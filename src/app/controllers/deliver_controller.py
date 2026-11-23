@@ -34,6 +34,10 @@ import platform
 import subprocess
 import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import Future
+from pathlib import Path
+from typing import TypeVar
 
 import numpy as np
 
@@ -55,6 +59,8 @@ from src.shared.export.batch_queue_store import (
 from src.shared.i18n.i18n import I18N
 
 logger = logging.getLogger(__name__)
+
+_BatchReadResult = TypeVar("_BatchReadResult")
 
 
 def _config_bool(value, default: bool = False) -> bool:
@@ -245,7 +251,7 @@ class DeliverControllerMixin:
             self.status_bar.showMessage("Export failed!", 5000)
             QMessageBox.critical(self, "Export Error", f"Failed to save image to {path}")
 
-    def perform_quick_export(self, settings) -> None:
+    def perform_quick_export(self, settings, *, source_is_current: Callable[[], bool] | None = None) -> None:
         """执行导出 — 支持 Color 和 Composite 两个来源。"""
         # Auto-apply crop if tool is still active
         if self.crop_panel.is_crop_active():
@@ -262,9 +268,17 @@ class DeliverControllerMixin:
         export_source = settings.get("export_source", "color")
         if export_source == "composite" and self._composite_available and self.composite_page:
             export_img = self._export_composite(settings)
+        elif source_is_current is not None:
+            # The cached path temporarily swaps the engine's original while its
+            # nested render loop runs. Library navigation can replace that source.
+            export_img = self._export_color({**settings, "quick_export": False},
+                                            source_is_current=source_is_current)
         else:
             export_img = self._export_color(settings)
 
+        if source_is_current is not None and not source_is_current():
+            self._show_export_source_changed()
+            return
         if export_img is None:
             self.status_bar.showMessage("Export failed: Could not render image.", 5000)
             QMessageBox.critical(self, "Export Error", "Failed to render image.")
@@ -303,7 +317,7 @@ class DeliverControllerMixin:
             self.status_bar.showMessage("Export failed!", 5000)
             QMessageBox.critical(self, "Export Error", f"Failed to save image to {path}")
 
-    def _export_color(self, settings) -> 'np.ndarray | None':
+    def _export_color(self, settings, *, source_is_current: Callable[[], bool] | None = None) -> 'np.ndarray | None':
         """导出 Color pipeline 输出（原有行为）。"""
         is_quick = settings.get("quick_export", True)
         target_size = settings.get("options", {}).get("resize")
@@ -322,6 +336,8 @@ class DeliverControllerMixin:
             self.status_bar.showMessage(f"Exporting (high quality) to {os.path.basename(path)}...", 0)
             QApplication.processEvents()
 
+            if source_is_current is not None and not source_is_current():
+                return None
             export_img = self.engine.get_current_image(force_full_res=True)
 
             if target_size and export_img is not None:
@@ -1136,7 +1152,11 @@ class DeliverControllerMixin:
     # Export File As (quick export dialog)
     # ------------------------------------------------------------------
 
-    def export_file_as(self) -> None:
+    def _show_export_source_changed(self) -> None:
+        self.status_bar.showMessage(I18N.tr(
+            "grade_sets.export_source_changed", "The selected photo changed. Open Export again."), 4000)
+
+    def export_file_as(self, *, source_is_current: Callable[[], bool] | None = None) -> None:
         """快速导出功能（支持图像、LUT 和视频导出）"""
         from src.shared.export.quick_export_dialog import QuickExportDialog
 
@@ -1172,8 +1192,8 @@ class DeliverControllerMixin:
         timeline_info = self._build_timeline_info()
         # Work mode drives the default export tab so the dialog opens on the
         # tab that matches the active workflow, regardless of the current page.
-        from src.shared.feature_flags import get_work_mode
-        work_mode = get_work_mode(self.config_manager)
+        from src.shared.feature_flags import get_workspace_work_mode
+        work_mode = get_workspace_work_mode(self.config_manager)
         if work_mode == "image":
             initial_export_type = QuickExportDialog.EXPORT_IMAGE
         else:  # video (default)
@@ -1195,6 +1215,9 @@ class DeliverControllerMixin:
         )
 
         if dialog.exec():
+            if source_is_current is not None and not source_is_current():
+                self._show_export_source_changed()
+                return
             settings = dialog.get_settings()
             export_type = settings.get("export_type")
             if export_type == "lut":
@@ -1216,6 +1239,8 @@ class DeliverControllerMixin:
                         I18N.tr("export.video_export_failed", "视频导出失败"),
                         str(exc),
                     )
+            elif source_is_current is not None:
+                self.perform_quick_export(settings, source_is_current=source_is_current)
             else:
                 self.perform_quick_export(settings)
 
@@ -1233,7 +1258,10 @@ class DeliverControllerMixin:
 
     def _goto_deliver_page(self) -> bool:
         """切到 Deliver 页；页面不可用时给状态提示并返回 False。"""
-        if getattr(self, "_deliver_available", False) and self.deliver_page is not None:
+        from src.shared.feature_flags import uses_image_layer_workflow
+        image_batch = (uses_image_layer_workflow(getattr(self, "config_manager", None))
+                       and getattr(self, "dock_export", None) is not None)
+        if getattr(self, "_deliver_available", False) and (self.deliver_page is not None or image_batch):
             self.switch_to_page("Deliver")
             return True
         self.status_bar.showMessage("Deliver 页不可用", 5000)
@@ -1516,30 +1544,18 @@ class DeliverControllerMixin:
             and all(r.file_path == f for r, f in zip(restored_items, files))
         )
 
-        # 自动保存当前正在编辑的图，防止批量导出时调色/composite 丢失。
-        # 批量导出会重新从 .topos 读取渲染，没存 .topos 的图调色会丢。
-        # 仅全新导出需要（续渲时状态已在恢复前持久化）。
-        if not is_resume:
-            self._auto_save_current_file_before_batch()
-
-        # 保存引擎当前状态
-        self._batch_original_image = self.engine.img_full_original.copy() if self.engine.img_full_original is not None else None
-        self._batch_original_layers = None
-        if self.engine.layers:
-            self._batch_original_layers = []
-            for layer in self.engine.layers:
-                from src.features.color.core.layer import Layer
-                new_layer = Layer.from_dict(layer.to_dict())
-                new_layer.id = layer.id
-                self._batch_original_layers.append(new_layer)
-        self._batch_original_active_index = self.engine.active_layer_index
-        self._batch_original_raw_params = None
-        if hasattr(self.engine, 'current_raw_params') and self.engine.current_raw_params:
-            self._batch_original_raw_params = self.engine.current_raw_params.copy()
-        self._batch_original_file_path = self.engine.current_file_path
-        self._batch_original_is_srgb = self.engine.is_current_image_srgb
-        self._batch_original_raw_metadata = self.engine.current_raw_metadata.copy() if self.engine.current_raw_metadata else None
-        self._batch_original_last_raw_params = self.engine._last_applied_raw_params.copy() if hasattr(self.engine, '_last_applied_raw_params') and self.engine._last_applied_raw_params else None
+        image_grades = getattr(self, "grade_set_model", None) is not None
+        if image_grades:
+            if getattr(self, "current_file_path", None) in files and not self._prepare_to_leave_photo(
+                lambda: self.perform_batch_export(settings)
+            ):
+                return
+            self._cancel_grade_set_image_request()
+        else:
+            if not is_resume:
+                self._auto_save_current_file_before_batch()
+            self._snapshot_batch_engine()
+        self._batch_image_grades = image_grades
 
         # 初始化批量导出状态
         self._batch_settings = settings
@@ -1553,6 +1569,8 @@ class DeliverControllerMixin:
         # [AUD-2509] 批量导出生命周期标志：perform_batch_export 置位，
         # _batch_export_complete 复位；二次启动据此拒绝（见方法入口）。
         self._batch_running = True
+        if image_grades and self.grade_set_panel is not None:
+            self.grade_set_panel.setEnabled(False)
         self._connect_full_resolution_progress_signal()
         # 暂停/恢复：暂停时不调度下一个文件，resume 时重新触发 singleShot 链
         self._batch_paused = False
@@ -1578,6 +1596,26 @@ class DeliverControllerMixin:
         # 开始处理第一个文件
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(0, self._process_next_batch_file)
+
+    def _snapshot_batch_engine(self) -> None:
+        """Save the live engine state for the legacy batch renderer."""
+        self._batch_original_image = self.engine.img_full_original.copy() if self.engine.img_full_original is not None else None
+        self._batch_original_layers = None
+        if self.engine.layers:
+            self._batch_original_layers = []
+            for layer in self.engine.layers:
+                from src.features.color.core.layer import Layer
+                new_layer = Layer.from_dict(layer.to_dict())
+                new_layer.id = layer.id
+                self._batch_original_layers.append(new_layer)
+        self._batch_original_active_index = self.engine.active_layer_index
+        self._batch_original_raw_params = None
+        if hasattr(self.engine, 'current_raw_params') and self.engine.current_raw_params:
+            self._batch_original_raw_params = self.engine.current_raw_params.copy()
+        self._batch_original_file_path = self.engine.current_file_path
+        self._batch_original_is_srgb = self.engine.is_current_image_srgb
+        self._batch_original_raw_metadata = self.engine.current_raw_metadata.copy() if self.engine.current_raw_metadata else None
+        self._batch_original_last_raw_params = self.engine._last_applied_raw_params.copy() if hasattr(self.engine, '_last_applied_raw_params') and self.engine._last_applied_raw_params else None
 
     def _auto_save_current_file_before_batch(self) -> None:
         """批量导出前自动保存当前图的 .topos，防止调色/composite 丢失。
@@ -1929,8 +1967,55 @@ class DeliverControllerMixin:
             time.sleep(0.01)
         return result["payload"]
 
-    def _batch_export_single_file(self, file_path: str, index: int) -> str:
+    @staticmethod
+    def _read_batch_photo(read: Callable[[], _BatchReadResult]) -> _BatchReadResult:
+        """Run decode/package I/O off the UI thread and propagate item failures."""
+        result: Future[_BatchReadResult] = Future()
+
+        def run() -> None:
+            try:
+                result.set_result(read())
+            except Exception as exc:
+                result.set_exception(exc)
+
+        worker = threading.Thread(target=run, name="BatchPhotoRead", daemon=True)
+        worker.start()
+        while worker.is_alive():
+            QApplication.processEvents()
+            worker.join(0.01)
+        return result.result()
+
+    def _batch_export_saved_photo(self, file_path: str, index: int) -> str | None:
+        from src.app.services.image_batch_grade import load_image_batch_grade, render_image_batch_grade
+        from src.features.files.transactions.ops import unique_suffixed
+
+        if not self._batch_checkpoint():
+            return None
+        grade = self._read_batch_photo(lambda: load_image_batch_grade(file_path))
+        if not self._batch_checkpoint():
+            return None
+        image = render_image_batch_grade(self.engine, file_path, grade)
+        if image is None or not self._batch_checkpoint():
+            return None
+
+        options = dict(self._batch_settings.get("options", {}))
+        if size := options.get("resize"):
+            import cv2
+            image = cv2.resize(image, tuple(size), interpolation=cv2.INTER_LANCZOS4)
+        _, source_space = self.color_manager.auto_assign_icc(file_path, grade.pixels)
+        image = self.color_manager.convert_for_export(image, source_space=source_space)
+        filename = self._batch_generate_filename(file_path, index)
+        output_path = str(unique_suffixed(Path(self._batch_export_dir) / filename))
+        if not FileIO.save_image(output_path, image, options=options):
+            raise OSError(f"failed to save output image: {output_path}")
+        if _config_bool(self.config_manager.get("embed_icc_profile"), default=True):
+            self.color_manager.embed_icc(output_path)
+        return output_path
+
+    def _batch_export_single_file(self, file_path: str, index: int) -> str | None:
         """导出单个文件；全分辨率 Color pass 在线程中完成。"""
+        if getattr(self, "_batch_image_grades", False):
+            return self._batch_export_saved_photo(file_path, index)
         # 1. 加载图像（[AUD-2505] 解码在后台线程执行，UI 线程泵事件等待）
         if not self._batch_checkpoint():
             return None
@@ -2115,6 +2200,45 @@ class DeliverControllerMixin:
             except Exception:
                 pass
 
+        if not getattr(self, "_batch_image_grades", False):
+            self._restore_batch_engine()
+
+        # 恢复UI
+        self.export_panel.finish_batch_ui()
+        self.export_panel.set_batch_paused(False)
+        self._batch_paused = False
+        self._batch_file_processing = False
+        # [AUD-2509] 生命周期结束：允许下一次批量导出启动
+        self._batch_running = False
+        if getattr(self, "_batch_image_grades", False) and self.grade_set_panel is not None:
+            self.grade_set_panel.setEnabled(True)
+
+        # 队列文件清理：全部成功完成才删除；有失败/取消则保留供下次恢复
+        has_unfinished = any(
+            item.status in (STATUS_PENDING, STATUS_RENDERING, STATUS_FAILED)
+            for item in getattr(self, '_batch_items', [])
+        )
+        if not has_unfinished and not self._batch_failed:
+            clear_batch_queue()
+
+        if self._batch_cancelled:
+            msg = f"Batch export cancelled. Exported {self._batch_success_count}/{total} files."
+            QMessageBox.information(self, "Batch Export Cancelled", msg)
+            self.status_bar.showMessage(msg, 5000)
+        elif self._batch_failed:
+            msg = f"Exported {self._batch_success_count}/{total} files. Failed: {', '.join(self._batch_failed)}"
+            QMessageBox.warning(self, "Batch Export", msg)
+            self.status_bar.showMessage(msg, 5000)
+        else:
+            msg = f"Successfully exported {self._batch_success_count} files"
+            QMessageBox.information(self, "Batch Export Complete", msg)
+            self.status_bar.showMessage(msg, 5000)
+
+        # 触发重新渲染当前图像
+        self.request_render()
+
+    def _restore_batch_engine(self) -> None:
+        """Restore the legacy batch renderer's live engine snapshot."""
         # 恢复引擎原始状态
         # [AUD-2506] 无条件回写快照值：此前用 `is not None` 判断，把「快照
         # 值为 None（导出前就是空）」误当「未快照」跳过恢复——导出前未打开
@@ -2169,38 +2293,6 @@ class DeliverControllerMixin:
             logger.error(f"restoring engine state: {e}")
             import traceback
             traceback.print_exc()
-
-        # 恢复UI
-        self.export_panel.finish_batch_ui()
-        self.export_panel.set_batch_paused(False)
-        self._batch_paused = False
-        self._batch_file_processing = False
-        # [AUD-2509] 生命周期结束：允许下一次批量导出启动
-        self._batch_running = False
-
-        # 队列文件清理：全部成功完成才删除；有失败/取消则保留供下次恢复
-        has_unfinished = any(
-            item.status in (STATUS_PENDING, STATUS_RENDERING, STATUS_FAILED)
-            for item in getattr(self, '_batch_items', [])
-        )
-        if not has_unfinished and not self._batch_failed:
-            clear_batch_queue()
-
-        if self._batch_cancelled:
-            msg = f"Batch export cancelled. Exported {self._batch_success_count}/{total} files."
-            QMessageBox.information(self, "Batch Export Cancelled", msg)
-            self.status_bar.showMessage(msg, 5000)
-        elif self._batch_failed:
-            msg = f"Exported {self._batch_success_count}/{total} files. Failed: {', '.join(self._batch_failed)}"
-            QMessageBox.warning(self, "Batch Export", msg)
-            self.status_bar.showMessage(msg, 5000)
-        else:
-            msg = f"Successfully exported {self._batch_success_count} files"
-            QMessageBox.information(self, "Batch Export Complete", msg)
-            self.status_bar.showMessage(msg, 5000)
-
-        # 触发重新渲染当前图像
-        self.request_render()
 
     # ------------------------------------------------------------------
     # 队列持久化：启动恢复 + 关闭兜底

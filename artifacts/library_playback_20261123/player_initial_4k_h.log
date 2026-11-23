@@ -1,0 +1,4 @@
+2026-11-23 21:57:42.023 comparison[38871:439371] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 21:57:42.023 comparison[38871:439371] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+4K_H264.mov: 22.50 fps, errors=[]
+4K_H265.mov: 19.70 fps, errors=[]

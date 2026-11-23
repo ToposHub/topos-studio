@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Optional
 
 if TYPE_CHECKING:  # pragma: no cover — 仅类型，无运行期依赖
+    from src.shared.gpu.scope_publication import ScopePublication
     from src.features.color.core.scope_graph_sampling import ScopeSampleIdentity
 
 
@@ -37,11 +38,10 @@ ScopeMode = Literal[
 ]
 
 # Default analysis sizes (pre-sampled front texture dimensions).
-# 320x180 = 57,600 samples: used while the user is actively dragging a
-# control, where latency matters more than final trace density.
+# 320x180 = 57,600 samples: dynamic multi-view budget and the initial idle
+# tier. Single-view playback/adjustment uses the denser tier below.
 DEFAULT_ANALYSIS_SIZE: tuple[int, int] = (320, 180)
-# Playback gets a denser trace while remaining comfortably below the CPU
-# path's cost.  The benchmark on the project Mac measured ~6.5 ms/pass.
+# Single-view playback/adjustment keeps a denser trace.
 PLAYBACK_ANALYSIS_SIZE: tuple[int, int] = (512, 288)
 # Paused/idle scopes can spend more GPU time for a crisp still frame.
 HIGH_QUALITY_ANALYSIS_SIZE: tuple[int, int] = (768, 432)
@@ -57,6 +57,30 @@ DEFAULT_CURVES_HISTOGRAM_SIZE: tuple[int, int] = (1024, 512)
 DEFAULT_CIE_SIZE: tuple[int, int] = (384, 432)
 # False Color renders the frame (aspect-fit) into a fixed 16:9 canvas.
 DEFAULT_FALSECOLOR_SIZE: tuple[int, int] = (512, 288)
+
+
+def scope_density_sizes(display_size: tuple[int, int], mode: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Resolve bounded, quantized density sizes from physical plot pixels.
+
+    Keep the original minimums for compact docks. Large/Retina windows need
+    more vertical bins to avoid magnifying a 300-row waveform into soft bands.
+    Quantization avoids reallocating the resource pool at every resize pixel.
+    """
+    width, height = (max(1, int(value)) for value in display_size)
+
+    def extent(value: int, minimum: int, maximum: int) -> int:
+        if value <= minimum:
+            return minimum
+        return max(minimum, min(maximum, ((value + 63) // 64) * 64))
+
+    waveform = DEFAULT_WAVEFORM_DENSITY_SIZE
+    vectorscope = DEFAULT_VECTORSCOPE_DENSITY_SIZE
+    if mode in ('waveform', 'parade', 'luma', 'split', 'quad', 'all'):
+        waveform = (extent(width, 1024, 2048), extent(height, 300, 1200))
+    if mode in ('vectorscope', 'split', 'quad', 'all'):
+        side = extent(min(width, height), 800, 1600)
+        vectorscope = (side, side)
+    return waveform, vectorscope
 
 # Scope input transfer characteristics (drives CIE linearisation and the
 # False Color HDR stops).  Mirrors ScopePanel._scope_transfer values.
@@ -88,8 +112,8 @@ class ScopeDemand:
         mode: Which scope outputs are required. ``'split'`` requests waveform
             and vectorscope, ``'quad'`` adds parade and histogram, and ``'all'``
             requests every scope. All density passes share one source sample.
-        display_size: The widget size (w, h) in pixels.  Used by the
-            presenter; does not influence analysis cost.
+        display_size: The exposed plot size (w, h) in physical pixels.
+            Sets bounded density resolution; source sample count is independent.
         analysis_size: The pre-sampled front texture size used for
             density accumulation (e.g. 320x180 or 512x288).
         vectorscope_zoom: 1.0 or 2.0; only affects the display pass.
@@ -123,6 +147,9 @@ class ScopeDemand:
     # S05：完整取样身份（session/owner/graph revision/frame/颜色上下文/
     # 目标）。缺省 None 保持旧 revision 契约（兼容既有测试与 CPU 路径）。
     sample_identity: Optional['ScopeSampleIdentity'] = None
+    # Curve-only demands share histogram counts without drawing a hidden
+    # standalone histogram. Default preserves existing independent callers.
+    standalone_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -130,9 +157,9 @@ class ScopeGpuFrame:
     """A descriptor for a completed GPU scope pass.
 
     The texture ids refer to textures owned by ``AsyncRenderer`` and
-    shared with the presenter's context.  They are only valid as long as
-    the renderer has not reallocated them; the presenter must consume
-    them inside the GL mutex window (tryLock).
+    shared with the presenter's context. ``publication`` revokes them before
+    reallocation. Under the GL mutex the presenter waits on its GPU fence and
+    copies to a local GPU snapshot, which survives resize and frozen curves.
 
     Attributes:
         revision: Matches the ``ScopeDemand.revision`` that produced it.
@@ -142,8 +169,8 @@ class ScopeGpuFrame:
             request waveform output.
         vectorscope_texture_id / vectorscope_size: GPU vectorscope
             texture (RGBA).  ``None`` when not requested.
-        analysis_ms: Wall time of the analysis+display passes, for
-            performance logging only.
+        analysis_ms: CPU wall time to submit the analysis/display commands;
+            GPU completion is asynchronous (not a GPU execution-time metric).
     """
     revision: int
     source_revision: int
@@ -169,6 +196,7 @@ class ScopeGpuFrame:
     # front revision）。面板经 ``ScopeSampleIdentity.allows`` 拒绝迟到/
     # 跨 clip/跨图版本结果。
     sample_identity: Optional['ScopeSampleIdentity'] = None
+    publication: Optional['ScopePublication'] = None
 
 
 def is_frame_valid_for_demand(

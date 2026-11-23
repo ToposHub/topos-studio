@@ -182,7 +182,9 @@ kernel void tg_corrector(
     float3 color = src4.rgb;
 
     color = graph_apply_grading(color, g);
-    if (g.has_curves != 0u) {
+    if (g.has_curves == 2u) {
+        color = graph_apply_calibrated_curves(color, curves);
+    } else if (g.has_curves != 0u) {
         color = graph_apply_curves(color, curves);
     }
     if (x.has_hsl != 0u) {
@@ -195,12 +197,13 @@ kernel void tg_corrector(
                                     x.sc_exposure, x.sc_contrast);
     }
     if (x.has_curves_soft_clip != 0u) {
-        color = msl_apply_curves_soft_clip(
+        color = msl_apply_curves_soft_clip_profile(
             color,
             float3(x.cs_low_clip_x, x.cs_low_clip_y, x.cs_low_clip_z),
             float3(x.cs_low_soft_x, x.cs_low_soft_y, x.cs_low_soft_z),
             float3(x.cs_high_clip_x, x.cs_high_clip_y, x.cs_high_clip_z),
-            float3(x.cs_high_soft_x, x.cs_high_soft_y, x.cs_high_soft_z));
+            float3(x.cs_high_soft_x, x.cs_high_soft_y, x.cs_high_soft_z),
+            x.has_curves_soft_clip == 2u);
     }
     if (x.has_mixer != 0u) {
         color = msl_apply_mixer(
@@ -581,7 +584,8 @@ def make_tex_extra_params(
     params["has_mixer"] = 1 if has_mixer else 0
     params["has_warper"] = 1 if has_warper else 0
     params["has_soft_clip"] = 1 if has_soft_clip else 0
-    params["has_curves_soft_clip"] = 1 if has_curves_soft_clip else 0
+    if has_curves_soft_clip:
+        params["has_curves_soft_clip"] = 2 if values.get("u_cs_calibrated") else 1
     params["blend_mode"] = int(_as_float(values.get("u_blend_mode"), 0.0))
     params["lut_intensity"] = _as_float(values.get("u_lut_intensity"), 1.0)
     params["warper_space"] = int(_as_float(values.get("u_warper_space"), 0.0))

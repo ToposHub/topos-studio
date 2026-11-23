@@ -7,6 +7,7 @@ hydrator 的侧栏回填/兜底收集、grade 剪贴板 curves 类别扩展。
 
 import numpy as np
 import pytest
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QSignalSpy, QTest
 
 from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
@@ -25,6 +26,86 @@ from src.shared.ui.widgets.curves_widget import CurvesWidget
 # ================================================================
 
 class TestPanelSignals:
+    def test_709_switch_and_soft_clip_use_resolve_units(self, qapp, image_engine):
+        panel = CurvesPanel(CurvesWidget())
+        panel.calibration_changed.connect(image_engine.set_curves_calibration_state)
+        panel.soft_clip_changed.connect(image_engine.set_curves_soft_clip_params)
+        panel.edit_changed.connect(image_engine.set_curves_edit_params)
+        layer = image_engine.get_active_layer()
+        layer.curves_data = {"M": [(0, 255), (128, 100), (255, 0)]}
+        layer.hsl_curve_data = {"HueSat": [(100, 110)]}
+        panel.curves_widget.set_curves_data(layer.curves_data)
+        panel.hsl_panel.set_curves_data(layer.hsl_curve_data)
+        switch = QSignalSpy(panel.calibration_changed)
+        panel.calibration_btn.click()
+        assert len(switch) == 1
+        assert layer.curves_edit["calibration_version"] == 1
+        assert layer.curves_soft_clip["calibration_version"] == 1
+        assert layer.curves_lut.shape == (512, 1, 3)
+        assert layer.hsl_curve_lut.shape == (6, 512)
+        assert panel.soft_clip_rows["low_clip"].value() == 50.0
+        assert panel.soft_clip_rows["high_clip"].value() == 50.0
+
+        panel.soft_clip_rows["low_clip"].slider.setValue(5610)
+        panel.soft_clip_rows["high_clip"].slider.setValue(3800)
+        panel.soft_clip_rows["high_soft"].slider.setValue(1200)
+        panel.edit_rows["Y"].slider.setValue(50)
+        panel._on_row_interaction_ended()
+        assert layer.curves_soft_clip["channels"]["B"] == pytest.approx(
+            {"low_clip": 0.0305, "low_soft": 0.0, "high_clip": 0.94, "high_soft": 0.06})
+        assert layer.curves_edit["amounts"]["Y"] == 50.0
+
+        from src.features.color.core.layer import Layer
+
+        restored = Layer.from_dict(layer.to_dict(None))
+        np.testing.assert_array_equal(restored.curves_lut, layer.curves_lut)
+        np.testing.assert_array_equal(restored.hsl_curve_lut, layer.hsl_curve_lut)
+        panel.set_layer_state({"curves_edit": restored.curves_edit,
+                               "curves_soft_clip": restored.curves_soft_clip})
+        assert panel.soft_clip_rows["low_clip"].value() == pytest.approx(56.1)
+        assert len(switch) == 1
+        panel.calibration_btn.click()
+        assert layer.curves_lut.shape == (256, 1, 3)
+        assert layer.hsl_curve_lut.shape == (6, 256)
+        assert "calibration_version" not in layer.curves_soft_clip
+
+    def test_709_linked_drag_commits_latest_xy_and_lut_in_one_gesture(self, qapp):
+        widget = CurvesWidget()
+        panel = CurvesPanel(widget)
+        panel.calibration_btn.click()
+        widget.resize(360, 220)
+        changed = QSignalSpy(widget.changed)
+        order = []
+        widget.changed.connect(lambda _lut, _points: order.append("change"))
+        widget.interaction_ended.connect(lambda: order.append("end"))
+        x, y = widget.to_widget(120, 135)
+        start = QPoint(round(x), round(y))
+        end = start + QPoint(20, -30)
+        QTest.mousePress(widget, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(widget, end)
+        QTest.mouseRelease(widget, Qt.MouseButton.LeftButton, pos=end)
+        assert order[-2:] == ["change", "end"]
+        lut, points = changed[-1]
+        assert points["M"] == points["R"] == points["G"] == points["B"]
+        assert points["M"][1][0] > 120
+        assert points["M"][1][1] < 135
+        assert lut.shape == (512, 1, 3)
+
+    def test_709_sat_curve_starts_with_a_single_global_anchor(self, qapp):
+        panel = CurvesPanel(CurvesWidget())
+        panel.calibration_btn.click()
+        panel.set_curve_mode("SatSat")
+        canvas = panel.hsl_panel.hsl_curves_widget
+        canvas.resize(360, 220)
+        changed = QSignalSpy(canvas.changed)
+        x, y = canvas.to_widget(127.5, 127.5)
+        QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=QPoint(round(x), round(y)))
+        assert len(canvas.curves["SatSat"]) == 1
+        assert canvas.selected_values()[0] == pytest.approx(0.25, abs=0.002)
+        canvas.set_selected_value("y", 1.3)
+        canvas.flush()
+        np.testing.assert_allclose(changed[-1][0][4], 1.3, atol=1e-6)
+
     def test_soft_clip_drag_emits_model_payload_after_throttle(self, qapp):
         panel = CurvesPanel(CurvesWidget())
         spy = QSignalSpy(panel.soft_clip_changed)
@@ -220,6 +301,20 @@ class _FakePalettePanel:
 
 
 class TestHydratorCurvesPalette:
+    def test_flat_709_stack_restores_rendered_curves_with_sidebar(self, image_engine):
+        stack = (ColorStackData.create()
+                 .with_curves({"M": [(0, 255), (127, 100), (255, 0)]})
+                 .with_hsl_curves({"HueSat": [(127, 120)]})
+                 .with_curves_edit({"calibration_version": 1, "amounts": {"Y": 50}})
+                 .with_curves_soft_clip({"calibration_version": 1,
+                                         "channels": {"R": {"low_soft": 0.1}}}))
+        ColorStackHydrator().apply_stack_to_engine(stack, image_engine)
+        layer = image_engine.get_active_layer()
+        assert layer.curves_edit["amounts"]["Y"] == 50.0
+        assert layer.curves_lut.shape == (512, 1, 3)
+        assert layer.hsl_curve_lut.shape == (6, 512)
+        assert layer.curves_soft_clip["channels"]["R"]["low_soft"] == 0.1
+
     def test_apply_prefers_active_layer_snapshot(self):
         stack = ColorStackData.create()
         stack = stack.with_layers((

@@ -3,10 +3,11 @@ from __future__ import annotations
 import sys
 import os
 import logging
+from pathlib import Path
 import threading
 from typing import TYPE_CHECKING, Any, Optional
 from PyQt6.QtGui import QPainter
-from PyQt6.QtWidgets import (QMainWindow, QWidget,
+from PyQt6.QtWidgets import (QMainWindow, QMenu, QWidget,
                              QMessageBox,
                              QComboBox, QApplication,
                              QLineEdit, QTextEdit,
@@ -25,6 +26,9 @@ from src.app.controllers.layer_controller import LayerOpsMixin
 from src.app.controllers.color_workspace_controller import ColorWorkspaceMixin
 from src.app.controllers.file_controller import FileOpsMixin
 from src.app.controllers.ai_editing_mixin import AiEditingMixin
+
+if TYPE_CHECKING:
+    from src.app.controllers.grade_set_image_loader import DecodedPhoto
 
 logger = logging.getLogger(__name__)
 
@@ -367,8 +371,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         # --- Apply preference-backed settings on startup ---
         self.config_manager = ConfigManager()
-        from src.shared.feature_flags import get_work_mode
-        self._active_work_mode = get_work_mode(self.config_manager)
+        from src.shared.feature_flags import get_workspace_work_mode
+        self._active_work_mode = get_workspace_work_mode(self.config_manager)
         if self.config_manager.get("show_version_in_title"):
             self.setWindowTitle(f"Topos {CURRENT_VERSION}")
         # Append the active work mode to the title so users always know which
@@ -1245,7 +1249,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         ctx = MainWindowContext(self)
 
         created_pages = {}
+        from src.shared.feature_flags import uses_image_layer_workflow
+        image_workflow = uses_image_layer_workflow(self.config_manager)
         for page_desc in self.feature_registry.get_all_pages():
+            if image_workflow and page_desc.page_id == "deliver":
+                # The image Deliver page uses the existing Batch Export dock,
+                # not the video settings/queue workspace.
+                continue
             try:
                 page_widget = page_desc.create_page(ctx)
                 created_pages[page_desc.page_id] = page_widget
@@ -1349,13 +1359,60 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             self._refresh_node_cache_hits)
         self._node_thumbnail_timer.start()
         self.grading_panel = GradingPanel()
+        from src.shared.feature_flags import uses_image_layer_workflow
+        image_workflow = uses_image_layer_workflow(self.config_manager)
+        self.grade_set_model = None
+        self.grade_set_panel = None
+        self._library_photo_export_request: tuple[int, int] | None = None
+        if image_workflow:
+            self.grading_panel.use_central_keyframes()
+            self.canvas.grade_set_import_enabled = True
+            self.canvas.photos_dropped.connect(self._open_grade_set_drop)
+            from src.app.controllers.grade_set_transfer import GradeSetTransfer
+            from src.app.controllers.grade_sets import GradeSetModel
+            from src.app.controllers.grade_set_image_loader import GradeSetImageLoader
+            from src.app.controllers.grade_set_previews import GradeSetPreviews
+            from src.app.ui.grade_set_panel import GradeSetPanel
+
+            active = self.config_manager.get("active_grade_set")
+            self.grade_set_model = GradeSetModel(
+                self.library_panel._native_transport._runtime,
+                active if type(active) is int else None, self,
+            )
+            self.library_panel.set_grade_sets(self.grade_set_model)
+            self.grade_set_panel = GradeSetPanel(
+                self.grade_set_model, self,
+                show_filenames=self.config_manager.get("grade_set_show_filenames") is True,
+                rating_at_bottom=self.config_manager.get("grade_set_rating_at_bottom") is True,
+            )
+            self._grade_set_transfer = GradeSetTransfer(self)
+            self._grade_set_image_loader = GradeSetImageLoader(self)
+            self._grade_set_image_loader.ready.connect(self._finish_grade_set_image)
+            self._grade_set_prefetch_timer = QTimer(self)
+            self._grade_set_prefetch_timer.setSingleShot(True)
+            self._grade_set_prefetch_timer.setInterval(250)
+            self._grade_set_prefetch_timer.timeout.connect(self._prefetch_grade_set_neighbor)
+            self.grade_set_panel.image_requested.connect(self._request_grade_set_image)
+            self.grade_set_panel.active_photo_name_changed.connect(self.canvas.color_viewport_chrome.set_photo_name)
+            self.grade_set_panel.active_photo_name_changed.connect(lambda _name: self._grade_set_prefetch_timer.start())
+            self.grade_set_panel.filename_visibility_changed.connect(
+                lambda visible: self.config_manager.set("grade_set_show_filenames", visible))
+            self.grade_set_panel.rating_at_bottom_changed.connect(
+                lambda enabled: self.config_manager.set("grade_set_rating_at_bottom", enabled))
+            self.grade_set_panel.copy_grade_requested.connect(self._grade_set_transfer.copy)
+            self.grade_set_panel.paste_grade_requested.connect(self._grade_set_transfer.paste)
+            for panel in (self.library_panel, self.files_panel):
+                panel._native_transport.metadata_snapshot.connect(self.grade_set_model.refresh_ratings)
+            self.grade_set_model.changed.connect(self._remember_active_grade_set)
+            self._grade_set_previews = GradeSetPreviews(self)
+            QTimer.singleShot(0, self.grade_set_model.refresh)
         # Native Tangent Hub integration is optional and runs its socket worker
         # off the Qt thread. It reuses the grading controller below instead of
         # writing renderer state directly from the hardware callback.
         from src.features.color.integrations.tangent_bridge import TangentColorBridge
         self.tangent_color_bridge = TangentColorBridge(self, parent=self)
         self.tangent_color_bridge.start()
-        self.denoise_panel = DenoisePanel()
+        self.denoise_panel = DenoisePanel(image_mode=image_workflow)
         self.deblur_panel = DeblurPanel()
         self.curves_widget = CurvesWidget()
         self.hsl_curves_panel = HSLCurvesPanel(engine=self.engine)
@@ -1371,11 +1428,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # 单帧遮罩工具（Remove BG / Smart Brush / Brush / Eraser）产出静态
         # mask，会无差别应用到整段视频，因此仅在图片模式显示；work mode
         # 在启动时确定（切换需重启），此处一次性设置即可。
-        try:
-            from src.shared.feature_flags import get_work_mode as _get_wm
-            _mask_image_tools_visible = _get_wm(self.config_manager) == "image"
-        except Exception:
-            _mask_image_tools_visible = True
+        _mask_image_tools_visible = image_workflow
         self.mask_panel.set_image_only_tools_visible(_mask_image_tools_visible)
         self.canvas.set_video_window_mode(not _mask_image_tools_visible)
         self.tracker_panel = TrackerPanel()
@@ -1391,7 +1444,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # （layer.soft_clip_params 经脚本 API / 旧工程数据继续生效）。
         self.raw_panel = RawPanel()
         self.crop_panel = CropPanel()
-        self.export_panel = ExportPanel()
+        self.export_panel = ExportPanel(image_mode=image_workflow)
+        if self.grade_set_panel is not None:
+            self.grade_set_panel.export_queue_requested.connect(self.export_panel.batch_list.add_files)
         self.export_panel.set_default_export_settings(
             self.config_manager.get("default_export_format") or "JPEG",
             self.config_manager.get("default_export_quality") or 85
@@ -1559,7 +1614,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         # Deliver Page (P9.3) - Phase 9/R-001: Conditional creation with delayed import
         # Fallback: create directly if not created via registry
-        if self._deliver_available and self.deliver_page is None:
+        if self._deliver_available and self.deliver_page is None and not image_workflow:
             try:
                 from src.features.deliver.facade import get_deliver_page_class
                 _DeliverPage = get_deliver_page_class()
@@ -1576,6 +1631,144 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # B06.5：真实节点面板接权威图（coordinator/bridge/host 装配）。
         # 失败不阻断启动（color_graph_host=None → 原工作流不变）。
         self._wire_color_graph_host()
+
+    def _remember_active_grade_set(self) -> None:
+        active = self.grade_set_model.active_id
+        if self.config_manager.get("active_grade_set") != active:
+            self._cancel_grade_set_image_request()
+            self.config_manager.set("active_grade_set", active)
+        self._grade_set_previews.schedule()
+
+    def _active_grade_set_image(self) -> str | None:
+        from src.features.files.repository.catalog import nfc
+
+        if self._current_edit_project is None:
+            return None
+        path = nfc(self.current_file_path) if self.current_file_path else None
+        return path if path in self.grade_set_model.paths else None
+
+    def _open_grade_set_image(self, path: str) -> None:
+        """Open the paste target through the normal image lifecycle."""
+        self._cancel_grade_set_image_request()
+        if path == self._active_grade_set_image():
+            self._photo_action_after_save = None
+            self.grade_set_panel.set_active_path(path)
+            return
+        if not Path(path).is_file():
+            self.status_bar.showMessage(I18N.tr("grade_sets.image_missing", "Image file is unavailable"), 4000)
+            return
+        self._open_media_path(path)
+
+    def _request_grade_set_image(self, path: str) -> int | None:
+        self._library_photo_export_request = None
+        self._grade_set_prefetch_timer.stop()
+        self._photo_action_after_save = None
+        if path == self.grade_set_panel.active_path:
+            self._cancel_grade_set_image_request()
+            return None
+        self._grade_set_loading_message = I18N.tr(
+            "grade_sets.loading_image", "Loading {name}…").format(name=Path(path).name)
+        self.status_bar.showMessage(self._grade_set_loading_message)
+        serial = self._grade_set_image_loader.request(path)
+        if self._has_grade_set_photo() and self.edit_project_dirty:
+            self._schedule_autosave(0)
+        return serial
+
+    def _export_library_grade_photo(self, path: str) -> None:
+        generation = getattr(self, "_page_switch_generation", 0)
+        if not self._library_photo_export_selected(path, generation):
+            return
+        serial = self._request_grade_set_image(path)
+        if serial is None:
+            self._show_library_photo_export(path, generation)
+        else:
+            self._library_photo_export_request = (serial, generation)
+
+    def _library_photo_export_selected(self, path: str, generation: int) -> bool:
+        return (self.current_page == "Library"
+                and getattr(self, "_page_switch_generation", 0) == generation
+                and self.library_panel.selected_grade_set_photo() == path)
+
+    def _show_library_photo_export(self, path: str, generation: int) -> None:
+        from src.features.files.repository.catalog import nfc
+
+        project = self._current_edit_project
+        if project is None:
+            return
+        project_id = project.project_id
+
+        def source_is_current() -> bool:
+            return (self._library_photo_export_selected(path, generation)
+                    and self._has_grade_set_photo()
+                    and nfc(self.current_file_path) == path
+                    and self.grade_set_panel.active_path == path
+                    and self._current_edit_project.project_id == project_id)
+
+        if source_is_current():
+            self.export_file_as(source_is_current=source_is_current)
+
+    def _open_library_photo_in_color(self, path: str) -> None:
+        from src.features.files.repository.catalog import nfc
+
+        self.switch_to_page("Color")
+        self._request_grade_set_image(nfc(path))
+
+    def _set_library_lightbox_active(self, active: bool) -> None:
+        toolbar = getattr(self, "main_toolbar", None)
+        if toolbar is None:
+            return
+        hidden_by_lightbox = getattr(self, "_toolbar_hidden_for_lightbox", False)
+        if active and self.current_page == "Library" and not toolbar.isHidden():
+            self._toolbar_hidden_for_lightbox = True
+            toolbar.hide()
+        elif not active and hidden_by_lightbox:
+            self._toolbar_hidden_for_lightbox = False
+            toolbar.show()
+
+    def _prefetch_grade_set_neighbor(self) -> None:
+        path = self._active_grade_set_image()
+        if path is not None and (following := self.grade_set_panel.following_photo(path)) is not None:
+            self._grade_set_image_loader.prefetch(following)
+
+    def _finish_grade_set_image(self, serial: int, path: str, photo: DecodedPhoto | None) -> None:
+        if not self._grade_set_image_loader.is_current(serial):
+            return
+        export = self._library_photo_export_request
+        generation = export[1] if export is not None and export[0] == serial else None
+        if generation is not None and not self._library_photo_export_selected(path, generation):
+            self._cancel_grade_set_image_request()
+            self._library_photo_export_request = None
+            return
+        if photo is None or not photo.matches(path):
+            if generation is not None:
+                self._library_photo_export_request = None
+            self.status_bar.showMessage(
+                I18N.tr("grade_sets.image_missing", "Image file is unavailable"), 4000)
+            return
+        if not self._prepare_to_leave_photo(lambda: self._finish_grade_set_image(serial, path, photo)):
+            return
+        if self.status_bar.currentMessage() == self._grade_set_loading_message:
+            self.status_bar.clearMessage()
+        if generation is not None:
+            self._library_photo_export_request = None
+        self._open_media_path(path, decoded_photo=photo)
+        if generation is not None and self._grade_set_image_loader.is_current(serial):
+            self._show_library_photo_export(path, generation)
+
+    def _open_grade_set_drop(self, paths: list[str]) -> None:
+        """Open the first dropped photo and collect the batch after it loads."""
+        from src.features.files.repository.catalog import nfc
+
+        first = next((path for path in paths if Path(path).is_file()), None)
+        if first is None:
+            return
+        self._cancel_grade_set_image_request()
+        if self._current_edit_project is None or self.grade_set_panel.active_path != nfc(first):
+            if not self._prepare_to_leave_photo(lambda: self._open_grade_set_drop(paths)):
+                return
+            self._open_media_path(first)
+        if self._current_edit_project is not None and self.grade_set_panel.active_path == nfc(first):
+            self.grade_set_model.add_dropped_images(paths)
 
     def _wire_color_keyframes_host(self) -> None:
         """装配关键帧面板、播放头和图命令。停靠面板创建后调用。"""
@@ -1902,6 +2095,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             return [] if what == "list_clips" else None
 
     def setup_connections(self):
+        self.canvas.file_open_requested.connect(self._open_media_path)
         self.engine.frame_ready.connect(self.on_frame_ready)
         self.engine.scope_snapshot_ready.connect(self.on_scope_snapshot_ready)
         # Native GPU scope descriptor (no CPU pixel readback).
@@ -1918,9 +2112,16 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         if hasattr(self, "_on_color_output_monitor_ready") and hasattr(self.engine, "monitor_color_output_changed"):
             self.engine.monitor_color_output_changed.connect(self._on_color_output_monitor_ready)
         self.engine.mask_shapes_changed.connect(lambda: self.mask_panel.update_shapes_list(self.engine.get_active_layer().mask_shapes if self.engine.get_active_layer() else []))
-        self.library_panel.image_selected.connect(self.load_image)
+        self.library_panel.image_selected.connect(
+            self._open_media_path if self.grade_set_model is not None else self.load_image)
+        self.library_panel.photo_grade_requested.connect(self._open_library_photo_in_color)
+        self.library_panel.photo_export_requested.connect(self._export_library_grade_photo)
+        self.library_panel.image_lightbox_active.connect(self._set_library_lightbox_active)
         self.library_panel.video_selected.connect(self._on_library_video_selected)  # Library 面板视频打开（备用）
-        self.library_panel.grade_applied.connect(self.on_apply_grade_from_library)
+        if self.grade_set_model is None:
+            self.library_panel.grade_applied.connect(self.on_apply_grade_from_library)
+        else:
+            self.library_panel.set_middle_click_grade_enabled(False)
         self.library_panel.quick_project_requested.connect(self._on_quick_project_requested)  # Quick Project 入口
 
         # Presets/Gallery Panel connections (P1-COLOR-04: Gallery 并入 Presets)
@@ -1960,11 +2161,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.files_panel.transfer_directories_changed.connect(self.library_panel.refresh_transfer_directories)
         self.library_panel.transfer_directories_changed.connect(self.files_panel.refresh_transfer_directories)
 
-        # 新增：星级评定双向同步 (Files → Library)
-        self.files_panel.rating_changed.connect(self.library_panel.refresh_file_rating)
-
-        # 新增：星级评定双向同步 (Library → Files)
-        self.library_panel.rating_changed.connect(self.files_panel.refresh_file_rating)
+        self.files_panel._native_transport.metadata_snapshot.connect(
+            self.library_panel._native_panel.apply_metadata_snapshot)
+        self.library_panel._native_transport.metadata_snapshot.connect(
+            self.files_panel._native_panel.apply_metadata_snapshot)
 
         self.export_panel.export_requested.connect(self.perform_panel_export)
         self.export_panel.batch_export_requested.connect(self.perform_batch_export)
@@ -2055,8 +2255,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.layer_panel.layer_moved.connect(self.on_layer_moved)
         self.layer_panel.layer_visibility_changed.connect(self.on_layer_visibility_changed)
         self.layer_panel.layer_renamed.connect(self.on_layer_renamed)
-        self.layer_panel.layer_blend_mode_changed.connect(self.engine.set_layer_blend_mode)
-        self.layer_panel.layer_opacity_changed.connect(self.engine.set_layer_opacity)
+        self.layer_panel.layer_blend_mode_changed.connect(self.on_layer_blend_mode_changed)
+        self.layer_panel.layer_opacity_changed.connect(self.on_layer_opacity_changed)
+        self.layer_panel.opacity_slider.sliderPressed.connect(self.on_interaction_started)
+        self.layer_panel.opacity_slider.sliderReleased.connect(self.on_interaction_ended)
 
         # Layer Copy/Paste/Duplicate signals
         self.layer_panel.layer_copy.connect(self.on_layer_copy)
@@ -2141,10 +2343,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # 曲线面板侧栏（四参数柔化裁切 + Edit 强度）：正式参数信号。
         # 画布控制点仍走 curves_widget.changed -> on_curves_changed，
         # 两路互不重复提交；interaction 对复用同一撤销快照通道。
-        self.curves_panel.soft_clip_changed.connect(self.engine.set_curves_soft_clip_params)
-        self.curves_panel.soft_clip_changed.connect(self._invalidate_video_render_params_if_playing)
-        self.curves_panel.edit_changed.connect(self.engine.set_curves_edit_params)
-        self.curves_panel.edit_changed.connect(self._invalidate_video_render_params_if_playing)
+        self.curves_panel.soft_clip_changed.connect(self.on_curves_soft_clip_changed)
+        self.curves_panel.edit_changed.connect(self.on_curves_edit_changed)
+        self.curves_panel.calibration_changed.connect(self.on_curves_calibration_changed)
         self.curves_panel.interaction_started.connect(self.on_interaction_started)
         self.curves_panel.interaction_ended.connect(self.on_interaction_ended)
 
@@ -2408,7 +2609,15 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # 两组浏览器信号永不双写。
         from src.app.controllers.color_resource_catalog import EffectsResourceCatalog
         self.color_resource_catalog_provider = EffectsResourceCatalog()
-        if self.config_manager.get('color_resource_ui_preview_mode', False):
+        from src.shared.feature_flags import uses_image_layer_workflow
+        if uses_image_layer_workflow(self.config_manager):
+            from src.app.controllers.color_layer_resource_controller import ColorLayerResourceController
+            self.color_resource_preview = None
+            self.color_resource_controller = ColorLayerResourceController(
+                self, catalog_provider=self.color_resource_catalog_provider)
+            self.color_effects_browser.set_production_mode(True)
+            self.color_lut_browser.set_production_mode(True)
+        elif self.config_manager.get('color_resource_ui_preview_mode', False):
             from src.app.controllers.color_resource_preview import ColorResourcePreview
             self.color_resource_preview = ColorResourcePreview(
                 self, catalog_provider=self.color_resource_catalog_provider)
@@ -2576,7 +2785,14 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
     # Shutdown
     # ================================================================
 
+    def createPopupMenu(self) -> QMenu | None:
+        """Use the dock popup only in workspaces that expose dock controls."""
+        if self._is_image_library_page():
+            return None
+        return super().createPopupMenu()
+
     def closeEvent(self, event) -> None:
+        FileOpsMixin._cancel_grade_set_image_request(self)
         # R10：保存资源浏览器用户偏好（收藏/视图/缩放；无像素缓存）。
         try:
             self.config_manager.set(
@@ -2687,6 +2903,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 resource_controller = getattr(self, "color_resource_controller", None)
                 if resource_controller is not None:
                     resource_controller.shutdown()
+                if getattr(self, "grade_set_panel", None) is not None:
+                    self._grade_set_previews.shutdown()
+                    self._grade_set_prefetch_timer.stop()
+                    self._grade_set_image_loader.shutdown()
+                    self._grade_set_transfer.shutdown()
+                    self.grade_set_panel.shutdown()
+                    self.grade_set_model.shutdown()
             except Exception:
                 logger.exception("MainWindow: Color resource thumbnail shutdown failed")
             try:

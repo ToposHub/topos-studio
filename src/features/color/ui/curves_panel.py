@@ -13,13 +13,15 @@ from collections.abc import Callable
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
 from src.shared.ui.panel_splitter import PanelSplitter
+from src.features.color.core.curves_calibration import curves_calibration_enabled
 from src.features.color.core.curves_soft_clip import (
     normalize_curves_edit,
     normalize_curves_soft_clip,
+    uses_calibrated_soft_clip,
 )
 from src.shared.assets.icon_manager import icon_link, icon_reset, icon_unlink
 from src.shared.i18n.i18n import I18N
@@ -33,6 +35,7 @@ from src.shared.ui.widgets.hsl_curves_widget import CURVE_MODES
 from src.features.color.ui.hsl_curves_panel import HSLCurvesPanel
 
 CURVE_PALETTE_ORDER = ('Custom', 'HueHue', 'HueSat', 'HueLum', 'LumSat', 'SatSat', 'SatLum')
+_SOFT_CLIP_DISPLAY_OFFSETS = {"low_clip": 50.0, "high_clip": -150.0}
 
 
 class CurvesPanel(QWidget):
@@ -45,6 +48,7 @@ class CurvesPanel(QWidget):
 
     soft_clip_changed = pyqtSignal(dict)
     edit_changed = pyqtSignal(dict)
+    calibration_changed = pyqtSignal(dict)
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
     curve_mode_changed = pyqtSignal(str)
@@ -57,6 +61,7 @@ class CurvesPanel(QWidget):
         # 不得触发节流发射（_wiring_ready 在 __init__ 尾部才放行）。
         self._syncing = False
         self._wiring_ready = False
+        self._soft_calibrated = False
         # Keep the dock resizable on compact screens while preserving enough
         # room for a useful graph and the channel controls side by side.
         self.setMinimumWidth(420)
@@ -88,6 +93,15 @@ class CurvesPanel(QWidget):
             button.clicked.connect(lambda _checked=False, m=mode: self.set_curve_mode(m))
             toolbar.addWidget(button)
         self.mode_buttons['Custom'].setChecked(True)
+        self.calibration_btn = QToolButton(self)
+        self.calibration_btn.setText("709")
+        self.calibration_btn.setCheckable(True)
+        calibration_label = I18N.tr(
+            "curves_palette.rec709_calibration", "Rec.709 Gamma 2.4 curve calibration")
+        self.calibration_btn.setToolTip(calibration_label)
+        self.calibration_btn.setAccessibleName(calibration_label)
+        self.calibration_btn.clicked.connect(self._set_calibration)
+        toolbar.addWidget(self.calibration_btn)
         # Reparent the original buttons, retaining their existing slots/state.
         self.reset_curves_btn = curves_widget.btn_container.layout().itemAt(
             curves_widget.btn_container.layout().count() - 1
@@ -150,7 +164,7 @@ class CurvesPanel(QWidget):
                 size=20,
                 icon_size=12,
             )
-            reset.clicked.connect(row.reset)
+            reset.clicked.connect(lambda _checked=False, ch=channel: self._reset_edit_amount(ch))
             line.addWidget(reset)
             controls.addLayout(line)
             self.edit_rows[channel] = row
@@ -409,9 +423,15 @@ class CurvesPanel(QWidget):
         self._schedule_edit_emit()
 
     def _reset_edit(self) -> None:
-        for row in self.edit_rows.values():
-            row.reset()
+        self.interaction_started.emit()
+        self.set_edit_state({**self.get_edit_payload(), "amounts": {}})
         self._schedule_edit_emit()
+        self._on_row_interaction_ended()
+
+    def _reset_edit_amount(self, channel: str) -> None:
+        self.interaction_started.emit()
+        self._store_edit_amount(channel, 100.0)
+        self._on_row_interaction_ended()
 
     def _store_edit_amount(self, channel: str, value: float) -> None:
         """侧栏强度 -> 画布合成（compose_curves_lut），行值回吸防漂移。"""
@@ -424,6 +444,8 @@ class CurvesPanel(QWidget):
         self._schedule_edit_emit()
 
     def _on_soft_row_changed(self, key: str, value: float) -> None:
+        if self._soft_calibrated:
+            value = (value - _SOFT_CLIP_DISPLAY_OFFSETS.get(key, 0.0)) / 200.0
         self._store_soft_value(key, value)
         self._schedule_soft_emit()
 
@@ -431,11 +453,12 @@ class CurvesPanel(QWidget):
         targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
         for channel in targets:
             self._soft_values[channel] = self._clamped_channel(
-                self._soft_values[channel], key, value)
+                self._soft_values[channel], key, value,
+                decimals=5 if self._soft_calibrated else 2)
         self._refresh_soft_rows()
 
     @staticmethod
-    def _clamped_channel(values: dict, key: str, value: float) -> dict:
+    def _clamped_channel(values: dict, key: str, value: float, *, decimals: int = 2) -> dict:
         """Apply one control change with the shared mobile-app clamps.
 
         Mirrors ``SoftClipChannelParams.withControl``: clip points stay
@@ -461,12 +484,10 @@ class CurvesPanel(QWidget):
                 max(out["high_soft"], 0.0), max(new_gap - out["low_soft"], 0.0))
         else:  # high_soft
             out["high_soft"] = min(max(value, 0.0), max(gap - out["low_soft"], 0.0))
-        # Snap onto the 2-decimal UI grid so stored state, the drag box and
-        # the slider int domain agree despite binary float noise in `gap`.
-        return {name: round(val, 2) for name, val in out.items()}
+        return {name: round(val, decimals) for name, val in out.items()}
 
     @staticmethod
-    def _soft_row_range(key: str, values: dict) -> tuple:
+    def _soft_row_range(key: str, values: dict, *, decimals: int = 2) -> tuple[float, float]:
         """Slider bounds per control, mirroring the mobile SoftClipPanel.
 
         Bounds snap to the 2-decimal UI grid to avoid float-noise ticks.
@@ -480,16 +501,26 @@ class CurvesPanel(QWidget):
             bounds = (max(0.0, values["low_clip"]), 2.0)
         else:
             bounds = (0.0, max(gap - values["low_soft"], 0.0))
-        return (round(bounds[0], 2), round(bounds[1], 2))
+        return (round(bounds[0], decimals), round(bounds[1], decimals))
 
     def _refresh_soft_rows(self) -> None:
         """Push the constrained values of the active channel into the rows."""
         channel = self._soft_values[self._soft_channel]
         for key, row in self.soft_clip_rows.items():
+            value, default = channel[key], self._soft_defaults[key]
+            row_min, row_max = self._soft_row_range(
+                key, channel, decimals=5 if self._soft_calibrated else 2)
+            if self._soft_calibrated:
+                offset = _SOFT_CLIP_DISPLAY_OFFSETS.get(key, 0.0)
+                value = value * 200.0 + offset
+                default = default * 200.0 + offset
+                row_min = min(value, max(0.0, row_min * 200.0 + offset))
+                row_max = max(value, min(100.0, row_max * 200.0 + offset))
             row.blockSignals(True)
-            row_min, row_max = self._soft_row_range(key, channel)
+            row.setDecimals(1 if self._soft_calibrated else 2)
             row.setRange(row_min, row_max)
-            row.setValue(channel[key])
+            row.setDefaultValue(default)
+            row.setValue(value)
             row.blockSignals(False)
 
     def _select_soft_channel(self, channel: str) -> None:
@@ -514,19 +545,24 @@ class CurvesPanel(QWidget):
         self._schedule_soft_emit()
 
     def _reset_soft_clip(self) -> None:
+        self.interaction_started.emit()
         targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
         for channel in targets:
             self._soft_values[channel] = dict(self._soft_defaults)
-        self._select_soft_channel(self._soft_channel)
+        self._refresh_soft_rows()
         self._schedule_soft_emit()
+        self._on_row_interaction_ended()
 
     def _reset_soft_parameter(self, key: str) -> None:
+        self.interaction_started.emit()
         targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
         for channel in targets:
             self._soft_values[channel] = self._clamped_channel(
-                self._soft_values[channel], key, self._soft_defaults[key])
+                self._soft_values[channel], key, self._soft_defaults[key],
+                decimals=5 if self._soft_calibrated else 2)
         self._refresh_soft_rows()
         self._schedule_soft_emit()
+        self._on_row_interaction_ended()
 
     def get_ui_state(self) -> dict:
         """Return detached draft state for future wiring; never a render payload."""
@@ -548,6 +584,7 @@ class CurvesPanel(QWidget):
     def get_soft_clip_payload(self) -> dict:
         """四参数柔化裁切的模型形 payload（``soft_clip_changed`` 载荷）。"""
         return {
+            **({"calibration_version": 1} if self._soft_calibrated else {}),
             "linked": self.soft_clip_link_btn.isChecked(),
             "channels": {ch: dict(values) for ch, values in self._soft_values.items()},
         }
@@ -555,6 +592,7 @@ class CurvesPanel(QWidget):
     def get_edit_payload(self) -> dict:
         """Edit 强度/链接的模型形 payload（``edit_changed`` 载荷）。"""
         return {
+            **({"calibration_version": 1} if self.curves_widget.calibrated else {}),
             "linked": self.edit_link_btn.isChecked(),
             "amounts": self.curves_widget.get_edit_amounts(),
         }
@@ -572,14 +610,31 @@ class CurvesPanel(QWidget):
         草稿不跨目标泄漏——每次回填整体覆盖四参数与 Edit 强度；上一目标
         的滑条值不会残留。
         """
+        self._soft_timer.stop()
+        self._edit_timer.stop()
         self.set_soft_clip_state(state.get("curves_soft_clip") or {})
         self.set_edit_state(state.get("curves_edit") or {})
+
+    def _set_curve_model(self, enabled: bool) -> None:
+        self.calibration_btn.setChecked(enabled)
+        self.curves_widget.set_calibrated(enabled)
+        self.hsl_panel.hsl_curves_widget.set_calibrated(enabled)
+
+    def _set_calibration(self, enabled: bool) -> None:
+        self._flush_pending()
+        self.interaction_started.emit()
+        self._set_curve_model(enabled)
+        self._soft_calibrated = enabled
+        self._refresh_soft_rows()
+        self.calibration_changed.emit(self.get_layer_state())
+        self.interaction_ended.emit()
 
     def set_soft_clip_state(self, state: dict) -> None:
         """回填四参数柔化裁切（归一化 + 界面刷新，不发渲染信号）。"""
         normalized = normalize_curves_soft_clip(state)
         self._syncing = True
         try:
+            self._soft_calibrated = uses_calibrated_soft_clip(normalized)
             self._soft_values = {
                 ch: dict(normalized["channels"][ch]) for ch in "RGB"
             }
@@ -600,6 +655,7 @@ class CurvesPanel(QWidget):
         normalized = normalize_curves_edit(state)
         self._syncing = True
         try:
+            self._set_curve_model(curves_calibration_enabled(normalized))
             self.curves_widget.set_edit_amounts(normalized["amounts"])
             for channel, row in self.edit_rows.items():
                 row.setValue(self.curves_widget.edit_amounts[channel])

@@ -1034,6 +1034,18 @@ class TestExportFileAs:
 
         harness.perform_quick_export.assert_not_called()
 
+    def test_dialog_does_not_export_after_its_source_changes(
+        self, harness: Harness, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._patch_dialog(monkeypatch, {"export_type": "image"})
+        harness._build_timeline_info = MagicMock()
+        harness.perform_quick_export = MagicMock()
+
+        harness.export_file_as(source_is_current=lambda: False)
+
+        harness.perform_quick_export.assert_not_called()
+        harness.status_bar.showMessage.assert_called_once()
+
     def test_default_name_from_current_file(
         self, harness: Harness, monkeypatch: pytest.MonkeyPatch
     ) -> None:

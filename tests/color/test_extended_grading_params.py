@@ -269,7 +269,7 @@ def test_extended_params_registered_as_animatable() -> None:
 def test_glsl_snippet_signature_and_call_site_stay_in_sync() -> None:
     from src.features.color.core.shader_nodes import GRADING_SNIPPET
 
-    call = ("apply_grading(graded, u_lift, u_gamma, u_gain, u_exposure, "
+    call = ("apply_grading(graded, {primary_input}, u_lift, u_gamma, u_gain, u_exposure, "
             "u_temp, u_tint, u_contrast, u_saturation, u_vibrance, u_shadow, "
             "u_highlights, u_mid_detail, u_sharpness, u_hue_shift, "
             "u_lift_saturation, u_gamma_saturation, u_gain_saturation, "
@@ -280,12 +280,13 @@ def test_glsl_snippet_signature_and_call_site_stay_in_sync() -> None:
     from src.features.color.core import shader_compiler
     source = inspect.getsource(shader_compiler)
     assert call in source
-    # GLSL 签名（跳过首参 color）与调用点实参（跳过 graded、去掉 u_ 前缀）一一对应
+    # 前两个参数分别是已校准输入和 Lum Mix 使用的原始输入。
     signature = GRADING_SNIPPET.split("apply_grading(", 1)[1].split(")", 1)[0]
-    glsl_names = [p.strip().split()[-1] for p in signature.split(",")][1:]
+    glsl_names = [p.strip().split()[-1] for p in signature.split(",")]
+    assert glsl_names[:2] == ["color", "source_color"]
     call_args = [a.strip() for a in
-                 call.split("(", 1)[1].rstrip(");").split(",")][1:]
-    assert glsl_names == [name[2:] for name in call_args]
+                 call.split("(", 1)[1].rstrip(");").split(",")][2:]
+    assert glsl_names[2:] == [name[2:] for name in call_args]
     # 新数学位次：Offset/Log 在 Shadows 之前，Lum Mix 在 Saturation 之后
     body = GRADING_SNIPPET
     assert body.index("color += offset;") < body.index("// 5. Shadows")

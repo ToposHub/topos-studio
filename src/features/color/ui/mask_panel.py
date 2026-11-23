@@ -591,6 +591,7 @@ class MaskPanel(QWidget):
         self.btn_sam.setVisible(visible)
         self.btn_brush.setVisible(visible)
         self.btn_eraser.setVisible(visible)
+        self.btn_send_tracker.setVisible(not visible)
         if not visible:
             # setChecked(False) 对未选中按钮无副作用；brush 取消时会级联复位 eraser
             self.btn_sam.setChecked(False)

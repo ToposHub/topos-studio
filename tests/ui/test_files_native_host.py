@@ -1,6 +1,9 @@
 """Real native host composition, with no Chromium or loopback server."""
 from pathlib import Path
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QLineEdit
+
 from src.app.ui.files_panel import FilesPanel
 from src.app.ui.library_panel import LibraryPanel
 from src.app.ui.native_files_panel import NativeFilesPanel
@@ -30,7 +33,11 @@ def test_native_host_loads_real_service_without_browser_or_server(qtbot, monkeyp
         assert panel.content_stack.currentWidget() is panel._native_panel
         assert panel._native_transport._facade is not None
         assert panel._native_panel.model.entries[0].name == "item.txt"
-        qtbot.waitUntil(lambda: len(panel._files_plugins._infos) == 10, timeout=8000)
+        qtbot.waitUntil(lambda: {"apps.topos_word", "apps.quick_3d_viewer"} <= {
+            info.plugin_id for info in panel._files_plugins._infos}, timeout=8000)
+        apps = [info for info in panel._files_plugins._infos if info.source == "local_app"]
+        assert len(apps) == 2 and all(info.can_launch and not info.runtime_loaded for info in apps)
+        assert panel._files_plugins._app_runtime is None  # Discovery never starts an application.
     finally:
         panel.shutdown()
         panel.shutdown()
@@ -61,11 +68,15 @@ def test_files_library_share_persisted_metadata_and_safe_operations(qtbot, monke
         files.refresh_file_rating(str(source), 4)
         qtbot.waitUntil(lambda: bool(files._native_panel.model.entries) and files._native_panel.model.entries[0].user.rating == 4,
                         timeout=8000)
-        monkeypatch.setattr("src.app.ui.library_panel.QInputDialog.getText",
-                            lambda *a, **k: ("renamed.txt", True))
+        library.resize(1100, 700)
+        library.show()
         jobs = []
         library._native_transport.task_finished.connect(jobs.append)
         library.rename_item(str(source))
+        editor = library._native_panel.pages.currentWidget().findChild(QLineEdit, "filesNameEditor")
+        assert editor is not None
+        editor.setText("renamed.txt")
+        qtbot.keyClick(editor, Qt.Key.Key_Return)
         qtbot.waitUntil(lambda: bool(jobs), timeout=8000)
         assert (media / "renamed.txt").read_text() == "source"
         assert not source.exists()

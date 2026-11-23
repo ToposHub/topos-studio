@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from PyQt6.QtCore import QMimeData, QPoint, QPointF, QSettings, Qt, QUrl
 from PyQt6.QtGui import QDragEnterEvent, QDragMoveEvent, QDropEvent
-from PyQt6.QtWidgets import QApplication, QAbstractItemView, QMenu
+from PyQt6.QtWidgets import QApplication, QAbstractItemView, QLineEdit, QMenu
 from pytestqt.qtbot import QtBot
 
 from src.app.ui import native_files_panel as panel_module
@@ -61,17 +61,47 @@ def test_delete_without_selection_does_not_call_service(panel):
     assert "先选择" in panel.meta_status.text()
 
 
-def test_rename_uses_input_dialog_and_emits_task(panel, monkeypatch):
-    captured = []
-    panel.file_task_requested.connect(lambda op, targets, options: captured.append((op, targets, options)))
-    panel.selection.select(panel.proxy.index(0, 0),
-                           panel.selection.SelectionFlag.ClearAndSelect
+@pytest.mark.parametrize("trigger", ["caption", "menu", "f2", "details"])
+def test_rename_edits_filename_in_place_and_emits_task(panel, qtbot, trigger):
+    panel.resize(1100, 700)
+    panel.show()
+    panel.view_combo.setCurrentIndex(panel.view_combo.findData("list" if trigger == "details" else "adaptive"))
+    view = panel.pages.currentWidget()
+    panel.activateWindow()
+    view.setFocus()
+    index = panel.proxy.mapFromSource(panel.model.index(0, 0))
+    panel.selection.select(index, panel.selection.SelectionFlag.ClearAndSelect
                            | panel.selection.SelectionFlag.Rows)
-    monkeypatch.setattr(panel_module.QInputDialog, "getText",
-                        staticmethod(lambda *a, **k: ("renamed.mov", True)))
-    panel.request_rename()
-    assert captured[-1][0] == "rename"
-    assert captured[-1][2]["options"]["new_name"] == "renamed.mov"
+    if trigger == "menu":
+        menu = panel._build_context_menu(view, view.visualRect(index).center())
+        action = next(action for action in menu.actions()
+                      if action.text() == panel_module._tr("rename_title", "重命名"))
+        action.trigger()
+    elif trigger == "f2":
+        qtbot.keyClick(view, Qt.Key.Key_F2)
+    else:
+        name_rect = view.itemDelegate().name_rect(view.visualRect(index))
+        qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=name_rect.center())
+    qtbot.waitUntil(lambda: view.findChild(QLineEdit, "filesNameEditor") is not None)
+    editor = view.findChild(QLineEdit, "filesNameEditor")
+    assert editor.text() == "a.mov"
+    editor.setText("renamed.mov")
+    with qtbot.waitSignal(panel.file_task_requested) as task:
+        qtbot.keyClick(editor, Qt.Key.Key_Return)
+    assert task.args == ["rename", ["/Users/creator/Media/a.mov"],
+                         {"policy": "error", "options": {"new_name": "renamed.mov"}}]
+    assert panel.model.entries[0].name == "a.mov"
+
+
+def test_inline_rename_escape_discards_draft(panel, qtbot):
+    panel.show()
+    panel.rename_visible_file("/Users/creator/Media/a.mov")
+    view = panel.pages.currentWidget()
+    editor = view.findChild(QLineEdit, "filesNameEditor")
+    editor.setText("draft.mov")
+    with qtbot.assertNotEmitted(panel.file_task_requested):
+        qtbot.keyClick(editor, Qt.Key.Key_Escape)
+    assert panel.model.entries[0].name == "a.mov"
 
 
 def test_new_folder_emits_mkdir_in_current_directory(panel):

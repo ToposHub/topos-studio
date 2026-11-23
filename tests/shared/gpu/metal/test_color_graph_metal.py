@@ -112,8 +112,10 @@ def _payload_provider(graph):
         if node is not None:
             payload["visible"] = node.enabled
         if payload.get("curves_data"):
+            edit = payload.get("curves_edit") or {}
             payload["curves_lut"] = build_curves_lut_from_data(
-                dict(payload["curves_data"]))
+                dict(payload["curves_data"]), edit.get("amounts"),
+                calibration_version=edit.get("calibration_version", 0))
         return payload
     return provide
 
@@ -236,8 +238,14 @@ class TestMetalGradingKernel:
         assert result.published
         _assert_dual(result.output, cpu, "rich")
 
-    def test_curves_vs_cpu_oracle(self, metal_ctx):
+    @pytest.mark.parametrize("calibration_version", [0, 1])
+    def test_curves_vs_cpu_oracle(self, metal_ctx, calibration_version):
         layer = _curves_layer()
+        if calibration_version:
+            layer.curves_data["R"] = [(0, 255), (128, 92), (255, 0)]
+            layer.curves_edit["calibration_version"] = calibration_version
+            layer.curves_lut = build_curves_lut_from_data(
+                layer.curves_data, calibration_version=calibration_version)
         src = f02_patches(32)
         q = _quantized(src)
         payload = {"grading_params": dict(layer.grading_params),

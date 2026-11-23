@@ -45,6 +45,34 @@ def test_opening_edit_project_switches_from_color_to_edit(tmp_path) -> None:
     assert host.current_page == "Edit"
 
 
+def test_decoded_photo_project_handoff_preserves_the_image_request(tmp_path) -> None:
+    from src.app.controllers.file_controller import FileOpsMixin
+
+    project_path = tmp_path / "photo.topos"
+    project_path.touch()
+    photo = object()
+    loaded_project = object()
+    host = SimpleNamespace(
+        _current_edit_project=object(),
+        _check_project_matches_work_mode=MagicMock(return_value=True),
+        _read_project_mode_from_manifest=MagicMock(return_value="standalone_image"),
+        _sync_mg_preset_project_root=MagicMock(),
+    )
+
+    def close_project(**_options: object) -> bool:
+        host._current_edit_project = None
+        return True
+
+    def load_project(_path: str, **_options: object) -> None:
+        host._current_edit_project = loaded_project
+
+    host.close_project = MagicMock(side_effect=close_project)
+    host._load_standalone_project = MagicMock(side_effect=load_project)
+    assert FileOpsMixin._open_project_path(host, str(project_path), decoded_photo=photo)
+    host.close_project.assert_called_once_with(cancel_grade_set_request=False)
+    host._load_standalone_project.assert_called_once_with(str(project_path), decoded_photo=photo)
+
+
 def test_timeline_save_snapshot_includes_active_editor_timeline() -> None:
     """Ctrl+S must see a just-committed split even if cache sync is pending."""
     from src.app.controllers.file_controller import FileOpsMixin

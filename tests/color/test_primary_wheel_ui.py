@@ -8,14 +8,55 @@ import pytest
 from PyQt6.QtCore import QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QSplitter, QWidget
 
 from src.features.color.core.composition_uniforms import (
     composition_uniform_values, params_to_rgb, params_to_offset_rgb,
 )
 from src.features.color.core.the_decompiler import GradingMath
+from src.features.color.core.layer import Layer
+from src.features.color.core.primary_calibration import (
+    PRIMARY_CALIBRATION_VERSION_KEY, calibrated_grade_inputs,
+)
 from src.features.color.ui.color_wheel import (
     ColorWheel, GradingPanel, offset_display_to_hsb, offset_hsb_to_display,
 )
+
+
+def test_measured_grade_uses_native_display_values_and_round_trips(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.calibration_btn.click()
+    assert panel.get_current_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 1
+    assert panel.pivot_slider.spin.value() == pytest.approx(0.435)
+    assert panel.log_offset_wheel._r_drag.value() == pytest.approx(25.0)
+
+    panel.temp_slider.spin.setValue(500.0)
+    panel.color_bars_panel.offset._nums["R"].setValue(26.0)
+    panel.flush_pending_changes()
+    assert panel.temp_slider.value() == pytest.approx(5.0)
+    assert panel.offset_wheel._r_drag.value() == pytest.approx(26.0, abs=0.001)
+    assert panel.log_offset_wheel._r_drag.value() == pytest.approx(26.0, abs=0.001)
+
+    panel.log_offset_wheel._g_drag.setValue(24.0)
+    panel.flush_pending_changes()
+    assert panel.color_bars_panel.offset._nums["G"].value() == pytest.approx(24.0, abs=0.001)
+    panel.log_shadow_wheel._r_drag.setValue(0.10)
+    panel.flush_pending_changes()
+
+    layer = Layer("Calibrated")
+    layer.grading_params.update(panel.get_current_params())
+    reloaded = Layer.from_dict(layer.to_dict())
+    assert reloaded.grading_params[PRIMARY_CALIBRATION_VERSION_KEY] == 1
+    assert reloaded.grading_params["log_offset"] == (0.0, 0.0, 0.0)
+    grid, remaining = calibrated_grade_inputs(reloaded)
+    assert grid is not None and abs(grid).max() > 0.0
+    assert remaining["temp"] == 0.0
+    assert remaining["log_shadow"] == (0.0, 0.0, 0.0)
+
+    panel.set_extended_params(Layer("Legacy").grading_params)
+    assert not panel.calibration_btn.isChecked()
+    assert panel.log_offset_wheel._r_drag.value() == pytest.approx(0.0)
 
 
 def test_immediate_version_save_flushes_throttled_wheel_and_slider_before_snapshot(qtbot):
@@ -47,7 +88,7 @@ def test_rendered_ring_pointer_and_rendered_grade_share_six_hue_directions(qapp,
     canvas = wheel._wheel_canvas
     pixels = canvas.grab().toImage()
     center, outer_radius = canvas._geometry()
-    inner_radius = outer_radius * canvas._RING_RATIO
+    inner_radius = canvas._inner_radius(outer_radius)
     try:
         for hue in range(0, 360, 60):
             angle = math.radians(hue + rotation)
@@ -85,7 +126,7 @@ def test_trackerball_is_relative_and_flushes_before_gesture_end(qapp):
     wheel.set_hsv(60.0, 0.1, 0.0)
     before = QPointF(wheel.knob_pos)
     center, outer_radius = canvas._geometry()
-    inner_radius = outer_radius * canvas._RING_RATIO
+    inner_radius = canvas._inner_radius(outer_radius)
     press = center + QPointF(20, 10)
     events = []
     wheel.interaction_started.connect(lambda: events.append("start"))
@@ -115,7 +156,7 @@ def test_outer_ring_drag_changes_master_brightness_only(qapp):
     qapp.processEvents()
     wheel.set_hsv(215.0, 0.3, 0.0)
     center, outer_radius = canvas._geometry()
-    inner_radius = outer_radius * canvas._RING_RATIO
+    inner_radius = canvas._inner_radius(outer_radius)
     ring_point = center + QPointF((inner_radius + outer_radius) / 2.0, 0.0)
     events = []
     wheel.changed.connect(lambda *args: events.append(tuple(args)))
@@ -356,18 +397,122 @@ def test_wheel_canvas_radius_follows_panel_and_caps_at_100(qapp):
     panel.show()
     qapp.processEvents()
     try:
-        radius = panel.lift_wheel._wheel_canvas._geometry()[1]
+        canvas = panel.lift_wheel._wheel_canvas
+        radius = canvas._geometry()[1]
         assert radius == 100.0
+        assert radius - canvas._inner_radius(radius) == 4.0
         panel.resize(1260, 470)
         qapp.processEvents()
-        assert panel.lift_wheel._wheel_canvas._geometry()[1] == 100.0
+        assert canvas._geometry()[1] == 100.0
         panel.resize(700, 300)
         qapp.processEvents()
-        smaller = panel.lift_wheel._wheel_canvas._geometry()[1]
+        smaller = canvas._geometry()[1]
         assert 0.0 < smaller < 100.0
+        assert smaller - canvas._inner_radius(smaller) == 4.0
     finally:
         panel.close()
         panel.deleteLater()
+
+
+def test_master_dials_align_with_fixed_value_groups_in_all_modes(qtbot, qapp) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.show()
+    qapp.processEvents()
+    minimum_width = panel.minimumSizeHint().width()
+    def wheel_controls(wheel: ColorWheel) -> tuple[QWidget, QWidget, QWidget]:
+        first = wheel._bright_drag if wheel._bright_drag is not None else wheel._r_drag
+        return wheel.master_jog, first, wheel._b_drag
+
+    controls_by_mode = {
+        "wheels": tuple(wheel_controls(wheel) for wheel in (
+            panel.lift_wheel, panel.gamma_wheel, panel.gain_wheel, panel.offset_wheel)),
+        "bars": tuple((column._dial, column._nums[column._channels[0]], column._nums["B"])
+                      for column in panel.color_bars_panel.columns()),
+        "log": tuple(wheel_controls(wheel) for wheel in (
+            panel.log_shadow_wheel, panel.log_midtone_wheel,
+            panel.log_highlight_wheel, panel.log_offset_wheel)),
+    }
+    for width in (minimum_width, 974, 975, 1300):
+        panel.resize(width, 380)
+        dial_positions = set()
+        for mode, controls in controls_by_mode.items():
+            panel._switch_mode(mode)
+            qapp.processEvents()
+            for dial, first, last in controls:
+                assert dial.width() == dial.minimumWidth() == dial.maximumWidth()
+                assert dial.height() == 14
+                if dial.isVisible():
+                    origin = dial.mapTo(panel, dial.rect().topLeft())
+                    assert origin.x() == first.mapTo(panel, first.rect().topLeft()).x()
+                    assert origin.x() + dial.width() - 1 == last.mapTo(panel, last.rect().bottomRight()).x()
+                    dial_positions.add(origin.y())
+        assert len(dial_positions) == 1
+
+
+def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp) -> None:
+    splitter = QSplitter()
+    qtbot.addWidget(splitter)
+    panel = GradingPanel()
+    splitter.addWidget(panel)
+    splitter.addWidget(QWidget())
+    splitter.resize(1600, 380)
+    splitter.show()
+    qapp.processEvents()
+
+    def set_panel_width(width: int) -> None:
+        splitter.setSizes([width, splitter.width() - splitter.handleWidth() - width])
+        qapp.processEvents()
+        assert panel.width() == width
+
+    offset = panel.offset_wheel
+    rows = {
+        "wheels": (panel._wheel_page, offset),
+        "bars": (panel.color_bars_panel, panel.color_bars_panel.offset),
+        "log": (panel._log_page, panel.log_offset_wheel),
+    }
+    set_panel_width(650)
+    assert all(column.isHidden() for _, column in rows.values())
+    minimum_width = panel.minimumSizeHint().width()
+    set_panel_width(974)
+    assert all(not column.isHidden() for _, column in rows.values())
+    threshold = (max(row.minimumSizeHint().width() for row, _ in rows.values())
+                 + panel.width() - panel._wheel_page.width())
+    set_panel_width(threshold - 1)
+    assert all(column.isHidden() for _, column in rows.values())
+    set_panel_width(threshold)
+    for mode, (row, column) in rows.items():
+        panel._mode_buttons[mode].click()
+        qapp.processEvents()
+        assert column.isVisible()
+        layout = row.layout()
+        for index in range(layout.count()):
+            widget = layout.itemAt(index).widget()
+            assert widget.width() >= widget.minimumSizeHint().width()
+            assert row.rect().contains(widget.geometry())
+    assert panel.minimumSizeHint().width() == minimum_width
+
+    offset._r_drag.setValue(40.0)
+    panel.log_offset_wheel._g_drag.setValue(25.0)
+    panel.flush_pending_changes()
+    grade = panel.get_extended_params()
+    red_value = offset._r_drag.value()
+    assert grade["offset"][1] > 0.0
+    assert grade["log_offset"][1] > 0.0
+    updates = []
+    panel.grading_extended_changed.connect(updates.append)
+    set_panel_width(minimum_width)
+    assert all(column.isHidden() for _, column in rows.values())
+    panel._switch_mode("bars")
+    set_panel_width(threshold)
+    assert panel.color_bars_panel.offset.isVisible()
+    panel._switch_mode("wheels")
+    qapp.processEvents()
+    assert offset.isVisible()
+    assert offset._r_drag.value() == red_value
+    assert panel.get_extended_params() == grade
+    panel.flush_pending_changes()
+    assert updates == []
 
 
 @pytest.mark.parametrize("mode", ["lift", "gamma", "gain"])

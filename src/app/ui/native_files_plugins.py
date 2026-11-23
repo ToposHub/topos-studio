@@ -301,7 +301,11 @@ class PluginCenterDialog(QDialog):
         self.version.setText(version_text)
         self.author.setText(info.author)
         self.features.setText(" · ".join(info.capabilities) or info.category)
-        self.runtime.setText(_tr("session_loaded", "已加载；停用需要重启") if info.runtime_loaded else _tr("session_unloaded", "未加载"))
+        if info.source == "local_app":
+            self.runtime.setText(_tr("app_running", "独立应用运行中；停用后窗口可继续单独使用")
+                                 if info.runtime_loaded else _tr("app_stopped", "独立应用未连接"))
+        else:
+            self.runtime.setText(_tr("session_loaded", "已加载；停用需要重启") if info.runtime_loaded else _tr("session_unloaded", "未加载"))
         # [F1] 来源政策 + 安装事实直达 UI（未验证开发源显式标注）
         source = getattr(info, "source", "builtin")
         self.uninstall.setVisible(source == "installed")

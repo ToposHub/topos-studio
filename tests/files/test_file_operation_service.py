@@ -6,11 +6,31 @@ from pathlib import Path
 import pytest
 
 from src.features.files.repository import FilesCatalog, FilesDataLocator
+from src.features.files.services.domain import FilesMetadataService
 from src.features.files.services.query import FilesQueryService
 from src.features.files.transactions import (
     FileOperationService,
     OperationJournal,
 )
+
+
+def test_loose_metadata_follows_an_overwrite(env):
+    tmp, catalog, _, _, service, _ = env
+    source, target = tmp / "source.jpg", tmp / "target.jpg"
+    source.write_bytes(b"source")
+    target.write_bytes(b"target")
+    metadata = FilesMetadataService(catalog)
+    assert metadata.patch_metadata([str(source)], {"rating": 3, "color": 2, "comments": "source", "tags": "source-tag"}).ok
+    assert metadata.patch_metadata([str(target)], {"rating": 5, "tags": "old-tag"}).ok
+
+    result = service.rename("", source, target.name, policy="overwrite")
+
+    assert result.ok
+    assert target.read_bytes() == b"source"
+    assert metadata.get_metadata([str(target)]).items[0].result == {
+        "rating": 3, "color": 2, "flag": 0, "comments": "source", "tags": ["source-tag"],
+    }
+    assert catalog.asset("", source) is None
 
 
 @pytest.fixture()

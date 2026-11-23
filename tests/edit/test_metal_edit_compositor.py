@@ -589,6 +589,7 @@ def _compare_planar_on_render_thread(path: Path, cube: Path) -> None:
                     parking.use()
                     fbo.release()
                     texture.release()
+        _check_calibrated_gl_fallback(renderer, first, parking)
     finally:
         assert producer.shutdown()
         metal.release()
@@ -597,6 +598,50 @@ def _compare_planar_on_render_thread(path: Path, cube: Path) -> None:
         parking.release()
         parking_texture.release()
         context.release()
+
+
+def _check_calibrated_gl_fallback(renderer: Any, source: Any, parking: Any) -> None:
+    from PyQt6.QtCore import QThread
+
+    from src.features.color.core.color_graph_cpu import run_graph_frame_cpu
+    from src.features.edit.core.edit_gpu_preview_renderer import EditRenderTask
+    from src.features.edit.core.timeline_preview_renderer import PreviewRenderWorker
+    from src.shared.project.color_stack import ColorStackData
+
+    stack = ColorStackData.create().with_grading_params({
+        "primary_calibration_version": 1, "contrast": 35.0, "saturation": -15.0,
+    }).with_curves({"M": [(0, 255), (128, 80), (255, 0)]}).with_curves_edit({
+        "calibration_version": 1,
+    })
+    worker = PreviewRenderWorker.__new__(PreviewRenderWorker)
+    QThread.__init__(worker)
+    worker._asset_resolver = SimpleNamespace(_project=SimpleNamespace(color_stacks={stack.stack_id: stack}))
+    info = SimpleNamespace(clip=SimpleNamespace(color_stack_id=stack.stack_id), source_frame=25)
+    grade = worker._get_preview_color_grade(info)
+    assert grade is not None and grade["source_frame"] == 25
+
+    width, height = PROXY
+    context = renderer.ctx
+    texture = context.texture(PROXY, 4)
+    fbo = context.framebuffer([texture])
+    renderer._composite_fbo, renderer._composite_tex = fbo, texture
+    try:
+        spec = {"size": PROXY, "coordinate": SOURCE_SIZE, "layers": [_planar(source)], "dip": None}
+        original = _gl_reference(renderer, spec)
+        layer = _planar(source, preview_grade=grade)
+        task = EditRenderTask(25, 1, [layer], output_fbo_size=PROXY, coordinate_size=SOURCE_SIZE)
+        assert not renderer._try_native_metal_preview(task, width, height)
+        assert not renderer._try_metal_preview(task, width, height)
+        assert layer["decoded_frame"] is source
+        actual = _gl_reference(renderer, {**spec, "layers": [layer]})
+        expected = run_graph_frame_cpu(grade["color_graph"], original[:, :, ::-1].astype(np.uint8), 25)
+        assert not np.array_equal(original, expected[:, :, ::-1])
+        error = _difference(actual, expected[:, :, ::-1])
+        assert error["mean"] < 0.8 and error["p99"] <= 2, error
+    finally:
+        parking.use()
+        fbo.release()
+        texture.release()
 
 
 @pytest.mark.gpu_renderer

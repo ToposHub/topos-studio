@@ -19,7 +19,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 if TYPE_CHECKING:
+    from numpy import ndarray
     from src.features.files.services.ai_library import LibraryAnalysisPolicy
+    from src.features.files.services.thumbnail_cache import GradedThumbnailStamp
 
 from src.features.files.contracts import (
     FilesError,
@@ -33,6 +35,7 @@ from src.features.files.contracts import (
 )
 from src.features.files.repository.catalog import FilesCatalog, LibraryRecord
 from src.features.files.services.domain import (
+    GRADE_SET_SCOPE,
     FilesCollectionsService,
     FilesMetadataService,
     FilesScanService,
@@ -275,12 +278,35 @@ class FilesFacade:
             return self._operations.create_library(str(root), name)
         return self.libraries.register(root)
 
+    def export_library(self, library_id: str, destination: str) -> Path:
+        from src.features.files.services.library_transfer import FilesLibraryTransfer
+
+        return FilesLibraryTransfer(self._catalog, self.metadata).export_library(library_id, destination)
+
+    def import_library(self, package: str, destination_parent: str) -> LibraryRecord:
+        from src.features.files.services.library_transfer import FilesLibraryTransfer
+
+        return FilesLibraryTransfer(self._catalog, self.metadata).import_library(package, destination_parent)
+
     def thumbnail_bytes(self, path: str, version: int, *, cancel: threading.Event) -> bytes:
         from src.features.files.services.media import thumbnail_bytes
 
         if cancel.is_set():
             raise ValueError("缩略图请求已取消")
         return self._thumbnail_cache.get_or_create(path, version, lambda: thumbnail_bytes(path, cancel=cancel))
+
+    def graded_thumbnail(self, path: str, *, verified_sidecar: str | None = None) -> bytes | None:
+        return self._thumbnail_cache.read_graded(path, verified_sidecar=verified_sidecar)
+
+    def cache_graded_thumbnail(self, stamp: GradedThumbnailStamp, rgb: ndarray) -> bool:
+        import cv2
+
+        long_edge = max(rgb.shape[:2])
+        if self._thumbnail_cache.read_graded(stamp.source, minimum_edge=long_edge) is not None:
+            return True
+        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        ok, data = cv2.imencode(".webp", bgr, [cv2.IMWRITE_WEBP_QUALITY, 80])
+        return bool(ok and self._thumbnail_cache.store_graded(stamp, data.tobytes(), long_edge=long_edge))
 
     @property
     def dropped_results(self) -> int:
@@ -369,7 +395,7 @@ class FilesFacade:
                 self.collections.member_paths(collection_id),
                 request_id=request_id,
                 path_label=f"collection://{collection_id}",
-                library_id=library_id)
+                library_id=None if library_id == GRADE_SET_SCOPE else library_id)
 
         self._submit(
             key="collection", request_id=request_id,
@@ -442,6 +468,15 @@ class FilesFacade:
                      listener=listener, wrap=lambda result: result)
 
     # ------------------------------------------------------------ 扫描/任务/元数据
+
+    def refresh_external_paths(self, paths: list[str], *, request_id: str,
+                               listener: Listener) -> None:
+        """Refresh a frozen external-save selection on the bounded worker."""
+        selection = list(paths) if isinstance(paths, list) else paths
+        self._submit(
+            key=f"external-refresh:{request_id}", request_id=request_id,
+            work=lambda: self.scan.refresh_external_paths(selection),
+            listener=listener, wrap=lambda result: result)
 
     def scan_library(self, library_id: str, *, request_id: str,
                      listener: Listener) -> None:

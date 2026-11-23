@@ -9,7 +9,7 @@ inspired by DaVinci Resolve professional UI.
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QStackedWidget, QPushButton, QMenu, QLabel, QDockWidget, QGridLayout
+    QStackedWidget, QPushButton, QMenu, QLabel, QDockWidget, QGridLayout, QDialog, QSizePolicy
 )
 from PyQt6.QtCore import QTimer, QSize, Qt, pyqtSignal, QPointF, QRectF
 from PyQt6.QtGui import QAction, QColor, QFont, QPainter, QPen, QPaintEvent
@@ -56,13 +56,20 @@ class _ScopeModeCombo(QComboBox):
         self.setFont(_scope_header_font())
         self.setFixedHeight(24)
         self.setMinimumWidth(56)
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.currentTextChanged.connect(self._update_text_width)
         self.setStyleSheet("QComboBox { border: none; background: transparent; }")
+
+    def _update_text_width(self, text: str) -> None:
+        """Reserve the full selected label, including its arrow and padding."""
+        self.setMinimumWidth(self.sizeHint().width())
+        self.updateGeometry()
 
     def sizeHint(self) -> QSize:
         return QSize(self.fontMetrics().horizontalAdvance(self.currentText()) + 30, 24)
 
     def minimumSizeHint(self) -> QSize:
-        return QSize(56, 24)
+        return self.sizeHint()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
@@ -98,6 +105,7 @@ class _ScopeHeaderButton(QPushButton):
         painter.fillRect(self.rect(), background)
         painter.setPen(QColor("#111114"))
         painter.drawLine(0, 0, 0, self.height())
+        painter.translate((self.width() - 36) / 2.0, 0.0)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(QPen(QColor("#85858a"), 1.0))
         if self.kind == 'settings':
@@ -176,6 +184,9 @@ _CPU_ONLY_MODES: set = set()
 
 MODE_ORDER = ['waveform', 'vectorscope', 'split', 'parade', 'luma',
               'histogram', 'cie', 'falsecolor', 'quad', 'all']
+# Keep stack indices stable; show everyday tools before specialist and multi-view modes.
+_SCOPE_SELECTOR_ORDER = ('waveform', 'vectorscope', 'parade', 'luma',
+                         'histogram', 'falsecolor', 'cie', 'split', 'quad', 'all')
 SCOPE_MODES.update({
     'quad': {'name': 'quad_view', 'widget_class': None},
     'all': {'name': 'all_scopes', 'widget_class': None},
@@ -250,7 +261,7 @@ class ScopePanel(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(200, 150)
+        self.setMinimumSize(250, 150)
         self._current_mode = 'waveform'
         self._pending_image: np.ndarray = None
         self._pending_mask: np.ndarray = None
@@ -281,6 +292,10 @@ class ScopePanel(QWidget):
         self._update_timer.setSingleShot(True)
         self._update_timer.setInterval(50)  # ~20 FPS max
         self._update_timer.timeout.connect(self._process_pending_image)
+        self._gpu_resize_timer = QTimer(self)
+        self._gpu_resize_timer.setSingleShot(True)
+        self._gpu_resize_timer.setInterval(150)
+        self._gpu_resize_timer.timeout.connect(self.bump_demand_revision)
 
         self.init_ui()
 
@@ -364,13 +379,56 @@ class ScopePanel(QWidget):
 
     def _update_layout_controls(self, *_) -> None:
         dock = self._host_dock()
+        floating = dock is None or dock.isFloating()
+        if dock is not None:
+            policy = getattr(self, '_floating_dock_policy', None)
+            if floating:
+                if policy is None:
+                    self._floating_dock_policy = (dock.allowedAreas(), dock.features())
+                dock.setAllowedAreas(Qt.DockWidgetArea.NoDockWidgetArea)
+                dock.setFeatures(dock.features() & ~QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+            elif policy is not None:
+                dock.setAllowedAreas(policy[0])
+                dock.setFeatures(policy[1])
+                self._floating_dock_policy = None
+        if not floating and self._current_mode in _MULTI_LAYOUTS:
+            self.set_mode('waveform')
+            return
+        modes = tuple(mode for mode in _SCOPE_SELECTOR_ORDER
+                      if floating or mode not in _MULTI_LAYOUTS)
+        if tuple(self.mode_combo.itemData(i) for i in range(self.mode_combo.count())) != modes:
+            blocked = self.mode_combo.blockSignals(True)
+            self.mode_combo.clear()
+            for mode in modes:
+                self.mode_combo.addItem(_scope_name(mode), mode)
+            self.mode_combo.setCurrentIndex(self.mode_combo.findData(self._current_mode))
+            self.mode_combo.blockSignals(blocked)
+            self.mode_combo._update_text_width(self.mode_combo.currentText())
         multi = self._current_mode in _MULTI_LAYOUTS
-        self.layout_toolbar.setVisible(multi or (dock is not None and dock.isFloating()))
+        self.layout_toolbar.setVisible(floating and (
+            multi or dock is not None or getattr(self, '_scope_dialog', None) is not None))
         self.mode_combo.setVisible(not multi)
         self.settings_btn.setVisible(not multi)
         for mode, button in self.layout_buttons.items():
             button.setChecked(self._current_mode == mode or (
                 mode == 'waveform' and not multi))
+        self._update_header_title_visibility()
+
+    def _update_header_title_visibility(self) -> None:
+        """Give the selected tool name priority in a narrow scope header."""
+        dock = self._host_dock()
+        duplicate = getattr(self, '_scope_dialog', None) is not None or (
+            dock is not None and dock.isFloating())
+        selected_width = 0 if self.mode_combo.isHidden() else self.mode_combo.minimumWidth()
+        button_width = 32 if selected_width + 10 + 3 * 36 > self.width() else 36
+        for button in (self.settings_btn, self.expand_btn, self.more_btn):
+            button.setFixedWidth(button_width)
+        controls = (self.mode_combo, self.settings_btn, self.expand_btn, self.more_btn,
+                    self.layout_toolbar)
+        required = 10 + self.scope_title.sizeHint().width() + sum(
+            max(widget.minimumWidth(), widget.minimumSizeHint().width())
+            for widget in controls if not widget.isHidden())
+        self.scope_title.setVisible(not duplicate and self.width() >= required)
 
     def _host_dock(self) -> Optional[QDockWidget]:
         parent = self.parentWidget()
@@ -381,20 +439,75 @@ class ScopePanel(QWidget):
         return None
 
     def open_floating(self) -> None:
-        """Open the live scope dock from the viewer context menu."""
+        """Move the live panel into a modeless window with no docking support."""
+        dialog = getattr(self, '_scope_dialog', None)
+        if dialog is not None:
+            if dialog.isMinimized():
+                dialog.showNormal()
+            else:
+                dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dock = self._host_dock()
+        self._scope_return_dock = dock
+        self._scope_return_parent = self.parentWidget()
+        self._scope_return_visible = dock.isVisible() if dock is not None else False
+        owner = dock.parentWidget() if dock is not None else self.window()
+        dialog = QDialog(owner if owner is not self else None)
+        dialog.setWindowTitle(I18N.tr('panel.analysis', '示波器'))
+        dialog.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        dialog.setWindowFlag(Qt.WindowType.WindowMinMaxButtonsHint, True)
+        self._scope_dialog = dialog
+        body = QVBoxLayout(dialog)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.addWidget(self)
+        if dock is not None:
+            # Keep the saved dock identity, but remove the live panel from the
+            # docking system entirely. No dock title bar can drag this window.
+            dock.setWidget(QWidget(dock))
+            dock.hide()
+            dock.visibilityChanged.connect(self._on_return_dock_visibility_changed)
+        dialog.finished.connect(self._restore_scope_dock)
+        self._update_layout_controls()
         if self._current_mode not in _MULTI_LAYOUTS:
             self.set_mode('quad')
-        dock = self._host_dock()
+        dialog.resize(900, 600)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+        self.bump_demand_revision()
+
+    def _on_return_dock_visibility_changed(self, visible: bool) -> None:
+        """Opening the regular panel explicitly returns it from the dialog."""
+        dialog = getattr(self, '_scope_dialog', None)
+        if visible and dialog is not None:
+            self._scope_return_visible = True
+            dialog.close()
+
+    def is_independent_window_visible(self) -> bool:
+        """Report exposure independently of the hidden saved-layout dock."""
+        dialog = getattr(self, '_scope_dialog', None)
+        return dialog is not None and dialog.isVisible() and self.isVisible()
+
+    def _restore_scope_dock(self, result: int) -> None:
+        """Return the same presenters when the independent window is closed."""
+        dialog = self._scope_dialog
+        self._scope_dialog = None
+        dock = self._scope_return_dock
         if dock is not None:
-            dock.setFloating(True)
-            dock.resize(max(900, dock.width()), max(600, dock.height()))
-            dock.show()
-            dock.raise_()
-            dock.activateWindow()
+            dock.visibilityChanged.disconnect(self._on_return_dock_visibility_changed)
+            placeholder = dock.widget()
+            dock.setWidget(self)
+            placeholder.deleteLater()
+            self._update_layout_controls()
+            dock.setVisible(self._scope_return_visible)
         else:
-            self.resize(900, 600)
-            self.show()
-        self._update_layout_controls()
+            self.setParent(self._scope_return_parent)
+            self.hide()
+            self._update_layout_controls()
+        dialog.deleteLater()
+        self.bump_demand_revision()
 
     def init_ui(self) -> None:
         """Initialize the UI layout."""
@@ -484,7 +597,7 @@ class ScopePanel(QWidget):
                 # The waveform shader already maps 0% to the GL bottom and
                 # 100% to the GL top.  Keep the blit unflipped so the
                 # presenter screen coordinates match the 1023..0 axis labels.
-                preserve_aspect=False, axis_left_px=38, flip_y=False,
+                preserve_aspect=False, axis_left_px=46, flip_y=False,
             )
             self._gpu_vs_presenter = GpuScopeWidget(
                 preserve_aspect=True, flip_y=False,
@@ -501,10 +614,10 @@ class ScopePanel(QWidget):
             # axis; the histogram bakes its own graticule into the shader;
             # CIE and False Color are aspect-fitted plots, not value plots.
             self._gpu_parade_presenter = GpuScopeWidget(
-                preserve_aspect=False, axis_left_px=38, flip_y=False,
+                preserve_aspect=False, axis_left_px=46, flip_y=False,
             )
             self._gpu_luma_presenter = GpuScopeWidget(
-                preserve_aspect=False, axis_left_px=38, flip_y=False,
+                preserve_aspect=False, axis_left_px=46, flip_y=False,
             )
             self._gpu_histogram_presenter = GpuScopeWidget(
                 preserve_aspect=False, show_value_axis=False,
@@ -640,7 +753,7 @@ class ScopePanel(QWidget):
 
         # Mode selector ComboBox
         self.mode_combo = _ScopeModeCombo()
-        for mode in MODE_ORDER:
+        for mode in _SCOPE_SELECTOR_ORDER:
             self.mode_combo.addItem(_scope_name(mode), mode)
 
         apply_combo_dropdown_style(self.mode_combo)
@@ -693,11 +806,14 @@ class ScopePanel(QWidget):
         """)
 
     def _expand_scope(self) -> None:
-        """Float/redock the host dock, or expand a standalone scope window."""
+        """Open an independent scope window, or toggle its maximized state."""
         dock = self._host_dock()
         if dock is not None:
             if dock.isFloating():
-                dock.setFloating(False)
+                if dock.isMaximized():
+                    dock.showNormal()
+                else:
+                    dock.showMaximized()
             else:
                 self.open_floating()
             self._update_layout_controls()
@@ -725,7 +841,9 @@ class ScopePanel(QWidget):
             info.setToolTip(label.toolTip())
         menu.setToolTipsVisible(True)
         menu.addSeparator()
-        for mode in ('waveform', 'split', 'quad', 'all'):
+        dock = self._host_dock()
+        layout_modes = ('waveform', 'split', 'quad', 'all') if dock is None or dock.isFloating() else ()
+        for mode in layout_modes:
             action = menu.addAction(_scope_name(mode))
             action.setCheckable(True)
             action.setChecked(self._current_mode == mode or (
@@ -1032,7 +1150,11 @@ class ScopePanel(QWidget):
 
     def _on_mode_changed(self, index: int) -> None:
         """Handle mode combo box selection change."""
-        mode = MODE_ORDER[index]
+        mode = self.mode_combo.itemData(index)
+        if mode not in SCOPE_MODES:
+            return
+        self.mode_combo._update_text_width(self.mode_combo.currentText())
+        index = MODE_ORDER.index(mode)
         if mode != self._current_mode:
             self._current_mode = mode
             self._configure_scope_layout(mode)
@@ -1054,9 +1176,11 @@ class ScopePanel(QWidget):
     def resizeEvent(self, event) -> None:
         """Handle resize and invalidate size-dependent scope output."""
         super().resizeEvent(event)
-        # A resize changes display_size, so the next demand needs a new
-        # revision to invalidate any in-flight GPU scope frame.
-        self.bump_demand_revision()
+        if hasattr(self, 'more_btn'):
+            self._update_header_title_visibility()
+        # Stretch the last GPU snapshot during the gesture. Coalesce forced
+        # size-dependent work instead of rebuilding the pool on every pixel.
+        self._gpu_resize_timer.start()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1213,8 +1337,12 @@ class ScopePanel(QWidget):
 
     def set_mode(self, mode: str) -> None:
         """Set the scope mode programmatically."""
+        if mode in _MULTI_LAYOUTS:
+            dock = self._host_dock()
+            if dock is not None:
+                self.open_floating()
         if mode in SCOPE_MODES and mode != self._current_mode:
-            idx = MODE_ORDER.index(mode)
+            idx = self.mode_combo.findData(mode)
             self.mode_combo.blockSignals(True)
             self.mode_combo.setCurrentIndex(idx)
             self.mode_combo.blockSignals(False)
@@ -1232,9 +1360,17 @@ class ScopePanel(QWidget):
         passes require.  The ``revision`` is owned by the panel and
         increments on any change.
         """
+        presenters = [getattr(self, attr, None) for attr in _MODE_PRESENTER_ATTR.values()]
+        exposed = [widget for widget in presenters
+                   if widget is not None and widget.isVisibleTo(self)]
+        display_size = (
+            max(round(widget.width() * widget.devicePixelRatioF()) for widget in exposed),
+            max(round(widget.height() * widget.devicePixelRatioF()) for widget in exposed),
+        ) if exposed else (round(self.width() * self.devicePixelRatioF()),
+                           round(self.height() * self.devicePixelRatioF()))
         return {
             'mode': self._current_mode,
-            'display_size': (self.width(), self.height()),
+            'display_size': display_size,
             'vectorscope_zoom': float(self._zoom_level),
             'scope_transfer': self._scope_transfer,
             'scope_primaries': self._scope_primaries,
@@ -1341,7 +1477,11 @@ class ScopePanel(QWidget):
                 tex_id = getattr(frame, f'{prefix}_texture_id', None)
                 size = getattr(frame, f'{prefix}_size', (0, 0))
                 if tex_id is not None:
-                    presenter.set_scope_frame(tex_id, *size)
+                    publication = getattr(frame, 'publication', None)
+                    if publication is None:
+                        presenter.set_scope_frame(tex_id, *size)
+                    else:
+                        presenter.set_scope_frame(tex_id, *size, publication=publication)
         except Exception as exc:
             # AUD-25610：GPU 呈现失败不能静默——frame 描述符字段缺失/更名
             # （AttributeError）、size 解包不符（TypeError）或共享纹理失败

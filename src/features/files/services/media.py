@@ -20,6 +20,64 @@ MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 MAX_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_IMAGE_PIXELS = 100_000_000
 _COMMON_IMAGES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tif", ".tiff"}
+RAW_PREVIEW_SUFFIXES = frozenset({
+    ".arw", ".cr2", ".cr3", ".dng", ".nef", ".orf", ".raf", ".sr2", ".srf", ".rw2", ".pef", ".x3f",
+})
+
+
+def source_dimensions(path: str, kind: str) -> str | None:
+    """Read source geometry for gallery captions without decoding a thumbnail."""
+    from src.features.files.contracts import format_resolution
+
+    if kind == "image":
+        from PyQt6.QtGui import QImageIOHandler, QImageReader
+
+        reader = QImageReader(path)
+        size = reader.size()
+        if size.isValid():
+            if reader.transformation() & QImageIOHandler.Transformation.TransformationRotate90:
+                size.transpose()
+            return format_resolution(size.width(), size.height())
+        if Path(path).suffix.lower() in RAW_PREVIEW_SUFFIXES:
+            try:
+                import rawpy
+            except ImportError:
+                return None
+            try:
+                if Path(path).stat().st_size <= MAX_SOURCE_BYTES:
+                    with rawpy.imread(path) as raw:
+                        size = raw.sizes
+                        width, height = size.width, size.height
+                        if size.flip in (5, 6):
+                            width, height = height, width
+                        return format_resolution(width, height)
+            except (OSError, rawpy.LibRawError):
+                return None
+    elif kind == "video":
+        from src.shared.media.factory import MediaSourceFactory
+
+        metadata = MediaSourceFactory.probe_video_metadata(path)
+        if metadata is not None:
+            return format_resolution(metadata.width, metadata.height)
+    return None
+
+
+def embedded_raw_preview(path: str, *, max_bytes: int) -> bytes:
+    """Read the camera's display preview without demosaicing the sensor image."""
+    import rawpy
+
+    source = Path(path)
+    if source.suffix.lower() not in RAW_PREVIEW_SUFFIXES or source.stat().st_size > MAX_SOURCE_BYTES:
+        raise ValueError("RAW 图片超过浏览预览的读取预算")
+    with rawpy.imread(path) as raw:
+        preview = raw.extract_thumb()
+        if preview.format == rawpy.ThumbFormat.JPEG:
+            if len(preview.data) > max_bytes:
+                raise ValueError("内嵌预览超过读取预算")
+            return bytes(preview.data)
+        image = Image.fromarray(preview.data)
+        image.thumbnail((1024, 1024))
+        return _encode(image)
 
 
 def _encode(image: Image.Image) -> bytes:

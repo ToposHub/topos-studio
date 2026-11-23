@@ -142,8 +142,10 @@ class NativePlayerHost(QObject):
     failed = pyqtSignal(str)
     notice = pyqtSignal(str)
 
-    def __init__(self, container, parent=None):
+    def __init__(self, container, parent=None, *, lightbox: bool = False):
         super().__init__(parent or container)
+        self._lightbox = lightbox
+        self._lightbox_tools = False
         self._container = container
         self._players = {}
         self._current = None
@@ -166,11 +168,18 @@ class NativePlayerHost(QObject):
             finally:
                 self._switching = False
         self._current = target
+        if self._lightbox:
+            target.set_lightbox_tools(self._lightbox_tools)
         target.setGeometry(self._container.rect())
         target.show()
         target.raise_()
         target.setFocus()
         target.play_video(path)
+
+    def set_lightbox_tools(self, visible: bool) -> None:
+        self._lightbox_tools = visible
+        if self._lightbox and self._current is not None:
+            self._current.set_lightbox_tools(visible)
 
     def stop(self) -> None:
         current, self._current = self._current, None

@@ -855,6 +855,33 @@ class TestApplyCancelSemantics:
 
 class TestRestartFlags:
 
+    @pytest.mark.parametrize("restart_now", [True, False])
+    def test_save_locale_survives_restart(
+        self, qapp: QApplication, qtbot: QtBot, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch, restart_now: bool,
+    ) -> None:
+        cfg = ConfigManager(tmp_path / "config.json")
+        dlg = PreferencesDialog(cfg)
+        qtbot.addWidget(dlg)
+        _set_combo_by_data(dlg._widgets["locale"], "zh_CN")
+        _confirm_with(monkeypatch, QMessageBox.StandardButton.Yes if restart_now
+                      else QMessageBox.StandardButton.No)
+        restart_results: list[int] = []
+
+        def restart() -> None:
+            restart_results.append(dlg.result())
+            # Application shutdown closes any dialog left open.
+            if dlg.isVisible():
+                dlg.close()
+
+        monkeypatch.setattr("src.shared.app_restart.restart_application", restart)
+        dlg.show()
+        dlg._save_btn.click()
+
+        assert dlg.result() == QDialog.DialogCode.Accepted
+        assert restart_results == ([QDialog.DialogCode.Accepted] if restart_now else [])
+        assert ConfigManager(cfg.config_path).get("locale") == "zh_CN"
+
     def test_save_without_changes_needs_no_restart(self, make_dialog, monkeypatch) -> None:
         monkeypatch.setattr(PreferencesDialog, "_show_restart_prompt",
                             lambda self: None)

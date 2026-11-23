@@ -465,6 +465,34 @@ class TestAuxiliaryBinding:
                            atol=1e-6)
         assert [prog[n].value for n in prog] == [2, 3]
 
+    def test_resolve_calibrated_curves_keep_both_packed_texture_sizes(self) -> None:
+        from src.app.controllers.node_thumbnail_evaluator import _bind_aux_with_lut, _with_hsl_curve_lut
+        from src.features.color.core.curves_calibration import CALIBRATED_CURVES_WIDTH
+        from src.features.color.core.hsl_curve_calibration import CALIBRATED_HSL_SAMPLES
+        from src.features.color.core.layer import build_curves_lut_from_data
+
+        curve = build_curves_lut_from_data(
+            {"M": [(0, 255), (128, 90), (255, 0)]}, calibration_version=1,
+        )
+        layer = _with_hsl_curve_lut({
+            "curves_lut": curve,
+            "curves_edit": {"calibration_version": 1},
+            "hsl_curve_data": {"HueSat": [(0, 127.5), (128, 110), (255, 127.5)]},
+        })
+        prog = {"u_curves_tex": _Sampler(), "u_hsl_curve_tex": _Sampler()}
+        ctx = _FakeContext()
+
+        _bind_aux_with_lut(ctx, prog, layer, {})
+
+        curves, hsl = ctx.made
+        assert curves.size == (CALIBRATED_CURVES_WIDTH, 1)
+        assert hsl.size == (6, CALIBRATED_HSL_SAMPLES)
+        np.testing.assert_array_equal(np.frombuffer(curves.data, np.float32), curve.ravel())
+        np.testing.assert_array_equal(
+            np.frombuffer(hsl.data, np.float32).reshape(CALIBRATED_HSL_SAMPLES, 6),
+            layer["hsl_curve_lut"].T,
+        )
+
     def test_only_declared_samplers_are_bound_and_equal_content_shares_a_texture(self) -> None:
         from src.app.controllers.node_thumbnail_evaluator import _bind_aux_with_lut
         ctx, cache = _FakeContext(), {}

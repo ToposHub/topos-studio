@@ -248,6 +248,11 @@ def generate_analysis(
             os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "node_badges"),
             "src/features/color/ui/node_badges",
         ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
+                         "primary_calibration_rec709_g24_v1.npz"),
+            "src/features/color/core/data",
+        ),
         # Node usage help documents (per-node bilingual Markdown).
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "node_help", "docs"),
@@ -257,6 +262,14 @@ def generate_analysis(
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "checkmark.svg"),
             "src/shared/assets/icons",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "locations"),
+            "src/shared/assets/icons/locations",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "buttons", "folder-open.svg"),
+            "src/shared/assets/icons/buttons",
         ),
         # Fonts used by the cross-platform Qt UI and their licenses.
         *[

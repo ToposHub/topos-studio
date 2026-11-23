@@ -119,9 +119,16 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
         CPU_GRADING_BASIC_KEYS,
         _fx_params_neutral,
     )
+    from src.features.color.core.primary_calibration import grade_uses_calibration
+
     errors: list[str] = []
     grading = layer.get("grading_params")
     grading = grading if isinstance(grading, Mapping) else {}
+    try:
+        if grade_uses_calibration(layer):
+            errors.append("Resolve primary calibration requires the compatible graph renderer")
+    except ValueError as exc:
+        errors.append(str(exc))
     unknown = sorted(set(grading) - CPU_GRADING_BASIC_KEYS
                      - _CPU_DEAD_GRADING_KEYS)
     if unknown:
@@ -689,11 +696,14 @@ class ColorGraphMetalTextureExecutor:
         if hsl_lut is None:
             hsl_data = layer.get("hsl_curve_data")
             if isinstance(hsl_data, Mapping) and hsl_data:
+                from src.features.color.core.curves_calibration import curves_calibration_enabled
                 from src.features.color.core.layer import (
                     build_hsl_curve_lut_from_data,
                 )
                 try:
-                    hsl_lut = build_hsl_curve_lut_from_data(dict(hsl_data))
+                    calibrated = curves_calibration_enabled(layer.get("curves_edit"))
+                    hsl_lut = build_hsl_curve_lut_from_data(
+                        dict(hsl_data), calibration_version=int(calibrated))
                 except (TypeError, ValueError):
                     hsl_lut = None
         mixer = layer.get("mixer_params")
@@ -904,7 +914,7 @@ class ColorGraphMetalTextureExecutor:
         return self._curves_buffers[key]
 
     def _hsl_texture(self, hsl_lut) -> Any:
-        """(6, 256) HSL 曲线 → R32Float 6×256 纹理（宽=曲线类型）。"""
+        """Upload the legacy or calibrated HSL LUT with one column per curve."""
         if hsl_lut is None:
             if self._hsl_default is None:
                 default = np.ones((6, 256), dtype=np.float32)
@@ -912,13 +922,17 @@ class ColorGraphMetalTextureExecutor:
                 self._hsl_default = self._upload_r32(
                     np.ascontiguousarray(default.T), 6, 256)
             return self._hsl_default
-        arr = np.ascontiguousarray(
-            np.asarray(hsl_lut, dtype=np.float32).reshape(6, 256).T)
+        from src.features.color.core.hsl_curve_calibration import CALIBRATED_HSL_SAMPLES
+
+        lut = np.asarray(hsl_lut, dtype=np.float32)
+        if lut.shape not in ((6, 256), (6, CALIBRATED_HSL_SAMPLES)):
+            raise MetalTextureGraphFailure("param_shape_unsupported", "Invalid HSL curve LUT layout")
+        arr = np.ascontiguousarray(lut.T)
         key = hashlib.sha256(arr.tobytes()).hexdigest()
         if key not in self._hsl_textures:
             if len(self._hsl_textures) >= 16:
                 self._hsl_textures.pop(next(iter(self._hsl_textures)))
-            self._hsl_textures[key] = self._upload_r32(arr, 6, 256)
+            self._hsl_textures[key] = self._upload_r32(arr, 6, arr.shape[0])
         return self._hsl_textures[key]
 
     def _upload_r32(self, arr: np.ndarray, width: int, height: int) -> Any:

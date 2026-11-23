@@ -40,10 +40,11 @@ from collections.abc import Mapping
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from src.features.color.core.layer import Layer
+from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
 from src.features.shared.effects.effect_spec import PluginBinding
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
@@ -83,8 +84,8 @@ class UniformDecl:
     kind: str = "value"
     snippet_owned: bool = False
     # GLSL 源内的发射区段：header（u_input_tex/u_matte_tex，在 SNIPPET 之前）
-    # 或 body（基础调色及之后，在 SNIPPET 之后）——与重构前手写文本的
-    # 物理顺序逐行一致。
+    # 或 body（基础调色及之后，在 SNIPPET 之后）。单独门控的追加项
+    # 由编译器在相应区段发射。
     section: str = "body"
     # MSL 布局（value kind 专用，由 build_composition_uniform_manifest 计算）
     msl_type: str = "float"
@@ -168,11 +169,8 @@ def _layout(decls: List[UniformDecl]) -> List[UniformDecl]:
     for d in ordered:
         if d.kind == "value":
             _, ncomp, _ = _MSL_SCALAR[d.glsl_type]
-            d = UniformDecl(
-                name=d.name, glsl_type=d.glsl_type, kind=d.kind,
-                snippet_owned=d.snippet_owned, msl_type=_MSL_SCALAR[d.glsl_type][0],
-                components=ncomp, offset=offset,
-            )
+            d = replace(d, msl_type=_MSL_SCALAR[d.glsl_type][0],
+                        components=ncomp, offset=offset)
             offset += 4 * ncomp
         laid_out.append(d)
     return laid_out
@@ -235,9 +233,8 @@ _BASE_DECLS = [
     ("u_lift_saturation", "float"),
     ("u_gamma_saturation", "float"),
     ("u_gain_saturation", "float"),
-    # 曲线面板四参数柔化裁切（每通道 R/G/B 三元组；指数软膝，默认恒等）。
-    # 无开关 uniform——编译期门控（has_curves_soft_clip 旗标进 program
-    # 缓存键），非恒等才编译进管线。
+    # 曲线面板四参数柔化裁切（每通道 R/G/B 三元组，默认恒等）。
+    # 非恒等时编译进管线；校准版本由末尾的独立 uniform 选择。
     ("u_cs_low_clip", "vec3"),
     ("u_cs_low_soft", "vec3"),
     ("u_cs_high_clip", "vec3"),
@@ -276,6 +273,7 @@ def build_composition_uniform_manifest(
     has_warper: bool = False, has_lut3d: bool = False,
     warper_space: int = 0,
     grain_enabled: bool = False,
+    has_primary_calibration: bool = False,
     bindings: Sequence[PluginBinding] = (),
 ) -> CompositionUniformManifest:
     """组装 composition 管线的完整 uniform manifest。
@@ -312,6 +310,10 @@ def build_composition_uniform_manifest(
         decls.append(UniformDecl(name="u_lut_tex", glsl_type="sampler3D",
                                  kind="sampler3D"))
         decls.append(UniformDecl(name="u_lut_intensity", glsl_type="float"))
+    if has_primary_calibration:
+        decls.append(UniformDecl(name="u_primary_calibration_tex", glsl_type="sampler3D",
+                                 kind="sampler3D"))
+        decls.append(UniformDecl(name="u_primary_calibration_enabled", glsl_type="bool"))
     if grain_enabled:
         decls += [UniformDecl(name=n, glsl_type=t) for n, t in _GRAIN_DECLS]
     for binding in bindings:
@@ -321,6 +323,10 @@ def build_composition_uniform_manifest(
         for ub in binding.uniform_manifest(prefix=f"u_P{p_idx}_"):
             decls.append(UniformDecl(name=ub.uniform_name,
                                      glsl_type=ub.glsl_type))
+    # The compiler emits this only in active GL variants.
+    # Append the Metal field so earlier constant-buffer offsets are stable.
+    decls.append(UniformDecl(name="u_cs_calibrated", glsl_type="bool",
+                             section="curves_soft_clip"))
     return CompositionUniformManifest(_layout(decls))
 
 
@@ -439,6 +445,7 @@ def composition_uniform_values(
     aspect_ratio: Optional[float] = None,
     tex_size: Optional[Tuple[float, float]] = None,
     visible_rect: Optional[Tuple[float, float, float, float]] = None,
+    grading_params_override: Optional[Mapping[str, Any]] = None,
     bindings: Sequence[PluginBinding] = (),
 ) -> Dict[str, Any]:
     """从 layer 状态提取 composition shader 的全部 uniform 值。
@@ -456,7 +463,8 @@ def composition_uniform_values(
         bm_idx = 0  # [R3-1] 未知混合模式回退 Normal
     values["u_blend_mode"] = int(bm_idx)
 
-    p = _layer_get(layer, "grading_params")
+    p = (grading_params_override if grading_params_override is not None
+         else _layer_get(layer, "grading_params"))
     if not isinstance(p, Mapping):
         p = {}
     values["u_lift"] = _wheel_rgb(p, "lift")
@@ -547,6 +555,7 @@ def composition_uniform_values(
     csc = _layer_get(layer, "curves_soft_clip") or {}
     if not isinstance(csc, Mapping):
         csc = {}
+    values["u_cs_calibrated"] = uses_calibrated_soft_clip(csc)
     csc_channels = csc.get("channels")
     if not isinstance(csc_channels, Mapping):
         csc_channels = {}

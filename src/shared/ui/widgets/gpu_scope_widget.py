@@ -6,23 +6,16 @@ analysis shader, never creates an analysis FBO, and never calls
 lives in the shared render-thread context) into a framebuffer it owns,
 then lets Qt composite the result.
 
-Safety model (see docs/gpu_scope_implementation_plan_2026-08-05.md §7
-"Presenter 的实现决策"):
+Safety model:
 
-1. No analysis FBO, no ``read()``, no scope shader on the UI thread.
-2. Uses the global GL mutex with ``tryLock``: if the renderer is busy,
-   keep the last frame and return immediately — never block the GUI or
-   spin a repaint loop.
-3. Uses PyOpenGL (``OpenGL.GL``) for the blit path, exactly like the
-   production-verified ``ProgramViewer``.  ``QOpenGLFunctions_4_1_Core``
-   is intentionally avoided because the PyQt6 binding omits several
-   framebuffer entry points (notably ``glGenFramebuffers``), which made
-   the first ``paintGL`` raise ``AttributeError`` and silently never
-   present a frame.
-4. The renderer publishes a ``ScopeGpuFrame`` carrying only a texture id;
-   the presenter validates it with ``glIsTexture`` before use.
-5. Any sharing failure degrades to "keep last frame / empty"; it never
-   copies pixels back to the CPU during playback.
+1. No analysis FBO, pixel readback, or statistical shader on the UI thread.
+2. Copy new shared output only under the global GL mutex (tryLock), using a
+   revocable publication and server-side GPU producer/consumer fences.
+3. Redraw the presenter-owned GPU snapshot without the renderer mutex. It
+   survives producer allocation changes and Qt framebuffer recreation.
+4. Invalid/unfinished publications and copy failures keep the previous
+   snapshot; an OpenGL numeric texture name alone is never a lifetime check.
+5. PyOpenGL supplies the framebuffer entry points missing from PyQt bindings.
 """
 from __future__ import annotations
 
@@ -34,6 +27,7 @@ from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QSurfaceFormat, QPaintEvent, QResizeEvent
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import QWidget
+from src.shared.gpu.scope_publication import ScopePublication
 
 # PyOpenGL provides a complete, driver-resolved binding for the framebuffer
 # / blit entry points this presenter needs.  It operates on whatever GL
@@ -46,9 +40,108 @@ from OpenGL.GL import (
     glGenFramebuffers, glDeleteFramebuffers, glBindFramebuffer,
     glFramebufferTexture2D, glCheckFramebufferStatus, glIsTexture,
     glBlitFramebuffer, glGetError,
+    GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, GL_TEXTURE_MIN_FILTER,
+    GL_TEXTURE_MAG_FILTER, GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T,
+    GL_CLAMP_TO_EDGE, GL_NEAREST,
+    glGenTextures, glDeleteTextures, glBindTexture, glTexImage2D, glTexParameteri,
+    GL_SCISSOR_TEST, glIsEnabled, glDisable, glEnable,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _blit_scope_pixels(source: tuple[int, int, int, int],
+                       target: tuple[int, int, int, int], filtering: int) -> None:
+    """Qt paint state must not clip a complete scope snapshot or redraw."""
+    clipped = glIsEnabled(GL_SCISSOR_TEST)
+    if clipped:
+        glDisable(GL_SCISSOR_TEST)
+    try:
+        glBlitFramebuffer(*source, *target, GL_COLOR_BUFFER_BIT, filtering)
+    finally:
+        if clipped:
+            glEnable(GL_SCISSOR_TEST)
+
+
+def _scope_ruler_font() -> QFont:
+    font = QFont("Arial")
+    font.setPixelSize(12)
+    font.setWeight(QFont.Weight.Medium)
+    return font
+
+
+def draw_waveform_ruler(
+    painter: QPainter, height: int, axis_left_px: int,
+    scale_mode: str = 'code10', transfer: str = 'srgb',
+) -> list[tuple[str, QRectF, int]]:
+    """Paint readable value labels; return their bounds and exact tick rows."""
+    if height <= 0 or axis_left_px <= 8:
+        return []
+    painter.save()
+    painter.setFont(_scope_ruler_font())
+    painter.setPen(QColor(190, 160, 70))
+    metrics = painter.fontMetrics()
+    if scale_mode in ('nits', 'code10_video'):
+        from src.shared.ui.widgets.vectorscope_widget import waveform_scale_marks
+        marks = waveform_scale_marks('nits' if scale_mode == 'nits' else 'code10', transfer)
+    else:
+        marks = [(code / 1023.0, str(code))
+                 for code in (1023, 896, 768, 640, 512, 384, 256, 128, 0)]
+    marks = sorted(marks, reverse=True)
+    # Reserve both endpoints before filling intermediate rows. A short plot
+    # drops labels rather than moving ticks away from the measured values.
+    priority = marks[:1] + marks[-1:] + marks[1:-1] if len(marks) > 1 else marks
+    labels: list[tuple[str, QRectF, int]] = []
+    text_height = float(metrics.height())
+    for value, label in priority:
+        label = label.removesuffix(' nits')
+        y = round((1.0 - (float(value) + 0.1) / 1.3) * height)
+        rect = QRectF(2.0, max(0.0, min(height - text_height, y - text_height / 2.0)),
+                      float(axis_left_px - 10), text_height)
+        if any(rect.adjusted(0.0, -2.0, 0.0, 2.0).intersects(other) for _, other, _ in labels):
+            continue
+        labels.append((label, rect, y))
+    labels.sort(key=lambda entry: entry[2])
+    for label, rect, y in labels:
+        painter.drawText(rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
+        painter.drawLine(axis_left_px - 5, y, axis_left_px, y)
+    painter.restore()
+    return labels
+
+
+def draw_histogram_ruler(painter: QPainter, width: int) -> list[tuple[str, QRectF, float]]:
+    """Paint the top code ruler in the same 20px/10px margins as the blit."""
+    if width <= 0:
+        return []
+    painter.save()
+    painter.setFont(_scope_ruler_font())
+    painter.setPen(QColor(190, 160, 70))
+    metrics = painter.fontMetrics()
+    left, right = 20.0, float(max(21, width - 10))
+    labels: list[tuple[str, QRectF, float]] = []
+    candidates = (
+        (0, 128, 256, 384, 512, 640, 768, 896, 1023),
+        (0, 256, 512, 768, 1023), (0, 512, 1023), (0, 1023), (0,),
+    )
+    for codes in candidates:
+        labels = []
+        for code in codes:
+            label = str(code)
+            x = left + (right - left) * code / 1023.0
+            text_width = float(metrics.horizontalAdvance(label))
+            text_x = max(2.0, min(width - 2.0 - text_width, x - text_width / 2.0))
+            rect = QRectF(text_x, 2.0, text_width, float(metrics.height()))
+            labels.append((label, rect, x))
+        if all(a[1].right() + 8.0 <= b[1].left() for a, b in zip(labels, labels[1:])):
+            break
+    for step in range(33):
+        code = min(1023, step * 32)
+        x = round(left + (right - left) * code / 1023.0)
+        painter.drawLine(x, 22, x, 29 if step % 4 == 0 else 25)
+    for label, rect, _ in labels:
+        painter.drawText(rect, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, label)
+    painter.restore()
+    return labels
 
 
 def _scope_diag():
@@ -216,6 +309,14 @@ class GpuScopeWidget(QOpenGLWidget):
         self._frame_tex_id: Optional[int] = None
         self._frame_w: int = 0
         self._frame_h: int = 0
+        self._frame_publication: Optional[ScopePublication] = None
+        self._copy_pending = False
+        # Display-only GPU snapshot survives producer reallocations and Qt's
+        # framebuffer recreation during a live window resize.
+        self._cache_tex: Optional[int] = None
+        self._cache_fbo: Optional[int] = None
+        self._cache_size = (0, 0)
+        self._cache_valid = False
         # Read FBO that wraps the shared source texture (created lazily).
         self._read_fbo: Optional[int] = None
         # GL is ready after the first initializeGL; paint is a no-op before.
@@ -241,11 +342,20 @@ class GpuScopeWidget(QOpenGLWidget):
         if self._targets_overlay is not None:
             self._targets_overlay.setGeometry(self.rect())
 
-    def set_scope_frame(self, tex_id: Optional[int], width: int, height: int) -> None:
-        """Publish a new GPU scope texture descriptor (thread-safe via signal)."""
+    def set_scope_frame(
+        self, tex_id: Optional[int], width: int, height: int, *,
+        publication: Optional[ScopePublication] = None,
+    ) -> None:
+        """Queue a shared output for one GPU copy on the next paint.
+
+        Production callers supply a publication. Legacy callers without one
+        must keep their externally owned texture live until the copy.
+        """
         self._frame_tex_id = tex_id
         self._frame_w = max(1, int(width))
         self._frame_h = max(1, int(height))
+        self._frame_publication = publication
+        self._copy_pending = tex_id is not None
         self.update()
 
     def set_scale_mode(self, mode: str, transfer: str = 'srgb') -> None:
@@ -273,6 +383,9 @@ class GpuScopeWidget(QOpenGLWidget):
         self._frame_tex_id = None
         self._frame_w = 0
         self._frame_h = 0
+        self._frame_publication = None
+        self._copy_pending = False
+        self._cache_valid = False
         self.update()
 
     # ------------------------------------------------------------------
@@ -294,9 +407,26 @@ class GpuScopeWidget(QOpenGLWidget):
         except (ImportError, AttributeError, RuntimeError):
             self._mutex = None
         self._gl_ready = True
+        self.context().aboutToBeDestroyed.connect(self._cleanup_context)
+
+    def _cleanup_context(self) -> None:
+        """Dispose presenter-owned GL objects with their own context current."""
+        self.makeCurrent()
+        try:
+            self.teardownGL()
+        finally:
+            self.doneCurrent()
 
     def teardownGL(self) -> None:  # pragma: no cover - GL required
         """Release the widget-owned read FBO on context teardown."""
+        if self._cache_fbo is not None:
+            glDeleteFramebuffers(1, [self._cache_fbo])
+        if self._cache_tex is not None:
+            glDeleteTextures([self._cache_tex])
+        self._cache_fbo = self._cache_tex = None
+        self._cache_size = (0, 0)
+        self._cache_valid = False
+        self._copy_pending = self._frame_tex_id is not None
         if self._read_fbo is not None:
             try:
                 glDeleteFramebuffers(1, [self._read_fbo])
@@ -308,19 +438,12 @@ class GpuScopeWidget(QOpenGLWidget):
     def paintGL(self) -> None:  # pragma: no cover - GL required
         if not self._gl_ready:
             return
+        # A resized QOpenGLWidget has a new, empty FBO. Always initialise it;
+        # retaining old Qt FBO pixels alone cannot protect live resize.
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(5, 5, 5))
+        painter.end()
         if self._frame_tex_id is None:
-            # PartialUpdate retains pixels deliberately on a busy-renderer
-            # skip, but an explicit clear must drop the previous source.
-            painter = QPainter(self)
-            painter.fillRect(self.rect(), QColor(5, 5, 5))
-            painter.end()
-            return
-        # tryLock: never block the GUI. If the renderer holds the mutex,
-        # keep showing the previous frame.
-        mutex = getattr(self, '_mutex', None)
-        if mutex is not None and not mutex.tryLock():
-            _scope_diag().record("widget", "mutex_busy",
-                                 tex_id=self._frame_tex_id)
             return
         try:
             # Qt's own GL compositing can leave a stale error flag in this
@@ -340,9 +463,8 @@ class GpuScopeWidget(QOpenGLWidget):
                 self._paint_scope_chrome()
             except Exception as exc:
                 logger.debug("GpuScopeWidget paint failed: %s", exc)
-        finally:
-            if mutex is not None:
-                mutex.unlock()
+        except Exception:
+            logger.debug('Scope display failed', exc_info=True)
 
     def _paint_scope_chrome(self) -> None:  # pragma: no cover - Qt/GL required
         """Paint UI annotations (value axis labels / legend) after the blit."""
@@ -356,15 +478,7 @@ class GpuScopeWidget(QOpenGLWidget):
     def _paint_histogram_axis(self) -> None:
         """Draw the histogram's top 10-bit ruler in logical pixels."""
         painter = QPainter(self)
-        painter.setFont(QFont("Arial", 8))
-        painter.setPen(QColor(150, 122, 46))
-        left, right = 20, max(21, self.width() - 10)
-        for step in range(33):
-            x = round(left + (right - left) * step / 32.0)
-            painter.drawLine(x, 22, x, 27 if step % 4 else 30)
-            if step % 4 == 0:
-                code = min(1023, step * 32)
-                painter.drawText(x - (12 if step == 32 else 5), 16, str(code))
+        draw_histogram_ruler(painter, self.width())
         painter.end()
 
     def _paint_legend(self) -> None:  # pragma: no cover - Qt required
@@ -440,42 +554,7 @@ class GpuScopeWidget(QOpenGLWidget):
         if not painter.begin(self):
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.setFont(QFont("Arial", 8))
-        if self._scale_mode == 'nits':
-            from src.shared.ui.widgets.vectorscope_widget import (
-                waveform_scale_marks,
-            )
-            painter.setPen(QColor(255, 220, 120, 220))
-            for value, label in waveform_scale_marks('nits', self._transfer):
-                t = (float(value) + 0.1) / 1.3
-                y = max(9, min(h - 3, round((1.0 - t) * h)))
-                painter.drawText(3, y + 3, label)
-                painter.drawLine(max(0, self._axis_left_px - 5), y,
-                                 self._axis_left_px, y)
-            painter.end()
-            return
-        painter.setPen(QColor(188, 149, 0, 220))
-        if self._scale_mode == 'code10_video':
-            # Legal range: value 0..1 maps to 64..940 on the same waveform.
-            from src.shared.ui.widgets.vectorscope_widget import (
-                waveform_scale_marks,
-            )
-            for value, label in waveform_scale_marks('code10', self._transfer):
-                t = (float(value) + 0.1) / 1.3
-                y = max(9, min(h - 3, round((1.0 - t) * h)))
-                painter.drawText(3, y + 3, label)
-                painter.drawLine(max(0, self._axis_left_px - 5), y,
-                                 self._axis_left_px, y)
-            painter.end()
-            return
-        # Code values mirror the 10-bit scale used by the reference scope.
-        for code in (1023, 896, 768, 640, 512, 384, 256, 128, 0):
-            value = float(code) / 1023.0
-            t = (value + 0.1) / 1.3
-            y = max(9, min(h - 3, round((1.0 - t) * h)))
-            painter.drawText(3, y + 3, str(code))
-            painter.drawLine(max(0, self._axis_left_px - 5), y,
-                             self._axis_left_px, y)
+        draw_waveform_ruler(painter, h, self._axis_left_px, self._scale_mode, self._transfer)
         painter.end()
 
     def _blit_src_rect(self, fw: int, fh: int) -> tuple[int, int, int, int]:
@@ -489,43 +568,108 @@ class GpuScopeWidget(QOpenGLWidget):
         """
         return 0, 0, fw, fh
 
-    def _blit_shared_texture(self) -> None:  # pragma: no cover - GL required
-        """Blit the renderer's shared texture into Qt's bound framebuffer.
+    def _allocate_cache(self, size: tuple[int, int]) -> tuple[int, int]:
+        """Allocate a candidate; keep the previous snapshot until copy succeeds."""
+        tex = glGenTextures(1)
+        fbo = None
+        try:
+            fbo = glGenFramebuffers(1)
+            glBindTexture(GL_TEXTURE_2D, tex)
+            for parameter, value in (
+                (GL_TEXTURE_MIN_FILTER, GL_LINEAR), (GL_TEXTURE_MAG_FILTER, GL_LINEAR),
+                (GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE), (GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE),
+            ):
+                glTexParameteri(GL_TEXTURE_2D, parameter, value)
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, *size, 0, GL_RGBA, GL_UNSIGNED_BYTE, None)
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo)
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0)
+            if glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+                raise RuntimeError('Scope cache framebuffer incomplete')
+        except Exception:
+            if fbo is not None:
+                glDeleteFramebuffers(1, [fbo])
+            glDeleteTextures([tex])
+            raise
+        finally:
+            glBindTexture(GL_TEXTURE_2D, 0)
+        return tex, fbo
 
-        QOpenGLWidget.paintGL is invoked with the widget's internal offscreen
-        FBO already bound as the draw framebuffer; Qt composites it
-        afterwards.  We re-bind it explicitly via ``defaultFramebufferObject``
-        as the blit destination (more reliable than querying
-        GL_DRAW_FRAMEBUFFER_BINDING through PyQt6's incomplete binding).
-        """
-        src = self._frame_tex_id
-        # Validate the shared texture name is still a live GL texture.
-        if not glIsTexture(src):
-            _scope_diag().record("widget", "texture_not_shared", tex_id=src)
+    def _copy_shared_texture(self) -> None:
+        """Copy a live shared allocation once, while holding the GL mutex."""
+        publication = self._frame_publication
+        if publication is not None and not publication.wait_ready():
+            self._copy_pending = False
+            _scope_diag().record('widget', 'publication_retired', tex_id=self._frame_tex_id)
             return
-
-        # Lazily allocate the read FBO that wraps the shared source texture.
-        # PyOpenGL's glGenFramebuffers(n) returns the name directly for n == 1.
+        src = self._frame_tex_id
+        if not glIsTexture(src):
+            self._copy_pending = False
+            _scope_diag().record('widget', 'texture_not_shared', tex_id=src)
+            return
         if self._read_fbo is None:
             self._read_fbo = glGenFramebuffers(1)
+        copied = False
+        candidate = None
+        size = (self._frame_w, self._frame_h)
+        try:
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, self._read_fbo)
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, src, 0)
+            if glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE:
+                raise RuntimeError('Shared scope framebuffer incomplete')
+            if size != self._cache_size or self._cache_tex is None:
+                candidate = self._allocate_cache(size)
+            target_fbo = candidate[1] if candidate is not None else self._cache_fbo
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target_fbo)
+            _blit_scope_pixels((0, 0, *size), (0, 0, *size), GL_NEAREST)
+            copied = True
+            if candidate is not None:
+                if self._cache_fbo is not None:
+                    glDeleteFramebuffers(1, [self._cache_fbo])
+                if self._cache_tex is not None:
+                    glDeleteTextures([self._cache_tex])
+                self._cache_tex, self._cache_fbo = candidate
+                self._cache_size = size
+                candidate = None
+            self._cache_valid = True
+            self._copy_pending = False
+        finally:
+            if candidate is not None:
+                glDeleteFramebuffers(1, [candidate[1]])
+                glDeleteTextures([candidate[0]])
+            # Do not keep the producer texture attached after its lifetime ends.
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, self._read_fbo)
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0)
+            try:
+                if copied and publication is not None:
+                    publication.copied()
+            finally:
+                target = self.defaultFramebufferObject()
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, target)
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target)
 
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, self._read_fbo)
-        glFramebufferTexture2D(
-            GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D, src, 0,
-        )
-        status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER)
-        if status != GL_FRAMEBUFFER_COMPLETE:
-            _scope_diag().record("widget", "fbo_incomplete",
-                                 tex_id=src, detail=f"0x{status:X}")
-            logger.debug("GpuScopeWidget read FBO incomplete: 0x%X", status)
-            glBindFramebuffer(GL_READ_FRAMEBUFFER, 0)
+    def _blit_shared_texture(self) -> None:
+        """Refresh the local snapshot if possible, then redraw without a lock."""
+        if self._copy_pending:
+            mutex = self._mutex
+            locked = mutex is None or mutex.tryLock()
+            if locked:
+                try:
+                    self._copy_shared_texture()
+                except Exception:
+                    logger.debug('Scope cache refresh failed; retaining snapshot', exc_info=True)
+                finally:
+                    if mutex is not None:
+                        mutex.unlock()
+            else:
+                _scope_diag().record('widget', 'mutex_busy', tex_id=self._frame_tex_id)
+        if not self._cache_valid:
             return
+        self._blit_cached_texture()
 
-        # Re-bind Qt's draw framebuffer (the widget offscreen FBO) as the
-        # blit destination.  defaultFramebufferObject is the robust way to
-        # identify it for a QOpenGLWidget.
+    def _blit_cached_texture(self) -> None:
+        """Scale the UI-owned GPU snapshot into Qt's current framebuffer."""
         draw_fbo = self.defaultFramebufferObject()
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, self._cache_fbo)
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fbo)
 
         # The framebuffer is expressed in device pixels, not Qt logical
@@ -534,7 +678,7 @@ class GpuScopeWidget(QOpenGLWidget):
         dpr = self.devicePixelRatioF()
         w = max(1, round(self.width() * dpr))
         h = max(1, round(self.height() * dpr))
-        fw, fh = self._frame_w, self._frame_h
+        fw, fh = self._cache_size
         if self._preserve_aspect:
             # Vectorscope is square in data space; letterbox it so circles do
             # not become ellipses in a wide/tall dock or split view.
@@ -560,17 +704,9 @@ class GpuScopeWidget(QOpenGLWidget):
         src_x0, src_y0, src_x1, src_y1 = self._blit_src_rect(fw, fh)
         if self._flip_y:
             src_y0, src_y1 = src_y1, src_y0
-        glBlitFramebuffer(
-            # The waveform shader emits 0% at the GL/FBO bottom and 100% at
-            # the top, which is already the screen-space value orientation
-            # expected by the 1023..0 labels.  Only callers that explicitly
-            # request flip_y (currently none of the built-in scopes) reverse
-            # the source rectangle.
-            src_x0, src_y0, src_x1, src_y1,
-            dx0, dy0, dx0 + dw, dy0 + dh,
-            GL_COLOR_BUFFER_BIT,
-            GL_LINEAR,
-        )
-        # Restore bindings so other paint code is unaffected.  Qt expects the
-        # default framebuffer to remain bound as both read and draw target.
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fbo)
+        try:
+            _blit_scope_pixels((src_x0, src_y0, src_x1, src_y1),
+                               (dx0, dy0, dx0 + dw, dy0 + dh), GL_LINEAR)
+        finally:
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fbo)
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fbo)

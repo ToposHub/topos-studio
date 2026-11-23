@@ -7,9 +7,12 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 
 from src.app.controllers.layer_controller import LayerOpsMixin
-from src.features.color.core.scope_types import PLAYBACK_ANALYSIS_SIZE
+from src.features.color.core.scope_types import (
+    DEFAULT_ANALYSIS_SIZE, HIGH_QUALITY_ANALYSIS_SIZE, PLAYBACK_ANALYSIS_SIZE,
+)
 
 
 class _ScopeRefreshHost(LayerOpsMixin):
@@ -21,6 +24,7 @@ class _ScopeRefreshHost(LayerOpsMixin):
         self.canvas = MagicMock()
         self.scope_panel = MagicMock()
         self.scope_panel.isVisible.return_value = True
+        self.scope_panel.is_independent_window_visible.return_value = False
         self.scope_panel.demand_state.return_value = {
             'mode': 'waveform',
             'display_size': (320, 180),
@@ -39,6 +43,16 @@ class _ScopeRefreshHost(LayerOpsMixin):
 
     def on_render_finished(self, result_img: object, is_full_res: bool) -> None:
         self.finished.append((result_img, is_full_res))
+
+
+def test_independent_scope_submits_while_original_dock_is_hidden() -> None:
+    host = _ScopeRefreshHost()
+    host.dock_analysis.isVisible.return_value = False
+    host._analysis_scope_dock_active = False
+    host.scope_panel.is_independent_window_visible.return_value = True
+    with patch('src.app.controllers.layer_controller.time.monotonic', return_value=1.0):
+        host.on_frame_ready(42)
+    host.engine.request_gpu_scope.assert_called_once()
 
 
 def test_scope_submits_gpu_demand_during_color_interaction() -> None:
@@ -107,6 +121,52 @@ def test_grading_interaction_uses_playback_quality_scope() -> None:
 
     demand = host.engine.request_gpu_scope.call_args.args[0]
     assert demand.analysis_size == PLAYBACK_ANALYSIS_SIZE
+
+
+@pytest.mark.parametrize('mode', ['split', 'quad', 'all'])
+@pytest.mark.parametrize('playing', [False, True])
+def test_active_multiview_scopes_share_a_smaller_five_hz_budget(mode: str, playing: bool) -> None:
+    host = _ScopeRefreshHost()
+    host.scope_panel.demand_state.return_value['mode'] = mode
+    host.engine.is_interacting = not playing
+    host.video_controller = SimpleNamespace(is_playing=playing)
+    with patch('src.app.controllers.layer_controller.time.monotonic', side_effect=(2.0, 2.1, 2.2)):
+        for _ in range(3):
+            host.on_frame_ready(42)
+    assert host.engine.request_gpu_scope.call_count == 2
+    for call in host.engine.request_gpu_scope.call_args_list:
+        demand = call.args[0]
+        assert demand.mode == mode
+        assert demand.analysis_size == DEFAULT_ANALYSIS_SIZE
+        assert demand.standalone_enabled is True
+        assert demand.histogram_overlay is False
+
+
+@pytest.mark.parametrize('mode', ['waveform', 'vectorscope', 'parade', 'luma', 'histogram', 'cie', 'falsecolor'])
+@pytest.mark.parametrize('playing', [False, True])
+def test_active_single_scopes_keep_playback_quality_and_ten_hz(mode: str, playing: bool) -> None:
+    host = _ScopeRefreshHost()
+    host.scope_panel.demand_state.return_value['mode'] = mode
+    host.engine.is_interacting = not playing
+    host.video_controller = SimpleNamespace(is_playing=playing)
+    with patch('src.app.controllers.layer_controller.time.monotonic', side_effect=(2.0, 2.1)):
+        host.on_frame_ready(42)
+        host.on_frame_ready(42)
+    assert host.engine.request_gpu_scope.call_count == 2
+    assert all(call.args[0].analysis_size == PLAYBACK_ANALYSIS_SIZE
+               for call in host.engine.request_gpu_scope.call_args_list)
+
+
+@pytest.mark.parametrize('mode', ['split', 'quad', 'all'])
+def test_paused_multiview_scopes_keep_high_quality_and_idle_rate(mode: str) -> None:
+    host = _ScopeRefreshHost()
+    host.scope_panel.demand_state.return_value['mode'] = mode
+    with patch('src.app.controllers.layer_controller.time.monotonic', side_effect=(2.0, 2.049, 2.051)):
+        for _ in range(3):
+            host.on_frame_ready(42)
+    assert host.engine.request_gpu_scope.call_count == 2
+    assert all(call.args[0].analysis_size == HIGH_QUALITY_ANALYSIS_SIZE
+               for call in host.engine.request_gpu_scope.call_args_list)
 
 
 def test_scope_snapshot_is_only_accepted_by_explicit_legacy_opt_in() -> None:
@@ -181,6 +241,42 @@ def _show_curves(host: _ScopeRefreshHost) -> None:
     host.curves_panel.isVisible.return_value = True
     host.curves_widget = MagicMock()
     host.curves_widget.histogram_display_metrics.return_value = ((1024, 512), 1.0)
+
+
+def test_curves_only_request_does_not_enable_standalone_scope_display() -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    host.on_frame_ready(42)
+    demand = host.engine.request_gpu_scope.call_args.args[0]
+    assert demand.mode == 'histogram'
+    assert demand.histogram_overlay is True
+    assert demand.standalone_enabled is False
+
+
+@pytest.mark.parametrize('curve_mode', ['Custom', 'HueSat'])
+@pytest.mark.parametrize('publication_kind', ['missing', 'none', 'token'])
+def test_curve_descriptor_forwards_publication_when_available(
+    curve_mode: str, publication_kind: str,
+) -> None:
+    host = _ScopeRefreshHost()
+    _show_curves(host)
+    host.scope_panel.isVisible.return_value = False
+    host.curves_panel.curve_mode = curve_mode
+    hsl = MagicMock()
+    host.hsl_curves_panel = SimpleNamespace(hsl_curves_widget=hsl)
+    host._latest_gpu_scope_demand = SimpleNamespace(revision=3, source_revision=10)
+    frame = SimpleNamespace(revision=3, source_revision=10, curves_mode=curve_mode,
+                            curves_histogram_texture_id=76, curves_histogram_size=(1024, 512))
+    publication = object() if publication_kind == 'token' else None
+    if publication_kind != 'missing':
+        frame.publication = publication
+    host.on_gpu_scope_ready(frame)
+    target = host.curves_widget if curve_mode == 'Custom' else hsl
+    if publication is None:
+        target.set_scope_frame.assert_called_once_with(76, 1024, 512)
+    else:
+        target.set_scope_frame.assert_called_once_with(76, 1024, 512, publication=publication)
 
 
 def test_curves_only_playback_submits_no_scope_work() -> None:
@@ -293,13 +389,16 @@ def test_gpu_presenter_preserves_frame_when_render_mutex_is_busy(qapp) -> None:
     from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
     presenter = GpuScopeWidget()
     assert presenter.updateBehavior() == QOpenGLWidget.UpdateBehavior.PartialUpdate
-    presenter._gl_ready = True
     presenter._frame_tex_id = 123
+    presenter._copy_pending = True
+    presenter._cache_valid = True
     presenter._mutex = MagicMock()
     presenter._mutex.tryLock.return_value = False
-    presenter._blit_shared_texture = MagicMock()
-    presenter.paintGL()
-    presenter._blit_shared_texture.assert_not_called()
+    presenter._copy_shared_texture = MagicMock()
+    presenter._blit_cached_texture = MagicMock()
+    presenter._blit_shared_texture()
+    presenter._copy_shared_texture.assert_not_called()
+    presenter._blit_cached_texture.assert_called_once()
     presenter._mutex.unlock.assert_not_called()
     assert presenter._frame_tex_id == 123
 

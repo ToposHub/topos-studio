@@ -510,6 +510,58 @@ def test_metal_selects_serial_grading_and_two_sided_dissolve(metal_grade_timelin
     assert variants == {(("lut", "primary"),), (("lut", "primary"), ("lut", "primary"))}
 
 
+@pytest.mark.parametrize("mode", ["primary", "curves"])
+def test_calibrated_corrector_with_lut_uses_regular_delivery(metal_grade_timeline, mode: str) -> None:
+    from src.features.color.core.color_graph_metal import serial_metal_delivery_grade
+    from src.features.color.core.color_graph_service import ColorGraphService
+    from src.features.color.core.color_graph_texture import serial_lut_only
+
+    exporter, config, track = metal_grade_timeline
+    stack_id = track.clips[0].color_stack_id
+    graph = exporter._project.color_stacks[stack_id].color_graph
+    lut_node = next(node for node in graph.nodes if node.params.get("resources"))
+    other = next(node for node in graph.nodes if node.node_type == "corrector" and node is not lut_node)
+    result = ColorGraphService().op_delete_nodes(graph, (other.node_id,))
+    assert result.ok and serial_lut_only(result.graph) is not None
+    if mode == "primary":
+        lut_node = replace(lut_node, params={**lut_node.params, "grade": {
+            "primary_calibration_version": 1, "exposure": 19.0,
+        }})
+    else:
+        lut_node = replace(lut_node, legacy_payload={
+            "curves_edit": {"calibration_version": 1},
+            "curves_data": {"M": [(0, 255), (128, 92), (255, 0)]},
+        })
+    graph = replace(result.graph, nodes=tuple(
+        lut_node if node.node_id == lut_node.node_id else node for node in result.graph.nodes))
+    assert serial_metal_delivery_grade(graph, 1920, 1080) is None
+    assert serial_lut_only(graph) is None  # The DNxHR fused LUT uses this stricter gate.
+    exporter._project = exporter._project.update_color_stack(stack_id, color_graph=graph)
+    assert exporter._metal_h264_lut_clips(config, 1920, 1080, 0, 40) == ({}, set())
+
+
+def test_measured_timeline_chain_cannot_enter_an_identity_bridge(metal_grade_timeline) -> None:
+    from src.features.edit.core.timeline_render_plan import TimelineRenderPlan
+
+    exporter, config, track = metal_grade_timeline
+    base, stack_id = exporter._project.create_color_stack(name="Measured timeline look")
+    graded = base.update_color_stack(stack_id, grading_params={
+        "primary_calibration_version": 1, "exposure": 19.0,
+    }).with_timeline_grade_stacks({exporter._sequence.timeline_id: stack_id})
+    track = replace(track, clips=tuple(replace(clip, color_stack_id=None) for clip in track.clips))
+    exporter._sequence = replace(exporter._sequence, video_tracks=(track,))
+    exporter._render_plan = TimelineRenderPlan(exporter._sequence)
+    exporter._project = base
+    frame_plan = exporter._render_plan.get_frame_plan(0)
+    assert exporter._identity_delivery_layer(frame_plan, 0, config) is not None
+    encoder = _StubEncoderConfig("h264", "yuv420p")
+    assert can_use_native_gpu_bridge(exporter._sequence, base, encoder).eligible
+
+    exporter._project = graded
+    assert exporter._identity_delivery_layer(frame_plan, 0, config) is None
+    assert can_use_native_gpu_bridge(exporter._sequence, graded, encoder).reason_code == "color_chain_present"
+
+
 @pytest.mark.parametrize("has_grade", [False, True])
 def test_metal_dip_eligibility_keeps_graded_inputs_on_the_regular_route(
     metal_grade_timeline, has_grade: bool,

@@ -380,6 +380,11 @@ class SaveRouter:
         if success:
             self._project_path_cache = project_path
             logger.info(f"Color saved to: {project_path}")
+            if file_path and not clip_id and not getattr(edit_project, "timelines", None):
+                from src.shared.media.format_registry import is_image
+
+                if is_image(file_path):
+                    self._call_callback("on_image_grade_saved", file_path)
 
         return success
 
@@ -493,6 +498,13 @@ class SaveRouter:
         Returns:
             是否成功
         """
+        from src.shared.project.document_mode import infer_project_mode
+
+        project = self._call_callback("get_current_edit_project")
+        if infer_project_mode(project, work_mode=self._call_callback("get_work_mode")) == "standalone_image":
+            # Switching to Batch Export must not let a pending autosave write
+            # the stale pre-grade model that Edit's route would serialize.
+            return self._save_from_color()
         return self._save_from_edit()
 
     # ==================== 工程包路径管理 ====================
@@ -510,9 +522,15 @@ class SaveRouter:
         if not file_path:
             return None
 
-        # 单素材工程：{素材名}.topos
-        base_path = os.path.splitext(file_path)[0]
-        return base_path + self.PROJECT_EXTENSION
+        base_path = os.path.splitext(file_path)[0] + self.PROJECT_EXTENSION
+        from src.shared.media.format_registry import is_image
+
+        if not is_image(file_path):
+            return base_path
+
+        from src.shared.project.image_sidecar import resolve_image_sidecar
+
+        return resolve_image_sidecar(file_path, extension=self.PROJECT_EXTENSION)[0]
 
     def _get_project_path_for_context(self) -> str | None:
         """
@@ -692,6 +710,8 @@ class SaveRouter:
             return False
 
         try:
+            from src.shared.project.document_mode import infer_project_mode
+
             # 使用 EditProjectIO.save_project() 统一保存入口
             # EditProjectIO 内部使用 ToposProjectIO.save() 写入 .topos ZIP 包
             success = edit_project_io.save_project(
@@ -700,11 +720,8 @@ class SaveRouter:
                 ui_state,
                 timeline_sequences,
                 teaching_animation_data=self._call_callback("get_teaching_animation_payload"),
-                force_project_mode=(
-                    "edit_project"
-                    if self._call_callback("get_work_mode") == "video"
-                    else "standalone_image"
-                ),
+                force_project_mode=infer_project_mode(
+                    edit_project, work_mode=self._call_callback("get_work_mode")),
             )
             if success:
                 logger.info(f"Edit project saved via EditProjectIO: {project_path}")
@@ -725,22 +742,32 @@ class SaveRouter:
         stack_id: str | None = None,
         timeline_id: str | None = None,
     ) -> bool:
-        """
-        保存 Color 状态到 EditProject。
+        """Persist the canonical grade snapshot through the unified writer."""
+        try:
+            updated_project = self.snapshot_color_project(
+                edit_project, engine, asset_id, clip_id, stack_id, timeline_id)
+            self._call_callback("on_edit_project_updated", updated_project)
+            ui_state = self._call_callback("get_ui_state")
+            timeline_sequences = self._call_callback("get_current_timeline_sequences")
+            return self._save_edit_project_to_topos(
+                project_path, updated_project, ui_state, timeline_sequences)
+        except Exception as exc:
+            logger.exception("Color save to edit project failed: %s", exc)
+            return False
 
-        更新 color_stacks 区域。对于 TIMELINE_CLIP，验证 clip 属于正确的 timeline。
+    def snapshot_color_project(
+        self,
+        edit_project: Any,
+        engine: Any,
+        asset_id: str | None = None,
+        clip_id: str | None = None,
+        stack_id: str | None = None,
+        timeline_id: str | None = None,
+    ) -> Any:
+        """Capture the live grade into a new canonical project without IO.
 
-        Args:
-            project_path: 工程包路径
-            edit_project: EditProject 实例
-            engine: ImageEngine 实例
-            asset_id: 素材 ID
-            clip_id: 剪辑 ID
-            stack_id: 调色栈 ID（P9.1: 从 ColorSession 获取）
-            timeline_id: 时间线 ID（TIMELINE_CLIP 时用于验证 clip 归属）
-
-        Returns:
-            是否成功
+        Save, first Save As and close-time save share this extraction boundary;
+        callers decide when a successful write may publish the snapshot.
         """
         # TIMELINE_CLIP 验证：clip_id 和 timeline_id 应匹配 EditProject 中的数据
         if clip_id and timeline_id:
@@ -781,105 +808,88 @@ class SaveRouter:
 
         # P0-4 修复：真正写入 color_stacks
         # EditProject 是不可变对象，使用工厂方法创建新实例
-        try:
-            # 检查 stack_id 是否已存在于 color_stacks
-            existing_stack = edit_project.color_stacks.get(stack_id)
+        # 检查 stack_id 是否已存在于 color_stacks
+        existing_stack = edit_project.color_stacks.get(stack_id)
 
-            if existing_stack is not None:
-                # 更新已有调色栈 — 传递完整数据（含 Layer 快照）
-                updated_project = edit_project.update_color_stack(
-                    stack_id=stack_id,
-                    grading_params=color_data.get('grading_params'),
-                    curves_data=color_data.get('curves_data'),
-                    hsl_curve_data=color_data.get('hsl_curve_data'),
-                    mixer_params=color_data.get('mixer_params'),
-                    soft_clip_params=color_data.get('soft_clip_params'),
-                    lut_path=color_data.get('lut_path'),
-                    lut_intensity=color_data.get('lut_intensity'),
-                    layers=color_data.get('layers'),
-                    active_layer_index=color_data.get('active_layer_index'),
-                    raw_params=color_data.get('raw_params'),
-                )
-                logger.debug(f"Updated existing color stack: {stack_id}")
-            else:
-                # 创建新调色栈（使用传入的 stack_id，而不是自动生成 UUID）
-                now = time.time()
-                stack_factory = (
-                    ColorStackData.create_standalone_image
-                    if asset_id and not edit_project.timelines
-                    else ColorStackData.create
-                )
-                new_stack = stack_factory(
-                    asset_id=asset_id,
-                    name=f"Color Stack {len(edit_project.color_stacks) + 1}",
-                )
-                new_stack = replace(
-                    new_stack,
-                    stack_id=stack_id,
-                    grading_params=color_data.get('grading_params', {}),
-                    curves_data=color_data.get('curves_data', {}),
-                    hsl_curve_data=color_data.get('hsl_curve_data', {}),
-                    mixer_params=color_data.get('mixer_params', {}),
-                    soft_clip_params=color_data.get('soft_clip_params', {}),
-                    lut_path=color_data.get('lut_path'),
-                    lut_intensity=color_data.get('lut_intensity', 1.0),
-                    created_at=now,
-                    modified_at=now,
-                    timeline_id=timeline_id,
-                    clip_id=clip_id,
-                    layers=tuple(color_data.get('layers') or ()),
-                    active_layer_index=int(color_data.get('active_layer_index', 0) or 0),
-                    raw_params=color_data.get('raw_params', {}),
-                )
-
-                # 手动添加到 color_stacks 并创建新 EditProject
-                new_stacks = dict(edit_project.color_stacks)
-                new_stacks[stack_id] = new_stack
-
-                if is_dataclass(edit_project):
-                    updated_project = replace(
-                        edit_project,
-                        color_stacks=new_stacks,
-                        modified_at=now,
-                    )
-                else:
-                    # Keep the router usable with lightweight test doubles
-                    # and adapter objects; the production EditProject is a
-                    # frozen dataclass and takes the branch above.
-                    updated_project = edit_project.__class__(
-                        project_id=edit_project.project_id,
-                        name=edit_project.name,
-                        assets=edit_project.assets,
-                        bins=edit_project.bins,
-                        timelines=edit_project.timelines,
-                        compositions=edit_project.compositions,
-                        color_stacks=new_stacks,
-                        comp_clips=getattr(edit_project, "comp_clips", {}),
-                        root_bin_id=edit_project.root_bin_id,
-                        active_timeline_id=edit_project.active_timeline_id,
-                        active_comp_clip_id=getattr(edit_project, "active_comp_clip_id", None),
-                        created_at=edit_project.created_at,
-                        modified_at=now,
-                    )
-                logger.debug(f"Created new color stack: {stack_id}")
-
-            # 通过回调更新内存中的 EditProject（保持数据一致性）
-            self._call_callback("on_edit_project_updated", updated_project)
-
-            # 保存更新后的 EditProject 到 .topos
-            ui_state = self._call_callback("get_ui_state")
-            timeline_sequences = self._call_callback("get_current_timeline_sequences")
-            return self._save_edit_project_to_topos(
-                project_path,
-                updated_project,
-                ui_state,
-                timeline_sequences,
+        if existing_stack is not None:
+            # 更新已有调色栈 — 传递完整数据（含 Layer 快照）
+            updated_project = edit_project.update_color_stack(
+                stack_id=stack_id,
+                grading_params=color_data.get('grading_params'),
+                curves_data=color_data.get('curves_data'),
+                hsl_curve_data=color_data.get('hsl_curve_data'),
+                mixer_params=color_data.get('mixer_params'),
+                soft_clip_params=color_data.get('soft_clip_params'),
+                lut_path=color_data.get('lut_path'),
+                lut_intensity=color_data.get('lut_intensity'),
+                layers=color_data.get('layers'),
+                active_layer_index=color_data.get('active_layer_index'),
+                raw_params=color_data.get('raw_params'),
             )
-        except Exception as e:
-            logger.error(f"Color save to edit project failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+            logger.debug(f"Updated existing color stack: {stack_id}")
+        else:
+            # 创建新调色栈（使用传入的 stack_id，而不是自动生成 UUID）
+            now = time.time()
+            stack_factory = (
+                ColorStackData.create_standalone_image
+                if asset_id and not edit_project.timelines
+                else ColorStackData.create
+            )
+            new_stack = stack_factory(
+                asset_id=asset_id,
+                name=f"Color Stack {len(edit_project.color_stacks) + 1}",
+            )
+            new_stack = replace(
+                new_stack,
+                stack_id=stack_id,
+                grading_params=color_data.get('grading_params', {}),
+                curves_data=color_data.get('curves_data', {}),
+                hsl_curve_data=color_data.get('hsl_curve_data', {}),
+                mixer_params=color_data.get('mixer_params', {}),
+                soft_clip_params=color_data.get('soft_clip_params', {}),
+                lut_path=color_data.get('lut_path'),
+                lut_intensity=color_data.get('lut_intensity', 1.0),
+                created_at=now,
+                modified_at=now,
+                timeline_id=timeline_id,
+                clip_id=clip_id,
+                layers=tuple(color_data.get('layers') or ()),
+                active_layer_index=int(color_data.get('active_layer_index', 0) or 0),
+                raw_params=color_data.get('raw_params', {}),
+            )
+
+            # 手动添加到 color_stacks 并创建新 EditProject
+            new_stacks = dict(edit_project.color_stacks)
+            new_stacks[stack_id] = new_stack
+
+            if is_dataclass(edit_project):
+                updated_project = replace(
+                    edit_project,
+                    color_stacks=new_stacks,
+                    modified_at=now,
+                )
+            else:
+                # Keep the router usable with lightweight test doubles
+                # and adapter objects; the production EditProject is a
+                # frozen dataclass and takes the branch above.
+                updated_project = edit_project.__class__(
+                    project_id=edit_project.project_id,
+                    name=edit_project.name,
+                    assets=edit_project.assets,
+                    bins=edit_project.bins,
+                    timelines=edit_project.timelines,
+                    compositions=edit_project.compositions,
+                    color_stacks=new_stacks,
+                    comp_clips=getattr(edit_project, "comp_clips", {}),
+                    root_bin_id=edit_project.root_bin_id,
+                    active_timeline_id=edit_project.active_timeline_id,
+                    active_comp_clip_id=getattr(edit_project, "active_comp_clip_id", None),
+                    created_at=edit_project.created_at,
+                    modified_at=now,
+                )
+            logger.debug(f"Created new color stack: {stack_id}")
+
+        return updated_project
 
     def _save_composite_to_edit_project(
         self,

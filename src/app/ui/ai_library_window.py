@@ -13,7 +13,6 @@ import qtawesome as qta
 
 from src.app.ui.add_library_dialog import AddLibraryDialog
 from src.app.ui.library_folder_picker import LibraryFolderPicker
-from src.app.ui.native_files_locations import library_icon
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
@@ -361,7 +360,7 @@ class RegisteredAILibraryWindow(QDialog):
         empty_layout.setSpacing(7)
         empty_layout.addStretch()
         empty_icon = QLabel(empty)
-        empty_icon.setPixmap(library_icon().pixmap(QSize(34, 34)))
+        empty_icon.setPixmap(qta.icon("fa5s.photo-video", color=C.ORANGE).pixmap(QSize(34, 34)))
         empty_layout.addWidget(empty_icon, alignment=Qt.AlignmentFlag.AlignHCenter)
         self.empty_title = QLabel(empty)
         self.empty_title.setObjectName("AiLibraryTitle")

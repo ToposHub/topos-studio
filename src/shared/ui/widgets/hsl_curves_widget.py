@@ -34,6 +34,7 @@ from src.shared.ui.style_sheet import (
 )
 from src.shared.assets.icon_manager import icon_color_picker, icon_reset
 from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
+from src.shared.gpu.scope_publication import ScopePublication
 
 
 class _HslCurveOverlay(QWidget):
@@ -141,6 +142,7 @@ class HSLCurvesWidget(QWidget):
 
         # Current active curve mode
         self._current_mode = 'LumSat'
+        self.calibrated = False
 
         # HSL Color Picker state
         self._hsl_picker_active = False
@@ -279,8 +281,11 @@ class HSLCurvesWidget(QWidget):
             self._scope_resize_timer.start()
         return super().event(event)
 
-    def set_scope_frame(self, tex_id: Optional[int], width: int, height: int) -> None:
-        self._scope.set_scope_frame(tex_id, width, height)
+    def set_scope_frame(
+        self, tex_id: Optional[int], width: int, height: int, *,
+        publication: Optional[ScopePublication] = None,
+    ) -> None:
+        self._scope.set_scope_frame(tex_id, width, height, publication=publication)
         self._has_histogram = tex_id is not None
         self._scope.setVisible(self._has_histogram)
         self._overlay.raise_()
@@ -497,7 +502,7 @@ class HSLCurvesWidget(QWidget):
         for i, p in enumerate(points):
             wx, wy = self.to_widget(p.x(), p.y())
             is_selected = (i == self.selected_point_idx)
-            is_endpoint = (i == 0 or i == len(points) - 1)
+            is_endpoint = self._is_endpoint(i)
 
             if is_selected:
                 # === Selected Point: Prominent visual feedback ===
@@ -542,7 +547,12 @@ class HSLCurvesWidget(QWidget):
     # ============================================================
 
     def calculate_curve(self, points):
-        """Calculate interpolated curve values using PCHIP."""
+        """Return display samples using the active grade's interpolation."""
+        if self.calibrated:
+            from src.features.color.core.hsl_curve_calibration import calibrated_hsl_curve_values
+
+            return calibrated_hsl_curve_values(
+                [(p.x(), p.y()) for p in points], np.arange(256), cyclic=self._is_hue_curve())
         pts = sorted(points, key=lambda p: p.x())
         xs = np.array([p.x() for p in pts])
         ys = np.array([p.y() for p in pts])
@@ -592,9 +602,19 @@ class HSLCurvesWidget(QWidget):
             return np.interp(np.arange(256), xs, ys)
 
     def _is_endpoint(self, idx: int) -> bool:
-        """Check if the given index is an endpoint (first or last point)."""
         pts = self.curves[self._current_mode]
+        if self.calibrated:
+            return 0 <= idx < len(pts) and pts[idx].x() in (0.0, 255.0)
         return idx == 0 or idx == len(pts) - 1
+
+    def _insert_point(self, point: QPointF) -> int:
+        points = self.curves[self._current_mode]
+        if self.calibrated and points == [QPointF(0, 127.5), QPointF(255, 127.5)]:
+            points.clear()
+        points.append(point)
+        points.sort(key=lambda p: p.x())
+        self._lut_dirty = True
+        return points.index(point)
 
     def mousePressEvent(self, event):
         pos = event.position()
@@ -645,18 +665,18 @@ class HSLCurvesWidget(QWidget):
                     mx_clamped = max(0, min(255, mx))
                     my_clamped = max(0, min(255, my))
                     new_point = QPointF(mx_clamped, my_clamped)
-                    pts.append(new_point)
-                    pts.sort(key=lambda p: p.x())
-                    self.selected_point_idx = pts.index(new_point)
+                    self.selected_point_idx = self._insert_point(new_point)
                     self._inspected_point_idx = self.selected_point_idx
                     self.update_lut()
         elif event.button() == Qt.MouseButton.RightButton:
-            if clicked_idx != -1 and not self._is_endpoint(clicked_idx) and len(pts) > 2:
+            if (clicked_idx != -1 and not self._is_endpoint(clicked_idx)
+                    and (self.calibrated or len(pts) > 2)):
                 self.interaction_started.emit()
                 pts.pop(clicked_idx)
                 self.selected_point_idx = -1
                 self._lut_dirty = True
                 self.update_lut()
+                self.flush()
                 self.interaction_ended.emit()
 
         self._update_info_label()
@@ -669,9 +689,15 @@ class HSLCurvesWidget(QWidget):
         index = max(0, min(self._inspected_point_idx, len(points) - 1))
         point = points[index]
         mode = CURVE_MODES[self._current_mode]
-        x = point.x() / 255.0 * (360.0 if mode['x_axis'] == 'hue' else 1.0)
+        x = point.x() / 255.0 * self.input_maximum()
         y = self.y_to_hue_shift(point.y()) * 360.0 if mode['y_type'] == 'shift' else self.y_to_multiplier(point.y())
         return x, y
+
+    def input_maximum(self) -> float:
+        axis = CURVE_MODES[self._current_mode]['x_axis']
+        if axis == 'hue':
+            return 360.0
+        return 0.5 if self.calibrated and axis == 'sat' else 1.0
 
     def set_selected_value(self, axis: str, value: float) -> None:
         """Edit the inspected point through the existing LUT/undo signal path."""
@@ -683,10 +709,11 @@ class HSLCurvesWidget(QWidget):
         mode = CURVE_MODES[self._current_mode]
         x, y = point.x(), point.y()
         if axis == 'x':
-            if index == 0 or index == len(points) - 1:
+            if self._is_endpoint(index):
                 return
-            x = value / (360.0 if mode['x_axis'] == 'hue' else 1.0) * 255.0
-            x = max(points[index - 1].x() + 0.1, min(points[index + 1].x() - 0.1, x))
+            lower = points[index - 1].x() + 0.1 if index else 0.0
+            upper = points[index + 1].x() - 0.1 if index + 1 < len(points) else 255.0
+            x = max(lower, min(upper, value / self.input_maximum() * 255.0))
         else:
             y = self.hue_shift_to_y(value / 360.0) if mode['y_type'] == 'shift' else self.multiplier_to_y(value)
             y = max(0.0, min(255.0, y))
@@ -712,10 +739,7 @@ class HSLCurvesWidget(QWidget):
         y = float(np.interp(x, np.arange(256), self.calculate_curve(points)))
         self.interaction_started.emit()
         point = QPointF(x, y)
-        points.append(point)
-        points.sort(key=lambda p: p.x())
-        self._inspected_point_idx = points.index(point)
-        self._lut_dirty = True
+        self._inspected_point_idx = self._insert_point(point)
         self.update_lut()
         self.flush()
         self.interaction_ended.emit()
@@ -739,7 +763,7 @@ class HSLCurvesWidget(QWidget):
         if not self._is_hue_curve():
             return False
         pts = self.curves[self._current_mode]
-        return len(pts) == 2
+        return len(pts) == 2 and pts[0].x() == 0.0 and pts[-1].x() == 255.0
 
     def mouseMoveEvent(self, event):
         if self.selected_point_idx != -1:
@@ -840,8 +864,21 @@ class HSLCurvesWidget(QWidget):
         """Convert hue shift (-0.5 to +0.5) to Y coordinate (0-255). INVERTED."""
         return 127.5 - (shift * 255.0)
 
+    def set_calibrated(self, enabled: bool) -> None:
+        if self.calibrated != enabled:
+            self.calibrated = enabled
+            self._lut_dirty = True
+            self.update_lut(emit_changed=False)
+            self._update_info_label()
+            self.update()
+
     def update_lut(self, emit_changed: bool = True) -> None:
-        """Calculate LUT for all 6 curves and update cache. Generates (6, 256) float32 array."""
+        """Refresh the sampled response and coalesce live grading signals."""
+        if self._lut_dirty and self.calibrated:
+            from src.features.color.core.hsl_curve_calibration import build_calibrated_hsl_lut
+
+            self._lut_cache = build_calibrated_hsl_lut(self.get_curves_data())
+            self._lut_dirty = False
         if self._lut_dirty:
             self._lut_cache = np.zeros((6, 256), dtype=np.float32)
 
@@ -952,26 +989,8 @@ class HSLCurvesWidget(QWidget):
         self._update_info_label()
         self._lut_dirty = True
         
-        # Rebuild LUT cache without starting timer
-        if self._lut_dirty:
-            self._lut_cache = np.zeros((6, 256), dtype=np.float32)
-            for i, mode in enumerate(MODE_ORDER):
-                curve_y = self.calculate_curve(self.curves[mode])
-                mode_info = CURVE_MODES[mode]
-                y_type = mode_info['y_type']
-                if y_type == 'mult':
-                    self._lut_cache[i] = (255.0 - curve_y) / 127.5
-                elif y_type == 'shift':
-                    self._lut_cache[i] = (127.5 - curve_y) / 255.0
-            self._lut_dirty = False
-        
+        self.update_lut(emit_changed=emit_changed)
         self.update()
-        
-        if emit_changed:
-            self._pending_lut = self._lut_cache.copy()
-            self._pending_data = self.get_curves_data()
-            if not self._update_timer.isActive():
-                self._update_timer.start()
 
     def set_lut(self, lut, emit_changed: bool = False):
         """Restore HSL curve control points from LUT array.
@@ -1070,7 +1089,11 @@ class HSLCurvesWidget(QWidget):
         # Calculate X coordinate based on x_axis type
         x_coord = 0.0
 
-        if x_axis == 'lum':
+        if self.calibrated:
+            from src.features.color.core.hsl_curve_calibration import calibrated_hsl_input
+
+            x_coord = calibrated_hsl_input((r_norm, g_norm, b_norm), x_axis) * 255.0
+        elif x_axis == 'lum':
             # Luminance: standard BT.601 luma formula
             # Y = 0.299*R + 0.587*G + 0.114*B
             luma = 0.299 * r + 0.587 * g + 0.114 * b
@@ -1118,11 +1141,7 @@ class HSLCurvesWidget(QWidget):
                 return True
 
         # Insert new point
-        pts.append(new_point)
-        pts.sort(key=lambda p: p.x())
-
-        # Update selected point index to the newly added point
-        self.selected_point_idx = pts.index(new_point)
+        self.selected_point_idx = self._insert_point(new_point)
         self._inspected_point_idx = self.selected_point_idx
         self._update_info_label(new_point.y())
 

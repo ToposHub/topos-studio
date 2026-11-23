@@ -80,9 +80,11 @@ class NativeFilesTransport(QObject):
     # Apply pagination after the panel has installed the page's rows.
     page_meta = pyqtSignal(str, int, bool)
     thumbnail_loaded = pyqtSignal(str, bytes)
+    card_dimensions_loaded = pyqtSignal(str, object)
     thumbnail_failed = pyqtSignal(str)
     thumbnail_pending = pyqtSignal(str)
     tree_loaded = pyqtSignal(str, list)
+    folder_counts_loaded = pyqtSignal(str, object)
     tree_failed = pyqtSignal(str, str)
     volumes_loaded = pyqtSignal(tuple)
     metadata_applied = pyqtSignal(list, dict, str)
@@ -110,6 +112,7 @@ class NativeFilesTransport(QObject):
     libraries_loaded = pyqtSignal(list)
     libraries_failed = pyqtSignal(str)
     library_changed = pyqtSignal(bool, str)
+    library_transfer_finished = pyqtSignal(bool, str)
     library_registry_changed = pyqtSignal()
     scan_status_loaded = pyqtSignal(dict)
     scan_failed = pyqtSignal(str)
@@ -122,6 +125,8 @@ class NativeFilesTransport(QObject):
     ai_library_settings_saved = pyqtSignal(str)
     ai_analysis_marks_loaded = pyqtSignal(str, list)
     thumbnail_retry_done = pyqtSignal(str, bool)
+    external_files_refreshed = pyqtSignal(list)
+    external_files_refresh_failed = pyqtSignal(str)
     batch_rename_preview_ready = pyqtSignal(dict)
     batch_rename_preview_failed = pyqtSignal(str, str)  # [FR-13] message, session_id
     batch_rename_finished = pyqtSignal(dict)
@@ -140,6 +145,8 @@ class NativeFilesTransport(QObject):
     _ai_library_index_done = pyqtSignal(object)
     _ai_library_settings_done = pyqtSignal(object, object, object)
     _ai_analysis_marks_done = pyqtSignal(object, str, int)
+    _external_files_done = pyqtSignal(object)
+    _metadata_done = pyqtSignal(object, object)
 
     MAX_THUMBNAIL_CONCURRENCY = 4
     MAX_THUMBNAIL_QUEUE = 128
@@ -151,12 +158,13 @@ class NativeFilesTransport(QObject):
     def __init__(
         self, server_url: Callable[[], str], token: str | None,
         parent: QObject | None = None, *, facade: FilesFacade | None = None,
-        facade_workers: int = MAX_WORKERS,
+        facade_workers: int = MAX_WORKERS, prefer_graded_thumbnails: bool = False,
     ) -> None:
         super().__init__(parent)
         # 数据面 runtime（懒构造：首用时建库/开连接，构造失败可诊断）
         self._facade: FilesFacade | None = facade
         self._facade_workers = facade_workers
+        self._prefer_graded_thumbnails = prefer_graded_thumbnails
         self._owned_catalog: FilesCatalog | None = None
         self._facade_error: str | None = None
         self._media_cancel = threading.Event()
@@ -170,11 +178,15 @@ class NativeFilesTransport(QObject):
         self._ai_library_index_done.connect(self._finish_ai_library_index, Qt.ConnectionType.QueuedConnection)
         self._ai_library_settings_done.connect(self._finish_ai_library_settings, Qt.ConnectionType.QueuedConnection)
         self._ai_analysis_marks_done.connect(self._finish_ai_analysis_marks, Qt.ConnectionType.QueuedConnection)
+        self._external_files_done.connect(self._finish_external_files, Qt.ConnectionType.QueuedConnection)
+        self._metadata_done.connect(self._finish_metadata_write, Qt.ConnectionType.QueuedConnection)
         self._generation = 0        # HTTP 缩略图代际（沿用原语义）
         self._nav_generation = 0    # 数据面导航代际：cancel() 后迟到结果作废
         self._preview_seq = 0       # 预览请求身份：同路径重开/取消都作废旧读取
         self._closed = False
         self._running_jobs: dict[str, CancelToken] = {}
+        self._metadata_queue: deque[tuple[_MetadataJob, str]] = deque()
+        self._metadata_writing = False
         self._scan_cancel: CancelToken | None = None
         self._ai_library_index_cancel: CancelToken | None = None
         self._ai_library_index_state: dict[str, Any] = {}
@@ -731,7 +743,45 @@ class NativeFilesTransport(QObject):
             return
         self.tree_loaded.emit(path, entries)
 
+    def load_folder_counts(self, request_id: str, paths: list[str]) -> None:
+        if self._closed:
+            return
+        facade = self._runtime()
+        if facade is None:
+            self.folder_counts_loaded.emit(request_id, {})
+            return
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                counts = outcome.result
+                if outcome.error is not None:
+                    counts = None if outcome.error.code == "busy" else {}
+                self.folder_counts_loaded.emit(request_id, counts)
+
+        facade.run(key=f"files-folder-counts:{request_id}", request_id=request_id,
+                   work=lambda: facade.query.directory_file_counts(paths), listener=deliver)
+
     # ------------------------------------------------------------ 本地缩略图
+    def read_card_dimensions(self, request_id: str, paths: dict[str, str]) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.card_dimensions_loaded.emit(request_id, {})
+            return
+
+        def read() -> dict[str, str | None]:
+            from src.features.files.services.media import source_dimensions
+
+            return {path: source_dimensions(path, kind) for path, kind in paths.items()}
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                dimensions = outcome.result
+                if outcome.error is not None:
+                    dimensions = None if outcome.error.code == "busy" else {}
+                self.card_dimensions_loaded.emit(request_id, dimensions)
+
+        facade.run(key="files-card-dimensions", request_id=request_id, work=read, listener=deliver)
+
     def request_thumbnail(self, path: str, version: int = 0) -> None:
         """Request only painted items; one attempt per path/version/directory.
 
@@ -816,10 +866,16 @@ class NativeFilesTransport(QObject):
                 if not self._closed:
                     self._thumbnail_done.emit(key, outcome)
 
+            def read_thumbnail(p: str = path, v: int = version, token: threading.Event = cancel,
+                               runtime: FilesFacade = facade) -> bytes:
+                if self._prefer_graded_thumbnails and not token.is_set():
+                    graded = runtime.graded_thumbnail(p)
+                    if graded is not None:
+                        return graded
+                return runtime.thumbnail_bytes(p, v, cancel=token)
+
             facade.run(key=f"thumbnail:{request_id}", request_id=request_id,
-                       work=lambda p=path, v=version, token=cancel, runtime=facade:
-                           runtime.thumbnail_bytes(p, v, cancel=token),
-                       listener=deliver)
+                       work=read_thumbnail, listener=deliver)
 
     def _finish_local_thumbnail(self, request_id: str, outcome: Any) -> None:
         state = self._thumbnail_replies.pop(request_id, None)
@@ -888,7 +944,6 @@ class NativeFilesTransport(QObject):
 
         tags_op 显式语义（replace/add/remove/clear）；失败逐条汇总，不写
         "已保存"的假状态；成功时随 metadata_snapshot 发布落库最终快照。
-        路径不在任何已固定库内时逐条失败并说明原因（不静默假装成功）。
         """
         if self._closed or not paths or not patch:
             return
@@ -900,45 +955,37 @@ class NativeFilesTransport(QObject):
             self.metadata_failed.emit(list(paths), dict(patch),
                                       self._runtime_error_message())
             return
-        job = _MetadataJob(paths=list(paths), patch=dict(patch))
+        self._metadata_queue.append((_MetadataJob(paths=list(paths), patch=dict(patch)), tags_op))
+        self._start_metadata_write(facade)
+
+    def _start_metadata_write(self, facade: FilesFacade) -> None:
+        if self._closed or self._metadata_writing or not self._metadata_queue:
+            return
+        # Rapid clicks must reach the catalog in the order the user chose them.
+        job, tags_op = self._metadata_queue.popleft()
+        self._metadata_writing = True
 
         def _work() -> list[ItemResult]:
-            groups: dict[str, list[str]] = {}
-            for raw in paths:
-                record = facade.libraries.library_for_path(raw)
-                groups.setdefault(record.library_id if record else "", []).append(nfc(raw))
-            items: list[ItemResult] = []
-            for library_id, group in groups.items():
-                if not library_id:
-                    items.extend(
-                        ItemResult(path, ok=False, error_code="NOT_FOUND",
-                                   message="路径不在任何已固定库内；先固定常用位置并建立索引。")
-                        for path in group)
-                    continue
-                result = facade.metadata.patch_metadata(
-                    group, dict(patch), library_id=library_id, tags_op=tags_op)
-                if result.accepted:
-                    items.extend(result.items)
-                else:
-                    items.extend(ItemResult(path, ok=False, error_code=result.error_code,
-                                            message=result.message) for path in group)
-            return items
-
-        def _deliver(outcome) -> None:
-            if self._closed:
-                return
-            if outcome.error is not None:
-                job.failures.append(str(outcome.error.message or "保存失败（服务未确认）"))
-            else:
-                for item in outcome.result:
-                    if item.ok:
-                        job.snapshots[item.path] = dict(item.result or {})
-                    else:
-                        job.failures.append(str(item.message or item.error_code or "保存失败"))
-            self._publish_metadata(job)
+            return facade.metadata.patch_owned_paths(job.paths, job.patch, tags_op=tags_op)
 
         facade.run(key=f"meta:{uuid.uuid4().hex}", request_id=uuid.uuid4().hex,
-                   work=_work, listener=_deliver)
+                   work=_work, listener=lambda outcome: self._metadata_done.emit(job, outcome))
+
+    def _finish_metadata_write(self, job: _MetadataJob, outcome: FacadeOutcome) -> None:
+        if self._closed:
+            return
+        if outcome.error is not None:
+            job.failures.append(str(outcome.error.message or "保存失败（服务未确认）"))
+        else:
+            for item in outcome.result:
+                if item.ok:
+                    job.snapshots[item.path] = dict(item.result or {})
+                else:
+                    job.failures.append(str(item.message or item.error_code or "保存失败"))
+        self._publish_metadata(job)
+        self._metadata_writing = False
+        if self._facade is not None:
+            self._start_metadata_write(self._facade)
 
     def _publish_metadata(self, job: _MetadataJob) -> None:
         if job.snapshots:
@@ -1123,6 +1170,38 @@ class NativeFilesTransport(QObject):
             I18N.tr("files.ai_library.library_missing", "该素材库已移除，请重新选择。"),
             I18N.tr("files.ai_library.library_removed", "已移除素材库。"))
 
+    def import_library(self, package: str, parent: str) -> None:
+        self._transfer_library(lambda facade: facade.import_library(package, parent), importing=True)
+
+    def export_library(self, library_id: str, destination: str) -> None:
+        self._transfer_library(lambda facade: facade.export_library(library_id, destination), importing=False)
+
+    def _transfer_library(self, work: Callable[[FilesFacade], Any], *, importing: bool) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.library_transfer_finished.emit(False, self._runtime_error_message())
+            return
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if self._closed:
+                return
+            if outcome.error is not None:
+                self.library_transfer_finished.emit(False, str(outcome.error.message))
+                return
+            if importing:
+                self.load_libraries()
+                self.library_registry_changed.emit()
+                message = I18N.tr("files.native.library_imported", "已导入素材库「{name}」").format(
+                    name=outcome.result.name)
+            else:
+                message = I18N.tr("files.native.library_exported", "素材库已导出到 {path}").format(
+                    path=outcome.result)
+            self.library_transfer_finished.emit(True, message)
+
+        request_id = uuid.uuid4().hex
+        facade.run(key=f"library-transfer:{request_id}", request_id=request_id,
+                   work=lambda: work(facade), listener=deliver)
+
     def _library_change(self, work: Callable[[FilesFacade], Any],
                         ok_message: str) -> None:
         facade = self._runtime()
@@ -1148,6 +1227,56 @@ class NativeFilesTransport(QObject):
                    work=lambda: work(facade), listener=_deliver)
 
     # ------------------------------------------------------------ 索引（facade）
+    def refresh_external_paths(self, paths: list[str]) -> None:
+        """Refresh saved/exported files without scanning unrelated libraries."""
+        if self._closed:
+            return
+        facade = self._runtime()
+        if facade is None:
+            self.external_files_refresh_failed.emit(self._runtime_error_message())
+            return
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                self._external_files_done.emit(outcome)
+
+        facade.refresh_external_paths(
+            paths, request_id=uuid.uuid4().hex, listener=deliver)
+
+    def _finish_external_files(self, outcome: FacadeOutcome) -> None:
+        """Consume the worker result and invalidate thumbnails on the GUI thread."""
+        if self._closed:
+            return
+        if outcome.error is not None:
+            self.external_files_refresh_failed.emit(str(outcome.error.message))
+            return
+        result = outcome.result
+        paths = [item.path for item in result.items if item.ok]
+        if paths:
+            targets = set(paths)
+            self._thumbnail_queue = deque(
+                key for key in self._thumbnail_queue if key[0] not in targets)
+            self._thumbnail_warm_queue = {
+                key: value for key, value in self._thumbnail_warm_queue.items()
+                if key[0] not in targets}
+            self._thumbnail_attempted.difference_update(
+                key for key in tuple(self._thumbnail_attempted) if key[0] in targets)
+            # Discard old in-flight results before the panel requests fresh
+            # thumbnails with the same version; otherwise old pixels can win.
+            self._thumbnail_replies = {
+                key: value for key, value in self._thumbnail_replies.items()
+                if value.path not in targets}
+            for path in paths:
+                self._thumbnail_versions.pop(path, None)
+            self.external_files_refreshed.emit(paths)
+            self._pump_thumbnails()
+        failures = [f"{item.path}: {item.message or item.error_code}"
+                    for item in result.items if not item.ok]
+        if not result.accepted:
+            failures.append(result.message or result.error_code)
+        if failures:
+            self.external_files_refresh_failed.emit("；".join(failures))
+
     def load_scan_status(self) -> None:
         if self._closed:
             return
@@ -1377,6 +1506,8 @@ class NativeFilesTransport(QObject):
 
     # ------------------------------------------------------------ 集合浏览（facade）
     def load_collections(self) -> None:
+        from src.features.files.services.domain import GRADE_SET_SCOPE
+
         if self._closed:
             return
         facade = self._runtime()
@@ -1387,7 +1518,8 @@ class NativeFilesTransport(QObject):
             if self._closed or outcome.error is not None:
                 return
             self.collections_loaded.emit(
-                [dict(item.result) for item in outcome.result.items])
+                [dict(item.result) for item in outcome.result.items
+                 if item.result.get("library_id") != GRADE_SET_SCOPE])
 
         facade.run(key="collections", request_id=uuid.uuid4().hex,
                    work=lambda: facade.collections.list_collections(),
@@ -1652,8 +1784,13 @@ class NativeFilesTransport(QObject):
             self.preview_loaded.emit(path, bytes(outcome.result))
 
         request_id = uuid.uuid4().hex
-        if path.lower().endswith(".toos"):
-            from src.features.files.services.media import thumbnail_bytes
+        from src.features.files.services.media import RAW_PREVIEW_SUFFIXES, embedded_raw_preview, thumbnail_bytes
+        suffix = os.path.splitext(path)[1].lower()
+        if suffix in RAW_PREVIEW_SUFFIXES:
+            facade.run(key="preview:" + identity_key(path), request_id=request_id,
+                       work=lambda: embedded_raw_preview(path, max_bytes=self.MAX_PREVIEW_BYTES),
+                       listener=_deliver)
+        elif suffix == ".toos":
             facade.run(key="preview:" + identity_key(path), request_id=request_id,
                        work=lambda: thumbnail_bytes(path), listener=_deliver)
         else:
@@ -1716,6 +1853,7 @@ class NativeFilesTransport(QObject):
         if self._closed:
             return
         self._closed = True
+        self._metadata_queue.clear()
         self.stop_ai_library_index()
         self.cancel_ai_library_search()
         for session_id in list(self._compare_sessions):

@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from PyQt6.QtCore import QObject, QPoint, QRunnable, QThreadPool, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QApplication, QFileDialog, QLineEdit, QMessageBox, QPlainTextEdit, QTextEdit, QWidget
+from PyQt6.QtWidgets import QApplication, QFileDialog, QInputDialog, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QTextEdit, QWidget
 
 from src.app.ui.native_files_plugins import PluginCenterDialog, PluginLauncherDialog, _tr
 from src.app.ui.native_files_prefs import NativeFilesPreferences
@@ -151,6 +151,11 @@ class FilesPluginsController(QObject):
         self._image_editor_window = None
         self._ai_library_window = None
         self._audio_window = None
+        self._app_runtime = None
+        self._app_launch_tokens: dict[str, str] = {}
+        if hasattr(self.transport, "external_files_refreshed"):
+            self.transport.external_files_refreshed.connect(self._app_files_refreshed)
+            self.transport.external_files_refresh_failed.connect(self._message)
         self.center.refresh_requested.connect(self.refresh)
         self.request_refresh.connect(self.refresh)
         self.center.install_requested.connect(self._choose_package)
@@ -236,11 +241,28 @@ class FilesPluginsController(QObject):
                 runtime_version=record.runtime_version,
                 diagnostics=tuple(info.diagnostics) + typed_notes))
         for record in snapshot.records:
-            if record.plugin_id in matched_ids or record.manifest is None:
+            if record.plugin_id in matched_ids:
                 continue
             manifest = record.manifest
             typed_notes = tuple(f"[{item.code}/{item.severity}] {item.message}"
                                 for item in record.diagnostics)
+            if manifest is None:
+                if record.source == "local_app":
+                    merged.append(FilesPluginInfo(
+                        plugin_id=record.plugin_id, name=record.display_name,
+                        version=record.version, author="", description="",
+                        api_version=None, category="独立应用", capabilities=(),
+                        runtime_loaded=False, desired_enabled=False,
+                        self_disabled=True, needs_restart=False,
+                        error=record.error_message, launch_path="", launch_payload_kind="none",
+                        launch_unavailable_reason=record.error_message or "应用清单无效。",
+                        path=Path(record.origin_path or "."), diagnostics=typed_notes,
+                        source="local_app", install_state=record.install_state))
+                continue
+            local_app = record.source == "local_app"
+            blocked = bool(record.error_message) or any(note.severity == "error" for note in record.diagnostics)
+            app_reason = (record.error_message or "应用声明校验失败") if blocked else \
+                         "应用已停用" if not record.desired_enabled else ""
             merged.append(FilesPluginInfo(
                 plugin_id=record.plugin_id, name=record.display_name,
                 version=record.version, author=manifest.author,
@@ -249,12 +271,12 @@ class FilesPluginsController(QObject):
                 category=manifest.category or "扩展",
                 capabilities=tuple(item.capability_id
                                    for item in manifest.capabilities),
-                runtime_loaded=False,
+                runtime_loaded=local_app and record.runtime_state in ("loaded", "active"),
                 desired_enabled=record.desired_enabled,
-                self_disabled=False, needs_restart=record.pending_restart,
-                error=record.error_message, launch_path="",
+                self_disabled=False, needs_restart=False if local_app else record.pending_restart,
+                error=record.error_message, launch_path=f"app://{record.plugin_id}" if local_app else "",
                 launch_payload_kind="none",
-                launch_unavailable_reason=record.error_message or "尚未接入本宿主命令入口",
+                launch_unavailable_reason=app_reason if local_app else record.error_message or "尚未接入本宿主命令入口",
                 path=Path(record.origin_path or "."),
                 diagnostics=typed_notes,
                 source=record.source, install_state=record.install_state,
@@ -402,6 +424,12 @@ class FilesPluginsController(QObject):
         if self._writing:
             return
         info = next((item for item in self._infos if item.plugin_id == plugin_id), None)
+        if info is not None and info.source == "local_app" and not enabled:
+            self._app_launch_tokens.pop(plugin_id, None)
+            self._busy.discard(plugin_id)
+            if self._app_runtime is not None:
+                self._app_runtime.detach(plugin_id)
+            self._app_state_changed(plugin_id, "stopped")
         command_key = info.command_key if info is not None and info.command_key else ""
         if not command_key and self._inventory is None:
             command_key = plugin_id   # 旧接线：id 即命令键
@@ -447,6 +475,11 @@ class FilesPluginsController(QObject):
         info = next((item for item in self._infos if item.plugin_id == plugin_id), None)
         if info is not None and not info.can_launch:
             self._message(info.launch_unavailable_reason or "该插件没有可用命令入口。")
+            return
+        if info is not None and info.source == "local_app":
+            # Explicitly trusted local applications are full-permission apps.
+            # installed/local_dev continue through the existing sandbox gate.
+            self._launch_independent_app(info, tuple(self.selected_paths()) if paths is None else paths)
             return
         # [F10] 未保护第三方执行入口禁用：非 builtin 源的执行必须经
         # seatbelt 级隔离。判定用**当前启动管线实际具备的隔离**（不是
@@ -499,6 +532,214 @@ class FilesPluginsController(QObject):
             return self._commands.revalidate(prepared)
 
         self._submit(f"launch:{plugin_id}", work)
+
+    def app_candidates(self, path: str) -> tuple[FilesPluginInfo, ...]:
+        """Resolve only enabled, validated app contributions from this snapshot."""
+        if self._inventory is None:
+            return ()
+        suffix = Path(path).suffix.lower()
+        snapshot = self._inventory.snapshot()
+        candidates = []
+        for info in self._infos:
+            if info.source != "local_app" or not info.can_launch:
+                continue
+            record = snapshot.record(info.plugin_id)
+            if record is None or record.manifest is None:
+                continue
+            declaration = record.manifest.metadata.get("independent_app", {})
+            if suffix in tuple(ext.lower() for ext in declaration.get("extensions", ())):
+                candidates.append(info)
+        return tuple(candidates)
+
+    def open_associated_file(self, path: str) -> bool:
+        candidates = self.app_candidates(path)
+        preferred = self.preferences.app_default_handlers.get(Path(path).suffix.lower(), "")
+        if preferred == "__native__" or not candidates:
+            return False
+        chosen = next((info for info in candidates if info.plugin_id == preferred), None)
+        if chosen is None and len(candidates) == 1:
+            chosen = candidates[0]
+        if chosen is None:
+            names = [f"{info.name} ({info.plugin_id})" for info in candidates]
+            name, accepted = QInputDialog.getItem(
+                self.panel, _tr("open_with", "打开方式"),
+                _tr("choose_application", "选择打开此文件的应用"), names, 0, False)
+            if not accepted:
+                return True
+            chosen = candidates[names.index(name)]
+        self.launch(chosen.plugin_id, paths=(path,))
+        return True
+
+    def populate_open_with_menu(self, menu: QMenu, paths: list[str]) -> None:
+        if len(paths) != 1:
+            return
+        path = paths[0]
+        candidates = self.app_candidates(path)
+        if not candidates:
+            return
+        submenu = menu.addMenu(_tr("open_with", "打开方式"))
+        for info in candidates:
+            submenu.addAction(info.name, lambda checked=False, pid=info.plugin_id: self.launch(pid, paths=(path,)))
+        defaults = submenu.addMenu(_tr("default_application", "默认打开工具"))
+        suffix = Path(path).suffix.lower()
+        preferred = self.preferences.app_default_handlers.get(suffix, "")
+        for plugin_id, name in [(info.plugin_id, info.name) for info in candidates] + [
+                ("__native__", _tr("native_open", "使用原有预览方式"))]:
+            action = defaults.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(preferred == plugin_id)
+            action.triggered.connect(lambda checked=False, pid=plugin_id: self._set_app_default(suffix, pid))
+
+    def _set_app_default(self, suffix: str, plugin_id: str) -> None:
+        defaults = self.preferences.app_default_handlers
+        defaults[suffix] = plugin_id
+        self.preferences.app_default_handlers = defaults
+
+    def _confirm_app_trust(self, spec: Any) -> bool:
+        grant = {"root": str(spec.root), "fingerprint": spec.fingerprint}
+        trusts = self.preferences.app_trust
+        if trusts.get(spec.plugin_id) == grant:
+            return True
+        answer = QMessageBox.question(
+            self.panel, _tr("trust_application", "运行本地独立应用"),
+            f"{spec.display_name} {spec.version}\n{spec.root}\n\n"
+            "此应用使用项目 Python，拥有当前用户的文件和网络权限，未使用沙箱。"
+            "确认信任并运行？应用内容变化后会重新确认。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return False
+        trusts[spec.plugin_id] = grant
+        self.preferences.app_trust = trusts
+        return True
+
+    def _launch_independent_app(self, info: FilesPluginInfo, paths: tuple[str, ...]) -> None:
+        from src.features.files.independent_app_runtime import (
+            IndependentAppRuntime, application_python, check_dependencies, validate_input,
+        )
+        from src.shared.plugins.independent_apps import load_independent_app
+
+        plugin_id = info.plugin_id
+        token = uuid4().hex
+        self._app_launch_tokens[plugin_id] = token
+        self._busy.add(plugin_id)
+        self._project()
+
+        def still_enabled() -> bool:
+            return not self._closed and self._app_launch_tokens.get(plugin_id) == token and any(
+                item.plugin_id == plugin_id and item.source == "local_app" and item.can_launch
+                for item in self._infos)
+
+        def prepare() -> object:
+            spec = load_independent_app(info.path)
+            if spec.plugin_id != plugin_id:
+                raise ValueError("应用身份已变化，请刷新插件列表后重新打开。")
+            path = validate_input(spec, paths)
+            python = application_python()
+            check_dependencies(spec, python, path)
+            return spec, python, path
+
+        def finish_error(message: str) -> None:
+            if self._app_launch_tokens.get(plugin_id) != token:
+                return
+            self._busy.discard(plugin_id)
+            self._app_launch_tokens.pop(plugin_id, None)
+            if not self._closed:
+                self._project()
+                self._message(message)
+
+        def prepared(_generation: int, _operation: str, result: object, error: str) -> None:
+            if not still_enabled():
+                finish_error("应用打开已取消。")
+                return
+            if error:
+                finish_error(error)
+                return
+            spec, python, path = result
+            if not self._confirm_app_trust(spec):
+                finish_error("未运行本地应用。")
+                return
+
+            def revalidate() -> object:
+                current = load_independent_app(info.path)
+                if current.fingerprint != spec.fingerprint or current.plugin_id != plugin_id:
+                    raise ValueError("确认后应用内容发生变化，请重新打开。")
+                if validate_input(current, paths) != path:
+                    raise ValueError("打开的文件已变化，请重新选择。")
+                return current
+
+            def dispatch(_g: int, _o: str, current: object, failure: str) -> None:
+                if not still_enabled():
+                    finish_error("应用打开已取消。")
+                    return
+                if failure:
+                    finish_error(failure)
+                    return
+                if self._app_runtime is None:
+                    self._app_runtime = IndependentAppRuntime(self)
+                    self._app_runtime.opened.connect(self._app_opened)
+                    self._app_runtime.failed.connect(self._app_failed)
+                    self._app_runtime.notice.connect(lambda _pid, message: self._message(message))
+                    self._app_runtime.state_changed.connect(self._app_state_changed)
+                    self._app_runtime.files_changed.connect(self.transport.refresh_external_paths)
+                try:
+                    self._message(f"正在打开 {spec.display_name}…")
+                    self._app_runtime.launch(current, python, path)
+                except (OSError, ValueError) as exc:
+                    finish_error(str(exc))
+                    return
+
+            task = _CatalogTask(0, f"app-dispatch:{plugin_id}", revalidate)
+            task.signals.finished.connect(dispatch)
+            self._pool.start(task)
+
+        task = _CatalogTask(0, f"app-prepare:{plugin_id}", prepare)
+        task.signals.finished.connect(prepared)
+        self._pool.start(task)
+
+    def _app_opened(self, plugin_id: str, path: str) -> None:
+        self._busy.discard(plugin_id)
+        self._app_launch_tokens.pop(plugin_id, None)
+        if self._closed:
+            return
+        self.preferences.plugin_recent = [plugin_id, *[pid for pid in self.preferences.plugin_recent if pid != plugin_id]]
+        self._project()
+        self._message(f"应用已打开：{Path(path).name}" if path else "应用窗口已就绪。")
+
+    def _app_failed(self, plugin_id: str, message: str) -> None:
+        self._busy.discard(plugin_id)
+        self._app_launch_tokens.pop(plugin_id, None)
+        if not self._closed:
+            self._project()
+            self._message(message)
+
+    def _app_state_changed(self, plugin_id: str, state: str) -> None:
+        loaded = state in ("ready", "dirty")
+        if state == "starting":
+            return
+        runtime_version = self._app_runtime.running_version(plugin_id) if loaded and self._app_runtime else ""
+        if self._inventory is not None:
+            try:
+                self._inventory.mark_runtime(plugin_id, "active" if loaded else "not_loaded",
+                                             runtime_version=runtime_version)
+            except KeyError:
+                return
+        self._infos = tuple(_dc_replace(info, runtime_loaded=loaded, needs_restart=False,
+                                        runtime_version=runtime_version)
+                            if info.plugin_id == plugin_id else info for info in self._infos)
+        if not self._closed:
+            self._project()
+
+    def _app_files_refreshed(self, paths: list[str]) -> None:
+        if self._closed:
+            return
+        invalidate = getattr(self.panel, "invalidate_external_files", None)
+        if callable(invalidate):
+            invalidate(paths)
+        refresh = getattr(self.panel, "refresh", None)
+        if callable(refresh):
+            refresh()
+        self._message(f"已更新 {len(paths)} 个文件的素材信息。")
 
     def _native_opener(self, plugin_id: str):
         """[G2] 原生工具 → 窗口打开回调表。"""
@@ -932,7 +1173,8 @@ class FilesPluginsController(QObject):
     def _open_directory(self) -> None:
         from PyQt6.QtCore import QUrl
         from PyQt6.QtGui import QDesktopServices
-        plugins_dir = self.catalog.plugins_dir
+        selected = next((info for info in self._infos if info.plugin_id == self.center._selected), None)
+        plugins_dir = selected.path if selected is not None and selected.source == "local_app" else self.catalog.plugins_dir
         if plugins_dir is None:
             self._message(_tr("directory_failed", "无法定位插件目录。"))
             return
@@ -1013,6 +1255,9 @@ class FilesPluginsController(QObject):
         if self._closed:
             return
         self._closed = True
+        self._app_launch_tokens.clear()
+        if self._app_runtime is not None:
+            self._app_runtime.shutdown()
         # [G1/G2] 原生工具窗口经注册表关闭（关闭即取消在途任务）
         if self._format_factory_window is not None:
             self.host_session.windows.close_all("files.format_factory")

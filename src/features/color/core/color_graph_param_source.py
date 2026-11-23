@@ -21,13 +21,15 @@ corrector/shared_corrector pass 取参）。
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+from dataclasses import replace
+from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
 from src.features.color.core.color_node_labels import display_node_label
 
 from src.shared.project.color_graph import (
     ColorGraphData,
+    ColorNodeData,
     NodeType,
     unfreeze_params,
 )
@@ -116,36 +118,68 @@ def node_layer_payload(node: Any, *,
     # 输出为原生嵌套 list（与 Layer.to_dict 持久化形态一致；执行器/
     # oracle 侧 np.asarray 同样可用）
     if include_lut_cache and payload.get("curves_data") and not _lut_current(payload):
+        from src.features.color.core.curves_soft_clip import normalize_curves_edit
         from src.features.color.core.layer import build_curves_lut_from_data
         try:
-            lut = build_curves_lut_from_data(dict(payload["curves_data"]))
+            edit = normalize_curves_edit(payload.get("curves_edit"))
+            lut = build_curves_lut_from_data(
+                dict(payload["curves_data"]), edit["amounts"],
+                calibration_version=edit.get("calibration_version", 0),
+            )
             payload["curves_lut"] = np.asarray(lut).tolist()
         except Exception:  # noqa: BLE001 —— 坏曲线按 identity（缺省）处理
             payload.pop("curves_lut", None)
             payload.pop("curves_data", None)
+    hsl_data = payload.get("hsl_curve_data")
+    if include_lut_cache and isinstance(hsl_data, Mapping) and hsl_data:
+        from src.features.color.core.curves_calibration import curves_calibration_enabled
+        from src.features.color.core.hsl_curve_calibration import CALIBRATED_HSL_SAMPLES
+        from src.features.color.core.layer import build_hsl_curve_lut_from_data
+
+        calibrated = curves_calibration_enabled(payload.get("curves_edit"))
+        expected_shape = (6, CALIBRATED_HSL_SAMPLES if calibrated else 256)
+        try:
+            cache_shape = np.shape(payload.get("hsl_curve_lut"))
+        except (TypeError, ValueError):
+            cache_shape = ()
+        if cache_shape != expected_shape:
+            payload["hsl_curve_lut"] = build_hsl_curve_lut_from_data(
+                dict(hsl_data), calibration_version=int(calibrated),
+            ).tolist()
     return payload
 
 
 def _lut_current(payload: Mapping[str, Any]) -> bool:
-    """payload 已带有效 256×3 LUT 时不必重建。"""
-    lut = payload.get("curves_lut")
+    """Reuse a packed LUT already generated from the current snapshot."""
+    from src.features.color.core.curves_calibration import (
+        curves_calibration_enabled, is_calibrated_curves_lut,
+    )
     try:
-        import numpy as np
-        arr = np.asarray(lut)
-        return arr.shape == (256, 3)
-    except Exception:  # noqa: BLE001
+        arr = np.asarray(payload.get("curves_lut"))
+    except (TypeError, ValueError):
         return False
+    if curves_calibration_enabled(payload.get("curves_edit")):
+        return is_calibrated_curves_lut(arr)
+    return arr.shape in ((256, 3), (256, 1, 3))
 
 
-def _iter_corrector_nodes(graph: ColorGraphData):
-    """遍历全部 Corrector 节点（含 compound children，plan 展开后按
-    成员 node_id 取参——B11 inline 保持成员身份）。"""
-    stack = list(graph.nodes)
-    while stack:
-        node = stack.pop(0)
-        if getattr(node, "compound_children", None) is not None:
-            stack.extend(node.compound_children.nodes)
-        else:
+def _iter_corrector_nodes(graph: ColorGraphData) -> Iterator[ColorNodeData]:
+    """Resolve shared defaults before materializing the execution payload."""
+    definitions = {definition.definition_id: definition.params
+                   for definition in graph.shared_definitions}
+    for node in graph.nodes:
+        if node.compound_children is not None:
+            yield from _iter_corrector_nodes(node.compound_children)
+        elif node.node_type == NodeType.SHARED_CORRECTOR.value:
+            definition = definitions.get(node.shared_definition_id)
+            if definition is not None:
+                # Keep the same domain precedence as the graph compiler.
+                params = dict(definition)
+                params.update({key: value for key, value in node.params.items()
+                               if key != "shared_definition_id"})
+                node = replace(node, params=params)
+            yield node
+        elif node.node_type == NodeType.CORRECTOR.value:
             yield node
 
 
@@ -175,8 +209,7 @@ def graph_node_layer_provider(
             evaluate_mask_tracks_payload, evaluate_qualifier_params_tracks,
         )
         evaluated = dict(payloads)
-        for n in _iter_corrector_nodes(graph):
-            payload = payloads.get(n.node_id)
+        for node_id, payload in payloads.items():
             if not payload:
                 continue
             kf = payload.get("grade_keyframes")
@@ -224,7 +257,7 @@ def graph_node_layer_provider(
                     int(frame))
                 if patched_shapes is not None:
                     merged["mask_shapes"] = patched_shapes
-            evaluated[n.node_id] = merged
+            evaluated[node_id] = merged
             from src.features.color.core.effect_keyframes import evaluate_effect_tracks
             plugins = evaluate_effect_tracks(tracks, payload.get("plugins") or (), int(frame))
             if plugins is not None:

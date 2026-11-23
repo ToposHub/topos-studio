@@ -8,20 +8,55 @@ import sqlite3
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from src.features.files.repository.locator import FilesDataLocator
 from src.features.files.services.media import MAX_OUTPUT_BYTES
+from src.shared.media.graded_thumbnail import GRADED_PREVIEW_JPEG_HEADER, GRADED_PREVIEW_MAX_EDGE, is_webp_preview
 
 logger = logging.getLogger(__name__)
 MAX_CACHE_BYTES = 512 * 1024 * 1024
 _PNG_HEADER = b"\x89PNG\r\n\x1a\n"
+MAX_GRADED_THUMBNAIL_BYTES = 160 * 1024
+_GRADED_CACHE_VERSION = "v3"
 _TOUCH_INTERVAL_NS = 60_000_000_000
+FileRevision = tuple[int, int, int, int, int]
 
 
 def _fingerprint(source: Path, version: int) -> str:
     stat = source.stat()
     return f"{stat.st_dev}:{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}:{stat.st_ctime_ns}:{version}"
+
+
+@dataclass(frozen=True)
+class GradedThumbnailStamp:
+    source: str
+    sidecar: str
+    source_revision: FileRevision
+    sidecar_revision: FileRevision
+
+    @classmethod
+    def capture(cls, source: str, sidecar: str) -> GradedThumbnailStamp:
+        return cls(source, sidecar, cls.revision(source), cls.revision(sidecar))
+
+    @staticmethod
+    def revision(path: str) -> FileRevision:
+        stat = os.stat(path)
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+    @property
+    def fingerprint(self) -> str:
+        return ":".join(map(str, (*self.source_revision, *self.sidecar_revision)))
+
+    @property
+    def key(self) -> str:
+        return _graded_key(self.source)
+
+
+def _graded_key(source: str) -> str:
+    normalized = os.path.normcase(os.path.abspath(source))
+    return "graded:" + hashlib.sha256(os.fsencode(normalized)).hexdigest()
 
 
 class ThumbnailCache:
@@ -91,11 +126,85 @@ class ThumbnailCache:
             logger.debug("Thumbnail cache write skipped: %s", error)
         return image
 
-    def _store(self, key: str, fingerprint: str, image: bytes, generation: int) -> None:
+    def read_graded(self, path: str, *, verified_sidecar: str | None = None,
+                    minimum_edge: int = 0) -> bytes | None:
+        """Read the preview only when both the source and its saved grade match."""
+        from src.shared.project.image_sidecar import resolve_image_sidecar
+
+        if not self.path.is_file():
+            return None
+        key = _graded_key(path)
+        try:
+            with self._connection() as connection:
+                row = connection.execute(
+                    "SELECT fingerprint, image, used FROM thumbnails WHERE key = ? AND length(image) <= ?",
+                    (key, MAX_GRADED_THUMBNAIL_BYTES),
+                ).fetchone()
+            if row is None:
+                return None
+            fingerprint, image, used = row
+            if is_webp_preview(image):
+                version = _GRADED_CACHE_VERSION
+            elif not minimum_edge and image.startswith(GRADED_PREVIEW_JPEG_HEADER):
+                version = "v2"
+            else:
+                return None
+            if verified_sidecar is None:
+                verified_sidecar, owned = resolve_image_sidecar(path)
+                if not owned:
+                    return None
+            stamp = GradedThumbnailStamp.capture(path, verified_sidecar)
+            # Keep legacy previews visible until a new capture can replace them.
+            if version != "v2" or fingerprint != stamp.fingerprint:
+                revision, _, edge = fingerprint.rpartition(":")
+                if (revision != f"{version}:{stamp.fingerprint}"
+                        or not edge.isascii() or not edge.isdecimal()
+                        or int(edge) < max(1, minimum_edge)):
+                    return None
+            now = time.time_ns()
+            if now - used >= _TOUCH_INTERVAL_NS:
+                with self._connection() as connection:
+                    connection.execute("UPDATE thumbnails SET used = ? WHERE key = ?", (now, key))
+            return image
+        except (OSError, ValueError, sqlite3.Error) as error:
+            logger.debug("Graded thumbnail read skipped: %s", error)
+            return None
+
+    def store_graded(self, stamp: GradedThumbnailStamp, webp: bytes, *, long_edge: int) -> bool:
+        """Commit a small WebP through the regular thumbnail cache budget."""
+        from src.shared.project.image_sidecar import resolve_image_sidecar
+
+        if (not 0 < long_edge <= GRADED_PREVIEW_MAX_EDGE or len(webp) > MAX_GRADED_THUMBNAIL_BYTES
+                or not is_webp_preview(webp)):
+            return False
+        try:
+            sidecar, owned = resolve_image_sidecar(stamp.source)
+            if not owned or GradedThumbnailStamp.capture(stamp.source, sidecar).fingerprint != stamp.fingerprint:
+                return False
+            with self._connection() as connection:
+                generation = connection.execute("SELECT generation FROM cache_state").fetchone()[0]
+            return self._store(
+                stamp.key, f"{_GRADED_CACHE_VERSION}:{stamp.fingerprint}:{long_edge:03d}", webp, generation,
+                keep_larger=True,
+                verify=lambda: GradedThumbnailStamp.capture(stamp.source, sidecar).fingerprint == stamp.fingerprint)
+        except (OSError, ValueError, sqlite3.Error) as error:
+            logger.debug("Graded thumbnail write skipped: %s", error)
+            return False
+
+    def _store(self, key: str, fingerprint: str, image: bytes, generation: int, *,
+               verify: Callable[[], bool] | None = None, keep_larger: bool = False) -> bool:
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            if connection.execute("SELECT generation FROM cache_state").fetchone()[0] != generation:
-                return
+            if (connection.execute("SELECT generation FROM cache_state").fetchone()[0] != generation
+                    or (verify is not None and not verify())):
+                return False
+            if keep_larger:
+                previous = connection.execute(
+                    "SELECT fingerprint FROM thumbnails WHERE key = ?", (key,),
+                ).fetchone()
+                # The fixed-width suffix orders captures with the same source and grade.
+                if previous and previous[0][:-3] == fingerprint[:-3] and previous[0] >= fingerprint:
+                    return True
             connection.execute(
                 "INSERT OR REPLACE INTO thumbnails VALUES (?, ?, ?, ?, ?)",
                 (key, fingerprint, image, len(image), time.time_ns()),
@@ -110,6 +219,7 @@ class ThumbnailCache:
                         ) WHERE retained > ?
                     )
                 """, (MAX_CACHE_BYTES * 9 // 10,))
+        return True
 
     def clear(self) -> int:
         if not self.path.exists() and not self.path.is_symlink():

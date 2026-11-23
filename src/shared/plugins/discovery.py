@@ -35,7 +35,8 @@ from src.shared.plugins.manifest import (
     parse_manifest_file,
 )
 
-_SOURCE_LABELS = {"builtin": "内建", "installed": "已安装", "local_dev": "开发源"}
+_SOURCE_LABELS = {"builtin": "内建", "installed": "已安装", "local_dev": "开发源",
+                  "local_app": "本地独立应用"}
 
 # [F1] 宿主事实：插件清单兼容校验（host_api/最低版本/平台/架构）的权威输入
 HOST_API = 1
@@ -268,13 +269,16 @@ class PluginSourceConfig:
     builtin_ids: frozenset[str]
     install_root: Path
     dev_roots: tuple[Path, ...]
+    app_roots: tuple[Path, ...] = ()
 
     @classmethod
     def for_host(cls, *, builtin_ids: Iterable[str], install_root: Path,
-                 dev_roots: Iterable[Path] = ()) -> "PluginSourceConfig":
+                 dev_roots: Iterable[Path] = (),
+                 app_roots: Iterable[Path] = ()) -> "PluginSourceConfig":
         return cls(builtin_ids=frozenset(builtin_ids),
                    install_root=Path(install_root),
-                   dev_roots=tuple(Path(item) for item in dev_roots))
+                   dev_roots=tuple(Path(item) for item in dev_roots),
+                   app_roots=tuple(Path(item) for item in app_roots))
 
 
 def scan_sources(catalog_rows: Iterable[Any], config: PluginSourceConfig, *,
@@ -289,6 +293,10 @@ def scan_sources(catalog_rows: Iterable[Any], config: PluginSourceConfig, *,
     records.extend(installed_records(config.install_root, host_facts=host_facts,
                                      desired_by_id=desired_by_id))
     records.extend(dev_records(config.dev_roots))
+    # Local apps use an explicit source; their manifest never grants trust.
+    from src.shared.plugins.independent_apps import discover_independent_apps
+    records.extend(discover_independent_apps(
+        config.app_roots, desired_by_id=desired_by_id, host_facts=host_facts))
     return records
 
 

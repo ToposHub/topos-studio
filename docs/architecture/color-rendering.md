@@ -236,10 +236,11 @@ denoise）。无 qualifier 且无 mask shapes 的常见层**早退 white_tex**�
 macOS 的 `TOPOS_COLOR_METAL=1` 启用调色工作线程的 Metal 图执行与原生视口。`AsyncRenderer` 先按原有规则
 准备图输入，`ColorMetalPreview` 用同设备的 RGBA16F IOSurface 在 GL 与 Metal 间传递工作纹理，再从权威
 调色图执行 Metal 计划。视口直接消费 Metal 结果，兼容显示和工具取得同一结果的 GPU 纹理。遮罩、邻域效果
-及其他不满足能力的图继续按权威 GL 计划求值。取色、分屏和需要覆盖编辑手柄的状态使用兼容视口。
+及实测初级调色校准的图继续按权威 GL 计划求值。Metal 调色图支持校准版 YRGB、HSL 和柔化裁切。
+取色、分屏和需要覆盖编辑手柄的状态使用兼容视口。
 
-无蒙版的波形和 RGB 直方图可以用 `MetalScopeEngine` 计算，并经 IOSurface 将示波器的 GPU 显示纹理交给
-现有控件。原生视口的已验证显示域为 SDR。HDR、时间线传输和其余示波器有各自的兼容呈现路径。
+生产示波器使用 GL 的密度计算、显示布局及 `ScopePublication` 发布协议，输入可以来自 Metal 调色后的整帧。
+`MetalScopeEngine` 可用于独立对拍。原生视口的已验证显示域为 SDR。HDR 和时间线传输有各自的兼容呈现路径。
 
 - **`opengl_render_backend.py`**：`AsyncRenderer` 的 GraphicsBackend 契约
   （`src/shared/gpu/graphics_backend.py`）'opengl' 维度实现，放 feature 侧是为
@@ -473,8 +474,42 @@ GPU 示波器（播放中安全）：
 request_gpu_scope(demand) → submit(RENDER_GPU_SCOPE)     [lane: GPU_SCOPE，最低优先]
   → _do_render_gpu_scope → 私有 scope ColorOutput（内容 revision 缓存）
   → GPU 侧 waveform/vectorscope/histogram/CIE/falsecolor 累积
-  → 一次跨上下文 finish 后发布纹理 → gpu_scope_ready(ScopeGpuFrame)
+  → glFenceSync + glFlush 发布可撤销纹理凭据 → gpu_scope_ready(ScopeGpuFrame)
+  → UI tryLock + glWaitSync → GPU 快照复制 → Qt 当前 FBO（resize 可重建）
 ```
+
+视图右键菜单通过 `ScopePanel.open_floating()` 打开无模式 `QDialog`，
+不使用浮动 `QDockWidget`，因此窗口没有停靠或合并入口。原有 ScopePanel
+及其 presenter 移入弹窗，原布局 dock 保留身份并隐藏；关闭弹窗后归还面板。
+控制器判定示波器可见性时包含独立弹窗，避免原 dock 隐藏后停止 GPU 更新。
+
+纹理凭据 `ScopePublication` 在分配存活期间复用；写入前等待各 UI 上下文的
+复制 fence，写入中标记不可读，成功后发布新的 producer fence。尺寸重分配、
+曲线分布模式切换和清理前撤销旧凭据，防止 GL 数字编号被视图纹理复用后
+串图。显示端只在新结果到达时复制到自有 GPU 快照；忙碌、旧凭据失效或
+复制失败时重绘上一快照。复制和重绘均处理 Qt 遗留 scissor 状态，不回读像素。
+正常支持 sync object 的驱动不调用 `finish`；不支持时保留正确性回退。
+`analysis_ms` 仅计 CPU 命令提交耗时，不再代表 GPU 完成耗时。
+
+播放/参数交互时单视图使用 512×288、10Hz，多视图使用 320×180、5Hz；
+静止时恢复原高质量档位。面板强制尺寸刷新合并到 150ms 安静窗口。
+曲线底图尺寸变化复用 GPU histogram counts（内容 revision、采样尺寸、
+遮罩 epoch、曲线模式及 Y 通道需求均匹配时），只重画显示纹理；
+曲线专用需求省略隐藏的独立直方图显示 pass。已排队的新调色/视频/视口
+预览优先于尚未开始的 scope pass。全帧 ColorOutput 的内容缓存继续保留，
+不直接复用可能含背景、遮罩预览或视口裁剪的 front，保持统计输入语义。
+
+直方图与曲线底图共用五点平滑、逐通道线性峰值归一化和抗锯齿轮廓
+shader；独立直方图只切换为 RGB 三行布局。波形/分量的密度纹理根据
+实际绘图区物理像素分档扩大（最高 2048×1200），矢量保持正方形
+（最高 1600×1600），避免 Retina/大浮窗放大固定 300 行波形。
+采样数仍由交互/播放/静止质量档位决定；密度增益按纹理尺寸补偿。
+显示通路保留窄幅垂直抗锯齿。分量图从原密度纹理读取八邻域，仅在同通道
+对向邻点均存在时重建单像素缺口；不会递归扩张，也不修改累计密度纹理。
+分量图另有显示亮度增益，白芯阈值按增益前密度计算，避免整体泛白；
+稀疏轨迹保留较饱满的 RGB 色相。矢量按 Cb/Cr 坐标显示色相，
+中心中性色保持白色，密度亮度使用柔和饱和映射。
+统计与显示均留在 GPU。
 
 层 bake：
 

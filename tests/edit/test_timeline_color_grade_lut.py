@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from src.features.edit.core.timeline_export import TimelineExporter
 from src.features.color.core.the_decompiler import GradingMath
@@ -161,3 +162,56 @@ def test_decomposed_fastpath_declines_nonlinear_coupled_params():
     # 纯 saturation 极端值仍在快路内
     result = ex._get_decomposed_grade_fastpath({"saturation": -100.0})
     assert result is not None and result[1] is not None
+
+
+def test_measured_chain_without_a_main_stack_uses_same_cpu_grade(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.edit.core import color_chain
+    from src.features.edit.core.timeline_preview_renderer import PreviewRenderWorker
+
+    params = {"primary_calibration_version": 1, "offset": (0.0, 0.0, 0.02)}
+    monkeypatch.setattr(color_chain, "chain_extra_params", lambda *args, **kwargs: [
+        {**params, "_chain_segment": "pre"},
+    ])
+    exporter, layer = _exporter_for_grade(params)
+    layer.clip.color_stack_id = None
+    worker = PreviewRenderWorker.__new__(PreviewRenderWorker)
+    worker._asset_resolver = SimpleNamespace(_project=exporter._project)
+    worker._timeline_sequence = SimpleNamespace(timeline_id="timeline")
+    frame = np.array([[[62, 98, 127], [177, 120, 33]]], dtype=np.uint8)
+    expected = _reference_bgr(frame, params)
+    assert not np.array_equal(expected, frame)
+
+    preview = worker._apply_preview_color_grade_unstabilized(frame, layer)
+    exported = exporter._apply_color_grade_unstabilized(frame, layer)
+    np.testing.assert_array_equal(preview, expected)
+    np.testing.assert_array_equal(exported, expected)
+    assert exporter._get_decomposed_grade_fastpath(params) is None
+    with pytest.raises(ValueError, match="CPU compositor"):
+        exporter._gpu_grade_uniforms(layer)
+
+
+def test_measured_curves_only_stack_reaches_preview_and_export() -> None:
+    from src.features.color.core.color_graph_cpu import apply_curves_cpu
+    from src.features.color.core.layer import build_curves_lut_from_data
+    from src.features.edit.core.timeline_preview_renderer import PreviewRenderWorker
+    from src.shared.project.color_stack import ColorStackData
+
+    points = {"M": [(0, 255), (128, 80), (255, 0)]}
+    stack = ColorStackData.create().with_curves(points).with_curves_edit(
+        {"calibration_version": 1}
+    )
+    exporter, layer = _exporter_for_grade({})
+    exporter._project.color_stacks["stack"] = stack
+    worker = PreviewRenderWorker.__new__(PreviewRenderWorker)
+    worker._asset_resolver = SimpleNamespace(_project=exporter._project)
+    worker._timeline_sequence = SimpleNamespace(timeline_id="timeline")
+    working_bgr = np.array([[[0.15, 0.09, 0.02], [0.22, 0.33, 1.4]]], dtype=np.float32)
+
+    lut = build_curves_lut_from_data(points, calibration_version=1)
+    expected = apply_curves_cpu(working_bgr[..., ::-1], lut)[..., ::-1]
+    assert not np.array_equal(working_bgr, expected)
+    np.testing.assert_allclose(
+        worker._apply_preview_color_grade_unstabilized(working_bgr, layer), expected)
+    np.testing.assert_allclose(
+        exporter._apply_color_grade_unstabilized(working_bgr, layer), expected)

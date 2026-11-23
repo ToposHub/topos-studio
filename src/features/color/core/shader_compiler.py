@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import re
 import logging
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Iterable, List
 
@@ -15,6 +18,7 @@ from src.features.color.core.shader_nodes import (COMMON_DEFINITIONS, GRADING_SN
                                     WARPER_SNIPPET, BLEND_MODES_SNIPPET,
                                     QUALIFIER_SNIPPET, FILM_GRAIN_SNIPPET,
                                     SOFT_CLIP_SNIPPET, CURVES_SOFT_CLIP_SNIPPET,
+                                    CURVES_SOFT_CLIP_CALIBRATION_SNIPPET,
                                     BLUR_SHARPEN_SNIPPET,
     WARPER_SPACE_SNIPPET)
 from src.features.color.core.plugin_manager import get_plugin_manager
@@ -30,6 +34,23 @@ from src.shared.render_diagnostics import (
     SOURCE_COMPOSITION,
     record_compile_failure,
 )
+
+
+_PRIMARY_CALIBRATION_GLSL = """
+vec3 apply_primary_calibration(vec3 color, sampler3D response_tex) {
+    vec3 sdr = clamp(color, 0.0, 1.0);
+    vec3 encoded = pow(sdr, vec3(1.0 / 2.4));
+    vec3 grid_size = vec3(textureSize(response_tex, 0));
+    vec3 uv = (encoded * (grid_size - 1.0) + 0.5) / grid_size;
+    vec3 delta = texture(response_tex, uv).rgb;
+    vec3 graded = pow(clamp(encoded + delta, 0.0, 1.0), vec3(2.4));
+    return graded + (color - sdr);
+}
+"""
+
+# Input and matte use 0–1. The four optional artist textures use 2–5.
+_PRIMARY_CALIBRATION_UNIT = 6
+_PRIMARY_CALIBRATION_CACHE_SIZE = 4
 
 
 # AUD-0832：GLSL 330 保留字/常用内建函数与类型/composition 宿主管线
@@ -193,6 +214,9 @@ class ShaderPipeline:
         # 参数组合的笛卡尔积，长调色会话反复开关效果会无限累积 GL
         # program（driver 侧驻留内存），此前仅 release() 全量释放。
         self.comp_cache: "OrderedDict[Any, Any]" = OrderedDict()
+        self._primary_calibration_textures: OrderedDict[
+            int, tuple[np.ndarray, moderngl.Texture3D]
+        ] = OrderedDict()
 
     #: LRU 容量：超出按最久使用淘汰，被逐出的 program 即时 release
     #: （_evict_overflow 只在 build_composition_shader 内调用，即渲染
@@ -210,7 +234,7 @@ class ShaderPipeline:
                              exc_info=True)
 
     def release(self) -> None:
-        """Release every program owned by this pipeline.
+        """Release the programs and calibration textures owned by this pipeline.
 
         Composition shaders are cached by structural layer configuration and
         live in the renderer's GL context; they must be released explicitly
@@ -225,6 +249,52 @@ class ShaderPipeline:
             except Exception:
                 logger.debug("Failed to release shader program", exc_info=True)
         self.comp_cache.clear()
+        for _, texture in self._primary_calibration_textures.values():
+            try:
+                texture.release()
+            except Exception:
+                logger.debug("Failed to release primary calibration texture", exc_info=True)
+        self._primary_calibration_textures.clear()
+
+    def bind_primary_calibration(
+        self, program: moderngl.Program, layer: Any, *,
+        temporary_textures: list[moderngl.Texture3D] | None = None,
+    ) -> Mapping[str, Any] | None:
+        """Bind the measured grade on the current GL context, if active."""
+        if "u_primary_calibration_tex" not in program:
+            return None
+        from src.features.color.core.primary_calibration import calibrated_grade_inputs
+
+        response = calibrated_grade_inputs(layer)
+        program["u_primary_calibration_tex"].value = _PRIMARY_CALIBRATION_UNIT
+        grid, legacy_params = response if response is not None else (None, None)
+        program["u_primary_calibration_enabled"].value = grid is not None
+        if grid is None:
+            return legacy_params
+        textures = self._primary_calibration_textures
+        key = id(grid)
+        if temporary_textures is None and key in textures:
+            textures.move_to_end(key)
+            _, texture = textures[key]
+        else:
+            texture = self.ctx.texture3d(
+                grid.shape[:3][::-1], 3,
+                np.ascontiguousarray(grid, dtype="f4"), dtype="f4")
+            try:
+                texture.filter = (self.ctx.LINEAR, self.ctx.LINEAR)
+                texture.repeat_x = texture.repeat_y = texture.repeat_z = False
+            except Exception:
+                texture.release()
+                raise
+            if temporary_textures is not None:
+                temporary_textures.append(texture)
+            else:
+                textures[key] = (grid, texture)
+                if len(textures) > _PRIMARY_CALIBRATION_CACHE_SIZE:
+                    _, (_, evicted) = textures.popitem(last=False)
+                    evicted.release()
+        texture.use(_PRIMARY_CALIBRATION_UNIT)
+        return legacy_params
 
     @staticmethod
     def has_active_mixer_params(params: Any) -> bool:
@@ -246,8 +316,11 @@ class ShaderPipeline:
         """Return True only when an RGB curves LUT is not the identity curve."""
         if lut is None:
             return False
+        from src.features.color.core.curves_calibration import is_calibrated_curves_lut
         try:
             arr = np.asarray(lut, dtype=np.float32)
+            if is_calibrated_curves_lut(arr):
+                return bool(np.any(arr))
             if arr.shape[0] != 256:
                 return True
             if arr.ndim == 3:
@@ -272,9 +345,9 @@ class ShaderPipeline:
             return False
         try:
             arr = np.asarray(lut, dtype=np.float32)
-            if arr.shape != (6, 256):
+            if arr.shape not in ((6, 256), (6, 512)):
                 return True
-            expected = np.ones((6, 256), dtype=np.float32)
+            expected = np.ones_like(arr)
             expected[1, :] = 0.0
             return not np.allclose(arr, expected, atol=1.0e-4)
         except Exception:
@@ -294,6 +367,7 @@ class ShaderPipeline:
         has_curves_soft_clip: bool = False,
         plugins: Iterable[PluginBinding] | None = None,
         *,
+        has_primary_calibration: bool = False,
         request_id: Any = None,
         layer_id: Any = None,
     ) -> "moderngl.Program | None":
@@ -307,7 +381,7 @@ class ShaderPipeline:
             manifest（EffectSpec）驱动 uniform 声明、命名空间改写与
             结构化缓存键；原始 instance dict 进入编译入口即 TypeError
             （G5：显式失败，禁止静默降级）。
-            has_curves_soft_clip: 曲线面板四参数柔化裁切（指数软膝）。
+            has_curves_soft_clip: 曲线面板四参数柔化裁切。
                 旗标只在参数非恒等时开启（默认恒等映射无需编译进管线）。
             request_id/layer_id: 可选诊断关联上下文，不参与 shader 缓存键。
         """
@@ -339,7 +413,7 @@ class ShaderPipeline:
              binding.enabled, _binding_structural_params(binding))
             for binding in bindings
         ) if bindings else ()
-        key = (has_curves, has_warper, warper_space if has_warper else 0, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, plugin_key)
+        key = (has_curves, has_warper, warper_space if has_warper else 0, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, has_primary_calibration, plugin_key)
         if key in self.comp_cache:
             # AUD-0831：LRU 命中刷新新旧顺序
             self.comp_cache.move_to_end(key)
@@ -353,7 +427,8 @@ class ShaderPipeline:
             has_curves=has_curves, has_hsl_curve=has_hsl_curve,
             has_warper=has_warper, has_lut3d=has_lut3d,
             warper_space=warper_space,
-            grain_enabled=grain_enabled, bindings=bindings)
+            grain_enabled=grain_enabled, has_primary_calibration=has_primary_calibration,
+            bindings=bindings)
 
         shader_code = [
             "#version 330",
@@ -374,6 +449,11 @@ class ShaderPipeline:
             CURVES_SOFT_CLIP_SNIPPET,
             QUALIFIER_SNIPPET,
         ]
+        if has_primary_calibration:
+            shader_code.append(_PRIMARY_CALIBRATION_GLSL)
+        if has_curves_soft_clip:
+            shader_code.append(CURVES_SOFT_CLIP_CALIBRATION_SNIPPET)
+            shader_code += uniform_manifest.declarations("curves_soft_clip")
         shader_code += uniform_manifest.declarations("body")
         # Phase 2: Qualifier uniforms removed - qualifier is now computed in matte generation
 
@@ -488,7 +568,12 @@ class ShaderPipeline:
         # Apply Blur / Sharpen first to allow subsequent grading
         shader_code.append("    vec3 graded = apply_blur_sharpen(color, u_input_tex, v_texcoord, u_fx_mode, u_fx_sharpen, u_fx_texture, u_fx_halo, u_fx_radius, u_fx_iterations, u_tex_size, u_fx_enabled, u_blur_enabled, u_blur_mode, u_blur_intensity, u_blur_detail, u_blur_radius, u_blur_bokeh, u_blur_angle);")
 
-        shader_code.append("    graded = apply_grading(graded, u_lift, u_gamma, u_gain, u_exposure, u_temp, u_tint, u_contrast, u_saturation, u_vibrance, u_shadow, u_highlights, u_mid_detail, u_sharpness, u_hue_shift, u_lift_saturation, u_gamma_saturation, u_gain_saturation, u_pivot, u_offset, u_log_shadow, u_log_midtone, u_log_highlight, u_log_offset, u_log_low_range, u_log_high_range, u_lum_mix);")
+        primary_input = "graded"
+        if has_primary_calibration:
+            primary_input = "primary_input"
+            shader_code.append("    vec3 primary_input = graded;")
+            shader_code.append("    if (u_primary_calibration_enabled) { graded = apply_primary_calibration(graded, u_primary_calibration_tex); }")
+        shader_code.append(f"    graded = apply_grading(graded, {primary_input}, u_lift, u_gamma, u_gain, u_exposure, u_temp, u_tint, u_contrast, u_saturation, u_vibrance, u_shadow, u_highlights, u_mid_detail, u_sharpness, u_hue_shift, u_lift_saturation, u_gamma_saturation, u_gain_saturation, u_pivot, u_offset, u_log_shadow, u_log_midtone, u_log_highlight, u_log_offset, u_log_low_range, u_log_high_range, u_lum_mix);")
 
         if has_curves: shader_code.append("    graded = apply_curves(graded, u_curves_tex);")
         if has_hsl_curve: shader_code.append("    graded = apply_hsl_curve(graded, u_hsl_curve_tex);")
@@ -497,10 +582,15 @@ class ShaderPipeline:
             shader_code.append("    if (u_sc_enabled) {")
             shader_code.append("        graded = apply_soft_clip(graded, u_sc_high, u_sc_white_point, u_sc_shoulder_strength, u_sc_low, u_sc_black_point, u_sc_toe_strength, u_sc_exposure, u_sc_contrast);")
             shader_code.append("    }")
-        # 曲线面板四参数柔化裁切（指数软膝）：编译期门控——只在参数非
+        # 曲线面板四参数柔化裁切：编译期门控——只在参数非
         # 恒等时编译进管线（默认恒等映射保留超白/负值，无需执行）。
         if has_curves_soft_clip:
-            shader_code.append("    graded = apply_curves_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft);")
+            shader_code.append(
+                "    if (u_cs_calibrated) {\n"
+                "        graded = apply_calibrated_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft);\n"
+                "    } else {\n"
+                "        graded = apply_curves_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft);\n"
+                "    }")
         if has_mixer:
             shader_code.append("    graded = apply_mixer(graded, u_red_p, u_orange_p, u_yellow_p, u_green_p, u_aqua_p, u_blue_p, u_purple_p, u_magenta_p);")
         if has_warper and warper_space:

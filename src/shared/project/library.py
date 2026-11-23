@@ -5,8 +5,8 @@ The Project Manager (video mode only) scans a fixed library directory for
 layer: directory resolution, lightweight metadata reads (no full project
 load) and cover-thumbnail extraction.
 
-Image mode never touches this — image projects are sidecar .topos files
-beside their source image, managed by the existing save/load flow.
+The image workflow also uses the lightweight metadata reader to establish
+which adjacent .topos archive belongs to a particular source.
 """
 
 from __future__ import annotations
@@ -390,7 +390,7 @@ def _archive_float(value: Any, fallback: float) -> float:
         return fallback
 
 
-def read_project_meta(path: str) -> Optional[ProjectMeta]:
+def read_project_meta(path: str, *, require_manifest_mode: bool = False) -> Optional[ProjectMeta]:
     """Read a .topos archive's metadata without a full load.
 
     Opens the zip and reads only manifest.json + project.json. Returns None
@@ -400,6 +400,8 @@ def read_project_meta(path: str) -> Optional[ProjectMeta]:
     try:
         with zipfile.ZipFile(path, "r") as zf:
             manifest = _read_zip_json(zf, "manifest.json") or {}
+            if require_manifest_mode and (not isinstance(manifest, dict) or not manifest.get("project_mode")):
+                return None
             project = _read_zip_json(zf, "project.json") or {}
     except (zipfile.BadZipFile, OSError) as exc:
         logger.debug("Cannot read project meta from %s: %s", path, exc)
@@ -418,7 +420,13 @@ def read_project_meta(path: str) -> Optional[ProjectMeta]:
     for asset in (project.get("assets") or {}).values():
         if not isinstance(asset, dict):
             continue
-        asset_path = asset.get("path") or asset.get("path_relative")
+        relative = asset.get("path_relative")
+        if isinstance(relative, str) and relative and "\x00" not in relative:
+            candidate = project_dir / relative
+            if not Path(relative).is_absolute() and os.path.isfile(candidate):
+                preview_path = str(candidate)
+                break
+        asset_path = asset.get("path") or relative
         if not asset_path:
             continue
         candidate = Path(str(asset_path))

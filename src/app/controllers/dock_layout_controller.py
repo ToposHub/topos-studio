@@ -330,9 +330,14 @@ class DockLayoutMixin:
         self.dock_info = create_custom_dock(I18N.tr("panel.info", "Info"), self.info_panel, "dockInfo")
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_info)
 
-        # Preserve the dock identity used by saved layouts; replace only its
-        # visible UI. Backend migration is tracked in the Color Nodes plan.
-        self.dock_layers = create_custom_dock(I18N.tr("color_nodes.nodes", "Nodes"), self.color_node_panel, "dockLayers")
+        # Keep the serialized dock identity and each workflow's own layout.
+        # Image users edit the real layer stack; video keeps its node editor.
+        from src.shared.feature_flags import uses_image_layer_workflow
+        image_layers = uses_image_layer_workflow(getattr(self, "config_manager", None))
+        stack_widget = self.layer_panel if image_layers else self.color_node_panel
+        stack_title = I18N.tr("panel.layers", "Layers") if image_layers else I18N.tr("color_nodes.nodes", "Nodes")
+        self.dock_layers = create_custom_dock(stack_title, stack_widget, "dockLayers")
+        stack_widget.show()
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_layers)
         self.color_node_panel.view.toggle_display_mode = self._toggle_color_node_display_mode
 
@@ -429,7 +434,9 @@ class DockLayoutMixin:
 
         # The image batch-export panel. Renamed for clarity so a future
         # video batch-export panel can coexist without confusing users.
-        self.dock_export = create_custom_dock(I18N.tr("panel.image_export", "Image Export"), self.export_panel, "dockExport")
+        export_title = (I18N.tr("export.batch_export", "Batch Export") if image_layers
+                        else I18N.tr("panel.image_export", "Image Export"))
+        self.dock_export = create_custom_dock(export_title, self.export_panel, "dockExport")
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_export)
 
         self.dock_crop = create_custom_dock(I18N.tr("panel.crop_transform", "Crop & Transform"), self.crop_panel, "dockCrop")
@@ -449,6 +456,15 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_presets)
         self.tabifyDockWidget(self.dock_presets, self.dock_lut)
         self.tabifyDockWidget(self.dock_lut, self.dock_plugin)
+        self.dock_grade_sets = None
+        if self.grade_set_panel is not None:
+            self.dock_grade_sets = create_custom_dock(
+                I18N.tr("grade_sets.title", "Grade Sets"), self.grade_set_panel, "dockGradeSets",
+            )
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_grade_sets)
+            self.tabifyDockWidget(self.dock_presets, self.dock_grade_sets)
+            self.dock_grade_sets.visibilityChanged.connect(
+                lambda visible: self._grade_set_previews.schedule() if visible else None)
 
         # P9.1: Timeline Clip Strip Dock (Color page)
         self.dock_color_timeline_clips = create_custom_dock(
@@ -1248,6 +1264,8 @@ class DockLayoutMixin:
             self.dock_color_timeline_clips, self.dock_tracker, self.dock_color_keyframes,
         ]
         # Add Edit docks if available
+        if self.dock_grade_sets is not None:
+            self.all_docks.append(self.dock_grade_sets)
         if self.dock_edit_media_pool:
             self.all_docks.append(self.dock_edit_media_pool)
         if self.dock_program_viewer:
@@ -1305,6 +1323,19 @@ class DockLayoutMixin:
         if self.dock_deliver:
             self.all_docks.append(self.dock_deliver)
         self.all_docks.extend(self._audio_workspace_docks())
+        if self._current_work_mode() == "image":
+            # Resolve visibility after a page switch has restored Qt state
+            # and published the destination page.
+            for dock in self.all_docks:
+                dock.visibilityChanged.connect(
+                    self._guard_image_library_layout, Qt.ConnectionType.QueuedConnection,
+                )
+            self.dock_library.topLevelChanged.connect(
+                self._guard_image_library_layout, Qt.ConnectionType.QueuedConnection,
+            )
+            self.dock_export.visibilityChanged.connect(
+                self._guard_image_batch_export, Qt.ConnectionType.QueuedConnection,
+            )
         # Initial splitting and proportions
         self.apply_default_layout()
 
@@ -2080,16 +2111,13 @@ class DockLayoutMixin:
         self.page_layouts["Color"] = self.saveState()
 
         # 1. Library Layout
-        for d in self.all_docks: d.setVisible(False)
-        if self._current_work_mode() == "video":
+        if self._current_work_mode() == "image":
+            self._apply_image_library_layout()
+        else:
+            for dock in self.all_docks:
+                dock.hide()
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
             self.dock_files.show()
-        else:
-            self.dock_viewport.show()
-            self.dock_library.show()
-            self.dock_info.show()
-            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_library)
-            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_info)
         self.page_layouts["Library"] = self.saveState()
 
         # 2. Edit Layout (P1 phase) - conditional
@@ -2188,7 +2216,12 @@ class DockLayoutMixin:
             self.page_layouts["Edit"] = self.saveState()
 
         # 3. Deliver Layout (P9.3) - conditional
-        if self._deliver_available and self.dock_deliver:
+        if self._deliver_available and self._current_work_mode() == "image":
+            self._apply_image_deliver_layout(reset=True)
+            self.page_layouts["Deliver"] = self.saveState()
+            if "Deliver" not in saved_page_layouts:
+                self._image_deliver_default_size_pending = True
+        elif self._deliver_available and self.dock_deliver:
             for d in self.all_docks: d.setVisible(False)
             self.dock_viewport.setVisible(True)
             self.dock_deliver.setVisible(True)
@@ -2267,9 +2300,9 @@ class DockLayoutMixin:
         active_mode = getattr(self, "_active_work_mode", None)
         if active_mode is not None:
             return active_mode
-        from src.shared.feature_flags import get_work_mode
+        from src.shared.feature_flags import get_workspace_work_mode
         try:
-            return get_work_mode(getattr(self, "config_manager", None))
+            return get_workspace_work_mode(getattr(self, "config_manager", None))
         except Exception:
             return "all"
 
@@ -2890,6 +2923,7 @@ class DockLayoutMixin:
         independent visibility, floating geometry and user tab arrangements.
         """
         self._migrate_color_resource_dock_layout(force=force)
+        self._place_grade_sets_dock(force=force)
         migration_version = self.config_manager.get(
             _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY
         )
@@ -2909,16 +2943,17 @@ class DockLayoutMixin:
         if warper is None or mixer is None:
             return
 
-        was_hidden = warper.isHidden()
-        mixer.setFloating(False)
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, mixer)
-        if not warper.isFloating():
-            self.tabifyDockWidget(warper, mixer)
-        mixer.setVisible(True)
-        if was_hidden:
-            warper.hide()
-        elif not warper.isFloating():
-            warper.raise_()
+        if self._current_work_mode() != "image" or mixer not in self.tabifiedDockWidgets(warper):
+            was_hidden = warper.isHidden()
+            mixer.setFloating(False)
+            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, mixer)
+            if not warper.isFloating():
+                self.tabifyDockWidget(warper, mixer)
+            mixer.setVisible(True)
+            if was_hidden:
+                warper.hide()
+            elif not warper.isFloating():
+                warper.raise_()
 
         self._compact_factory_color_tools(force=force)
         color_state = self.saveState()
@@ -2942,7 +2977,7 @@ class DockLayoutMixin:
         logger.info("Split Color Mapping into independent Warper and Mixer docks")
 
     def _compact_factory_color_tools(self, *, force: bool = False) -> None:
-        if self.current_page != "Color":
+        if self.current_page != "Color" or self._current_work_mode() == "image":
             return
         if not force and (getattr(self, "_has_saved_state", False)
                           or getattr(self, "_factory_color_tools_compacted", False)):
@@ -2962,6 +2997,10 @@ class DockLayoutMixin:
             return
         gallery = getattr(self, "dock_presets", None)
         if gallery is None:
+            return
+        if (self._current_work_mode() == "image" and not gallery.isFloating()
+                and all(dock in self.tabifiedDockWidgets(gallery) for dock in (self.dock_lut, self.dock_plugin))):
+            self.config_manager.set(key, 1)
             return
         if force:
             gallery.setFloating(False)
@@ -2983,6 +3022,35 @@ class DockLayoutMixin:
         self.config_manager.set(key, 1, auto_save=False)
         self._save_current_layout_to_store("Color")
         self.config_manager.save_config()
+
+    def _place_grade_sets_dock(self, *, force: bool = False) -> None:
+        """Seat the new tab once, then let saved dock layouts own its position."""
+        dock = getattr(self, "dock_grade_sets", None)
+        key = f"grade_sets_dock_placed_{self._layout_profile_mode()}"
+        if dock is None or self.current_page != "Color" or (not force and self.config_manager.get(key)):
+            return
+        if dock not in self.tabifiedDockWidgets(self.dock_presets):
+            self._tabify_grade_sets_dock()
+        self.config_manager.set(key, True, auto_save=False)
+        self.page_layouts["Color"] = self.saveState()
+        self._save_current_layout_to_store("Color")
+        self.config_manager.save_config()
+
+    def _tabify_grade_sets_dock(self) -> None:
+        dock = getattr(self, "dock_grade_sets", None)
+        if dock is None:
+            return
+        anchor = self.dock_presets
+        area = self.dockWidgetArea(anchor)
+        if area == Qt.DockWidgetArea.NoDockWidgetArea:
+            area = Qt.DockWidgetArea.LeftDockWidgetArea
+        dock.setFloating(False)
+        self.addDockWidget(area, dock)
+        if not anchor.isFloating():
+            self.tabifyDockWidget(anchor, dock)
+        dock.show()
+        if not anchor.isHidden() and not anchor.isFloating():
+            anchor.raise_()
 
     def reset_product_layout(self) -> None:
         """Clear all saved layouts for the current product mode only.
@@ -3120,6 +3188,8 @@ class DockLayoutMixin:
 
         Provides Float/Dock toggle and Close actions.
         """
+        if self._is_image_library_page():
+            return
         if dock.objectName() in ("dockEditEffects", "dockAudioClipEditor"):
             panel = (getattr(self, "edit_effects_panel", None) if dock.objectName() == "dockEditEffects"
                      else dock.widget())
@@ -3270,6 +3340,11 @@ class DockLayoutMixin:
         hidden in video mode, and the video-only panel (Color Timeline Clips)
         hidden in image mode, so the first-run layout matches the workflow.
         """
+        work_mode = self._current_work_mode()
+        if work_mode == "image":
+            self._apply_default_photo_color_layout()
+            return
+
         for d in self.all_docks:
             d.setVisible(True)
             d.setFloating(False)
@@ -3277,7 +3352,6 @@ class DockLayoutMixin:
         # Work-mode scoped docks — keep _enforce_page_dock_visibility semantics
         # in the hardcoded fallback so there is no first-run flash of panels
         # that do not belong to the active workflow.
-        work_mode = self._current_work_mode()
         if work_mode == "video":
             # Video workflow: hide image-only Library, Batch Export and the
             # image-only tool panels (Deblur / Crop / Info).
@@ -3286,16 +3360,6 @@ class DockLayoutMixin:
                 d = getattr(self, attr, None)
                 if d is not None:
                     d.setVisible(False)
-        elif work_mode == "image":
-            # Image workflow: hide the video-only Color Timeline Clips panel
-            # (it has no Edit timeline to read from in image mode).
-            d = getattr(self, "dock_color_timeline_clips", None)
-            if d is not None:
-                d.setVisible(False)
-            # Video Batch Export is also video-only — hide in image mode.
-            d = getattr(self, "dockVideoBatchExport", None)
-            if d is not None:
-                d.setVisible(False)
 
         # Assign basic areas
         self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_viewport)
@@ -3311,6 +3375,7 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_plugin)
         self.tabifyDockWidget(self.dock_presets, self.dock_lut)
         self.tabifyDockWidget(self.dock_lut, self.dock_plugin)
+        self._tabify_grade_sets_dock()
 
         # Bottom Area Distribution
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grading)
@@ -3356,10 +3421,61 @@ class DockLayoutMixin:
         self.resizeDocks([self.dock_library, self.dock_viewport, self.dock_info], [300, 1000, 300], Qt.Orientation.Horizontal)
 
         # Update dock titlebars after layout is applied
+        self._enforce_work_mode_dock_visibility()
         self._perform_update_all_titlebars()
 
         # Save default dock sizes to config
         self._save_all_docked_sizes()
+
+    def _apply_default_photo_color_layout(self) -> None:
+        """Build the image Color arrangement before applying any saved layout."""
+        left, right = Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea
+        top, bottom = Qt.DockWidgetArea.TopDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea
+        horizontal, vertical = Qt.Orientation.Horizontal, Qt.Orientation.Vertical
+        self.setCorner(Qt.Corner.TopLeftCorner, left)
+        self.setCorner(Qt.Corner.TopRightCorner, right)
+        self.setCorner(Qt.Corner.BottomLeftCorner, bottom)
+        self.setCorner(Qt.Corner.BottomRightCorner, bottom)
+        for dock in self.all_docks:
+            dock.hide()
+            if dock.isFloating():
+                dock.setFloating(False)
+
+        grade_sets = getattr(self, "dock_grade_sets", None)
+        resources = tuple(dock for dock in (
+            grade_sets, self.dock_presets, self.dock_lut, self.dock_plugin) if dock is not None)
+        primary = (self.dock_raw, self.dock_grading, self.dock_denoise, self.dock_deblur)
+        secondary = (self.dock_curves, self.dock_warper, self.dock_mixer,
+                     self.dock_qualifier, self.dock_masks, self.dock_effects)
+        analysis = (self.dock_analysis, self.dock_grain)
+        right_tools = (self.dock_info, self.dock_crop)
+        visible = (*resources, *primary, *secondary, *analysis, *right_tools,
+                   self.dock_layers, self.dock_viewport)
+        for dock in visible:
+            self.removeDockWidget(dock)
+
+        self.addDockWidget(top, self.dock_viewport)
+        self.addDockWidget(right, self.dock_info)
+        self.splitDockWidget(self.dock_info, self.dock_layers, vertical)
+        self.tabifyDockWidget(self.dock_info, self.dock_crop)
+        self.addDockWidget(left, resources[0])
+        self.addDockWidget(bottom, primary[0])
+        self.splitDockWidget(primary[0], secondary[0], horizontal)
+        self.splitDockWidget(secondary[0], analysis[0], horizontal)
+        for group in (resources, primary, secondary, analysis):
+            for dock in group[1:]:
+                self.tabifyDockWidget(group[0], dock)
+        for dock in visible:
+            dock.show()
+        for dock in (resources[0], self.dock_grading, self.dock_curves,
+                     self.dock_analysis, self.dock_info):
+            dock.raise_()
+        self.resizeDocks([resources[0], self.dock_viewport, self.dock_info], [320, 900, 320], horizontal)
+        self.resizeDocks([self.dock_info, self.dock_layers], [250, 420], vertical)
+        self.resizeDocks([primary[0], secondary[0], analysis[0]], [500, 565, 385], horizontal)
+        self.resizeDocks([self.dock_viewport, primary[0]], [650, 360], vertical)
+        self._enforce_work_mode_dock_visibility()
+        self._perform_update_all_titlebars()
 
     # ------------------------------------------------------------------
     # _get_all_page_layouts
@@ -3958,6 +4074,8 @@ class DockLayoutMixin:
             )
         elif self.current_page == "Composite":
             QTimer.singleShot(0, self._migrate_composite_scopes_dock_visibility)
+        elif self.current_page == "Deliver" and self._current_work_mode() == "image":
+            QTimer.singleShot(50, self._migrate_deliver_layout)
 
         # Deferred dock-size restoration (``resizeDocks`` and the migrations
         # above) can grow the main window back beyond the screen when the
@@ -3990,6 +4108,95 @@ class DockLayoutMixin:
     # ------------------------------------------------------------------
     # _enforce_page_dock_visibility
     # ------------------------------------------------------------------
+    def _is_image_library_page(self) -> bool:
+        return getattr(self, "current_page", None) == "Library" and self._current_work_mode() == "image"
+
+    def _apply_image_library_layout(self) -> None:
+        """Give the image browser the whole workspace, including old layouts."""
+        library = self.dock_library
+        for dock in self.all_docks:
+            if dock is not library and not dock.isHidden():
+                dock.hide()
+        if library.isFloating():
+            library.setFloating(False)
+        if self.dockWidgetArea(library) == Qt.DockWidgetArea.NoDockWidgetArea:
+            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, library)
+        if library.isHidden():
+            library.show()
+
+    def _guard_image_library_layout(self, _visible: bool) -> None:
+        """Keep global dock actions from reopening tools on the Library page."""
+        if self.isVisible() and self._is_image_library_page():
+            self._apply_image_library_layout()
+
+    def _guard_image_batch_export(self, visible: bool) -> None:
+        if visible and self.current_page != "Deliver":
+            self.dock_export.hide()
+
+    def _apply_image_deliver_layout(self, *, reset: bool = False) -> None:
+        """Place the shared Grade Sets dock beside image Batch Export."""
+        grade_sets = getattr(self, "dock_grade_sets", None)
+        batch_export = self.dock_export
+        left = Qt.DockWidgetArea.LeftDockWidgetArea
+        right = Qt.DockWidgetArea.RightDockWidgetArea
+        placements = [(grade_sets, left), (batch_export, right)] if grade_sets is not None else [
+            (batch_export, right)
+        ]
+        visible = {dock for dock, _ in placements}
+        for dock in self.all_docks:
+            if dock not in visible:
+                dock.hide()
+
+        repair = reset or any(
+            dock.isHidden() or dock.isFloating() or self.dockWidgetArea(dock) != area
+            or self.tabifiedDockWidgets(dock)
+            for dock, area in placements
+        )
+        if repair:
+            for dock, area in placements:
+                dock.setFloating(False)
+                self.removeDockWidget(dock)
+                self.addDockWidget(area, dock)
+        for dock, _ in placements:
+            dock.show()
+        if repair and grade_sets is not None:
+            self._resize_image_deliver_docks(grade_sets, batch_export)
+            if not reset:
+                self._image_deliver_default_size_pending = True
+
+    def _resize_image_deliver_docks(self, grade_sets: QDockWidget, batch_export: QDockWidget) -> None:
+        width = self.contentsRect().width()
+        export_width = width // 3
+        self.resizeDocks([grade_sets, batch_export], [width - export_width, export_width],
+                         Qt.Orientation.Horizontal)
+
+    def _enforce_work_mode_dock_visibility(self) -> None:
+        """Keep unavailable tools hidden after old Qt layouts are restored."""
+        mode = self._current_work_mode()
+        if mode not in ("image", "video"):
+            return
+        registry = get_panel_registry()
+        allowed = {desc.dock_attr for group in registry.get_panels_by_category(
+            work_mode=mode).values() for desc in group}
+        excluded = {desc.dock_attr for desc in registry.get_all()
+                    if desc.work_mode not in ("all", mode) and desc.dock_attr not in allowed}
+        if mode == "image":
+            # These core docks also exist when their video modules are off.
+            excluded.update(("dock_tracker", "dock_color_keyframes", "dock_color_timeline_clips",
+                             "dock_audio_mixer", "dock_deliver", "dockVideoBatchExport"))
+        for attr in excluded:
+            dock = getattr(self, attr, None)
+            if dock is None:
+                continue
+            dock.hide()
+            action = dock.toggleViewAction()
+            action.setVisible(False)
+            action.setEnabled(False)
+            if not dock.property("toposWorkModeHidden"):
+                dock.setProperty("toposWorkModeHidden", True)
+                # A saved state or delayed tool callback must not resurrect it.
+                dock.visibilityChanged.connect(lambda visible, d=dock: d.hide() if visible else None)
+
     def _enforce_page_dock_visibility(self) -> None:
         """Ensure page-specific docks are only visible on their own page.
 
@@ -4001,6 +4208,32 @@ class DockLayoutMixin:
         mode they stay usable. Media Pool is already unavailable in image mode
         (Edit feature disabled at startup).
         """
+        self._enforce_work_mode_dock_visibility()
+        image_workflow = self._current_work_mode() == "image"
+        if image_workflow and getattr(self, "dock_export", None) is not None:
+            allowed = self.current_page == "Deliver"
+            action = self.dock_export.toggleViewAction()
+            action.setVisible(allowed)
+            action.setEnabled(allowed)
+            if not allowed:
+                self.dock_export.hide()
+        image_library = self._is_image_library_page()
+        panels_menu = getattr(self, "_window_panels_menu", None)
+        if panels_menu is not None:
+            panels_menu.menuAction().setVisible(not image_library)
+        if image_library:
+            self._apply_image_library_layout()
+            return
+        grade_sets = getattr(self, "dock_grade_sets", None)
+        if grade_sets is not None:
+            grade_sets_available = self.current_page == "Color" or (
+                image_workflow and self.current_page == "Deliver")
+            grade_sets.toggleViewAction().setEnabled(grade_sets_available)
+            if not grade_sets_available:
+                grade_sets.hide()
+        if image_workflow and self.current_page == "Deliver":
+            self._apply_image_deliver_layout()
+            return
         activate_deliver = getattr(getattr(self, "deliver_page", None), "set_workspace_active", None)
         if callable(activate_deliver):
             activate_deliver(self.current_page == "Deliver")
@@ -4292,6 +4525,16 @@ class DockLayoutMixin:
         queue is now inside DeliverWorkspace, so enforce a usable minimum and
         reapply the intended right-side geometry after restoreState() settles.
         """
+        if self._current_work_mode() == "image":
+            if self.current_page == "Deliver":
+                self._enforce_page_dock_visibility()
+                if getattr(self, "_image_deliver_default_size_pending", False):
+                    self._image_deliver_default_size_pending = False
+                    grade_sets = getattr(self, "dock_grade_sets", None)
+                    if grade_sets is not None:
+                        # Factory states are captured before the window reaches its restored size.
+                        self._resize_image_deliver_docks(grade_sets, self.dock_export)
+            return
         dock = getattr(self, "dock_deliver", None)
         if dock is None:
             return

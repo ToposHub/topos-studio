@@ -60,6 +60,7 @@ class ConfigManager:
         "transition_preview_size": "medium",
         "accent_color": "#ff8800",
         "show_panel_titles": True,
+        "grade_set_show_filenames": False,
         "compact_mode": False,
         "zoom_speed": 100,
         # Color Management

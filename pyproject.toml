@@ -106,6 +106,7 @@ include = ["src*", "apps*"]
 exclude = ["src.app.integrations.file_explorer*"]
 
 [tool.setuptools.package-data]
+"src.features.color.core" = ["data/primary_calibration_rec709_g24_v1.npz"]
 "src.features.files" = ["builtin_manifests/*/*.json"]
 "src.features.mixer" = ["assets/*.json", "locales/*.json"]
 "src.features.mixer.effects" = ["*.json"]

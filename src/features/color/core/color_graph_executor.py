@@ -204,6 +204,18 @@ class ColorGraphExecutor:
             except Exception:  # noqa: BLE001
                 pass
         self._white_mattes = {}
+        curves_textures = getattr(self, "_curves_tex_cache", {})
+        for texture in curves_textures.values():
+            texture.release()
+            released += 1
+        curves_textures.clear()
+        self._calibrated_curves_bytes = None
+        calibrated_hsl_tex = getattr(self, "_calibrated_hsl_tex", None)
+        if calibrated_hsl_tex is not None:
+            calibrated_hsl_tex.release()
+            self._calibrated_hsl_tex = None
+            self._calibrated_hsl_bytes = None
+            released += 1
         return released
 
     def pooled_texture_count(self) -> int:
@@ -1018,12 +1030,15 @@ class ColorGraphExecutor:
                 prog["u_curves_tex"].value = unit
                 unit += 1
             if "u_hsl_curve_tex" in prog:
-                tex = self._default_hsl_texture()
+                hsl_lut = layer.get("hsl_curve_lut") if isinstance(layer, Mapping) else None
+                tex = self._hsl_texture(hsl_lut)
                 tex.use(unit)
                 prog["u_hsl_curve_tex"].value = unit
         return bind
 
     def _curves_texture(self, layer, node_id: str) -> Any:
+        from src.features.color.core.curves_calibration import is_calibrated_curves_lut
+
         lut = layer.get("curves_lut") if isinstance(layer, Mapping) else None
         cache = getattr(self, "_curves_tex_cache", None)
         if cache is None:
@@ -1038,15 +1053,45 @@ class ColorGraphExecutor:
                 tex.filter = (self.ctx.LINEAR, self.ctx.LINEAR)
                 cache["identity"] = tex
             return cache["identity"]
-        arr = np.ascontiguousarray(
-            np.asarray(lut, dtype=np.float32).reshape(256, 1, 3)).tobytes()
-        key = hash(arr)
+        samples = np.asarray(lut, dtype=np.float32)
+        pixels = samples.reshape(-1, 3)
+        data = np.ascontiguousarray(pixels).tobytes()
+        if is_calibrated_curves_lut(samples):
+            texture = cache.get("calibrated")
+            if texture is None:
+                texture = self.ctx.texture((len(pixels), 1), components=3, dtype="f4", data=data)
+                texture.filter = (self.ctx.LINEAR, self.ctx.LINEAR)
+                texture.repeat_x = texture.repeat_y = False
+                cache["calibrated"] = texture
+            elif self._calibrated_curves_bytes != data:
+                texture.write(data)
+            self._calibrated_curves_bytes = data
+            return texture
+        key = hash(data)
         if key not in cache:
-            tex = self.ctx.texture((256, 1), components=3, dtype="f4",
-                                   data=arr)
+            tex = self.ctx.texture((len(pixels), 1), components=3, dtype="f4",
+                                   data=data)
             tex.filter = (self.ctx.LINEAR, self.ctx.LINEAR)
             cache[key] = tex
         return cache[key]
+
+    def _hsl_texture(self, lut: Any) -> Any:
+        from src.features.color.core.hsl_curve_calibration import is_calibrated_hsl_lut
+
+        samples = np.asarray(lut, dtype=np.float32)
+        if not is_calibrated_hsl_lut(samples):
+            return self._default_hsl_texture()
+        data = np.ascontiguousarray(samples.T).tobytes()
+        texture = getattr(self, "_calibrated_hsl_tex", None)
+        if texture is None:
+            texture = self.ctx.texture(samples.shape, components=1, dtype="f4", data=data)
+            texture.filter = (self.ctx.LINEAR, self.ctx.LINEAR)
+            texture.repeat_x = texture.repeat_y = False
+            self._calibrated_hsl_tex = texture
+        elif data != self._calibrated_hsl_bytes:
+            texture.write(data)
+        self._calibrated_hsl_bytes = data
+        return texture
 
     def _default_hsl_texture(self) -> Any:
         if getattr(self, "_hsl_tex", None) is None:
@@ -1101,7 +1146,8 @@ class ColorGraphExecutor:
 
         def _upload(prog: Any) -> None:
             values = composition_uniform_values(
-                layer, bindings=tuple(bindings), width=width, height=height)
+                layer, bindings=tuple(bindings), width=width, height=height,
+                grading_params_override=self.pipeline.bind_primary_calibration(prog, layer))
             upload_composition_uniforms(prog, values)
         return _upload
 

@@ -309,7 +309,7 @@ class ColorNodeOutputPreview(QObject):
         ctx = moderngl.create_standalone_context(require=330)
         try:
             executor = ColorGraphExecutor(ctx, pipeline=ShaderPipeline(ctx))
-            lut_cache: dict[str, Any] = {}
+            lut_cache: dict[str | tuple[str, bytes], Any] = {}
 
             def bind_aux(prog, layer, _cache=lut_cache):
                 _bind_aux_with_lut(ctx, prog, layer, _cache)
@@ -426,36 +426,37 @@ def _with_hsl_curve_lut(payload: dict) -> dict:
     缩略图看起来像没调过。
     """
     if payload.get("hsl_curve_lut") is None and payload.get("hsl_curve_data"):
+        from src.features.color.core.curves_calibration import curves_calibration_enabled
         from src.features.color.core.layer import build_hsl_curve_lut_from_data
         payload["hsl_curve_lut"] = build_hsl_curve_lut_from_data(
-            dict(payload["hsl_curve_data"]))
+            dict(payload["hsl_curve_data"]),
+            calibration_version=int(curves_calibration_enabled(payload.get("curves_edit"))),
+        )
     return payload
 
 
 def _curve_array(layer) -> np.ndarray:
-    """The layer's curve as ``(256, 3)`` in [0, 1]; a straight line when it has none."""
+    """Legacy RGB samples or the packed calibrated RGB and luminance response."""
     lut = layer.get("curves_lut") if isinstance(layer, Mapping) else None
     if lut is None:
         ramp = np.linspace(0.0, 1.0, 256, dtype=np.float32)
         return np.stack([ramp] * 3, axis=-1)
-    return np.asarray(lut, dtype=np.float32).reshape(256, 3)
+    return np.asarray(lut, dtype=np.float32).reshape(-1, 3)
 
 
 def _hsl_curve_array(layer) -> np.ndarray:
-    """The layer's six HSL curves as ``(256, 6)`` -- one texture row per sample
-    point, as the production renderer lays the (6, 256) LUT out; all defaults
-    (multipliers 1, hue shift 0) when it has none."""
+    """Lay out the six curves as columns with one row per HSL sample."""
     lut = layer.get("hsl_curve_lut") if isinstance(layer, Mapping) else None
     if lut is None:
         lut = np.ones((6, 256), dtype=np.float32)
         lut[1] = 0.0                                   # HueHue is a shift
-    return np.asarray(lut, dtype=np.float32).reshape(6, 256).T.copy()
+    return np.asarray(lut, dtype=np.float32).reshape(6, -1).T.copy()
 
 
 def _aux_texture(ctx, cache: dict, name: str, size: tuple, components: int, data: np.ndarray):
     """A float texture of ``data``, one per distinct content (the cache lives as long as the context)."""
     payload = np.ascontiguousarray(data, dtype=np.float32).tobytes()
-    key = f"{name}:{hash(payload)}"
+    key = (name, payload)
     tex = cache.get(key)
     if tex is None:
         tex = ctx.texture(size, components, data=payload, dtype="f4")
@@ -481,9 +482,11 @@ def _bind_aux_with_lut(ctx, prog, layer, cache: dict) -> None:
     """
     unit = 2
     mapping = layer if isinstance(layer, Mapping) else {}
+    curves = _curve_array(mapping)
+    hsl_curves = _hsl_curve_array(mapping)
     for name, size, components, data in (
-            ("u_curves_tex", (256, 1), 3, _curve_array(mapping)),
-            ("u_hsl_curve_tex", (6, 256), 1, _hsl_curve_array(mapping)),
+            ("u_curves_tex", (len(curves), 1), 3, curves),
+            ("u_hsl_curve_tex", (6, len(hsl_curves)), 1, hsl_curves),
             ("u_warper_tex", (2, 2), 2, np.zeros((2, 2, 2), dtype=np.float32))):
         if name in prog:
             _aux_texture(ctx, cache, name, size, components, data).use(unit)

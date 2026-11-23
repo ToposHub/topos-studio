@@ -1,0 +1,10 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[dnxhd @ 0x7fb6968604c0] Unsupported: variable ACT flag.
+qt.qpa.fonts: Populating font family aliases took 562 ms. Replace uses of missing font family "-apple-system" with one that exists to avoid this cost. 
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+2026-11-23 22:06:34.184 Python[41084:461382] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 22:06:34.184 Python[41084:461382] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+{"file": "4K_DNxHR 444 10bit.mov", "route": "libav", "submitted_fps": 18.028896707161046, "swapped_fps": 18.028896707161046, "qt_frames_fps": 0.0, "decode_ms": {"count": 102, "mean": 55.3788014412752, "p50": 51.04949449923879, "p95": 82.96070935248274, "max": 150.5406949981989}, "worker_mode": "texture", "errors": null}

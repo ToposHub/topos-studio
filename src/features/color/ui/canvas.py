@@ -5,10 +5,11 @@ from src.shared.i18n.i18n import I18N
 from src.shared.assets.icon_manager import (IconColors,
     icon_jump_start, icon_step_back, icon_play, icon_pause,
     icon_step_forward, icon_jump_end, icon_loop)
-from PyQt6.QtCore import Qt, QRectF, pyqtSignal, pyqtSlot, QPoint, QPointF, QLineF, QTimer, QSize
+from PyQt6.QtCore import Qt, QRectF, pyqtSignal, pyqtSlot, QPoint, QPointF, QLineF, QTimer, QSize, QMimeData
 from PyQt6.QtGui import (
     QPixmap, QImage, QPainter, QPen, QColor, QBrush, QPainterPath,
     QTransform, QPainterPathStroker, QKeySequence, QPolygonF, QResizeEvent,
+    QDragEnterEvent, QDragMoveEvent, QDropEvent,
 )
 from typing import Any, List, Tuple, Optional
 from src.features.color.ui.gl_viewport import GLCanvasViewport
@@ -3935,6 +3936,8 @@ class SAMPointItem(QGraphicsItem):
 
 
 class Canvas(QGraphicsView):
+    file_open_requested = pyqtSignal(str)
+    photos_dropped = pyqtSignal(list)
     scopes_requested = pyqtSignal()
     stroke_finished = pyqtSignal(list, tuple, int)
     mask_shape_changed = pyqtSignal(str, dict)
@@ -3969,11 +3972,69 @@ class Canvas(QGraphicsView):
     tracker_feature_selected = pyqtSignal(int)
     tracker_feature_inserted = pyqtSignal(float, float)
 
+    @staticmethod
+    def _dropped_media_path(mime: QMimeData) -> str | None:
+        """Accept one local image/project; decoding stays in the host service."""
+        if not mime.hasUrls():
+            return None
+        urls = mime.urls()
+        if len(urls) != 1 or not urls[0].isLocalFile():
+            return None
+        path = urls[0].toLocalFile()
+        from src.shared.media.format_registry import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+        if path and os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | {".topos"}:
+            return path
+        return None
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        self._accept_media_drag(event)
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        self._accept_media_drag(event)
+
+    def _accept_media_drag(self, event: QDragMoveEvent) -> None:
+        if self._dropped_photos(event.mimeData()):
+            self._accept_photo_copy(event)
+        elif self._dropped_media_path(event.mimeData()) is not None:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    @staticmethod
+    def _accept_photo_copy(event: QDropEvent) -> bool:
+        if not event.possibleActions() & Qt.DropAction.CopyAction:
+            event.ignore()
+            return False
+        event.setDropAction(Qt.DropAction.CopyAction)
+        event.accept()
+        return True
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        photos = self._dropped_photos(event.mimeData())
+        if photos:
+            if self._accept_photo_copy(event):
+                self.photos_dropped.emit(photos)
+            return
+        path = self._dropped_media_path(event.mimeData())
+        if path is None:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self.file_open_requested.emit(path)
+
+    def _dropped_photos(self, mime: QMimeData) -> list[str]:
+        if not self.grade_set_import_enabled:
+            return []
+        from src.shared.media.format_registry import is_image
+        paths = [url.toLocalFile() for url in mime.urls()]
+        return paths if all(is_image(path) for path in paths) else []
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.engine = None
         self.active_shape_id = None
-        self.setAcceptDrops(False)
+        self.grade_set_import_enabled = False
+        self.setAcceptDrops(True)
         
         # Remove frame border
         self.setFrameStyle(QGraphicsView.Shape.NoFrame)
@@ -3999,6 +4060,10 @@ class Canvas(QGraphicsView):
         # P4-2 SAFETY: Flag to detect render_pipeline calls during drawBackground
         # If render_pipeline is called while this flag is True, it's a bug
         self._in_draw_background = False
+        self._still_present_retry = QTimer(self)
+        self._still_present_retry.setSingleShot(True)
+        self._still_present_retry.setInterval(16)
+        self._still_present_retry.timeout.connect(self._retry_still_paint)
         
         self.gl_viewport = GLCanvasViewport()
         self.setViewport(self.gl_viewport)
@@ -4217,7 +4282,7 @@ class Canvas(QGraphicsView):
             return override
         return int(source_w), int(source_h)
 
-    def set_image(self, cv_image, is_new_source=False) -> None:
+    def set_image(self, cv_image, is_new_source=False, *, render: bool = True) -> None:
         if cv_image is None: return
         if self.engine and self.engine.img_full_original is not None:
             h, w = self.engine.img_full_original.shape[:2]
@@ -4246,7 +4311,7 @@ class Canvas(QGraphicsView):
         if not getattr(self, "_timeline_preview_active", False):
             self.pixmap_item.setVisible(False)
         if is_new_source:
-            self.fit_to_window()
+            self.fit_to_window(render=render)
             if self.viewport().width() <= 100:
                 self._needs_initial_fit = True
             # Sync menu states after loading new image
@@ -4254,7 +4319,7 @@ class Canvas(QGraphicsView):
                 self.viewport_menu.sync_menu_state()
         self._update_scene_pan_bounds()
         self._update_lod()
-        if self.engine:
+        if self.engine and render:
             self.engine.render_pipeline()
         self.viewport().update()
 
@@ -4408,7 +4473,7 @@ class Canvas(QGraphicsView):
         ):
             self.scene.setSceneRect(target)
 
-    def fit_to_window(self) -> None:
+    def fit_to_window(self, *, render: bool = True) -> None:
         if not self.logical_size: return
         view_rect = self.viewport().rect()
         if view_rect.width() <= 10 or view_rect.height() <= 10: return
@@ -4433,7 +4498,7 @@ class Canvas(QGraphicsView):
         else:
             self.centerOn(img_w / 2, img_h / 2)
             self._update_scene_pan_bounds()
-        if self._update_lod():
+        if self._update_lod() and render:
             if not self._refresh_video_frame_view():
                 if self.engine:
                     self.engine.render_pipeline(render_reason='viewport_refresh')
@@ -6696,6 +6761,12 @@ class Canvas(QGraphicsView):
         """
         return not bool(getattr(renderer, "video_texture_pending", False))
 
+    def _retry_still_paint(self) -> None:
+        engine = self.engine
+        if self.isVisible() and engine and engine.renderer and not getattr(engine, "_is_video_mode", False):
+            self.scene.invalidate(self.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer)
+            self.viewport().update()
+
     def drawBackground(self, painter, rect) -> None:
         # P4-2 SAFETY: drawBackground 必须只使用已完成的 front texture
         # 绝对禁止在此方法中调用 render_pipeline()，否则会形成：
@@ -6737,8 +6808,15 @@ class Canvas(QGraphicsView):
                         rotation_angle=self._crop_preview_angle,
                     )
                     if did_draw:
+                        if self._still_present_retry.isActive():
+                            self._still_present_retry.stop()
                         _diag_blit_tex = int(tex_id)
                         self._record_presented_preview_frame()
+                    elif (not getattr(self.engine, "_is_video_mode", False)
+                          and not self._still_present_retry.isActive()):
+                        # Scopes can hold the shared GL lock after frame_ready.
+                        # Retry displaying that frame even when no input arrives.
+                        self._still_present_retry.start()
                 else:
                     _diag_pending = bool(getattr(renderer, 'video_texture_pending', False))
                 painter.endNativePainting()

@@ -3,6 +3,8 @@ import os
 import logging
 from typing import Any, Dict, Optional, Tuple
 
+from src.features.color.core.primary_calibration import grade_uses_calibration
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -109,6 +111,8 @@ class GradingMath:
         The timeline LUT gate uses these unprotected responses to prove that
         the RGB-dependent dark-protection branch cannot run for any u8 input.
         """
+        if grade_uses_calibration({"grading_params": params}):
+            raise ValueError("Measured primary calibration cannot be evaluated as a per-channel prefix")
         res = color.copy()
         dt = res.dtype
 
@@ -198,6 +202,11 @@ class GradingMath:
         暗部保护 → 4.5 Offset → 4.6 Log 四轮 → 5/6/6.5/7 → 9/10 →
         11 Lum Mix。
         """
+        layer = {"grading_params": params}
+        if grade_uses_calibration(layer):
+            from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
+
+            return apply_layer_grading_cpu(color, layer, width=1, height=1)[0]
         # 0. 原始亮度（Lum Mix 用：把结果亮度向调色前回拉）
         luma_weights_in = np.array([0.299, 0.587, 0.114], dtype=color.dtype)
         luma_original = color @ luma_weights_in

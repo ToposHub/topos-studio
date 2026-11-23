@@ -431,10 +431,17 @@ CURVES_SOFTCLIP_SDR_CASES = [
         B={"low_clip": -0.2, "low_soft": 0.1,
            "high_clip": 1.2, "high_soft": 0.25})),
     ("clip_points_only", _csc_state(R={"low_clip": -0.05, "high_clip": 0.85})),
+    ("calibrated", {**_csc_state(R={"low_clip": 0.05, "low_soft": 0.1,
+                                   "high_clip": 0.9, "high_soft": 0.15},
+                                 B={"high_clip": 0.96}),
+                    "calibration_version": 1}),
 ]
 CURVES_SOFTCLIP_HDR_CASES = [
     ("hdr_knees", _csc_state(R={"low_clip": -0.1, "low_soft": 0.2,
                                 "high_clip": 0.95, "high_soft": 0.1})),
+    ("calibrated_hdr", {**_csc_state(R={"low_clip": -0.1, "low_soft": 0.2},
+                                     B={"high_clip": 0.93, "high_soft": 0.1}),
+                        "calibration_version": 1}),
 ]
 
 

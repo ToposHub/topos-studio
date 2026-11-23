@@ -323,7 +323,7 @@ class TestStructural:
                  body.index("graph_apply_curves("),
                  body.index("msl_apply_hsl_curves("),
                  body.index("msl_apply_soft_clip("),
-                 body.index("msl_apply_curves_soft_clip("),
+                 body.index("msl_apply_curves_soft_clip_profile("),
                  body.index("msl_apply_mixer("),
                  body.index("msl_apply_warper("),
                  body.index("msl_apply_3dlut("),
@@ -385,6 +385,33 @@ class TestStructural:
         assert any("fx/blur" in e for e in texture_layer_domain_errors(
             {"effects_params": {"blur_enabled": True,
                                 "blur_intensity": 5.0}}))
+
+    def test_resolve_primary_requires_compatible_graph(self) -> None:
+        assert not texture_layer_domain_errors({
+            "grading_params": {"primary_calibration_version": 0},
+        })
+        for version in (1, 99):
+            assert any("primary calibration" in error.lower() for error in
+                       texture_layer_domain_errors({
+                           "grading_params": {"primary_calibration_version": version},
+                       }))
+
+    def test_shared_definition_keeps_primary_calibration_in_execution_payload(self) -> None:
+        graph = _graph_for([_neutral_layer("Shared")])
+        node = next(item for item in graph.nodes if item.node_type == "corrector")
+        shared_graph = ColorGraphService().op_create_shared_definition(graph, node.node_id).graph
+        definition = shared_graph.shared_definitions[0]
+        shared_graph = _replace(
+            shared_graph,
+            shared_definitions=(_replace(
+                definition, params={"grade": {"primary_calibration_version": 1}},
+            ),),
+            nodes=tuple(_replace(item, params={}) if item.node_id == node.node_id else item
+                        for item in shared_graph.nodes),
+        )
+        payload = graph_node_layer_provider(shared_graph)(node.node_id)
+        assert payload["grading_params"]["primary_calibration_version"] == 1
+        assert any("primary calibration" in error for error in texture_layer_domain_errors(payload))
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +475,32 @@ class TestTextureGraphVsCpu:
         assert result.published
         _assert_dual(executor.read_output_rgba16f(result), cpu.output,
                      "curves")
+
+    @pytest.mark.parametrize("operator", ["yrgb", "hsl", "soft_clip"])
+    def test_resolve_calibrated_curves_match_cpu(self, metal_ctx, operator):
+        from src.features.color.core.curves_soft_clip import normalize_curves_soft_clip
+
+        layer = _neutral_layer(operator)
+        layer.curves_edit["calibration_version"] = 1
+        if operator == "yrgb":
+            layer.curves_data = {"M": [(0, 255), (127.5, 102), (255, 0)]}
+        elif operator == "hsl":
+            layer.hsl_curve_data = {"HueSat": [(127.5, 100.0)]}
+        else:
+            layer.curves_soft_clip = normalize_curves_soft_clip({
+                "calibration_version": 1,
+                "channels": {"G": {"low_soft": 0.15, "high_clip": 0.8}},
+            })
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        src = f02_patches(32)
+        result, cpu = _run_graph(metal_ctx, executor, _graph_for([layer]), src)
+        try:
+            assert result.published, result.diagnostic_message
+            assert not np.allclose(cpu.output, _quantized(src))
+            _assert_dual(executor.read_output_rgba16f(result), cpu.output, operator)
+        finally:
+            executor.release_revision(result.request_id)
+            executor.release_pool()
 
     def test_hsl_curves(self, metal_ctx):
         """HSL 曲线 vs MSL 同式移植（CPU oracle 是另一套近似，既有跨后端

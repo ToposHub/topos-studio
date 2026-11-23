@@ -1705,6 +1705,12 @@ class ColorGraphService:
                     params[param_key] = unfreeze_params(data)
                 elif legacy_key is not None:
                     legacy[legacy_key] = unfreeze_params(data)
+            if (("curves" in domains and payload.get("curves") is not None)
+                    or ("curves_edit" in domains and legacy.get("curves_data"))):
+                legacy.pop("curves_lut", None)
+            if (("hsl" in domains and payload.get("hsl") is not None)
+                    or ("curves_edit" in domains and legacy.get("hsl_curve_data"))):
+                legacy.pop("hsl_curve_lut", None)
             if "effects" in domains:
                 from src.features.color.core.effect_keyframes import remap_effect_tracks
                 if "keyframes" in domains and isinstance(params.get("grade_keyframes"), Mapping):

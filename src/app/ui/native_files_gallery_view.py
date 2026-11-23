@@ -8,6 +8,7 @@ from __future__ import annotations
 import heapq
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from PyQt6.QtCore import (
@@ -19,13 +20,20 @@ from PyQt6.QtWidgets import QApplication, QAbstractItemView, QStyle, QStyleOptio
 
 from src.features.files.contracts import Entry
 
-GALLERY_CAPTION_HEIGHT = 44
-GALLERY_ITEM_INSET = 6
-GALLERY_GAP = 8
 GALLERY_MARGIN = 8
 _BUCKET_HEIGHT = 256
 _LAYOUT_MODES = frozenset(("adaptive", "masonry", "grid"))
-_ENTRY_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+GALLERY_ENTRY_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+
+
+@dataclass(frozen=True)
+class GallerySpacing:
+    inset: int = 6
+    gap: int = 8
+    caption_height: int = 44
+
+
+DEFAULT_GALLERY_SPACING = GallerySpacing()
 
 
 def _bounded_ratio(value: float) -> float:
@@ -35,11 +43,13 @@ def _bounded_ratio(value: float) -> float:
 
 def gallery_rectangles(
     aspects: Sequence[float], width: int, thumbnail_size: int, mode: str,
+    *, spacing: GallerySpacing = DEFAULT_GALLERY_SPACING, adaptive_tail_scale: float = 1.0,
 ) -> tuple[list[QRect], int]:
     """Return document-space cells and height, preserving model row order.
 
     Adaptive rows are justified around a target image height; a short final row
-    remains at or below that height. Masonry uses equal-width shortest columns.
+    remains at the target unless it can be filled within the tail scale.
+    Masonry uses equal-width shortest columns.
     Grid uses equal square image areas. Every cell includes the caption/insets.
     """
     if mode not in _LAYOUT_MODES:
@@ -47,57 +57,67 @@ def gallery_rectangles(
     if not aspects:
         return [], 0
     ratios = [_bounded_ratio(float(ratio)) for ratio in aspects]
-    available = max(1, int(width) - 2 * GALLERY_MARGIN)
+    gap = spacing.gap
+    padding = 2 * spacing.inset
+    available = max(padding + 1, int(width) - 2 * GALLERY_MARGIN)
     target = max(32, int(thumbnail_size))
-    padding = 2 * GALLERY_ITEM_INSET
-    footer = padding + GALLERY_CAPTION_HEIGHT
+    footer = padding + spacing.caption_height
     cells: list[QRect] = []
     if mode == "adaptive":
         start = 0
         top = GALLERY_MARGIN
+        max_items = (available + gap) // (padding + gap + 1)
         while start < len(ratios):
             end = start
             summed = 0.0
-            while end < len(ratios):
+            limit = min(len(ratios), start + max_items)
+            while end < limit:
                 summed += ratios[end]
                 end += 1
                 count = end - start
-                fit = max(1.0, (available - count * padding - (count - 1) * GALLERY_GAP) / summed)
+                fit = (available - count * padding - (count - 1) * gap) / summed
                 if fit <= target:
                     if count > 1:
-                        previous = (available - (count - 1) * padding - (count - 2) * GALLERY_GAP) / (summed - ratios[end - 1])
+                        previous = ((available - (count - 1) * padding - (count - 2) * gap)
+                                    / (summed - ratios[end - 1]))
                         if abs(previous - target) < abs(fit - target):
                             end -= 1
                             summed -= ratios[end]
                     break
             count = end - start
-            fit = max(1.0, (available - count * padding - (count - 1) * GALLERY_GAP) / summed)
-            last = end == len(ratios)
-            image_height = max(1, round(min(target, fit) if last else fit))
-            remaining = available - count * padding - (count - 1) * GALLERY_GAP
+            image_space = available - count * padding - (count - 1) * gap
+            fit = image_space / summed
+            justify = end < len(ratios) or fit <= target * adaptive_tail_scale
+            image_height = max(1, round(fit if justify else target))
+            image_pixels = image_space if justify else max(count, round(summed * image_height))
+            width_per_ratio = image_pixels / summed
             left = GALLERY_MARGIN
-            for offset, ratio in enumerate(ratios[start:end]):
-                image_width = max(1, round(ratio * image_height))
-                # Fill rounding differences only for a justified row, not its short tail.
-                if not last and offset == count - 1:
-                    image_width = max(1, remaining)
-                image_width = min(image_width, max(1, width - GALLERY_MARGIN - left - padding))
+            ideal_edge = 0.0
+            edge = 0
+            for item_number, ratio in enumerate(ratios[start:end], 1):
+                ideal_edge += ratio * width_per_ratio
+                # Allocate the rounding remainder across the row and leave each cell one pixel.
+                next_edge = min(max(edge + 1, round(ideal_edge)), image_pixels - (count - item_number))
+                image_width = next_edge - edge
                 cells.append(QRect(left, top, image_width + padding, image_height + footer))
-                remaining -= image_width
-                left += image_width + padding + GALLERY_GAP
-            top += image_height + footer + GALLERY_GAP
+                left += image_width + padding + gap
+                edge = next_edge
+            top += image_height + footer + gap
             start = end
     else:
-        columns = max(1, round((available + GALLERY_GAP) / (target + padding + GALLERY_GAP)))
-        column_width = max(1, (available - (columns - 1) * GALLERY_GAP) // columns)
+        columns = max(1, round((available + gap) / (target + padding + gap)))
+        usable = available - (columns - 1) * gap
+        column_width = usable // columns
         image_width = max(1, column_width - padding)
         if mode == "grid":
             row_height = image_width + footer
             for row in range(len(ratios)):
                 column = row % columns
-                cells.append(QRect(GALLERY_MARGIN + column * (column_width + GALLERY_GAP),
-                                   GALLERY_MARGIN + row // columns * (row_height + GALLERY_GAP),
-                                   column_width, row_height))
+                edge = column * usable // columns
+                next_edge = (column + 1) * usable // columns
+                cells.append(QRect(GALLERY_MARGIN + column * gap + edge,
+                                   GALLERY_MARGIN + row // columns * (row_height + gap),
+                                   next_edge - edge, row_height))
         else:
             heights = [(GALLERY_MARGIN, column) for column in range(columns)]
             heapq.heapify(heights)
@@ -105,17 +125,20 @@ def gallery_rectangles(
                 top, column = heapq.heappop(heights)
                 image_height = max(1, min(target * 4, round(image_width / ratio)))
                 height = image_height + footer
-                cells.append(QRect(GALLERY_MARGIN + column * (column_width + GALLERY_GAP),
+                cells.append(QRect(GALLERY_MARGIN + column * (column_width + gap),
                                    top, column_width, height))
-                heapq.heappush(heights, (top + height + GALLERY_GAP, column))
+                heapq.heappush(heights, (top + height + gap, column))
     return cells, max(cell.bottom() + 1 for cell in cells) + GALLERY_MARGIN
 
 
 class FilesGalleryView(QAbstractItemView):
     """Three gallery layouts sharing one Qt model and selection model."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, spacing: GallerySpacing = DEFAULT_GALLERY_SPACING,
+                 adaptive_tail_scale: float = 1.0) -> None:
         super().__init__(parent)
+        self._spacing = spacing
+        self._adaptive_tail_scale = adaptive_tail_scale
         self._mode = "adaptive"
         self._thumbnail_size = 180
         self._rectangles: list[QRect] = []
@@ -123,6 +146,7 @@ class FilesGalleryView(QAbstractItemView):
         self._path_rows: dict[str, int] = {}
         self._known_aspect_paths: set[str] = set()
         self._model_aspects: list[float | None] = []
+        self._rated_entries: list[tuple[int, Entry]] = []
         self._snapshot_dirty = True
         self._aspect_hints: dict[str, float] = {}
         self._buckets: dict[int, list[int]] = {}
@@ -202,9 +226,15 @@ class FilesGalleryView(QAbstractItemView):
     def thumbnailSize(self) -> int:
         return self._thumbnail_size
 
+    def setGallerySpacing(self, spacing: GallerySpacing) -> None:
+        if spacing != self._spacing:
+            self._stop_rubber_selection()
+            self._spacing = spacing
+            self.doItemsLayout()
+
     def gridSize(self) -> QSize:
-        return QSize(self._thumbnail_size + 2 * GALLERY_ITEM_INSET,
-                     self._thumbnail_size + 2 * GALLERY_ITEM_INSET + GALLERY_CAPTION_HEIGHT)
+        side = self._thumbnail_size + 2 * self._spacing.inset
+        return QSize(side, side + self._spacing.caption_height)
 
     def setAspectRatio(self, path: str, ratio: float) -> None:
         if not math.isfinite(ratio) or ratio <= 0.0:
@@ -253,7 +283,7 @@ class FilesGalleryView(QAbstractItemView):
     def _ensure_layout(self) -> None:
         model = self.model()
         count = model.rowCount(self.rootIndex()) if model is not None else 0
-        if count != len(self._rectangles):
+        if not self._laying_out and (self._snapshot_dirty or count != len(self._rectangles)):
             self.doItemsLayout()
 
     def _rebuild_layout(self) -> None:
@@ -269,11 +299,14 @@ class FilesGalleryView(QAbstractItemView):
             if self._snapshot_dirty or count != len(self._paths):
                 paths: list[str] = []
                 model_aspects: list[float | None] = []
+                rated_entries: list[tuple[int, Entry]] = []
                 known: set[str] = set()
                 for row in range(count):
-                    entry = model.index(row, 0, self.rootIndex()).data(_ENTRY_ROLE)
+                    entry = model.index(row, 0, self.rootIndex()).data(GALLERY_ENTRY_ROLE)
                     if isinstance(entry, Entry):
                         path = entry.path
+                        if entry.user.rating:
+                            rated_entries.append((row, entry))
                         width, height = entry.technical.width, entry.technical.height
                         if width and height and width > 0 and height > 0:
                             ratio = width / height
@@ -288,12 +321,15 @@ class FilesGalleryView(QAbstractItemView):
                 self._path_rows = {path: row for row, path in enumerate(paths)}
                 self._known_aspect_paths = known
                 self._model_aspects = model_aspects
+                self._rated_entries = rated_entries
                 self._snapshot_dirty = False
             aspects = [ratio if ratio is not None else self._aspect_hints.get(path, 1.0)
                        for path, ratio in zip(self._paths, self._model_aspects)]
             for _ in range(2):
                 width = self.viewport().width()
-                rectangles, content_height = gallery_rectangles(aspects, width, self._thumbnail_size, self._mode)
+                rectangles, content_height = gallery_rectangles(
+                    aspects, width, self._thumbnail_size, self._mode,
+                    spacing=self._spacing, adaptive_tail_scale=self._adaptive_tail_scale)
                 buckets: dict[int, list[int]] = {}
                 for row, rect in enumerate(rectangles):
                     for bucket in range(rect.top() // _BUCKET_HEIGHT, rect.bottom() // _BUCKET_HEIGHT + 1):
@@ -307,11 +343,16 @@ class FilesGalleryView(QAbstractItemView):
                 bar.setRange(0, max(0, self._content_height - self.viewport().height()))
                 if self.viewport().width() == width:
                     break
+            update_rating_layout = getattr(self.itemDelegate(), "update_rating_layout", None)
+            if callable(update_rating_layout):
+                update_rating_layout(self._rated_entries, self._rectangles, self.font())
             if self._anchor is not None:
                 path, offset = self._anchor
                 row = self._path_rows.get(path)
                 self.verticalScrollBar().setValue(self._rectangles[row].top() - offset if row is not None else 0)
             self._anchor = None
+            if self.state() == QAbstractItemView.State.EditingState:
+                self.updateEditorGeometries()
         finally:
             self._laying_out = False
         self.viewport().update()
@@ -504,7 +545,8 @@ class FilesGalleryView(QAbstractItemView):
         self._rubber_active = False
         self._rubber_base_rows = set()
         self._rubber_timer.stop()
-        self.setState(QAbstractItemView.State.NoState)
+        if self.state() == QAbstractItemView.State.DragSelectingState:
+            self.setState(QAbstractItemView.State.NoState)
         self.viewport().update()
 
     def cancelSelectionDrag(self) -> bool:
@@ -648,4 +690,6 @@ class FilesGalleryView(QAbstractItemView):
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         del dx, dy
+        if not self._laying_out and self.state() == QAbstractItemView.State.EditingState:
+            self.updateEditorGeometries()
         self.viewport().update()

@@ -1,0 +1,46 @@
+[
+  {
+    "avsync" : -1.4362691749814083e-07,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999986,
+    "file" : "2K_prores422HQ.mov",
+    "frame-drop-count" : 1,
+    "heartbeat_interval_ms" : {
+      "max" : 79.596277999371523,
+      "mean" : 22.338035014915626,
+      "p95" : 43.99210699921241
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0008164859973476,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33324263735096127,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 101.73458300050697,
+    "renderer_interval_ms" : {
+      "max" : 44.823298001574585,
+      "mean" : 40.416523567605388,
+      "p95" : 43.50412300118478
+    },
+    "renderer_submissions_fps" : 24.993197801322093,
+    "time-pos" : 3.1600000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      3600,
+      1900
+    ]
+  }
+]

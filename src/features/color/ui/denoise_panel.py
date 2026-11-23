@@ -1,10 +1,13 @@
+from copy import deepcopy
+import math
+import os
 from typing import Dict, Any, Optional, Tuple, Callable
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QLabel, QComboBox, QPushButton, QCheckBox,
-                             QSizePolicy)
+                             QSizePolicy, QGroupBox, QToolButton)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
 from src.shared.i18n.i18n import I18N
-from src.features.color.core.denoise_engine import DenoiseEngine
+from src.features.color.core.denoise_engine import DenoiseEngine, get_model_tile_config
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
@@ -32,27 +35,21 @@ _SPATIAL_DEFAULTS = SpatialParams()
 
 
 class DenoisePanel(QWidget):
-    """降噪面板 — 达芬奇 Motion Effects 式两栏视频降噪。
+    """图片使用经典/AI 降噪，视频使用 Motion Effects 式时域/空域两栏。
 
-    2026-11 重设计：
-    - 经典/AI（图片烘焙式）降噪从 UI 移除：``DenoiseEngine`` 与外部信号
-      接线保留，``denoise_requested`` 不再发射，``set_params`` /
-      ``set_baked_state`` 保留为兼容空操作（旧工程恢复路径安全跳过）。
-    - 面板唯一模式为视频降噪（非破坏、实时、参数直发渲染器）：
-      左栏时域（Frames 下拉 0-3，0 = 关闭且整列变灰，达芬奇行为），
-      右栏空域（节标题 ToggleSwitch 启用）。
-    - 连续数值参数沿用 ParamSliderRow（滑杆 + DragValue 数值框），
-      枚举参数用 ChevronComboBox；参数变化经 16ms 节流直发渲染器。
+    图片模式复用已有 DenoiseEngine 和宿主的 source-bake 提交入口，不
+    创建视频控件。隐藏的视频参数仍可被无损恢复和读取，不参与图片
+    UI 的重置或信号发射。视频布局及其 16ms 参数节流保持原有行为。
 
     Signals:
-        denoise_requested: 兼容保留，UI 移除烘焙模式后不再发射。
+        denoise_requested: 图片经典/AI 降噪请求，交给宿主异步处理。
         reset_requested: 请求清除降噪烘焙状态（全部重置时发射）。
         video_denoise_changed: 携带 VideoDenoiseParams.to_dict()，实时下发。
         video_history_reset_requested: 请求重置时域累积历史。
         video_debug_overlay_toggled: 运动置信度调试叠加开关。
     """
 
-    denoise_requested = pyqtSignal(str, dict)  # mode, params（兼容保留，不再发射）
+    denoise_requested = pyqtSignal(str, dict)  # mode, params
     reset_requested = pyqtSignal()
     # M5: 视频降噪（非破坏、实时调整），携带 VideoDenoiseParams.to_dict()
     video_denoise_changed = pyqtSignal(dict)
@@ -60,9 +57,18 @@ class DenoisePanel(QWidget):
     # M7: 运动置信度调试叠加（video_denoise_debug_overlay）
     video_debug_overlay_toggled = pyqtSignal(bool)
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, *, image_mode: bool = False) -> None:
         super().__init__(parent)
+        self.image_mode = image_mode
+        self._stored_video_params = VideoDenoiseParams().to_dict()
         self.engine = DenoiseEngine()
+        self._image_request_active = False
+        self._image_busy_timer = QTimer(self)
+        self._image_busy_timer.setInterval(25)
+        self._image_busy_timer.timeout.connect(self._poll_image_processing)
+        if image_mode:
+            self.engine.processing_finished.connect(self._on_image_processing_finished)
+            self.engine.error_occurred.connect(self._on_image_processing_finished)
         self._is_interacting = False
         self._video_updating = False
         # AUD-25403: 恢复窗口防递归状态锁（经典/AI UI 已移除，保留供
@@ -86,6 +92,9 @@ class DenoisePanel(QWidget):
 
     def init_ui(self) -> None:
         """初始化 UI 布局（达芬奇 Motion Effects 两栏式）。"""
+        if self.image_mode:
+            self._init_image_ui()
+            return
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(8, 6, 8, 6)
         main_layout.setSpacing(4)
@@ -141,6 +150,177 @@ class DenoisePanel(QWidget):
 
         self.setMinimumHeight(285)
         self.setMinimumWidth(460)
+
+    def _init_image_ui(self) -> None:
+        """Expose only the still-image backends that DenoiseEngine implements."""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
+        header = QHBoxLayout()
+        self.mode_combo = ChevronComboBox()
+        self.mode_combo.addItem(I18N.tr("denoise.classic", "Classic"), "Basic")
+        self.mode_combo.addItem(I18N.tr("denoise.ai", "AI Denoise"), "AI")
+        header.addWidget(self.mode_combo)
+        header.addStretch()
+        self.reset_btn = self._make_section_reset_btn(
+            I18N.tr("denoise.reset_tooltip", "Reset Denoise"), self.reset_defaults)
+        header.addWidget(self.reset_btn)
+        layout.addLayout(header)
+
+        self.classic_group = QGroupBox(I18N.tr("denoise.classic", "Classic"))
+        classic = QVBoxLayout(self.classic_group)
+        self.luma_control = self._create_row(
+            I18N.tr("denoise.luminance", "Luminance"), 0.0, 1.0, 0.05, 0.01)
+        self.color_control = self._create_row(
+            I18N.tr("denoise.color", "Color"), 0.0, 1.0, 0.1, 0.01)
+        classic.addWidget(self.luma_control)
+        classic.addWidget(self.color_control)
+        layout.addWidget(self.classic_group)
+
+        self.ai_group = QGroupBox(I18N.tr("denoise.ai", "AI Denoise"))
+        ai = QVBoxLayout(self.ai_group)
+        self.model_control = self.create_labeled_combo(I18N.tr("denoise.model", "Model:"), [])
+        ai.addLayout(self.model_control["layout"])
+        self.model_status = QLabel()
+        self.model_status.setWordWrap(True)
+        ai.addWidget(self.model_status)
+        self.blend_control = self._create_row(
+            I18N.tr("denoise.blend", "Blend"), 0.0, 1.0, 1.0, 0.01)
+        ai.addWidget(self.blend_control)
+        self.advanced_toggle = QToolButton()
+        self.advanced_toggle.setText(I18N.tr("denoise.tiling", "Tiling Options"))
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        ai.addWidget(self.advanced_toggle)
+        self.tiling_group = QWidget()
+        tiling = QVBoxLayout(self.tiling_group)
+        self.auto_tiling_combo = self.create_labeled_combo(
+            I18N.tr("denoise.auto_tile", "Auto-Tile:"),
+            [I18N.tr("denoise.on", "On"), I18N.tr("denoise.off", "Off")])
+        self.tile_size_control = self.create_labeled_combo(
+            I18N.tr("denoise.tile_size", "Tile Size:"), ["256", "512", "1024", "2048"])
+        self.overlap_control = self.create_labeled_combo(
+            I18N.tr("denoise.overlap", "Overlap:"), ["16", "32", "64", "128", "256", "384"])
+        self.tile_size_control["combo"].setCurrentText("512")
+        self.overlap_control["combo"].setCurrentText("64")
+        for control in (self.auto_tiling_combo, self.tile_size_control, self.overlap_control):
+            tiling.addLayout(control["layout"])
+        ai.addWidget(self.tiling_group)
+        self.tiling_group.hide()
+        self.advanced_toggle.toggled.connect(self._toggle_image_advanced)
+        layout.addWidget(self.ai_group)
+        self.apply_btn = QPushButton(I18N.tr("denoise.apply", "Apply Denoise"))
+        self.apply_btn.setObjectName("gradingApplyBtn")
+        self.apply_btn.clicked.connect(self.on_apply_clicked)
+        layout.addWidget(self.apply_btn)
+        layout.addStretch()
+        self.mode_combo.currentIndexChanged.connect(self._update_image_controls)
+        self.model_control["combo"].currentIndexChanged.connect(self._on_image_model_changed)
+        self.auto_tiling_combo["combo"].currentIndexChanged.connect(self._on_image_model_changed)
+        self.refresh_models()
+        self._update_image_controls()
+        self.setMinimumHeight(220)
+        self.setMinimumWidth(280)
+
+    def _toggle_image_advanced(self, checked: bool) -> None:
+        self.tiling_group.setVisible(checked)
+        self.advanced_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow)
+
+    def _update_image_controls(self, *_args: Any) -> None:
+        if self._restoring_params:
+            return
+        ai_mode = self.mode_combo.currentData() == "AI"
+        self.classic_group.setVisible(not ai_mode)
+        self.ai_group.setVisible(ai_mode)
+        busy = self._image_request_active or self.engine.is_processing()
+        for control in (self.reset_btn, self.mode_combo, self.classic_group, self.ai_group):
+            control.setEnabled(not busy)
+        model_ready = bool(self.model_control["combo"].currentData())
+        self.apply_btn.setEnabled(not busy and (not ai_mode or model_ready))
+        if busy and not self._image_busy_timer.isActive():
+            self._image_busy_timer.start()
+        elif not busy:
+            self._image_busy_timer.stop()
+
+    def _on_image_processing_finished(self, *_args: Any) -> None:
+        """Completion can arrive just before QThread exits; keep that gap locked."""
+        self._image_request_active = False
+        self._update_image_controls()
+
+    def _poll_image_processing(self) -> None:
+        """Observe worker shutdown without blocking the UI thread."""
+        if not self.image_mode or self.engine.is_processing():
+            return
+        self._image_request_active = False
+        self._update_image_controls()
+
+    def _on_image_model_changed(self, *_args: Any) -> None:
+        if self._restoring_params:
+            return
+        name = self.model_control["combo"].currentData()
+        if name and self.auto_tiling_combo["combo"].currentIndex() == 0:
+            defaults = get_model_tile_config(str(name))
+            self.tile_size_control["combo"].setCurrentText(str(defaults["tile_size"]))
+            self.overlap_control["combo"].setCurrentText(str(defaults["overlap"]))
+        self._update_image_controls()
+
+    def refresh_models(self) -> None:
+        """Discover installed models; a missing model never starts inference."""
+        if not self.image_mode:
+            return
+        combo = self.model_control["combo"]
+        previous = combo.currentData()
+        blocked = combo.blockSignals(True)
+        try:
+            combo.clear()
+            models = self.engine.get_available_models()
+            for name in models:
+                combo.addItem(name, name)
+            if not models:
+                combo.addItem(I18N.tr("denoise.no_models", "No denoise model installed"), None)
+            elif previous in models:
+                combo.setCurrentIndex(models.index(previous))
+        finally:
+            combo.blockSignals(blocked)
+        self.model_status.setText("" if models else I18N.tr(
+            "denoise.model_missing", "Install an ONNX denoise model in {directory} to use AI Denoise.").format(
+                directory=self.engine.model_dir))
+        self._on_image_model_changed()
+
+    def on_apply_clicked(self) -> None:
+        """Emit a still-image request; video parameters are never involved."""
+        if not self.image_mode or self._restoring_params:
+            return
+        if self._image_request_active or self.engine.is_processing():
+            self._update_image_controls()
+            return
+        mode = self.mode_combo.currentData()
+        if mode == "Basic":
+            params = {"luma_strength": self.luma_control.value(),
+                      "color_strength": self.color_control.value()}
+        else:
+            model = self.model_control["combo"].currentData()
+            if not model or not os.path.isfile(os.path.join(self.engine.model_dir, model)):
+                self.refresh_models()
+                return
+            tile_size = int(self.tile_size_control["combo"].currentText())
+            overlap = int(self.overlap_control["combo"].currentText())
+            if overlap >= tile_size:
+                self.overlap_control["combo"].setCurrentText("64")
+                overlap = 64
+            params = {"model_path": os.path.join(self.engine.model_dir, model),
+                      "blend": self.blend_control.value(),
+                      "use_tiling": self.auto_tiling_combo["combo"].currentIndex() == 0,
+                      "tile_size": tile_size, "overlap": overlap}
+        # Lock reset before dispatch: it must not restore the source while an
+        # earlier worker is still allowed to commit its bake into that source.
+        self._image_request_active = True
+        self._update_image_controls()
+        self.denoise_requested.emit(str(mode), params)
+        self._image_request_active = self.engine.is_processing()
+        self._update_image_controls()
 
     def _build_temporal_column(self) -> QWidget:
         """左栏：时域降噪（Frames 0=关闭，达芬奇行为）。"""
@@ -431,6 +611,8 @@ class DenoisePanel(QWidget):
 
     def connect_signals(self) -> None:
         """连接内部信号（视频降噪参数实时直发渲染器）。"""
+        if self.image_mode:
+            return
         # 达芬奇式亮度/色度链接：先于通用发参连接，保证同一 tick 内
         # 目标行已同步、收集到的参数两侧一致
         self.temporal_luma.valueChanged.connect(
@@ -485,6 +667,8 @@ class DenoisePanel(QWidget):
         只是变灰且不可交互。ParamSliderRow.setEnabled 会同步滑杆与
         数值框并切换标签/数值格的暗淡样式。
         """
+        if self.image_mode:
+            return
         temporal_on = self.temporal_frames['combo'].currentIndex() > 0
         for widget in (self.temporal_motion['combo'], self.temporal_luma,
                        self.temporal_chroma, self.temporal_threshold,
@@ -507,6 +691,8 @@ class DenoisePanel(QWidget):
 
     def _collect_video_params(self) -> VideoDenoiseParams:
         """从控件收集当前视频降噪参数（发射与项目保存共用单一来源）。"""
+        if self.image_mode:
+            return VideoDenoiseParams.from_dict(self._stored_video_params)
         motion_map = ("fast", "balanced", "accurate")
         mode_map = ("fast", "better", "enhanced")
         # Frames 下拉 0-3：0 = 关闭（enabled=False）；开启时帧深即档位值
@@ -539,7 +725,7 @@ class DenoisePanel(QWidget):
         渲染器参数变化会自动重置时域历史，直发（每个拖动 tick 一次）
         会反复重置历史并造成渲染风暴（AUD-25401）。
         """
-        if self._video_updating:
+        if self._video_updating or self.image_mode:
             return
         self._pending_video_params = self._collect_video_params().to_dict()
         if not self._video_param_timer.isActive():
@@ -547,7 +733,7 @@ class DenoisePanel(QWidget):
 
     def _emit_pending_video_params(self) -> None:
         """发射节流窗口内最后一次收集的参数（定时器到期）。"""
-        if self._video_updating:
+        if self._video_updating or self.image_mode:
             return
         if self._pending_video_params is not None:
             pending = self._pending_video_params
@@ -629,30 +815,67 @@ class DenoisePanel(QWidget):
 
     def reset_defaults(self) -> None:
         """重置全部视频降噪参数到默认值（时域/空域均关闭）。"""
+        if self.image_mode:
+            if self._image_request_active or self.engine.is_processing():
+                self._update_image_controls()
+                return
+            self.set_params({"mode": "Basic", "luma_strength": 0.05,
+                             "color_strength": 0.1, "blend": 1.0,
+                             "use_tiling": True, "tile_size": 512, "overlap": 64})
+            self.set_baked_state(False)
+            self.reset_requested.emit()
+            return
         self._run_guarded(self._apply_all_defaults)
         self._update_enabled_states()
         self.reset_requested.emit()
 
     # ==================================================================
-    # 兼容保留 API（经典/AI 烘焙降噪 UI 已移除）
+    # 图片参数恢复 / 已应用状态；视频继续兼容忽略旧图片参数
     # ==================================================================
 
     def set_params(self, params: Dict[str, Any]) -> None:
-        """兼容空操作：经典/AI 烘焙降噪 UI 已随 2026-11 重设计移除。
-
-        旧工程恢复路径仍可能携带 Basic/AI 降噪参数键；面板不再展示或
-        消费这些键，安全忽略以保证恢复流程不中断。视频降噪参数走
-        :meth:`set_video_params_dict`。
-        """
-        return
+        """Restore image settings silently without dispatching a processing job."""
+        if not self.image_mode or not isinstance(params, dict):
+            return
+        combos = (self.mode_combo, self.model_control["combo"],
+                  self.auto_tiling_combo["combo"], self.tile_size_control["combo"],
+                  self.overlap_control["combo"])
+        blocked = [combo.blockSignals(True) for combo in combos]
+        self._restoring_params = True
+        try:
+            if params.get("mode") in ("Basic", "AI"):
+                self.mode_combo.setCurrentIndex(0 if params["mode"] == "Basic" else 1)
+            for key, row in (("luma_strength", self.luma_control),
+                             ("color_strength", self.color_control),
+                             ("blend", self.blend_control)):
+                value = params.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                    row.setValue(float(value))
+            if isinstance(params.get("use_tiling"), bool):
+                self.auto_tiling_combo["combo"].setCurrentIndex(0 if params["use_tiling"] else 1)
+            for key, control, fallback in (("tile_size", self.tile_size_control, "512"),
+                                           ("overlap", self.overlap_control, "64")):
+                if key in params:
+                    text = str(params[key])
+                    combo = control["combo"]
+                    combo.setCurrentText(text if combo.findText(text) >= 0 else fallback)
+            model_path = params.get("model_path")
+            if isinstance(model_path, str):
+                index = self.model_control["combo"].findData(os.path.basename(model_path))
+                if index >= 0:
+                    self.model_control["combo"].setCurrentIndex(index)
+        finally:
+            self._restoring_params = False
+            for combo, previous in zip(combos, blocked):
+                combo.blockSignals(previous)
+        self._update_image_controls()
 
     def set_baked_state(self, is_baked: bool) -> None:
-        """兼容空操作：烘焙降噪状态指示（Apply 按钮）已随 UI 移除删除。
-
-        加载带历史烘焙（source_bake_type == "denoise"）的工程时由
-        file_controller 调用；面板已无烘焙 UI，忽略即可。
-        """
-        return
+        """Reflect the existing source-bake state on the still-image Apply button."""
+        if self.image_mode:
+            self.apply_btn.setText(I18N.tr("denoise.applied", "Denoise Applied") if is_baked
+                                   else I18N.tr("denoise.apply", "Apply Denoise"))
+            self._update_image_controls()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -666,6 +889,8 @@ class DenoisePanel(QWidget):
 
     def get_video_params_dict(self) -> Dict[str, Any]:
         """返回当前面板的视频降噪参数（用于项目保存）。"""
+        if self.image_mode:
+            return deepcopy(self._stored_video_params)
         return self._collect_video_params().to_dict()
 
     def set_video_params_dict(self, data: Dict[str, Any]) -> None:
@@ -675,6 +900,11 @@ class DenoisePanel(QWidget):
         档位 = frames（1-3）。
         """
         if not isinstance(data, dict):
+            return
+        if self.image_mode:
+            self._video_param_timer.stop()
+            self._pending_video_params = None
+            self._stored_video_params = deepcopy(data)
             return
         params = VideoDenoiseParams.from_dict(data)
         # 丢弃恢复前残留的节流待发参数，避免旧值在恢复完成后发射

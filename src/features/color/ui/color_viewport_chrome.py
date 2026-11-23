@@ -138,6 +138,7 @@ class ColorViewportChrome(QObject):
         self.toolbar = canvas.viewport_menu
         self.transport = canvas.video_control_bar
         self._color_transport_active = False
+        self._photo_name = ""
         self._original_row: list[tuple[QWidget, int]] = []
         self._options_stub_actions: dict[str, QAction] = {}
         self._install_header()
@@ -251,6 +252,13 @@ class ColorViewportChrome(QObject):
         for button in (self.proxy_button, self.resolution_button, self.bypass_button, self.enhanced_button, self.options_button):
             right.addWidget(button)
         layout.addWidget(self.header_right)
+
+        self.photo_title = QLabel(toolbar)
+        self.photo_title.setObjectName("colorViewerPhotoTitle")
+        self.photo_title.setTextFormat(Qt.TextFormat.PlainText)
+        self.photo_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.photo_title.setStyleSheet("color: #d6d6d9; font-size: 11px; background: transparent; border: none;")
+        self.photo_title.hide()
 
     @staticmethod
     def _adopt_header(layout: QHBoxLayout, button: QToolButton) -> None:
@@ -418,6 +426,12 @@ class ColorViewportChrome(QObject):
                 widget.setChecked(bool(cap.checked))
                 widget.blockSignals(False)
 
+    def set_photo_name(self, name: str) -> None:
+        self._photo_name = name
+        self.photo_title.setToolTip(name)
+        self.photo_title.setAccessibleName(name)
+        self.position_title()
+
     def position_title(self) -> None:
         """Keep exact centering, while protecting functional controls first."""
         if not hasattr(self, "header_right"):
@@ -428,6 +442,8 @@ class ColorViewportChrome(QObject):
             button.setVisible(expanded)
         self.header_timecode.setVisible(width >= 520)
         self.split_screen_button.setVisible(width >= 520)
+        self.header_left.updateGeometry()
+        self.header_right.updateGeometry()
         self.toolbar._layout.activate()
         padding = max(self.header_left.sizeHint().width(), self.header_right.sizeHint().width()) + 10
         available = max(0, width - 2 * padding)
@@ -439,9 +455,15 @@ class ColorViewportChrome(QObject):
             QComboBox::down-arrow { image: none; border: none; }
         """)
         selector_width = min(320, max(80, selector.sizeHint().width()), available)
-        selector.setVisible(selector.count() > 0 and selector_width >= 80)
+        selector.setVisible(not self._photo_name and selector.count() > 0 and selector_width >= 80)
         selector.setGeometry((width - max(0, selector_width)) // 2, 0, max(0, selector_width), 30)
         selector.raise_()
+        title = self.photo_title
+        name = title.fontMetrics().elidedText(self._photo_name, Qt.TextElideMode.ElideMiddle, available)
+        title.setText(name)
+        title.setGeometry((width - available) // 2, 0, available, self.toolbar.height() - 1)
+        title.setVisible(bool(name))
+        title.raise_()
 
     def _prepare_transport(self) -> None:
         bar = self.transport

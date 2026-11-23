@@ -1902,6 +1902,10 @@ class EditProjectIO(QObject):
         """获取当前文件路径"""
         return self._current_filepath
 
+    def has_pending_archive_write(self) -> bool:
+        """Whether a worker can still access the current resource staging."""
+        return bool(self._manual_save_workers or self._autosave_workers)
+
     def set_current_filepath(self, filepath: str | Path | None) -> None:
         """Adopt a recovery file's canonical path or detach a closed project."""
         self._current_filepath = str(filepath) if filepath else None

@@ -27,14 +27,15 @@ def add_dock_management_actions(
     menu: QMenu, dock: QDockWidget, *, toggle_floating: Callable[[], None] | None = None,
 ) -> None:
     """Append the standard Float/Dock and Close actions to ``menu``."""
-    float_action = menu.addAction(
-        I18N.tr("dock.float", "Float")
-        if not dock.isFloating()
-        else I18N.tr("dock.dock", "Dock")
-    )
-    float_action.triggered.connect(
-        toggle_floating if toggle_floating is not None else lambda: dock.setFloating(not dock.isFloating())
-    )
+    if dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable:
+        float_action = menu.addAction(
+            I18N.tr("dock.float", "Float")
+            if not dock.isFloating()
+            else I18N.tr("dock.dock", "Dock")
+        )
+        float_action.triggered.connect(
+            toggle_floating if toggle_floating is not None else lambda: dock.setFloating(not dock.isFloating())
+        )
 
     close_action = menu.addAction(I18N.tr("dock.close", "Close"))
     close_action.triggered.connect(lambda: dock.setVisible(False))

@@ -43,6 +43,7 @@ class FileIO:
     # RAW instance cache
     _current_raw_obj = None
     _current_raw_path = None
+    _current_raw_revision = None
     _raw_lock = threading.Lock()
 
     @staticmethod
@@ -288,7 +289,7 @@ class FileIO:
         return cleaned
 
     @staticmethod
-    def load_image(path):
+    def load_image(path, *, use_preview_cache: bool = True):
         """
         Loads an image and returns a tuple (full, high, low).
         """
@@ -298,7 +299,8 @@ class FileIO:
         # AUD-33910: check-then-create is a TOCTOU race — two threads loading
         # images concurrently can both see "missing" and one makedirs() then
         # raises FileExistsError. makedirs(exist_ok=True) alone is race-free.
-        os.makedirs(FileIO.CACHE_DIR, exist_ok=True)
+        if use_preview_cache:
+            os.makedirs(FileIO.CACHE_DIR, exist_ok=True)
 
         full_img = FileIO._read_full_image(path)
         if full_img is None:
@@ -307,22 +309,24 @@ class FileIO:
         h, w = full_img.shape[:2]
         
         # 1. Prepare Low Res (Proxy)
-        low_img = FileIO._get_cached_preview(path, "low")
+        low_img = FileIO._get_cached_preview(path, "low") if use_preview_cache else None
         if low_img is None:
             if w > FileIO.LOW_RES_SIZE or h > FileIO.LOW_RES_SIZE:
                 low_img = FileIO._resize_to_fit(full_img, FileIO.LOW_RES_SIZE)
-                FileIO._cache_preview(path, low_img, "low")
+                if use_preview_cache:
+                    FileIO._cache_preview(path, low_img, "low")
             else:
-                low_img = full_img.copy()
+                low_img = full_img.copy() if use_preview_cache else full_img
 
         # 2. Prepare High Res
         if w <= FileIO.HIGH_RES_SIZE and h <= FileIO.HIGH_RES_SIZE:
-            high_img = full_img.copy()
+            high_img = full_img.copy() if use_preview_cache else full_img
         else:
-            high_img = FileIO._get_cached_preview(path, "high")
+            high_img = FileIO._get_cached_preview(path, "high") if use_preview_cache else None
             if high_img is None:
                 high_img = FileIO._resize_to_fit(full_img, FileIO.HIGH_RES_SIZE)
-                FileIO._cache_preview(path, high_img, "high")
+                if use_preview_cache:
+                    FileIO._cache_preview(path, high_img, "high")
 
         return full_img, high_img, low_img
 
@@ -343,19 +347,9 @@ class FileIO:
                     logger.error("RAW decoding requires rawpy; cannot open %s", path)
                     return None
                 with FileIO._raw_lock:
-                    if FileIO._current_raw_path != path:
-                        if FileIO._current_raw_obj:
-                            FileIO._current_raw_obj.close()
-                        # AUD-33903：先清空单例状态再重开。imread 抛错时若保留
-                        # "已 close 对象 + 旧路径"的悬挂组合，此后旧路径请求会因
-                        # 路径相等跳过重开、对已关闭对象 postprocess 而永久失败。
-                        FileIO._current_raw_obj = None
-                        FileIO._current_raw_path = None
-                        FileIO._current_raw_obj = rawpy.imread(path)
-                        FileIO._current_raw_path = path
-                    
-                    safe_wb = FileIO._get_normalized_camera_wb(FileIO._current_raw_obj)
-                    rgb = FileIO._current_raw_obj.postprocess(
+                    raw = FileIO._open_raw_locked(path)
+                    safe_wb = FileIO._get_normalized_camera_wb(raw)
+                    rgb = raw.postprocess(
                         use_camera_wb=False, 
                         user_wb=safe_wb,
                         no_auto_bright=True, 
@@ -432,11 +426,49 @@ class FileIO:
         return [float(cam_wb[0]/g), 1.0, float(cam_wb[2]/g), 1.0]
 
     @staticmethod
-    def get_cache_key(path, suffix="") -> str:
-        if not os.path.exists(path):
-            return hashlib.md5(f"{path}_{suffix}".encode()).hexdigest()
+    def _file_revision(path: str) -> tuple[int, int, int, int, int]:
         stat = os.stat(path)
-        key_str = f"{path}_{stat.st_size}_{stat.st_mtime}_{suffix}_v2"
+        return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+    @staticmethod
+    def _open_raw_locked(path: str) -> "rawpy.RawPy":
+        """Get a RAW handle matching the file currently on disk."""
+        revision = FileIO._file_revision(path)
+        if (FileIO._current_raw_obj is None or FileIO._current_raw_path != path
+                or FileIO._current_raw_revision != revision):
+            if FileIO._current_raw_obj is not None:
+                FileIO._current_raw_obj.close()
+            # A failed imread must leave a closed cache ready for the next file.
+            FileIO._current_raw_obj = None
+            FileIO._current_raw_path = None
+            FileIO._current_raw_revision = None
+            FileIO._current_raw_obj = rawpy.imread(path)
+            FileIO._current_raw_path = path
+            FileIO._current_raw_revision = revision
+        return FileIO._current_raw_obj
+
+    @staticmethod
+    def read_camera_white_balance(path: str) -> list[float]:
+        """Read the source white balance under the shared RAW decoder lock."""
+        with FileIO._raw_lock:
+            if rawpy is not None:
+                try:
+                    if (FileIO._current_raw_path == path and FileIO._current_raw_obj is not None
+                            and FileIO._current_raw_revision == FileIO._file_revision(path)):
+                        return FileIO._get_normalized_camera_wb(FileIO._current_raw_obj)
+                    with rawpy.imread(path) as raw:
+                        return FileIO._get_normalized_camera_wb(raw)
+                except (OSError, rawpy.LibRawError):
+                    logger.debug("Could not read camera white balance for %s", path)
+        return [2.0, 1.0, 1.5, 1.0]
+
+    @staticmethod
+    def get_cache_key(path, suffix="") -> str:
+        try:
+            revision = FileIO._file_revision(path)
+        except OSError:
+            return hashlib.md5(f"{path}_{suffix}".encode()).hexdigest()
+        key_str = f"{path}_{revision}_{suffix}_v3"
         return hashlib.md5(key_str.encode()).hexdigest()
 
     @staticmethod
@@ -753,19 +785,11 @@ class FileIO:
         if not os.path.exists(path): return None, None, None, raw_params
         applied_params = raw_params.copy()
         with FileIO._raw_lock:
-            if FileIO._current_raw_path != path:
-                if FileIO._current_raw_obj: FileIO._current_raw_obj.close()
-                # AUD-33903：同 _read_full_image——先清空状态再重开，
-                # imread 失败不留"已 close 对象 + 旧路径"悬挂组合。
-                FileIO._current_raw_obj = None
-                FileIO._current_raw_path = None
-                try:
-                    FileIO._current_raw_obj = rawpy.imread(path)
-                    FileIO._current_raw_path = path
-                except Exception:
-                    logger.exception("RAW reopen failed: %s", path)
-                    return None, None, None, raw_params
-            raw = FileIO._current_raw_obj
+            try:
+                raw = FileIO._open_raw_locked(path)
+            except (OSError, RuntimeError, rawpy.LibRawError):
+                logger.exception("RAW reopen failed: %s", path)
+                return None, None, None, raw_params
             pp_params = {"no_auto_bright": True, "bright": 1.0, "output_bps": 16, "gamma": (1, 1), "use_camera_wb": False, "use_auto_wb": False, "output_color": rawpy.ColorSpace.ProPhoto}
             baseline_wb = FileIO._get_normalized_camera_wb(raw)
             wb_type = raw_params.get('wb_type', 'camera')

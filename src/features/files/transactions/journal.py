@@ -197,7 +197,8 @@ class OperationJournal:
             if job["op"] in ("move", "rename"):
                 from src.features.files.transactions.service import IdentityPropagation
                 with self._catalog._write():
-                    IdentityPropagation(self._catalog).on_moved(job["library_id"],str(source),str(destination))
+                    IdentityPropagation(self._catalog).on_moved(
+                        job["library_id"], str(source), str(destination), recovering=True)
             state, classification = "completed", "completed"
             action = "reconciled_catalog"
         elif dst_exists and src_exists:

@@ -46,6 +46,7 @@ import time  # noqa: F401 — 回归守卫 patch 锚点（tests/color/test_quali
 import os
 import logging
 import threading
+from contextlib import AbstractContextManager, nullcontext
 from typing import Optional, List, Dict, Any
 from PyQt6.QtGui import QOpenGLContext
 from PyQt6.QtCore import (
@@ -57,7 +58,10 @@ from src.features.color.core.corrector_render_service import (
 )
 from src.features.color.core.layer import Layer, MaskShape, MaskGroup
 from src.features.color.core.window_rasterizer import WindowRasterizer
-from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+from src.features.color.core.curves_soft_clip import (
+    curves_soft_clip_is_identity,
+    uses_calibrated_soft_clip,
+)
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX, PASSTHROUGH_FRAGMENT, SPLIT_VIEW_FRAGMENT, ROTATION_PREVIEW_VERTEX, ROTATION_PREVIEW_FRAGMENT
 from src.features.color.core.shader_compiler import ShaderPipeline
@@ -124,7 +128,7 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
         })
 
     mask_shapes = [shape.to_dict() for shape in layer.mask_shapes]
-    return {
+    data = {
         "id": layer.id,
         "visible": layer.visible,
         "opacity": layer.opacity,
@@ -146,6 +150,12 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
         "plugins": plugins,
         "is_baked": bool(getattr(layer, "is_baked", False)),
     }
+    # Versioned nodes opt into this stage in the preview and bake DTOs.
+    # Keep older DTO digests stable so existing baked grades still resolve.
+    csc = layer.curves_soft_clip
+    if uses_calibrated_soft_clip(csc) and not curves_soft_clip_is_identity(csc):
+        data["curves_soft_clip"] = copy.deepcopy(csc)
+    return data
 
 
 class Tile:
@@ -164,7 +174,7 @@ class Tile:
 
 class RawUpdateWorker(QObject):
     """Background worker for heavy RAW decoding tasks."""
-    finished = pyqtSignal(object, object, object, dict) # full, high, low, applied_params
+    finished = pyqtSignal(object, object, object, dict, int)
     error = pyqtSignal(str)
 
     def __init__(self):
@@ -172,28 +182,29 @@ class RawUpdateWorker(QObject):
         super().__init__()
         self._is_busy = False
         self._cancel_event = threading.Event()
+        self.latest_request_id = 0
 
     def request_cancel(self) -> None:
         """Stop delivery of a decode result after the current native call."""
         self._cancel_event.set()
 
-    @pyqtSlot(str, dict)
-    def decode(self, path, params):
+    @pyqtSlot(str, dict, int)
+    def decode(self, path: str, params: dict, request_id: int = 0) -> None:
         """Decode a RAW file on the worker thread and emit the result.
 
-        Emits ``finished`` with (full, high, low, applied_params) or
+        Emits ``finished`` with (full, high, low, applied_params, request_id) or
         ``error``; after :meth:`request_cancel` the pending result is
         dropped instead of emitted.
         """
         self._is_busy = True
         try:
-            if self._cancel_event.is_set():
+            if self._cancel_event.is_set() or request_id != self.latest_request_id:
                 return
             from src.shared.io.file_io import FileIO
             full, high, low, applied_params = FileIO.update_raw_decoding(path, params, preview_only=False)
-            if self._cancel_event.is_set():
+            if self._cancel_event.is_set() or request_id != self.latest_request_id:
                 return
-            self.finished.emit(full, high, low, applied_params)
+            self.finished.emit(full, high, low, applied_params, request_id)
         except Exception as e:
             if not self._cancel_event.is_set():
                 self.error.emit(str(e))
@@ -238,6 +249,7 @@ class ImageEngine(QObject, WindowRasterizer):
             return False
     
     frame_ready = pyqtSignal(int)
+    grade_set_preview_ready = pyqtSignal(object, object)  # (source epoch, grade revision), RGB pixels
     scope_snapshot_ready = pyqtSignal(object)
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     error_occurred = pyqtSignal(str)
@@ -304,6 +316,7 @@ class ImageEngine(QObject, WindowRasterizer):
         self._color_graph_revision = 0
 
         # RAW Background Worker
+        self._raw_decode_request = 0
         self.raw_worker_thread = QThread()
         # 命名：QThread destroyed-while-running 崩溃报告可直指责任线程
         self.raw_worker_thread.setObjectName("ImageEngineRawWorker")
@@ -348,6 +361,7 @@ class ImageEngine(QObject, WindowRasterizer):
         # 按代数守卫丢弃。
         self._bake_generation = {}  # {layer_id: int}
         self._source_epoch = 0  # 每次替换源图递增，参与前缀摘要
+        self._still_grade_revision = 0
 
         self._clipboard_layer = None  # Instance-level clipboard for layer copy/paste
         self.viewport_size = (2048, 2048)
@@ -657,6 +671,7 @@ class ImageEngine(QObject, WindowRasterizer):
         black_canvas = np.zeros((height, width, 3), dtype=np.uint8)
 
         # Set the placeholder as the "original" image for rendering pipeline
+        self.invalidate_raw_decode()
         self.img_full_original = black_canvas
         self.img_source_full = black_canvas.copy()
 
@@ -717,6 +732,7 @@ class ImageEngine(QObject, WindowRasterizer):
         if self.renderer is None:
             self.renderer = AsyncRenderer(main_context)
             self.renderer.frame_ready.connect(self.frame_ready.emit)
+            self.renderer.grade_set_preview_ready.connect(self.grade_set_preview_ready.emit)
             self.renderer.scope_snapshot_ready.connect(self.scope_snapshot_ready.emit)
             # GPU scope: forward the descriptor frame only; no pixel data.
             if hasattr(self.renderer, 'gpu_scope_ready'):
@@ -749,6 +765,21 @@ class ImageEngine(QObject, WindowRasterizer):
         if not self.scope_snapshots_enabled or self.renderer is None:
             return
         self.renderer.submit(RenderCommand.RENDER_SCOPE, {'max_dim': max(1, int(max_dim))})
+
+    @property
+    def grade_set_preview_key(self) -> tuple[int, int]:
+        return self._source_epoch, self._still_grade_revision
+
+    def request_grade_set_preview(self) -> bool:
+        """Request a small copy of an already rendered still."""
+        if self.renderer is not None and self.img_full_original is not None and not self._is_video_mode:
+            self.renderer.submit(RenderCommand.RENDER_SCOPE, {"grade_set_preview_key": self.grade_set_preview_key})
+            return True
+        return False
+
+    @property
+    def source_epoch(self) -> int:
+        return self._source_epoch
 
     def request_gpu_scope(self, demand) -> None:
         """Queue a native GPU scope pass for ``ScopeDemand``.
@@ -903,7 +934,8 @@ class ImageEngine(QObject, WindowRasterizer):
                 "1", "true", "yes", "on")
         return bool(self._color_graph_render_enabled)
 
-    def set_image(self, full, high, low, is_new_file=True, path=None, is_video=False, video_path=None):
+    def set_image(self, full, high, low, is_new_file=True, path=None, is_video=False, video_path=None,
+                  *, camera_white_balance: tuple[float, ...] | None = None, render: bool = True) -> None:
         """Sets the source images. Uploads to GPU asynchronously.
 
         Args:
@@ -914,6 +946,8 @@ class ImageEngine(QObject, WindowRasterizer):
             path: File path
             is_video: Whether this is a video frame (skips Mipmap generation)
             video_path: Original video file path
+            camera_white_balance: RAW white balance already read with the source.
+            render: Queue a render immediately when the viewer is ready.
         """
         if full is None: return
 
@@ -933,7 +967,8 @@ class ImageEngine(QObject, WindowRasterizer):
             self.img_source_full = full.copy()
 
         if is_new_file:
-            self.img_source_full = full.copy()
+            self.invalidate_raw_decode()
+            self.img_source_full = full if full.flags.owndata and not full.flags.writeable else full.copy()
             self.img_full_original = full.copy()
             self._flip_h = False
             self._flip_v = False
@@ -978,16 +1013,10 @@ class ImageEngine(QObject, WindowRasterizer):
             # Extract RAW metadata for lock-free preview calculation
             if is_raw:
                 from src.shared.io.file_io import FileIO
-                with FileIO._raw_lock:
-                    if FileIO._current_raw_path == path and FileIO._current_raw_obj:
-                        self.current_raw_metadata["camera_wb"] = FileIO._get_normalized_camera_wb(FileIO._current_raw_obj)
-                    else:
-                        try:
-                            import rawpy
-                            with rawpy.imread(path) as raw:
-                                self.current_raw_metadata["camera_wb"] = FileIO._get_normalized_camera_wb(raw)
-                        except Exception:
-                            self.current_raw_metadata["camera_wb"] = [2.0, 1.0, 1.5, 1.0]
+                self.current_raw_metadata["camera_wb"] = (
+                    list(camera_white_balance) if camera_white_balance is not None
+                    else FileIO.read_camera_white_balance(path)
+                )
 
                 # ===== 正确的修改方式 =====
                 # 同步底层的初次解码状态。将真实的相机白平衡作为基准线。
@@ -1028,17 +1057,20 @@ class ImageEngine(QObject, WindowRasterizer):
                 'image': img_for_upload,
                 'original_size': (orig_w, orig_h),
                 'is_video': is_video,  # FIX: 传递 is_video 标志，防止 _do_upload 清除视频纹理状态
+                'use_source_as_reference': is_new_file and not render and not is_video,
             })
         else:
             self._upload_to_gpu(img_for_upload, high)
             self._generate_pyramid(img_for_upload)
 
-        if is_new_file:
+        if is_new_file and render:
             # 参考图也必须与 GPU 主纹理尺寸保持一致
-            self.set_reference_image(self.img_high)
+            if self.renderer:
+                self.renderer.submit(RenderCommand.UPLOAD_REFERENCE, img_for_upload)
 
         self.temp_image = None
-        self.render_pipeline()
+        if render:
+            self.render_pipeline()
 
     def set_interaction_mode(self, is_active: bool, itype: str = "general") -> None:
         """进入/退出交互模式（滑杆拖动、裁剪、蒙版绘制等）。
@@ -1191,7 +1223,9 @@ class ImageEngine(QObject, WindowRasterizer):
             return False
         return bool(cancel(rid))
 
-    def render_full_resolution(self) -> Optional[np.ndarray]:
+    def render_full_resolution(
+        self, *, prepare_request: AbstractContextManager[None] | None = None,
+    ) -> Optional[np.ndarray]:
         """同步渲染全分辨率结果并返回 BGR ndarray（失败/超时为 None）。
 
         生产路径：提交 RENDER_FULL_RESOLUTION 给渲染线程，在嵌套
@@ -1199,8 +1233,11 @@ class ImageEngine(QObject, WindowRasterizer):
         兜底）——保留导出/脚本用的同步 API 语义，同时不在 UI 线程执行
         任何全分辨率 GL 调用。无 AsyncRenderer 的 headless 场景退化为
         本地 legacy 渲染路径。失败时绝不返回上一次的过期导出结果。
+
+        prepare_request only surrounds the async submission, so temporary
+        image state is restored before the event loop processes UI events.
         """
-        if self.img_full_original is None:
+        if self.img_full_original is None and prepare_request is None:
             return None
         if bool(self.__dict__.get("_full_res_render_active", False)):
             logger.warning("Ignoring re-entrant full-resolution render request")
@@ -1247,7 +1284,8 @@ class ImageEngine(QObject, WindowRasterizer):
                     # quickly enough that attaching listeners afterwards would
                     # otherwise leave the nested loop waiting for a signal it
                     # already missed.
-                    submitted_id = self.request_full_resolution(request_id)
+                    with prepare_request if prepare_request is not None else nullcontext():
+                        submitted_id = self.request_full_resolution(request_id)
                     if not submitted_id:
                         return None
                     request_id = submitted_id
@@ -1267,17 +1305,21 @@ class ImageEngine(QObject, WindowRasterizer):
                     except (TypeError, RuntimeError):
                         pass
                 if result['image'] is not None:
-                    self.temp_image = result['image']
+                    if prepare_request is None:
+                        self.temp_image = result['image']
+                    return result['image'].copy()
                 elif result['reason']:
                     logger.warning(
                         "Full-resolution render did not produce output "
                         "(request_id=%s, reason=%s)", request_id, result['reason']
                     )
-                return self.temp_image.copy() if self.temp_image is not None else None
+                return None
 
             # Compatibility fallback for headless/legacy callers that have not
             # created an AsyncRenderer yet.  This path is not used by the
             # application once the shared context is initialized.
+            if prepare_request is not None:
+                return None
             self._full_res_render_active = True
             self.temp_image = None
             self.render_pipeline(is_full_res=True)
@@ -1417,6 +1459,10 @@ class ImageEngine(QObject, WindowRasterizer):
             logger.info(f"layer '{source_layer.name}' parameters to clipboard")
         else:
             logger.info(f"copy layer: invalid index {index}")
+
+    def can_paste_layer(self, target_index: int) -> bool:
+        """Report whether a layer paste can mutate the requested target."""
+        return self._clipboard_layer is not None and 0 <= target_index < len(self.layers)
 
     def paste_layer(self, target_index: int):
         """将剪贴板中的图层参数粘贴到指定图层。
@@ -1701,6 +1747,16 @@ class ImageEngine(QObject, WindowRasterizer):
                     'space': int(getattr(layer, 'warper_space', 0) or 0),
                 })
 
+    def replace_grade_layers(self, layers: list[Layer]) -> None:
+        """Replace the stack and rebuild its render-thread resource bindings."""
+        if self.renderer:
+            incoming = {layer.id for layer in layers}
+            for previous in self.layers:
+                if previous.id not in incoming:
+                    self.renderer.submit(RenderCommand.REMOVE_LAYER, previous.id)
+        self.layers = layers
+        self.sync_all_resources()
+
     def apply_curves(self, curves_lut: np.ndarray) -> None:
         """Attach an RGB curves LUT (256x3) to the active layer and preview it.
 
@@ -1859,7 +1915,8 @@ class ImageEngine(QObject, WindowRasterizer):
         from src.features.color.core.layer import build_curves_lut_from_data
         layer.curves_edit = normalize_curves_edit(params)
         layer.curves_lut = build_curves_lut_from_data(
-            layer.curves_data, layer.curves_edit.get("amounts"))
+            layer.curves_data, layer.curves_edit.get("amounts"),
+            calibration_version=layer.curves_edit.get("calibration_version", 0))
         if self.renderer and layer.curves_lut is not None:
             lut = layer.curves_lut
             if lut.dtype != np.float32:
@@ -1868,6 +1925,37 @@ class ImageEngine(QObject, WindowRasterizer):
                 'layer_id': layer.id, 'type': 'curves', 'data': lut.tobytes()
             })
         self.render_pipeline(render_reason='grading')
+
+    def set_curves_calibration_state(self, state: Dict[str, Any]) -> None:
+        """Switch the three curve stages together before submitting the new grade."""
+        layer = self.get_active_layer()
+        if not layer:
+            return
+        from src.features.color.core.curves_soft_clip import (
+            normalize_curves_edit,
+            normalize_curves_soft_clip,
+        )
+        from src.features.color.core.layer import (
+            build_curves_lut_from_data,
+            build_hsl_curve_lut_from_data,
+        )
+        layer.curves_edit = normalize_curves_edit(state.get("curves_edit"))
+        layer.curves_soft_clip = normalize_curves_soft_clip(state.get("curves_soft_clip"))
+        version = layer.curves_edit.get("calibration_version", 0)
+        if layer.curves_data:
+            layer.curves_lut = build_curves_lut_from_data(
+                layer.curves_data, layer.curves_edit["amounts"], calibration_version=version)
+        if layer.hsl_curve_data:
+            layer.hsl_curve_lut = build_hsl_curve_lut_from_data(
+                layer.hsl_curve_data, calibration_version=version)
+        if self.renderer:
+            for kind, lut in (("curves", layer.curves_lut), ("hsl_curve", layer.hsl_curve_lut)):
+                if lut is not None:
+                    self.renderer.submit(RenderCommand.UPDATE_AUX_TEX, {
+                        "layer_id": layer.id, "type": kind,
+                        "data": np.asarray(lut, dtype=np.float32).tobytes(),
+                    })
+        self.render_pipeline(render_reason="grading")
 
     def set_qualifier_params(self, params: Dict[str, Any]) -> None:
         """Merge qualifier (keyer) params into the active layer and submit a grading render."""
@@ -2343,7 +2431,11 @@ class ImageEngine(QObject, WindowRasterizer):
         return True
 
     @pyqtSlot(dict)
-    def on_raw_params_changed(self, params: dict) -> None:
+    def invalidate_raw_decode(self) -> None:
+        self._raw_decode_request += 1
+        self.raw_worker.latest_request_id = self._raw_decode_request
+
+    def on_raw_params_changed(self, params: dict, *, redecode: bool = True, render: bool = True) -> None:
         """Handles RAW parameter changes from RawPanel.
 
         AUD-0612: 入口先浅拷贝调用方 dict——本方法会写入 ``user_wb``、
@@ -2354,7 +2446,8 @@ class ImageEngine(QObject, WindowRasterizer):
         params = dict(params)  # AUD-0612: 与调用方对象解耦
         if self._last_applied_raw_params == params:
             return
-            
+
+        self.invalidate_raw_decode()
         self.current_raw_params = params
         if not self.current_file_path:
             return
@@ -2433,33 +2526,37 @@ class ImageEngine(QObject, WindowRasterizer):
                     'path': input_lut
                 })
         
-        self.render_pipeline(render_reason='grading')
+        if render:
+            self.render_pipeline(render_reason='grading')
 
         # Only trigger heavy re-decoding for non-interacting changes or WB 'auto'
         # Also ensure we only call decode for actual RAW files
         is_raw = self.current_file_path and os.path.splitext(self.current_file_path)[1].lower() in self.RAW_EXTENSIONS
 
-        if is_raw and (not self.is_interacting or wb_type == 'auto'):
+        if is_raw and redecode and (not self.is_interacting or wb_type == 'auto'):
             from PyQt6.QtCore import QMetaObject, Q_ARG
             # AUD-0612: 传给 worker 前再浅拷贝一次——queued 连接只传递
             # Python 对象引用，拷贝后 worker 与 engine 各持独立 dict。
             QMetaObject.invokeMethod(self.raw_worker, "decode",
                                    Qt.ConnectionType.QueuedConnection,
                                    Q_ARG(str, self.current_file_path),
-                                   Q_ARG(dict, dict(params)))
+                                   Q_ARG(dict, dict(params)),
+                                   Q_ARG(int, self._raw_decode_request))
         elif not is_raw:
             # For non-RAW files, we don't call the worker, so we must update 
             # the last applied params immediately to keep the state in sync.
             self._last_applied_raw_params = params.copy()
 
-    def _on_raw_update_finished(self, full, high, low, applied_params):
+    def _on_raw_update_finished(self, full, high, low, applied_params,
+                                request_id: int | None = None) -> None:
         """Consume a finished background RAW decode (RawUpdateWorker.finished).
 
         重解码把 RAW 参数烘焙进了新图：重置 shader 侧 RAW 预览 uniforms、
         同步 _last_applied_raw_params 基线、重置所有层蒙版置脏，并把新
         预览图上传渲染线程后触发全量渲染。
         """
-        if full is None: return
+        if full is None or (request_id is not None and request_id != self._raw_decode_request):
+            return
         
         # Reset Shader RAW Previews since they are now baked into the decoded image
         # Note: Some parameters might still need to be applied in shader if not baked by raw decoder
@@ -3033,6 +3130,7 @@ class ImageEngine(QObject, WindowRasterizer):
                 'film_grain': self._effective_film_grain_params(),
                 'raw_preview': raw_params, # 始终传递参数，由 Shader 统一处理
                 'render_reason': render_reason,
+                'source_epoch': self._source_epoch,
                 # P1-COLOR-13: 全分辨率渲染（导出/应用更改）走降噪最高档
                 'video_denoise_quality_mode': 'export' if is_full_res else None,
                 # Snapshot the renderer's video generation so _do_render can drop
@@ -3088,6 +3186,12 @@ class ImageEngine(QObject, WindowRasterizer):
                         forget(render_params['render_request_id'])
                     raise
             else:
+                if not self._is_video_mode and self.img_full_original is not None:
+                    if render_reason != 'viewport_refresh':
+                        self._still_grade_revision += 1
+                    h, w = self.img_full_original.shape[:2]
+                    render_params['grade_set_preview_key'] = self.grade_set_preview_key
+                    render_params['photo_size'] = (w, h)
                 self.renderer.submit(RenderCommand.RENDER_FRAME, render_params)
             return render_params['render_request_id']
 
@@ -3434,42 +3538,39 @@ class ImageEngine(QObject, WindowRasterizer):
                         width=w, height=h,
                         aspect_ratio=aspect_ratio,
                         tex_size=(float(w), float(h)),
+                        grading_params_override=self.pipeline.bind_primary_calibration(
+                            prog_comp, layer, temporary_textures=texture_garbage),
                         bindings=layer_plugins,
                     )
                     upload_composition_uniforms(prog_comp, values)
 
                     # Bind auxiliary textures
                     tex_unit = 2
+                    flags = prepared.flags
 
                     # Curves
-                    if has_curves:
-                        lut_data = np.array(layer.curves_lut)
-                        if lut_data.ndim == 2:
-                            lut_data = lut_data.reshape(256, 1, 3)
-                        lut_f32 = lut_data.astype(np.float32)
-                        c_tex = ctx.texture((256, 1), 3, data=lut_f32.tobytes(), dtype='f4')
+                    if flags["has_curves"]:
+                        lut_data = np.asarray(layer.curves_lut, dtype=np.float32)
+                        c_tex = ctx.texture((lut_data.shape[0], 1), 3,
+                                            data=lut_data.tobytes(), dtype='f4')
+                        texture_garbage.append(c_tex)
                         c_tex.repeat_x = c_tex.repeat_y = False
                         c_tex.use(tex_unit)
                         prog_comp['u_curves_tex'].value = tex_unit
-                        texture_garbage.append(c_tex)
                         tex_unit += 1
 
-                    # HSL Curve (6 curves, 256 samples each)
-                    if has_hsl_curve:
-                        hsl_lut_data = np.array(layer.hsl_curve_lut, dtype=np.float32)
-                        # HSL curve LUT is (6, 256): 6 curves, each with 256 samples
-                        # Transpose to (256, 6) so each column is a curve for texture sampling
-                        # Texture size: width=6 (curves), height=256 (samples)
-                        hsl_lut_f32 = hsl_lut_data.T.astype(np.float32)
-                        hsl_tex = ctx.texture((6, 256), 1, data=hsl_lut_f32.tobytes(), dtype='f4')
+                    if flags["has_hsl_curve"]:
+                        hsl_lut_data = np.asarray(layer.hsl_curve_lut, dtype=np.float32)
+                        hsl_tex = ctx.texture(hsl_lut_data.shape, 1,
+                                              data=hsl_lut_data.T.tobytes(), dtype='f4')
+                        texture_garbage.append(hsl_tex)
                         hsl_tex.repeat_x = hsl_tex.repeat_y = False
                         hsl_tex.use(tex_unit)
                         prog_comp['u_hsl_curve_tex'].value = tex_unit
-                        texture_garbage.append(hsl_tex)
                         tex_unit += 1
 
                     # Warper
-                    if has_warper:
+                    if flags["has_warper"]:
                         wp = np.array(layer.warper_params)
                         wh, ww = wp.shape[:2]
                         w_tex = ctx.texture((ww, wh), 2, data=wp.astype(np.float32).tobytes(), dtype='f4')
@@ -3483,7 +3584,7 @@ class ImageEngine(QObject, WindowRasterizer):
                         tex_unit += 1
                 
                     # 3D LUT
-                    if has_lut3d:
+                    if flags["has_lut3d"]:
                         lut_tex = self._load_lut_sync(ctx, layer.active_lut_path)
                         if lut_tex:
                             lut_tex.use(tex_unit)
@@ -3882,8 +3983,8 @@ class ImageEngine(QObject, WindowRasterizer):
         """
         mutex = self.gl_manager.mutex
         # Never stall the GUI event loop behind a long render-thread pass.
-        # Canvas will retain the previously presented frame and paint again on
-        # the next frame_ready signal once the renderer releases this mutex.
+        # Canvas retries a still-image paint when the worker owns the lock.
+        # Video playback can use the next frame notification.
         if not mutex.tryLock():
             return False
         try:
@@ -4402,7 +4503,7 @@ class ImageEngine(QObject, WindowRasterizer):
         # 恢复图层
         layers_data = state.get('layers', [])
         if layers_data:
-            self.layers = HistoryManager.deserialize_layers(layers_data)
+            self.replace_grade_layers(HistoryManager.deserialize_layers(layers_data))
         history = getattr(self, "history", None)
         if history is not None:
             history.restore_extra_state(state)
@@ -5046,4 +5147,7 @@ class ImageEngine(QObject, WindowRasterizer):
             'plugins': layer.plugins.copy() if layer.plugins else [],
             'is_baked': False,  # Always False for baking - we're creating the baked result
         }
+        csc = layer.curves_soft_clip
+        if uses_calibrated_soft_clip(csc) and not curves_soft_clip_is_identity(csc):
+            snapshot["curves_soft_clip"] = copy.deepcopy(csc)
         return snapshot

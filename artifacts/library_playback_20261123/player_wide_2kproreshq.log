@@ -1,0 +1,35 @@
+Metal shader compilation: Error Domain=MTLLibraryErrorDomain Code=3 "program_source:120:11: error: no member named 'colorConvert' in 'Uniforms'
+    if (p.colorConvert.x > 0.5) {
+        ~ ^
+program_source:122:32: error: no member named 'colorConvert' in 'Uniforms'
+        const int eotf = int(p.colorConvert.y + 0.5);
+                             ~ ^
+program_source:136:39: error: no member named 'cmsRow0' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                    ~ ^
+program_source:136:54: error: no member named 'cmsRow1' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                   ~ ^
+program_source:136:69: error: no member named 'cmsRow2' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                                  ~ ^
+" UserInfo={NSLocalizedDescription=program_source:120:11: error: no member named 'colorConvert' in 'Uniforms'
+    if (p.colorConvert.x > 0.5) {
+        ~ ^
+program_source:122:32: error: no member named 'colorConvert' in 'Uniforms'
+        const int eotf = int(p.colorConvert.y + 0.5);
+                             ~ ^
+program_source:136:39: error: no member named 'cmsRow0' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                    ~ ^
+program_source:136:54: error: no member named 'cmsRow1' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                   ~ ^
+program_source:136:69: error: no member named 'cmsRow2' in 'Uniforms'
+        const float3x3 m = float3x3(p.cmsRow0.xyz, p.cmsRow1.xyz, p.cmsRow2.xyz);
+                                                                  ~ ^
+}
+Metal unavailable; production app also falls back to CPU
+2026-11-23 22:09:58.898 comparison[42497:479942] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 22:09:58.898 comparison[42497:479942] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+2K_prores422HQ.mov: renderer 24.99 fps, errors=[]

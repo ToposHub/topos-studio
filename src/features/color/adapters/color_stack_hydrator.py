@@ -356,9 +356,29 @@ class ColorStackHydrator:
                 from src.features.color.core.curves_soft_clip import (
                     default_curves_edit,
                     default_curves_soft_clip,
+                    normalize_curves_edit,
+                    normalize_curves_soft_clip,
+                    uses_calibrated_soft_clip,
                 )
-                layer.curves_soft_clip = default_curves_soft_clip()
+                soft_clip = getattr(stack, "curves_soft_clip", None)
+                layer.curves_soft_clip = (
+                    normalize_curves_soft_clip(soft_clip) if uses_calibrated_soft_clip(soft_clip)
+                    else default_curves_soft_clip())
+                from src.features.color.core.curves_calibration import curves_calibration_enabled
+                curve_edit = getattr(stack, "curves_edit", None)
                 layer.curves_edit = default_curves_edit()
+                if curves_calibration_enabled(curve_edit):
+                    from src.features.color.core.layer import (
+                        build_curves_lut_from_data,
+                        build_hsl_curve_lut_from_data,
+                    )
+                    layer.curves_edit = normalize_curves_edit(curve_edit)
+                    if layer.curves_data:
+                        layer.curves_lut = build_curves_lut_from_data(
+                            layer.curves_data, layer.curves_edit["amounts"], calibration_version=1)
+                    if layer.hsl_curve_data:
+                        layer.hsl_curve_lut = build_hsl_curve_lut_from_data(
+                            layer.hsl_curve_data, calibration_version=1)
                 # LUT
                 layer.active_lut_path = stack.lut_path
                 layer.lut_intensity = stack.lut_intensity

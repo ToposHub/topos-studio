@@ -1,6 +1,7 @@
 """Regression coverage for Color timeline-clip still-preview presentation."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt
 from PyQt6.QtGui import QWheelEvent
@@ -20,6 +21,28 @@ def test_canvas_presents_front_texture_after_replacement_upload() -> None:
     renderer = SimpleNamespace(video_texture_pending=False)
 
     assert Canvas._should_present_renderer_front_texture(renderer) is True
+
+
+def test_busy_gl_still_retries_paint_without_input(qtbot, monkeypatch) -> None:
+    canvas = Canvas()
+    qtbot.addWidget(canvas)
+    renderer = SimpleNamespace(video_texture_pending=False, current_front_tex_id=42)
+    draw = Mock(side_effect=(False, True))
+    canvas.engine = SimpleNamespace(renderer=renderer, _is_video_mode=False, _draw_background_tex_id=draw)
+    monkeypatch.setattr(canvas, "isVisible", lambda: True)
+    nudge = Mock()
+    monkeypatch.setattr(canvas.viewport(), "update", nudge)
+    monkeypatch.setattr(canvas, "_record_presented_preview_frame", Mock())
+    painter = Mock()
+
+    canvas.drawBackground(painter, QRectF())
+    assert canvas._still_present_retry.isActive()
+    qtbot.waitUntil(lambda: nudge.called)
+
+    canvas.drawBackground(painter, QRectF())
+    assert not canvas._still_present_retry.isActive()
+    assert draw.call_count == 2
+    canvas.engine = None
 
 
 def test_pending_static_preview_withdraws_the_previous_front_texture() -> None:

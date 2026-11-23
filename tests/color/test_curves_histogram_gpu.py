@@ -179,3 +179,25 @@ def test_real_frame_preview(gpu, tmp_path):
         mode_path = tmp_path / f'{mode}-histogram.png'
         cv2.imwrite(str(mode_path), cv2.cvtColor(mode_image[::-1], cv2.COLOR_RGBA2BGRA))
         print(f'GPU HSL preview: {mode_path}')
+
+
+def test_curve_mode_switch_retires_old_same_size_descriptor(gpu):
+    """Custom -> HSL -> Custom cannot revive an old semantic texture ID."""
+    from dataclasses import replace
+    ctx, engine = gpu
+    rgba = np.ones((32, 64, 4), dtype='f2')
+    rgba[:, :, :3] = 0.4
+    source = ctx.texture((64, 32), 4, rgba.tobytes(), dtype='f2')
+    try:
+        demand = ScopeDemand(1, 1, 'histogram', (512, 300),
+                             analysis_size=(64, 32), histogram_overlay=True)
+        engine.render_demand(demand, source)
+        custom = engine.publish()
+        engine.render_demand(replace(demand, curves_mode='HueSat'), source)
+        assert not custom.valid
+        hue = engine.publish()
+        engine.render_demand(demand, source)
+        assert not hue.valid and not custom.valid
+        assert engine.publish().valid
+    finally:
+        source.release()

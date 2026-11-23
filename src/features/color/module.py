@@ -263,6 +263,18 @@ class ColorModule:
             default_visible=True,
         ))
         panel_registry.register(PanelDescriptor(
+            panel_id="color.grade_sets",
+            title_key="grade_sets.title",
+            fallback_title="Grade Sets",
+            feature_id="color",
+            category="Color",
+            page_ids=("Color", "Deliver"),
+            dock_attr="dock_grade_sets",
+            order=950,
+            default_visible=True,
+            work_mode="image",
+        ))
+        panel_registry.register(PanelDescriptor(
             panel_id="workspace.library",
             title_key="panel.library",
             fallback_title="Library",
@@ -428,6 +440,7 @@ class ColorModule:
             dock_attr="dock_tracker",
             order=820,
             default_visible=False,
+            work_mode="video",
         ))
 
         # Output / analysis panels

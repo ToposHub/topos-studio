@@ -161,14 +161,16 @@ class HSLCurvesPanel(QWidget):
             input_blocked = self.input_value.blockSignals(True)
             output_blocked = self.output_value.blockSignals(True)
             try:
-                self.input_value.setRange(0.0, 360.0 if axis == 'hue' else 1.0)
+                self.input_value.setRange(0.0, canvas.input_maximum())
                 self.output_value.setRange(-180.0 if shift else 0.0, 180.0 if shift else 2.0)
                 self.output_value.setDefaultValue(0.0 if shift else 1.0)
                 x, y = canvas.selected_values()
                 self.input_value.setValue(x)
                 self.output_value.setValue(y)
-                index = min(canvas._inspected_point_idx, len(canvas.curves[canvas.current_mode]) - 1)
-                self.input_value.setEnabled(index not in (0, len(canvas.curves[canvas.current_mode]) - 1))
+                points = canvas.curves[canvas.current_mode]
+                index = min(canvas._inspected_point_idx, len(points) - 1)
+                self.input_value.setEnabled(bool(points) and not canvas._is_endpoint(index))
+                self.output_value.setEnabled(bool(points))
             finally:
                 self.input_value.blockSignals(input_blocked)
                 self.output_value.blockSignals(output_blocked)

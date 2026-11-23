@@ -54,6 +54,7 @@ import numpy as np
 import onnxruntime as ort
 from PyQt6.QtCore import QObject, pyqtSignal, QThread
 from src.shared.ai_models.onnx_env import get_optimal_providers, get_gpu_provider_info
+from src.shared.paths import get_models_dir, get_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -682,8 +683,8 @@ class DenoiseEngine(QObject):
         """
         super().__init__()
         self.worker = None
-        self.project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.model_dir = os.path.join(self.project_root, "models", model_subdir)
+        self.project_root = get_project_root()
+        self.model_dir = get_models_dir(model_subdir)
 
     def apply_denoise(self, image: np.ndarray, mode: str, params: dict) -> bool:
         """

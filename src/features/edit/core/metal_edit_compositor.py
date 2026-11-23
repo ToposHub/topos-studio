@@ -250,7 +250,10 @@ def _grade_plan(
     if not nodes or any(node.primary is None or node.lut is not None for node in nodes):
         return _refuse("grade_unsupported")
     correctors = tuple(node.primary for node in nodes if node.primary is not None)
-    if any(not np.isfinite(params.view(np.float32)).all() for params in correctors):
+    # The shared classifier uses the projected Color payload. Edit only binds
+    # the pointwise uniforms; the kernel cannot sample a mask or a curve LUT.
+    if any(params["has_curves"].any() or params["mask_mode"].any()
+           or not np.isfinite(params.view(np.float32)).all() for params in correctors):
         return _refuse("grade_unsupported")
     return None, correctors
 

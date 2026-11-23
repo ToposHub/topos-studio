@@ -1,0 +1,9 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+qt.qpa.fonts: Populating font family aliases took 799 ms. Replace uses of missing font family "-apple-system" with one that exists to avoid this cost. 
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+2026-11-23 22:06:07.974 Python[40936:458562] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 22:06:07.974 Python[40936:458562] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+{"file": "2K_prores422HQ.mov", "route": "libav", "submitted_fps": 24.902113577925075, "swapped_fps": 25.029816724478536, "qt_frames_fps": 0.0, "decode_ms": {"count": 195, "mean": 6.805961758893831, "p50": 7.459101998392725, "p95": 10.173921100431471, "max": 12.074050999217434}, "worker_mode": "texture", "errors": null}

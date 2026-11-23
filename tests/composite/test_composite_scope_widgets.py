@@ -20,7 +20,10 @@ def test_composite_scope_panel_is_the_color_scope_panel(qapp):
     panel.resize(600, 300)
     panel.show()
 
-    assert [panel.mode_combo.itemData(i) for i in range(panel.mode_combo.count())] == list(MODE_ORDER)
+    assert [panel.mode_combo.itemData(i) for i in range(panel.mode_combo.count())] == [
+        'waveform', 'vectorscope', 'parade', 'luma', 'histogram', 'falsecolor', 'cie',
+        'split', 'quad', 'all',
+    ]
     # Composite scopes run the same full-GPU pipeline as Color: the shared
     # panel stays on its default GPU page (the CPU page is only the explicit
     # diagnostic fallback / source-reference path).

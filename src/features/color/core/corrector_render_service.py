@@ -69,6 +69,7 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
     from src.features.color.core.curves_soft_clip import (
         curves_soft_clip_is_identity,
     )
+    from src.features.color.core.primary_calibration import grade_uses_calibration
 
     def _get(key: str, default: Any = None) -> Any:
         """dict DTO / Layer 对象双形态访问（与 composition_uniforms 约定）。"""
@@ -110,6 +111,7 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
         grain_enabled=False, has_hsl_curve=has_hsl_curve,
         has_mixer=has_mixer, has_curves_soft_clip=has_curves_soft_clip,
         plugins=plugin_bindings or None,
+        has_primary_calibration=grade_uses_calibration(layer),
         request_id=request_id, layer_id=layer_id,
     )
     if program is None:
@@ -300,14 +302,24 @@ def run_serial_passes(
                 ramp = np.linspace(0.0, 1.0, 256, dtype=np.float32)
                 data = np.stack([ramp] * 3, axis=-1).reshape(256, 1, 3)
             else:
-                data = np.asarray(lut, dtype=np.float32).reshape(256, 1, 3)
-            curves_tex = ctx.texture((256, 1), components=3, dtype="f4",
+                data = np.asarray(lut, dtype=np.float32).reshape(-1, 1, 3)
+            curves_tex = ctx.texture((len(data), 1), components=3, dtype="f4",
                                      data=np.ascontiguousarray(data).tobytes())
             curves_tex.filter = (ctx.LINEAR, ctx.LINEAR)
             curves_tex.use(2)
             program['u_curves_tex'].value = 2
+        hsl_tex = None
+        if 'u_hsl_curve_tex' in program:
+            hsl = np.asarray(layer['hsl_curve_lut'], dtype=np.float32)
+            hsl_tex = ctx.texture(hsl.shape, components=1, dtype="f4",
+                                  data=np.ascontiguousarray(hsl.T).tobytes())
+            hsl_tex.filter = (ctx.LINEAR, ctx.LINEAR)
+            hsl_tex.repeat_x = hsl_tex.repeat_y = False
+            hsl_tex.use(3)
+            program['u_hsl_curve_tex'].value = 3
         values = composition_uniform_values(
-            layer, bindings=prepared.bindings, width=w, height=h)
+            layer, bindings=prepared.bindings, width=w, height=h,
+            grading_params_override=pipeline.bind_primary_calibration(program, layer))
         upload_composition_uniforms(program, values)
         fbo.use()
         vao = ctx.vertex_array(program, [(ctx.buffer(np.array([
@@ -318,7 +330,7 @@ def run_serial_passes(
         current = np.frombuffer(
             fbo.read(components=4, dtype="f2"),
             dtype=np.float16).reshape(h, w, 4).astype(np.float32)
-        for tex in (src_tex, out_tex, matte_tex, curves_tex):
+        for tex in (src_tex, out_tex, matte_tex, curves_tex, hsl_tex):
             if tex is not None:
                 tex.release()
         fbo.release()

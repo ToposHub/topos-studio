@@ -4812,8 +4812,11 @@ class EditGpuPreviewRenderer(QThread):
     @staticmethod
     def _grade_params_to_uniforms(grade: dict) -> dict:
         """Translate persisted ColorStack controls to shader-ready uniforms."""
+        from src.features.color.core.primary_calibration import grade_uses_calibration
         from src.features.color.core.the_decompiler import GradingMath
 
+        if grade_uses_calibration(grade):
+            raise ValueError("Measured primary calibration requires the color graph or CPU compositor")
         params = dict((grade or {}).get('grading_params', {}) or {})
 
         def scalar(name: str) -> float:
@@ -4872,7 +4875,12 @@ class EditGpuPreviewRenderer(QThread):
         """
         if not grade:
             return source_tex
-        if self._grade_program is None or self._grade_vao is None:
+        graph = grade.get("color_graph")
+        if graph is None and (self._grade_program is None or self._grade_vao is None):
+            from src.features.color.core.primary_calibration import grade_uses_calibration
+
+            if grade_uses_calibration(grade):
+                raise ValueError("Measured primary calibration requires the color graph or CPU compositor")
             logger.warning("EditGpuPreviewRenderer: ColorStack grade shader unavailable")
             return source_tex
 
@@ -4904,7 +4912,6 @@ class EditGpuPreviewRenderer(QThread):
         for i, extra in enumerate(pre_extras):
             pre_tex = _chain_grade_tex(pre_tex, extra, f"color-chain-pre-{i}")
 
-        graph = grade.get("color_graph")
         if graph is not None:
             if any(e.get("_unsupported_advanced") for e in extras):
                 raise RuntimeError("Color graph chain contains an unsupported advanced grade")

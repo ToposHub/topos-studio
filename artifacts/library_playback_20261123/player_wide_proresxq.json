@@ -1,0 +1,46 @@
+[
+  {
+    "avsync" : -9.2395394040156731e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999986,
+    "file" : "4K_prores4444XQ.mov",
+    "frame-drop-count" : 0,
+    "heartbeat_interval_ms" : {
+      "max" : 96.490567000728333,
+      "mean" : 21.197644850014644,
+      "p95" : 44.6915069987881
+    },
+    "hwdec-current" : "videotoolbox",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0040776200003165,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33288087942278088,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 96.256406999600586,
+    "renderer_interval_ms" : {
+      "max" : 78.376393001235556,
+      "mean" : 40.552202767099665,
+      "p95" : 44.995627999014687
+    },
+    "renderer_submissions_fps" : 24.633185077285788,
+    "time-pos" : 3.0800000000000001,
+    "video-codec" : "Apple ProRes (iCodec Pro)",
+    "video-out-params\/pixelformat" : "videotoolbox",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      3600,
+      1900
+    ]
+  }
+]

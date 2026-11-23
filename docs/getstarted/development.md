@@ -1,6 +1,6 @@
 # 开发指南 / Development Guide
 
-> getstarted · 计划 04 P3（2026-09-28）。本文内容整理自 `README.md` / `README_EN.md`（迁移瘦身），未新增事实。
+> getstarted · 计划 04 P3（2026-09-28）。目录结构与模块说明整理自 `README.md` / `README_EN.md`。
 > 构建与打包见 [building.md](building.md)；模块分层硬约束见 [docs/module_boundary_rules.md](../module_boundary_rules.md)。
 > 本文为双语文档：简体中文在前，English follows below。
 
@@ -273,6 +273,15 @@ vec3 process(vec3 color, vec2 uv) {
 
 ### 5. 开发流程
 
+#### 新建面板的默认配色
+
+| 界面区域 | 背景色 | RGB |
+| --- | --- | --- |
+| 面板主体 | `#27272B` | `(39, 39, 43)` |
+| 面板标题栏 | `#222226` | `(34, 34, 38)` |
+
+新建面板的内容区域默认使用 `C.BG_PANEL`。面板有独立标题栏时，可使用较深的 `C.BG_PANEL_HEADER` 区分标题栏和内容区域。[共享 UI 样式表](../../src/shared/ui/style_sheet.py)
+
 #### 添加新特性模块
 
 1. **创建模块目录**：`src/features/my_feature/`
@@ -443,6 +452,15 @@ vec3 process(vec3 color, vec2 uv) {
 Full plugin conventions, including the two plugin systems: [docs/PLUGIN_DEV_GUIDE.md](../PLUGIN_DEV_GUIDE.md).
 
 ### 5. Development Workflows
+
+#### Default Colors for New Panels
+
+| UI area | Background | RGB |
+| --- | --- | --- |
+| Panel body | `#27272B` | `(39, 39, 43)` |
+| Panel title bar | `#222226` | `(34, 34, 38)` |
+
+Use `C.BG_PANEL` as the default background for new panel bodies. Panels with a dedicated title bar can use the darker `C.BG_PANEL_HEADER` to distinguish it from the body. [Shared UI stylesheet](../../src/shared/ui/style_sheet.py)
 
 #### Add a Feature Module
 

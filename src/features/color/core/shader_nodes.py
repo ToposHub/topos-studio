@@ -23,9 +23,9 @@ vec3 hsv2rgb(vec3 c) {
 GRADING_SNIPPET = """
 uniform vec2 u_tex_size;
 
-vec3 apply_grading(vec3 color, vec3 lift, vec3 gamma, vec3 gain, float exposure, float temp, float tint, float contrast, float saturation, float vibrance, float shadow, float highlights, float mid_detail, float sharpness, float hue_shift, float lift_saturation, float gamma_saturation, float gain_saturation, float pivot, vec3 offset, vec3 log_shadow, vec3 log_midtone, vec3 log_highlight, vec3 log_offset, float log_low_range, float log_high_range, float lum_mix) {
+vec3 apply_grading(vec3 color, vec3 source_color, vec3 lift, vec3 gamma, vec3 gain, float exposure, float temp, float tint, float contrast, float saturation, float vibrance, float shadow, float highlights, float mid_detail, float sharpness, float hue_shift, float lift_saturation, float gamma_saturation, float gain_saturation, float pivot, vec3 offset, vec3 log_shadow, vec3 log_midtone, vec3 log_highlight, vec3 log_offset, float log_low_range, float log_high_range, float lum_mix) {
     // 0. 原始亮度（Lum Mix 用：把结果亮度向调色前回拉）
-    float luma_original = dot(color, vec3(0.299, 0.587, 0.114));
+    float luma_original = dot(source_color, vec3(0.299, 0.587, 0.114));
 
     // 1. Exposure - Reversible linear multiplier
     float exp_stops = (exposure / 100.0) * (exposure / 100.0) * 6.0;
@@ -239,7 +239,30 @@ vec3 apply_grading(vec3 color, vec3 lift, vec3 gamma, vec3 gain, float exposure,
 """
 
 CURVES_SNIPPET = """
+float calibrated_curve_delta(sampler2D curves_tex, float x, float offset, int channel) {
+    float u = (offset + clamp(x, 0.0, 1.0) * 255.0 + 0.5) / 512.0;
+    return texture(curves_tex, vec2(u, 0.5))[channel];
+}
+
+vec3 apply_calibrated_curves(vec3 color, sampler2D curves_tex) {
+    vec3 encoded = sign(color) * pow(abs(color), vec3(1.0 / 2.4));
+    const vec3 weights = vec3(0.2126, 0.7152, 0.0722);
+    vec3 delta = vec3(
+        calibrated_curve_delta(curves_tex, encoded.r, 0.0, 0),
+        calibrated_curve_delta(curves_tex, encoded.g, 0.0, 1),
+        calibrated_curve_delta(curves_tex, encoded.b, 0.0, 2)
+    );
+    float y = calibrated_curve_delta(curves_tex, dot(encoded, weights), 256.0, 0);
+    vec3 response = delta + vec3(y - dot(delta, weights));
+    vec3 mapped = encoded + response;
+    vec3 decoded = sign(mapped) * pow(abs(mapped), vec3(2.4));
+    return mix(decoded, color, equal(response, vec3(0.0)));
+}
+
 vec3 apply_curves(vec3 color, sampler2D curves_tex) {
+    if (textureSize(curves_tex, 0).x == 512) {
+        return apply_calibrated_curves(color, curves_tex);
+    }
     // Advanced Curves with Linear Extrapolation to prevent clipping.
     // Instead of clamping input to [0, 1], we extrapolate the curve's slope
     // for values outside the range. This allows "finding back" colors.
@@ -316,7 +339,57 @@ float sample_hsl_curve(sampler2D lut_tex, float sample_normalized, int curve_idx
     return texture(lut_tex, vec2(x_coord, sample_normalized)).r;
 }
 
+float sample_calibrated_hsl_curve(sampler2D tex, float x, float row) {
+    return texture(tex, vec2((row + 0.5) / 6.0, (clamp(x, 0.0, 1.0) * 511.0 + 0.5) / 512.0)).r;
+}
+
+float calibrated_hsl_envelope(float t, vec3 coefficients) {
+    t = clamp(t, 0.0, 1.0);
+    float edge = 1.0 - t;
+    return t * t * (3.0 - 2.0 * t)
+        + t * edge * edge * (coefficients.x + t * (coefficients.y + coefficients.z * t));
+}
+
+float calibrated_hsl_center(float x) {
+    return calibrated_hsl_envelope(2.0 * min(x, 1.0 - x), vec3(0.74, 0.86, 1.37));
+}
+
+vec3 apply_calibrated_hsl_curves(vec3 color, sampler2D tex) {
+    vec3 encoded = sign(color) * pow(abs(color), vec3(1.0 / 2.4));
+    const vec3 weights = vec3(0.2126, 0.7152, 0.0722);
+    float luma = dot(encoded, weights);
+    float cb = (encoded.b - luma) / 1.8556;
+    float cr = (encoded.r - luma) / 1.5748;
+    float chroma = length(vec2(1.87 * cb, 1.815 * cr - 0.418 * cb));
+    float sat_x = 2.0 * chroma;
+    float low = min(min(encoded.r, encoded.g), encoded.b);
+    vec3 hsv = rgb2hsv(encoded - vec3(low));
+
+    float lum_sat = 1.0 + (sample_calibrated_hsl_curve(tex, luma, 0.0) - 1.0) * calibrated_hsl_center(luma);
+    float hue_shift = sample_calibrated_hsl_curve(tex, hsv.x, 1.0);
+    float hue_sat = sample_calibrated_hsl_curve(tex, hsv.x, 2.0);
+    float hue_lum = (sample_calibrated_hsl_curve(tex, hsv.x, 3.0) - 1.0)
+        * calibrated_hsl_envelope(sat_x, vec3(0.08, -0.44, 1.06));
+    float sat_response = calibrated_hsl_center(chroma);
+    float sat_sat = 1.0 + (sample_calibrated_hsl_curve(tex, sat_x, 4.0) - 1.0) * sat_response;
+    float sat_lum = (sample_calibrated_hsl_curve(tex, sat_x, 5.0) - 1.0) * sat_response;
+    float sat_factor = lum_sat * hue_sat * sat_sat;
+    float lum_response = hue_lum + sat_lum;
+    if (sat_factor == 1.0 && hue_shift == 0.0 && lum_response == 0.0) return color;
+
+    vec3 delta = encoded - vec3(luma);
+    if (hue_shift != 0.0) {
+        vec3 rotated = hsv2rgb(vec3(fract(hsv.x - hue_shift), 1.0, hsv.z));
+        delta = rotated - vec3(dot(rotated, weights));
+    }
+    vec3 mapped = delta * sat_factor + vec3(luma * (1.0 + lum_response));
+    return sign(mapped) * pow(abs(mapped), vec3(2.4));
+}
+
 vec3 apply_hsl_curves(vec3 color, sampler2D hsl_lut_tex) {
+    if (textureSize(hsl_lut_tex, 0).y == 512) {
+        return apply_calibrated_hsl_curves(color, hsl_lut_tex);
+    }
     // AUD-0840：负值 HDR 颜色（curves 线性外推可产生）直接进 rgb2hsv 会
     // 得到负饱和度与失真色相——整条 HSV 链以 |color| 为基准，出口按符号
     // 还原（与 MIXER/WARPER 同防护）。非负输入 abs 恒等，行为不变。
@@ -1080,6 +1153,49 @@ vec3 apply_curves_soft_clip(vec3 color, vec3 low_clip, vec3 low_soft, vec3 high_
         apply_soft_clip_knee(color.r, low_clip.r, low_soft.r, high_clip.r, high_soft.r),
         apply_soft_clip_knee(color.g, low_clip.g, low_soft.g, high_clip.g, high_soft.g),
         apply_soft_clip_knee(color.b, low_clip.b, low_soft.b, high_clip.b, high_soft.b)
+    );
+}
+"""
+
+# Scalar kernel uses the float built-ins common to GLSL and MSL.
+CALIBRATED_SOFT_CLIP_KNEE = """
+float calibrated_soft_clip_toe(float value, float edge, float width) {
+    if (width <= 0.0) return max(value, edge);
+    if (value >= edge + width) return value;
+    float t = clamp((value - edge + width) / (2.0 * width), 0.0, 1.0);
+    return edge + width * t * t;
+}
+
+float calibrated_soft_clip_channel(float color, float low, float low_soft,
+                                    float high, float high_soft) {
+    if (isnan(color) || isinf(color)) return color;
+    if (low == 0.0 && low_soft == 0.0 && high == 1.0 && high_soft == 0.0)
+        return color;
+    float gap = max(high - low, 0.0);
+    if (gap == 0.0) return sign(low) * pow(abs(low), 2.4);
+    float low_knee = clamp(low_soft, 0.0, gap);
+    float high_knee = clamp(high_soft, 0.0, gap - low_knee);
+
+    float encoded = sign(color) * pow(abs(color), 1.0 / 2.4);
+    float bias = 0.5 - 1.5 * (low - low_knee) + 0.5 * (high - 1.0 + high_knee);
+    encoded -= (clamp(encoded, 0.0, 1.0) + bias) / 1024.0;
+    if (low != 0.0 || low_knee > 0.0)
+        encoded = calibrated_soft_clip_toe(encoded, low, low_knee);
+    if (high_knee > 0.0)
+        encoded = 1.0 - calibrated_soft_clip_toe(1.0 - encoded, 1.0 - high, high_knee);
+    else if (high != 1.0)
+        encoded = min(encoded, high - clamp(high, 0.0, 1.0) / 1024.0);
+    return sign(encoded) * pow(abs(encoded), 2.4);
+}
+"""
+
+CURVES_SOFT_CLIP_CALIBRATION_SNIPPET = CALIBRATED_SOFT_CLIP_KNEE + """
+vec3 apply_calibrated_soft_clip(vec3 color, vec3 low, vec3 low_soft,
+                                vec3 high, vec3 high_soft) {
+    return vec3(
+        calibrated_soft_clip_channel(color.r, low.r, low_soft.r, high.r, high_soft.r),
+        calibrated_soft_clip_channel(color.g, low.g, low_soft.g, high.g, high_soft.g),
+        calibrated_soft_clip_channel(color.b, low.b, low_soft.b, high.b, high_soft.b)
     );
 }
 """

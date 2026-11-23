@@ -73,6 +73,7 @@ from src.features.color.core.curves_soft_clip import (
     curves_edit_is_default,
     curves_soft_clip_is_identity,
 )
+from src.features.color.core.curves_calibration import curves_calibration_enabled
 from src.features.shared.effects.effect_tiers import effective_denoise_radius
 from src.features.edit.core.transition_catalog import (
     COMPOSITE_TRANSITION_TYPES,
@@ -2341,7 +2342,7 @@ class NativeGpuBridgeEligibility:
     ``reason_code`` 词表（fail-closed，任一不满足即不可选）：
     ``unsupported_encoder_format`` / ``subtitles_requested`` /
     ``alpha_requested`` / ``no_video_clips`` / ``transitions_present`` /
-    ``non_video_clip`` / ``clip_effects_present`` /
+    ``non_video_clip`` / ``clip_effects_present`` / ``color_chain_present`` /
     ``non_identity_transform`` / ``non_identity_crop`` /
     ``non_identity_opacity`` / ``fades_present`` /
     ``topos_422_to_nv12_not_implemented`` /
@@ -2570,9 +2571,11 @@ def can_use_native_gpu_bridge(
 
     try:
         from src.features.edit.core.clip_params import CropParams, TransformParams
+        from src.features.edit.core.color_chain import chain_extra_params
 
         identity_transform = TransformParams()
         identity_crop = CropParams()
+        timeline_id = str(getattr(sequence, "timeline_id", "") or "")
         for clip in clips:
             asset = project.get_asset_by_id(clip.asset_id)
             if asset is None or str(getattr(asset, "media_type", "")) != "video":
@@ -2582,6 +2585,8 @@ def can_use_native_gpu_bridge(
                     or getattr(clip, "composite_id", None)):
                 return NativeGpuBridgeEligibility(
                     False, "clip_effects_present")
+            if chain_extra_params(project, timeline_id, clip):
+                return NativeGpuBridgeEligibility(False, "color_chain_present")
             if getattr(clip, "transform", None) != identity_transform:
                 return NativeGpuBridgeEligibility(
                     False, "non_identity_transform")
@@ -7562,9 +7567,14 @@ class TimelineExporter:
                         < int(getattr(clip, "timeline_end", 0)))):
             return None
 
-        if (not allow_color_graph and (self._clip_color_graph(layer) is not None
-                                      or self._get_clip_color_grade(layer) is not None)):
-            return None
+        if not allow_color_graph:
+            from src.features.edit.core.color_chain import chain_extra_params
+
+            timeline_id = str(getattr(getattr(self, "_sequence", None), "timeline_id", "") or "")
+            if (chain_extra_params(self._project, timeline_id, clip)
+                    or self._clip_color_graph(layer) is not None
+                    or self._get_clip_color_grade(layer) is not None):
+                return None
         if self._get_clip_video_denoise(layer) is not None:
             return None
 
@@ -10960,6 +10970,11 @@ class TimelineExporter:
         from src.features.edit.core.timeline_gpu_export_renderer import (
             grade_params_to_uniforms,
         )
+        from src.features.color.core.primary_calibration import grade_uses_calibration
+
+        if any(grade_uses_calibration({"grading_params": extra})
+               for extra in (grade.get("chain_extra_params") or ())):
+            raise ValueError("Measured color chain requires the CPU compositor")
         main = grade_params_to_uniforms(grading_params)
         # M05（S08）/F4.1：链段作为 grade pass 序列返回，渲染端按序逐段
         # 过 shader（mid FBO 乒乓）——pre 段在主栈**之前**，trim/post 段
@@ -11044,13 +11059,20 @@ class TimelineExporter:
         """
         clip = getattr(layer, "clip", None)
         stack_id = getattr(clip, "color_stack_id", None)
-        if not stack_id:
-            return None
-
         project = self._project
         stacks = getattr(project, "color_stacks", {}) if project is not None else {}
         stack = stacks.get(stack_id)
         if stack is None:
+            if not stacks or clip is None:
+                return None
+            from src.features.color.core.primary_calibration import grade_uses_calibration
+            from src.features.edit.core.color_chain import chain_extra_params
+
+            timeline = getattr(self, "_timeline", None) or getattr(self, "_sequence", None)
+            timeline_id = getattr(timeline, "timeline_id", None) or getattr(clip, "timeline_id", "")
+            extras = chain_extra_params(project, str(timeline_id), clip, exclude_timeline=exclude_timeline)
+            if any(grade_uses_calibration({"grading_params": extra}) for extra in extras):
+                return {"grading_params": {}, "chain_extra_params": extras}
             return None
 
         # B13 图能力硬门：栈携带 color_graph 时旧 layers/平铺路径不得
@@ -11087,6 +11109,8 @@ class TimelineExporter:
                           exclude_timeline: bool = False,
                           ) -> Optional[Dict[str, Any]]:
         """从栈载荷构建 grade dict（layers/平铺路径；图门在外层）。"""
+        from src.features.color.core.primary_calibration import grade_uses_calibration
+
         clip = getattr(layer, "clip", None) if layer is not None else None
         project = self._project
         stack_id = (getattr(clip, "color_stack_id", None)
@@ -11126,7 +11150,7 @@ class TimelineExporter:
             except (TypeError, ValueError):
                 return value != default
 
-        basic_active = any(
+        basic_active = grade_uses_calibration(stack) or any(
             changed(grading_params.get(name, default), default)
             for name, default in {**wheel_defaults, **scalar_defaults}.items()
         )
@@ -11189,7 +11213,8 @@ class TimelineExporter:
                     "timeline_id", "") or "")
         extras = chain_extra_params(project, timeline_id, clip,
                                     exclude_timeline=exclude_timeline)
-        extras_on = extras_active(extras)
+        extras_on = extras_active(extras) or any(
+            grade_uses_calibration({"grading_params": extra}) for extra in extras)
 
         if not basic_active and not advanced_active and not grade_keyframes \
                 and not extras_on:
@@ -11229,6 +11254,7 @@ class TimelineExporter:
                 else layer_csc
             layer_cedit = layer_dict.get("curves_edit")
             layer_cedit = None if curves_edit_is_default(layer_cedit) \
+                and not (layer_curves and curves_calibration_enabled(layer_cedit)) \
                 else layer_cedit
             layer_lut = layer_dict.get("active_lut_path") or None
             layer_qp = None
@@ -11504,7 +11530,9 @@ class TimelineExporter:
                                        int(getattr(layer, 'source_frame', 0)))
 
     def _clip_color_graph(self, layer: "ClipLayerInfo") -> Optional[Any]:
-        """clip 调色栈携带的权威图（无图栈返回 None）。"""
+        """Resolve the clip's explicit graph or its measured primary execution graph."""
+        from src.features.color.core.color_graph_migration import stack_primary_execution_graph
+
         clip = getattr(layer, "clip", None)
         stack_id = getattr(clip, "color_stack_id", None)
         if not stack_id:
@@ -11512,7 +11540,7 @@ class TimelineExporter:
         project = self._project
         stacks = getattr(project, "color_stacks", {}) if project is not None else {}
         stack = stacks.get(stack_id)
-        return getattr(stack, "color_graph", None) if stack is not None else None
+        return stack_primary_execution_graph(stack)
 
     def _apply_color_graph_cpu(
         self,
@@ -11846,6 +11874,10 @@ class TimelineExporter:
             def _apply_entries(buf, entries):
                 for extra in entries:
                     if extra.get("_unsupported_advanced", False):
+                        from src.features.color.core.primary_calibration import grade_uses_calibration
+
+                        if grade_uses_calibration({"grading_params": extra}):
+                            raise ExportGradeDegradedError("Measured color chain segment has unsupported advanced operations")
                         logger.warning(
                             "Export color chain: clip %s 链段含 curves/LUT"
                             " 等高级操作，primary 导出跳过该段",
@@ -11864,25 +11896,34 @@ class TimelineExporter:
             # 见 shader_compiler build_composition_shader 的段序）
             curves_data = grade.get("curves_data")
             if curves_data:
+                edit = grade.get("curves_edit") or {}
                 try:
                     from src.features.color.core.layer import (
                         build_curves_lut_from_data,
                     )
                     # Edit 强度参与 LUT 合成（与 Color 页 GPU 同一语义）
                     lut = build_curves_lut_from_data(
-                        curves_data,
-                        (grade.get("curves_edit") or {}).get("amounts"),
-                    )  # (256,1,3)
-                    flat = graded.reshape(-1, 3)
-                    idx = np.clip(
-                        (flat * 255.0).round().astype(np.int64), 0, 255)
-                    flat = np.stack([
-                        lut[idx[:, 0], 0, 0],
-                        lut[idx[:, 1], 0, 1],
-                        lut[idx[:, 2], 0, 2],
-                    ], axis=-1).astype(np.float32)
-                    graded = flat.reshape(rgb.shape)
-                except Exception:  # noqa: BLE001 — 曲线失败按 dropped 告警
+                        curves_data, edit.get("amounts"),
+                        calibration_version=edit.get("calibration_version", 0),
+                    )
+                    if curves_calibration_enabled(edit):
+                        from src.features.color.core.color_graph_cpu import apply_curves_cpu
+
+                        graded = apply_curves_cpu(graded, lut)
+                    else:
+                        flat = graded.reshape(-1, 3)
+                        idx = np.clip(
+                            (flat * 255.0).round().astype(np.int64), 0, 255)
+                        flat = np.stack([
+                            lut[idx[:, 0], 0, 0],
+                            lut[idx[:, 1], 0, 1],
+                            lut[idx[:, 2], 0, 2],
+                        ], axis=-1).astype(np.float32)
+                        graded = flat.reshape(rgb.shape)
+                except Exception as exc:  # noqa: BLE001 — legacy failure reports a dropped operation
+                    if curves_calibration_enabled(edit):
+                        raise ExportGradeDegradedError(
+                            f"Calibrated curves could not render for clip {layer.clip_id}") from exc
                     logger.warning(
                         "Export color grade: clip %s 曲线应用失败——该段"
                         "按无曲线输出", layer.clip_id, exc_info=True)
@@ -11989,6 +12030,10 @@ class TimelineExporter:
         prefix evaluator as GradingMath rather than sampled final responses.
         """
         import numpy as np
+        from src.features.color.core.primary_calibration import grade_uses_calibration
+
+        if grade_uses_calibration({"grading_params": grading_params}):
+            return None
 
         coupled_controls = ("highlights", "vibrance", "hue_shift", "saturation")
         try:

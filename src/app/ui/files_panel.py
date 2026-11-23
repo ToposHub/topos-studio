@@ -266,6 +266,10 @@ class FilesPanel(QWidget):
             self._native_panel.library_register_requested.connect(self._native_transport.register_library)
             self._native_panel.library_remove_requested.connect(self._native_transport.remove_library)
             self._native_panel.library_rename_requested.connect(self._native_transport.rename_library)
+            self._native_panel.library_import_requested.connect(self._native_transport.import_library)
+            self._native_panel.library_export_requested.connect(self._native_transport.export_library)
+            self._native_transport.library_transfer_finished.connect(
+                self._native_panel.show_library_transfer_result)
             self._native_transport.library_changed.connect(
                 self._native_panel.show_library_change)
             self._native_transport.library_registry_changed.connect(self.library_registry_changed)
@@ -286,6 +290,8 @@ class FilesPanel(QWidget):
                 self._open_batch_rename)
             self._native_panel.compare_requested.connect(self._open_compare)
             self._native_transport.tree_loaded.connect(self._native_panel.locations.set_children)
+            self._native_panel.locations.folder_counts_requested.connect(self._native_transport.load_folder_counts)
+            self._native_transport.folder_counts_loaded.connect(self._native_panel.locations.apply_folder_counts)
             self._native_transport.tree_failed.connect(self._native_panel.locations.set_error)
             self._native_panel.locations.tree_reload_requested.connect(self._native_transport.reload_tree)
             self._native_panel.locations.tree_path_removed.connect(self._native_transport.invalidate_tree_path)
@@ -330,10 +336,16 @@ class FilesPanel(QWidget):
         dev_registry = DevSourceRegistry(locator.root / "plugin_dev_sources.json")
 
         def sources() -> PluginSourceConfig:
+            from pathlib import Path
+            # Copyable standalone apps are a distinct local source, never builtin.
+            app_roots = [Path(__file__).resolve().parents[3] / "extensions"]
+            extra = os.environ.get("TOPOS_APPS_DIR", "")
+            if extra:
+                app_roots.extend(Path(part).expanduser() for part in extra.split(os.pathsep) if part)
             return PluginSourceConfig.for_host(
                 builtin_ids=tuple(row.plugin_id for row in catalog.snapshot()),
                 install_root=locator.plugins_install_root,
-                dev_roots=dev_registry.list())
+                dev_roots=dev_registry.list(), app_roots=app_roots)
 
         self._files_plugins = FilesPluginsController(
             catalog, self._native_transport, self._files_prefs, self._native_panel,
@@ -343,6 +355,7 @@ class FilesPanel(QWidget):
             desired_store=desired_store)
         self._native_panel.plugins_requested.connect(self._files_plugins.show_launcher)
         self._native_panel.plugin_center_requested.connect(self._files_plugins.show_center)
+        self._native_panel.file_actions_requested.connect(self._files_plugins.populate_open_with_menu)
         # [F11] 安装/更新/卸载编排：停用→安装事务→Inventory 重扫；
         # 数据（配置命名空间）/凭据（secret 撤权）分开，素材不触及
         from src.shared.plugins.installer import LocalPackageInstaller
@@ -588,6 +601,8 @@ class FilesPanel(QWidget):
         from pathlib import Path
         from src.shared.media.format_registry import AUDIO_EXTENSIONS
         plugins = getattr(self, "_files_plugins", None)
+        if plugins is not None and plugins.open_associated_file(path):
+            return
         if Path(path).suffix.lower() in AUDIO_EXTENSIONS and plugins is not None:
             try:
                 plugins.open_audio(path)

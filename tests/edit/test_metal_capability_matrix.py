@@ -121,6 +121,8 @@ def _rows() -> dict[str, EditRenderTask]:
             1, 1, [_video(preview_grade=_primary_grade(grade={"mid_detail": 20.0}))]),
         "animated grade": EditRenderTask(
             1, 1, [_video(preview_grade=_primary_grade(grade_keyframes={"exposure": {"keyframes": [{}]}}))]),
+        "measured primary grade": EditRenderTask(1, 1, [_video(preview_grade=_primary_grade(
+            grade={"primary_calibration_version": 1, "contrast": 30.0}))]),
     }
 
 
@@ -142,6 +144,7 @@ EXPECTED: dict[str, tuple[str, str, str]] = {
     "adjustment clip above": (GL, GL, GL),
     "spatial grade": (GL, GL, GL),
     "animated grade": (GL, GL, GL),
+    "measured primary grade": (GL, GL, GL),
 }
 
 
@@ -240,6 +243,7 @@ def test_every_gl_cell_of_the_metal_column_is_a_refusal_with_a_reason() -> None:
         "adjustment clip above": "adjustment_layers",
         "spatial grade": "grade_unsupported",
         "animated grade": "grade_unsupported",
+        "measured primary grade": "grade_unsupported",
     }
 
 

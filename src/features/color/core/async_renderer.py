@@ -69,6 +69,7 @@ from src.shared.gpu.gl_resource_registry import (
 )
 from src.features.color.core.opengl_render_backend import OpenGLRenderBackend
 from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+from src.shared.media.graded_thumbnail import GRADED_PREVIEW_MAX_EDGE
 from src.shared.media.gpu_frame import (
     GpuDecodedFrame,
     GpuFrameRelease,
@@ -139,6 +140,7 @@ class RenderLane(Enum):
     COLOR_OUTPUT = "color_output"
     SCOPE_SNAPSHOT = "scope_snapshot"
     GPU_SCOPE = "gpu_scope"
+    GRADE_SET_PREVIEW = "grade_set_preview"
 
 from src.shared.video.render_commands import RenderCommand  # noqa: F401 - re-export for backward compatibility
 
@@ -165,6 +167,7 @@ class AsyncRenderer(QThread):
     color_output_ready = pyqtSignal(int, int, int)  # ColorOutput: (texture_id, width, height)
     monitor_color_output_ready = pyqtSignal(int, int, int)  # DeckLink monitor output only
     scope_snapshot_ready = pyqtSignal(object)  # BGR float32 scope image (CPU fallback)
+    grade_set_preview_ready = pyqtSignal(object, object)  # (source epoch, grade revision), RGB uint8 or None
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     
     def __init__(self, main_context: QOpenGLContext) -> None:
@@ -212,6 +215,7 @@ class AsyncRenderer(QThread):
         # never by viewport refreshes.
         self._scope_content_revision: int = 0
         self._scope_color_output_revision: int = -1
+        self._scope_color_output_photo_key: tuple[int, int] | None = None
         self._scope_color_output_max_dim: int = 0
         self._last_scope_render_params: Optional[dict] = None
         # S04/B16.5：图执行（N07）。scope 全帧先接（S04）；生产开关
@@ -301,6 +305,7 @@ class AsyncRenderer(QThread):
         # still frame and must not be used as a render fallback.
         self._pyramid_epoch_generation = 0
         self.reference_pyramid_textures = []
+        self._reference_follows_source = False
         self.tiles = []
         self.layer_textures = {} # {id(layer): {'curves': tex, 'warper': tex, 'lut3d': tex}}
         self.baked_textures = {}  # AI Baking: {layer_id: texture} - cached baked layer textures
@@ -430,7 +435,7 @@ class AsyncRenderer(QThread):
         # Each lane holds at most one command; newer submissions replace older ones.
         # Lane execution order (see _drain_pending_slots):
         #   AUX_TEX (per-resource sub-slots) -> GRADING_REFRESH -> VIDEO_PLAYBACK
-        #   -> VIEWPORT_REFRESH -> COLOR_OUTPUT -> SCOPE_SNAPSHOT
+        #   -> VIEWPORT_REFRESH -> COLOR_OUTPUT -> SCOPE_SNAPSHOT -> GPU_SCOPE -> GRADE_SET_PREVIEW
         # VIEWPORT_REFRESH executes last to ensure latest viewport state is published.
         # Commands NOT in any lane (seek, master, export, compile, upload, bake, etc.)
         # go directly to the queue and are never discarded (critical commands).
@@ -864,11 +869,15 @@ class AsyncRenderer(QThread):
             # 单槽会在 sync_all_resources / 多层 mask 上传的紧循环里把
             # 不同资源的更新互相覆盖掉，导致加载后曲线/LUT/蒙版静默失效。
             d = data or {}
+            if d.get("ordered"):
+                return None
             return (RenderLane.AUX_TEX,
                     str(d.get('layer_id')), str(d.get('type')))
         elif cmd_type == RenderCommand.RENDER_COLOR_OUTPUT:
             return RenderLane.COLOR_OUTPUT
         elif cmd_type == RenderCommand.RENDER_SCOPE:
+            if isinstance(data, dict) and "grade_set_preview_key" in data:
+                return RenderLane.GRADE_SET_PREVIEW
             return RenderLane.SCOPE_SNAPSHOT
         elif cmd_type == RenderCommand.RENDER_GPU_SCOPE:
             # GPU scope is the lowest-priority, latest-result-wins lane.
@@ -923,6 +932,7 @@ class AsyncRenderer(QThread):
                 RenderLane.COLOR_OUTPUT,
                 RenderLane.SCOPE_SNAPSHOT,
                 RenderLane.GPU_SCOPE,
+                RenderLane.GRADE_SET_PREVIEW,
             ):
                 entry = self._pending_slots.get(lane)
                 if entry is not None:
@@ -1071,7 +1081,11 @@ class AsyncRenderer(QThread):
         elif cmd_type == RenderCommand.RENDER_COLOR_OUTPUT:
             self._do_render_color_output(data)
         elif cmd_type == RenderCommand.RENDER_SCOPE:
-            self._do_render_scope_snapshot(data)
+            if isinstance(data, dict) and "grade_set_preview_key" in data:
+                key = data["grade_set_preview_key"]
+                self.grade_set_preview_ready.emit(key, self._read_grade_set_preview(key))
+            else:
+                self._do_render_scope_snapshot(data)
         elif cmd_type == RenderCommand.RENDER_GPU_SCOPE:
             self._do_render_gpu_scope(data)
         elif cmd_type == RenderCommand.UPLOAD_IMAGE:
@@ -1079,7 +1093,11 @@ class AsyncRenderer(QThread):
                 self.__dict__.pop("_color_metal_source_transfer", None)
             if isinstance(data, dict):
                 # FIX: 传递 is_video 标志，防止视频模式下清除视频纹理状态
-                self._do_upload(data['image'], is_reference=False, original_size=data.get('original_size'), is_video=data.get('is_video', False))
+                source_reference = {"use_source_as_reference": True} if data.get("use_source_as_reference") else {}
+                self._do_upload(
+                    data['image'], is_reference=False, original_size=data.get('original_size'),
+                    is_video=data.get('is_video', False), **source_reference,
+                )
             else:
                 self._do_upload(data, is_reference=False)
         elif cmd_type == RenderCommand.UPLOAD_REFERENCE:
@@ -1646,6 +1664,84 @@ class AsyncRenderer(QThread):
         self._temp_texture_alloc_count = 0
         self._finish_call_count = 0
 
+    def _read_grade_set_preview(self, key: tuple[int, int]) -> np.ndarray | None:
+        """Copy an already-rendered photo without evaluating its grade again."""
+        params = self._last_scope_render_params
+        if (not params or params.get('grade_set_preview_key') != key
+                or not self.ctx or self.video_playback_active or not self.pyramid_textures):
+            return None
+        width, height = params['photo_size']
+        texture = None
+        uv = None
+        if not params.get('show_mask'):
+            vx, vy, vw, vh = params['scene_visible_rect']
+            front_w, front_h = self.current_front_size
+            if min(vw, vh, front_w, front_h) > 0:
+                # Fit includes background around the photo. Crop it off, allowing
+                # for viewport rounding at the image edges.
+                dx, dy = 1.5 * vw / front_w, 1.5 * vh / front_h
+                if vx <= dx and vy <= dy and vx + vw >= width - dx and vy + vh >= height - dy:
+                    texture = self._published_front_texture()
+                    uv = (max(0.0, -vx / vw), min(1.0, 1.0 + vy / vh),
+                          min(1.0, (width - vx) / vw), max(0.0, 1.0 - (height - vy) / vh))
+        if (texture is None and self._scope_color_output_revision == self._scope_content_revision
+                and self._scope_color_output_photo_key == key):
+            # When zoomed or showing a matte, an already-computed scope surface
+            # can supply a clean full frame of this exact grade.
+            texture = self._scope_color_output_tex
+            uv = None
+        if texture is None:
+            return None
+        try:
+            if uv is None:
+                available_w, available_h = texture.size
+            else:
+                available_w = front_w * (uv[2] - uv[0])
+                available_h = front_h * (uv[1] - uv[3])
+            scale = min(1.0, GRADED_PREVIEW_MAX_EDGE / max(width, height),
+                        available_w / width, available_h / height)
+            size = (max(1, round(width * scale)), max(1, round(height * scale)))
+            pixels = self._read_scaled_texture(texture, size, dtype='f1', uv=uv)
+            rgb = np.frombuffer(pixels, dtype=np.uint8).reshape(size[1], size[0], 3)
+            return np.ascontiguousarray(rgb[::-1])
+        except (AttributeError, RuntimeError, ValueError, moderngl.Error):
+            logger.debug("Grade set preview failed", exc_info=True)
+            return None
+
+    def _published_front_texture(self) -> moderngl.Texture | None:
+        return next(
+            (texture for texture in self.tex_pair
+             if texture is not None and texture.glo == self.current_front_tex_id), None)
+
+    def _read_scaled_texture(
+        self, texture: moderngl.Texture, size: tuple[int, int], *, dtype: str,
+        uv: tuple[float, float, float, float] | None = None,
+    ) -> bytes:
+        if self._scope_snapshot_size != size:
+            self._scope_snapshot_size = (0, 0)
+            if self._scope_snapshot_fbo is not None:
+                self._scope_snapshot_fbo.release()
+                self._scope_snapshot_fbo = None
+            if self._scope_snapshot_tex is not None:
+                self._scope_snapshot_tex.release()
+                self._scope_snapshot_tex = None
+            self._scope_snapshot_tex = self.ctx.texture(size, 3, dtype='f4')
+            self._scope_snapshot_fbo = self.ctx.framebuffer(
+                color_attachments=[self._scope_snapshot_tex])
+            self._scope_snapshot_size = size
+        self._scope_snapshot_fbo.use()
+        self.ctx.viewport = (0, 0, *size)
+        self.ctx.scissor = None
+        self._scope_snapshot_fbo.clear(0.0, 0.0, 0.0, 1.0)
+        program = self.utility_shaders['passthrough']
+        texture.use(0)
+        program['u_texture'].value = 0
+        if uv is None:
+            self._render_quad(program)
+        else:
+            self._render_tile_raw_uv(program, -1.0, 1.0, 1.0, -1.0, *uv)
+        return self._scope_snapshot_fbo.read(components=3, alignment=1, dtype=dtype)
+
     def _do_render_scope_snapshot(self, data: Dict[str, Any] | None) -> None:
         """Read a reduced copy of the published front texture on the render thread.
 
@@ -1664,13 +1760,7 @@ class AsyncRenderer(QThread):
 
         max_dim = int((data or {}).get('max_dim', 512) or 512)
         max_dim = max(1, max_dim)
-        front_texture = next(
-            (
-                texture for texture in self.tex_pair
-                if texture is not None and texture.glo == self.current_front_tex_id
-            ),
-            None,
-        )
+        front_texture = self._published_front_texture()
         if front_texture is None:
             return
 
@@ -1684,30 +1774,7 @@ class AsyncRenderer(QThread):
         )
 
         try:
-            if self._scope_snapshot_size != target_size:
-                if self._scope_snapshot_fbo is not None:
-                    self._scope_snapshot_fbo.release()
-                if self._scope_snapshot_tex is not None:
-                    self._scope_snapshot_tex.release()
-                self._scope_snapshot_tex = self.ctx.texture(target_size, 3, dtype='f4')
-                self._scope_snapshot_fbo = self.ctx.framebuffer(
-                    color_attachments=[self._scope_snapshot_tex]
-                )
-                self._scope_snapshot_size = target_size
-
-            self._scope_snapshot_fbo.use()
-            self.ctx.viewport = (0, 0, *target_size)
-            self.ctx.scissor = None
-            self._scope_snapshot_fbo.clear(0.0, 0.0, 0.0, 1.0)
-            program = self.utility_shaders.get('passthrough')
-            front_texture.use(0)
-            program['u_texture'].value = 0
-            self._render_quad(program)
-            pixels = self._scope_snapshot_fbo.read(
-                components=3,
-                alignment=1,
-                dtype='f4',
-            )
+            pixels = self._read_scaled_texture(front_texture, target_size, dtype='f4')
             image = np.frombuffer(pixels, dtype=np.float32).reshape(
                 target_size[1], target_size[0], 3,
             )
@@ -2110,33 +2177,6 @@ class AsyncRenderer(QThread):
         self.__dict__['last_node_cache_events'] = result.cache_events
         return result.output_texture, False
 
-    def _try_color_metal_scope(self, demand, pool: dict, started: float) -> bool:
-        from src.features.color.core.scope_types import ScopeGpuFrame
-
-        preview = self.__dict__.get("_color_metal_preview")
-        source = self.__dict__.get("_scope_color_output_fbo")
-        if (preview is None or source is None or demand.mask_enabled
-                or demand.histogram_overlay or demand.mode not in ("waveform", "histogram")):
-            return False
-        key = "wf_display" if demand.mode == "waveform" else "hist_display"
-        destination = pool[key + "_fbo"]
-        if not preview.render_scope(demand, source, destination):
-            return False
-        self.ctx.finish()  # Scope presenter reads the shared GL texture.
-        revision = self._scope_source_revision
-        identity = demand.sample_identity
-        frame = ScopeGpuFrame(
-            revision=demand.revision,
-            source_revision=revision,
-            sample_identity=identity.with_source_content_revision(revision) if identity else None,
-            analysis_ms=(time.monotonic() - started) * 1000.0,
-            **{f"{demand.mode}_texture_id": pool[key].glo,
-               f"{demand.mode}_size": destination.size},
-        )
-        self.last_color_scope_backend = "metal"
-        self.gpu_scope_ready.emit(frame)
-        return True
-
     def _do_render_gpu_scope(self, demand) -> None:
         """Run the native GPU scope pipeline for a ``ScopeDemand``.
 
@@ -2155,7 +2195,7 @@ class AsyncRenderer(QThread):
             mode_needs_waveform, mode_needs_vectorscope,
             mode_needs_parade, mode_needs_luma, mode_needs_histogram,
             mode_needs_cie, mode_needs_falsecolor,
-            DEFAULT_WAVEFORM_DENSITY_SIZE, DEFAULT_VECTORSCOPE_DENSITY_SIZE,
+            scope_density_sizes,
             DEFAULT_HISTOGRAM_DISPLAY_SIZE, DEFAULT_CIE_SIZE,
             DEFAULT_FALSECOLOR_SIZE,
         )
@@ -2200,15 +2240,30 @@ class AsyncRenderer(QThread):
                                      demand_revision=self._scope_demand_revision)
             return
 
+        # A newer preview can arrive after the lane batch was drained. Give
+        # that work another chance before starting a non-preemptible scope
+        # pass; its front-publish callback will submit the fresh demand.
+        with self._pending_lock:
+            preview_pending = any(
+                self._pending_slots.get(lane) is not None for lane in (
+                    RenderLane.GRADING_REFRESH, RenderLane.VIDEO_PLAYBACK,
+                    RenderLane.VIEWPORT_REFRESH,
+                )
+            )
+        if preview_pending:
+            scope_diagnostics.record('execute', 'preview_priority', revision=demand.revision)
+            return
+
         t0 = time.monotonic()
         try:
             analysis_size = (
                 max(1, int(demand.analysis_size[0])),
                 max(1, int(demand.analysis_size[1])),
             )
-            waveform_size = DEFAULT_WAVEFORM_DENSITY_SIZE
-            vectorscope_size = DEFAULT_VECTORSCOPE_DENSITY_SIZE
+            waveform_size, vectorscope_size = scope_density_sizes(demand.display_size, demand.mode)
 
+            scope_engine = self._ensure_scope_engine()
+            scope_engine.begin_frame()
             pool = self._ensure_gpu_scope_pool(
                 analysis_size, waveform_size, vectorscope_size
             )
@@ -2220,7 +2275,7 @@ class AsyncRenderer(QThread):
             # keeps scope geometry stable and excludes the canvas background
             # from the signal.  Viewport-only refreshes reuse the cached output.
             # The scope-specific ColorOutput path skips its intermediate finish;
-            # the single finish below publishes the completed scope textures.
+            # the fence below publishes the completed scope textures.
             scope_source = None
             scope_source_is_full_frame = False
             scope_params = getattr(self, '_last_scope_render_params', None)
@@ -2259,6 +2314,7 @@ class AsyncRenderer(QThread):
                         revision=demand.revision, mode=demand.mode)
                     return
                 self._scope_color_output_revision = content_revision
+                self._scope_color_output_photo_key = scope_params.get('grade_set_preview_key')
                 self._scope_color_output_max_dim = requested_max_dim
             candidate = getattr(self, '_scope_color_output_tex', None)
             candidate_size = getattr(candidate, 'size', (0, 0))
@@ -2276,9 +2332,9 @@ class AsyncRenderer(QThread):
                 return
             scope_source = candidate
             scope_source_is_full_frame = True
-            if (self.__dict__.get("_color_metal_preview") is not None
-                    and self._try_color_metal_scope(demand, pool, t0)):
-                return
+            # The full-frame grade can come from Metal. Scope presentation
+            # uses the current shared GPU scope algorithm and publication
+            # fence so the presenter sees identical plots across backends.
 
             # 1. Downscale front texture to analysis resolution. The mask is
             # resolved from the renderer-owned GPU texture table and applied
@@ -2289,9 +2345,19 @@ class AsyncRenderer(QThread):
                 mask_texture = self.layer_textures.get(
                     demand.mask_layer_id, {}
                 ).get('mask')
-            if demand.mode != 'falsecolor' or bool(
-                getattr(demand, 'histogram_overlay', False)
-            ):
+            histogram_key = (
+                content_revision, analysis_size,
+                demand.mask_layer_id if demand.mask_enabled else None,
+                (self.__dict__.get('_mask_epoch') or {}).get(demand.mask_layer_id, 0),
+                bool(demand.histogram_overlay), demand.curves_mode,
+            )
+            histogram_cached = pool.get('histogram_cache_key') == histogram_key
+            # A curve-canvas resize changes only its display texture. Reuse
+            # the GPU histogram counts for unchanged content/axis/mask instead
+            # of point-splatting the same 768x432 samples again.
+            if ((demand.mode not in ('falsecolor', 'histogram'))
+                    or (demand.mode == 'histogram' and not histogram_cached)
+                    or (demand.histogram_overlay and not histogram_cached)):
                 self._scope_sample_front(
                     scope_source,
                     pool,
@@ -2343,13 +2409,16 @@ class AsyncRenderer(QThread):
             if mode_needs_histogram(demand.mode) or bool(
                 getattr(demand, 'histogram_overlay', False)
             ):
-                if bool(getattr(demand, 'histogram_overlay', False)):
-                    self._scope_accumulate_histogram(pool, include_luma=True, curve_mode=demand.curves_mode)
-                else:
-                    self._scope_accumulate_histogram(pool)
-                self._scope_reduce_histogram(pool)
-                self._scope_display_histogram(pool)
-                hist_id = pool['hist_display'].glo
+                if not histogram_cached:
+                    if bool(getattr(demand, 'histogram_overlay', False)):
+                        self._scope_accumulate_histogram(pool, include_luma=True, curve_mode=demand.curves_mode)
+                    else:
+                        self._scope_accumulate_histogram(pool)
+                    self._scope_reduce_histogram(pool)
+                    pool['histogram_cache_key'] = histogram_key
+                if demand.standalone_enabled and mode_needs_histogram(demand.mode):
+                    self._scope_display_histogram(pool)
+                    hist_id = pool['hist_display'].glo
                 if bool(getattr(demand, 'histogram_overlay', False)):
                     self._scope_display_curves_histogram(pool, demand.curves_display_size,
                                                         demand.curves_line_width, demand.curves_mode)
@@ -2364,13 +2433,11 @@ class AsyncRenderer(QThread):
                 self._scope_display_falsecolor(pool, scope_source, demand)
                 fc_id = pool['fc_display'].glo
 
-            # Cross-context visibility: the presenter (UI thread / its own
-            # context) reads these textures via glBlitFramebuffer. Insert an
-            # explicit finish so the writes are visible before we publish the
-            # texture ids. This is a full-pipeline sync, but it runs only on
-            # the rate-limited, low-priority GPU_SCOPE lane rather than on
-            # every video render. Cheaper than a CPU readback.
-            self.ctx.finish()
+            # The UI GPU-copy waits on this flushed fence. The render worker
+            # can immediately accept the next grading/video command instead
+            # of blocking in glFinish. The lifetime guard also revokes IDs
+            # before a resize can recycle them for unrelated textures.
+            publication = scope_engine.publish()
 
             analysis_ms = (time.monotonic() - t0) * 1000.0
             demand_identity = getattr(demand, 'sample_identity', None)
@@ -2408,6 +2475,7 @@ class AsyncRenderer(QThread):
                     DEFAULT_FALSECOLOR_SIZE if fc_id is not None else (0, 0)
                 ),
                 analysis_ms=analysis_ms,
+                publication=publication,
             )
             self.last_color_scope_backend = "gl"
             self.gpu_scope_ready.emit(frame)
@@ -4664,6 +4732,7 @@ class AsyncRenderer(QThread):
             tex_size=(float(src_w), float(src_h))
             if src_w > 0 and src_h > 0 else None,
             visible_rect=visible_rect,
+            grading_params_override=self.pipeline.bind_primary_calibration(prog, layer),
             bindings=bindings,
         )
         upload_composition_uniforms(prog, values)
@@ -4900,43 +4969,39 @@ class AsyncRenderer(QThread):
                 arr_u8 = np.frombuffer(tex_data, dtype=np.uint8)
                 tex_data = (arr_u8.astype(np.float32) / 255.0).tobytes()
 
+            from src.features.color.core.curves_calibration import (
+                CALIBRATED_CURVES_WIDTH, CURVE_SAMPLES,
+            )
+            width, remainder = divmod(len(tex_data), 3 * np.dtype(np.float32).itemsize)
+            if remainder or width not in (CURVE_SAMPLES, CALIBRATED_CURVES_WIDTH):
+                raise ValueError("Invalid curves texture size")
+            tex_size = (width, 1)
             tex = self.layer_textures[l_id].get('curves')
-            if not tex:
-                tex = self.ctx.texture((256, 1), 3, data=tex_data, dtype='f4')
-                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                tex.repeat_x = tex.repeat_y = False
-                self.layer_textures[l_id]['curves'] = tex
-            else:
-                # If texture exists but might have been created with different dtype (unlikely but safe)
-                if tex.dtype != 'f4':
+            if not tex or tex.size != tex_size or tex.dtype != 'f4':
+                replacement = self.ctx.texture(tex_size, 3, data=tex_data, dtype='f4')
+                replacement.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                replacement.repeat_x = replacement.repeat_y = False
+                if tex:
                     tex.release()
-                    tex = self.ctx.texture((256, 1), 3, data=tex_data, dtype='f4')
-                    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                    tex.repeat_x = tex.repeat_y = False
-                    self.layer_textures[l_id]['curves'] = tex
-                else:
-                    tex.write(tex_data)
+                self.layer_textures[l_id]['curves'] = replacement
+            else:
+                tex.write(tex_data)
         elif tex_type == 'hsl_curve':
-            # HSL Curves: 2D R32F texture (6, 256) with 6 curves
-            # Texture layout: width=6 (curve types), height=256 (sample points)
-            # Data comes as (6, 256) array, needs transpose for correct memory layout
-            lut_array = np.frombuffer(data['data'], dtype=np.float32).reshape(6, 256)
-            tex_data = lut_array.T.tobytes()  # Transpose to (256, 6) memory layout
+            lut_array = np.frombuffer(data['data'], dtype=np.float32).reshape(6, -1)
+            if lut_array.shape[1] not in (256, 512):
+                raise ValueError("Invalid HSL curves texture size")
+            size = lut_array.shape
+            tex_data = lut_array.T.tobytes()
             tex = self.layer_textures[l_id].get('hsl_curve')
-            if not tex:
-                tex = self.ctx.texture((6, 256), 1, data=tex_data, dtype='f4')
-                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                tex.repeat_x = tex.repeat_y = False
-                self.layer_textures[l_id]['hsl_curve'] = tex
-            else:
-                if tex.dtype != 'f4' or tex.size != (6, 256):
+            if not tex or tex.dtype != 'f4' or tex.size != size:
+                updated = self.ctx.texture(size, 1, data=tex_data, dtype='f4')
+                updated.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                updated.repeat_x = updated.repeat_y = False
+                self.layer_textures[l_id]['hsl_curve'] = updated
+                if tex:
                     tex.release()
-                    tex = self.ctx.texture((6, 256), 1, data=tex_data, dtype='f4')
-                    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                    tex.repeat_x = tex.repeat_y = False
-                    self.layer_textures[l_id]['hsl_curve'] = tex
-                else:
-                    tex.write(tex_data)
+            else:
+                tex.write(tex_data)
         elif tex_type == 'lut3d':
             path = data['path']
             tex = self._upload_3dlut(path)
@@ -5003,7 +5068,8 @@ class AsyncRenderer(QThread):
             logger.warning(f"Error uploading 3D LUT {path}: {e}")
         return None
 
-    def _do_upload(self, img_u8, is_reference=False, original_size=None, is_video=False):
+    def _do_upload(self, img_u8, is_reference=False, original_size=None, is_video=False,
+                   *, use_source_as_reference: bool = False) -> None:
         """
         GPU 硬件级 Mipmap 上传 - 彻底摒弃 CPU 端软件金字塔生成
         
@@ -5016,6 +5082,17 @@ class AsyncRenderer(QThread):
         
         # 清理旧纹理
         target_list = self.reference_pyramid_textures if is_reference else self.pyramid_textures
+        if use_source_as_reference:
+            self._do_clear_reference()
+            self._reference_follows_source = True
+        elif is_reference:
+            self._reference_follows_source = False
+        elif getattr(self, "_reference_follows_source", False):
+            # Keep the original source for wipe when a crop, RAW decode or bake
+            # replaces the working pixels. Each texture still has one owner.
+            self.reference_pyramid_textures = target_list
+            self._reference_follows_source = False
+            target_list = []
         for tex in target_list:
             try: tex.release()
             except Exception: logger.debug("Failed to release texture during _do_upload cleanup")
@@ -5058,8 +5135,7 @@ class AsyncRenderer(QThread):
         
         # 只上传原图 (Level 0) 一次
         h, w = img_u8.shape[:2]
-        rgb = cv2.cvtColor(img_u8, cv2.COLOR_BGR2RGB)
-        rgba = cv2.cvtColor(rgb, cv2.COLOR_RGB2RGBA)
+        rgba = cv2.cvtColor(img_u8, cv2.COLOR_BGR2RGBA)
         
         tex = self.ctx.texture((w, h), 4, data=rgba.astype(np.float16).tobytes(), dtype='f2', alignment=4)
         # 启用三线性过滤 + Mipmap，GPU 会根据 Screen-space derivatives 自动选择最佳层级
@@ -7196,6 +7272,7 @@ class AsyncRenderer(QThread):
             except Exception:
                 logger.debug("Failed to release reference texture")
         self.reference_pyramid_textures = []
+        self._reference_follows_source = False
 
     def get_original_texture_id(self, lod: int = 0) -> Optional[int]:
         """取原始（未调色）金字塔纹理的 GL 名称（UI 线程可调）。
@@ -7333,6 +7410,7 @@ class AsyncRenderer(QThread):
             current_src_tex = source_tex
             current_src_fbo = None  # (source_tex 是外部纹理，无配对 FBO)
 
+            from src.features.color.core.primary_calibration import grade_uses_calibration
             from src.features.color.core.shader_compiler import (
                 plugin_bindings_from_instances,
             )
@@ -7417,6 +7495,7 @@ class AsyncRenderer(QThread):
                         has_mixer=has_mixer,
                         has_curves_soft_clip=has_curves_soft_clip,
                         plugins=layer_plugins,
+                        has_primary_calibration=grade_uses_calibration(prefix_layer),
                         request_id=render_request_id,
                         layer_id=pl_id,
                     )

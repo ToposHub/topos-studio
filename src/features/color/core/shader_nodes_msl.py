@@ -26,6 +26,8 @@ soft_clip / film_grain = **msl_verified(fragment)**（G2 实测通过：SDR
 
 from __future__ import annotations
 
+from src.features.color.core.shader_nodes import CALIBRATED_SOFT_CLIP_KNEE
+
 # ── COMMON_DEFINITIONS 的 MSL 翻译（rgb2hsv / hsv2rgb）───────────────────
 
 MSL_HSV_FUNCS = """
@@ -310,8 +312,31 @@ float _curves_guard(float x) {
 """
 
 MSL_CURVES = """
+float msl_calibrated_curve_delta(texture2d<float> tex, sampler smp, float x,
+                                 float offset, int channel) {
+    float u = (offset + clamp(x, 0.0, 1.0) * 255.0 + 0.5) / 512.0;
+    return tex.sample(smp, float2(u, 0.5))[channel];
+}
+
+float3 msl_apply_calibrated_curves(float3 color, texture2d<float> tex, sampler smp) {
+    float3 encoded = sign(color) * pow(abs(color), float3(1.0 / 2.4));
+    const float3 weights = float3(0.2126, 0.7152, 0.0722);
+    float3 delta = float3(
+        msl_calibrated_curve_delta(tex, smp, encoded.r, 0.0, 0),
+        msl_calibrated_curve_delta(tex, smp, encoded.g, 0.0, 1),
+        msl_calibrated_curve_delta(tex, smp, encoded.b, 0.0, 2)
+    );
+    float y = msl_calibrated_curve_delta(tex, smp, dot(encoded, weights), 256.0, 0);
+    float3 response = delta + float3(y - dot(delta, weights));
+    float3 mapped = encoded + response;
+    return select(sign(mapped) * pow(abs(mapped), float3(2.4)), color, response == 0.0);
+}
+
 // —— CURVES_SNIPPET.apply_curves 逐条翻译
 float3 msl_apply_curves(float3 color, texture2d<float> curves_tex, sampler smp) {
+    if (curves_tex.get_width() == 512) {
+        return msl_apply_calibrated_curves(color, curves_tex, smp);
+    }
     // Sample points near boundaries to calculate slopes
     float3 v0 = curves_tex.sample(smp, float2(0.5 / 256.0, 0.5)).rgb;
     float3 v1 = curves_tex.sample(smp, float2(1.5 / 256.0, 0.5)).rgb;
@@ -350,8 +375,58 @@ float msl_sample_hsl_curve(texture2d<float> lut_tex, sampler smp,
     return lut_tex.sample(smp, float2(x_coord, sample_normalized)).r;
 }
 
+float msl_sample_calibrated_hsl_curve(texture2d<float> tex, sampler smp, float x, float row) {
+    return tex.sample(smp, float2((row + 0.5) / 6.0, (clamp(x, 0.0, 1.0) * 511.0 + 0.5) / 512.0)).r;
+}
+
+float msl_calibrated_hsl_envelope(float t, float3 coefficients) {
+    t = clamp(t, 0.0, 1.0);
+    float edge = 1.0 - t;
+    return t * t * (3.0 - 2.0 * t)
+        + t * edge * edge * (coefficients.x + t * (coefficients.y + coefficients.z * t));
+}
+
+float msl_calibrated_hsl_center(float x) {
+    return msl_calibrated_hsl_envelope(2.0 * min(x, 1.0 - x), float3(0.74, 0.86, 1.37));
+}
+
+float3 msl_apply_calibrated_hsl_curves(float3 color, texture2d<float> tex, sampler smp) {
+    float3 encoded = sign(color) * pow(abs(color), float3(1.0 / 2.4));
+    const float3 weights = float3(0.2126, 0.7152, 0.0722);
+    float luma = dot(encoded, weights);
+    float cb = (encoded.b - luma) / 1.8556;
+    float cr = (encoded.r - luma) / 1.5748;
+    float chroma = length(float2(1.87 * cb, 1.815 * cr - 0.418 * cb));
+    float sat_x = 2.0 * chroma;
+    float low = min(min(encoded.r, encoded.g), encoded.b);
+    float3 hsv = msl_rgb2hsv(encoded - float3(low));
+
+    float lum_sat = 1.0 + (msl_sample_calibrated_hsl_curve(tex, smp, luma, 0.0) - 1.0) * msl_calibrated_hsl_center(luma);
+    float hue_shift = msl_sample_calibrated_hsl_curve(tex, smp, hsv.x, 1.0);
+    float hue_sat = msl_sample_calibrated_hsl_curve(tex, smp, hsv.x, 2.0);
+    float hue_lum = (msl_sample_calibrated_hsl_curve(tex, smp, hsv.x, 3.0) - 1.0)
+        * msl_calibrated_hsl_envelope(sat_x, float3(0.08, -0.44, 1.06));
+    float sat_response = msl_calibrated_hsl_center(chroma);
+    float sat_sat = 1.0 + (msl_sample_calibrated_hsl_curve(tex, smp, sat_x, 4.0) - 1.0) * sat_response;
+    float sat_lum = (msl_sample_calibrated_hsl_curve(tex, smp, sat_x, 5.0) - 1.0) * sat_response;
+    float sat_factor = lum_sat * hue_sat * sat_sat;
+    float lum_response = hue_lum + sat_lum;
+    if (sat_factor == 1.0 && hue_shift == 0.0 && lum_response == 0.0) return color;
+
+    float3 delta = encoded - float3(luma);
+    if (hue_shift != 0.0) {
+        float3 rotated = msl_hsv2rgb(float3(fract(hsv.x - hue_shift), 1.0, hsv.z));
+        delta = rotated - float3(dot(rotated, weights));
+    }
+    float3 mapped = delta * sat_factor + float3(luma * (1.0 + lum_response));
+    return sign(mapped) * pow(abs(mapped), float3(2.4));
+}
+
 // —— CURVES_SNIPPET.apply_hsl_curves 逐条翻译
 float3 msl_apply_hsl_curves(float3 color, texture2d<float> hsl_lut_tex, sampler smp) {
+    if (hsl_lut_tex.get_height() == 512) {
+        return msl_apply_calibrated_hsl_curves(color, hsl_lut_tex, smp);
+    }
     // AUD-0840：负值 HDR 颜色按 MIXER 同防护——整条 HSV 链以 |color|
     // 为基准，出口按符号还原（与 GLSL 权威逐条一致；非负输入恒等）。
     float3 sign_c = sign(color);
@@ -903,6 +978,16 @@ float3 msl_apply_curves_soft_clip(float3 color, float3 low_clip, float3 low_soft
         msl_apply_soft_clip_knee(color.r, low_clip.r, low_soft.r, high_clip.r, high_soft.r),
         msl_apply_soft_clip_knee(color.g, low_clip.g, low_soft.g, high_clip.g, high_soft.g),
         msl_apply_soft_clip_knee(color.b, low_clip.b, low_soft.b, high_clip.b, high_soft.b)
+    );
+}
+""" + CALIBRATED_SOFT_CLIP_KNEE + """
+float3 msl_apply_curves_soft_clip_profile(float3 color, float3 low, float3 low_soft,
+                                           float3 high, float3 high_soft, bool calibrated) {
+    if (!calibrated) return msl_apply_curves_soft_clip(color, low, low_soft, high, high_soft);
+    return float3(
+        calibrated_soft_clip_channel(color.r, low.r, low_soft.r, high.r, high_soft.r),
+        calibrated_soft_clip_channel(color.g, low.g, low_soft.g, high.g, high_soft.g),
+        calibrated_soft_clip_channel(color.b, low.b, low_soft.b, high.b, high_soft.b)
     );
 }
 """

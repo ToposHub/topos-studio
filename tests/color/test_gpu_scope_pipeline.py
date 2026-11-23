@@ -298,6 +298,7 @@ class _GpuScopeGuardRenderer(_FakeRenderer):
         super().__init__()
         self.gpu_scope_enabled = True
         self.ctx = Mock()  # truthy
+        self._ensure_scope_engine = Mock()
         self.current_front_tex_id = 42
         self._scope_source_revision = 10
         self._scope_demand_revision = 5
@@ -388,7 +389,9 @@ class TestDoRenderGpuScopeGuard:
         assert r._scope_sample_front.call_args.kwargs['mask_uv_rect'] == (
             0.0, 0.0, 1.0, 1.0,
         )
-        r.ctx.finish.assert_called_once()
+        r.ctx.finish.assert_not_called()
+        r._ensure_scope_engine.return_value.publish.assert_called_once()
+        assert r._emitted[0].publication is r._ensure_scope_engine.return_value.publish.return_value
 
     def test_paused_grading_scope_keeps_full_frame_refresh(self):
         r = _GpuScopeGuardRenderer()
@@ -497,6 +500,58 @@ class TestDoRenderGpuScopeGuard:
         output_params = r._do_render_color_output.call_args.args[0]
         assert output_params['max_proxy_dim'] == 768
         assert r._scope_color_output_max_dim == 768
+
+    @pytest.mark.parametrize('change', ['geometry', 'content', 'axis', 'mask'])
+    def test_curve_resize_reuses_counts_but_content_axis_mask_invalidate(self, change):
+        from dataclasses import replace
+        r = _GpuScopeGuardRenderer()
+        r._last_scope_render_params = {'layers': []}
+        r._scope_content_revision = r._scope_color_output_revision = 10
+        r._scope_color_output_max_dim = 320
+        r._scope_color_output_tex = SimpleNamespace(size=(320, 180))
+        r._do_render_color_output = Mock(return_value=True)
+        pool = {'hist_display': Mock(glo=71), 'curves_hist_display': Mock(glo=72),
+                'curves_hist_display_size': (1024, 512)}
+        r._ensure_gpu_scope_pool = lambda *_args: pool
+        r._scope_sample_front = Mock()
+        r._scope_accumulate_histogram = Mock()
+        r._scope_reduce_histogram = Mock()
+        r._scope_display_histogram = Mock()
+        r._scope_display_curves_histogram = Mock()
+        r._mask_epoch = {'mask': 1}
+        r.layer_textures = {'mask': {'mask': Mock()}}
+        demand = ScopeDemand(5, 10, 'histogram', (512, 300),
+                             histogram_overlay=True, standalone_enabled=False,
+                             mask_enabled=True, mask_layer_id='mask')
+        AsyncRenderer._do_render_gpu_scope(r, demand)
+        assert len(r._emitted) == 1
+        if change == 'content':
+            r._scope_content_revision += 1
+        elif change == 'axis':
+            demand = replace(demand, curves_mode='HueSat')
+        elif change == 'mask':
+            r._mask_epoch['mask'] += 1
+        else:
+            demand = replace(demand, curves_display_size=(1400, 700))
+        AsyncRenderer._do_render_gpu_scope(r, demand)
+        assert len(r._emitted) == 2
+        counts = 1 if change == 'geometry' else 2
+        assert r._scope_sample_front.call_count == counts
+        assert r._scope_accumulate_histogram.call_count == counts
+        assert r._scope_reduce_histogram.call_count == counts
+        assert r._scope_display_curves_histogram.call_count == 2
+        r._scope_display_histogram.assert_not_called()
+        assert r._emitted[-1].histogram_texture_id is None
+
+    @pytest.mark.parametrize('lane', [RenderLane.GRADING_REFRESH, RenderLane.VIDEO_PLAYBACK,
+                                      RenderLane.VIEWPORT_REFRESH])
+    def test_scope_yields_to_preview_queued_after_drain(self, lane):
+        r = _GpuScopeGuardRenderer()
+        r._pending_slots[lane] = ('preview', {})
+        AsyncRenderer._do_render_gpu_scope(r, ScopeDemand(5, 10, 'waveform', (500, 300)))
+        r._ensure_scope_engine.assert_not_called()
+        assert not r._emitted
+        assert r._pending_slots[lane] == ('preview', {})
 
     def test_failed_full_frame_refresh_does_not_promote_stale_texture(self):
         r = _GpuScopeGuardRenderer()
@@ -749,7 +804,7 @@ class TestScopePanelGpuIntegration:
         # the vectorscope must be letterboxed to keep its circle circular.
         assert p._gpu_wf_presenter._preserve_aspect is False
         assert p._gpu_vs_presenter._preserve_aspect is True
-        assert p._gpu_wf_presenter._axis_left_px == 38
+        assert p._gpu_wf_presenter._axis_left_px == 46
         # Waveform values are already oriented in GL coordinates by the
         # shader (100% at the top, 0% at the bottom); the presenter must not
         # flip them away from the 1023..0 axis labels.

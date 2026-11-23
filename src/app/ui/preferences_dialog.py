@@ -2291,11 +2291,13 @@ class PreferencesDialog(QDialog):
         if self._widgets['developer_mode'].isChecked() != self._initial_developer_mode:
             self._needs_restart = True
 
-        # Show restart prompt before accept (restart_application respawns the
-        # app in a fresh process if Yes)
-        if self._needs_restart:
-            self._show_restart_prompt()
+        restart_requested = self._needs_restart and self._show_restart_prompt()
+        # Qt closes visible dialogs on quit. Accept first so shutdown cannot
+        # reject this dialog and roll back the preferences we just saved.
         self.accept()
+        if restart_requested:
+            from src.shared.app_restart import restart_application
+            restart_application()
 
     def _on_cancel(self) -> None:
         """Restore settings and close dialog."""
@@ -2577,8 +2579,8 @@ class PreferencesDialog(QDialog):
         self._preview_blocked = False
         self._emit_batch_preview()
 
-    def _show_restart_prompt(self) -> None:
-        """Show restart prompt after language change."""
+    def _show_restart_prompt(self) -> bool:
+        """Ask whether to restart after saving the preferences."""
         reply = QMessageBox.question(
             self.parent() if self.parent() else self,
             I18N.tr("dialog.restart_title", "Restart Required"),
@@ -2588,9 +2590,7 @@ class PreferencesDialog(QDialog):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            from src.shared.app_restart import restart_application  # [R2-6] 统一重启路径
-            restart_application()
+        return reply == QMessageBox.StandardButton.Yes
 
     def needs_restart(self) -> bool:
         """Check if the application needs to restart (e.g. language changed)."""

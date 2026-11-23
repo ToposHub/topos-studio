@@ -130,6 +130,8 @@ class QuickExportDialog(QDialog):
         if not video_tab_enabled:
             # QTabBar 没有 model()，用 setTabEnabled 直接禁用
             self.tab_bar.setTabEnabled(2, False)
+        if self._work_mode == "image":
+            self.tab_bar.setTabVisible(2, False)
         if self._work_mode == "video":
             # 纯视频模式下隐藏图像导出 Tab，保持工作流一致。
             # LUT 导出保留：视频调色项目导出 .cube/.3dl LUT 是标准交付物
@@ -229,8 +231,9 @@ class QuickExportDialog(QDialog):
         source_row.addWidget(source_param_label)
         self.source_combo = ChevronComboBox()
         self.source_combo.addItem(I18N.tr("export.source_color", "Color Output"))
-        self.source_combo.addItem(I18N.tr("export.source_composite", "Composite Output"))
-        if self._has_composite_output:
+        if self._work_mode != "image":
+            self.source_combo.addItem(I18N.tr("export.source_composite", "Composite Output"))
+        if self._has_composite_output and self._work_mode != "image":
             self.source_combo.setCurrentIndex(1)  # Default to Composite when available
         else:
             # 无合成输出时禁用 Composite 项

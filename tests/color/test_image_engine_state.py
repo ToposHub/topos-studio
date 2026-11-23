@@ -159,6 +159,43 @@ def test_request_full_resolution_exposes_cancelable_request(monkeypatch, image_e
     assert image_engine._full_res_pending_request_id is None
 
 
+def test_export_render_restores_live_source_before_waiting(monkeypatch, image_engine):
+    from contextlib import contextmanager
+    from PyQt6.QtCore import QTimer
+
+    live = np.zeros((2, 2, 3), dtype=np.uint8)
+    temporary = np.ones_like(live)
+    image_engine.img_full_original = live
+    image_engine.temp_image = live
+    image_engine.renderer = MagicMock()
+    submitted = []
+    waiting = []
+
+    @contextmanager
+    def prepare():
+        image_engine.img_full_original = temporary
+        try:
+            yield
+        finally:
+            image_engine.img_full_original = live
+            image_engine.temp_image = live
+
+    def submit(**kwargs):
+        submitted.append(image_engine.img_full_original is temporary)
+
+        def finish():
+            waiting.append(image_engine.img_full_original is live)
+            image_engine._on_full_resolution_ready(kwargs["render_request_id"], temporary)
+
+        QTimer.singleShot(0, finish)
+        return kwargs["render_request_id"]
+
+    monkeypatch.setattr(image_engine, "render_pipeline", submit)
+    assert np.array_equal(image_engine.render_full_resolution(prepare_request=prepare()), temporary)
+    assert submitted == waiting == [True]
+    assert image_engine.temp_image is live
+
+
 class TestResetAllLayers:
     def test_resets_all_layer_params(self, image_engine):
         image_engine.layers[0].grading_params["exposure"] = 2.0

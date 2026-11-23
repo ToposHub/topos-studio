@@ -12,6 +12,8 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
+
 
 def _rgb_to_hsv(rgb: np.ndarray) -> np.ndarray:
     """RGB→HSV（与 lut_exporter._rgb_to_hsv_static / GLSL 同式）。"""
@@ -54,9 +56,17 @@ def apply_hsl_curves_image(
     索引序与 lut_exporter 一致：LumSat0/HueHue1/HueSat2/HueLum3/
     SatSat4/SatLum5。None/形状不符 → 原样返回（调用方不应到达）。
     """
-    if hsl_curve_lut is None or getattr(
-            hsl_curve_lut, "shape", (0,))[0] != 6:
+    if hsl_curve_lut is None:
         return rgb
+    hsl_curve_lut = np.asarray(hsl_curve_lut, dtype=np.float32)
+    if hsl_curve_lut.shape not in ((6, 256), (6, 512)):
+        return rgb
+    from src.features.color.core.hsl_curve_calibration import (
+        apply_calibrated_hsl_curves,
+        is_calibrated_hsl_lut,
+    )
+    if is_calibrated_hsl_lut(hsl_curve_lut):
+        return apply_calibrated_hsl_curves(rgb, hsl_curve_lut)
     result = rgb.astype(np.float32, copy=True)
     orig_shape = result.shape
     flat = result.reshape(-1, 3)
@@ -156,20 +166,47 @@ def apply_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
     return result.astype(np.float32)
 
 
+def _quadratic_toe(values: np.ndarray, edge: float, width: float) -> np.ndarray:
+    """Join a constant floor to unit slope across a two-sided knee."""
+    if width <= 0.0:
+        return np.maximum(values, edge)
+    t = np.clip((values - edge + width) / (2.0 * width), 0.0, 1.0)
+    return np.where(values < edge + width, edge + width * t * t, values)
+
+
+def _apply_calibrated_soft_clip(
+    values: np.ndarray, low: float, low_knee: float, high: float, high_knee: float,
+) -> np.ndarray:
+    """Evaluate the fitted knees in Gamma 2.4 code values."""
+    encoded = np.copysign(np.power(np.abs(values), 1.0 / 2.4), values)
+    # The measured interior has slope 1023/1024 for an active channel.
+    # Extend the endpoint response continuously into signed/HDR values.
+    bias = 0.5 - 1.5 * (low - low_knee) + 0.5 * (high - 1.0 + high_knee)
+    encoded -= (np.clip(encoded, 0.0, 1.0) + bias) / 1024.0
+    if low != 0.0 or low_knee > 0.0:
+        encoded = _quadratic_toe(encoded, low, low_knee)
+    if high_knee > 0.0:
+        encoded = 1.0 - _quadratic_toe(1.0 - encoded, 1.0 - high, high_knee)
+    elif high != 1.0:
+        encoded = np.minimum(encoded, high - np.clip(high, 0.0, 1.0) / 1024.0)
+    return np.copysign(np.power(np.abs(encoded), 2.4), encoded)
+
+
 def apply_curves_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
                                  ) -> np.ndarray:
     """曲线面板四参数软剪裁（指数软膝）作用于 RGB 图像。
 
     逐式镜像 curves_soft_clip.apply_soft_clip_channel（= 移动版
     soft_clip.frag / GLSL CURVES_SOFT_CLIP_SNIPPET / MSL 同式）。默认
-    参数下严格恒等：超白与负 RGB 原样保留。非有限像素原样直通（软膝
-    只定义在有限域上，与旧 soft-clip 的行为一致）。
+    参数下严格恒等：超白与负 RGB 原样保留。校准版使用编码域二次软膝。
+    非有限像素原样直通（软膝只定义在有限域上）。
     """
     result = rgb.astype(np.float64, copy=True)
     channels = params.get("channels") if isinstance(params, dict) else None
     if not isinstance(channels, dict):
         return result.astype(np.float32)
 
+    calibrated = uses_calibrated_soft_clip(params)
     finite = np.isfinite(result)
     for idx, name in ((0, "R"), (1, "G"), (2, "B")):
         values = channels.get(name)
@@ -182,7 +219,8 @@ def apply_curves_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
 
         gap = max(high_clip - low_clip, 0.0)
         if gap == 0.0:
-            result[..., idx] = np.where(finite[..., idx], low_clip,
+            floor = np.copysign(abs(low_clip) ** 2.4, low_clip) if calibrated else low_clip
+            result[..., idx] = np.where(finite[..., idx], floor,
                                         result[..., idx])
             continue
         low_knee = min(max(low_soft, 0.0), gap)
@@ -190,6 +228,11 @@ def apply_curves_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
 
         col = result[..., idx]
         col_finite = finite[..., idx]
+        if calibrated:
+            if (low_clip, low_knee, high_clip, high_knee) != (0.0, 0.0, 1.0, 0.0):
+                col[col_finite] = _apply_calibrated_soft_clip(
+                    col[col_finite], low_clip, low_knee, high_clip, high_knee)
+            continue
         if low_knee > 0.0:
             low_start = low_clip + low_knee
             mask = col_finite & (col < low_start)

@@ -1,0 +1,46 @@
+[
+  {
+    "avsync" : 7.8283400842815709e-06,
+    "container-fps" : 25,
+    "decoder-frame-drop-count" : 0,
+    "engine" : "mpv-opengl",
+    "errors" : [
+
+    ],
+    "estimated-vf-fps" : 24.999999999999982,
+    "file" : "4K_DNxHR 444 10bit.mov",
+    "frame-drop-count" : 0,
+    "heartbeat_interval_ms" : {
+      "max" : 80.964368000422837,
+      "mean" : 25.91543711207186,
+      "p95" : 67.662540997844189
+    },
+    "hwdec-current" : "no",
+    "measured_decoder_drops" : 0,
+    "measured_drops" : 0,
+    "measured_seconds" : 3.0138518429994292,
+    "metal_output_sizes" : [
+
+    ],
+    "mpv-version" : "mpv v0.41.0",
+    "observed_frame_changes_fps" : 0.33180131343310676,
+    "observed_frame_interval_ms" : {
+
+    },
+    "open_ms" : 77.308094998443266,
+    "renderer_interval_ms" : {
+      "max" : 72.428117000526981,
+      "mean" : 40.131494733310923,
+      "p95" : 43.427659998997115
+    },
+    "renderer_submissions_fps" : 25.216899820916112,
+    "time-pos" : 3.6400000000000001,
+    "video-codec" : "VC3\/DNxHD",
+    "video-out-params\/pixelformat" : "yuv444p10",
+    "vo-delayed-frame-count" : 0,
+    "window" : [
+      3600,
+      1900
+    ]
+  }
+]

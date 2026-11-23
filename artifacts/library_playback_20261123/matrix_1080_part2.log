@@ -1,0 +1,94 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+2026-11-23 21:52:23.459 Python[37784:412068] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-23 21:52:23.459 Python[37784:412068] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/Users/heng/Documents/vscode/topos-studio/tests/test_videos/2K_h264.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    creation_time   : 2023-08-29T06:49:05.000000Z
+    encoder         : Lavf59.9.102
+  Duration: 00:01:02.89, start: 0.000000, bitrate: 6680 kb/s
+  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], 6548 kb/s, 25 fps, 25 tbr, 12800 tbn (default)
+      Metadata:
+        creation_time   : 2023-08-29T06:49:05.000000Z
+        handler_name    : VideoHandler
+        vendor_id       : [0][0][0][0]
+        timecode        : 00:00:00:00
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 48000 Hz, stereo, fltp, 128 kb/s (default)
+      Metadata:
+        creation_time   : 2023-08-29T06:49:05.000000Z
+        handler_name    : SoundHandler
+        vendor_id       : [0][0][0][0]
+  Stream #0:2[0x3](eng): Data: none (tmcd / 0x64636D74)
+      Metadata:
+        creation_time   : 2023-08-29T06:49:05.000000Z
+        handler_name    : VideoHandler
+        timecode        : 00:00:00:00
+[aac @ 0x7fcdbb422140] Could not update timestamps for skipped samples.
+{"file": "2K_h264.mp4", "route": "qt", "submitted_fps": 0.0, "swapped_fps": 0.0, "qt_frames_fps": 26.448103397470963, "decode_ms": {"count": 0}, "worker_mode": null, "errors": null}
+qt.qpa.fonts: Populating font family aliases took 610 ms. Replace uses of missing font family "-apple-system" with one that exists to avoid this cost. 
+{"file": "2K_prores422.mov", "route": "libav", "submitted_fps": 24.99450014771256, "swapped_fps": 24.99450014771256, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 7.392380771697, "p50": 7.446831499692053, "p95": 14.72756490038591, "max": 18.33373499903246}, "worker_mode": "texture", "errors": null}
+{"file": "2K_prores422HQ.mov", "route": "libav", "submitted_fps": 24.99920238262047, "swapped_fps": 24.99920238262047, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 6.79418030002645, "p50": 7.673410000279546, "p95": 9.938300498470198, "max": 22.925909001060063}, "worker_mode": "texture", "errors": null}
+{"file": "2K_prores422LT.mov", "route": "libav", "submitted_fps": 24.991858875186537, "swapped_fps": 24.991858875186537, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 6.452805299756749, "p50": 7.4697544987429865, "p95": 10.212810848315712, "max": 11.79288599814754}, "worker_mode": "texture", "errors": null}
+{"file": "2K_prores422Proxy.mov", "route": "libav", "submitted_fps": 25.003880209309415, "swapped_fps": 25.003880209309415, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 6.894436899840782, "p50": 7.558883498859359, "p95": 11.263006999433854, "max": 16.563756002142327}, "worker_mode": "texture", "errors": null}
+{"file": "2K_prores4444.mov", "route": "libav", "submitted_fps": 24.994503744350975, "swapped_fps": 24.994503744350975, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 7.4027281143311745, "p50": 8.639804500489845, "p95": 10.945543699199334, "max": 14.255458001571242}, "worker_mode": "texture", "errors": null}
+{"file": "2K_prores4444XQ.mov", "route": "libav", "submitted_fps": 25.001590866828515, "swapped_fps": 25.001590866828515, "qt_frames_fps": 0.0, "decode_ms": {"count": 80, "mean": 8.918486637548995, "p50": 8.886882500519278, "p95": 14.311078601713234, "max": 25.82658300161711}, "worker_mode": "texture", "errors": null}
+{"file": "2K_topos_4444.mov", "route": "topos", "submitted_fps": 24.772154634623767, "swapped_fps": 25.1069134810376, "qt_frames_fps": 0.0, "decode_ms": {"count": 74, "mean": 6.555938378369319, "p50": 4.018682000605622, "p95": 12.231651651381979, "max": 13.533526001992868}, "worker_mode": "texture", "errors": null}
+{"file": "2K_topos_4444xq.mov", "route": "topos", "submitted_fps": 24.84670452058378, "swapped_fps": 24.84670452058378, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 6.886878914104143, "p50": 3.938538000511471, "p95": 13.356617550562076, "max": 20.136897001066245}, "worker_mode": "texture", "errors": null}
+{"file": "2K_topos_hq.mov", "route": "topos", "submitted_fps": 24.98065885871967, "swapped_fps": 24.623792303595103, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 4.755223185514167, "p50": 2.89858100040874, "p95": 10.774311050590768, "max": 13.586098000814673}, "worker_mode": "texture", "errors": null}
+{"file": "2K_topos_lt.mov", "route": "topos", "submitted_fps": 24.95352181979838, "swapped_fps": 24.95352181979838, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 4.96944922867572, "p50": 2.7915705013583647, "p95": 10.349317249529122, "max": 12.321195998083567}, "worker_mode": "texture", "errors": null}
+{"file": "2K_topos_proxy.mov", "route": "topos", "submitted_fps": 24.923437008438356, "swapped_fps": 24.923437008438356, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 5.409546742781198, "p50": 3.227410999897984, "p95": 10.401108650512468, "max": 11.8099630017241}, "worker_mode": "texture", "errors": null}
+{"file": "2K_topos_standard.mov", "route": "topos", "submitted_fps": 25.000940705016276, "swapped_fps": 25.000940705016276, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 5.0101924142446865, "p50": 2.838864500517957, "p95": 10.690853898995556, "max": 12.943581001309212}, "worker_mode": "texture", "errors": null}
+[dnxhd @ 0x7fcd4a7caa00] Unsupported: variable ACT flag.
+{"file": "4K_DNxHR 444 10bit.mov", "route": "libav", "submitted_fps": 20.886730535545357, "swapped_fps": 20.538618359952935, "qt_frames_fps": 0.0, "decode_ms": {"count": 59, "mean": 48.35115333924601, "p50": 45.50667399962549, "p95": 80.12064110153003, "max": 133.800612999039}, "worker_mode": "texture", "errors": null}
+{"file": "4K_DNxHR 444 12bit.mov", "route": "libav", "submitted_fps": 21.27000411638941, "swapped_fps": 21.27000411638941, "qt_frames_fps": 0.0, "decode_ms": {"count": 61, "mean": 47.31076032822173, "p50": 40.52140099884127, "p95": 91.73898899825872, "max": 129.56775299971923}, "worker_mode": "texture", "errors": null}
+{"file": "4K_DNxHR HQX 10bit.mov", "route": "libav", "submitted_fps": 25.01700741748711, "swapped_fps": 25.01700741748711, "qt_frames_fps": 0.0, "decode_ms": {"count": 76, "mean": 29.234095618305314, "p50": 27.482163497552392, "p95": 50.37036025078123, "max": 57.53399699824513}, "worker_mode": "texture", "errors": null}
+{"file": "4K_DNxHR HQX 12-bit.mov", "route": "libav", "submitted_fps": 25.075353869658606, "swapped_fps": 25.075353869658606, "qt_frames_fps": 0.0, "decode_ms": {"count": 74, "mean": 26.60239425696656, "p50": 24.173613001039485, "p95": 46.248674650269095, "max": 65.12796400056686}, "worker_mode": "texture", "errors": null}
+{"file": "4K_DNxHR HQX 12bit.mov", "route": "libav", "submitted_fps": 24.879800393209585, "swapped_fps": 24.879800393209585, "qt_frames_fps": 0.0, "decode_ms": {"count": 76, "mean": 26.021132670824667, "p50": 23.41417549723701, "p95": 40.02779574966553, "max": 55.49664100180962}, "worker_mode": "texture", "errors": null}
+{"file": "4K_H264.mov", "route": "libav", "submitted_fps": 25.13972088871619, "swapped_fps": 25.13972088871619, "qt_frames_fps": 0.0, "decode_ms": {"count": 80, "mean": 14.671224849917053, "p50": 14.001062498209649, "p95": 23.090525799489107, "max": 29.38783100034925}, "worker_mode": "texture", "errors": null}
+{"file": "4K_H265.mov", "route": "libav", "submitted_fps": 25.10598222597842, "swapped_fps": 24.771235796298708, "qt_frames_fps": 0.0, "decode_ms": {"count": 74, "mean": 18.543718729602375, "p50": 16.101345499919262, "p95": 37.86794825027754, "max": 40.4974859993672}, "worker_mode": "texture", "errors": null}
+{"file": "4K_prores422.mov", "route": "libav", "submitted_fps": 25.212824116995037, "swapped_fps": 25.212824116995037, "qt_frames_fps": 0.0, "decode_ms": {"count": 76, "mean": 22.60678771050918, "p50": 21.319415000107256, "p95": 35.15434749988344, "max": 49.85950300033437}, "worker_mode": "texture", "errors": null}
+{"file": "4K_prores422HQ.mov", "route": "libav", "submitted_fps": 24.998722963684227, "swapped_fps": 24.998722963684227, "qt_frames_fps": 0.0, "decode_ms": {"count": 80, "mean": 22.893167650045143, "p50": 21.552112000790657, "p95": 31.237890101328954, "max": 52.40127200158895}, "worker_mode": "texture", "errors": null}
+{"file": "4K_prores422LT.mov", "route": "libav", "submitted_fps": 25.000717903421886, "swapped_fps": 25.000717903421886, "qt_frames_fps": 0.0, "decode_ms": {"count": 81, "mean": 23.314375506159216, "p50": 21.820552999997744, "p95": 36.861256001429865, "max": 51.338610999664525}, "worker_mode": "texture", "errors": null}
+{"file": "4K_prores422Proxy.mov", "route": "libav", "submitted_fps": 24.997000440295707, "swapped_fps": 24.997000440295707, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 21.120299499930947, "p50": 20.349858999907156, "p95": 31.272656700093645, "max": 38.47720200064941}, "worker_mode": "texture", "errors": null}
+{"file": "4K_prores4444.mov", "route": "libav", "submitted_fps": 25.219544547557714, "swapped_fps": 25.219544547557714, "qt_frames_fps": 0.0, "decode_ms": {"count": 75, "mean": 29.567534346618533, "p50": 26.901275999989593, "p95": 45.88393330050166, "max": 59.44697299855761}, "worker_mode": "texture", "errors": null}
+{"file": "4K_prores4444XQ.mov", "route": "libav", "submitted_fps": 25.146777535184707, "swapped_fps": 24.80695621714167, "qt_frames_fps": 0.0, "decode_ms": {"count": 75, "mean": 39.00070329327718, "p50": 32.84574999997858, "p95": 68.0724960995576, "max": 89.30255199811654}, "worker_mode": "texture", "errors": null}
+{"file": "4K_topos_4444.mov", "route": "topos", "submitted_fps": 25.034450842511678, "swapped_fps": 24.70932810429724, "qt_frames_fps": 0.0, "decode_ms": {"count": 77, "mean": 11.95859046762147, "p50": 9.075572997971904, "p95": 38.439847199333606, "max": 44.46962700239965}, "worker_mode": "texture", "errors": null}
+{"file": "4K_topos_4444xq.mov", "route": "topos", "submitted_fps": 24.987804657333594, "swapped_fps": 24.987804657333594, "qt_frames_fps": 0.0, "decode_ms": {"count": 72, "mean": 38.87444983325218, "p50": 38.753472501412034, "p95": 49.29618074947939, "max": 72.3240520019317}, "worker_mode": "texture", "errors": null}
+{"file": "4K_topos_hq.mov", "route": "topos", "submitted_fps": 24.99702971010186, "swapped_fps": 24.99702971010186, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 5.6958539000333985, "p50": 3.203418002158287, "p95": 14.687938852512156, "max": 21.483345997694414}, "worker_mode": "texture", "errors": null}
+{"file": "4K_topos_lt.mov", "route": "topos", "submitted_fps": 24.9957254274614, "swapped_fps": 24.9957254274614, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 5.219991142647424, "p50": 2.900806000980083, "p95": 11.48667539946473, "max": 13.401996002357919}, "worker_mode": "texture", "errors": null}
+{"file": "4K_topos_proxy.mov", "route": "topos", "submitted_fps": 24.995551577386074, "swapped_fps": 24.995551577386074, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 5.265511885850823, "p50": 2.9701045004912885, "p95": 10.88194829862914, "max": 16.817005001939833}, "worker_mode": "texture", "errors": null}
+{"file": "4K_topos_standard.mov", "route": "topos", "submitted_fps": 25.00050208150325, "swapped_fps": 25.00050208150325, "qt_frames_fps": 0.0, "decode_ms": {"count": 70, "mean": 5.009220457265785, "p50": 2.8515025005617645, "p95": 10.300974702295205, "max": 12.00813900140929}, "worker_mode": "texture", "errors": null}
+[mov,mp4,m4a,3gp,3g2,mj2 @ 0x7fcd0a7a7600] Could not find codec parameters for stream 0 (Video: h264 (avc1 / 0x31637661), none(bt709, progressive), 1920x1080, 17698 kb/s): unspecified pixel format
+Consider increasing the value for the 'analyzeduration' (1) and 'probesize' (32768) options
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from '/Users/heng/Documents/vscode/topos-studio/tests/test_videos/测试素材01.mov':
+  Metadata:
+    major_brand     : qt  
+    minor_version   : 512
+    compatible_brands: qt  
+    creation_time   : 2026-11-01T18:04:39.000000Z
+    encoder         : Blackmagic Design DaVinci Resolve Studio
+  Duration: 00:00:04.96, start: 0.000000, bitrate: 20006 kb/s
+  Stream #0:0[0x1]: Video: h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], 17698 kb/s, 25 fps, 25 tbr, 12800 tbn (default)
+      Metadata:
+        creation_time   : 2026-11-01T18:04:39.000000Z
+        handler_name    : VideoHandler
+        vendor_id       :     
+        encoder         : H.264
+        timecode        : 01:00:00:00
+  Stream #0:1[0x2]: Audio: pcm_s24le (lpcm / 0x6D63706C), 48000 Hz, stereo, s32 (24 bit), 2304 kb/s (default)
+      Metadata:
+        creation_time   : 2026-11-01T18:04:39.000000Z
+        handler_name    : SoundHandler
+        vendor_id       : [0][0][0][0]
+  Stream #0:2[0x3](eng): Data: none (tmcd / 0x64636D74), 0 kb/s (default)
+      Metadata:
+        creation_time   : 2026-11-01T18:04:39.000000Z
+        handler_name    : TimeCodeHandler
+        timecode        : 01:00:00:00
+{"file": "\u6d4b\u8bd5\u7d20\u675001.mov", "route": "qt", "submitted_fps": 0.0, "swapped_fps": 0.0, "qt_frames_fps": 25.271656326012323, "decode_ms": {"count": 0}, "worker_mode": null, "errors": null}

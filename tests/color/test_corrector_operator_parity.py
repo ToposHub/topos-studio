@@ -122,6 +122,42 @@ class TestPrepareCorrector:
             ctx.release()
 
 
+def test_primary_calibration_gl_keeps_channel_order_and_hdr(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.features.color.core import primary_calibration
+    from src.shared.color.lut_loader import LoadedLut, sample_lut_trilinear
+
+    b, g, r = np.indices((3, 3, 3), dtype=np.float32) / 2.0
+    grid = np.stack(((1.0 - r) * 0.125 - 0.05, (b - g) * 0.05, (r - b) * 0.07), axis=-1)
+    monkeypatch.setattr(primary_calibration, "grade_uses_calibration",
+                        lambda layer: layer.get("calibrated", False))
+    monkeypatch.setattr(primary_calibration, "calibrated_grade_inputs",
+                        lambda layer: (grid if layer.get("response") else None, {}))
+
+    source = np.array([[[-0.12, 0.42, 0.90, 0.25], [1.30, 0.20, 0.60, 0.75],
+                        [0.00, 0.65, 0.40, 1.00], [0.24, 0.54, 0.83, 1.00]]], dtype=np.float16)
+    rgb = source[..., :3].astype(np.float32)
+    sdr = np.clip(rgb, 0.0, 1.0)
+    encoded = sdr ** (1.0 / 2.4)
+    delta = sample_lut_trilinear(LoadedLut(grid, 3, "cube"), encoded.reshape(-1, 3))
+    expected = np.clip(encoded + delta.reshape(encoded.shape), 0.0, 1.0) ** 2.4 + (rgb - sdr)
+
+    ctx, pipeline = _ctx_and_pipeline()
+    try:
+        # Both shaders must omit the old gain once the calibration adapter overrides it.
+        legacy_grade = {"gain": (0.0, 0.0, 0.4)}
+        active = run_serial_passes(ctx, pipeline, source, [
+            {"calibrated": True, "response": True, "grading_params": legacy_grade}])
+        bypassed = run_serial_passes(ctx, pipeline, source, [
+            {"calibrated": True, "grading_params": legacy_grade}])
+        legacy = run_serial_passes(ctx, pipeline, source, [{}])
+        np.testing.assert_allclose(active[..., :3], expected, atol=1.5e-3, rtol=0.0)
+        np.testing.assert_array_equal(active[..., 3], source[..., 3])
+        np.testing.assert_array_equal(bypassed, legacy)
+    finally:
+        pipeline.release()
+        ctx.release()
+
+
 class TestGoldenParity:
     """N06 standalone 执行 vs B00 归档 float 基线（同 GPU 位级一致）。"""
 

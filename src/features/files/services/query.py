@@ -33,7 +33,8 @@ from src.shared.media.format_registry import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS,
 IMAGE_EXTS = IMAGE_EXTENSIONS | {".avif"}
 VIDEO_EXTS = VIDEO_EXTENSIONS | {".topos"}
 AUDIO_EXTS = AUDIO_EXTENSIONS
-DOC_EXTS = {".txt", ".md", ".pdf", ".json", ".xml", ".csv", ".log", ".srt"}
+DOC_EXTS = {".txt", ".md", ".pdf", ".json", ".xml", ".csv", ".log", ".srt",
+            ".doc", ".docx", ".odt", ".rtf", ".pages", ".xls", ".xlsx", ".ppt", ".pptx"}
 
 _PAGE_LIMIT = 500
 
@@ -102,9 +103,12 @@ class FilesQueryService:
         return self._assemble(path, dir_entry.name, is_dir, size, mtime,
                               availability, library_id)
 
-    def _path_entry(self, raw: str, library_id: str) -> Entry:
+    def _path_entry(self, raw: str, library_id: str | None) -> Entry:
         """任意路径水合：集合成员/搜索回填等没有 DirEntry 的场合。"""
         path = nfc(raw)
+        if library_id is None:
+            library = self._catalog.library_for_path(path)
+            library_id = library.library_id if library else ""
         try:
             stat = os.lstat(path)
             size, mtime = stat.st_size, stat.st_mtime
@@ -119,20 +123,12 @@ class FilesQueryService:
     def _assemble(self, path: str, name: str, is_dir: bool,
                   size: int | None, mtime: float | None,
                   availability: str, library_id: str) -> Entry:
-        row = self._catalog.asset(library_id, path) if library_id else None
-        user = UserMetadata() if not library_id else UserMetadata(
-            rating=(row or {}).get("rating") or 0,
-            color=(row or {}).get("color") or 0,
-            flag=(row or {}).get("flag") or 0,
-            tags=tuple(self._catalog.tags_of(library_id, path)),
-            comments=(row or {}).get("comment") or "",
-        )
-        technical = TechnicalMetadata(
-            width=(row or {}).get("width"),
-            height=(row or {}).get("height"),
-            duration_seconds=(row or {}).get("duration"),
-            codec=(row or {}).get("codec"),
-        )
+        row = self._catalog.asset(library_id, path)
+        if row is None and library_id:
+            row = self._catalog.asset("", path)
+            library_id = ""
+        user = self._user_metadata(row or {}, library_id, path)
+        technical = self._technical_metadata(row or {})
         return Entry(
             path=path, name=name,
             kind="dir" if is_dir else classify(name),
@@ -142,8 +138,20 @@ class FilesQueryService:
             availability=availability, technical=technical, user=user,
         )
 
+    def _user_metadata(self, row: dict, library_id: str, path: str) -> UserMetadata:
+        return UserMetadata.from_legacy({
+            "rating": row.get("rating"), "color": row.get("color"),
+            "flag": row.get("flag"), "comments": row.get("comment"),
+            "tags": self._catalog.tags_of(library_id, path) if row else (),
+        })
+
+    @staticmethod
+    def _technical_metadata(row: dict) -> TechnicalMetadata:
+        return TechnicalMetadata(width=row.get("width"), height=row.get("height"),
+                                 duration_seconds=row.get("duration"), codec=row.get("codec"))
+
     def entries_for_paths(self, paths: Iterable[str], *, request_id: str = "",
-                          path_label: str = "", library_id: str = "") -> QueryResult:
+                          path_label: str = "", library_id: str | None = "") -> QueryResult:
         """集合成员/外部路径列表 → 目录条目（磁盘真值 + catalog 叠加）。
 
         成员已从磁盘消失时保留为 OFFLINE（集合身份仍可解释），不静默丢行。
@@ -156,6 +164,21 @@ class FilesQueryService:
         )
 
     # ------------------------------------------------------------ tree / search
+
+    def directory_file_counts(self, paths: Iterable[str]) -> dict[str, int | None]:
+        """Count immediate visible non-directory entries without loading assets."""
+        counts: dict[str, int | None] = {}
+        for path in paths:
+            try:
+                with os.scandir(path) as entries:
+                    counts[path] = sum(
+                        1 for entry in entries
+                        if not entry.name.startswith(".") and not entry.name.casefold().endswith(".app")
+                        and not entry.is_dir(follow_symlinks=False)
+                    )
+            except OSError:
+                counts[path] = None
+        return counts
 
     def tree(self, path: str, *, follow_symlinks: bool = True) -> list[dict[str, str]]:
         root = Path(normalize_path(path))
@@ -185,7 +208,8 @@ class FilesQueryService:
                 path=row["path"], name=os.path.basename(row["path"]),
                 kind=classify(row["path"]), size_bytes=asset.get("size"),
                 mtime_ts=asset.get("mtime"),
-                user=UserMetadata(rating=asset.get("rating") or 0),
+                user=self._user_metadata(asset, row["library_id"], row["path"]),
+                technical=self._technical_metadata(asset),
             ))
         return QueryResult(
             request_id=request_id, path=f"search://{query}",
