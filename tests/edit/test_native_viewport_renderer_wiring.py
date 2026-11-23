@@ -71,6 +71,7 @@ class _FakeProducer:
         self.paused_reason = None
         self.outcome = outcome
         self.rendered: list = []
+        self.composites: list = []
         self.acked: list = []
         self.polled = 0
         self.shutdown_calls = 0
@@ -78,6 +79,10 @@ class _FakeProducer:
 
     def try_render(self, task, size, source, lut):
         self.rendered.append((task, size, source, lut))
+        return self.outcome
+
+    def try_composite(self, task, size, plan, coordinate_size):
+        self.composites.append((task, size, plan, coordinate_size))
         return self.outcome
 
     def poll(self):
@@ -283,6 +288,87 @@ class TestTakingAFrame:
         native._native_producer.outcome = DROPPED
         assert native._try_native_metal_preview(_task(source, frame=7), 960, 540) is True
         assert errors == [(7, "native_preview_dropped")]
+
+    def test_composite_frames_carry_every_source_into_the_transaction(self, native) -> None:
+        """Plan 2.6: a cross dissolve is two layers with rewritten opacities."""
+        first, second = _VtFrame(), _VtFrame()
+        task = _task(first, frame=51)
+        task.layers.append({"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": second,
+                            "track_info": {"opacity": 0.65}})
+        task.layers[0]["track_info"] = {"opacity": 0.35}
+        native._active_transform_coordinate_size = (1920, 1080)
+        errors: list = []
+        native.render_error.connect(lambda frame, message: errors.append(message))
+
+        assert native._try_native_metal_preview(task, 960, 540) is True
+
+        (plan_task, size, plan, coordinate), = native._native_producer.composites
+        assert (plan_task, size, coordinate) == (task, (960, 540), (1920, 1080))
+        assert [(layer.opacity, layer.kind) for layer in plan.layers] == [(0.35, "nv12"),
+                                                                          (0.65, "nv12")]
+        assert plan.layers[0].source is first and plan.layers[1].source is second
+        # Both frames belong to the frame transaction now; it releases them.
+        assert [layer["vt_pixel_buffer"] for layer in task.layers] == [None, None]
+        assert (first.releases, second.releases) == (0, 0)
+        assert native._native_producer.rendered == [] and errors == []
+
+    def test_composite_fallback_gives_every_frame_back(self, native) -> None:
+        first, second = _VtFrame(), _VtFrame()
+        task = _task(first)
+        task.layers.append({"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": second,
+                            "track_info": {"opacity": 0.5}})
+        native._active_transform_coordinate_size = (960, 540)
+        native._native_producer.outcome = FALLBACK
+
+        assert native._try_native_metal_preview(task, 960, 540) is False
+
+        assert [layer["vt_pixel_buffer"] for layer in task.layers] == [first, second]
+        assert (first.releases, second.releases) == (0, 0)
+        assert native._task_used_io_surface_source is False
+
+    def test_composite_dropped_frame_is_reported_with_both_frames_taken(self, native) -> None:
+        first, second = _VtFrame(), _VtFrame()
+        task = _task(first, frame=9)
+        task.layers.append({"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": second,
+                            "track_info": {"opacity": 0.5}})
+        native._active_transform_coordinate_size = (960, 540)
+        errors: list = []
+        native.render_error.connect(lambda frame, message: errors.append((frame, message)))
+        native._native_producer.outcome = DROPPED
+
+        assert native._try_native_metal_preview(task, 960, 540) is True
+
+        assert errors == [(9, "native_preview_dropped")]
+        assert [layer["vt_pixel_buffer"] for layer in task.layers] == [None, None]
+
+    def test_a_failing_composite_gives_every_frame_back_and_raises(self, native) -> None:
+        first, second = _VtFrame(), _VtFrame()
+        task = _task(first)
+        task.layers.append({"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": second,
+                            "track_info": {"opacity": 0.5}})
+        native._active_transform_coordinate_size = (960, 540)
+
+        def explode(*_args):
+            raise RuntimeError("encode failed")
+
+        native._native_producer.try_composite = explode
+        with pytest.raises(RuntimeError, match="encode failed"):
+            native._try_native_metal_preview(task, 960, 540)
+        assert [layer["vt_pixel_buffer"] for layer in task.layers] == [first, second]
+        assert (first.releases, second.releases) == (0, 0)
+
+    @pytest.mark.parametrize("mode", ["lut", "off"])
+    def test_composites_need_the_explicit_opt_in(self, native, mode: str) -> None:
+        first, second = _VtFrame(), _VtFrame()
+        task = _task(first)
+        task.layers.append({"frame_type": "vt_pixel_buffer", "vt_pixel_buffer": second,
+                            "track_info": {"opacity": 0.5}})
+        native._metal_preview_mode = mode
+
+        assert native._try_native_metal_preview(task, 960, 540) is False
+
+        assert native._native_producer.composites == []
+        assert [layer["vt_pixel_buffer"] for layer in task.layers] == [first, second]
 
     def test_a_failing_producer_gives_the_frame_back_and_raises(self, native) -> None:
         source = _VtFrame()

@@ -43,7 +43,7 @@ from src.shared.gpu.present_frame import (
     PresentColorInfo,
     SlotState,
 )
-from src.shared.media.gpu_frame import GpuPlaneResource
+from src.shared.media.gpu_frame import GpuFrameRelease, GpuPlaneResource
 
 logger = logging.getLogger(__name__)
 
@@ -166,11 +166,43 @@ class NativePreviewProducer:
         self, task: Any, size: Tuple[int, int], source: Any,
         lut: Optional[Tuple[str, float]],
     ) -> str:
+        """Encode and submit one untouched clip with its optional LUT."""
+
+        def encode(output: Any) -> Optional[List[GpuFrameRelease]]:
+            imported = self._preview.encode_native(source, output, size, lut=lut)
+            return None if imported is None else [imported]
+
+        return self._try_submit(task, size, encode, (source,))
+
+    def try_composite(
+        self, task: Any, size: Tuple[int, int], plan: Any,
+        coordinate_size: Tuple[int, int],
+    ) -> str:
+        """Encode and submit a composite plan (plan task 2.6).
+
+        Every NV12 layer's VT frame is an input of the frame transaction and
+        is released once when the GPU finished reading it — the same rule the
+        GL path applies per layer.
+        """
+        sources: Tuple[Any, ...] = tuple(
+            layer.source for layer in plan.layers if layer.kind == "nv12")
+
+        def encode(output: Any) -> Optional[List[GpuFrameRelease]]:
+            return self._preview.encode_composite_native(
+                plan, output, size, coordinate_size)
+
+        return self._try_submit(task, size, encode, sources)
+
+    def _try_submit(
+        self, task: Any, size: Tuple[int, int],
+        encode: Callable[[Any], Optional[List[GpuFrameRelease]]],
+        sources: Tuple[Any, ...],
+    ) -> str:
         """Encode and submit one frame.  ``SUBMITTED`` / ``FALLBACK`` / ``DROPPED``.
 
         With ``FALLBACK`` nothing of the task was consumed: the caller's GL
-        path may render it.  With ``DROPPED`` the VT frame was released and
-        the caller must report the frame as failed.
+        path may render it.  With ``DROPPED`` the VT frames were released
+        and the caller must report the frame as failed.
         """
         self.ensure_size(size)
         if self._transactions.paused:
@@ -188,22 +220,22 @@ class NativePreviewProducer:
         if lease is None:
             self.stats["pool_full"] += 1
             return FALLBACK
-        imported = self._preview.encode_native(
-            source, lease.resource.native_handle, size, lut=lut)
+        imported = encode(lease.resource.native_handle)
         if imported is None:
             lease.abort_writing()
             self.stats["fallbacks"] += 1
             return FALLBACK
         transaction = self._transactions.begin(
-            inputs=(imported.release, source.release), payload=task,
+            inputs=tuple(item.release for item in (*imported, *sources)), payload=task,
         )
         if transaction is None:
-            imported.release()
+            for item in imported:
+                item.release()
             lease.abort_writing()
             self.stats["fallbacks"] += 1
             return FALLBACK
         if not self._transactions.submit(transaction):
-            # The pool released both inputs exactly once.
+            # The pool released every input exactly once.
             lease.abort_writing()
             self.stats["dropped"] += 1
             return DROPPED

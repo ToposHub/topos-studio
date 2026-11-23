@@ -2213,7 +2213,9 @@ class EditGpuPreviewRenderer(QThread):
 
         self._task_used_io_surface_source = False
         if self._try_metal_preview(task, w, h):
-            self._publish_composited_frame(task, self._composite_tex, w, h, 1, metal=True)
+            self._publish_composited_frame(
+                task, self._composite_tex, w, h,
+                self.__dict__.get("_metal_preview_track_count", 1), metal=True)
             return
 
         # Render each layer to its own FBO (YUV→RGB conversion)
@@ -2653,7 +2655,10 @@ class EditGpuPreviewRenderer(QThread):
                 or task.background or len(task.layers) != 1
                 or task.adjustment_layers or task.transition_jobs):
             return None
-        from src.features.edit.core.crop_cpu import crop_is_identity
+        from src.features.edit.core.metal_edit_compositor import (
+            gl_crop_params,
+            nv12_source_eligible,
+        )
 
         layer = task.layers[0]
         if layer.get("frame_type") != "vt_pixel_buffer":
@@ -2661,15 +2666,10 @@ class EditGpuPreviewRenderer(QThread):
         info = layer.get("track_info", {})
         transform = info.get("transform")
         source = layer.get("vt_pixel_buffer")
-        if (source is None or source.pixel_buffer is None
-                or source.pixel_format != "nv12" or source.bit_depth != 8
-                or source.color_matrix != "bt709" or source.color_range != "limited"
-                or source.color_primaries not in (None, "bt709")
-                or source.color_transfer not in (None, "bt709")
-                or source.width <= 0 or source.height <= 0
+        if (not nv12_source_eligible(source)
                 or info.get("opacity", 1.0) != 1.0
                 or info.get("clip_effects") or (transform and not _transform_tuple_is_identity(transform))
-                or not crop_is_identity(info.get("crop"))):
+                or gl_crop_params(info.get("crop")) is not None):
             return None
 
         lut = None
@@ -2688,11 +2688,44 @@ class EditGpuPreviewRenderer(QThread):
             return None
         return layer, source, lut
 
+    def _metal_composite_plan(self, task: EditRenderTask) -> Optional[Any]:
+        """The composite plan for a frame the single-clip plan did not take.
+
+        Metal migration plan 2.6: several layers, transforms, crops, blend
+        modes, opacities (which is what a cross dissolve is) and
+        ``dip_to_color``.  Explicit opt-in only (``all`` mode) until the
+        composite has passed the default-rollout gates.  A refusal is a
+        per-frame decision: the GL path renders that frame unchanged.
+        """
+        if (getattr(self, "_metal_preview_mode", "off") != "all"
+                or getattr(self, "_effect_hdr", False)
+                or task.background or task.cached_composite):
+            return None
+        from src.features.edit.core.metal_edit_compositor import (
+            PlanRefusal,
+            build_metal_composite_plan,
+        )
+
+        plan = build_metal_composite_plan(task)
+        if isinstance(plan, PlanRefusal):
+            self._note_metal_composite_refusal(plan.reason)
+            return None
+        return plan
+
+    def _note_metal_composite_refusal(self, reason: str) -> None:
+        """Count why frames stay on GL; one debug line per new reason."""
+        seen = self.__dict__.get("_metal_composite_refusals")
+        if seen is None:
+            seen = self._metal_composite_refusals = {}
+        if reason not in seen:
+            logger.debug("Edit Metal composite not used (%s); using OpenGL", reason)
+        seen[reason] = seen.get(reason, 0) + 1
+
     def _try_metal_preview(self, task: EditRenderTask, width: int, height: int) -> bool:
         """Try one SDR VideoToolbox clip with an optional single LUT."""
         plan = self._metal_preview_plan(task)
         if plan is None:
-            return False
+            return self._try_metal_composite(task, width, height)
         layer, source, lut = plan
         from src.features.edit.core.metal_timeline_preview import MetalTimelinePreview
 
@@ -2717,8 +2750,50 @@ class EditGpuPreviewRenderer(QThread):
         layer["vt_pixel_buffer"] = None
         source.release()
         self._note_zero_copy_import(source, timeline_frame=task.frame)
+        self._metal_preview_track_count = 1
         playback_trace("gpu_renderer.metal_preview", frame=task.frame,
                        generation=task.generation_id, lut=lut is not None,
+                       gpu_submit_ms=self._metal_preview.last_gpu_time_ms)
+        return True
+
+    def _try_metal_composite(self, task: EditRenderTask, width: int, height: int) -> bool:
+        """Composite the whole frame on Metal into the shared IOSurface."""
+        plan = self._metal_composite_plan(task)
+        if plan is None:
+            return False
+        from src.features.edit.core.metal_timeline_preview import MetalTimelinePreview
+
+        try:
+            if self._metal_preview is None:
+                self._metal_preview = MetalTimelinePreview(self.ctx)
+            coordinate_size = tuple(self._active_transform_coordinate_size)
+            rendered = self._metal_preview.render_composite(
+                plan, (width, height), coordinate_size)
+            if rendered is None:
+                return False
+            slot, lease = rendered
+            self._previous_gpu_frames.append(lease)
+            self._task_used_io_surface_source = True
+            self._metal_preview.blit(slot, self._composite_fbo)
+        except Exception as error:
+            self._metal_preview_mode = "off"
+            logger.warning("Edit Metal composite unavailable, using OpenGL: %s", error)
+            playback_trace("gpu_renderer.metal_preview_fallback", frame=task.frame,
+                           error=error, composite=True)
+            return False
+
+        # The GPU is done with the sources (render_composite waited): give
+        # every VT frame back exactly once, as the GL path does per layer.
+        for layer in task.layers:
+            source = layer.get("vt_pixel_buffer")
+            if source is None:
+                continue
+            layer["vt_pixel_buffer"] = None
+            source.release()
+            self._note_zero_copy_import(source, timeline_frame=task.frame)
+        self._metal_preview_track_count = len(plan.layers)
+        playback_trace("gpu_renderer.metal_composite", frame=task.frame,
+                       generation=task.generation_id, layers=len(plan.layers),
                        gpu_submit_ms=self._metal_preview.last_gpu_time_ms)
         return True
 
@@ -5956,24 +6031,47 @@ void main() {
             # are stale for the viewport.
             port.set_request(render_size=(int(width), int(height)))
         plan = self._metal_preview_plan(task)
-        if plan is None:
-            return False
-        layer, source, lut = plan
+        if plan is not None:
+            layer, source, lut = plan
+            composite = None
+        else:
+            composite = self._metal_composite_plan(task)
+            if composite is None:
+                return False
         from src.features.edit.core.native_metal_preview import DROPPED, FALLBACK, SUBMITTED
 
-        # Ownership of the VT frame passes to the frame transaction; nothing
-        # else may release it from here on.
-        layer["vt_pixel_buffer"] = None
+        # Ownership of the VT frames passes to the frame transaction; nothing
+        # else may release them from here on.
+        def _take_sources() -> list:
+            taken = []
+            for entry in task.layers:
+                frame_source = entry.get("vt_pixel_buffer")
+                if frame_source is not None:
+                    taken.append((entry, frame_source))
+                    entry["vt_pixel_buffer"] = None
+            return taken
+
+        def _give_back(taken: list) -> None:
+            for entry, frame_source in taken:
+                entry["vt_pixel_buffer"] = frame_source
+
+        taken = _take_sources()
         try:
-            outcome = producer.try_render(task, (width, height), source, lut)
+            if composite is not None:
+                outcome = producer.try_composite(
+                    task, (width, height), composite,
+                    tuple(self._active_transform_coordinate_size))
+            else:
+                outcome = producer.try_render(task, (width, height), source, lut)
         except Exception:
-            layer["vt_pixel_buffer"] = source   # untouched: the GL path may use it
+            _give_back(taken)                   # untouched: the GL path may use them
             raise
         if outcome == FALLBACK:
-            layer["vt_pixel_buffer"] = source
+            _give_back(taken)
             return False
         self._task_used_io_surface_source = True
-        self._note_zero_copy_import(source, timeline_frame=task.frame)
+        for _entry, frame_source in taken:
+            self._note_zero_copy_import(frame_source, timeline_frame=task.frame)
         if outcome == DROPPED:
             self._emit_task_render_error(task, "native_preview_dropped")
         return True

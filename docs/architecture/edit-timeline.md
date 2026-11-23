@@ -75,6 +75,14 @@ Edit 页面的时间线子系统遵循"**不可变模型 + 命令模式 + 提交
 
 自动模式优先以 Metal 预览符合条件的单 LUT 视频。条件为单层、不透明、无有效裁切、变换和视频效果的 BT.709 限幅 NV12。选择 Metal 或设置 `TOPOS_EDIT_METAL_PREVIEW=1` 也会覆盖符合条件的无调色视频。渲染线程使用 Metal 将 VideoToolbox 帧按预览尺寸写入共享 BGRA IOSurface，再拷贝到 Program Viewer 的 OpenGL 呈现槽。槽位确认与 GPU fence 负责回收共享纹理，音频时钟与画面队列沿用已有播放调度。其他画面和 Metal 设备或共享纹理导入不可用的场景由常规路径处理。`TOPOS_EDIT_METAL_PREVIEW=0` 可关闭此路径。
 
+显式选择 Metal 时（`TOPOS_BACKEND_GRAPHICS=metal`，或自动模式下 `TOPOS_EDIT_METAL_PREVIEW=1`），符合
+条件的**合成帧**也走 Metal：每一层都是 SDR NV12 VideoToolbox 帧或纯色，可带变换、裁切、不透明度、
+混合模式和单个串联 LUT，合成后可接 `dip_to_color`；交叉溶解即两层带不透明度的普通层。计划由
+`build_metal_composite_plan()` 逐帧判定（纯数据，不消耗任务），按 GL 的逐遍顺序编码
+（`metal_composite_msl.py`），结果进入同一个共享 IOSurface 或原生呈现槽位。任何一层不满足条件——片段
+效果、其他调色、planar 源、comp 句柄、空间转场、调整剪辑——整帧留在 OpenGL。字幕是 Qt 叠加层，嵌套
+序列不进 GPU 任务。
+
 ---
 
 ## 2. 模型层：timeline_v2.py / project.py

@@ -1,4 +1,15 @@
-"""Metal conversion for SDR timeline previews presented through the GL slot pool."""
+"""Metal conversion for SDR timeline previews presented through the GL slot pool.
+
+Two kinds of frame leave this class, both into an IOSurface the GL viewer
+blits (:meth:`render`, :meth:`render_composite`) or straight into a native
+present slot (:meth:`encode_native`, :meth:`encode_composite_native`):
+
+* one untouched VideoToolbox clip, optionally with a single LUT — the fused
+  one-pass kernels below;
+* a composite of several layers (plan task 2.6) — :class:`MetalEditCompositor`
+  reproduces the GL per-track passes; see ``metal_edit_compositor.py`` for
+  which frames qualify.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +24,11 @@ import numpy as np
 
 from src.features.color.core.cache_manager import CacheTier, LRUCache
 from src.features.color.core.shader_nodes_msl import MSL_LUT3D
+from src.features.edit.core.metal_edit_compositor import (
+    MetalCompositeError,
+    MetalCompositePlan,
+    MetalEditCompositor,
+)
 from src.shared.media.gpu_frame import GpuFrameRelease
 
 
@@ -128,6 +144,7 @@ class MetalTimelinePreview:
         self._lut_textures: LRUCache[Any] = LRUCache(
             16, CacheTier.GPU_TEXTURE, max_bytes=32 * 1024 * 1024)
         self._lut_strength: tuple[float, Any] | None = None
+        self._compositor = MetalEditCompositor(self._metal, self._prepare_lut)
         self._program = self._gl.program(vertex_shader=_PRESENT_VERTEX_SHADER,
                                          fragment_shader=_PRESENT_FRAGMENT_SHADER)
         try:
@@ -301,13 +318,62 @@ class MetalTimelinePreview:
         if source is None:
             return None
         (y_plane, uv_plane), source_lease = source
+        fresh = not self._metal.has_pending_work
         try:
             self._encode(y_plane.resolved_handle(), uv_plane.resolved_handle(),
                          output, size, lut=lut)
         except Exception:
             source_lease.release()
+            if fresh:
+                # Leave no half-encoded frame for the next submission: it
+                # would read the planes that were just given back.
+                self._metal.discard_pending()
             raise
         return source_lease
+
+    def render_composite(
+        self, plan: MetalCompositePlan, size: tuple[int, int],
+        coordinate_size: tuple[int, int],
+    ) -> tuple[_SharedPreviewSurface, GpuFrameRelease] | None:
+        """Composite into a free IOSurface (plan 2.6); the GL viewer blits it.
+
+        Every layer's VT frame stays with the caller.  ``None`` when no
+        surface is free or a source cannot be imported; nothing of the frame
+        is consumed then.
+        """
+        slot = self._acquire(size)
+        if slot is None:
+            return None
+        try:
+            leases = self._compositor.encode(
+                plan, slot.metal_texture, size, coordinate_size,
+                import_source=self._import_source)
+        except MetalCompositeError:
+            return None
+        try:
+            self._metal.finish()
+        finally:
+            for lease in leases:
+                lease.release()
+        slot.in_use = True
+        return slot, GpuFrameRelease(retain_token=slot, release_callback=slot.release_lease)
+
+    def encode_composite_native(
+        self, plan: MetalCompositePlan, output: Any, size: tuple[int, int],
+        coordinate_size: tuple[int, int],
+    ) -> Optional[list[GpuFrameRelease]]:
+        """Encode a composite into ``output`` for the native viewport.
+
+        Like :meth:`encode_native`: nothing is submitted or waited for, and
+        the caller owns the returned import leases together with the VT
+        frames until the GPU finished.  ``None`` when a source cannot be
+        imported; the layers' VT frames are then untouched.
+        """
+        try:
+            return self._compositor.encode(
+                plan, output, size, coordinate_size, import_source=self._import_source)
+        except MetalCompositeError:
+            return None
 
     def blit(self, slot: _SharedPreviewSurface, framebuffer: Any) -> None:
         """Flip the IOSurface once into the normal viewer presentation slot."""
@@ -334,5 +400,6 @@ class MetalTimelinePreview:
             self._lut_textures.clear()
             self._lut_strength = None
             self._bridge.destroy()
+            self._compositor.release()
             self._vao.release()
             self._program.release()

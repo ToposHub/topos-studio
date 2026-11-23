@@ -227,11 +227,10 @@ def test_metal_preview_blit_failure_preserves_source_for_gl_retry(renderer) -> N
 
 
 @pytest.mark.parametrize('track_info', [
-    {'opacity': 0.5}, {'crop': (0.1, 0.0, 0.0, 0.0, 0.0)},
-    {'transform': (5.0, 0.0, 1.0, 1.0, 0.0, 'center', 0.0, 0.0)},
     {'preview_grade': {'color_graph': object()}}, {'clip_effects': (object(),)},
 ])
-def test_metal_preview_skips_modified_layers(renderer, track_info: dict) -> None:
+def test_metal_preview_skips_layers_it_cannot_render(renderer, track_info: dict) -> None:
+    """No grade but a serial LUT, and no clip effects: GL keeps the frame."""
     worker, _ = renderer
     task, _ = _metal_preview_task()
     task.layers[0]['track_info'] = track_info
@@ -241,6 +240,80 @@ def test_metal_preview_skips_modified_layers(renderer, track_info: dict) -> None
     assert not worker._try_metal_preview(task, 64, 32)
 
     worker._metal_preview.render.assert_not_called()
+    worker._metal_preview.render_composite.assert_not_called()
+
+
+@pytest.mark.parametrize('track_info', [
+    {'opacity': 0.5}, {'crop': (0.1, 0.0, 0.0, 0.0, 0.0)},
+    {'transform': (5.0, 0.0, 1.0, 1.0, 0.0, 'center', 0.0, 0.0)},
+])
+def test_metal_composite_takes_a_modified_clip_when_enabled(renderer, track_info: dict) -> None:
+    """Plan 2.6: with Metal preview opted in (``all``) a moved, cropped or
+    semi-transparent clip is composited on Metal; the frame is consumed
+    only once the picture is in the shared surface."""
+    worker, _ = renderer
+    task, source = _metal_preview_task()
+    task.layers[0]['track_info'] = track_info
+    worker._metal_preview_mode = "all"
+    worker._active_transform_coordinate_size = (64, 32)
+    worker._composite_fbo = object()
+    slot, release = object(), GpuFrameRelease(release_callback=Mock())
+    worker._metal_preview = Mock()
+    worker._metal_preview.render_composite.return_value = (slot, release)
+    worker._note_zero_copy_import = Mock()
+
+    assert worker._try_metal_preview(task, 64, 32)
+
+    worker._metal_preview.render.assert_not_called()
+    ((plan, size, coordinate), _kwargs) = worker._metal_preview.render_composite.call_args
+    assert size == (64, 32) and coordinate == (64, 32)
+    worker._metal_preview.blit.assert_called_once_with(slot, worker._composite_fbo)
+    assert task.layers[0]['vt_pixel_buffer'] is None
+    source.release.assert_called_once()
+    # The shared surface stays leased until the task's GL fence is done.
+    assert worker._previous_gpu_frames == [release]
+    assert not release.is_released
+    worker._release_gpu_frame_list(worker._previous_gpu_frames)
+    assert release.is_released
+
+
+@pytest.mark.parametrize('track_info', [
+    {'opacity': 0.5}, {'crop': (0.1, 0.0, 0.0, 0.0, 0.0)},
+    {'transform': (5.0, 0.0, 1.0, 1.0, 0.0, 'center', 0.0, 0.0)},
+])
+def test_metal_preview_default_keeps_modified_clips_on_gl(renderer, track_info: dict) -> None:
+    """The composite is an opt-in: ``lut`` mode (the automatic default) still
+    sends anything but the untouched single LUT clip down the GL path."""
+    worker, _ = renderer
+    task, source = _metal_preview_task()
+    task.layers[0]['track_info'] = track_info
+    worker._metal_preview_mode = "lut"
+    worker._metal_preview = Mock()
+
+    assert not worker._try_metal_preview(task, 64, 32)
+
+    worker._metal_preview.render.assert_not_called()
+    worker._metal_preview.render_composite.assert_not_called()
+    source.release.assert_not_called()
+
+
+def test_metal_composite_failure_keeps_the_frame_for_gl_and_ends_the_session(renderer) -> None:
+    worker, _ = renderer
+    task, source = _metal_preview_task()
+    task.layers[0]['track_info'] = {'opacity': 0.5}
+    worker._metal_preview_mode = "all"
+    worker._active_transform_coordinate_size = (64, 32)
+    worker._composite_fbo = object()
+    worker._metal_preview = Mock()
+    worker._metal_preview.render_composite.side_effect = RuntimeError('kernel rejected')
+
+    assert not worker._try_metal_preview(task, 64, 32)
+
+    # Nothing of the frame was consumed, and the session stays on GL.
+    assert worker._metal_preview_mode == "off"
+    assert task.layers[0]['vt_pixel_buffer'] is source
+    source.release.assert_not_called()
+    worker._metal_preview.blit.assert_not_called()
 
 
 @pytest.mark.parametrize(('platform', 'graphics', 'override', 'expected'), [
