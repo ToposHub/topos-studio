@@ -376,6 +376,23 @@ class TestScopeGraphSplice:
         params = r._do_render_color_output.call_args.args[0]
         assert "color_graph_execute" not in params
 
+    def test_metal_grade_uses_current_scope_publication(self):
+        r = self._scope_renderer({"layers": [], "color_graph_snapshot": SimpleNamespace()})
+        r._color_metal_preview = Mock()
+        r._scope_color_output_fbo = Mock()
+        pool = {"wf_display": Mock(glo=71), "wf_display_fbo": Mock(size=(1024, 512))}
+        r._ensure_gpu_scope_pool = Mock(return_value=pool)
+        scope_engine = r._ensure_scope_engine.return_value
+        AsyncRenderer._do_render_gpu_scope(
+            r, ScopeDemand(revision=5, source_revision=10,
+                           mode="waveform", display_size=(1600, 640)))
+        scope_engine.begin_frame.assert_called_once()
+        scope_engine.publish.assert_called_once()
+        r._color_metal_preview.render_scope.assert_not_called()
+        frame = r._emitted[0]
+        assert frame.publication is scope_engine.publish.return_value
+        assert frame.waveform_size == (1600, 640)
+
     def test_frame_identity_echoes_demand_with_front_revision(self):
         from src.features.color.core.scope_graph_sampling import (
             ScopeSampleIdentity,

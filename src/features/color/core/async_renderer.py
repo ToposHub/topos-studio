@@ -159,6 +159,7 @@ class AsyncRenderer(QThread):
     包装与资源台账，不引入平行渲染路径，render_pass 直接委托 submit。
     """
     frame_ready = pyqtSignal(int) # texture_id of the front buffer
+    color_metal_frame_status = pyqtSignal(int, int, bool)
     layer_baked_ready = pyqtSignal(str, object)  # AI Baking: (layer_id, numpy_array)
     full_resolution_ready = pyqtSignal(str, object)  # (render_request_id, BGR ndarray)
     full_resolution_failed = pyqtSignal(str, str)  # (render_request_id, reason)
@@ -585,6 +586,7 @@ class AsyncRenderer(QThread):
                 # GPU→CPU transfer and lets cancellation be observed while a
                 # fence is still in flight.
                 self._poll_full_resolution_readbacks()
+                self._poll_color_metal_preview()
                 # Use a small timeout to allow checking self.is_running
                 item = self.command_queue.get(timeout=0.01)
                 cmd_type, data = item
@@ -1070,7 +1072,9 @@ class AsyncRenderer(QThread):
         由 ``run()`` 的命令循环调用（GL mutex 已持有）。未知命令被静默
         忽略；抛错的命令由外层循环的异常隔离兜底，不会中断线程。
         """
-        if cmd_type == RenderCommand.RENDER_FRAME:
+        if cmd_type == "attach_color_metal_preview":
+            self._attach_color_metal_preview(data)
+        elif cmd_type == RenderCommand.RENDER_FRAME:
             self._do_render(data)
         elif cmd_type == RenderCommand.RENDER_FULL_RESOLUTION:
             self._do_render_full_resolution(data)
@@ -1085,6 +1089,8 @@ class AsyncRenderer(QThread):
         elif cmd_type == RenderCommand.RENDER_GPU_SCOPE:
             self._do_render_gpu_scope(data)
         elif cmd_type == RenderCommand.UPLOAD_IMAGE:
+            if not isinstance(data, dict) or not data.get("is_video"):
+                self.__dict__.pop("_color_metal_source_transfer", None)
             if isinstance(data, dict):
                 # FIX: 传递 is_video 标志，防止视频模式下清除视频纹理状态
                 source_reference = {"use_source_as_reference": True} if data.get("use_source_as_reference") else {}
@@ -2001,6 +2007,38 @@ class AsyncRenderer(QThread):
         if executor is not None:
             executor.release_pool()
 
+    def _attach_color_metal_preview(self, data: tuple) -> None:
+        from src.features.color.core.metal_color_preview import ColorMetalPreview
+
+        try:
+            self._color_metal_preview = ColorMetalPreview(*data)
+        except Exception:
+            logger.warning("Color Metal preview initialization failed", exc_info=True)
+
+    def _poll_color_metal_preview(self) -> None:
+        preview = self.__dict__.get("_color_metal_preview")
+        if preview is not None and not self.__dict__.get("_color_metal_presentation_failed"):
+            try:
+                preview.poll(self._video_generation_id, self.color_metal_frame_status.emit)
+            except Exception:
+                logger.warning("Color Metal presentation failed", exc_info=True)
+                self._color_metal_presentation_failed = True
+                self.color_metal_frame_status.emit(
+                    self.__dict__.get("_color_metal_front_serial", 0),
+                    self._video_generation_id, False)
+
+    def _color_metal_display_allowed(self, params: dict) -> bool:
+        """The native viewer takes display-encoded SDR at this entry."""
+        if (params.get("film_grain", {}).get("enabled")
+                or params.get("video_stabilization")
+                or params.get("raw_preview", {}).get("gamma") == 6
+                or self.__dict__.get("_color_metal_presentation_failed")):
+            return False
+        from src.shared.media.color_metadata import normalize_color_transfer
+
+        transfer = normalize_color_transfer(self.__dict__.get("_color_metal_source_transfer"))
+        return transfer not in ("smpte2084", "arib-std-b67")
+
     def _graph_execution_deferred_reason(self, params) -> Optional[str]:
         """图执行暂缓判定：legacy 专属特性仍需旧循环的帧走旧循环。
 
@@ -2039,7 +2077,6 @@ class AsyncRenderer(QThread):
           失败——调用方不回退旧循环（复杂图的旧循环渲染过期 layers
           投影=错图），保留上一帧 + 诊断才是安全行为。
         """
-        from src.features.color.core.color_graph_compiler import compile_graph
         from src.features.color.core.color_graph_param_source import (
             graph_node_layer_provider,
         )
@@ -2073,8 +2110,26 @@ class AsyncRenderer(QThread):
         # cache_context/严格位的宿主属性均经 __dict__（裸 __new__ 兼容）
         try:
             executor = self._ensure_graph_executor()
-            plan = compile_graph(snapshot, size=(w, h),
-                                 cache=self._graph_plan_cache)
+            # 4.1 共享图入口：预览与导出经同一「快照 → 资源预检 → 依赖
+            # 锥计划」取 plan（同快照同尺寸 → 同一 pass 序/节点 ID/参数/
+            # 旁路状态）。资源预检问题按 R06 记诊断（不代替执行期
+            # fail-closed——GL 执行器行为不变）。
+            from src.features.color.core.color_graph_entry import (
+                plan_color_graph_frame,
+            )
+            outcome = plan_color_graph_frame(
+                snapshot, size=(w, h), backend="gl",
+                cache=self._graph_plan_cache)
+            for issue in outcome.resource_issues:
+                scope_diagnostics.record(
+                    "execute", "graph_resource_preflight",
+                    revision=params.get('render_request_id'),
+                    detail="{}:{}:{}".format(
+                        issue.code, issue.node_id,
+                        issue.detail)[:160])
+            if outcome.plan is None:
+                raise outcome.compile_error
+            plan = outcome.plan
             # N01：full-res 出口走 f4（与 legacy 全分辨率精度对齐；
             # front/composite/scope 维持 f2）
             graph_dtype = ("f4" if str(params.get('color_output_target')
@@ -2279,6 +2334,9 @@ class AsyncRenderer(QThread):
                 return
             scope_source = candidate
             scope_source_is_full_frame = True
+            # The full-frame grade can come from Metal. Scope presentation
+            # uses the current shared GPU scope algorithm and publication
+            # fence so the presenter sees identical plots across backends.
 
             # 1. Downscale front texture to analysis resolution. The mask is
             # resolved from the renderer-owned GPU texture table and applied
@@ -2421,6 +2479,7 @@ class AsyncRenderer(QThread):
                 analysis_ms=analysis_ms,
                 publication=publication,
             )
+            self.last_color_scope_backend = "gl"
             self.gpu_scope_ready.emit(frame)
         except Exception as exc:
             # A single failed pass should not permanently disable the scope
@@ -3233,7 +3292,42 @@ class AsyncRenderer(QThread):
         use_graph_execution = bool(
             params.get('color_graph_execute')
             and params.get('color_graph_snapshot') is not None)
-        if use_graph_execution:
+        metal_preview = self.__dict__.get("_color_metal_preview")
+        metal_grade = False
+        metal_display = None
+        if metal_preview is not None and not color_output_mode:
+            self._color_metal_front_serial = self.__dict__.get("_color_metal_front_serial", 0) + 1
+        if (
+            metal_preview is not None
+            and params.get("color_graph_snapshot") is not None
+            and (not color_output_mode or color_output_target == "scope")
+            and self._graph_execution_deferred_reason(params) is None
+        ):
+            surface = metal_preview.surface.publisher.current()
+            if (not color_output_mode and self._color_metal_display_allowed(params)
+                    and surface.is_usable()):
+                metal_display = (self._color_metal_front_serial,
+                                 self._video_generation_id, surface.generation)
+            from src.features.color.core.color_graph_metal import MetalGraphCancelled
+            try:
+                metal_grade = metal_preview.grade(
+                    params["color_graph_snapshot"],
+                    params.get("color_graph_source_frame"),
+                    raw_view_fbo, ping_fbo, cancelled=is_cancelled,
+                    display=metal_display, scope_output=color_output_mode)
+            except MetalGraphCancelled:
+                return False
+            if metal_grade:
+                self._release_graph_lease()
+                self.last_node_cache_events = ()
+                current_source_tex = ping_tex
+                current_target_tex = pong_tex
+                current_target_fbo = pong_fbo
+                layers = ()
+            else:
+                # A rejected Metal graph still uses the authoritative GL plan.
+                use_graph_execution = True
+        if use_graph_execution and not metal_grade:
             graph_out_tex, graph_deferred = self._execute_graph_frame(
                 params, w, h, raw_view_tex, is_cancelled)
             if graph_out_tex is None and not graph_deferred:
@@ -3588,6 +3682,11 @@ class AsyncRenderer(QThread):
             # snapshot on the render thread much later, so it must not alias
             # UI-owned mutable layer DTOs.
             self._last_scope_render_params = self._snapshot_scope_params(params)
+            if metal_preview is not None:
+                self.last_color_preview_backend = "metal_texture" if metal_grade else "gl"
+                if metal_preview.last_submitted_serial != self._color_metal_front_serial:
+                    self.color_metal_frame_status.emit(
+                        self._color_metal_front_serial, self._video_generation_id, False)
             # GPU scope source revision: every successfully published front
             # texture advances the revision so stale scope frames can be
             # rejected after seek / clip switch.  See scope_types.ScopeGpuFrame.
@@ -6136,6 +6235,8 @@ class AsyncRenderer(QThread):
 
         # Execute render
         self.debug_last_render_command = "RENDER_VIDEO_FRAME"
+        self._color_metal_source_transfer = getattr(
+            getattr(decoded_frame, "metadata", None), "color_transfer", None)
         # New frame content: qualifier mattes keyed on this epoch must regenerate
         # (__new__-constructed test stubs skip __init__; __dict__ access avoids
         # the QObject RuntimeError raised by plain attribute reads)
@@ -6344,6 +6445,7 @@ class AsyncRenderer(QThread):
 
         # Execute render using the external GPU texture planes
         self.debug_last_render_command = "RENDER_VIDEO_GPU_FRAME"
+        self._color_metal_source_transfer = getattr(gpu_frame, "color_transfer", None)
         # New frame content: qualifier mattes keyed on this epoch must regenerate
         # (__new__-constructed test stubs skip __init__; __dict__ access avoids
         # the QObject RuntimeError raised by plain attribute reads)
@@ -6942,6 +7044,12 @@ class AsyncRenderer(QThread):
         # Run this before the GL teardown while the render thread still owns
         # the context.  A queued zero-copy frame has no other release path once
         # ``run`` exits its command loop.
+        metal_preview = self.__dict__.pop("_color_metal_preview", None)
+        if metal_preview is not None:
+            try:
+                metal_preview.release()
+            except Exception:
+                logger.warning("Color Metal preview cleanup failed", exc_info=True)
         self._release_queued_gpu_frames()
         if self.ctx:
             runner = self.__dict__.pop('_stabilization_runner', None)

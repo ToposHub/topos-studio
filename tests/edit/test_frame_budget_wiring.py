@@ -145,6 +145,39 @@ def test_in_flight_history_survives_pop(fresh_collector):
     assert TPR._lookup_frame_trace_id(shell, 11) == 0
 
 
+def test_present_ready_before_result_finds_the_in_flight_trace(fresh_collector):
+    """``present_frame_ready`` reaches the UI before ``frame_ready``.
+
+    At that moment the frame's identity is still in the in-flight table and
+    not yet in the history; the "submitted" annotation (and the actual render
+    backend it carries) must find it there.
+    """
+    from src.features.edit.core.timeline_preview_renderer import (
+        TimelinePreviewRenderer as TPR,
+    )
+    shell = _tpr_shell(_in_flight_frame_ids={10: (42, 999)})
+    TPR._annotate_present_status(
+        shell, 10, "submitted", slot_id=3, render_backend="metal")
+    trace = fresh_collector.get_traces()[-1]
+    assert trace.present_status == "submitted"
+    assert trace.backend == "metal"
+    assert trace.present_submitted_mono > 0.0
+    # Looking the identity up does not consume the in-flight entry.
+    assert TPR._take_in_flight_frame_ids(shell, 10) == (42, 999)
+    assert TPR._lookup_frame_trace_id(shell, 10) == 42
+
+
+def test_in_flight_identity_wins_over_history():
+    from src.features.edit.core.timeline_preview_renderer import (
+        TimelinePreviewRenderer as TPR,
+    )
+    # A re-dispatch of the same frame carries the newer identity.
+    shell = _tpr_shell(
+        _in_flight_frame_ids={10: (43, 0)}, _frame_trace_id_history={10: 42})
+    assert TPR._lookup_frame_trace_id(shell, 10) == 43
+    assert TPR._lookup_frame_trace_id(shell, 11) == 0
+
+
 def test_annotate_present_status_submitted_carries_monotonic(fresh_collector):
     from src.features.edit.core.timeline_preview_renderer import (
         TimelinePreviewRenderer as TPR,

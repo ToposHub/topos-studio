@@ -1,0 +1,411 @@
+{
+  "schema": "topos_metal_ab_playback/1",
+  "generated_at_utc": "2026-11-22T21:26:42+00:00",
+  "commit": "20bf448a7807db44e6f9be9fc237f7030c8be5ad",
+  "machine": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "python": "3.12.13",
+    "hostname": "Mac Pro",
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "gpus": [
+      "AMD Radeon RX 6900 XT",
+      "PHL 439P1"
+    ]
+  },
+  "ab_dir": "bench_out/metal-ab.2026-11-23",
+  "repeats": 1,
+  "expected_frames": 400,
+  "display_power_state": [
+    1,
+    4
+  ],
+  "display_asleep_allowed": true,
+  "summary": [
+    {
+      "config": "native",
+      "source": "dnxhr",
+      "graded": false,
+      "rounds": 1,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        43
+      ],
+      "presented_median": 43,
+      "presented_min": 43,
+      "presented_max": 43,
+      "dropped_median": 357,
+      "wall_median_s": 35.092,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 42
+      },
+      "render_path_counts": {
+        "gpu_composite": 42
+      },
+      "present_status_counts": {
+        "displayed": 42
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 2
+      },
+      "backend_counts": {
+        "opengl": 42
+      },
+      "present_path_counts": {
+        "gl_viewer": 42
+      },
+      "max_cpu_upload_bytes": 303464448,
+      "max_cpu_download_bytes": 1090560,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 42,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    },
+    {
+      "config": "native",
+      "source": "dnxhr",
+      "graded": true,
+      "rounds": 1,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        53
+      ],
+      "presented_median": 53,
+      "presented_min": 53,
+      "presented_max": 53,
+      "dropped_median": 347,
+      "wall_median_s": 35.874,
+      "decode_path_counts": {
+        "gpu": 1,
+        "ffmpeg_planar_gpu_upload": 52
+      },
+      "render_path_counts": {
+        "gpu_composite": 53
+      },
+      "present_status_counts": {
+        "displayed": 52
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {},
+      "backend_counts": {
+        "opengl": 53
+      },
+      "present_path_counts": {
+        "gl_viewer": 52
+      },
+      "max_cpu_upload_bytes": 375717888,
+      "max_cpu_download_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 52,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    },
+    {
+      "config": "native",
+      "source": "h264",
+      "graded": false,
+      "rounds": 1,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        148
+      ],
+      "presented_median": 148,
+      "presented_min": 148,
+      "presented_max": 148,
+      "dropped_median": 252,
+      "wall_median_s": 16.18,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 150
+      },
+      "render_path_counts": {
+        "gpu_composite": 150
+      },
+      "present_status_counts": {
+        "slot_released": 145,
+        "displayed": 1,
+        "submitted": 1
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 2
+      },
+      "backend_counts": {
+        "opengl": 3,
+        "metal": 147
+      },
+      "present_path_counts": {
+        "native_metal": 147
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 1090560,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    },
+    {
+      "config": "native",
+      "source": "h264",
+      "graded": true,
+      "rounds": 1,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        70
+      ],
+      "presented_median": 70,
+      "presented_min": 70,
+      "presented_max": 70,
+      "dropped_median": 330,
+      "wall_median_s": 35.525,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 80
+      },
+      "render_path_counts": {
+        "gpu_composite": 80
+      },
+      "present_status_counts": {
+        "slot_released": 78,
+        "displayed": 1,
+        "submitted": 1
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 2
+      },
+      "backend_counts": {
+        "metal": 80
+      },
+      "present_path_counts": {
+        "native_metal": 80
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 1090560,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    }
+  ],
+  "runs": [
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.180430705997424,
+      "presented_frames": 148,
+      "last_frame": 398,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 1090560,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 150
+      },
+      "render_path_counts": {
+        "gpu_composite": 150
+      },
+      "present_status_counts": {
+        "slot_released": 145,
+        "displayed": 1,
+        "submitted": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 2
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 3,
+        "metal": 147
+      },
+      "present_path_counts": {
+        "native_metal": 147
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 1,
+      "wall_s": 35.52528282399726,
+      "presented_frames": 70,
+      "last_frame": 373,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 1090560,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 80
+      },
+      "render_path_counts": {
+        "gpu_composite": 80
+      },
+      "present_status_counts": {
+        "slot_released": 78,
+        "displayed": 1,
+        "submitted": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 2
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "metal": 80
+      },
+      "present_path_counts": {
+        "native_metal": 80
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 1,
+      "wall_s": 35.09199302200068,
+      "presented_frames": 43,
+      "last_frame": 205,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 303464448,
+      "cpu_download_bytes": 1090560,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 42,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 42
+      },
+      "render_path_counts": {
+        "gpu_composite": 42
+      },
+      "present_status_counts": {
+        "displayed": 42
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 2
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 42
+      },
+      "present_path_counts": {
+        "gl_viewer": 42
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 1,
+      "wall_s": 35.87357969100049,
+      "presented_frames": 53,
+      "last_frame": 218,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 375717888,
+      "cpu_download_bytes": 0,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 52,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "gpu": 1,
+        "ffmpeg_planar_gpu_upload": 52
+      },
+      "render_path_counts": {
+        "gpu_composite": 53
+      },
+      "present_status_counts": {
+        "displayed": 52
+      },
+      "readback_kind_counts": {},
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 53
+      },
+      "present_path_counts": {
+        "gl_viewer": 52
+      },
+      "app_exit": "exited"
+    }
+  ],
+  "notes": [
+    "功能冒烟，不是性能基线：测量时显示器休眠（电源状态 1/4），呈现帧数不可与清醒基线比较。",
+    "源码状态等于提交 5292d843：运行时 HEAD 是 20bf448a，工作树里带着随后提交为 5292d843 的改动；运行之后到提交之间源码没有再变（只跑了回归）。记录里的 commit 字段是驱动取的运行时 HEAD。",
+    "配置 native = TOPOS_BACKEND_GRAPHICS=metal + TOPOS_EDIT_METAL_VIEWPORT=1。",
+    "看点在实际渲染后端与实际呈现面：H.264 帧经 native_metal 上屏；DNxHR 为 planar 帧，留在 gl_viewer。",
+    "旧帧覆盖 0、槽位未确认复用 0；应用正常启动与退出，日志无原生视口相关告警或 Traceback。"
+  ]
+}

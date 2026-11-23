@@ -1,0 +1,2580 @@
+{
+ "generated_at": "2026-11-23T11:48:01+00:00",
+ "git_head": "4cbbe5004ec6060a8f053d91612ff197caca0e26",
+ "compiler": {
+  "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+  "os_version": "15.3.1",
+  "fast_math_enabled": true,
+  "math_mode": 2,
+  "default_language_version": 196610,
+  "available": true,
+  "device": "AMD Radeon RX 6900 XT",
+  "registry_id": 4294968732,
+  "has_unified_memory": false
+ },
+ "gate": {
+  "abs_tol": 0.000244140625,
+  "rel_tol": 0.0009765625,
+  "scale_tol": 1e-06,
+  "rule": "|a-b| <= max(ABS_TOL, REL_TOL*max(|a|,|b|), SCALE_TOL*input_scale)；Alpha 逐位相同；非有限值的位置必须一致",
+  "abs_tol_meaning": "1/16 个 8-bit 码值、1/4 个 10-bit 码值",
+  "rel_tol_meaning": "正常范围数值的 1–2 个 fp16 ulp",
+  "scale_tol_meaning": "fp32 舍入相对运算对象 / 采样邻域幅度的比例（实测 ≤ 2.3e-7）"
+ },
+ "corpus": "GL: dctl_wrapper.wrap_dctl_process + EffectPassRunner 顶点/quad，RGBA16F；5 种尺寸（19x13、7x1、1x7、64x48、33x32）× 3 类图像（HDR 负值/零/超白、边缘极值、渐变）× 每个参数 min/default/max 加 4 组固定种子随机组合；门限：Alpha 逐位相同且 |Δ| ≤ max(2.44e-4, 9.77e-4·|v|, 1e-6·输入幅度)",
+ "sizes": [
+  [
+   19,
+   13
+  ],
+  [
+   7,
+   1
+  ],
+  [
+   1,
+   7
+  ],
+  [
+   64,
+   48
+  ],
+  [
+   33,
+   32
+  ]
+ ],
+ "images": [
+  "hdr",
+  "edges",
+  "ramp"
+ ],
+ "plugins": {
+  "Bleach_Bypass": {
+   "status": "verified",
+   "metrics": {
+    "renders": 165,
+    "identical_fraction": 0.9959514170040485,
+    "max_abs": 0.00390625,
+    "max_rel": 0.0009661835501901805,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.754605770111084,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/random2",
+     0.7546,
+     0.000244140625,
+     0.0007518797065131366
+    ],
+    [
+     "64x48/ramp/saturation=max",
+     0.5,
+     0.0001220703125,
+     0.0005540166166611016
+    ],
+    [
+     "19x13/ramp/random0",
+     0.125,
+     3.0517578125e-05,
+     0.0009661835501901805
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Bleach_Bypass",
+    "msl_fingerprint": "dab2d96cdea6bc2dd9812912ca0dbb1435e2af62bc9f55b6003d97a6c3a91140",
+    "source_fingerprint": "6d24ab679f8a42db65c503437bd2bd6d1e82dfe7160c90e74a7eb3fe4a43c596",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "6d24ab679f8a42db65c503437bd2bd6d1e82dfe7160c90e74a7eb3fe4a43c596",
+    "param_schema_hash": "7053535f6f0ca8348211322e6dfb232a9e6577edda09ebad36b0dfa58548186c",
+    "layout_fingerprint": "790750fad10e3453",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "1940aa0657b1078e5faedc05c0849aca6b356c9c",
+    "kernel_name": "topos_fx_1940aa0657b1078e5fae"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_strength"
+     ]
+    },
+    {
+     "param": "contrast",
+     "glsl_type": "float",
+     "fields": [
+      "p_contrast"
+     ]
+    },
+    {
+     "param": "saturation",
+     "glsl_type": "float",
+     "fields": [
+      "p_saturation"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "dab2d96cdea6bc2dd9812912ca0dbb1435e2af62bc9f55b6003d97a6c3a91140",
+   "source_fingerprint": "6d24ab679f8a42db65c503437bd2bd6d1e82dfe7160c90e74a7eb3fe4a43c596",
+   "compile_seconds": 0.0033,
+   "wrap_dependent": false
+  },
+  "CRT_Scanlines": {
+   "status": "verified",
+   "metrics": {
+    "renders": 195,
+    "identical_fraction": 0.3967611336032389,
+    "max_abs": 32.0,
+    "max_rel": 0.0009756097570061684,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.9980506896972656,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/crt_mode=0",
+     0.9981,
+     0.0009765625,
+     0.000974658876657486
+    ],
+    [
+     "64x48/ramp/mask_strength=min",
+     0.9981,
+     0.0009765625,
+     0.000974658876657486
+    ],
+    [
+     "64x48/ramp/random1",
+     0.9981,
+     0.0009765625,
+     0.000974658876657486
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:CRT_Scanlines",
+    "msl_fingerprint": "c84f06aa41995f266031677006ed9a8dcab096ce943b29cf29e01b45471c72ab",
+    "source_fingerprint": "9f4b7c8208032c4107ba7ad7591f371c7140538134ad2fe50bc29087bc3f130e",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "9f4b7c8208032c4107ba7ad7591f371c7140538134ad2fe50bc29087bc3f130e",
+    "param_schema_hash": "7270f8b7cd784341835ba7e88a27ad62e1f53904f4f76c1dd409a2923d29f6ed",
+    "layout_fingerprint": "8230872480a09bdb",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "89582eeae207abe854c04c836f06e83e22a71eba",
+    "kernel_name": "topos_fx_89582eeae207abe854c0"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "crt_mode",
+     "glsl_type": "int",
+     "fields": [
+      "p_crt_mode"
+     ]
+    },
+    {
+     "param": "scan_count",
+     "glsl_type": "float",
+     "fields": [
+      "p_scan_count"
+     ]
+    },
+    {
+     "param": "scan_strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_scan_strength"
+     ]
+    },
+    {
+     "param": "mask_strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_mask_strength"
+     ]
+    }
+   ],
+   "features": [
+    "texture_size"
+   ],
+   "matched_helper": null,
+   "msl_fingerprint": "c84f06aa41995f266031677006ed9a8dcab096ce943b29cf29e01b45471c72ab",
+   "source_fingerprint": "9f4b7c8208032c4107ba7ad7591f371c7140538134ad2fe50bc29087bc3f130e",
+   "compile_seconds": 0.0008,
+   "wrap_dependent": false
+  },
+  "Channel_Mixer": {
+   "status": "verified",
+   "metrics": {
+    "renders": 360,
+    "identical_fraction": 0.9959514170040485,
+    "max_abs": 0.00048828125,
+    "max_rel": 0.0016666667070239782,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.521916389465332,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/random2",
+     0.5219,
+     0.000244140625,
+     0.0016666667070239782
+    ],
+    [
+     "33x32/ramp/random3",
+     0.0625,
+     1.52587890625e-05,
+     0.0009033423848450184
+    ],
+    [
+     "64x48/ramp/random3",
+     0.0156,
+     3.814697265625e-06,
+     0.0009165902738459408
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Channel_Mixer",
+    "msl_fingerprint": "e6024a2ffd27cd91d43bea09ee5e7451ce61fb023e1e01b617cd5964d899c83c",
+    "source_fingerprint": "73d34fcc83686142d74db3d4e0e14c894ba69fc58fbab6a94d883cda1a7c1430",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "73d34fcc83686142d74db3d4e0e14c894ba69fc58fbab6a94d883cda1a7c1430",
+    "param_schema_hash": "6fca9d4983802c77578f2ba610e7170dd580f90f7ac233bdd4416765d3559fba",
+    "layout_fingerprint": "8d28ea9fe4cb2c1f",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "e2e52b450975a9a240640b9ffcc026629f6d825d",
+    "kernel_name": "topos_fx_e2e52b450975a9a24064"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "red_gain",
+     "glsl_type": "float",
+     "fields": [
+      "p_red_gain"
+     ]
+    },
+    {
+     "param": "green_gain",
+     "glsl_type": "float",
+     "fields": [
+      "p_green_gain"
+     ]
+    },
+    {
+     "param": "blue_gain",
+     "glsl_type": "float",
+     "fields": [
+      "p_blue_gain"
+     ]
+    },
+    {
+     "param": "green_into_red",
+     "glsl_type": "float",
+     "fields": [
+      "p_green_into_red"
+     ]
+    },
+    {
+     "param": "blue_into_red",
+     "glsl_type": "float",
+     "fields": [
+      "p_blue_into_red"
+     ]
+    },
+    {
+     "param": "red_into_green",
+     "glsl_type": "float",
+     "fields": [
+      "p_red_into_green"
+     ]
+    },
+    {
+     "param": "blue_into_green",
+     "glsl_type": "float",
+     "fields": [
+      "p_blue_into_green"
+     ]
+    },
+    {
+     "param": "red_into_blue",
+     "glsl_type": "float",
+     "fields": [
+      "p_red_into_blue"
+     ]
+    },
+    {
+     "param": "green_into_blue",
+     "glsl_type": "float",
+     "fields": [
+      "p_green_into_blue"
+     ]
+    },
+    {
+     "param": "mixer_strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_mixer_strength"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "e6024a2ffd27cd91d43bea09ee5e7451ce61fb023e1e01b617cd5964d899c83c",
+   "source_fingerprint": "73d34fcc83686142d74db3d4e0e14c894ba69fc58fbab6a94d883cda1a7c1430",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Cross_Process": {
+   "status": "verified",
+   "metrics": {
+    "renders": 135,
+    "identical_fraction": 0.9990530303030303,
+    "max_abs": 0.00390625,
+    "max_rel": 0.012987012974917889,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.784674346446991,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/random3",
+     0.7847,
+     0.00048828125,
+     0.0007662835414521396
+    ],
+    [
+     "64x48/ramp/random0",
+     0.5888,
+     0.00048828125,
+     0.0005750431446358562
+    ],
+    [
+     "64x48/ramp/default",
+     0.5875,
+     0.00048828125,
+     0.0019083969527855515
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Cross_Process",
+    "msl_fingerprint": "556da6d145809ba5cd8b9485b7d682f458f1e728e80ef7fea285c03b6e1a4787",
+    "source_fingerprint": "5a04199f149f1530a7a117ce5eea63404070515a6298913a4dc0d4c89bc21ff6",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "5a04199f149f1530a7a117ce5eea63404070515a6298913a4dc0d4c89bc21ff6",
+    "param_schema_hash": "82f0f0a9de90b345423ffc2dcdcc652314f03c5e2d2b8df3bc8f9af12b533ab6",
+    "layout_fingerprint": "c0e7f3479ae6f739",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "4847f6e80a994b6a277dbf49d2332ceb1c1cbb98",
+    "kernel_name": "topos_fx_4847f6e80a994b6a277d"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "preset",
+     "glsl_type": "int",
+     "fields": [
+      "p_preset"
+     ]
+    },
+    {
+     "param": "strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_strength"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "556da6d145809ba5cd8b9485b7d682f458f1e728e80ef7fea285c03b6e1a4787",
+   "source_fingerprint": "5a04199f149f1530a7a117ce5eea63404070515a6298913a4dc0d4c89bc21ff6",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Day_Night_Converter": {
+   "status": "verified",
+   "metrics": {
+    "renders": 195,
+    "identical_fraction": 0.9919028340080972,
+    "max_abs": 0.0078125,
+    "max_rel": 0.0009578543831594288,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.9808428883552551,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/random0",
+     0.9808,
+     0.00048828125,
+     0.0009578543831594288
+    ],
+    [
+     "33x32/ramp/night_depth=max",
+     0.8912,
+     0.000244140625,
+     0.0008703219937160611
+    ],
+    [
+     "33x32/ramp/default",
+     0.8449,
+     0.00048828125,
+     0.0008250825339928269
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Day_Night_Converter",
+    "msl_fingerprint": "059173570a9b2d306d79cd5369e066c6dad7192aad3f1e28a952067387493964",
+    "source_fingerprint": "d3ef44939ad7170073a1cefed00d592553c16c7cd54debc155c87f856295ab98",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "d3ef44939ad7170073a1cefed00d592553c16c7cd54debc155c87f856295ab98",
+    "param_schema_hash": "28e59107cf4acebcfe4591fcf5f5bce65ef9abb11534b79eeaed901e64ec050d",
+    "layout_fingerprint": "9025d47b25519c29",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "1fcc17edc98060d4779101313ff03136edb33c8b",
+    "kernel_name": "topos_fx_1fcc17edc98060d47791"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "night_depth",
+     "glsl_type": "float",
+     "fields": [
+      "p_night_depth"
+     ]
+    },
+    {
+     "param": "temperature_shift",
+     "glsl_type": "float",
+     "fields": [
+      "p_temperature_shift"
+     ]
+    },
+    {
+     "param": "sky_protection",
+     "glsl_type": "float",
+     "fields": [
+      "p_sky_protection"
+     ]
+    },
+    {
+     "param": "exposure",
+     "glsl_type": "float",
+     "fields": [
+      "p_exposure"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "059173570a9b2d306d79cd5369e066c6dad7192aad3f1e28a952067387493964",
+   "source_fingerprint": "d3ef44939ad7170073a1cefed00d592553c16c7cd54debc155c87f856295ab98",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Duotone_Toner": {
+   "status": "verified",
+   "metrics": {
+    "renders": 210,
+    "identical_fraction": 0.8571428571428571,
+    "max_abs": 0.001953125,
+    "max_rel": 0.015243902802467346,
+    "max_fp16_ulp": 5,
+    "worst_ratio": 0.9624060392379761,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/random1",
+     0.9624,
+     0.00048828125,
+     0.000939849647693336
+    ],
+    [
+     "64x48/ramp/shadow_color=1",
+     0.8707,
+     0.00048828125,
+     0.0008503401186317205
+    ],
+    [
+     "19x13/ramp/random1",
+     0.7787,
+     0.0009765625,
+     0.0007604562561027706
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Duotone_Toner",
+    "msl_fingerprint": "73bbf5a68522defca43c0ece9db5d31f95410048ff715a65872af2e595c3d432",
+    "source_fingerprint": "d4cd96af6ab22a6016a95dc8683ba87abfd67e1df4b1d498b46ac5ce77d47b38",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "d4cd96af6ab22a6016a95dc8683ba87abfd67e1df4b1d498b46ac5ce77d47b38",
+    "param_schema_hash": "f932dbc581b928100e686af1bf7023b98bbdf3cd82aadbcc7457a417b665bd10",
+    "layout_fingerprint": "ed661fffd421f116",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "1bca103048e09eb1a6f2bd4a15de88f70487d25f",
+    "kernel_name": "topos_fx_1bca103048e09eb1a6f2"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "shadow_color",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_shadow_color_x",
+      "p_shadow_color_y",
+      "p_shadow_color_z"
+     ]
+    },
+    {
+     "param": "highlight_color",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_highlight_color_x",
+      "p_highlight_color_y",
+      "p_highlight_color_z"
+     ]
+    },
+    {
+     "param": "tone_amount",
+     "glsl_type": "float",
+     "fields": [
+      "p_tone_amount"
+     ]
+    },
+    {
+     "param": "tone_detail",
+     "glsl_type": "float",
+     "fields": [
+      "p_tone_detail"
+     ]
+    },
+    {
+     "param": "luma_mode",
+     "glsl_type": "int",
+     "fields": [
+      "p_luma_mode"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "73bbf5a68522defca43c0ece9db5d31f95410048ff715a65872af2e595c3d432",
+   "source_fingerprint": "d4cd96af6ab22a6016a95dc8683ba87abfd67e1df4b1d498b46ac5ce77d47b38",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Edge_Ink_Outline": {
+   "status": "verified",
+   "metrics": {
+    "renders": 180,
+    "identical_fraction": 0.7142857142857143,
+    "max_abs": 16.0,
+    "max_rel": 0.0008779631461948156,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.6826666593551636,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "19x13/hdr/ink_color=0",
+     0.6827,
+     16.0,
+     0.0007309941574931145
+    ],
+    [
+     "19x13/edges/ink_color=0",
+     0.6827,
+     16.0,
+     0.0006666666595265269
+    ],
+    [
+     "7x1/edges/ink_color=0",
+     0.6827,
+     16.0,
+     0.0006666666595265269
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Edge_Ink_Outline",
+    "msl_fingerprint": "34108f796c46f0b8e642071c7f3e02954fb1e9e49554a59d220690c20c0e1e1e",
+    "source_fingerprint": "945a6ea8939d71011ed92564998d300ebdba79ddf6073816b85a1f7ee7dd0947",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "945a6ea8939d71011ed92564998d300ebdba79ddf6073816b85a1f7ee7dd0947",
+    "param_schema_hash": "8cb532fd4ec5db6f6813fc398272ab3e42e5c10147a3e4faa8c9c7e436fae752",
+    "layout_fingerprint": "d65dd05fbcf6649a",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "b5bef248ab932f7711dde68fc6f9eb2997e41e84",
+    "kernel_name": "topos_fx_b5bef248ab932f7711dd"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "edge_strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_edge_strength"
+     ]
+    },
+    {
+     "param": "edge_threshold",
+     "glsl_type": "float",
+     "fields": [
+      "p_edge_threshold"
+     ]
+    },
+    {
+     "param": "ink_color",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_ink_color_x",
+      "p_ink_color_y",
+      "p_ink_color_z"
+     ]
+    },
+    {
+     "param": "edge_source",
+     "glsl_type": "int",
+     "fields": [
+      "p_edge_source"
+     ]
+    }
+   ],
+   "features": [
+    "sampling",
+    "texture_size"
+   ],
+   "matched_helper": null,
+   "msl_fingerprint": "34108f796c46f0b8e642071c7f3e02954fb1e9e49554a59d220690c20c0e1e1e",
+   "source_fingerprint": "945a6ea8939d71011ed92564998d300ebdba79ddf6073816b85a1f7ee7dd0947",
+   "compile_seconds": 0.0004,
+   "wrap_dependent": false
+  },
+  "Fake_Infrared": {
+   "status": "verified",
+   "metrics": {
+    "renders": 165,
+    "identical_fraction": 0.9990530303030303,
+    "max_abs": 0.0625,
+    "max_rel": 0.0013351135421544313,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.8165869116783142,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "33x32/ramp/glow=max",
+     0.8166,
+     0.001953125,
+     0.0007974481559358537
+    ],
+    [
+     "64x48/ramp/contrast=max",
+     0.6813,
+     0.00390625,
+     0.0006653359741903841
+    ],
+    [
+     "33x32/hdr/random1",
+     0.5398,
+     0.0625,
+     0.0005271481350064278
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Fake_Infrared",
+    "msl_fingerprint": "63a0fb316e88d39d05ddcf11bec5f4a171fc11777ece9632da550ec308b32595",
+    "source_fingerprint": "bb714f047b744e470efb998c094a81954a16bf7d287602cff36b6d08c4576d9e",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "bb714f047b744e470efb998c094a81954a16bf7d287602cff36b6d08c4576d9e",
+    "param_schema_hash": "9ef9dcaa7d1fca2e53804d0d488f58bbceafd96ee206c6378cf15eeafadfaf61",
+    "layout_fingerprint": "40307fd27634d144",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "c582ced5c7a4e21355aad4ddbb53a7bf1023dccd",
+    "kernel_name": "topos_fx_c582ced5c7a4e21355aa"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "channel_map",
+     "glsl_type": "int",
+     "fields": [
+      "p_channel_map"
+     ]
+    },
+    {
+     "param": "glow",
+     "glsl_type": "float",
+     "fields": [
+      "p_glow"
+     ]
+    },
+    {
+     "param": "contrast",
+     "glsl_type": "float",
+     "fields": [
+      "p_contrast"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "63a0fb316e88d39d05ddcf11bec5f4a171fc11777ece9632da550ec308b32595",
+   "source_fingerprint": "bb714f047b744e470efb998c094a81954a16bf7d287602cff36b6d08c4576d9e",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Film_Halation": {
+   "status": "verified",
+   "metrics": {
+    "renders": 120,
+    "identical_fraction": 1.0,
+    "max_abs": 0.0,
+    "max_rel": 0.0,
+    "max_fp16_ulp": 0,
+    "worst_ratio": 0.0,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "19x13/hdr/default",
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     "19x13/hdr/blur_radius=min",
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     "19x13/hdr/blur_radius=max",
+     0.0,
+     0.0,
+     0.0
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Film_Halation",
+    "msl_fingerprint": "ced869f41c34820e6b44a7abc478bc4290b3a69a3c62a2871eec48d8c86421fb",
+    "source_fingerprint": "5cbba8337b0b64948401ded830afcf3a28e64c360216dd6bbac362e724eec412",
+    "plugin_version": "",
+    "plugin_content_hash": "5cbba8337b0b64948401ded830afcf3a28e64c360216dd6bbac362e724eec412",
+    "param_schema_hash": "211cb28b585118dd826e7d7d59b156711940f1ba4216bd77e67657fb5eab3187",
+    "layout_fingerprint": "4eedc4ef46de54af",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "3c8b39cfa0d3b0bc7599c25a92a67254b20e508f",
+    "kernel_name": "topos_fx_3c8b39cfa0d3b0bc7599"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "blur_radius",
+     "glsl_type": "float",
+     "fields": [
+      "p_blur_radius"
+     ]
+    },
+    {
+     "param": "enable_tint",
+     "glsl_type": "int",
+     "fields": [
+      "p_enable_tint"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "ced869f41c34820e6b44a7abc478bc4290b3a69a3c62a2871eec48d8c86421fb",
+   "source_fingerprint": "5cbba8337b0b64948401ded830afcf3a28e64c360216dd6bbac362e724eec412",
+   "compile_seconds": 0.0005,
+   "wrap_dependent": false
+  },
+  "Frequency_Split": {
+   "status": "verified",
+   "metrics": {
+    "renders": 180,
+    "identical_fraction": 0.9876893939393939,
+    "max_abs": 0.00390625,
+    "max_rel": 0.06666667014360428,
+    "max_fp16_ulp": 2,
+    "worst_ratio": 0.9846153855323792,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/radius=min",
+     0.9846,
+     0.00048828125,
+     0.000961538462433964
+    ],
+    [
+     "33x32/ramp/radius=min",
+     0.8889,
+     0.00048828125,
+     0.0008748906548134983
+    ],
+    [
+     "64x48/ramp/default",
+     0.8752,
+     0.000244140625,
+     0.0009319664677605033
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Frequency_Split",
+    "msl_fingerprint": "405275635b5841c97bfcb71f7e89822342825623522cdbc67f9e9d7f94063b9b",
+    "source_fingerprint": "317b66512e4c93b5955b9b1ded5e0302d94281bd2fae6744af40c0bfa06dac2c",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "317b66512e4c93b5955b9b1ded5e0302d94281bd2fae6744af40c0bfa06dac2c",
+    "param_schema_hash": "820102278554a46932a579417285b7645fdba046736176f5fbca5ed3e8ecdadb",
+    "layout_fingerprint": "0a276424b605f324",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "3d2ba76270b5874bc11dbe28a892ac6acc7bb109",
+    "kernel_name": "topos_fx_3d2ba76270b5874bc11d"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "radius",
+     "glsl_type": "float",
+     "fields": [
+      "p_radius"
+     ]
+    },
+    {
+     "param": "smooth",
+     "glsl_type": "float",
+     "fields": [
+      "p_smooth"
+     ]
+    },
+    {
+     "param": "detail",
+     "glsl_type": "float",
+     "fields": [
+      "p_detail"
+     ]
+    },
+    {
+     "param": "protect_chroma",
+     "glsl_type": "int",
+     "fields": [
+      "p_protect_chroma"
+     ]
+    }
+   ],
+   "features": [
+    "sampling"
+   ],
+   "matched_helper": null,
+   "msl_fingerprint": "405275635b5841c97bfcb71f7e89822342825623522cdbc67f9e9d7f94063b9b",
+   "source_fingerprint": "317b66512e4c93b5955b9b1ded5e0302d94281bd2fae6744af40c0bfa06dac2c",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": true
+  },
+  "Grad_Filter_Exposure": {
+   "status": "verified",
+   "metrics": {
+    "renders": 195,
+    "identical_fraction": 0.8571428571428571,
+    "max_abs": 0.03125,
+    "max_rel": 0.0009708738070912659,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.9552238583564758,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/random2",
+     0.9552,
+     0.000244140625,
+     0.0009328357991762459
+    ],
+    [
+     "33x32/ramp/random1",
+     0.8767,
+     0.000244140625,
+     0.0008561643771827221
+    ],
+    [
+     "64x48/ramp/feather=min",
+     0.8238,
+     0.000244140625,
+     0.0008045052527450025
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Grad_Filter_Exposure",
+    "msl_fingerprint": "befef2c64995afcea924254bb6bbad6f624f467c93976af4a74141ca22b8a70b",
+    "source_fingerprint": "4a79f27387f7aa124f8a1324242e33402651a6a2125234e254bd609935b74841",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "4a79f27387f7aa124f8a1324242e33402651a6a2125234e254bd609935b74841",
+    "param_schema_hash": "eb6cc5ebeb3fb2c43a45035118fb276ec511a1c591814bf27391dd14f535c0d4",
+    "layout_fingerprint": "bcd8a92f93d8a107",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "a6d701f1fa2be844e2b4ad884dc61f9d16beb962",
+    "kernel_name": "topos_fx_a6d701f1fa2be844e2b4"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "exposure",
+     "glsl_type": "float",
+     "fields": [
+      "p_exposure"
+     ]
+    },
+    {
+     "param": "grad_angle",
+     "glsl_type": "float",
+     "fields": [
+      "p_grad_angle"
+     ]
+    },
+    {
+     "param": "grad_center",
+     "glsl_type": "float",
+     "fields": [
+      "p_grad_center"
+     ]
+    },
+    {
+     "param": "feather",
+     "glsl_type": "float",
+     "fields": [
+      "p_feather"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "befef2c64995afcea924254bb6bbad6f624f467c93976af4a74141ca22b8a70b",
+   "source_fingerprint": "4a79f27387f7aa124f8a1324242e33402651a6a2125234e254bd609935b74841",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Kaleido_Mirror": {
+   "status": "verified",
+   "metrics": {
+    "renders": 165,
+    "identical_fraction": 0.9959514170040485,
+    "max_abs": 0.01025390625,
+    "max_rel": 0.013944223523139954,
+    "max_fp16_ulp": 21,
+    "worst_ratio": 0.8619528412818909,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "19x13/ramp/random0",
+     0.862,
+     0.00048828125,
+     0.0008417508215643466
+    ],
+    [
+     "64x48/ramp/random2",
+     0.679,
+     0.00048828125,
+     0.0006631299620494246
+    ],
+    [
+     "64x48/hdr/random2",
+     0.1709,
+     0.01025390625,
+     0.013944223523139954
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Kaleido_Mirror",
+    "msl_fingerprint": "63fe278fda598a7409d4f402c4f150329f9dd1f67c25171864e5815d8bd34640",
+    "source_fingerprint": "93fd83179dc6bc2ac39d0fd6aa3a910a2924aed982f04de1a648240ca2345705",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "93fd83179dc6bc2ac39d0fd6aa3a910a2924aed982f04de1a648240ca2345705",
+    "param_schema_hash": "75de2c75e774ff47a6f6bbdc98727f28c018d3ce169dafcc647d2cf252110c5c",
+    "layout_fingerprint": "9a877e3754e7a396",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "c2dd4111db6351c75b4f5ba86c48f1aac29f705b",
+    "kernel_name": "topos_fx_c2dd4111db6351c75b4f"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "mirror_mode",
+     "glsl_type": "int",
+     "fields": [
+      "p_mirror_mode"
+     ]
+    },
+    {
+     "param": "mirror_axis",
+     "glsl_type": "float",
+     "fields": [
+      "p_mirror_axis"
+     ]
+    },
+    {
+     "param": "mirror_mix",
+     "glsl_type": "float",
+     "fields": [
+      "p_mirror_mix"
+     ]
+    }
+   ],
+   "features": [
+    "sampling",
+    "texture_size"
+   ],
+   "matched_helper": null,
+   "msl_fingerprint": "63fe278fda598a7409d4f402c4f150329f9dd1f67c25171864e5815d8bd34640",
+   "source_fingerprint": "93fd83179dc6bc2ac39d0fd6aa3a910a2924aed982f04de1a648240ca2345705",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "LIB1_Gradient_Map": {
+   "status": "verified",
+   "metrics": {
+    "renders": 285,
+    "identical_fraction": 0.9959514170040485,
+    "max_abs": 0.00048828125,
+    "max_rel": 0.0029069767333567142,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.7681920528411865,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/stop_0=1",
+     0.7682,
+     0.00048828125,
+     0.0007501875516027212
+    ],
+    [
+     "64x48/ramp/pos_2=max",
+     0.7176,
+     0.000244140625,
+     0.000700770819094032
+    ],
+    [
+     "64x48/ramp/interp_mode=1",
+     0.6768,
+     0.00048828125,
+     0.0006609385600313544
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:LIB1_Gradient_Map",
+    "msl_fingerprint": "b1e06bc59e1dbcc661720486673a381dc4eb34a62954e4596a07f768e284e7c0",
+    "source_fingerprint": "5d4077154423a19c9a40ec56973f4320157d8b586af37530088bdf525c6bc755",
+    "plugin_version": "0.1.0",
+    "plugin_content_hash": "5d4077154423a19c9a40ec56973f4320157d8b586af37530088bdf525c6bc755",
+    "param_schema_hash": "408225b52dc7be19fd853a8f7c98b07bf51151bf8f1de1ff03e5c735306a723b",
+    "layout_fingerprint": "7721bb0404196c0a",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "5c9b2e59bab2359291a9ab3416db34c7712d2ba0",
+    "kernel_name": "topos_fx_5c9b2e59bab2359291a9"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "stop_0",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_stop_0_x",
+      "p_stop_0_y",
+      "p_stop_0_z"
+     ]
+    },
+    {
+     "param": "stop_1",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_stop_1_x",
+      "p_stop_1_y",
+      "p_stop_1_z"
+     ]
+    },
+    {
+     "param": "stop_2",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_stop_2_x",
+      "p_stop_2_y",
+      "p_stop_2_z"
+     ]
+    },
+    {
+     "param": "stop_3",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_stop_3_x",
+      "p_stop_3_y",
+      "p_stop_3_z"
+     ]
+    },
+    {
+     "param": "pos_1",
+     "glsl_type": "float",
+     "fields": [
+      "p_pos_1"
+     ]
+    },
+    {
+     "param": "pos_2",
+     "glsl_type": "float",
+     "fields": [
+      "p_pos_2"
+     ]
+    },
+    {
+     "param": "interp_mode",
+     "glsl_type": "int",
+     "fields": [
+      "p_interp_mode"
+     ]
+    },
+    {
+     "param": "amount",
+     "glsl_type": "float",
+     "fields": [
+      "p_amount"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "b1e06bc59e1dbcc661720486673a381dc4eb34a62954e4596a07f768e284e7c0",
+   "source_fingerprint": "5d4077154423a19c9a40ec56973f4320157d8b586af37530088bdf525c6bc755",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Lens_Distortion": {
+   "status": "verified",
+   "metrics": {
+    "renders": 135,
+    "identical_fraction": 0.990530303030303,
+    "max_abs": 0.013671875,
+    "max_rel": 0.016826923936605453,
+    "max_fp16_ulp": 28,
+    "worst_ratio": 0.798751950263977,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/zoom_comp=max",
+     0.7988,
+     0.00048828125,
+     0.0007800312014296651
+    ],
+    [
+     "33x32/ramp/distortion=min",
+     0.6999,
+     0.00048828125,
+     0.0015220700297504663
+    ],
+    [
+     "64x48/ramp/auto_zoom=0",
+     0.6636,
+     0.00048828125,
+     0.0006480881129391491
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Lens_Distortion",
+    "msl_fingerprint": "8d701ef6825260a6e3f369a8e23c4d066b24115881381fcf1444c350a95616b1",
+    "source_fingerprint": "d96d8a8f9d119a005f4ae4f91f97e5a915fc2630c5705b2d0c096bcc9dd1a5d9",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "d96d8a8f9d119a005f4ae4f91f97e5a915fc2630c5705b2d0c096bcc9dd1a5d9",
+    "param_schema_hash": "f71dde06c9d1a30fb0c196bcdcf0dc4417451c3da1d922da2cf53ff6f4efd070",
+    "layout_fingerprint": "188a4942035c416d",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "6651c39520ee988a09e43f4c3cb9c5fbd30baa14",
+    "kernel_name": "topos_fx_6651c39520ee988a09e4"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "distortion",
+     "glsl_type": "float",
+     "fields": [
+      "p_distortion"
+     ]
+    },
+    {
+     "param": "zoom_comp",
+     "glsl_type": "float",
+     "fields": [
+      "p_zoom_comp"
+     ]
+    },
+    {
+     "param": "auto_zoom",
+     "glsl_type": "int",
+     "fields": [
+      "p_auto_zoom"
+     ]
+    }
+   ],
+   "features": [
+    "sampling",
+    "texture_size"
+   ],
+   "matched_helper": null,
+   "msl_fingerprint": "8d701ef6825260a6e3f369a8e23c4d066b24115881381fcf1444c350a95616b1",
+   "source_fingerprint": "d96d8a8f9d119a005f4ae4f91f97e5a915fc2630c5705b2d0c096bcc9dd1a5d9",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Light_Leak_Corner": {
+   "status": "verified",
+   "metrics": {
+    "renders": 210,
+    "identical_fraction": 0.9981060606060606,
+    "max_abs": 0.000244140625,
+    "max_rel": 0.000859845255035907,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.25,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/leak_corner=3",
+     0.25,
+     6.103515625e-05,
+     0.0008467400330118835
+    ],
+    [
+     "64x48/ramp/random2",
+     0.125,
+     3.0517578125e-05,
+     0.0005157297709956765
+    ],
+    [
+     "64x48/ramp/leak_corner=2",
+     0.0312,
+     7.62939453125e-06,
+     0.0006116207805462182
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Light_Leak_Corner",
+    "msl_fingerprint": "ea5b756dcf8953796ec816819b80f17b8c69f9e073e7d4b53e15d10d79956217",
+    "source_fingerprint": "3068c7a87d2f26373d9137f17d7138f5b0ed2ba81b0aca11e93707b8755fce55",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "3068c7a87d2f26373d9137f17d7138f5b0ed2ba81b0aca11e93707b8755fce55",
+    "param_schema_hash": "f5114a588be65d395d863fe71048f9916ec83f61ac76d76be933cfadfd641bd8",
+    "layout_fingerprint": "f7d40d7461369fa2",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "eabfec1350b0949fe621fb76f7f6caf290281a42",
+    "kernel_name": "topos_fx_eabfec1350b0949fe621"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "leak_corner",
+     "glsl_type": "int",
+     "fields": [
+      "p_leak_corner"
+     ]
+    },
+    {
+     "param": "leak_size",
+     "glsl_type": "float",
+     "fields": [
+      "p_leak_size"
+     ]
+    },
+    {
+     "param": "strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_strength"
+     ]
+    },
+    {
+     "param": "leak_color",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_leak_color_x",
+      "p_leak_color_y",
+      "p_leak_color_z"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "ea5b756dcf8953796ec816819b80f17b8c69f9e073e7d4b53e15d10d79956217",
+   "source_fingerprint": "3068c7a87d2f26373d9137f17d7138f5b0ed2ba81b0aca11e93707b8755fce55",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Sky_Replace_Matte": {
+   "status": "verified",
+   "metrics": {
+    "renders": 240,
+    "identical_fraction": 0.8571428571428571,
+    "max_abs": 0.0078125,
+    "max_rel": 0.0036900369450449944,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.5580381751060486,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/random3",
+     0.558,
+     0.000244140625,
+     0.0005449591553770006
+    ],
+    [
+     "19x13/ramp/sky_color_low=0",
+     0.5529,
+     0.00048828125,
+     0.0005399567889980972
+    ],
+    [
+     "19x13/ramp/horizon_falloff=min",
+     0.5517,
+     0.00048828125,
+     0.0005387931014411151
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Sky_Replace_Matte",
+    "msl_fingerprint": "9c9d04bcda3b14bc951dd195773c42cdd8b8eca99b66818f00d77d7502594ab9",
+    "source_fingerprint": "a7dd4d113c8fe3670c03291cde07aac26868810b76164789d8e917617c36ab7d",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "a7dd4d113c8fe3670c03291cde07aac26868810b76164789d8e917617c36ab7d",
+    "param_schema_hash": "772190fe5761599d093204d93e06642e41c2c1a34344862addfd46506e2aa0be",
+    "layout_fingerprint": "e7594bc24662e568",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "b263293b85b9f37cb24154d552d2d93ad0b611c5",
+    "kernel_name": "topos_fx_b263293b85b9f37cb241"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "sky_color_low",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_sky_color_low_x",
+      "p_sky_color_low_y",
+      "p_sky_color_low_z"
+     ]
+    },
+    {
+     "param": "sky_color_high",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_sky_color_high_x",
+      "p_sky_color_high_y",
+      "p_sky_color_high_z"
+     ]
+    },
+    {
+     "param": "key_luma",
+     "glsl_type": "float",
+     "fields": [
+      "p_key_luma"
+     ]
+    },
+    {
+     "param": "key_width",
+     "glsl_type": "float",
+     "fields": [
+      "p_key_width"
+     ]
+    },
+    {
+     "param": "horizon_falloff",
+     "glsl_type": "float",
+     "fields": [
+      "p_horizon_falloff"
+     ]
+    },
+    {
+     "param": "blend",
+     "glsl_type": "float",
+     "fields": [
+      "p_blend"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "9c9d04bcda3b14bc951dd195773c42cdd8b8eca99b66818f00d77d7502594ab9",
+   "source_fingerprint": "a7dd4d113c8fe3670c03291cde07aac26868810b76164789d8e917617c36ab7d",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Three_Way_Tint": {
+   "status": "verified",
+   "metrics": {
+    "renders": 255,
+    "identical_fraction": 0.9990530303030303,
+    "max_abs": 0.001953125,
+    "max_rel": 0.0009233610471710563,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.9455217123031616,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/highlight_color=1",
+     0.9455,
+     0.00048828125,
+     0.0009233610471710563
+    ],
+    [
+     "64x48/ramp/random3",
+     0.7913,
+     0.000244140625,
+     0.0007727975025773048
+    ],
+    [
+     "64x48/ramp/midtone_strength=max",
+     0.7625,
+     0.00048828125,
+     0.0007446016534231603
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Three_Way_Tint",
+    "msl_fingerprint": "7ca6d2766353b0cd6dc8714705a0394bf73541177dad46fd25da2f7f10273237",
+    "source_fingerprint": "a50e68ecebd9189d71f8df5f65390498d1cc0bb8704a4f6d9458f668b28743d7",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "a50e68ecebd9189d71f8df5f65390498d1cc0bb8704a4f6d9458f668b28743d7",
+    "param_schema_hash": "1bfc66a35d93c7a6caa5c9594464177feaf633ec0bb813255b27a1c50e4ce4e7",
+    "layout_fingerprint": "cf870dc92caac7ba",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "6b22a55d801769f5b74673a02fe6302265a8a075",
+    "kernel_name": "topos_fx_6b22a55d801769f5b746"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "shadow_color",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_shadow_color_x",
+      "p_shadow_color_y",
+      "p_shadow_color_z"
+     ]
+    },
+    {
+     "param": "shadow_strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_shadow_strength"
+     ]
+    },
+    {
+     "param": "midtone_color",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_midtone_color_x",
+      "p_midtone_color_y",
+      "p_midtone_color_z"
+     ]
+    },
+    {
+     "param": "midtone_strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_midtone_strength"
+     ]
+    },
+    {
+     "param": "highlight_color",
+     "glsl_type": "vec3",
+     "fields": [
+      "p_highlight_color_x",
+      "p_highlight_color_y",
+      "p_highlight_color_z"
+     ]
+    },
+    {
+     "param": "highlight_strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_highlight_strength"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "7ca6d2766353b0cd6dc8714705a0394bf73541177dad46fd25da2f7f10273237",
+   "source_fingerprint": "a50e68ecebd9189d71f8df5f65390498d1cc0bb8704a4f6d9458f668b28743d7",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Vibrance_Saturation": {
+   "status": "verified",
+   "metrics": {
+    "renders": 150,
+    "identical_fraction": 0.984375,
+    "max_abs": 0.001953125,
+    "max_rel": 0.0017152659129351377,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.805031418800354,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/saturation=max",
+     0.805,
+     0.000244140625,
+     0.0007861634949222207
+    ],
+    [
+     "64x48/ramp/vibrance=min",
+     0.6849,
+     0.00048828125,
+     0.000933706818614155
+    ],
+    [
+     "64x48/ramp/vibrance=max",
+     0.6849,
+     0.00048828125,
+     0.000933706818614155
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Vibrance_Saturation",
+    "msl_fingerprint": "44508f4665c985dcccda6f048c4cf7ae9e1130fd2d84c3a65834039d9384e050",
+    "source_fingerprint": "5f4ecc65fa814fa8c7638ea24a3fea3b815049f2744f00bcec9869f6646d1a03",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "5f4ecc65fa814fa8c7638ea24a3fea3b815049f2744f00bcec9869f6646d1a03",
+    "param_schema_hash": "b6cfdccd50e8cadd26e9f38b02ab32012b0d76fe86869577d36d729e2da91056",
+    "layout_fingerprint": "4616c660b956f2e4",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "677e2cbb56f068b7a2a95887d090dbab882c701e",
+    "kernel_name": "topos_fx_677e2cbb56f068b7a2a9"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "saturation",
+     "glsl_type": "float",
+     "fields": [
+      "p_saturation"
+     ]
+    },
+    {
+     "param": "vibrance",
+     "glsl_type": "float",
+     "fields": [
+      "p_vibrance"
+     ]
+    },
+    {
+     "param": "lum_preserve",
+     "glsl_type": "int",
+     "fields": [
+      "p_lum_preserve"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "44508f4665c985dcccda6f048c4cf7ae9e1130fd2d84c3a65834039d9384e050",
+   "source_fingerprint": "5f4ecc65fa814fa8c7638ea24a3fea3b815049f2744f00bcec9869f6646d1a03",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "Vignette_Shapes": {
+   "status": "verified",
+   "metrics": {
+    "renders": 180,
+    "identical_fraction": 0.9919028340080972,
+    "max_abs": 1.0,
+    "max_rel": 0.25,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.9499072432518005,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "64x48/ramp/feather=max",
+     0.9499,
+     0.00048828125,
+     0.0009276437922380865
+    ],
+    [
+     "64x48/ramp/random2",
+     0.8505,
+     0.00048828125,
+     0.000830564764328301
+    ],
+    [
+     "19x13/ramp/strength=max",
+     0.8108,
+     0.000244140625,
+     0.0007917656330391765
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Vignette_Shapes",
+    "msl_fingerprint": "c0a8aa503c8432ef314ccb92a156defda6e1f33332cb30f5f06f979aa2d488ac",
+    "source_fingerprint": "8155966ea9263365e36d86e7347d212c1f426427693413c0cd74565cb550b19c",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "8155966ea9263365e36d86e7347d212c1f426427693413c0cd74565cb550b19c",
+    "param_schema_hash": "2ce010ef1d19741a2f0288247fec85b442d9a4f32bc19088e7ee7aa2cd5da048",
+    "layout_fingerprint": "dd3af2c9d48b7aa4",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "5b5ae4c3e1754f39b8df63c74141b5d3a3d0a782",
+    "kernel_name": "topos_fx_5b5ae4c3e1754f39b8df"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "shape",
+     "glsl_type": "int",
+     "fields": [
+      "p_shape"
+     ]
+    },
+    {
+     "param": "feather",
+     "glsl_type": "float",
+     "fields": [
+      "p_feather"
+     ]
+    },
+    {
+     "param": "strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_strength"
+     ]
+    },
+    {
+     "param": "luma_comp",
+     "glsl_type": "float",
+     "fields": [
+      "p_luma_comp"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "c0a8aa503c8432ef314ccb92a156defda6e1f33332cb30f5f06f979aa2d488ac",
+   "source_fingerprint": "8155966ea9263365e36d86e7347d212c1f426427693413c0cd74565cb550b19c",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "White_Balance_Advanced": {
+   "status": "verified",
+   "metrics": {
+    "renders": 165,
+    "identical_fraction": 0.8571428571428571,
+    "max_abs": 0.0078125,
+    "max_rel": 0.0008787346305325627,
+    "max_fp16_ulp": 1,
+    "worst_ratio": 0.6732413172721863,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "33x32/ramp/tint=min",
+     0.6732,
+     0.00048828125,
+     0.0006574622238986194
+    ],
+    [
+     "1x7/hdr/tint=min",
+     0.5,
+     0.0078125,
+     0.00048828125
+    ],
+    [
+     "19x13/hdr/tint=min",
+     0.1302,
+     0.0078125,
+     0.00048828125
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:White_Balance_Advanced",
+    "msl_fingerprint": "06a4905a34d68b3bea97566d653c4daea85b4ccb700e574c91ba2a89c80dc09c",
+    "source_fingerprint": "437f7518ffa40d0e7a5b96e4e035888756bb2453e38e737f89c4f7f31c1ec411",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "437f7518ffa40d0e7a5b96e4e035888756bb2453e38e737f89c4f7f31c1ec411",
+    "param_schema_hash": "db36d6599ce9c67ffb5097684b67a5b2d4dda6520b70a3d12799bce6fd00b32e",
+    "layout_fingerprint": "bd78d27f19606ca5",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "6d4a2bbad17fbc090e6aea8a1bb35eee13178b36",
+    "kernel_name": "topos_fx_6d4a2bbad17fbc090e6a"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "temperature",
+     "glsl_type": "float",
+     "fields": [
+      "p_temperature"
+     ]
+    },
+    {
+     "param": "tint",
+     "glsl_type": "float",
+     "fields": [
+      "p_tint"
+     ]
+    },
+    {
+     "param": "wb_method",
+     "glsl_type": "int",
+     "fields": [
+      "p_wb_method"
+     ]
+    },
+    {
+     "param": "strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_strength"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "06a4905a34d68b3bea97566d653c4daea85b4ccb700e574c91ba2a89c80dc09c",
+   "source_fingerprint": "437f7518ffa40d0e7a5b96e4e035888756bb2453e38e737f89c4f7f31c1ec411",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  },
+  "warm_tint": {
+   "status": "verified",
+   "metrics": {
+    "renders": 105,
+    "identical_fraction": 1.0,
+    "max_abs": 0.0,
+    "max_rel": 0.0,
+    "max_fp16_ulp": 0,
+    "worst_ratio": 0.0,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "19x13/hdr/default",
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     "19x13/hdr/strength=min",
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     "19x13/hdr/strength=max",
+     0.0,
+     0.0,
+     0.0
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:warm_tint",
+    "msl_fingerprint": "752b9f69c9a2b0a18e79da4f8f543bfb06050179aff9cb4f78ebcddf31b9ddd2",
+    "source_fingerprint": "f1272b527ffbb19df9d287fc57d672682ecc7f4cae6228e239bb8f6a1f932bba",
+    "plugin_version": "1.1",
+    "plugin_content_hash": "f1272b527ffbb19df9d287fc57d672682ecc7f4cae6228e239bb8f6a1f932bba",
+    "param_schema_hash": "71a967c96fd79d98279891238c8fcc019c59a6e9dc923ba7d46d54739a3d6a58",
+    "layout_fingerprint": "bd76df24309b46a0",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "8a032fec1852e81d21e058b84a4d73692df32bb6",
+    "kernel_name": "topos_fx_8a032fec1852e81d21e0"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_strength"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "752b9f69c9a2b0a18e79da4f8f543bfb06050179aff9cb4f78ebcddf31b9ddd2",
+   "source_fingerprint": "f1272b527ffbb19df9d287fc57d672682ecc7f4cae6228e239bb8f6a1f932bba",
+   "compile_seconds": 0.0003,
+   "wrap_dependent": false
+  }
+ },
+ "noise_gated": {
+  "Film_Grain": {
+   "status": "noise_gated",
+   "metrics": {
+    "renders": 195,
+    "identical_fraction": 0.6818181818181818,
+    "max_abs": 0.25048828125,
+    "max_rel": 1.8974961042404175,
+    "max_fp16_ulp": 24099,
+    "worst_ratio": 979.0,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": false
+   },
+   "worst_cases": [
+    [
+     "33x32/ramp/random2",
+     979.0,
+     0.239013671875,
+     1.2206982374191284
+    ],
+    [
+     "64x48/ramp/random2",
+     885.5,
+     0.2161865234375,
+     1.8974961042404175
+    ],
+    [
+     "33x32/ramp/strength=max",
+     869.2831,
+     0.242279052734375,
+     1.3528428077697754
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Film_Grain",
+    "msl_fingerprint": "e1c74bacd8b8d4d545f316780cfd9f1e6b9dfa3da872ab3c953a948f070e2202",
+    "source_fingerprint": "fcbdb1ec7bc442373b66f4433f54edde31e0259b7ebf6f96bf9e7296224f95a9",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "fcbdb1ec7bc442373b66f4433f54edde31e0259b7ebf6f96bf9e7296224f95a9",
+    "param_schema_hash": "9f14c2269fff7c2c091a5d00929b2b34609e916002d9faa0e58587841392c55c",
+    "layout_fingerprint": "ad98cf09a010025b",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "87aa709bd84a1b9753f318663c18fcc56ef1bcc7",
+    "kernel_name": "topos_fx_87aa709bd84a1b9753f3"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "strength",
+     "glsl_type": "float",
+     "fields": [
+      "p_strength"
+     ]
+    },
+    {
+     "param": "grain_size",
+     "glsl_type": "float",
+     "fields": [
+      "p_grain_size"
+     ]
+    },
+    {
+     "param": "shadow_bias",
+     "glsl_type": "float",
+     "fields": [
+      "p_shadow_bias"
+     ]
+    },
+    {
+     "param": "highlight_bias",
+     "glsl_type": "float",
+     "fields": [
+      "p_highlight_bias"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": null,
+   "msl_fingerprint": "e1c74bacd8b8d4d545f316780cfd9f1e6b9dfa3da872ab3c953a948f070e2202",
+   "source_fingerprint": "fcbdb1ec7bc442373b66f4433f54edde31e0259b7ebf6f96bf9e7296224f95a9",
+   "compile_seconds": 0.0004,
+   "note": "195 次渲染，68.2% 像素逐位相同；算术哈希 grain_hash 在 GL 与 Metal 之间不可复现；68.2% 像素逐位相同；关闭 FP 合并（#pragma clang fp contract(off)）数值不变。"
+  },
+  "Glitch_Blocks": {
+   "status": "noise_gated",
+   "metrics": {
+    "renders": 195,
+    "identical_fraction": 0.537109375,
+    "max_abs": 468.0,
+    "max_rel": 1.941216230392456,
+    "max_fp16_ulp": 17773,
+    "worst_ratio": 107.64420318603516,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": false
+   },
+   "worst_cases": [
+    [
+     "64x48/edges/band_height=min",
+     107.6442,
+     468.0,
+     0.10512129217386246
+    ],
+    [
+     "64x48/edges/default",
+     46.1118,
+     256.0,
+     0.04503105580806732
+    ],
+    [
+     "64x48/edges/corruption=max",
+     46.1118,
+     256.0,
+     0.04503105580806732
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:Glitch_Blocks",
+    "msl_fingerprint": "114c4a66460675cd296105ffeb37b3e567c22ce835799477e09f3c2bfb0b962b",
+    "source_fingerprint": "0140d34586f705e2922100babc24855d9a15668d0da3990f3f2aef428805dbae",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "0140d34586f705e2922100babc24855d9a15668d0da3990f3f2aef428805dbae",
+    "param_schema_hash": "19a7e752ee7792952a6fb3816f1d7673c7e46b7cb2c0227618466a619117fca9",
+    "layout_fingerprint": "174dc44143808c32",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "2747db4df36e1ccb647a61315f2acd80280f12b3",
+    "kernel_name": "topos_fx_2747db4df36e1ccb647a"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "band_height",
+     "glsl_type": "float",
+     "fields": [
+      "p_band_height"
+     ]
+    },
+    {
+     "param": "band_shift",
+     "glsl_type": "float",
+     "fields": [
+      "p_band_shift"
+     ]
+    },
+    {
+     "param": "rgb_split",
+     "glsl_type": "float",
+     "fields": [
+      "p_rgb_split"
+     ]
+    },
+    {
+     "param": "corruption",
+     "glsl_type": "float",
+     "fields": [
+      "p_corruption"
+     ]
+    }
+   ],
+   "features": [
+    "sampling",
+    "texture_size"
+   ],
+   "matched_helper": null,
+   "msl_fingerprint": "114c4a66460675cd296105ffeb37b3e567c22ce835799477e09f3c2bfb0b962b",
+   "source_fingerprint": "0140d34586f705e2922100babc24855d9a15668d0da3990f3f2aef428805dbae",
+   "compile_seconds": 0.0003,
+   "note": "195 次渲染，53.7% 像素逐位相同；特性 sampling, texture_size；算术哈希 glitch_hash 在 GL 与 Metal 之间不可复现；53.7% 像素逐位相同；边缘极值语料上最大绝对差 468。"
+  },
+  "HighPass_Retouch": {
+   "status": "noise_gated",
+   "metrics": {
+    "renders": 150,
+    "identical_fraction": 0.0,
+    "max_abs": 4040.0,
+    "max_rel": 2.0,
+    "max_fp16_ulp": 46539,
+    "worst_ratio": 1874.88427734375,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": false
+   },
+   "worst_cases": [
+    [
+     "19x13/edges/random3",
+     1874.8843,
+     208.25,
+     1.9732844829559326
+    ],
+    [
+     "33x32/edges/random3",
+     1717.1875,
+     160.0,
+     1.9917808771133423
+    ],
+    [
+     "64x48/edges/random3",
+     1703.2378,
+     230.9375,
+     1.9555375576019287
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "plugin:HighPass_Retouch",
+    "msl_fingerprint": "0d205cbbfa3c0921b2bd24cb89d1e61467a9a773c3b9283945805aff99b13d16",
+    "source_fingerprint": "63d9bfc264963f734e42307f08251f7d61c26dbc2082524975438e27c78a1759",
+    "plugin_version": "1.0",
+    "plugin_content_hash": "63d9bfc264963f734e42307f08251f7d61c26dbc2082524975438e27c78a1759",
+    "param_schema_hash": "8a1151394e050570a3a85eac6359d543cdf9a125171247d6165d80b974c4deed",
+    "layout_fingerprint": "006288c30b2db4a7",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [
+     [
+      "host:fast_blur",
+      "1"
+     ]
+    ],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "3f61ed0ae860a0c308e67654d1a9a0d87f2b5748",
+    "kernel_name": "topos_fx_3f61ed0ae860a0c308e6"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "smooth_radius",
+     "glsl_type": "float",
+     "fields": [
+      "p_smooth_radius"
+     ]
+    },
+    {
+     "param": "detail_preserve",
+     "glsl_type": "float",
+     "fields": [
+      "p_detail_preserve"
+     ]
+    },
+    {
+     "param": "mix_amount",
+     "glsl_type": "float",
+     "fields": [
+      "p_mix_amount"
+     ]
+    }
+   ],
+   "features": [
+    "host_helper:fast_blur",
+    "sampling",
+    "texture_size"
+   ],
+   "matched_helper": null,
+   "msl_fingerprint": "0d205cbbfa3c0921b2bd24cb89d1e61467a9a773c3b9283945805aff99b13d16",
+   "source_fingerprint": "63d9bfc264963f734e42307f08251f7d61c26dbc2082524975438e27c78a1759",
+   "compile_seconds": 0.0005,
+   "note": "150 次渲染，0.0% 像素逐位相同；特性 sampling, texture_size；宿主 helper fast_blur 的 sin-hash 抖动不可复现：同一输入下 GL 与 Metal 的 fract(sin(d)*43758.5453) 仅 81% 相等。"
+  }
+ },
+ "builtin_exposure": {
+  "builtin:exposure": {
+   "status": "verified",
+   "metrics": {
+    "renders": 165,
+    "identical_fraction": 1.0,
+    "max_abs": 0.0,
+    "max_rel": 0.0,
+    "max_fp16_ulp": 0,
+    "worst_ratio": 0.0,
+    "alpha_identical": true,
+    "non_finite_reference": false,
+    "non_finite_actual": false,
+    "gate_ok": true
+   },
+   "worst_cases": [
+    [
+     "19x13/hdr/exposure=-5.0",
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     "19x13/hdr/exposure=-4.0",
+     0.0,
+     0.0,
+     0.0
+    ],
+    [
+     "19x13/hdr/exposure=-2.0",
+     0.0,
+     0.0,
+     0.0
+    ]
+   ],
+   "compile_key": {
+    "host_abi": "topos.tglsl-msl/1",
+    "effect_id": "builtin:exposure",
+    "msl_fingerprint": "6cf4de4cfb40d89c358ab614b11f309f7dac1dcfd0dba7688d8860960a0b4ef9",
+    "source_fingerprint": "3575fddc095ce72395ec9c3c007aa5418de39d6bb9195e340bf65f4caae646f0",
+    "plugin_version": "1.0.0",
+    "plugin_content_hash": "",
+    "param_schema_hash": "fa9b8c739e117145f23418eefef700353130ef94c55d932731ec9d96e204a94b",
+    "layout_fingerprint": "96913b8e36b1b1b3",
+    "compile_options": "context-default(MTLCompileOptions=nil; fast-math=default-on; language=default)",
+    "pixel_format": "rgba16f",
+    "device_capability": "3c99f944b354e053",
+    "translator_version": "tglsl-msl/1.0.0",
+    "helper_versions": [
+     [
+      "builtin:exposure",
+      "1.0.0"
+     ]
+    ],
+    "coord_convention": "gl_row0_is_v0",
+    "sampler_spec": "linear+clamp_to_edge",
+    "digest": "591d5e7c1dc4e36566fc01e076ae5d199dba080d",
+    "kernel_name": "topos_fx_591d5e7c1dc4e36566fc"
+   },
+   "reflection": [
+    {
+     "param": "",
+     "glsl_type": "vec2",
+     "fields": [
+      "u_tex_size_x",
+      "u_tex_size_y"
+     ]
+    },
+    {
+     "param": "exposure",
+     "glsl_type": "float",
+     "fields": [
+      "p_exposure"
+     ]
+    }
+   ],
+   "features": [],
+   "matched_helper": "builtin:exposure",
+   "msl_fingerprint": "6cf4de4cfb40d89c358ab614b11f309f7dac1dcfd0dba7688d8860960a0b4ef9",
+   "source_fingerprint": "3575fddc095ce72395ec9c3c007aa5418de39d6bb9195e340bf65f4caae646f0",
+   "compile_seconds": 0.0003
+  }
+ },
+ "msl_sources": [
+  "builtin-exposure",
+  "plugin-Bleach_Bypass",
+  "plugin-CRT_Scanlines",
+  "plugin-Channel_Mixer",
+  "plugin-Cross_Process",
+  "plugin-Day_Night_Converter",
+  "plugin-Duotone_Toner",
+  "plugin-Edge_Ink_Outline",
+  "plugin-Fake_Infrared",
+  "plugin-Film_Halation",
+  "plugin-Frequency_Split",
+  "plugin-Grad_Filter_Exposure",
+  "plugin-Kaleido_Mirror",
+  "plugin-LIB1_Gradient_Map",
+  "plugin-Lens_Distortion",
+  "plugin-Light_Leak_Corner",
+  "plugin-Sky_Replace_Matte",
+  "plugin-Three_Way_Tint",
+  "plugin-Vibrance_Saturation",
+  "plugin-Vignette_Shapes",
+  "plugin-White_Balance_Advanced",
+  "plugin-warm_tint"
+ ]
+}

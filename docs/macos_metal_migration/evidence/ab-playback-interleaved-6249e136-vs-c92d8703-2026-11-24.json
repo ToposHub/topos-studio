@@ -1,0 +1,262 @@
+{
+ "purpose": "interleaved playback: the pre-plan baseline against the current commit on the same machine",
+ "recorded": "2026-11-24T02:27:39+08:00",
+ "machine": "i9-9900K, AMD Radeon RX 6900 XT, macOS 15.3.1, 3840x2160 at 60 Hz, DPR 1",
+ "display_awake": true,
+ "other_load": "a web browser at about 30% CPU and Resolve were running",
+ "denominator": 399,
+ "sessions": [
+  {
+   "config": "gl",
+   "round": 1,
+   "code": "6249e136",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 359,
+     "wall_s": 16.301,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 362,
+     "wall_s": 15.992,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 324,
+     "wall_s": 15.987,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 333,
+     "wall_s": 16.036,
+     "playhead": 399
+    }
+   ]
+  },
+  {
+   "config": "gl",
+   "round": 1,
+   "code": "c92d8703",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 372,
+     "wall_s": 16.116,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 361,
+     "wall_s": 16.022,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 304,
+     "wall_s": 16.519,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 312,
+     "wall_s": 16.251,
+     "playhead": 399
+    }
+   ]
+  },
+  {
+   "config": "metal",
+   "round": 1,
+   "code": "6249e136",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 368,
+     "wall_s": 16.315,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 342,
+     "wall_s": 16.006,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 317,
+     "wall_s": 16.462,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 306,
+     "wall_s": 16.776,
+     "playhead": 399
+    }
+   ]
+  },
+  {
+   "config": "metal",
+   "round": 1,
+   "code": "c92d8703",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 358,
+     "wall_s": 16.273,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 378,
+     "wall_s": 16.044,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 322,
+     "wall_s": 16.511,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 301,
+     "wall_s": 17.231,
+     "playhead": 399
+    }
+   ]
+  },
+  {
+   "config": "gl",
+   "round": 2,
+   "code": "6249e136",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 358,
+     "wall_s": 16.329,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 354,
+     "wall_s": 16.047,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 305,
+     "wall_s": 16.293,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 323,
+     "wall_s": 16.593,
+     "playhead": 399
+    }
+   ]
+  },
+  {
+   "config": "gl",
+   "round": 2,
+   "code": "c92d8703",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 359,
+     "wall_s": 16.09,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 358,
+     "wall_s": 16.031,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 321,
+     "wall_s": 16.209,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 311,
+     "wall_s": 16.557,
+     "playhead": 399
+    }
+   ]
+  },
+  {
+   "config": "metal",
+   "round": 2,
+   "code": "6249e136",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 364,
+     "wall_s": 16.352,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 367,
+     "wall_s": 16.039,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 311,
+     "wall_s": 16.601,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 282,
+     "wall_s": 17.1,
+     "playhead": 399
+    }
+   ]
+  },
+  {
+   "config": "metal",
+   "round": 2,
+   "code": "c92d8703",
+   "cases": [
+    {
+     "timeline": "h264 Original",
+     "presented": 377,
+     "wall_s": 16.132,
+     "playhead": 399
+    },
+    {
+     "timeline": "h264 LUT",
+     "presented": 364,
+     "wall_s": 16.012,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr Original",
+     "presented": 275,
+     "wall_s": 17.148,
+     "playhead": 399
+    },
+    {
+     "timeline": "dnxhr LUT",
+     "presented": 323,
+     "wall_s": 16.567,
+     "playhead": 399
+    }
+   ]
+  }
+ ],
+ "totals": {
+  "6249e136": 5375,
+  "c92d8703": 5396
+ }
+}

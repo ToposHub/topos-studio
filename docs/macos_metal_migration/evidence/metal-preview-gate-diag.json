@@ -1,0 +1,99 @@
+{
+  "frame_types": {
+    "vt_pixel_buffer": 510,
+    "planar": 111
+  },
+  "record_probe": {
+    "trace_id=0 | already_recorded=False | trace_backend=opengl": 41,
+    "trace_id=set | already_recorded=False | trace_backend=opengl": 585
+  },
+  "mode": "all",
+  "present_probe": {
+    "declared=metal | trace_id=0 | traces_with_id=4 | trace_backend=opengl": 1,
+    "declared=metal | trace_id=0 | traces_with_id=1 | trace_backend=opengl": 398,
+    "declared=metal | trace_id=0 | traces_with_id=2 | trace_backend=opengl": 1,
+    "declared=metal | trace_id=0 | traces_with_id=3 | trace_backend=opengl": 1,
+    "declared=metal | trace_id=0 | traces_with_id=6 | trace_backend=opengl": 1,
+    "declared=metal | trace_id=0 | traces_with_id=0 | trace_backend=-": 68,
+    "declared=metal | trace_id=set | traces_with_id=0 | trace_backend=-": 17,
+    "declared=opengl | trace_id=set | traces_with_id=0 | trace_backend=-": 27,
+    "declared=opengl | trace_id=0 | traces_with_id=0 | trace_backend=-": 29,
+    "declared=opengl | trace_id=set | traces_with_id=1 | trace_backend=opengl": 2,
+    "declared=opengl | trace_id=0 | traces_with_id=3 | trace_backend=opengl": 1,
+    "declared=opengl | trace_id=0 | traces_with_id=1 | trace_backend=opengl": 48
+  },
+  "trace_probes": [
+    {
+      "calls": 100,
+      "backend_counts": {
+        "opengl": 89
+      },
+      "annotate": {
+        "merged": 356,
+        "missed": 0
+      }
+    },
+    {
+      "calls": 200,
+      "backend_counts": {
+        "opengl": 189
+      },
+      "annotate": {
+        "merged": 756,
+        "missed": 0
+      }
+    },
+    {
+      "calls": 300,
+      "backend_counts": {
+        "opengl": 289
+      },
+      "annotate": {
+        "merged": 1155,
+        "missed": 0
+      }
+    },
+    {
+      "calls": 400,
+      "backend_counts": {
+        "opengl": 389
+      },
+      "annotate": {
+        "merged": 1555,
+        "missed": 0
+      }
+    },
+    {
+      "calls": 500,
+      "backend_counts": {
+        "opengl": 76
+      },
+      "annotate": {
+        "merged": 313,
+        "missed": 8
+      }
+    },
+    {
+      "calls": 600,
+      "backend_counts": {
+        "opengl": 44
+      },
+      "annotate": {
+        "merged": 208,
+        "missed": 14
+      }
+    }
+  ],
+  "tally": {
+    "rendered_by_metal": 487,
+    "background_task": 27,
+    "frame_type": 107
+  },
+  "graphics_env": "metal",
+  "frame_type_counts": {
+    "vt_pixel_buffer": 510,
+    "planar": 111
+  },
+  "diagnostic_errors": {},
+  "gate_calls": 621
+}

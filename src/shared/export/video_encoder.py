@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from fractions import Fraction
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -2495,11 +2495,16 @@ class FFmpegVideoEncoder:
             self._audio_written_duration += (end - offset) * time_base
             offset = end
 
-    def close(self) -> None:
+    def close(
+        self, *, should_cancel: Optional[Callable[[], bool]] = None,
+        expected_frames: Optional[int] = None,
+    ) -> Optional[bool]:
         """
         关闭编码器并写入文件。
 
         编码结束帧并关闭容器，确保文件完整写入。
+        ``should_cancel`` is checked immediately before atomic publication.
+        With a cancellation callback, return whether publication went ahead.
 
         Raises:
             Exception: flush/drain/容器关闭中途失败时上抛（AUD-33506）。
@@ -2569,13 +2574,25 @@ class FFmpegVideoEncoder:
                 self._container.close()
             container_closed = True
 
+            if expected_frames is not None and self._frame_count != expected_frames:
+                raise RuntimeError(f"Encoded {self._frame_count} frames, expected {expected_frames}")
+
             # M21.1（R04）：发布事务——flush/trailer/容器关闭全部完成
             # 后才原子替换到最终路径。存在同名旧成片时，编码中途任何
             # 失败/异常都只清临时文件，旧成功输出保持不动。
-            if self._write_path != self._output_path \
-                    and os.path.exists(self._write_path):
+            has_staged_output = (self._write_path != self._output_path
+                                 and os.path.exists(self._write_path))
+            if has_staged_output and expected_frames and os.path.getsize(self._write_path) == 0:
+                raise RuntimeError("The staged video output was empty")
+            if should_cancel is not None and should_cancel():
+                if has_staged_output:
+                    os.unlink(self._write_path)
+                return False
+            if has_staged_output:
                 os.replace(self._write_path, self._output_path)
             elif self._write_path != self._output_path:
+                if expected_frames is not None:
+                    raise RuntimeError("The staged video output was not written")
                 # 生产路径 av.open(mode='w') 在 open 即创建临时文件，
                 # 此分支只可能是替身/异常环境——不发布也不报错（无
                 # 半成品可替换），最终路径保持原状。
@@ -2587,6 +2604,7 @@ class FFmpegVideoEncoder:
                 f"Encoder closed: {self._output_path}, "
                 f"total_frames={self._frame_count}"
             )
+            return True if should_cancel is not None else None
 
         except Exception as e:
             logger.exception(f"Error closing encoder: {e}")

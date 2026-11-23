@@ -11,8 +11,8 @@
 // @determinism deterministic
 // @export_support video
 // @threading gpu
-// @graphics_backends opengl
-// @compute_backends glsl_fragment
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @preview_cost low
 // @param slider distortion "Distortion" 0.35 -1.0 1.0
 // @param slider zoom_comp "Zoom Compensation" 0.0 0.0 1.0

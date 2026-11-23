@@ -59,7 +59,9 @@ def test_copies_two_real_edits_with_exact_packets_and_new_timestamps(
             assert packet.duration == 512
 
 
-@pytest.mark.parametrize("failure", ["format", "timestamp", "cancel_before_publish", "replace"])
+@pytest.mark.parametrize("failure", [
+    "format", "timestamp", "cancel_before_publish", "replace", "verify", "cancel_after_verify",
+])
 def test_preserves_existing_destination_on_failure(
     failure: str, hqx_source: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -67,11 +69,22 @@ def test_preserves_existing_destination_on_failure(
     target.write_bytes(b"previous successful export")
     completed: list[int] = []
     calls = 0
+    verify_finished = False
 
     def continue_export() -> bool:
         nonlocal calls
         calls += 1
+        if failure == "cancel_after_verify":
+            return not verify_finished
         return failure != "cancel_before_publish" or calls < 4
+
+    def verify_staged(path: str) -> None:
+        nonlocal verify_finished
+        assert Path(path).stat().st_size > 0
+        assert target.read_bytes() == b"previous successful export"
+        verify_finished = True
+        if failure == "verify":
+            raise DnxhrPacketCopyUnsupported("test packet mismatch")
 
     def fail_publish(_temporary: Path, _target: Path) -> None:
         raise PermissionError("test publish failure")
@@ -95,10 +108,10 @@ def test_preserves_existing_destination_on_failure(
             str(hqx_source), str(target), [(25, 1), (275, 1)],
             width=1920 if failure == "format" else 3840,
             height=2160, fps=Fraction(25), continue_export=continue_export,
-            progress=completed.append,
+            progress=completed.append, verify_staged=verify_staged,
         )
 
-    if failure == "cancel_before_publish":
+    if failure in ("cancel_before_publish", "cancel_after_verify"):
         assert run() is False
     else:
         with pytest.raises(PermissionError if failure == "replace" else DnxhrPacketCopyUnsupported):

@@ -1880,6 +1880,12 @@ class AiEditingPreferencePage:
             profile.profile_id, operation, version, result, error,
         ))
         worker.finished.connect(worker.deleteLater)
+        # The page's reference is dropped on ``finished``, never on
+        # ``completed``: ``completed`` is emitted from inside run() while the
+        # thread is still running, and releasing the last reference there
+        # destroys a running QThread, which Qt treats as fatal - the whole
+        # process aborts.
+        worker.finished.connect(lambda done=worker: self._probe_worker_finished(done))
         self._test_worker = worker
         worker.start()
 
@@ -1895,9 +1901,13 @@ class AiEditingPreferencePage:
         if profile_id == self._current_profile_id:
             self._reveal_model_control("probe_status")
 
+    def _probe_worker_finished(self, worker: _ConnectionTestWorker) -> None:
+        """Drop the page's reference once the probe thread has really stopped."""
+        if self._test_worker is worker:
+            self._test_worker = None
+
     def _probe_finished(self, profile_id: str, operation: str, version: int,
                         result: str | list[str] | None, error: str) -> None:
-        self._test_worker = None
         button = self._widgets.get("test_btn")
         if not isinstance(button, QPushButton) or sip.isdeleted(button):
             return

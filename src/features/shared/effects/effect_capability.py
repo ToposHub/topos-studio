@@ -156,6 +156,13 @@ def resolve_capability(
         inferred_graphics = set(_DEFAULT_GRAPHICS) if has_gpu else set()
         if has_gpu and effect_type in gpu_export_types:
             inferred_graphics.add(GraphicsBackendKind.METAL.value)
+        if has_gpu and effect_type.startswith("plugin:"):
+            # 阶段 6.3：.tglsl 插件按「作者声明 ∩ 宿主可译」得出 graphics 轴。
+            # 未声明 metal 的旧插件保持 OpenGL-only；声明了但转译失败的插件
+            # 同样不含 metal（诊断见 tglsl_metal_support），继续走兼容路径。
+            plugin_graphics = _plugin_effective_backends(effect_type, "graphics")
+            if plugin_graphics is not None:
+                inferred_graphics = set(plugin_graphics)
         resolved_graphics = frozenset(inferred_graphics)
     else:
         resolved_graphics = graphics_backends if has_gpu else frozenset()
@@ -163,6 +170,10 @@ def resolve_capability(
         inferred_compute = set(_DEFAULT_COMPUTE) if has_gpu else set()
         if has_gpu and effect_type in gpu_export_types:
             inferred_compute.add(ComputeBackendKind.METAL_COMPUTE.value)
+        if has_gpu and effect_type.startswith("plugin:"):
+            plugin_compute = _plugin_effective_backends(effect_type, "compute")
+            if plugin_compute is not None:
+                inferred_compute = set(plugin_compute)
         resolved_compute = frozenset(inferred_compute)
     else:
         resolved_compute = compute_backends if has_gpu else frozenset()
@@ -174,6 +185,29 @@ def resolve_capability(
         graphics_backends=resolved_graphics,
         compute_backends=resolved_compute,
     )
+
+
+# ── 阶段 6.3：.tglsl 插件的生效后端轴 ──────────────────────────────────
+
+def _plugin_effective_backends(effect_type: str, axis: str) -> Optional[FrozenSet[str]]:
+    """``plugin:*`` 效果在 ``axis``（graphics / compute）上的生效后端集合。
+
+    非 ``.tglsl`` 插件或 catalog 中没有对应 spec 时返回 None（调用方沿用
+    按实际实现表推导的默认值）。分析结果按源码指纹缓存，不会每次转译。
+    """
+    try:
+        from src.features.shared.effects.effect_catalog import get_effect_catalog
+        from src.features.shared.effects.tglsl_metal_support import plugin_metal_support
+
+        spec = get_effect_catalog().get_spec(effect_type)
+    except Exception:  # noqa: BLE001 — 目录不可用时按默认能力处理（OpenGL）
+        return None
+    if spec is None:
+        return None
+    support = plugin_metal_support(spec)
+    if support is None:
+        return None
+    return support.effective_graphics if axis == "graphics" else support.effective_compute
 
 
 # ── Phase 7 P7-08：按会话后端的可用性诊断 ─────────────────────────────

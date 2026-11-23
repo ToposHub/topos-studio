@@ -21,13 +21,15 @@ corrector/shared_corrector pass 取参）。
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+from dataclasses import replace
+from typing import Any, Callable, Iterator, Mapping
 
 import numpy as np
 from src.features.color.core.color_node_labels import display_node_label
 
 from src.shared.project.color_graph import (
     ColorGraphData,
+    ColorNodeData,
     NodeType,
     unfreeze_params,
 )
@@ -173,15 +175,23 @@ def _lut_current(payload: Mapping[str, Any]) -> bool:
     return arr.shape in ((256, 3), (256, 1, 3))
 
 
-def _iter_corrector_nodes(graph: ColorGraphData):
-    """遍历全部 Corrector 节点（含 compound children，plan 展开后按
-    成员 node_id 取参——B11 inline 保持成员身份）。"""
-    stack = list(graph.nodes)
-    while stack:
-        node = stack.pop(0)
-        if getattr(node, "compound_children", None) is not None:
-            stack.extend(node.compound_children.nodes)
-        else:
+def _iter_corrector_nodes(graph: ColorGraphData) -> Iterator[ColorNodeData]:
+    """Resolve shared defaults before materializing the execution payload."""
+    definitions = {definition.definition_id: definition.params
+                   for definition in graph.shared_definitions}
+    for node in graph.nodes:
+        if node.compound_children is not None:
+            yield from _iter_corrector_nodes(node.compound_children)
+        elif node.node_type == NodeType.SHARED_CORRECTOR.value:
+            definition = definitions.get(node.shared_definition_id)
+            if definition is not None:
+                # Keep the same domain precedence as the graph compiler.
+                params = dict(definition)
+                params.update({key: value for key, value in node.params.items()
+                               if key != "shared_definition_id"})
+                node = replace(node, params=params)
+            yield node
+        elif node.node_type == NodeType.CORRECTOR.value:
             yield node
 
 
@@ -211,8 +221,7 @@ def graph_node_layer_provider(
             evaluate_mask_tracks_payload, evaluate_qualifier_params_tracks,
         )
         evaluated = dict(payloads)
-        for n in _iter_corrector_nodes(graph):
-            payload = payloads.get(n.node_id)
+        for node_id, payload in payloads.items():
             if not payload:
                 continue
             kf = payload.get("grade_keyframes")
@@ -260,7 +269,7 @@ def graph_node_layer_provider(
                     int(frame))
                 if patched_shapes is not None:
                     merged["mask_shapes"] = patched_shapes
-            evaluated[n.node_id] = merged
+            evaluated[node_id] = merged
             from src.features.color.core.effect_keyframes import evaluate_effect_tracks
             plugins = evaluate_effect_tracks(tracks, payload.get("plugins") or (), int(frame))
             if plugins is not None:

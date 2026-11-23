@@ -214,6 +214,12 @@ def main() -> int:
         )
         args, remaining = parser.parse_known_args()
 
+        # Metal 迁移 7.5：TOPOS_GRAPHICS_LEDGER=1 时记录本次会话创建的每一个图形
+        # 上下文（API、所在域、原因、线程），退出时写出快照；未设置时不安装任何
+        # 钩子。放在一切图形初始化之前，启动期创建的上下文才数得到。
+        from src.shared.gpu.graphics_ledger import start_session_ledger
+        start_session_ledger(sys.argv[0])
+
         # AUD-31202: 校验 --project，非法路径不再静默无效。仅补诊断日志，
         # 传参与下游行为保持不变（是否升级为拒绝启动属产品决策，未改动）。
         if args.project and not (

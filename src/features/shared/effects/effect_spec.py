@@ -143,6 +143,16 @@ class EffectSpec:
     plugin_source_uri: str = ""
     plugin_parameter_schema_hash: str = ""
     plugin_capabilities: Tuple[str, ...] = ()
+    # ── 阶段 6（macOS Metal 迁移，6.3 / 6.4）────────────────────────────
+    # .tglsl 插件元数据块之后的原始 GLSL 源（Color 编译器的「GLSL 权威文本」）。
+    # MSL 转译器只接受这份源 + 上面的 param_defs manifest（ADR 0004：EffectSpec
+    # 是插件 manifest 的唯一权威载体）。内置效果为空串。
+    plugin_source_glsl: str = ""
+    # 插件头部声明的图形 / 计算后端（``@graphics_backends`` / ``@compute_backends``，
+    # P7-07）。空元组 = 未声明（旧插件，按 OpenGL 能力解析）。声明本身不等于
+    # 能力：生效集合由 ``resolve_capability`` 结合宿主是否有可用实现得出。
+    graphics_backends: Tuple[str, ...] = ()
+    compute_backends: Tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate source-count / kind consistency at construction time.

@@ -1,0 +1,36 @@
+{
+ "session": "topos_bench.py",
+ "counts": {
+  "opengl": 1,
+  "metal": 1
+ },
+ "by_domain": {
+  "edit": {
+   "opengl": 1,
+   "metal": 1
+  }
+ },
+ "opengl_threads": [
+  "Dummy-2"
+ ],
+ "calls": [
+  {
+   "api": "opengl",
+   "domain": "edit",
+   "reason": "edit_gpu_preview_renderer.run",
+   "thread": "Dummy-2",
+   "session": "topos_bench.py",
+   "factory": "moderngl.create_context",
+   "kind": "adopt"
+  },
+  {
+   "api": "metal",
+   "domain": "edit",
+   "reason": "metal_timeline_preview.__init__",
+   "thread": "Dummy-2",
+   "session": "topos_bench.py",
+   "factory": "MetalComputeContext",
+   "kind": "new"
+  }
+ ]
+}

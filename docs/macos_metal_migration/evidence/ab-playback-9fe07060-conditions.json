@@ -1,0 +1,103 @@
+{
+ "what": "conditions of the eight single-configuration sessions behind ab-playback-9fe07060.json",
+ "method": "tools/bench_metal_ab_playback.py --configs <one> --repeats 1 per session; round 1 in the order gl, auto, metal, native and round 2 in the reverse order; the report was then assembled with --import",
+ "other_load": "other programs were using the machine (load average about 4.5 on 16 threads)",
+ "sessions": [
+  {
+   "round": 1,
+   "config": "gl",
+   "generated_at_utc": "2026-11-23T19:53:30+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  },
+  {
+   "round": 1,
+   "config": "auto",
+   "generated_at_utc": "2026-11-23T19:55:00+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  },
+  {
+   "round": 1,
+   "config": "metal",
+   "generated_at_utc": "2026-11-23T19:56:29+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  },
+  {
+   "round": 1,
+   "config": "native",
+   "generated_at_utc": "2026-11-23T19:58:01+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  },
+  {
+   "round": 2,
+   "config": "gl",
+   "generated_at_utc": "2026-11-23T20:03:58+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  },
+  {
+   "round": 2,
+   "config": "auto",
+   "generated_at_utc": "2026-11-23T20:02:29+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  },
+  {
+   "round": 2,
+   "config": "metal",
+   "generated_at_utc": "2026-11-23T20:01:00+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  },
+  {
+   "round": 2,
+   "config": "native",
+   "generated_at_utc": "2026-11-23T19:59:32+00:00",
+   "display_power_state": [
+    4,
+    4
+   ],
+   "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+   "runs": 4,
+   "invalid": 0
+  }
+ ]
+}

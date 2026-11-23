@@ -11,8 +11,8 @@
 // @determinism deterministic
 // @export_support video
 // @threading gpu
-// @graphics_backends opengl
-// @compute_backends glsl_fragment
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @preview_cost low
 // @param select crt_mode "Pattern" 2 "Scanlines" "RGB Grille" "Full CRT"
 // @param slider scan_count "Scanline Count" 480.0 120.0 1200.0

@@ -8,6 +8,8 @@
 // @output_space scene-linear
 // @determinism deterministic
 // @preview_cost low
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @param select shape "Shape" 0 "Ellipse" "Rectangle" "Circle"
 // @param slider feather "Feather" 0.5 0.0 1.0
 // @param separator

@@ -11,8 +11,8 @@
 // @determinism deterministic
 // @export_support all
 // @threading gpu
-// @graphics_backends opengl
-// @compute_backends glsl_fragment
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @preview_cost low
 // @param select leak_corner "Leak Origin" 0 "Top Left" "Top Right" "Bottom Left" "Bottom Right"
 // @param slider leak_size "Leak Size" 0.65 0.05 1.0

@@ -524,8 +524,9 @@ class TestScheduler:
         assert context.command_buffers[0].wait_calls == 1
 
     def test_on_complete_failure_recorded_not_escaped(self) -> None:
-        # AUD-1521：on_complete 在 completion 线程抛异常不得逃逸，
-        # 且要进入 error() 供 poll 侧发现。
+        # AUD-1521：on_complete 抛异常不得逃逸，且要进入 error() 供 poll 侧
+        # 发现。Metal 迁移 1.2 起 on_complete 与 release 回调都在资源线程的
+        # poll() 内执行——驱动回调只把完成结果入队。
         context = _PlainContext()
         scheduler = MetalSubmissionScheduler(context, max_in_flight=2)
         released: list[int] = []
@@ -538,7 +539,9 @@ class TestScheduler:
             on_complete=broken_on_complete,
         )
         context.callbacks[0](context.command_buffers[0])  # 模拟驱动回调
+        assert released == []  # 驱动线程不释放资源
 
+        assert scheduler.poll() == (0,)  # 资源线程回收
         assert released == [1]  # 前置 release 回调不受影响
         err = scheduler.error(0)
         assert err is not None and "on_complete" in err

@@ -25,6 +25,7 @@ import os
 import sys
 import pytest
 import tempfile
+from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import MagicMock, patch, PropertyMock
 
@@ -611,6 +612,42 @@ class TestEncoderInitialization:
 
 class TestEncoderLifecycle:
     """测试 open/close 生命周期"""
+
+    @pytest.mark.parametrize("end_state", ["published", "cancelled", "frame_count"])
+    def test_close_checks_staged_delivery_before_publish(
+        self, tmp_path: Path, end_state: str,
+    ) -> None:
+        target = tmp_path / "hqx.mov"
+        target.write_bytes(b"previous export")
+        config = FFmpegEncoderConfig(
+            codec="dnxhr", profile="hqx", pix_fmt="yuv422p10le",
+            width=1920, height=1080, fps=Rational(25, 1),
+        )
+        encoder = FFmpegVideoEncoder(str(target), config)
+        staged = Path(encoder._write_path)
+        encoder._is_open = True
+        encoder._frame_count = 2
+        encoder._stream = MagicMock()
+        encoder._stream.encode.return_value = []
+        encoder._container = MagicMock()
+        cancel = False
+
+        def finish_container() -> None:
+            nonlocal cancel
+            assert target.read_bytes() == b"previous export"
+            staged.write_bytes(b"finished export")
+            cancel = end_state == "cancelled"
+
+        encoder._container.close.side_effect = finish_container
+        if end_state == "frame_count":
+            with pytest.raises(RuntimeError, match="Encoded 2 frames, expected 3"):
+                encoder.close(should_cancel=lambda: cancel, expected_frames=3)
+        else:
+            assert encoder.close(should_cancel=lambda: cancel, expected_frames=2) is (not cancel)
+        assert target.read_bytes() == (
+            b"finished export" if end_state == "published" else b"previous export")
+        assert not staged.exists()
+        assert not encoder.is_open
 
     @patch.dict('sys.modules', {'av': MagicMock()})
     def test_open_creates_container(

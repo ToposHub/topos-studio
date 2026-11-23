@@ -47,7 +47,7 @@ import logging
 import math
 import numpy as np
 import time
-from typing import Optional, Tuple, Dict, Any, Callable
+from typing import Optional, Tuple, Dict, Any, Callable, Union
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
@@ -56,7 +56,7 @@ from PyQt6.QtWidgets import (
     QMenu, QComboBox,
 )
 from PyQt6.QtCore import (
-    Qt, pyqtSignal, QPoint, QPointF, QSize, QRectF, QSignalBlocker, QEvent, QObject,
+    Qt, pyqtSignal, pyqtSlot, QPoint, QPointF, QSize, QRectF, QSignalBlocker, QEvent, QObject, QTimer,
 )
 from PyQt6.QtGui import (
     QMouseEvent, QWheelEvent, QKeyEvent, QPainter, QColor, QPen, QBrush,
@@ -70,6 +70,7 @@ from src.shared.assets.icon_manager import (
     icon_jump_end, icon_loop, IconColors,
 )
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
+from src.shared.gpu.metal.present_port import normalized_rect
 from src.features.edit.ui.edit_style import EDIT_COLORS
 from src.shared.ui.style_sheet import UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
 from src.features.edit.core.playback_debug import playback_trace
@@ -806,6 +807,22 @@ class TransportControlBar(QFrame):
 # ProgramViewer - OpenGL Viewport
 # ================================================================
 
+def _annotate_present_path(trace_id: int, path: str) -> None:
+    """Record which surface showed a frame: the GL viewer or the Metal layer.
+
+    The playback trace sums these as ``present_path_counts``; a Metal-computed
+    frame may leave through either surface, so the render backend alone does
+    not tell.
+    """
+    if not trace_id:
+        return
+    try:
+        from src.shared.video.playback_frame_trace import get_trace_collector
+        get_trace_collector().annotate(int(trace_id), extra={"present_path": path})
+    except Exception:  # noqa: BLE001 - telemetry must never break presenting
+        logger.debug("present path annotate failed", exc_info=True)
+
+
 class ProgramViewer(QOpenGLWidget):
     """
     OpenGL viewport for the Program Viewer (Edit page).
@@ -1321,6 +1338,14 @@ class ProgramViewer(QOpenGLWidget):
     def _paintGL_impl(self) -> None:
         if not self._gl_initialized:
             return
+        if self._native_layer_covers():
+            # Repainted for another reason (expose, resize): nothing of this
+            # widget is visible under the layer.  Do not copy the stale frame.
+            self._reset_copy_gl_state()
+            _gl.glViewport(0, 0, max(1, self.width()), max(1, self.height()))
+            _gl.glClearColor(0.0, 0.0, 0.0, 0.0)
+            _gl.glClear(GL_COLOR_BUFFER_BIT)
+            return
 
         # AUD-20402: 执行 clear_texture 排队的 deferred 纹理释放（此处
         # 上下文必然 current）。防御性比对当前纹理名，绝不删除已被
@@ -1385,50 +1410,123 @@ class ProgramViewer(QOpenGLWidget):
                     self._current_display_trace_id = 0
                 self.frame_presented.emit(int(self._current_frame_index))
 
+        self._paint_overlays()
+
+    def _paint_overlays(self, painter: Optional[QPainter] = None) -> None:
+        """Every QPainter overlay, in z-order: guides, subtitles (+ handles),
+        error state, clip transform handles.
+
+        ``painter`` may target any device with this widget's logical
+        coordinate system.  Without one, each block opens its own
+        ``QPainter(self)`` — the established pattern inside paintGL (see the
+        note in :meth:`paintGL`; never wrap them in beginNativePainting).
+        With one, the caller owns it: that is how the same overlays are drawn
+        into the transparent image shown above the native Metal viewport.
+        """
         # Guides are a screen-space QPainter overlay bound to the same
         # letterbox/zoom/pan rectangle as the displayed frame.
-        self._draw_guides_overlay()
+        self._draw_guides_overlay(painter)
 
         # P10.3: Subtitle overlay — drawn via QPainter on top of GL content.
-        # On macOS QPainter(self) after super().paintGL() would clobber the
-        # framebuffer, so it is painted here, inside paintGL.
         # AUD-20404: no begin/endNativePainting wrapper — between those calls
         # Qt only permits raw GL; QPainter operations there are undefined
         # (the subtitle path depends on opacity/SmoothPixmapTransform state).
-        # Direct QPainter(self) inside paintGL is the established pattern
-        # (see _draw_guides_overlay above and the transform handles below).
         show_subtitle_handles = self._selected_subtitle_is_visible()
         if self._subtitle_overlays or show_subtitle_handles:
-            painter = QPainter(self)
+            own = painter is None
+            p = painter or QPainter(self)
             try:
-                self._paint_subtitle_overlay(painter)
+                self._paint_subtitle_overlay(p)
                 # 绘制选中字幕的变换手柄
                 if show_subtitle_handles:
-                    self._subtitle_handle_controller.draw_handles(painter)
+                    self._subtitle_handle_controller.draw_handles(p)
             finally:
-                painter.end()
+                if own:
+                    p.end()
 
         # AUD-20401: error-state feedback overlay ("Media Offline"、render/
-        # decode error、R-8 composite ghost)。set_error_state/set_offline_
-        # media/set_composite_error 只置状态并 update()；以前没有任何调用
-        # 点绘制这些状态，错误反馈 UI 完全失效。此处接通 overlay 绘制。
+        # decode error、R-8 composite ghost)。
         if self._error_state != "none":
-            painter = QPainter(self)
+            own = painter is None
+            p = painter or QPainter(self)
             try:
-                self._paint_error_overlay(painter)
+                self._paint_error_overlay(p)
             finally:
-                painter.end()
+                if own:
+                    p.end()
 
         # Clip Transform tool handles — drawn on top of everything when the
-        # tool is active and a clip is selected.  These are QPainter primitives
-        # (not raw GL), so keep them outside beginNativePainting: that mode is
-        # only for raw OpenGL and bypasses QPainter's antialiasing pipeline.
+        # tool is active and a clip is selected.  QPainter primitives only.
         if self._transform_tool_active and self._clip_transform_controller.has_clip():
-            painter = QPainter(self)
+            own = painter is None
+            p = painter or QPainter(self)
             try:
-                self._clip_transform_controller.draw_handles(painter)
+                self._clip_transform_controller.draw_handles(p)
             finally:
-                painter.end()
+                if own:
+                    p.end()
+
+    def has_overlays(self) -> bool:
+        """Whether anything is drawn above the picture right now."""
+        return bool(
+            self._active_guide is not None
+            or self._subtitle_overlays
+            or self._error_state != "none"
+            or self._selected_subtitle_is_visible()
+            or (self._transform_tool_active and self._clip_transform_controller.has_clip())
+        )
+
+    def render_overlay_image(self) -> Optional[QImage]:
+        """The overlays alone, on a transparent image sized to this widget.
+
+        For the native Metal viewport (plan 2.3): its layer shows the video,
+        an image of exactly these pixels is shown above it.  ``None`` when
+        there is nothing to draw.
+        """
+        if not self.has_overlays():
+            self._overlay_shown = False
+            return None
+        scale = float(self.devicePixelRatioF())
+        image = QImage(
+            max(1, round(self.width() * scale)), max(1, round(self.height() * scale)),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+        # Paint in widget (logical) coordinates, exactly as in paintGL.
+        image.setDevicePixelRatio(scale)
+        painter = QPainter(image)
+        try:
+            self._paint_overlays(painter)
+        finally:
+            painter.end()
+        self._overlay_shown = True
+        return image
+
+    def _native_layer_covers(self) -> bool:
+        """Whether the native Metal viewport is on top of this widget now."""
+        covered = getattr(self, "_native_covered_hook", None)
+        return callable(covered) and bool(covered())
+
+    def update(self, *args) -> None:  # noqa: N802 - Qt override
+        """Request a repaint; tell the native viewport if overlays may have changed.
+
+        Overlay state changes only ever call ``update()``.  While the native
+        Metal viewport covers this widget, its own paint is not visible, so
+        the owner re-renders the overlay image instead -- and no GL repaint
+        is requested at all: one costs a texture copy and a flush of the
+        window on the GUI thread for a picture nobody sees (measured in the
+        real application: about 50 ms a frame, which halved the frame rate).
+        The owner requests the repaint when the layer goes away.
+        """
+        hook = getattr(self, "_overlay_dirty_hook", None)
+        if hook is not None:
+            try:
+                hook()
+            except Exception:  # noqa: BLE001 - never break a repaint request
+                logger.debug("overlay dirty hook failed", exc_info=True)
+        if self._native_layer_covers():
+            return
+        super().update(*args)
 
     def _calculate_display_rect(self) -> Tuple[float, float, float, float]:
         """
@@ -1547,8 +1645,13 @@ class ProgramViewer(QOpenGLWidget):
         _gl.glUseProgram(0)
         _gl.glBindTexture(GL_TEXTURE_2D, 0)
 
-    def _draw_guides_overlay(self) -> None:
-        """Draw the active aspect-ratio or safe-area guide over the frame."""
+    def _draw_guides_overlay(self, painter: Optional[QPainter] = None) -> None:
+        """Draw the active aspect-ratio or safe-area guide over the frame.
+
+        Without ``painter`` one is opened on this widget and closed here;
+        with one given (a QImage for the native viewport's overlay), the
+        caller owns it.
+        """
         guide = self._active_guide
         if guide is None or self._tex_width <= 0 or self._tex_height <= 0:
             return
@@ -1559,7 +1662,8 @@ class ProgramViewer(QOpenGLWidget):
         if image_rect.width() <= 1.0 or image_rect.height() <= 1.0:
             return
 
-        painter = QPainter(self)
+        owns_painter = painter is None
+        painter = painter or QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setClipRect(image_rect)
@@ -1583,7 +1687,8 @@ class ProgramViewer(QOpenGLWidget):
                     float(params.get("secondary", 0.0)),
                 )
         finally:
-            painter.end()
+            if owns_painter:
+                painter.end()
 
     def _paint_aspect_ratio_guide(
         self,
@@ -1849,6 +1954,7 @@ class ProgramViewer(QOpenGLWidget):
             self._video_aspect_ratio = present_frame.width / present_frame.height
         if self._view_transform.mode == "fit":
             self._fit_to_window()
+        _annotate_present_path(trace_id, "gl_viewer")
         self.update()
 
     def set_fence_wait_function(self, wait_fn: Optional[callable]) -> None:
@@ -3300,6 +3406,10 @@ class ProgramViewerWidget(QWidget):
     subtitle_interaction_updated = pyqtSignal(str, dict)
     subtitle_interaction_ended = pyqtSignal(str, dict, dict)
 
+    # Native Metal viewport (plan 2.2): a frame's lease goes back on the GUI
+    # thread, like the GL viewer's ack, even though the render thread decides
+    # when the frame was released.
+    native_release_requested = pyqtSignal(object, object, int)  # present, ack_cb, trace_id
     # Clip Transform on-canvas handle interaction (forwarded from inner viewer).
     clip_transform_interaction_updated = pyqtSignal(str, object)
     clip_transform_interaction_ended = pyqtSignal(str, object, object)
@@ -3309,8 +3419,18 @@ class ProgramViewerWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("ProgramViewerWidget")
 
+        # Native Metal viewport (plan 2.1 / 2.2 / 2.3): absent unless the
+        # session opts in and the renderer accepts the layer.
+        self._metal_host: Optional[QWidget] = None
+        self._native_renderer: Optional[QObject] = None
+        self._native_showing: bool = False
+        self._native_refresh_scheduled: bool = False
+        self._native_trace_by_frame: Dict[int, int] = {}
+
         # Build UI
         self._setup_ui()
+        self.native_release_requested.connect(
+            self._release_native_frame, Qt.ConnectionType.QueuedConnection)
 
         logger.debug("ProgramViewerWidget initialized")
 
@@ -3415,11 +3535,15 @@ class ProgramViewerWidget(QWidget):
                 monitor.setGeometry(self._viewer.rect())
                 if not monitor.isHidden():
                     monitor.raise_()
+            if self.__dict__.get("_metal_host") is not None:
+                self._schedule_native_refresh()
         return super().eventFilter(watched, event)
 
     def _on_zoom_changed(self, zoom_level: float) -> None:
         """Handle zoom change."""
         self._toolbar.update_zoom_label(zoom_level)
+        if self.__dict__.get("_native_showing"):
+            self._schedule_native_refresh()
 
     def _on_guide_changed(
         self,
@@ -3514,6 +3638,9 @@ class ProgramViewerWidget(QWidget):
 
     def clear_texture(self) -> None:
         """Clear the current texture and pending QImage (P2.1 / P8)."""
+        leave_native = getattr(self, "_set_native_showing", None)
+        if callable(leave_native):
+            leave_native(False)
         self._viewer.clear_texture()
         # P8: Reset error state to none (show empty frame, not error)
         self._viewer._error_state = "none"
@@ -3614,6 +3741,17 @@ class ProgramViewerWidget(QWidget):
             except RuntimeError:
                 scrub_active_for_trace = False
             self._viewer._current_frame_index = int(frame)
+            present_in_dict = result.get("present_frame") if isinstance(result, dict) else None
+            # Strict on purpose: test doubles answer any attribute with a
+            # truthy object, and only a real native descriptor says True.
+            is_native = getattr(present_in_dict, "is_native", False) is True
+            if not is_native:
+                # Anything the GL viewer shows takes the screen back from the
+                # native viewport (CPU snapshots and unsupported scenes).  Shell
+                # hosts that bind only this method have no native mode.
+                leave_native = getattr(self, "_set_native_showing", None)
+                if callable(leave_native):
+                    leave_native(False)
             if result is None:
                 # P8: 显示"无片段"状态
                 playback_trace("program_viewer.set_frame_none", frame=frame, scrub_active=scrub_active_for_trace)
@@ -3625,6 +3763,23 @@ class ProgramViewerWidget(QWidget):
                 present = result.get("present_frame")
                 ack_cb = result.get("ack_cb")
                 trace_id = int(result.get("trace_id") or 0)
+                if is_native:
+                    show_native = getattr(self, "_show_native_frame", None)
+                    # True when the viewport took the frame; otherwise why not.
+                    outcome = show_native(frame, present, ack_cb, trace_id) if callable(show_native) else False
+                    if outcome is True:
+                        return
+                    # No native viewport can show it: give the lease back and
+                    # keep the previous picture.  A native slot belongs to the
+                    # render thread's pool — ask it to release the frame.
+                    unclaimed = getattr(self, "_unclaim_native_frame", None)
+                    if callable(unclaimed):
+                        unclaimed(present, ack_cb, trace_id,
+                                  outcome if isinstance(outcome, str) and outcome else "no_native_viewport")
+                    playback_trace(
+                        "program_viewer.native_frame_unclaimed", frame=frame,
+                        slot_id=getattr(present, "slot_id", -1), scrub_active=scrub_active_for_trace)
+                    return
                 playback_trace(
                     "program_viewer.set_frame_present_dict",
                     frame=frame,
@@ -3708,6 +3863,333 @@ class ProgramViewerWidget(QWidget):
             self.clear_texture()
         finally:
             self._set_frame_depth -= 1
+
+    # ==================== Native Metal viewport (plan 2.1 / 2.2 / 2.3) ====================
+
+    def set_native_viewport_candidate(self, renderer: Optional[QObject]) -> None:
+        self._native_candidate = renderer
+        self._native_pending_attach = None
+
+    @pyqtSlot()
+    def attach_requested_native_viewport(self) -> None:
+        renderer = self.sender()
+        if renderer is not None and renderer is self.__dict__.get("_native_candidate"):
+            self.enable_native_viewport(renderer)
+
+    def enable_native_viewport(self, renderer: Optional[QObject]) -> bool:
+        """Show eligible frames on a CAMetalLayer instead of the GL viewer.
+
+        Off unless the session opted in.  Returns ``False`` — leaving
+        everything as it was — when the renderer did not opt in, the platform
+        cannot host the layer, or attaching fails; the GL viewer then keeps
+        presenting every frame.
+        """
+        opted_in = getattr(renderer, "native_viewport_opted_in", None)
+        if renderer is None or not callable(opted_in) or not opted_in():
+            return False
+        is_running = getattr(renderer, "isRunning", None)
+        if callable(is_running) and not is_running():
+            return False
+        current = self.__dict__.get("_native_renderer")
+        if current is not None:
+            if current is renderer:
+                return True
+            self._native_pending_attach = renderer
+            self.disable_native_viewport()
+            return False
+        from src.shared.ui.widgets.metal_viewport_host import MetalViewportHost
+
+        host = MetalViewportHost(self._viewer_container)
+        host.setObjectName("ProgramViewerMetalHost")
+        try:
+            attached = host.attach()
+        except Exception:  # noqa: BLE001 - any AppKit failure is a refusal
+            logger.warning("ProgramViewerWidget: native viewport attach failed", exc_info=True)
+            attached = False
+        if not attached:
+            logger.info(
+                "ProgramViewerWidget: native viewport unavailable (%s); using the GL viewer",
+                host.failure)
+            host.deleteLater()
+            return False
+        self._metal_host = host
+        self._native_renderer = renderer
+        self._viewer._overlay_dirty_hook = self._schedule_native_refresh
+        self._viewer._native_covered_hook = self._native_layer_is_showing
+        host.hide()
+        renderer.native_viewport_failed.connect(self._on_native_viewport_failed)
+        renderer.native_frame_presented.connect(self._on_native_frame_presented)
+        renderer.attach_native_viewport(host.layer, host.publisher)
+        self._layout_native_host()
+        return True
+
+    def native_viewport_enabled(self) -> bool:
+        """Whether a native viewport was set up for this widget."""
+        return self.__dict__.get("_native_renderer", None) is not None
+
+    def disable_native_viewport(self) -> None:
+        """Stop using the native viewport and take the layer back."""
+        renderer = self.__dict__.get("_native_renderer")
+        host = self.__dict__.get("_metal_host")
+        viewer = self.__dict__.get("_viewer")
+        if viewer is not None:
+            viewer._overlay_dirty_hook = None
+            viewer._native_covered_hook = None
+        if renderer is None or host is None:
+            self._native_renderer = None
+            return
+        self._set_native_showing(False)
+        host.hide()
+        host.set_overlay_image(None)
+        released = renderer.detach_native_viewport(timeout_s=0.0)
+        if released:
+            self._finish_native_detach(host)
+        else:
+            # The render thread still holds the layer: keep host and renderer
+            # (native_viewport_enabled() stays True) and try again; the
+            # viewport stays hidden meanwhile.
+            self._queue_native_detach_retry(host, renderer)
+
+    def _queue_native_detach_retry(self, host: QWidget, renderer: QObject) -> None:
+        if self.__dict__.get("_native_retry_target") is None:
+            QTimer.singleShot(30, self._retry_native_detach)
+        self._native_retry_target = (host, renderer)
+
+    def _retry_native_detach(self) -> None:
+        host = self.__dict__.get("_metal_host")
+        renderer = self.__dict__.get("_native_renderer")
+        target = self.__dict__.pop("_native_retry_target", None)
+        if target is None or host is not target[0] or renderer is not target[1]:
+            return
+        is_running = getattr(renderer, "isRunning", None)
+        if (renderer is not None and (not callable(is_running) or is_running())
+                and not renderer.detach_native_viewport(timeout_s=0.0)):
+            self._queue_native_detach_retry(host, renderer)
+            return
+        self._finish_native_detach(host)
+
+    def _finish_native_detach(self, host: QWidget) -> None:
+        previous = self._native_renderer
+        if previous is not None:
+            try:
+                previous.native_viewport_failed.disconnect(self._on_native_viewport_failed)
+                previous.native_frame_presented.disconnect(self._on_native_frame_presented)
+            except (TypeError, RuntimeError):
+                pass
+        host.detach()
+        host.deleteLater()
+        self._metal_host = None
+        self._native_renderer = None
+        renderer = self.__dict__.pop("_native_pending_attach", None)
+        if renderer is not None and renderer is self.__dict__.get("_native_candidate"):
+            self.enable_native_viewport(renderer)
+
+    def _native_host_can_show(self) -> bool:
+        """Whether the layer can cover the viewer right now.
+
+        The layer is a sibling inside the viewer container; wherever the
+        viewer is shown differently (its own fullscreen window, the Trim
+        monitor on top) the GL viewer presents instead.
+        """
+        viewer = self._viewer
+        monitor = getattr(self, "_trim_monitor_widget", None)
+        return bool(
+            viewer is not None
+            and viewer.isVisible()
+            and viewer.parentWidget() is self._viewer_container
+            and not viewer.isFullScreen()
+            and (monitor is None or monitor.isHidden())
+        )
+
+    def _native_layer_is_showing(self) -> bool:
+        """The layer is on screen over the viewer, hiding the viewer's own paint."""
+        host = self.__dict__.get("_metal_host")
+        return bool(self.__dict__.get("_native_showing")) and host is not None and not host.isHidden()
+
+    def _layout_native_host(self) -> None:
+        """Keep the layer over the viewer exactly while a native frame is shown."""
+        host = self._metal_host
+        renderer = self._native_renderer
+        if host is None or renderer is None:
+            return
+        allowed = self._native_host_can_show()
+        wanted = self._native_showing and allowed
+        # Tell the renderer where frames should go: with the layer unable to
+        # show, new frames take the GL path so the viewer is never starved.
+        set_wanted = getattr(renderer, "set_native_frames_wanted", None)
+        if callable(set_wanted):
+            set_wanted(allowed)
+        if host.geometry() != self._viewer.geometry():
+            host.setGeometry(self._viewer.geometry())
+            # A hidden host's resize event is still pending: publish the size
+            # now, the picture rectangle is normalized to it.
+            sync = getattr(host, "sync_surface", None)
+            if callable(sync):
+                sync()
+        if wanted:
+            if host.isHidden():
+                host.show()
+                host.raise_()
+        elif not host.isHidden():
+            host.hide()
+            # The viewer's own picture is visible again; it was not repainted
+            # while the layer covered it.
+            self._viewer.update()
+
+    def _set_native_showing(self, showing: bool) -> None:
+        showing = bool(showing)
+        if showing == self.__dict__.get("_native_showing", False):
+            return
+        self._native_showing = showing
+        host = self.__dict__.get("_metal_host")
+        if not showing and host is not None:
+            host.set_overlay_image(None)
+        self._layout_native_host()
+
+    def _show_native_frame(
+        self, frame: int, present: Any, ack_cb: Any, trace_id: int,
+    ) -> Union[bool, str]:
+        """Hand a native frame to the viewport.
+
+        ``True`` when it was taken; otherwise the reason it was not (the
+        caller returns the frame to the render thread with that reason).
+        """
+        renderer, host = self._native_renderer, self._metal_host
+        if renderer is None or host is None:
+            return "no_native_viewport"
+        if not self._native_host_can_show():
+            # Re-evaluate on every frame: the layer may have been pushed off
+            # screen (Trim monitor, fullscreen viewer) without an event we
+            # saw.  New frames must now take the GL path.
+            self._layout_native_host()
+            return "layer_not_on_screen"
+        viewer = self._viewer
+        # The view transform and the overlays work from the texture size.
+        viewer._tex_width, viewer._tex_height = int(present.width), int(present.height)
+        if host.geometry() != viewer.geometry():
+            # The viewer is laid out after the viewport is enabled: the first
+            # native frame finds the layer at its start-up size.
+            self._layout_native_host()
+        rect_px = viewer._calculate_display_rect_qt()
+        display_rect_px = (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height())
+        rect = normalized_rect(display_rect_px, (viewer.width(), viewer.height()))
+        taken = renderer.submit_native_present(
+            present, rect=rect, display_rect_px=display_rect_px,
+            on_released=lambda released, reason: self.native_release_requested.emit(
+                released, ack_cb, trace_id),
+        )
+        if not taken:
+            return "viewport_queue_refused"
+        # Same state effects as the GL viewer's set_present_frame: a new
+        # frame clears stale error / offline feedback and re-fits in fit mode.
+        viewer._error_state = "none"
+        viewer._error_message = ""
+        viewer._offline_media = ()
+        _annotate_present_path(trace_id, "native_metal")
+        if trace_id:
+            traces = self.__dict__.setdefault("_native_trace_by_frame", {})
+            traces[int(frame)] = int(trace_id)
+            while len(traces) > 64:
+                traces.pop(next(iter(traces)), None)
+        self._set_native_showing(True)
+        # The queued frame already carries this display rectangle. A
+        # repeat present is only needed when zoom or layout changes.
+        host.set_overlay_image(viewer.render_overlay_image())
+        return True
+
+    def _unclaim_native_frame(self, present: Any, ack_cb: Any, trace_id: int, reason: str) -> None:
+        """A native frame that will not be shown: its slot goes back via the
+        render thread, which owns the pool.  The viewer-side callback of a
+        native frame is bookkeeping only and cannot free the slot."""
+        renderer = self.__dict__.get("_native_renderer")
+        release = getattr(renderer, "release_native_frame", None)
+        if callable(release):
+            release(present, reason)
+        else:
+            logger.error(
+                "ProgramViewerWidget: native frame %s cannot be returned (no renderer)",
+                getattr(present, "frame", -1))
+        self._return_native_lease(present, ack_cb, trace_id, reason)
+
+    def _return_native_lease(
+        self, present: Any, ack_cb: Any, trace_id: int, reason: str,
+    ) -> None:
+        """A frame nobody will show: record it and give its lease back."""
+        if trace_id:
+            try:
+                from src.shared.video.playback_frame_trace import get_trace_collector
+                get_trace_collector().annotate(
+                    int(trace_id), present_status="dropped",
+                    extra={"present_drop_reason": reason})
+            except Exception:  # noqa: BLE001 - telemetry only
+                pass
+        if ack_cb is not None:
+            try:
+                ack_cb(present.slot_id)
+            except Exception:  # noqa: BLE001 - the pool tolerates a lost ack no better
+                logger.debug("ProgramViewerWidget: returning a native lease failed", exc_info=True)
+
+    def _release_native_frame(self, present: Any, ack_cb: Any, trace_id: int) -> None:
+        """GUI thread: the viewport is done with a frame — same ack as the GL path."""
+        self._return_native_lease(present, ack_cb, trace_id, "native_viewport_released")
+
+    def _schedule_native_refresh(self) -> None:
+        """Coalesce overlay / geometry changes into one refresh per event-loop turn."""
+        if (self.__dict__.get("_native_refresh_scheduled")
+                or not self.__dict__.get("_native_showing")):
+            return
+        self._native_refresh_scheduled = True
+        QTimer.singleShot(0, self._refresh_native_view)
+
+    def _refresh_native_view(self) -> None:
+        """Show the kept frame with the current picture rectangle and overlays."""
+        self._native_refresh_scheduled = False
+        host = self.__dict__.get("_metal_host")
+        renderer = self.__dict__.get("_native_renderer")
+        if not self.__dict__.get("_native_showing") or host is None or renderer is None:
+            return
+        self._layout_native_host()
+        if not self._native_host_can_show():
+            return
+        viewer = self._viewer
+        rect_px = viewer._calculate_display_rect_qt()
+        rect = normalized_rect(
+            (rect_px.x(), rect_px.y(), rect_px.width(), rect_px.height()),
+            (viewer.width(), viewer.height()))
+        represent = getattr(renderer, "represent_native_viewport", None)
+        if callable(represent):
+            represent(rect)
+        host.set_overlay_image(self._viewer.render_overlay_image())
+
+    def _on_native_frame_presented(self, frame: int) -> None:
+        """A native frame was handed to the display: same accounting as paintGL."""
+        sender = self.sender()
+        if sender is not None and sender is not self.__dict__.get("_native_renderer"):
+            return
+        trace_id = self.__dict__.get("_native_trace_by_frame", {}).pop(int(frame), 0)
+        if trace_id:
+            try:
+                from src.shared.video.playback_frame_trace import get_trace_collector
+                get_trace_collector().annotate(int(trace_id), present_status="displayed")
+            except Exception:  # noqa: BLE001 - telemetry only
+                pass
+        self._viewer.frame_presented.emit(int(frame))
+
+    def _on_native_viewport_failed(self, reason: str) -> None:
+        """The renderer cannot present natively: fall back to the GL viewer."""
+        sender = self.sender()
+        if sender is not None and sender is not self.__dict__.get("_native_renderer"):
+            return
+        logger.warning("ProgramViewerWidget: native viewport unavailable, using OpenGL: %s", reason)
+        self._set_native_showing(False)
+        renderer = self.__dict__.get("_native_renderer")
+        active = getattr(renderer, "native_viewport_active", None)
+        if renderer is not None and callable(active) and not active():
+            # The port is gone for good: take the layer back.
+            try:
+                self.disable_native_viewport()
+            except Exception:  # noqa: BLE001
+                logger.debug("ProgramViewerWidget: native viewport teardown failed", exc_info=True)
 
     def set_realtime_mode(self, enabled: bool) -> None:
         """

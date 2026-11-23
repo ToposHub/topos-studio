@@ -911,6 +911,22 @@ class ImageEngine(QObject, WindowRasterizer):
             frame = self.__dict__.get('current_grade_frame')
             if frame is not None:
                 render_params['color_graph_source_frame'] = int(frame)
+                # 4.1 共享图入口契约：同一「媒体（栈）、帧时刻、效果修订、
+                # 工作色域、目标格式」的需求键随参下发——预览/导出/静帧
+                # 消费方以此互认同一帧的图身份（键契约见 color_graph_entry）。
+                from src.features.color.core.color_graph_entry import (
+                    color_graph_frame_demand_key,
+                )
+                render_params['color_graph_demand_key'] = (
+                    color_graph_frame_demand_key(
+                        media_id=self.active_color_graph_stack_id,
+                        frame=int(frame),
+                        effect_revision=self.color_graph_revision,
+                        resource_fingerprint=(
+                            snapshot.resource_fingerprint),
+                        working_color_context=(
+                            snapshot.working_color_context),
+                    ))
             if execute:
                 render_params['color_graph_execute'] = True
 

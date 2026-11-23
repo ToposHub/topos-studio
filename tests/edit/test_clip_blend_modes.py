@@ -235,3 +235,37 @@ class TestGpuShaderSource:
         assert "blend_channel" in ex._FRAG_BLEND_F4_SRC
         assert callable(ex._BLEND_GLSL) is False  # 已在导入期读取为字符串
         assert "blend_set_lum" in ex._BLEND_GLSL
+
+
+class TestHslModesWhenTheResultClips:
+    """W3C SetLum/ClipColor：结果被拉回 [0,1] 后仍须保持它被赋予的亮度。
+
+    ``_clip_color_simple`` 曾漏掉公式里的 ``L +``，超范围分量被拉向 0
+    而不是等亮度点。灰阶样本（上面的 test_hsl_group_preserves_luminosity_or_hue）
+    永远不进入该分支，所以只有彩色且超范围的样本能发现；Metal 合成器与
+    NumPy 的同输入对拍（test_metal_composite_kernels.py）暴露了它。
+    """
+
+    @pytest.mark.parametrize(('mode', 'overlay', 'base', 'target'), [
+        # color：亮度取底图 0.388，红色超出 1
+        ('color', (1.0, 0.0, 0.0), (0.9, 0.2, 0.0), 0.388),
+        # luminosity：亮度取叠加层 0.11，绿蓝被压到负
+        ('luminosity', (0.0, 0.0, 1.0), (0.9, 0.1, 0.0), 0.11),
+        # hue：按叠加层色相重建后红略超 1
+        ('hue', (1.0, 0.0, 0.0), (0.9, 0.2, 0.0), 0.388),
+        # saturation：底图拉满饱和后蓝为负
+        ('saturation', (0.0, 0.0, 1.0), (0.9, 0.2, 0.0), 0.388),
+    ])
+    def test_the_result_keeps_the_luminosity_it_was_given(
+        self, mode: str, overlay: tuple, base: tuple, target: float,
+    ) -> None:
+        out = blend_rgb(
+            np.array([[base]], np.float32), np.array([[overlay]], np.float32), mode)
+        assert (out >= 0.0).all() and (out <= 1.0).all()
+        lum = 0.3 * out[0, 0, 0] + 0.59 * out[0, 0, 1] + 0.11 * out[0, 0, 2]
+        assert float(lum) == pytest.approx(target, abs=1e-5)
+        # color 模式按 W3C 公式逐项手算：C = (1.088, 0.088, 0.088)，x = 1.088，
+        # C = L + (C - L)·(1 - L)/(x - L) → 红 1.0，绿蓝 0.388 - 0.3·0.612/0.7
+        if mode == 'color':
+            low = 0.388 - (0.388 - 0.088) * (1.0 - 0.388) / (1.088 - 0.388)
+            np.testing.assert_allclose(out[0, 0], [1.0, low, low], atol=1e-5)

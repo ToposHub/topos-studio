@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import QMainWindow
 
 from PyQt6.QtWidgets import (QFileDialog, QMessageBox, QInputDialog,
                              QDialog)
-from PyQt6.QtCore import QByteArray, QTimer, QObject, QEvent, QRunnable, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QByteArray, QTimer, QObject, QEvent, QRunnable, QThreadPool, Qt, pyqtSignal
 
 from src.features.color.core.layer import Layer
 from src.features.edit.core.playback_debug import playback_trace
@@ -272,6 +272,94 @@ logger = logging.getLogger(__name__)
 # P1-THREAD-01：stop() 超时后仍存活的 GPU/QThread 对象引用，推迟到进程
 # 退出回收，防止 GC 在线程存活期间析构 QThread 触发进程 Abort。
 _LEAKED_GPU_OBJECTS: list = []
+
+
+def _watch_native_viewport_request(widget: QObject, renderer: QObject) -> bool:
+    deferred = getattr(renderer, "native_viewport_deferred", None)
+    if not callable(deferred) or not deferred():
+        return False
+    renderer.native_viewport_attach_requested.connect(
+        widget.attach_requested_native_viewport, Qt.ConnectionType.QueuedConnection)
+    return True
+
+
+def _set_native_viewport_candidate(widget: QObject | None, renderer: QObject | None) -> None:
+    setter = getattr(widget, "set_native_viewport_candidate", None)
+    if callable(setter):
+        setter(renderer)
+
+
+def _enable_native_program_viewport(host, gpu_renderer) -> None:
+    """Enable native presentation when the first compatible frame arrives.
+
+    Metal 迁移 2.1–2.3：合格的帧直接呈现到 CAMetalLayer，显式请求可提前挂载。
+    平台、格式和挂载失败时由兼容视口显示。模块级函数：``host`` 可以是任何持有
+    ``program_viewer_widget`` 的控制器（含测试宿主）。
+    """
+    widget = getattr(host, "program_viewer_widget", None)
+    enable = getattr(widget, "enable_native_viewport", None)
+    opted_in = getattr(gpu_renderer, "native_viewport_opted_in", None)
+    if not callable(enable) or not callable(opted_in) or not opted_in():
+        _set_native_viewport_candidate(widget, None)
+        return
+    try:
+        _set_native_viewport_candidate(widget, gpu_renderer)
+        if _watch_native_viewport_request(widget, gpu_renderer):
+            return
+        enabled = bool(enable(gpu_renderer))
+    except Exception:  # noqa: BLE001 - a refusal must leave the GL viewer intact
+        logger.exception("Program Viewer: native viewport could not be enabled; using OpenGL")
+        return
+    if enabled:
+        logger.info("Program Viewer: native Metal viewport enabled")
+
+
+def _disable_native_program_viewport(host) -> None:
+    """Take the Metal layer back while the render thread can still confirm."""
+    widget = getattr(host, "program_viewer_widget", None)
+    _set_native_viewport_candidate(widget, None)
+    disable = getattr(widget, "disable_native_viewport", None)
+    enabled = getattr(widget, "native_viewport_enabled", None)
+    if not callable(disable) or not callable(enabled) or not enabled():
+        return
+    try:
+        disable()
+    except Exception:  # noqa: BLE001 - closing must go on
+        logger.exception("Program Viewer: native viewport teardown failed")
+
+
+def _enable_native_source_viewport(host, gpu_renderer) -> None:
+    """Route eligible source frames to the native Metal layer."""
+    widget = getattr(host, "source_viewer_widget", None)
+    enable = getattr(widget, "enable_native_viewport", None)
+    opted_in = getattr(gpu_renderer, "native_viewport_opted_in", None)
+    if not callable(enable) or not callable(opted_in) or not opted_in():
+        _set_native_viewport_candidate(widget, None)
+        return
+    try:
+        _set_native_viewport_candidate(widget, gpu_renderer)
+        if _watch_native_viewport_request(widget, gpu_renderer):
+            return
+        enabled = bool(enable(gpu_renderer))
+    except Exception:  # noqa: BLE001 - a refusal must leave the GL canvas intact
+        logger.exception("Source Viewer: native viewport could not be enabled; using OpenGL")
+        return
+    if enabled:
+        logger.info("Source Viewer: native Metal viewport enabled")
+
+
+def _disable_native_source_viewport(host) -> None:
+    """Take the Source Viewer's Metal layer back while its thread can confirm."""
+    widget = getattr(host, "source_viewer_widget", None)
+    _set_native_viewport_candidate(widget, None)
+    disable = getattr(widget, "disable_native_viewport", None)
+    enabled = getattr(widget, "native_viewport_enabled", None)
+    if not callable(disable) or not callable(enabled) or not enabled():
+        return
+    try:
+        disable()
+    except Exception:  # noqa: BLE001 - closing must go on
+        logger.exception("Source Viewer: native viewport teardown failed")
 
 
 def _stop_gpu_renderer_deferred(renderer, timeout_ms: int = 10000) -> None:
@@ -2895,6 +2983,9 @@ class FileOpsMixin:
             # Start the GPU render thread
             gpu_renderer.start()
 
+            # Bind before the preview renderer can submit the first frame.
+            _enable_native_program_viewport(self, gpu_renderer)
+
             # Pass to TimelinePreviewRenderer (which also connects frame_ready signal)
             self.timeline_preview_renderer.set_gpu_renderer(
                 gpu_decode_manager=gpu_decode_manager,
@@ -3018,7 +3109,9 @@ class FileOpsMixin:
             # Store reference for cleanup
             self._source_gpu_renderer = source_renderer
 
-            # Wire the provider that submits tasks to this renderer
+            _enable_native_source_viewport(self, source_renderer)
+
+            # Wire the provider that submits tasks to this renderer.
             self._setup_source_gpu_provider(gpu_decode_manager, source_renderer)
 
             logger.info("Source Viewer GPU renderer created and started")
@@ -3034,14 +3127,49 @@ class FileOpsMixin:
         VP-B02: the gate releases (acks) any pending descriptor this one
         displaces — a dropped pending must never strand its slot.
         """
+        if getattr(present, "is_native", False) is True:
+            # Metal 迁移 2.5：原生帧住在渲染线程的 Metal 槽位池里。门的 ack 不带
+            # 租约键，会把确认打到 GL 池的同号槽上，所以原生帧走这个单槽：被顶
+            # 掉的那一帧交回渲染线程归还。
+            self._stash_source_native_present(present)
+            return
         gate = getattr(self, '_source_present_gate', None)
         if gate is None:  # renderer created before this wiring existed
             self._source_pending_present = present
             return
         gate.stash(present)
 
+    def _stash_source_native_present(self, present: object) -> None:
+        """Latest-wins slot for a native Source frame (see _on_source_present_frame_ready)."""
+        previous = getattr(self, '_source_native_present', None)
+        self._source_native_present = present
+        if previous is not None and previous is not present:
+            self._release_source_native_present(previous, "superseded")
+
+    def _release_source_native_present(self, present: object, reason: str) -> None:
+        """Return a native Source frame to the render thread, which owns its slot."""
+        renderer = getattr(self, '_source_gpu_renderer', None)
+        release = getattr(renderer, 'release_native_frame', None)
+        if callable(release):
+            release(present, f"source_{reason}")
+
     def _on_source_gpu_frame_ready(self, frame: int, generation: int, tex_id: int, w: int, h: int) -> None:
         """Handle GPU-rendered frame for Source Viewer."""
+        if getattr(self, '_source_native_present', None) is not None:
+            # present_frame_ready always precedes frame_ready of the same task
+            # on the same thread: a native descriptor that is not this frame's
+            # has been superseded.
+            present, self._source_native_present = self._source_native_present, None
+            widget = self.source_viewer_widget
+            if (widget is not None
+                    and int(getattr(present, 'frame', -1)) == int(frame)
+                    and int(getattr(present, 'generation_id', -1)) == int(generation)):
+                try:
+                    widget.set_native_gpu_frame(present, frame=frame, generation=generation)
+                except RuntimeError:
+                    self._release_source_native_present(present, "widget_gone")
+                return
+            self._release_source_native_present(present, "unpaired")
         gate = getattr(self, '_source_present_gate', None)
         if gate is None:
             return
@@ -7813,6 +7941,7 @@ class FileOpsMixin:
         # In test_mode, only clean up essential resources (no panels were created)
         if getattr(self, '_test_mode', False):
             # Stop engine worker threads to prevent crash during GC
+            _disable_native_program_viewport(self)
             if hasattr(self, 'engine') and self.engine:
                 if hasattr(self.engine, 'renderer') and self.engine.renderer:
                     _stop_gpu_renderer_deferred(self.engine.renderer)
@@ -7836,6 +7965,7 @@ class FileOpsMixin:
                     self._source_decode_worker.stop()
                 except Exception:
                     pass
+            _disable_native_source_viewport(self)
             if hasattr(self, '_source_gpu_renderer') and self._source_gpu_renderer is not None:
                 _stop_gpu_renderer_deferred(self._source_gpu_renderer, 1000)
             QMainWindow.closeEvent(self, event)
@@ -7847,6 +7977,10 @@ class FileOpsMixin:
         if not self._confirm_save_before_close():
             event.ignore()
             return
+
+        # Metal 迁移 2.1–2.3：原生视口先于一切线程收回。握手需要预览渲染
+        # 线程仍在轮询，所以放在保存确认之后、第一个线程停止之前。
+        _disable_native_program_viewport(self)
 
         # AudioPlaybackManager is parented below EditPage and contains live
         # QThread children (playback + scrub preview).  Join them explicitly
@@ -7878,6 +8012,8 @@ class FileOpsMixin:
             except AttributeError:
                 pass  # widget without the B11 entry point
 
+        # Source 的原生视口先于 Source 线程收回（握手需要其渲染线程仍在轮询）。
+        _disable_native_source_viewport(self)
         # Stop Source decode worker thread, then the GPU renderer thread
         if hasattr(self, '_source_decode_worker') and self._source_decode_worker is not None:
             try:

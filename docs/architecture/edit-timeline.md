@@ -73,7 +73,18 @@ Edit 页面的时间线子系统遵循"**不可变模型 + 命令模式 + 提交
 
 ### macOS Metal 预览
 
-自动模式优先以 Metal 预览符合条件的单 LUT 视频。条件为单层、不透明、无有效裁切、变换和视频效果的 BT.709 限幅 NV12。选择 Metal 或设置 `TOPOS_EDIT_METAL_PREVIEW=1` 也会覆盖符合条件的无调色视频。渲染线程使用 Metal 将 VideoToolbox 帧按预览尺寸写入共享 BGRA IOSurface，再拷贝到 Program Viewer 的 OpenGL 呈现槽。槽位确认与 GPU fence 负责回收共享纹理，音频时钟与画面队列沿用已有播放调度。其他画面和 Metal 设备或共享纹理导入不可用的场景由常规路径处理。`TOPOS_EDIT_METAL_PREVIEW=0` 可关闭此路径。
+macOS 的图形 `auto` 与 `metal` 优先尝试 Metal。Program Viewer 与 Source Viewer 在首帧满足能力判定后
+挂载原生窗口图层，由 `CAMetalLayer` 呈现。显示回调记录实际呈现，GPU 完成事件单独决定纹理租约何时归还。
+视口关闭时由渲染线程异步等待已提交的读取，GUI 继续处理事件。Qt 的逻辑尺寸用于画面和交互定位，Metal
+drawable 独立使用物理像素。音频时钟、代际和拖动令牌沿用原有播放调度。
+
+单层 NV12 可直接写入 Metal 呈现槽。`build_metal_composite_plan()` 为每帧判定多层、多来源和效果能力。
+已支持 SDR NV12、符合条件的三平面 YUV（包括 10-bit DNxHR HQX）及纯色层，可带变换、裁切、不透明度、
+混合模式、单 LUT 或受支持的串联静态一级调色。交叉溶解按两层透明度合成，`dip_to_color` 使用同一计划。
+字幕在窗口叠加层绘制。高级色彩图、插件效果、合成片段、空间转场和不支持的格式使用原有兼容渲染器。
+
+`TOPOS_EDIT_METAL_VIEWPORT=0` 保留 OpenGL 呈现，仍可用共享 BGRA IOSurface 消费已接通的 Metal 渲染。
+`TOPOS_EDIT_METAL_PREVIEW=lut` 仅测试单 LUT，`TOPOS_EDIT_METAL_PREVIEW=0` 或选 OpenGL 回到原预览链路。
 
 ---
 

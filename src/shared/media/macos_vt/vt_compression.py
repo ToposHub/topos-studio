@@ -15,14 +15,20 @@ from __future__ import annotations
 
 import ctypes as _ctypes
 import logging
+import math
+import numbers
 import platform
 import threading
 import time
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Any, Callable, Optional
+from math import lcm
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 from src.shared.export.gpu_encode_surface import GpuEncodeSurface
+
+if TYPE_CHECKING:
+    from src.shared.media.metadata import Rational
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +38,111 @@ _H264_PROFILE_LEVELS = {
     "main": "H264_Main_AutoLevel",
     "high": "H264_High_AutoLevel",
 }
+# CMTime.timescale and FFmpeg's AVRational are int32 fields.
+_MAX_TIMESCALE = (1 << 31) - 1
+_DEFAULT_FRAME_RATE = Fraction(30)
+
+# An exact frame rate: an integer, a ``Fraction``, or the plan-side rational
+# (``Rational`` with ``num``/``den``).
+FrameRate = Union[int, Fraction, "Rational"]
 
 
 class VideoToolboxCompressionError(RuntimeError):
     """A native VideoToolbox compression operation failed."""
+
+
+def coerce_frame_rate(value: FrameRate) -> Fraction:
+    """Return one exact positive frame rate in frames per second.
+
+    Fractional rates such as 30000/1001 stay exact.  An integral ``float`` is
+    accepted for convenience, but a non-integral one is rejected rather than
+    truncated into a different frame rate.
+    """
+    if isinstance(value, Fraction):
+        rate = value
+    elif isinstance(value, bool):
+        # ``bool`` is an Integral and a Real; ``True`` is not "1 fps".
+        raise VideoToolboxCompressionError(
+            f"videotoolbox_frame_rate_unsupported:{value!r}")
+    elif isinstance(value, numbers.Integral):
+        rate = Fraction(int(value))
+    elif isinstance(value, numbers.Real):
+        number = float(value)
+        if not math.isfinite(number) or not number.is_integer():
+            raise VideoToolboxCompressionError(
+                f"videotoolbox_frame_rate_not_exact:{value!r}")
+        rate = Fraction(int(number))
+    else:
+        try:
+            rate = Fraction(int(getattr(value, "num")), int(getattr(value, "den")))
+        except (AttributeError, TypeError, ValueError, ZeroDivisionError,
+                OverflowError) as exc:
+            raise VideoToolboxCompressionError(
+                f"videotoolbox_frame_rate_unsupported:{value!r}") from exc
+    if rate <= 0 or rate.numerator > _MAX_TIMESCALE:
+        raise VideoToolboxCompressionError(
+            f"videotoolbox_frame_rate_unsupported:{value!r}")
+    return rate
+
+
+def _cm_time_base(rate: Fraction) -> tuple[int, int]:
+    """Return ``(timescale, frame_ticks)`` for one exact frame rate.
+
+    ``timescale`` is the reduced numerator and each frame lasts ``frame_ticks``
+    ticks, so frame ``n`` sits at exactly ``n * frame_ticks / timescale``
+    seconds: 25 fps keeps the historical timescale 25, while 30000/1001 uses
+    timescale 30000 with 1001 ticks per frame.
+    """
+    return rate.numerator, rate.denominator
+
+
+def rescale_coremedia_timing(
+    packet: "VideoToolboxEncodedPacket",
+    fallback_frame_rate: FrameRate,
+) -> tuple[Fraction, Optional[int], Optional[int], Optional[int]]:
+    """Move PTS, DTS and duration from their own timescales into one time base.
+
+    Returns ``(time_base, pts, dts, duration)``.  The three values are exact
+    integer ticks of ``time_base``; a component whose CoreMedia time was
+    invalid stays ``None``.  Each value is scaled by its own timescale.  A
+    component without a dedicated timescale falls back to the packet's shared
+    timescale and then to the frame-rate timescale, so packets built before
+    per-component timescales existed keep their meaning.  The common base is
+    the least common multiple of the timescales in use, which is the single
+    packet timescale for everything VideoToolbox emits today.
+    """
+    shared = packet.timescale or coerce_frame_rate(fallback_frame_rate).numerator
+    components: tuple[tuple[Optional[int], int], ...] = (
+        (packet.pts, packet.timescale or shared),
+        (packet.dts, packet.dts_timescale or shared),
+        (packet.duration, packet.duration_timescale or shared),
+    )
+    stamps: list[tuple[int, int]] = []
+    scales: set[int] = set()
+    for value, scale in components:
+        if value is None:
+            continue
+        scale = int(scale)
+        if scale <= 0 or scale > _MAX_TIMESCALE:
+            raise VideoToolboxCompressionError(
+                f"videotoolbox_packet_timescale_invalid:{scale}")
+        scales.add(scale)
+        stamps.append((int(value), scale))
+    unified = lcm(*sorted(scales)) if scales else int(shared)
+    if unified <= 0 or unified > _MAX_TIMESCALE:
+        raise VideoToolboxCompressionError(
+            "videotoolbox_packet_time_base_unrepresentable:"
+            f"{sorted(scales)}")
+    index = 0
+    converted: list[Optional[int]] = []
+    for value, _scale in components:
+        if value is not None:
+            stamp_value, stamp_scale = stamps[index]
+            index += 1
+            converted.append(stamp_value * (unified // stamp_scale))
+        else:
+            converted.append(None)
+    return Fraction(1, unified), converted[0], converted[1], converted[2]
 
 
 class _CMTime(_ctypes.Structure):
@@ -56,12 +163,19 @@ class VideoToolboxEncodedPacket:
     pts: int | None
     dts: int | None
     duration: int | None
+    # ``timescale`` is the CoreMedia timescale of ``pts`` (or of ``duration``
+    # when the PTS was invalid) and is kept for packet sinks built before
+    # per-component timescales existed.  ``dts_timescale`` and
+    # ``duration_timescale`` carry each component's own CoreMedia timescale
+    # so the muxer can convert them independently.
     timescale: int | None
     keyframe: bool
     parameter_sets: tuple[bytes, ...] = ()
     nal_unit_length_size: int = 4
     encode_info_flags: int = 0
     submission_id: int = 0
+    dts_timescale: int | None = None
+    duration_timescale: int | None = None
 
 
 _VT_COMPRESSION_CALLBACK = _ctypes.CFUNCTYPE(
@@ -376,7 +490,7 @@ class VideoToolboxCompressionSession:
         width: int,
         height: int,
         codec: str = "h264",
-        fps: int = 30,
+        fps: FrameRate = 30,
         pixel_format: str = "nv12",
         on_packet: Optional[Callable[[VideoToolboxEncodedPacket], Any]] = None,
         require_hardware: bool = True,
@@ -407,7 +521,11 @@ class VideoToolboxCompressionSession:
         if bit_rate is not None and (type(bit_rate) is not int or not 0 < bit_rate < 1 << 63):
             raise VideoToolboxCompressionError("videotoolbox_invalid_average_bit_rate")
         self._bt709_limited = bt709_limited
-        self.fps = max(1, int(fps))
+        # Exact frame rate. CoreMedia timestamps use the reduced numerator as
+        # their timescale and the denominator as the tick count of one frame,
+        # so 30000/1001 keeps 1001-tick frames instead of being truncated to
+        # an integer rate that drifts against the audio clock.
+        self.fps = coerce_frame_rate(fps)
         self._on_packet = on_packet
         # _lock 保护 Python 状态（_pending/_closed/_last_error）；
         # _session_lock 保护原生会话指针的检查-使用-Invalidate 生命周期。
@@ -579,11 +697,15 @@ class VideoToolboxCompressionSession:
             submission_id = self._next_submission_id
             self._next_submission_id += 1
             self._pending[submission_id] = surface
+            rate = coerce_frame_rate(getattr(self, "fps", _DEFAULT_FRAME_RATE))
+            timescale, frame_ticks = _cm_time_base(rate)
             pts = descriptor.pts if descriptor.pts is not None else descriptor.frame_index
             pts = int(pts if pts is not None and pts >= 0 else submission_id - 1)
+            pts *= frame_ticks
             duration = descriptor.duration_seconds
             duration_ticks = (
-                max(1, int(round(float(duration) * self.fps))) if duration else 1
+                max(1, int(round(Fraction(float(duration)) * rate)))
+                if duration else frame_ticks
             )
         info_flags = _ctypes.c_uint32()
         # AUD-35206：会话指针的检查与 EncodeFrame 必须在同一 _session_lock
@@ -598,8 +720,8 @@ class VideoToolboxCompressionSession:
                 status = _VT_LIB.VTCompressionSessionEncodeFrame(
                     session,
                     _native_pointer(surface.native_handle),
-                    _CMTime(pts, self.fps, 1, 0),
-                    _CMTime(duration_ticks, self.fps, 1, 0),
+                    _CMTime(pts, timescale, 1, 0),
+                    _CMTime(duration_ticks, timescale, 1, 0),
                     None,
                     _ctypes.c_void_p(submission_id),
                     _ctypes.byref(info_flags),
@@ -628,10 +750,12 @@ class VideoToolboxCompressionSession:
             session = self._session
             if not session.value:
                 return
+            timescale, _frame_ticks = _cm_time_base(coerce_frame_rate(
+                getattr(self, "fps", _DEFAULT_FRAME_RATE)))
             status = _VT_LIB.VTCompressionSessionCompleteFrames(
                 session,
                 # A valid, very large CMTime means complete all frames up to it.
-                _CMTime((1 << 62), self.fps, 1, 0),
+                _CMTime((1 << 62), timescale, 1, 0),
             )
         if int(status) != 0:
             raise VideoToolboxCompressionError(
@@ -775,7 +899,7 @@ class VideoToolboxCompressionSession:
                 _ctypes.c_void_p(sample_buffer)
             )
         )
-        dts, _ = _time_value(
+        dts, dts_timescale = _time_value(
             _CM_LIB.CMSampleBufferGetDecodeTimeStamp(
                 _ctypes.c_void_p(sample_buffer)
             )
@@ -804,6 +928,8 @@ class VideoToolboxCompressionSession:
             nal_unit_length_size=nal_length_size,
             encode_info_flags=int(info_flags),
             submission_id=submission_id,
+            dts_timescale=dts_timescale,
+            duration_timescale=duration_timescale,
         )
 
     def __enter__(self) -> "VideoToolboxCompressionSession":
@@ -827,6 +953,14 @@ class VideoToolboxPacketMuxer:
     configuration record and accepts those packets directly.  This class
     never receives a pixel plane.  Audio is accepted through the same PyAV
     container boundary before the first video packet is muxed.
+
+    ``fps`` is exact: an integer, a ``Fraction``, or the plan-side rational.
+    CoreMedia PTS, DTS and duration are each converted from their own
+    timescale into one packet time base before the muxer rescales them to the
+    track timescale, so 24000/1001 and 30000/1001 timelines keep their frame
+    spacing without end-of-file drift. Audio frames carry cumulative
+    sample-count PTS at ``1 / sample_rate``, which lets the container write
+    the AAC priming edit list exactly like the regular software encoder.
     """
 
     supports_audio = True
@@ -837,7 +971,7 @@ class VideoToolboxPacketMuxer:
         *,
         width: int,
         height: int,
-        fps: int = 30,
+        fps: FrameRate = 30,
         codec: str = "h264",
         pixel_format: str = "nv12",
         container_format: str | None = None,
@@ -850,12 +984,13 @@ class VideoToolboxPacketMuxer:
             )
         # AUD-35207：pixel_format 校验前移到 av.open 之前。此前先开容器、
         # add_stream 之后才校验，失败路径既不关容器也不删半成品输出文件，
-        # 泄漏容器与文件句柄。
+        # 泄漏容器与文件句柄。帧率同理：非法帧率不得先建容器再失败。
         normalized_pixel_format = str(pixel_format).strip().lower()
         if normalized_pixel_format not in {"nv12", "p010"}:
             raise VideoToolboxCompressionError(
                 f"videotoolbox_packet_pixel_format_unsupported:{pixel_format}"
             )
+        frame_rate = coerce_frame_rate(fps)
         try:
             import av
         except ImportError as exc:  # pragma: no cover - project dependency guard
@@ -871,9 +1006,9 @@ class VideoToolboxPacketMuxer:
         try:
             self._stream = self._container.add_stream(
                 f"{normalized}_videotoolbox",
-                rate=Fraction(max(1, int(fps)), 1),
+                rate=frame_rate,
             )
-            self._fps = max(1, int(fps))
+            self._fps = frame_rate
             self._stream.width = int(width)
             self._stream.height = int(height)
             self._stream.pix_fmt = (
@@ -894,6 +1029,12 @@ class VideoToolboxPacketMuxer:
         self._closed = False
         self._configured = False
         self._audio_stream = None
+        self._audio_layout_name = ""
+        self._audio_channels = 0
+        self._audio_sample_rate = 0
+        self._audio_samples_written = 0
+        self._audio_packets_muxed = 0
+        self._audio_required = False
         self._has_muxed_packet = False
         self.packet_count = 0
 
@@ -930,15 +1071,14 @@ class VideoToolboxPacketMuxer:
             payload = packet.data
             import av
 
+            time_base, pts, dts, duration = rescale_coremedia_timing(
+                packet, self._fps)
             output_packet = av.Packet(payload)
             output_packet.stream = self._stream
-            output_packet.pts = packet.pts
-            output_packet.dts = packet.dts
-            output_packet.duration = packet.duration
-            output_packet.time_base = Fraction(
-                1,
-                packet.timescale or self._fps,
-            )
+            output_packet.pts = pts
+            output_packet.dts = dts
+            output_packet.duration = duration
+            output_packet.time_base = time_base
             output_packet.is_keyframe = packet.keyframe
             self._container.mux(output_packet)
             self._has_muxed_packet = True
@@ -950,8 +1090,15 @@ class VideoToolboxPacketMuxer:
         sample_rate: int = 48000,
         channels: int = 2,
         bitrate: int | None = None,
+        *,
+        required: bool = False,
     ) -> None:
-        """Add the TimelineExporter audio stream before video packets arrive."""
+        """Add the TimelineExporter audio stream before video packets arrive.
+
+        ``required`` marks a delivery that must not be published without this
+        track: :meth:`close` then refuses to finalize when no audio sample
+        reached the container.
+        """
         with self._lock:
             if self._closed:
                 raise VideoToolboxCompressionError("videotoolbox_muxer_closed")
@@ -961,31 +1108,54 @@ class VideoToolboxPacketMuxer:
                 )
             if self._audio_stream is not None:
                 raise VideoToolboxCompressionError("audio_stream_already_added")
-            stream = self._container.add_stream(
-                str(codec), rate=max(1, int(sample_rate))
-            )
+            sample_rate = max(1, int(sample_rate))
+            channels = int(channels)
+            if channels < 1:
+                raise VideoToolboxCompressionError(
+                    f"videotoolbox_audio_channel_count_invalid:{channels}")
+            stream = self._container.add_stream(str(codec), rate=sample_rate)
             try:
                 from src.features.edit.core.channel_layout import ChannelLayout
 
-                stream.layout = ChannelLayout.from_channel_count(
-                    int(channels)
-                ).av_layout_name
+                layout = ChannelLayout.from_channel_count(channels).av_layout_name
             except (ImportError, ValueError):
-                stream.layout = (
-                    "stereo" if int(channels) == 2
-                    else "mono" if int(channels) == 1
-                    else f"{int(channels)}c"
+                layout = (
+                    "stereo" if channels == 2
+                    else "mono" if channels == 1
+                    else f"{channels}c"
                 )
+            stream.layout = layout
             if bitrate:
-                stream.options = {"b:a": f"{int(bitrate)}k"}
+                # AUD-33505: the AVOption name is ``b``. The CLI spelling
+                # ``b:a`` carries a stream specifier that avcodec_open2
+                # ignores, which silently left AAC at the encoder default.
+                stream.options = {"b": f"{int(bitrate)}k"}
             self._audio_stream = stream
+            self._audio_layout_name = layout
+            self._audio_channels = channels
+            self._audio_sample_rate = sample_rate
+            self._audio_samples_written = 0
+            self._audio_packets_muxed = 0
+            self._audio_required = bool(required)
 
     def write_audio_samples(
         self,
         samples: Any,
         sample_rate: int = 48000,
-    ) -> None:
-        """Encode and mux float-planar audio samples beside VT video packets."""
+    ) -> int:
+        """Encode and mux float-planar audio samples beside VT video packets.
+
+        ``samples`` is ``(channels, samples)`` (or 1-D for a mono stream) at
+        the rate and channel count declared by :meth:`add_audio_stream`. The
+        stream's declared layout names the channel order, so the planes keep
+        the regular exporter's ordering. Every 1024-sample frame is stamped
+        with the cumulative sample offset at ``1 / sample_rate``; the AAC
+        priming therefore lands in a container edit list instead of delaying
+        the programme by one frame.
+
+        Returns the next free sample offset, which is the ``start_sample`` of
+        a following call.
+        """
         import av
         import numpy as np
 
@@ -994,31 +1164,52 @@ class VideoToolboxPacketMuxer:
                 raise VideoToolboxCompressionError("videotoolbox_muxer_closed")
             if self._audio_stream is None:
                 raise VideoToolboxCompressionError("audio_stream_not_configured")
+            if int(sample_rate) != self._audio_sample_rate:
+                raise VideoToolboxCompressionError(
+                    "videotoolbox_audio_sample_rate_mismatch:"
+                    f"{sample_rate}!={self._audio_sample_rate}")
             array = np.asarray(samples)
             if array.ndim == 1:
                 array = array.reshape(1, -1)
             if array.ndim != 2 or array.shape[0] < 1:
                 raise ValueError("audio samples must be a 1D or 2D array")
+            if int(array.shape[0]) != self._audio_channels:
+                raise VideoToolboxCompressionError(
+                    "videotoolbox_audio_channel_mismatch:"
+                    f"{array.shape[0]}!={self._audio_channels}")
             array = np.ascontiguousarray(array, dtype=np.float32)
-            channels = int(array.shape[0])
-            layout = (
-                "stereo" if channels == 2
-                else "mono" if channels == 1
-                else f"{channels}c"
-            )
-            for start in range(0, int(array.shape[1]), 1024):
-                block = array[:, start:start + 1024]
+            time_base = Fraction(1, self._audio_sample_rate)
+            start_sample = self._audio_samples_written
+            for offset in range(0, int(array.shape[1]), 1024):
+                block = array[:, offset:offset + 1024]
                 frame = av.AudioFrame.from_ndarray(
-                    block, format="fltp", layout=layout
+                    block, format="fltp", layout=self._audio_layout_name
                 )
-                frame.sample_rate = max(1, int(sample_rate))
+                frame.sample_rate = self._audio_sample_rate
+                frame.time_base = time_base
+                frame.pts = start_sample + offset
                 for packet in self._audio_stream.encode(frame):
                     self._container.mux(packet)
+                    self._audio_packets_muxed += 1
+            self._audio_samples_written = start_sample + int(array.shape[1])
+            return self._audio_samples_written
 
     @property
     def audio_stream_configured(self) -> bool:
         with self._lock:
             return self._audio_stream is not None
+
+    @property
+    def audio_samples_written(self) -> int:
+        """Cumulative sample offset fed to the audio encoder."""
+        with self._lock:
+            return self._audio_samples_written
+
+    @property
+    def audio_packets_muxed(self) -> int:
+        """Number of encoded audio packets that reached the container."""
+        with self._lock:
+            return self._audio_packets_muxed
 
     def close(self) -> None:
         self._close_container(flush_audio=True)
@@ -1035,6 +1226,13 @@ class VideoToolboxPacketMuxer:
                 if flush_audio and self._audio_stream is not None:
                     for packet in self._audio_stream.encode(None):
                         self._container.mux(packet)
+                        self._audio_packets_muxed += 1
+                    if self._audio_required and self._audio_packets_muxed == 0:
+                        # A delivery that asked for this track is not finalized
+                        # without it. Checked after the drain so an encoder that
+                        # produced no packet counts as a missing track as well.
+                        raise VideoToolboxCompressionError(
+                            "videotoolbox_audio_track_missing")
             finally:
                 self._container.close()
 
@@ -1046,8 +1244,11 @@ class VideoToolboxPacketMuxer:
 
 
 __all__ = [
+    "FrameRate",
     "VideoToolboxCompressionError",
     "VideoToolboxCompressionSession",
     "VideoToolboxEncodedPacket",
     "VideoToolboxPacketMuxer",
+    "coerce_frame_rate",
+    "rescale_coremedia_timing",
 ]

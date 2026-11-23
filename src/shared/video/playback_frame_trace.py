@@ -46,6 +46,7 @@ from typing import Deque, Dict, List, Any, Optional
 
 from src.shared.video.frame_trace_schema import (
     FRAME_TRACE_SCHEMA_VERSION,
+    GRAPHICS_BACKENDS,
     PRESENT_STATUSES,
     READBACK_KINDS,
     STAGE_VALIDITY_STATES as _STAGE_VALIDITY_TUPLE,
@@ -97,7 +98,7 @@ _ANNOTATE_FIELD_WHITELIST: frozenset = frozenset({
     'cpu_upload_bytes', 'cpu_download_bytes', 'surface_map_bytes',
     'texture_write_bytes', 'cross_device_copy_bytes',
     'import_upload_ms', 'import_upload_status',
-    'decode_path', 'render_path',
+    'decode_path', 'render_path', 'backend',
     'decode_layers', 'transition_layers',
     'gpu_submit_ms', 'gpu_time_unavailable',
     'present_status', 'present_slot_id', 'present_submitted_mono',
@@ -384,12 +385,14 @@ class FrameTraceCollector:
                 f"annotate(): unknown field(s) {unknown}; "
                 f"whitelist={sorted(_ANNOTATE_FIELD_WHITELIST)}"
             )
-        for key in ("present_status", "readback_kind", "import_upload_status"):
+        for key in ("present_status", "readback_kind", "import_upload_status",
+                    "backend"):
             value = fields.get(key)
             if value:
                 vocab = {"present_status": PRESENT_STATUSES,
                          "readback_kind": READBACK_KINDS,
-                         "import_upload_status": _STAGE_VALIDITY_TUPLE}[key]
+                         "import_upload_status": _STAGE_VALIDITY_TUPLE,
+                         "backend": GRAPHICS_BACKENDS}[key]
                 if value not in vocab:
                     raise ValueError(
                         f"annotate(): {key}={value!r} not in vocabulary {vocab}"
@@ -480,6 +483,10 @@ class FrameTraceCollector:
                 # A0.1：空会话也保持新分节键形状一致
                 'present_status_counts': {},
                 'readback_kind_counts': {},
+                # 实际渲染后端分布（opengl / metal / cpu）
+                'backend_counts': {},
+                # 实际呈现面（gl_viewer / native_metal）
+                'present_path_counts': {},
                 'annotate': {'merged': 0, 'missed': 0},
                 'import_upload_coverage': {
                     'measured_frames': 0, 'not_applicable_frames': 0,
@@ -517,6 +524,22 @@ class FrameTraceCollector:
                 if t.render_path:
                     render_paths[t.render_path] = render_paths.get(t.render_path, 0) + 1
 
+            # 实际渲染后端分布。入队时的值只反映"有没有 GPU 渲染器"；Metal
+            # 预览快路等按帧选择的后端由 present descriptor 迟到标注，只有
+            # 这里的计数能证明一帧实际由谁渲染。
+            backend_counts: Dict[str, int] = {}
+            for t in traces:
+                if t.backend:
+                    backend_counts[t.backend] = backend_counts.get(t.backend, 0) + 1
+
+            # 实际呈现面。Metal 计算的帧既可以经 IOSurface 落回 GL 槽位上屏，
+            # 也可以直接进 CAMetalLayer；只有这里能证明一帧是从哪个面出去的。
+            present_path_counts: Dict[str, int] = {}
+            for t in traces:
+                path = t.extra.get('present_path') if isinstance(t.extra, dict) else None
+                if path:
+                    present_path_counts[str(path)] = present_path_counts.get(str(path), 0) + 1
+
             # 性能统计
             decode_times = [t.decode_ms for t in traces if t.decode_ms > 0]
             render_times = [t.render_ms for t in traces if t.render_ms > 0]
@@ -536,6 +559,8 @@ class FrameTraceCollector:
                 'fallback_reasons': fallback_reasons,
                 'decode_path_counts': decode_paths,
                 'render_path_counts': render_paths,
+                'backend_counts': backend_counts,
+                'present_path_counts': present_path_counts,
                 'decode_avg_ms': sum(decode_times) / len(decode_times) if decode_times else 0.0,
                 'render_avg_ms': sum(render_times) / len(render_times) if render_times else 0.0,
                 'total_avg_ms': sum(total_times) / len(total_times) if total_times else 0.0,

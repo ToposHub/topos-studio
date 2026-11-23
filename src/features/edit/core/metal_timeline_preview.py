@@ -1,4 +1,15 @@
-"""Metal conversion for SDR timeline previews presented through the GL slot pool."""
+"""Metal conversion for SDR timeline previews presented through the GL slot pool.
+
+Two kinds of frame leave this class, both into an IOSurface the GL viewer
+blits (:meth:`render`, :meth:`render_composite`) or straight into a native
+present slot (:meth:`encode_native`, :meth:`encode_composite_native`):
+
+* one untouched VideoToolbox clip, optionally with a single LUT — the fused
+  one-pass kernels below;
+* a composite of several layers (plan task 2.6) — :class:`MetalEditCompositor`
+  reproduces the GL per-track passes; see ``metal_edit_compositor.py`` for
+  which frames qualify.
+"""
 
 from __future__ import annotations
 
@@ -7,12 +18,17 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
 import numpy as np
 
 from src.features.color.core.cache_manager import CacheTier, LRUCache
 from src.features.color.core.shader_nodes_msl import MSL_LUT3D
+from src.features.edit.core.metal_edit_compositor import (
+    MetalCompositeError,
+    MetalCompositePlan,
+    MetalEditCompositor,
+)
 from src.shared.media.gpu_frame import GpuFrameRelease
 
 
@@ -87,6 +103,10 @@ def metal_preview_mode() -> Literal["off", "lut", "all"]:
     """Resolve which eligible frames an Edit preview worker sends to Metal."""
     if sys.platform != "darwin":
         return "off"
+    from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+
+    if feature_disabled(MetalFeature.EDIT_PREVIEW):
+        return "off"
     override = os.getenv("TOPOS_EDIT_METAL_PREVIEW", "").strip().lower()
     if override in {"0", "false", "off", "no"}:
         return "off"
@@ -95,9 +115,23 @@ def metal_preview_mode() -> Literal["off", "lut", "all"]:
         from src.shared.config.config_manager import ConfigManager
 
         graphics = ConfigManager().get_backend_selection().graphics.value
-    if graphics == "metal" or (graphics == "auto" and override in {"1", "true", "on", "yes"}):
-        return "all"
-    return "lut" if graphics == "auto" else "off"
+    if graphics not in {"auto", "metal"}:
+        return "off"
+    return "lut" if override == "lut" else "all"
+
+
+def native_viewport_mode() -> Literal["off", "deferred", "eager"]:
+    """Prepare the native viewer when an eligible edit frame first arrives."""
+    from src.shared.gpu.metal.feature_switches import MetalFeature, feature_disabled
+
+    override = os.getenv("TOPOS_EDIT_METAL_VIEWPORT", "").strip().lower()
+    if (override in {"0", "false", "off", "no"}
+            or feature_disabled(MetalFeature.NATIVE_VIEWPORT)
+            or metal_preview_mode() == "off"):
+        return "off"
+    if override in {"1", "true", "on", "yes"}:
+        return "eager"
+    return "deferred"
 
 
 @dataclass
@@ -128,6 +162,7 @@ class MetalTimelinePreview:
         self._lut_textures: LRUCache[Any] = LRUCache(
             16, CacheTier.GPU_TEXTURE, max_bytes=32 * 1024 * 1024)
         self._lut_strength: tuple[float, Any] | None = None
+        self._compositor = MetalEditCompositor(self._metal, self._prepare_lut)
         self._program = self._gl.program(vertex_shader=_PRESENT_VERTEX_SHADER,
                                          fragment_shader=_PRESENT_FRAGMENT_SHADER)
         try:
@@ -139,6 +174,11 @@ class MetalTimelinePreview:
     @property
     def last_gpu_time_ms(self) -> float | None:
         return self._metal.last_gpu_time_ms
+
+    @property
+    def metal_context(self) -> Any:
+        """The MetalComputeContext every preview kernel is dispatched on."""
+        return self._metal
 
     def _allocate(self, size: tuple[int, int]) -> _SharedPreviewSurface:
         import Metal
@@ -232,41 +272,123 @@ class MetalTimelinePreview:
                 np.asarray([strength], dtype=np.float32)))
         return texture, self._lut_strength[1]
 
-    def render(
-        self, vt_frame: Any, size: tuple[int, int], *, lut: tuple[str, float] | None = None,
-    ) -> tuple[_SharedPreviewSurface, GpuFrameRelease] | None:
-        """Render into a free IOSurface, leaving ownership of the VT frame to the caller."""
+    def _import_source(self, vt_frame: Any) -> tuple[tuple[Any, Any], GpuFrameRelease] | None:
+        """Import a VT frame's planes; the caller owns the returned lease."""
         if not self._bridge.initialize():
-            reason = self._bridge.last_fallback_reason() or "CVMetalTextureCache is unavailable"
+            reason = self._bridge.last_fallback_reason or "CVMetalTextureCache is unavailable"
             raise RuntimeError(f"Metal preview source import unavailable ({reason})")
-        slot = self._acquire(size)
-        if slot is None:
-            return None
         source = self._bridge.import_pixel_buffer(vt_frame.pixel_buffer, vt_frame.frame_index)
         if source is None:
             # One source could be ineligible for this bridge. Preserve the
             # caller's VT frame so the ordinary GL import can still consume it.
             return None
-        (y_plane, uv_plane), source_lease = source
+        return source
+
+    def _encode(
+        self, y_plane: Any, uv_plane: Any, output: Any, size: tuple[int, int],
+        *, lut: tuple[str, float] | None,
+    ) -> None:
+        """Encode NV12 -> BGRA into ``output``; leaves submitting to the caller."""
+        kernel = self._kernel
+        buffers = None
+        textures = {0: y_plane, 1: uv_plane, 2: output}
+        if lut is not None:
+            textures[3], strength = self._prepare_lut(*lut)
+            buffers = {0: strength}
+            if self._lut_kernel is None:
+                self._lut_kernel = self._metal.compile_kernel("edit_preview_nv12_lut", _NV12_PREVIEW_MSL)
+            kernel = self._lut_kernel
+        self._metal.dispatch(kernel, textures=textures, buffers=buffers, threads=(*size, 1))
+
+    def render(
+        self, vt_frame: Any, size: tuple[int, int], *, lut: tuple[str, float] | None = None,
+    ) -> tuple[_SharedPreviewSurface, GpuFrameRelease] | None:
+        """Render into a free IOSurface, leaving ownership of the VT frame to the caller."""
+        slot = self._acquire(size)
+        if slot is None:
+            return None
+        source_lease = self.encode_native(vt_frame, slot.metal_texture, size, lut=lut)
+        if source_lease is None:
+            return None
         try:
-            kernel = self._kernel
-            buffers = None
-            textures = {
-                0: y_plane.resolved_handle(), 1: uv_plane.resolved_handle(),
-                2: slot.metal_texture,
-            }
-            if lut is not None:
-                textures[3], strength = self._prepare_lut(*lut)
-                buffers = {0: strength}
-                if self._lut_kernel is None:
-                    self._lut_kernel = self._metal.compile_kernel("edit_preview_nv12_lut", _NV12_PREVIEW_MSL)
-                kernel = self._lut_kernel
-            self._metal.dispatch(kernel, textures=textures, buffers=buffers, threads=(*size, 1))
             self._metal.finish()
         finally:
             source_lease.release()
         slot.in_use = True
         return slot, GpuFrameRelease(retain_token=slot, release_callback=slot.release_lease)
+
+    def encode_native(
+        self, vt_frame: Any, output: Any, size: tuple[int, int], *,
+        lut: tuple[str, float] | None = None,
+    ) -> Optional[GpuFrameRelease]:
+        """Encode NV12 -> BGRA into ``output`` for the native viewport (plan 2.1).
+
+        Nothing is submitted and nothing is waited for: the caller owns the
+        command buffer (``MetalFrameTransactionPool``) and the returned lease
+        of the VT frame, which must stay alive until the GPU finished reading
+        the planes.  ``None`` when this frame cannot be imported; the caller's
+        VT frame is untouched then.
+        """
+        source = self._import_source(vt_frame)
+        if source is None:
+            return None
+        (y_plane, uv_plane), source_lease = source
+        fresh = not self._metal.has_pending_work()
+        try:
+            self._encode(y_plane.resolved_handle(), uv_plane.resolved_handle(),
+                         output, size, lut=lut)
+        except Exception:
+            source_lease.release()
+            if fresh:
+                # Leave no half-encoded frame for the next submission: it
+                # would read the planes that were just given back.
+                self._metal.discard_pending()
+            raise
+        return source_lease
+
+    def render_composite(
+        self, plan: MetalCompositePlan, size: tuple[int, int],
+        coordinate_size: tuple[int, int],
+    ) -> tuple[_SharedPreviewSurface, GpuFrameRelease] | None:
+        """Composite into a free IOSurface (plan 2.6); the GL viewer blits it.
+
+        Every layer's VT frame stays with the caller.  ``None`` when no
+        surface is free or a source cannot be imported; nothing of the frame
+        is consumed then.
+        """
+        slot = self._acquire(size)
+        if slot is None:
+            return None
+        try:
+            leases = self._compositor.encode(
+                plan, slot.metal_texture, size, coordinate_size,
+                import_source=self._import_source)
+        except MetalCompositeError:
+            return None
+        try:
+            self._metal.finish()
+        finally:
+            for lease in leases:
+                lease.release()
+        slot.in_use = True
+        return slot, GpuFrameRelease(retain_token=slot, release_callback=slot.release_lease)
+
+    def encode_composite_native(
+        self, plan: MetalCompositePlan, output: Any, size: tuple[int, int],
+        coordinate_size: tuple[int, int],
+    ) -> Optional[list[GpuFrameRelease]]:
+        """Encode a composite into ``output`` for the native viewport.
+
+        Like :meth:`encode_native`: nothing is submitted or waited for, and
+        the caller owns the returned import leases together with the VT
+        frames until the GPU finished.  ``None`` when a source cannot be
+        imported; the layers' VT frames are then untouched.
+        """
+        try:
+            return self._compositor.encode(
+                plan, output, size, coordinate_size, import_source=self._import_source)
+        except MetalCompositeError:
+            return None
 
     def blit(self, slot: _SharedPreviewSurface, framebuffer: Any) -> None:
         """Flip the IOSurface once into the normal viewer presentation slot."""
@@ -293,5 +415,6 @@ class MetalTimelinePreview:
             self._lut_textures.clear()
             self._lut_strength = None
             self._bridge.destroy()
+            self._compositor.release()
             self._vao.release()
             self._program.release()

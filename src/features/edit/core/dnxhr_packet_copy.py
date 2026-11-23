@@ -94,12 +94,14 @@ def copy_dnxhr_hqx_mov(
     fps: Fraction,
     continue_export: Callable[[], bool],
     progress: Callable[[int], None],
+    verify_staged: Callable[[str], None] | None = None,
 ) -> bool:
     """Copy runs of (source start frame, frame count) and publish atomically.
 
     Calls ``progress`` with the number of muxed video frames. The last frame
     is reported after publication. Return False on cancellation. A source
     mismatch permits normal rendering, while output I/O failures propagate.
+    ``verify_staged`` can inspect the closed movie before the destination is replaced.
     """
     import av
 
@@ -168,6 +170,10 @@ def copy_dnxhr_hqx_mov(
                             progress(written)
             if not continue_export():
                 return False
+            if verify_staged is not None:
+                verify_staged(str(temporary))
+                if not continue_export():
+                    return False
             os.replace(temporary, target_path)
         finally:
             temporary.unlink(missing_ok=True)

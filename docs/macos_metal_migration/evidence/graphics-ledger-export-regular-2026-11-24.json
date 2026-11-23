@@ -1,0 +1,27 @@
+{
+ "session": "export-regular",
+ "counts": {
+  "opengl": 1,
+  "metal": 0
+ },
+ "by_domain": {
+  "edit": {
+   "opengl": 1,
+   "metal": 0
+  }
+ },
+ "opengl_threads": [
+  "export-render-pipeline"
+ ],
+ "calls": [
+  {
+   "api": "opengl",
+   "domain": "edit",
+   "reason": "timeline_gpu_export_renderer._ensure_ready",
+   "thread": "export-render-pipeline",
+   "session": "export-regular",
+   "factory": "moderngl.create_standalone_context",
+   "kind": "new"
+  }
+ ]
+}

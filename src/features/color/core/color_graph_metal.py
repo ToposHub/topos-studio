@@ -79,7 +79,10 @@ def graph_grading_params_for_layer(
     from src.features.color.core.composition_uniforms import (
         composition_uniform_values,
     )
+    from src.features.color.core.primary_calibration import grade_uses_calibration
 
+    if grade_uses_calibration(layer):
+        raise ValueError("Measured primary grading needs a calibration grid")
     values = composition_uniform_values(dict(layer), width=width, height=height)
     curves = layer.get("curves_lut")
     return make_graph_grading_params(
@@ -131,7 +134,10 @@ class MetalDeliveryCorrector:
 def serial_metal_delivery_grade(
     graph: ColorGraphData, width: int, height: int,
 ) -> tuple[MetalDeliveryCorrector, ...] | None:
-    """Resolve static pointwise nodes without discarding unsupported effects."""
+    """Resolve static legacy primary and LUT nodes for the direct pixel path.
+
+    These kernels bind neither the measured primary grid nor curve samples.
+    """
     from src.features.color.core.color_graph_param_source import node_layer_payload
     from src.features.color.core.color_graph_texture import corrector_lut_only, serial_correctors
     from src.features.color.core.color_node_lut_spec import node_lut_projection
@@ -153,7 +159,7 @@ def serial_metal_delivery_grade(
         if not isinstance(resources, Mapping) or resources.keys() - {"lut_ref", "lut_strength"}:
             return None
         layer = node_layer_payload(node, include_lut_cache=False)
-        if (layer is None or layer.get("curves_lut") is not None
+        if (layer is None or layer.get("curves_data") or layer.get("curves_lut") is not None
                 or production_layer_domain_errors(layer, backend="metal")):
             return None
         reference, strength = node_lut_projection(resources)

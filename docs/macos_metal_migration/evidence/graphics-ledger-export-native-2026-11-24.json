@@ -1,0 +1,38 @@
+{
+ "session": "export-native",
+ "counts": {
+  "opengl": 0,
+  "metal": 2
+ },
+ "by_domain": {
+  "edit": {
+   "opengl": 0,
+   "metal": 1
+  },
+  "media": {
+   "opengl": 0,
+   "metal": 1
+  }
+ },
+ "opengl_threads": [],
+ "calls": [
+  {
+   "api": "metal",
+   "domain": "edit",
+   "reason": "timeline_export._try_export_metal_h264_lut",
+   "thread": "Dummy-1",
+   "session": "export-native",
+   "factory": "MetalComputeContext",
+   "kind": "new"
+  },
+  {
+   "api": "metal",
+   "domain": "media",
+   "reason": "cv_metal_bridge.initialize",
+   "thread": "Dummy-1",
+   "session": "export-native",
+   "factory": "MetalComputeContext",
+   "kind": "new"
+  }
+ ]
+}

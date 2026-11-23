@@ -1,8 +1,9 @@
 """Metal compute path for ordinary timeline export frames.
 
 The input frame is uploaded once, then source conversion/primary grade,
-scaling, and (for H.264) BT.709 YUV420 or (for Topos) YUV422P10 conversion run
-on Metal. Only the final encoder planes are read back. Unsupported timeline
+scaling, and encoder-plane conversion run on Metal when supported. DNxHR HQX
+can grade a 10-bit source through a LUT and read back the final 4:2:2 planes.
+Unsupported timeline
 constructs are filtered by
 ``TimelineExporter`` and continue through its established CPU compositor.
 """
@@ -14,7 +15,7 @@ import math
 import threading
 from functools import wraps
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 import numpy as np
 
@@ -24,7 +25,62 @@ from src.shared.export.gpu_encode_surface import GpuEncodeSurface
 from src.shared.export.gpu_trail import ExportGpuTrail
 from src.shared.media.gpu_frame import GpuDecodedFrame
 
+if TYPE_CHECKING:
+    from src.features.edit.core.timeline_gpu_export_renderer import (
+        GpuYuv422P10Output, GpuYuvSource,
+    )
+
 logger = logging.getLogger(__name__)
+
+
+_DNXHR_HQX_LUT_MSL = """
+#include <metal_stdlib>
+using namespace metal;
+""" + MSL_LUT3D + """
+constexpr sampler lut_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
+constant float3 luma_weights = float3(0.2126, 0.7152, 0.0722);
+
+float3 dnxhr_lut_color(ushort y_code, float2 chroma, texture3d<float> lut, float strength) {
+    const float y = (float(y_code) - 64.0) / 876.0;
+    const float2 uv = (rint(chroma) - 512.0) / 896.0;
+    const float3 rgb = float3(y + 1.5748 * uv.y,
+                              y - 0.18732427 * uv.x - 0.46812427 * uv.y,
+                              y + 1.8556 * uv.x);
+    const float3 rgb16 = rint(clamp(rgb, 0.0, 1.0) * 65535.0) / 65535.0;
+    return clamp(msl_apply_3dlut(rgb16, lut, lut_sampler, strength), 0.0, 1.0);
+}
+
+kernel void timeline_dnxhr_hqx_lut(
+    device const ushort* source_y [[buffer(0)]],
+    device const ushort* source_u [[buffer(1)]],
+    device const ushort* source_v [[buffer(2)]],
+    device ushort* output [[buffer(3)]],
+    constant uint2& size [[buffer(4)]],
+    constant float& strength [[buffer(5)]],
+    texture3d<float> lut [[texture(0)]],
+    uint2 p [[thread_position_in_grid]]) {
+    const uint chroma_width = size.x / 2u;
+    if (p.x >= chroma_width || p.y >= size.y) return;
+    const uint row = p.y * chroma_width;
+    const uint index = row + p.x;
+    const uint previous = row + max(p.x, 1u) - 1u;
+    const uint next = row + min(p.x + 1u, chroma_width - 1u);
+    const float2 center = float2(source_u[index], source_v[index]);
+    const float2 left = float2(source_u[previous], source_v[previous]);
+    const float2 right = float2(source_u[next], source_v[next]);
+    const float3 rgb0 = dnxhr_lut_color(source_y[index * 2u], mix(center, left, 0.25), lut, strength);
+    const float3 rgb1 = dnxhr_lut_color(source_y[index * 2u + 1u], mix(center, right, 0.25), lut, strength);
+    output[index * 2u] = ushort(rint(64.0 + 876.0 * dot(rgb0, luma_weights)));
+    output[index * 2u + 1u] = ushort(rint(64.0 + 876.0 * dot(rgb1, luma_weights)));
+    const float3 average = (rgb0 + rgb1) * 0.5;
+    const float y = dot(average, luma_weights);
+    const float2 uv = float2((average.b - y) / 1.8556, (average.r - y) / 1.5748);
+    const float2 codes = rint(clamp(512.0 + 896.0 * uv, 64.0, 960.0));
+    const uint y_size = size.x * size.y;
+    output[y_size + index] = ushort(codes.x);
+    output[y_size + y_size / 2u + index] = ushort(codes.y);
+}
+"""
 
 
 # Compile separately from the stack compositor. A single dispatch processes a
@@ -2484,15 +2540,19 @@ float blend_luma(float3 color) {
 }
 
 float3 blend_clip_color(float3 color) {
+    // W3C ClipColor, the formula of shaders/blend.glsl and blend_modes.py:
+    // both branches move the colour back to the isoluminant point,
+    // C = L + ((C - L) * ...).  Dropping the leading L (the old formula here
+    // and in the CPU twin) pulled it towards black instead, so the four HSL
+    // blend modes exported a different picture from the GL preview.
     float luma = blend_luma(color);
     float minimum = min(color.r, min(color.g, color.b));
     float maximum = max(color.r, max(color.g, color.b));
     float3 low = minimum < 0.0f
-        ? (color - luma) * luma / max(luma - minimum, 1.0e-6f)
+        ? luma + (color - luma) * luma / max(luma - minimum, 1.0e-6f)
         : color;
-    // Keep the same historical formula used by the CPU blend implementation.
     return maximum > 1.0f
-        ? (color - luma) * (1.0f - luma) / max(maximum - luma, 1.0e-6f)
+        ? luma + (color - luma) * (1.0f - luma) / max(maximum - luma, 1.0e-6f)
         : low;
 }
 
@@ -3492,6 +3552,7 @@ class TimelineMetalExportRenderer:
         # 入口重置）。render_layer_stack 等未显式传 cpu_upload_bytes 的
         # 完成记录用它，full-GPU 证据不再把 stack 路径记成 0 字节搬运。
         self._frame_cpu_upload_bytes = 0
+        self._dnxhr_lut: Optional[tuple[str, Any]] = None
 
     def set_gpu_trail(self, gpu_trail: Optional[ExportGpuTrail]) -> None:
         """Attach the export evidence sink before rendering begins."""
@@ -3965,6 +4026,77 @@ class TimelineMetalExportRenderer:
             )
 
     @_serialize_renderer_call
+    def render_dnxhr_hqx_lut(
+        self, source: GpuYuvSource, reference: str, strength: float,
+        allocate: Optional[Callable[[int, int], Optional[tuple[Any, tuple[np.ndarray, ...]]]]] = None,
+    ) -> GpuYuv422P10Output:
+        """Grade a BT.709 10-bit 4:2:2 master into encoder-ready planes."""
+        from src.features.edit.core.timeline_gpu_export_renderer import GpuYuv422P10Output
+        from src.shared.color.lut_loader import load_lut, resample_to_unit_domain, resolve_lut_path
+
+        y, u, v = source.planes
+        height, width = y.shape
+        chroma_shape = (height, width // 2)
+        if (source.luma_bits != 10 or source.full_range or source.kr != 0.2126
+                or source.kb != 0.0722 or (source.chroma_x_div, source.chroma_y_div) != (2, 1)
+                or width <= 0 or height <= 0 or width % 2
+                or u.shape != chroma_shape or v.shape != chroma_shape
+                or any(plane.dtype != np.dtype("<u2") for plane in source.planes)
+                or not math.isfinite(strength)):
+            raise ValueError("Expected limited-range BT.709 10-bit 4:2:2 source planes")
+        if not self._ensure_ready():
+            raise RuntimeError("Metal DNxHR renderer is unavailable")
+        ctx = self._context
+        assert ctx is not None
+
+        kernel_name = "timeline_dnxhr_hqx_lut"
+        kernel = self._kernels.get(kernel_name)
+        if kernel is None:
+            kernel = ctx.compile_kernel(kernel_name, _DNXHR_HQX_LUT_MSL)
+            self._kernels[kernel_name] = kernel
+        if self._dnxhr_lut is None or self._dnxhr_lut[0] != reference:
+            lut = resample_to_unit_domain(load_lut(resolve_lut_path(reference)))
+            self._dnxhr_lut = reference, ctx.create_rgb_lut_texture(lut.table)
+
+        self._frame_cpu_upload_bytes = 0
+        size = width * height
+        output = self._buffer("dnxhr_hqx_output", 4 * size)
+        ctx.dispatch(
+            kernel,
+            buffers={
+                0: self._upload_array("dnxhr_y", y),
+                1: self._upload_array("dnxhr_u", u),
+                2: self._upload_array("dnxhr_v", v),
+                3: output,
+                4: self._upload_array("dnxhr_size", np.array([width, height], dtype="<u4")),
+                5: self._upload_array("dnxhr_strength", np.array([strength], dtype="<f4")),
+            },
+            textures={0: self._dnxhr_lut[1]},
+            threads=(width // 2, height, 1),
+        )
+        ctx.finish()
+        values = ctx.read_buffer(output, 4 * size).view("<u2")
+        allocation = allocate(width, height) if allocate is not None else None
+        if allocation is None:
+            # Render and encode may run in parallel. An output frame must own
+            # its data when the next dispatch reuses the Metal buffer.
+            values = values.copy()
+        planes = (
+            values[:size].reshape(height, width),
+            values[size:size + size // 2].reshape(chroma_shape),
+            values[size + size // 2:].reshape(chroma_shape),
+        )
+        encoder_frame = None
+        if allocation is not None:
+            encoder_frame, target_planes = allocation
+            for target, plane in zip(target_planes, planes, strict=True):
+                np.copyto(target, plane)
+            planes = target_planes
+        self._record_render_completion(ctx, 4 * size, yuv_output=True)
+        self.frames_rendered += 1
+        return GpuYuv422P10Output(planes, encoder_frame)
+
+    @_serialize_renderer_call
     def render_planar(
         self,
         source: Any,
@@ -4217,6 +4349,30 @@ class TimelineMetalExportRenderer:
         ctx.finish()
         self._record_render_completion(ctx, 0, yuv_output=True, cpu_upload_bytes=0, readback=False)
         self.frames_rendered += 1
+        return ctx.last_gpu_time_ms
+
+    @_serialize_renderer_call
+    def render_dip_to_nv12(
+        self, sources: tuple[GpuDecodedFrame, GpuDecodedFrame],
+        opacity: tuple[float, float], color: tuple[float, float, float], factor: float,
+        surface: GpuEncodeSurface,
+    ) -> Optional[float]:
+        """Feed the existing SDR dip compositor directly into a VT surface."""
+        from src.shared.gpu.metal.context import MetalComputeError
+
+        ctx = self._context
+        width, height = surface.descriptor.width, surface.descriptor.height
+        if ctx is None or surface.descriptor.pixel_format != "nv12":
+            raise MetalComputeError("Metal dip delivery requires an NV12 surface")
+        for source in sources:
+            self._nv12_input_textures(source, width, height, ctx.device_identity)
+        result = self.render_layer_stack(
+            [(source, None, alpha, 0) for source, alpha in zip(sources, opacity, strict=True)],
+            width, height, output_yuv420p=True, output_surface=surface,
+            dip_color=color, dip_factor=factor,
+        )
+        if result is not surface:
+            raise MetalComputeError(self.last_fallback_reason or "Metal dip did not write the NV12 surface")
         return ctx.last_gpu_time_ms
 
     @staticmethod
@@ -5819,5 +5975,6 @@ class TimelineMetalExportRenderer:
                 logger.debug("Metal timeline context finish during release failed", exc_info=True)
         self._kernels.clear()
         self._buffers.clear()
+        self._dnxhr_lut = None
         self._context = None
         self._released = True

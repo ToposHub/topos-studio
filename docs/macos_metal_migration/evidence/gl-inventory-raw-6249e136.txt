@@ -1,0 +1,1623 @@
+plugins/warm_tint.tglsl:5:// @description Adds a gentle warm tint; declares OpenGL export support (W06 deliverable-plugin slice).
+src/main.py:60:# disabled; other Qt warnings (OpenGL context errors, etc.) still show.
+src/main.py:79:# ⚠️ CRITICAL Windows OpenGL + QWebEngine Compatibility Fix
+src/main.py:82:# with ModernGL's shared OpenGL context (wglShareLists fails with error 0x502).
+src/main.py:234:        # 强制 Qt Quick 使用 OpenGL 后端
+src/main.py:237:        # Set default OpenGL format before creating QApplication
+src/main.py:240:        # RTX 4090 / 现代 GPU 支持 OpenGL 4.5+
+src/main.py:263:        # 必须开启全局 OpenGL 上下文共享，否则 QOpenGLWidget 无法读取渲染线程的纹理
+src/app/services/edit_benchmark_service.py:13:No OpenGL object is created or touched here.  The renderer remains the sole
+src/app/integrations/file_explorer/edit_benchmark_service.py:14:No OpenGL object is created or touched here.  The renderer remains the sole
+src/app/controllers/ai_edit_host_bridge.py:274:        """返回当前可见页面的 QOpenGLWidget viewer（用于抓帧）；不可用返回 None。
+src/shared/gpu/gl_pass_timer.py:3:OpenGL 合成 pass 的 GPU timestamp 计时（性能总计划 §6 P0-03）。
+src/shared/gpu/gl_pass_timer.py:40:    import moderngl
+src/shared/gpu/gl_pass_timer.py:55:    def __init__(self, ctx: "moderngl.Context") -> None:
+src/app/controllers/node_thumbnail_evaluator.py:195:        import moderngl
+src/app/controllers/node_thumbnail_evaluator.py:223:        ctx = moderngl.create_standalone_context(require=330)
+src/shared/gpu/framebuffer_scope.py:9:    from moderngl import InvalidObject
+src/shared/gpu/framebuffer_scope.py:25:    from OpenGL.GL import GL_SCISSOR_TEST, glIsEnabled
+src/app/controllers/ai_editing_mixin.py:701:            # ToolFacade，绝不在后台线程读取 Qt/OpenGL 状态。写权限不通过该
+src/shared/gpu/capabilities.py:112:    context (moderngl ``ctx.info``).  When there is no live GL context on
+src/shared/gpu/capabilities.py:461:    context (moderngl ``ctx.info``); the decode probe arguments gate the
+src/app/controllers/ai_edit_host_bridge_impl.py:1662:        """当前可见页面的 QOpenGLWidget viewer（Color/Edit/Composite）；不可用返回 None。
+src/app/controllers/file_controller.py:3413:            from OpenGL import GL as gl
+src/app/controllers/file_controller.py:3527:                from OpenGL import GL as gl
+src/app/controllers/file_controller.py:3543:            from OpenGL import GL as gl
+src/app/controllers/file_controller.py:3594:            from OpenGL import GL as gl
+src/app/controllers/file_controller.py:3691:            from OpenGL import GL as gl
+src/app/controllers/file_controller.py:3815:                from OpenGL import GL as gl
+src/app/controllers/file_controller.py:3876:        """Normalize PyOpenGL id return values across scalar/list/ctypes variants."""
+src/shared/gpu/composite_gpu_frame_handle.py:11:- sync        : producer fence (opaque GLsync int, 0 = finish-fallback)
+src/shared/gpu/composite_gpu_frame_handle.py:26:This module does not depend on Qt or moderngl — the fence is an opaque
+src/shared/gpu/composite_gpu_frame_handle.py:27:int (GLsync pointer) so tests can drive the state machine with mocks.
+src/shared/gpu/composite_gpu_frame_handle.py:72:    # 'f1' = RGBA8) — matches moderngl dtype vocabulary.
+src/shared/gpu/composite_gpu_frame_handle.py:86:    # Opaque GLsync handle (int). 0 means "producer used finish()" — the
+src/shared/gpu/composite_gpu_frame_handle.py:187:# PyOpenGL returns glFenceSync's GLsync pointer as an opaque ctypes pointer
+src/shared/gpu/composite_gpu_frame_handle.py:210:    """Rebuild the GLsync argument PyOpenGL expects from the int form."""
+src/shared/gpu/composite_gpu_frame_handle.py:215:        from OpenGL._opaque import GLsync_pointer
+src/shared/gpu/composite_gpu_frame_handle.py:216:        return ctypes.cast(ctypes.c_void_p(fence_ns), GLsync_pointer)
+src/shared/gpu/composite_gpu_frame_handle.py:244:        from OpenGL.GL import glClientWaitSync
+src/shared/gpu/composite_gpu_frame_handle.py:247:    from OpenGL.GL import GL_TIMEOUT_IGNORED, glWaitSync
+src/shared/gpu/composite_gpu_frame_handle.py:256:    GLsync 泄漏，必须留诊断（fence id + 异常）供泄漏排查。失败仍不向
+src/shared/gpu/composite_gpu_frame_handle.py:263:        # PyOpenGL 异常基类随绑定一起延迟解析——本模块不硬依赖 PyOpenGL
+src/shared/gpu/composite_gpu_frame_handle.py:265:        from OpenGL.GL import glDeleteSync
+src/shared/gpu/composite_gpu_frame_handle.py:266:        from OpenGL.error import Error as _OpenGLError
+src/shared/gpu/composite_gpu_frame_handle.py:269:            "delete_fence(0x%x): OpenGL GL bindings unavailable (%s); "
+src/shared/gpu/composite_gpu_frame_handle.py:270:            "fence not deleted (GLsync leak)", fence_ns, exc)
+src/shared/gpu/composite_gpu_frame_handle.py:275:        # _OpenGLError: PyOpenGL 侧失败（GLError / NullFunctionError）；
+src/shared/gpu/composite_gpu_frame_handle.py:276:        # ctypes.ArgumentError: GLsync 指针重建产物非法。
+src/shared/gpu/composite_gpu_frame_handle.py:279:            "delete_fence(0x%x): glDeleteSync failed (%r); GLsync leaked",
+src/app/controllers/host_help_sources.py:14:- **不引入 moderngl / composite.core**：本模块只 import 编辑域/共享层。
+src/shared/gpu/gl_context_hub.py:15:any thread.  The old 2x2 "pixel probe" issued raw PyOpenGL calls that act
+src/shared/gpu/gl_context_hub.py:123:        3. Anything else (e.g. moderngl contexts) → fail-closed False:
+src/app/controllers/page_controller.py:590:            # OpenGL"铁律相悖（QOpenGLWidget 的 paint 事件会自行
+src/app/controllers/page_controller.py:704:            # frame can paint into a disappearing native OpenGL widget.
+src/shared/control_surfaces/tangent/hub_client.py:32:    or OpenGL objects; consumers receive Qt signals and apply changes on the UI
+src/app/controllers/deliver_controller.py:550:        # would still execute OpenGL on the UI thread even though evaluation
+src/app/controllers/deliver_controller.py:616:        # 批量导出多文件时每个文件泄漏一个 GL context，并与 QOpenGLWidget
+src/app/controllers/deliver_controller.py:622:                "session; refusing to run OpenGL on the UI thread "
+src/app/controllers/deliver_controller.py:629:            import moderngl
+src/app/controllers/deliver_controller.py:630:            ctx = moderngl.create_context()
+src/app/controllers/deliver_controller.py:637:            # dtype='f2' 上传需要 float16 字节布局，否则 moderngl 会报
+src/app/controllers/deliver_controller.py:643:            color_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/app/controllers/deliver_controller.py:656:                    color_texture_id=color_tex.glo,
+src/app/controllers/layer_controller.py:17:      不直接操作 OpenGL 或着色器。
+src/app/controllers/layer_controller.py:2571:        # 强制令场景的背景层失效，确保 OpenGL 纹理更新后能立即触发 drawBackground
+src/shared/gpu/gpu_scope_engine.py:26:import moderngl
+src/shared/gpu/gpu_scope_engine.py:64:    def __init__(self, ctx: moderngl.Context,
+src/shared/gpu/gpu_scope_engine.py:76:        self.programs: Dict[str, moderngl.Program] = {}
+src/shared/gpu/gpu_scope_engine.py:81:        self._quad_vbo: Optional[moderngl.Buffer] = None
+src/shared/gpu/gpu_scope_engine.py:82:        self._quad_vao_cache: Dict[int, moderngl.VertexArray] = {}
+src/shared/gpu/gpu_scope_engine.py:188:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/gpu/gpu_scope_engine.py:311:    def _points_vao(self, prog: moderngl.Program,
+src/shared/gpu/gpu_scope_engine.py:312:                    vertex_count: int) -> moderngl.VertexArray:
+src/shared/gpu/gpu_scope_engine.py:318:        key = (prog.glo, int(vertex_count))
+src/shared/gpu/gpu_scope_engine.py:328:    def _render_quad(self, prog: moderngl.Program) -> None:
+src/shared/gpu/gpu_scope_engine.py:337:        key = prog.glo
+src/shared/gpu/gpu_scope_engine.py:344:        vao.render(moderngl.TRIANGLE_STRIP)
+src/shared/gpu/gpu_scope_engine.py:348:        self.ctx.enable(moderngl.BLEND)
+src/shared/gpu/gpu_scope_engine.py:350:            self.ctx.enable(moderngl.PROGRAM_POINT_SIZE)
+src/shared/gpu/gpu_scope_engine.py:353:        self.ctx.blend_func = (moderngl.ONE, moderngl.ONE)
+src/shared/gpu/gpu_scope_engine.py:358:            moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA,
+src/shared/gpu/gpu_scope_engine.py:361:            self.ctx.disable(moderngl.BLEND)
+src/shared/gpu/gpu_scope_engine.py:365:            self.ctx.disable(moderngl.PROGRAM_POINT_SIZE)
+src/shared/gpu/gpu_scope_engine.py:369:    def _use_target(self, fbo: moderngl.Framebuffer, size: Tuple[int, int],
+src/shared/gpu/gpu_scope_engine.py:382:        source_texture: moderngl.Texture,
+src/shared/gpu/gpu_scope_engine.py:384:        mask_texture: Optional[moderngl.Texture] = None,
+src/shared/gpu/gpu_scope_engine.py:426:                vao.render(mode=moderngl.POINTS, vertices=aw * ah)
+src/shared/gpu/gpu_scope_engine.py:468:            vao.render(mode=moderngl.POINTS, vertices=aw * ah)
+src/shared/gpu/gpu_scope_engine.py:517:                vao.render(mode=moderngl.POINTS, vertices=aw * ah)
+src/shared/gpu/gpu_scope_engine.py:547:                vao.render(mode=moderngl.POINTS, vertices=aw * ah)
+src/shared/gpu/gpu_scope_engine.py:587:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/gpu/gpu_scope_engine.py:592:            except moderngl.Error:
+src/shared/gpu/gpu_scope_engine.py:649:            vao.render(mode=moderngl.POINTS, vertices=aw * ah)
+src/shared/gpu/gpu_scope_engine.py:671:        source_texture: moderngl.Texture,
+src/shared/gpu/gpu_scope_engine.py:710:    def render_demand(self, demand, source_texture: moderngl.Texture,
+src/shared/gpu/gpu_scope_engine.py:711:                      mask_texture: Optional[moderngl.Texture] = None,
+src/shared/gpu/gpu_scope_engine.py:748:            outputs['waveform'] = (pool['wf_display'].glo, pool['waveform_size'])
+src/shared/gpu/gpu_scope_engine.py:752:            outputs['vectorscope'] = (pool['vs_display'].glo,
+src/shared/gpu/gpu_scope_engine.py:758:            outputs['parade'] = (pool[target].glo, pool['waveform_size'])
+src/shared/gpu/gpu_scope_engine.py:763:            outputs['luma'] = (pool[target].glo, pool['waveform_size'])
+src/shared/gpu/gpu_scope_engine.py:769:            outputs['histogram'] = (pool['hist_display'].glo,
+src/shared/gpu/gpu_scope_engine.py:774:                outputs['curves_histogram'] = (pool['curves_hist_display'].glo,
+src/shared/gpu/gpu_scope_engine.py:780:            outputs['cie'] = (pool['cie_display'].glo, CIE_SIZE)
+src/shared/gpu/gpu_scope_engine.py:788:            outputs['falsecolor'] = (pool['fc_display'].glo, FALSECOLOR_SIZE)
+src/shared/gpu/gl_backend.py:26:import moderngl
+src/shared/gpu/gl_backend.py:72:        Initializes the ModernGL context using an existing PyQt OpenGL context.
+src/shared/gpu/gl_backend.py:75:        object; ``moderngl.create_context()`` always adopts the calling
+src/shared/gpu/gl_backend.py:97:        self.ctx = moderngl.create_context()
+src/shared/gpu/gl_backend.py:129:    def create_shared_context(self) -> "moderngl.Context":
+src/shared/gpu/gl_backend.py:133:        supported route is ``moderngl.create_context(share=True)``, which
+src/shared/gpu/gl_backend.py:150:        return moderngl.create_context(share=True)
+src/shared/gpu/gl_backend.py:152:    def create_texture(self, width, height, data=None, components=3, dtype='f1') -> "moderngl.Texture | None":
+src/shared/gpu/gl_backend.py:163:        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/gpu/gl_backend.py:169:    def create_framebuffer(self, color_attachments) -> "moderngl.Framebuffer | None":
+src/shared/gpu/gl_backend.py:188:    def __init__(self, ctx: "moderngl.Context"):
+src/shared/gpu/gl_backend.py:194:    def get_temp_texture(self, width, height, components=4, dtype='f2') -> "moderngl.Texture":
+src/shared/gpu/gl_backend.py:206:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/gpu/gl_backend.py:213:    def get_fbo(self, texture) -> "moderngl.Framebuffer":
+src/shared/gpu/gl_backend.py:232:        """Releases all pooled OpenGL resources.
+src/shared/video/external_yuv_renderer.py:5:current OpenGL context; this pass converts them to an ordinary RGBA texture
+src/shared/video/external_yuv_renderer.py:8:The pass deliberately accepts only two-plane OpenGL frames.  Other formats
+src/shared/video/external_yuv_renderer.py:124:            import moderngl
+src/shared/video/external_yuv_renderer.py:129:                "ExternalYuvToRgbPass: moderngl/numpy unavailable: %s", error
+src/shared/video/external_yuv_renderer.py:159:        except moderngl.Error as error:
+src/shared/video/external_yuv_renderer.py:195:        the external OpenGL contract.  The caller can then release the frame
+src/shared/video/external_yuv_renderer.py:217:            import moderngl
+src/shared/video/external_yuv_renderer.py:218:            from OpenGL.GL import (
+src/shared/video/external_yuv_renderer.py:229:                from OpenGL.error import GLError
+src/shared/video/external_yuv_renderer.py:230:            except ImportError:  # 旧版 PyOpenGL 模块名
+src/shared/video/external_yuv_renderer.py:231:                from OpenGL.errors import GLError
+src/shared/video/external_yuv_renderer.py:235:                "ExternalYuvToRgbPass: OpenGL bindings unavailable: %s", error
+src/shared/video/external_yuv_renderer.py:253:            # Edit renderer: moderngl never writes sampler2DRect uniform
+src/shared/video/external_yuv_renderer.py:255:            glUseProgram(program.glo)
+src/shared/video/external_yuv_renderer.py:256:            glUniform1i(glGetUniformLocation(program.glo, "u_y_plane"), 0)
+src/shared/video/external_yuv_renderer.py:257:            glUniform1i(glGetUniformLocation(program.glo, "u_uv_plane"), 1)
+src/shared/video/external_yuv_renderer.py:284:            vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/shared/video/external_yuv_renderer.py:285:        except (moderngl.Error, GLError, KeyError) as error:
+src/shared/gpu/present_frame.py:51:模块本身不依赖 Qt/GL，fence 用 opaque int 表示（实际是 GLsync 指针），
+src/shared/gpu/present_frame.py:111:        texture_glo: ModernGL texture 的 OpenGL 对象名（glo）
+src/shared/gpu/present_frame.py:116:        fence_ns: renderer 写完后插入的 fence（opaque，实际是 GLsync 指针）
+src/shared/gpu/present_frame.py:127:    fence_ns: int = 0  # opaque fence handle (GLsync*)
+src/shared/gpu/present_frame.py:353:        texture_id: OpenGL texture 对象名（共享 context）
+src/shared/gpu/present_frame.py:358:        fence_ns: opaque fence handle（GLsync*），Viewer 用 glWaitSync 等待
+src/shared/gpu/present_frame.py:439:        fence 时先回收（否则其 fence_cleanup 永不可达，GLsync 泄漏）
+src/shared/video/monitor_gpu_scale.py:16:GPU 不可用（无 moderngl 上下文/离屏限制）返回 None——调用方回退
+src/shared/video/monitor_gpu_scale.py:54:        ctx: 可复用的 moderngl 上下文；None 时新建 standalone（离屏
+src/shared/video/monitor_gpu_scale.py:66:            import moderngl
+src/shared/video/monitor_gpu_scale.py:67:            ctx = moderngl.create_standalone_context()
+src/shared/video/monitor_gpu_scale.py:97:        import moderngl as _mgl
+src/shared/video/cfa_gpu_debayer.py:20:import moderngl
+src/shared/video/cfa_gpu_debayer.py:278:    def __init__(self, ctx: moderngl.Context, dtype: str = 'f2',
+src/shared/video/cfa_gpu_debayer.py:283:        self._prog: Optional[moderngl.Program] = None
+src/shared/video/cfa_gpu_debayer.py:284:        self._vao: Optional[moderngl.VertexArray] = None
+src/shared/video/cfa_gpu_debayer.py:285:        self._vbo: Optional[moderngl.Buffer] = None
+src/shared/video/cfa_gpu_debayer.py:286:        self._textures: list[moderngl.Texture] = []
+src/shared/video/cfa_gpu_debayer.py:293:    def _ensure_program(self) -> moderngl.Program:
+src/shared/video/cfa_gpu_debayer.py:314:    def _ensure_textures(self, pw: int, ph: int) -> list[moderngl.Texture]:
+src/shared/video/cfa_gpu_debayer.py:323:                t.filter = (moderngl.NEAREST, moderngl.NEAREST)
+src/shared/video/cfa_gpu_debayer.py:340:        fbo: moderngl.Framebuffer,
+src/shared/video/cfa_gpu_debayer.py:420:            self._vao.render(moderngl.TRIANGLE_STRIP)
+src/shared/video/video_texture_pool.py:32:import moderngl
+src/shared/video/video_texture_pool.py:45:    texture: moderngl.Texture = None
+src/shared/video/video_texture_pool.py:83:    def __init__(self, ctx: moderngl.Context, pool_size: int = 5) -> None:
+src/shared/video/video_texture_pool.py:105:                components: int = 4, dtype: str = 'f2') -> Optional[moderngl.Texture]:
+src/shared/video/video_texture_pool.py:157:                texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/video_texture_pool.py:205:            except moderngl.Error as e:
+src/shared/video/video_texture_pool.py:209:            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/video_texture_pool.py:224:                except moderngl.Error:
+src/shared/video/video_texture_pool.py:298:    def get_texture_for_frame(self, frame_index: int) -> Optional[moderngl.Texture]:
+src/shared/ui/widgets/gpu_scope_widget.py:3:This is a *display-only* ``QOpenGLWidget``.  It never runs the scope
+src/shared/ui/widgets/gpu_scope_widget.py:16:3. Uses PyOpenGL (``OpenGL.GL``) for the blit path, exactly like the
+src/shared/ui/widgets/gpu_scope_widget.py:35:from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+src/shared/ui/widgets/gpu_scope_widget.py:38:# PyOpenGL provides a complete, driver-resolved binding for the framebuffer
+src/shared/ui/widgets/gpu_scope_widget.py:42:from OpenGL.GL import (
+src/shared/ui/widgets/gpu_scope_widget.py:149:class GpuScopeWidget(QOpenGLWidget):
+src/shared/ui/widgets/gpu_scope_widget.py:175:        self.setUpdateBehavior(QOpenGLWidget.UpdateBehavior.PartialUpdate)
+src/shared/ui/widgets/gpu_scope_widget.py:184:        # multisample QOpenGLWidget target is invalid on several macOS drivers
+src/shared/ui/widgets/gpu_scope_widget.py:189:        # NOTE: do NOT set WA_PaintOnScreen — QOpenGLWidget always renders
+src/shared/ui/widgets/gpu_scope_widget.py:279:    # QOpenGLWidget lifecycle
+src/shared/ui/widgets/gpu_scope_widget.py:284:        PyOpenGL resolves functions against the current context lazily, so
+src/shared/ui/widgets/gpu_scope_widget.py:327:            # context; a stale flag makes the next PyOpenGL call raise
+src/shared/ui/widgets/gpu_scope_widget.py:428:        """Draw 10-bit scale labels into the current QOpenGLWidget FBO.
+src/shared/ui/widgets/gpu_scope_widget.py:495:        QOpenGLWidget.paintGL is invoked with the widget's internal offscreen
+src/shared/ui/widgets/gpu_scope_widget.py:527:        # identify it for a QOpenGLWidget.
+src/app/ui/preferences_dialog.py:745:                "the OpenGL path. Eligible single-layer "
+src/shared/playback/gl_render_worker.py:85:        import moderngl
+src/shared/playback/gl_render_worker.py:88:        state["mctx"] = moderngl.create_context()
+src/shared/playback/gl_render_worker.py:89:        # 共享组探测：macOS NSOpenGL 常见"falling back to unshared context"
+src/shared/playback/gl_render_worker.py:158:        import moderngl
+src/shared/playback/gl_render_worker.py:168:        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/playback/gl_render_worker.py:232:            published_payload = ("texture", texture.glo, fw, fh)
+src/shared/video/yuv_gpu_upload.py:41:import moderngl
+src/shared/video/yuv_gpu_upload.py:87:    texture: moderngl.Texture = None
+src/shared/video/yuv_gpu_upload.py:141:        ctx: moderngl.Context,
+src/shared/video/yuv_gpu_upload.py:162:        self._filter_mode = filter_mode or (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/yuv_gpu_upload.py:185:    ) -> Optional[moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:213:    ) -> Optional[moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:241:    ) -> Optional[moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:258:    ) -> Optional[moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:275:    ) -> Optional[moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:300:    ) -> Optional[moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:518:    利用 OpenGL PBO 实现 CPU → GPU 的异步 DMA 传输：
+src/shared/video/yuv_gpu_upload.py:535:        ctx: moderngl.Context,
+src/shared/video/yuv_gpu_upload.py:548:        self._pools: Dict[int, List[moderngl.Buffer]] = {}
+src/shared/video/yuv_gpu_upload.py:553:        texture: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:587:    def _get_pbo(self, rounded_size: int) -> moderngl.Buffer:
+src/shared/video/yuv_gpu_upload.py:648:    - 所有 OpenGL 操作必须在渲染线程执行
+src/shared/video/yuv_gpu_upload.py:664:        ctx: moderngl.Context,
+src/shared/video/yuv_gpu_upload.py:678:        self._program: Optional[moderngl.Program] = None
+src/shared/video/yuv_gpu_upload.py:683:        self._quad_vao: Optional[moderngl.VertexArray] = None
+src/shared/video/yuv_gpu_upload.py:684:        self._quad_buffer: Optional[moderngl.Buffer] = None
+src/shared/video/yuv_gpu_upload.py:705:        self._r16ui_program: Optional[moderngl.Program] = None
+src/shared/video/yuv_gpu_upload.py:706:        self._r16ui_quad_vao: Optional[moderngl.VertexArray] = None
+src/shared/video/yuv_gpu_upload.py:711:        self._nv12_r16ui_program: Optional[moderngl.Program] = None
+src/shared/video/yuv_gpu_upload.py:712:        self._nv12_r16ui_vao: Optional[moderngl.VertexArray] = None
+src/shared/video/yuv_gpu_upload.py:716:        # VAO cache 以 program.glo 为 key，导致每帧新增一个永不释放的 VAO，
+src/shared/video/yuv_gpu_upload.py:718:        self._nv12_program: Optional[moderngl.Program] = None
+src/shared/video/yuv_gpu_upload.py:723:        self._nv12_quad_ibo: Optional[moderngl.Buffer] = None
+src/shared/video/yuv_gpu_upload.py:724:        self._nv12_vao_cache: Dict[int, Tuple[moderngl.Program, moderngl.VertexArray]] = {}
+src/shared/video/yuv_gpu_upload.py:726:        # AUD-39810: 三处四边形 IBO 登记为成员。moderngl 5.12 的
+src/shared/video/yuv_gpu_upload.py:730:        self._quad_ibo: Optional[moderngl.Buffer] = None            # _init_quad_buffer
+src/shared/video/yuv_gpu_upload.py:731:        self._r16ui_quad_ibo: Optional[moderngl.Buffer] = None      # _init_r16ui_quad
+src/shared/video/yuv_gpu_upload.py:732:        self._nv12_r16ui_ibo: Optional[moderngl.Buffer] = None      # _create_nv12_r16ui_shader
+src/shared/video/yuv_gpu_upload.py:739:            test_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/yuv_gpu_upload.py:744:                filter_mode=(moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/yuv_gpu_upload.py:753:            test_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+src/shared/video/yuv_gpu_upload.py:760:                filter_mode=(moderngl.NEAREST, moderngl.NEAREST)
+src/shared/video/yuv_gpu_upload.py:877:        texture: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:1022:    ) -> Tuple[moderngl.Texture, moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:1115:    ) -> Tuple[moderngl.Texture, moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:1144:    ) -> Tuple[moderngl.Texture, moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:1502:    ) -> Optional[moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:1729:    ) -> Tuple[moderngl.Texture, moderngl.Texture]:
+src/shared/video/yuv_gpu_upload.py:1998:    def get_yuv_shader(self) -> moderngl.Program:
+src/shared/video/yuv_gpu_upload.py:2012:    def _create_yuv_program(self) -> moderngl.Program:
+src/shared/video/yuv_gpu_upload.py:2158:    def _create_r16ui_yuv_program(self) -> moderngl.Program:
+src/shared/video/yuv_gpu_upload.py:2334:    def _create_nv12_r16ui_shader(self) -> moderngl.Program:
+src/shared/video/yuv_gpu_upload.py:2494:    def get_nv12_shader(self) -> moderngl.Program:
+src/shared/video/yuv_gpu_upload.py:2502:        以及 AsyncRenderer._render_quad VAO cache（按 program.glo 索引）的
+src/shared/video/yuv_gpu_upload.py:2656:    def _should_use_integer_sampler(self, y_tex: moderngl.Texture) -> bool:
+src/shared/video/yuv_gpu_upload.py:2674:        y_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2675:        u_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2676:        v_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2677:        output_fbo: moderngl.Framebuffer,
+src/shared/video/yuv_gpu_upload.py:2681:        a_tex: Optional[moderngl.Texture] = None,
+src/shared/video/yuv_gpu_upload.py:2741:            self._quad_vao.render(moderngl.TRIANGLES, vertices=6)
+src/shared/video/yuv_gpu_upload.py:2745:        y_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2746:        u_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2747:        v_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2748:        output_fbo: moderngl.Framebuffer,
+src/shared/video/yuv_gpu_upload.py:2754:        a_tex: Optional[moderngl.Texture] = None,
+src/shared/video/yuv_gpu_upload.py:2796:            self._r16ui_quad_vao.render(moderngl.TRIANGLES, vertices=6)
+src/shared/video/yuv_gpu_upload.py:2800:        y_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2801:        uv_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2802:        output_fbo: moderngl.Framebuffer,
+src/shared/video/yuv_gpu_upload.py:2806:        a_tex: Optional[moderngl.Texture] = None,
+src/shared/video/yuv_gpu_upload.py:2850:            self._nv12_r16ui_vao.render(moderngl.TRIANGLES, vertices=6)
+src/shared/video/yuv_gpu_upload.py:2852:    def _get_nv12_quad_vao(self, shader: moderngl.Program) -> moderngl.VertexArray:
+src/shared/video/yuv_gpu_upload.py:2907:        y_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2908:        uv_tex: moderngl.Texture,
+src/shared/video/yuv_gpu_upload.py:2909:        output_fbo: moderngl.Framebuffer,
+src/shared/video/yuv_gpu_upload.py:2910:        shader: Optional[moderngl.Program] = None,
+src/shared/video/yuv_gpu_upload.py:2914:        a_tex: Optional[moderngl.Texture] = None,
+src/shared/video/yuv_gpu_upload.py:2971:        vao.render(moderngl.TRIANGLES, vertices=6)
+src/shared/video/yuv_gpu_upload.py:3110:            output_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+src/shared/video/yuv_gpu_upload.py:3255:        # 在 moderngl 5.12 不释放 index buffer）
+src/shared/video/video_upload.py:20:- PBO 需要在 OpenGL 上下文激活时使用
+src/shared/video/video_upload.py:30:import moderngl
+src/shared/video/video_upload.py:74:    def __init__(self, ctx: moderngl.Context, buffer_count: int = 2) -> None:
+src/shared/video/video_upload.py:84:        self._buffers: List[moderngl.Buffer] = []
+src/shared/video/video_upload.py:119:    def upload_async(self, data: np.ndarray, texture: moderngl.Texture) -> float:
+src/shared/video/video_upload.py:174:    def upload_direct(self, data: np.ndarray, texture: moderngl.Texture) -> float:
+src/shared/video/video_upload.py:317:    def __init__(self, ctx: moderngl.Context) -> None:
+src/shared/video/video_upload.py:325:        self._textures: Dict[str, moderngl.Texture] = {}
+src/shared/video/video_upload.py:326:        self._program: Optional[moderngl.Program] = None
+src/shared/video/video_upload.py:332:    def upload_planes(self, frame: DecodedFrame) -> Tuple[moderngl.Texture, ...]:
+src/shared/video/video_upload.py:407:        y_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/video_upload.py:412:        u_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/video_upload.py:417:        v_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/video_upload.py:426:    def create_yuv_program(self) -> moderngl.Program:
+src/shared/video/video_upload.py:471:        except (OSError, ValueError, moderngl.Error) as e:
+src/shared/video/video_upload.py:475:    def _create_builtin_yuv_program(self) -> moderngl.Program:
+src/shared/video/video_upload.py:632:    def __init__(self, ctx: moderngl.Context) -> None:
+src/shared/ui/widgets/cie_scope_widget.py:401:        Separated from the QOpenGLWidget paint path so tests can render
+src/shared/video/video_playback.py:31:  - 提供渲染管线和 OpenGL 上下文
+src/shared/video/video_playback.py:1085:        无需 VideoAsyncRenderer 的独立 OpenGL 共享上下文，避免双重渲染器的
+src/shared/video/video_playback.py:1096:                # 获取主 OpenGL 上下文
+src/shared/video/video_playback.py:1104:                    logger.warning("WARNING: Cannot access main OpenGL context, falling back to AsyncRenderer")
+src/shared/io/file_io.py:126:            # Convert BGR to RGB for OpenGL texture upload
+src/shared/io/file_io.py:127:            # cv2.imdecode returns BGR format, but OpenGL expects RGB
+src/shared/gpu/graphics_backend.py:8:Phase 4 的 Metal backend 在无 moderngl 依赖的情况下 import，而
+src/shared/gpu/graphics_backend.py:69:    # fence 由拥有资源的 backend 解释（GLsync / Metal event / None）。
+src/shared/gpu/graphics_backend.py:75:    """graphics 维度的后端契约（OpenGL 实现见 features/color/core）。
+src/shared/playback/gl_video_canvas.py:3:为什么是 ``QOpenGLWidget``
+src/shared/playback/gl_video_canvas.py:9:本画布用 Qt 自己管理的 OpenGL surface（macOS 上是 NSOpenGL/CGL，
+src/shared/playback/gl_video_canvas.py:23:绘制视频内容。QOpenGLWidget 的 ``initializeGL/paintGL`` 仍发生在 GUI
+src/shared/playback/gl_video_canvas.py:43:from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+src/shared/playback/gl_video_canvas.py:82:    """垂直翻转并返回紧凑数组（OpenGL 纹理行序与 QImage 相反）。"""
+src/shared/playback/gl_video_canvas.py:102:        from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core
+src/shared/playback/gl_video_canvas.py:119:                    "/System/Library/Frameworks/OpenGL.framework/OpenGL"
+src/shared/playback/gl_video_canvas.py:134:class GLVideoCanvas(QOpenGLWidget):
+src/shared/playback/gl_video_canvas.py:232:            import moderngl
+src/shared/playback/gl_video_canvas.py:234:            self._ctx = moderngl.create_context()
+src/shared/playback/gl_video_canvas.py:340:            import moderngl
+src/shared/playback/gl_video_canvas.py:365:            self._blit_vao.render(moderngl.TRIANGLE_STRIP)
+src/shared/playback/gl_video_canvas.py:411:        """取 QOpenGLWidget 当前绑定的默认 FBO。
+src/shared/playback/gl_video_canvas.py:413:        ``QOpenGLWidget`` 在 paintGL 前会把内部 FBO 绑定为当前 framebuffer；
+src/shared/playback/gl_video_canvas.py:499:        # OpenGL 纹理首行对应 v=0（quad 底部），而 numpy 行 0 是画面顶部。
+src/shared/node_canvas/graph_ui_protocol.py:16:  / ``moderngl`` / 任何 renderer。AI Workflow 画布端口显示 artifact 类型/状态，
+src/shared/node_canvas/graph_ui_protocol.py:261:    红线：本类不持有 GPU 资源；不 import ``moderngl`` / ``composite.core``。
+src/shared/node_canvas/undo_stack.py:27:- 纯 ``QObject``，无 GPU/OpenGL 依赖；不引入任何 GPU 库或 composite 内部模块
+src/shared/node_canvas/undo_stack.py:29:- 无 OpenGL context / GPU 资源。
+src/shared/video/video_async_renderer.py:11:- 使用独立的 OpenGL 共享上下文
+src/shared/video/video_async_renderer.py:37:import moderngl
+src/shared/video/video_async_renderer.py:74:    - 独立的 OpenGL 上下文管理
+src/shared/video/video_async_renderer.py:96:            main_context: 主 OpenGL 上下文，用于创建共享上下文
+src/shared/video/video_async_renderer.py:102:        # OpenGL 上下文相关
+src/shared/video/video_async_renderer.py:216:            self.error_occurred.emit("Failed to make OpenGL context current")
+src/shared/video/video_async_renderer.py:221:            self.ctx = moderngl.create_context()
+src/shared/video/video_async_renderer.py:310:        # AUD-39506: 先捕获 moderngl 上下文引用（_cleanup_gl_resources 会
+src/shared/video/video_async_renderer.py:312:        moderngl_ctx = self.ctx
+src/shared/video/video_async_renderer.py:315:        # AUD-39506: 释放 moderngl 上下文并 doneCurrent，保证 GL 上下文在
+src/shared/video/video_async_renderer.py:317:        self._release_gl_context_on_exit(moderngl_ctx)
+src/shared/video/video_async_renderer.py:747:        except moderngl.Error as e:
+src/shared/video/video_async_renderer.py:888:            可用的 moderngl.Texture，创建失败返回 None
+src/shared/video/video_async_renderer.py:911:            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/video_async_renderer.py:1075:            合成目标 moderngl.Framebuffer，上下文不可用时返回 None
+src/shared/video/video_async_renderer.py:1100:            composite_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/video/video_async_renderer.py:1160:        tex_id = self.tex_pair[front_idx].glo
+src/shared/video/video_async_renderer.py:1217:            except moderngl.Error:
+src/shared/video/video_async_renderer.py:1274:        vao.render(moderngl.TRIANGLES, vertices=6)
+src/shared/video/video_async_renderer.py:1277:        """清理 OpenGL 资源"""
+src/shared/video/video_async_renderer.py:1289:                except moderngl.Error:
+src/shared/video/video_async_renderer.py:1370:    def _release_gl_context_on_exit(self, moderngl_ctx: Optional[Any]) -> None:
+src/shared/video/video_async_renderer.py:1374:        结束的渲染线程上，moderngl 上下文仅置 None 不 release——GL 对象
+src/shared/video/video_async_renderer.py:1377:        1. release moderngl 上下文（GL 对象已在 _cleanup_gl_resources
+src/shared/video/video_async_renderer.py:1383:        if moderngl_ctx is not None:
+src/shared/video/video_async_renderer.py:1385:                moderngl_ctx.release()
+src/shared/video/video_async_renderer.py:1386:            except moderngl.Error as e:
+src/shared/media/macos_vt/source.py:102:    Decode threads may produce this object without touching OpenGL.  The edit
+src/shared/media/macos_vt/source.py:646:        Decode the next VT frame without touching OpenGL.
+src/shared/video/yuv_gpu_self_test.py:5:on the current OpenGL context before enabling it for real playback.
+src/shared/video/yuv_gpu_self_test.py:12:- Must run on the render thread (OpenGL context required)
+src/shared/video/yuv_gpu_self_test.py:131:    ctx,  # moderngl.Context
+src/shared/video/yuv_gpu_self_test.py:146:    import moderngl
+src/shared/video/yuv_gpu_self_test.py:179:        output_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+src/shared/media/macos_vt/vt_zero_copy_probe.py:364:        import moderngl
+src/shared/media/macos_vt/vt_zero_copy_probe.py:365:        ctx = moderngl.create_standalone_context(require=330)
+src/shared/media/macos_vt/vt_zero_copy_probe.py:406:    """使用 PyOpenGL 绑定外部纹理到指定 texture unit"""
+src/shared/media/macos_vt/vt_zero_copy_probe.py:408:        from OpenGL.GL import glActiveTexture, glBindTexture, GL_TEXTURE0
+src/shared/media/macos_vt/vt_zero_copy_probe.py:642:                        import moderngl
+src/shared/media/macos_vt/vt_zero_copy_probe.py:652:                            output_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/shared/media/macos_vt/vt_zero_copy_probe.py:661:                        from OpenGL.GL import GL_TEXTURE_2D, GL_TEXTURE_RECTANGLE
+src/shared/media/macos_vt/vt_zero_copy_probe.py:674:                        # NOTE: moderngl 5.12 never writes sampler2DRect uniform
+src/shared/media/macos_vt/vt_zero_copy_probe.py:679:                        from OpenGL.GL import glUseProgram, glUniform1i, glGetUniformLocation
+src/shared/media/macos_vt/vt_zero_copy_probe.py:680:                        glUseProgram(active_prog.glo)
+src/shared/media/macos_vt/vt_zero_copy_probe.py:681:                        glUniform1i(glGetUniformLocation(active_prog.glo, 'y_plane'), 0)
+src/shared/media/macos_vt/vt_zero_copy_probe.py:682:                        glUniform1i(glGetUniformLocation(active_prog.glo, 'uv_plane'), 1)
+src/shared/media/macos_vt/vt_zero_copy_probe.py:700:                        active_vao.render(moderngl.TRIANGLES)
+src/shared/media/macos_vt/external_texture.py:2:External OpenGL texture descriptor for macOS VideoToolbox zero-copy probes.
+src/shared/media/macos_vt/external_texture.py:16:    """Non-owning descriptor for an externally created OpenGL texture."""
+src/shared/media/macos_vt/iosurface_gl_bridge.py:2:macOS IOSurface -> OpenGL Texture Bridge
+src/shared/media/macos_vt/iosurface_gl_bridge.py:3:将 CVPixelBuffer/IOSurface 桥接为 OpenGL texture planes。
+src/shared/media/macos_vt/iosurface_gl_bridge.py:53:        from OpenGL.GL import glGenTextures, glDeleteTextures, glBindTexture
+src/shared/media/macos_vt/iosurface_gl_bridge.py:163:        # load it directly from macOS OpenGL framework via ctypes
+src/shared/media/macos_vt/iosurface_gl_bridge.py:165:            from OpenGL.CGL import CGLTexImageIOSurface2D as _CGLTexImageIOSurface2D
+src/shared/media/macos_vt/iosurface_gl_bridge.py:169:                '/System/Library/Frameworks/OpenGL.framework/OpenGL'
+src/shared/media/macos_vt/iosurface_gl_bridge.py:203:    与 bind_pixel_buffer 内的解析顺序一致：优先 PyOpenGL 的
+src/shared/media/macos_vt/iosurface_gl_bridge.py:204:    OpenGL.CGL，不可用时退回 ctypes 直连 OpenGL.framework。
+src/shared/media/macos_vt/iosurface_gl_bridge.py:207:        from OpenGL.CGL import CGLGetCurrentContext
+src/shared/media/macos_vt/iosurface_gl_bridge.py:210:            '/System/Library/Frameworks/OpenGL.framework/OpenGL'
+src/shared/media/macos_vt/iosurface_gl_bridge.py:269:        # 分配前清空残留 GL 错误标记：moderngl 不消费错误标志，渲染线程
+src/shared/media/macos_vt/iosurface_gl_bridge.py:270:        # 混用 moderngl/raw GL 时陈旧错误会跨调用存活，被 PyOpenGL 归因
+src/shared/media/macos_vt/iosurface_gl_bridge.py:278:            from OpenGL.GL import glGetError, GL_NO_ERROR
+src/shared/media/macos_vt/iosurface_gl_bridge.py:299:            gl_context: OpenGL context（可选）
+src/shared/media/macos_vt/iosurface_gl_bridge.py:368:            "cannot migrate an OpenGL texture lease across target families; "
+src/shared/media/macos_vt/iosurface_gl_bridge.py:376:        OpenGL texture object 的 target 在第一次 glBindTexture 后基本固定。
+src/shared/media/macos_vt/iosurface_gl_bridge.py:558:    IOSurface -> OpenGL texture 桥接。
+src/shared/media/macos_vt/iosurface_gl_bridge.py:560:    将 CVPixelBuffer 的 IOSurface planes 桥接为 OpenGL textures，
+src/shared/media/macos_vt/iosurface_gl_bridge.py:746:            from OpenGL.GL import (
+src/shared/media/macos_vt/iosurface_gl_bridge.py:758:            # Use module-level resolved CGLTexImageIOSurface2D (PyOpenGL or ctypes fallback).
+src/shared/media/macos_vt/iosurface_gl_bridge.py:759:            # Do NOT re-import from OpenGL.CGL here — it may not be available.
+src/shared/media/macos_vt/iosurface_gl_bridge.py:762:                from OpenGL.CGL import CGLGetCurrentContext
+src/shared/media/macos_vt/iosurface_gl_bridge.py:766:                    '/System/Library/Frameworks/OpenGL.framework/OpenGL'
+src/shared/media/macos_vt/iosurface_gl_bridge.py:855:                        # 残留的 GL 错误标记：PyOpenGL 会在下一次调用观察到
+src/shared/media/macos_vt/iosurface_gl_bridge.py:856:                        # 陈旧错误并误判当前调用失败（moderngl 不消费错误，
+src/shared/media/macos_vt/iosurface_gl_bridge.py:865:                        # PyOpenGL raises immediately for GL_INVALID_OPERATION.
+src/shared/media/macos_vt/iosurface_gl_bridge.py:1064:        from OpenGL.GL import (
+src/shared/media/macos_vt/iosurface_gl_bridge.py:1096:        from OpenGL.GL import (
+src/shared/media/macos_vt/iosurface_gl_bridge.py:1119:        from OpenGL.GL import (
+src/shared/media/macos_vt/vt_session.py:541:        - 回调线程不能调用 OpenGL API
+src/shared/media/macos_vt/vt_session.py:921:            # 关键：IOSurface backing + OpenGL compatibility
+src/shared/media/macos_vt/vt_session.py:1049:        - Do NOT touch OpenGL or any non-thread-safe state
+src/shared/project/color_graph.py:4:NodeGraph、moderngl（共享 project 层约束，计划 §2.1）。
+src/shared/media/gpu_frame.py:206:        # P2-03 契约：裸 texture_id 是 OpenGL 对象名语义；非 GL 后端必须
+src/shared/media/gpu_frame.py:211:                f"bare texture_id is an OpenGL object name"
+src/shared/media/windows_hw/d3d11_device.py:121:# call time instead of breaking unrelated Metal/OpenGL imports during startup.
+src/shared/media/windows_hw/cuda_resident.py:20:  NV12 → GL_R8/GL_RG8（moderngl f1）；P010/P016 → GL_R16/GL_RG16 UNORM
+src/shared/media/windows_hw/cuda_resident.py:21:  （moderngl 无此 dtype，经 raw OpenGL 创建；CUDA array 格式与 R16UI 同为
+src/shared/media/windows_hw/cuda_resident.py:662:    """raw OpenGL 纹理的最小持有者（GL_R16/GL_RG16 UNORM 等 moderngl 不
+src/shared/media/windows_hw/cuda_resident.py:668:        self.glo = int(glo)
+src/shared/media/windows_hw/cuda_resident.py:677:            self._delete(self.glo)
+src/shared/media/windows_hw/cuda_resident.py:1045:        """NV12 → (R8, RG8)（moderngl）；p016le → (R16, RG16) UNORM（raw GL，
+src/shared/media/windows_hw/cuda_resident.py:1046:        moderngl 无 normalized u16 dtype；CUDA array 格式与 R16UI 相同）。
+src/shared/media/windows_hw/cuda_resident.py:1051:        import moderngl
+src/shared/media/windows_hw/cuda_resident.py:1053:        ctx = moderngl.get_context()
+src/shared/media/windows_hw/cuda_resident.py:1069:        from OpenGL.GL import (
+src/shared/media/windows_hw/cuda_resident.py:1230:            tex.glo, GL_TEXTURE_2D, 0)
+src/shared/media/windows_hw/cuda_resident.py:1335:                    texture_id=tex.glo,
+src/shared/media/windows_hw/capability.py:111:    - WGL_NV_DX_interop 或 CUDA-OpenGL interop 可用
+src/shared/media/windows_hw/__init__.py:3:Windows D3D11VA / NVDEC / QSV -> OpenGL texture interop 零拷贝。
+src/shared/media/windows_hw/d3d11_gl_bridge.py:1:"""Optional D3D11-to-OpenGL compatibility bridge.
+src/features/ai_harness/run_trace.py:16:本模块纯 Python，不依赖 Qt / OpenGL / provider。payload 会经过脱敏和有界截断，
+src/features/ai_harness/runtime.py:3:P0 提供的是 **fake 版本**：不接 Qt / OpenGL / 网络 / 真实模型。它只做：
+src/features/files/benchmark/benchmark.py:214:        # PyAV/OpenGL when the benchmark window is never opened.
+src/features/color/core/color_graph_executor.py:1079:        import moderngl
+src/features/color/core/color_graph_executor.py:1150:    import moderngl
+src/features/color/core/color_graph_executor.py:1151:    return moderngl.TRIANGLE_STRIP
+src/features/ai_harness/invocation_models.py:23:本模块纯逻辑、无 I/O、无 Qt / OpenGL 依赖；可被测试 / 节点编译器 / UI 共享。
+src/features/color/core/opengl_render_backend.py:4:（``src/shared/gpu/graphics_backend.py``）的 OpenGL 具体实现。放在
+src/features/color/core/opengl_render_backend.py:27:import moderngl
+src/features/color/core/opengl_render_backend.py:107:                "OpenGL backend 初始化失败：orchestrator 尚无 ModernGL context"
+src/features/color/core/opengl_render_backend.py:144:        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/opengl_render_backend.py:156:                "OpenGL backend 无可用 FramebufferManager（渲染线程未完成初始化）"
+src/features/ai_harness/__init__.py:12:  / ``resume`` / ``get_run`` 入口（RLock 保护；不接 Qt / OpenGL / 网络 / 模型）。
+src/features/color/core/async_renderer.py:42:import moderngl
+src/features/color/core/async_renderer.py:147:    Background rendering thread that handles all heavy OpenGL operations.
+src/features/color/core/async_renderer.py:315:        # Keep the PyOpenGL GLsync object itself. On macOS it is an opaque
+src/features/color/core/async_renderer.py:335:        # PyOpenGL cannot provide pixel-pack buffers, the request falls back to
+src/features/color/core/async_renderer.py:361:        self.current_video_texture: Optional[moderngl.Texture] = None
+src/features/color/core/async_renderer.py:467:        self._yuv_rgb_output_cache: Dict[Tuple[int, int], List[moderngl.Texture]] = {}
+src/features/color/core/async_renderer.py:478:        self._yuv_conv_fbo: Optional[moderngl.Framebuffer] = None
+src/features/color/core/async_renderer.py:483:        self._quad_vao_cache: Dict[int, moderngl.VertexArray] = {}
+src/features/color/core/async_renderer.py:486:        self._persistent_raw_view_tex: Optional[moderngl.Texture] = None
+src/features/color/core/async_renderer.py:487:        self._persistent_raw_view_fbo: Optional[moderngl.Framebuffer] = None
+src/features/color/core/async_renderer.py:488:        self._persistent_ping_tex: Optional[moderngl.Texture] = None
+src/features/color/core/async_renderer.py:489:        self._persistent_ping_fbo: Optional[moderngl.Framebuffer] = None
+src/features/color/core/async_renderer.py:490:        self._persistent_pong_tex: Optional[moderngl.Texture] = None
+src/features/color/core/async_renderer.py:491:        self._persistent_pong_fbo: Optional[moderngl.Framebuffer] = None
+src/features/color/core/async_renderer.py:529:            self.ctx = moderngl.create_context()
+src/features/color/core/async_renderer.py:1217:                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:1335:    ) -> Tuple[moderngl.Texture, moderngl.Framebuffer, moderngl.Texture, moderngl.Framebuffer, moderngl.Texture, moderngl.Framebuffer]:
+src/features/color/core/async_renderer.py:1371:        self._persistent_raw_view_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:1377:        self._persistent_ping_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:1383:        self._persistent_pong_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:1405:    ) -> moderngl.Texture:
+src/features/color/core/async_renderer.py:1438:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:1471:                    evicted_glos.add(int(tex.glo))
+src/features/color/core/async_renderer.py:1521:            # 未来可考虑使用 moderngl.Context.finish() 或 OpenGL fence 扩展
+src/features/color/core/async_renderer.py:1541:            from OpenGL.GL import glDeleteSync
+src/features/color/core/async_renderer.py:1558:            from OpenGL.GL import (
+src/features/color/core/async_renderer.py:1583:                from OpenGL.GL import glDeleteSync
+src/features/color/core/async_renderer.py:1664:                if texture is not None and texture.glo == self.current_front_tex_id
+src/features/color/core/async_renderer.py:1797:            # Mask textures use top-down image coordinates while OpenGL UVs
+src/features/color/core/async_renderer.py:2233:                wf_id = pool['wf_display'].glo
+src/features/color/core/async_renderer.py:2238:                vs_id = pool['vs_display'].glo
+src/features/color/core/async_renderer.py:2244:                    parade_id = pool['parade_display'].glo
+src/features/color/core/async_renderer.py:2247:                    parade_id = pool['wf_display'].glo
+src/features/color/core/async_renderer.py:2253:                    luma_id = pool['luma_display'].glo
+src/features/color/core/async_renderer.py:2256:                    luma_id = pool['wf_display'].glo
+src/features/color/core/async_renderer.py:2267:                hist_id = pool['hist_display'].glo
+src/features/color/core/async_renderer.py:2271:                    curves_hist_id = pool['curves_hist_display'].glo
+src/features/color/core/async_renderer.py:2276:                cie_id = pool['cie_display'].glo
+src/features/color/core/async_renderer.py:2280:                fc_id = pool['fc_display'].glo
+src/features/color/core/async_renderer.py:2333:            # NOTE: moderngl.Error frequently carries an *empty* message (the
+src/features/color/core/async_renderer.py:2940:            # every OpenGL operation on the renderer thread while preserving
+src/features/color/core/async_renderer.py:2960:                source_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:3331:            apply_stabilization_gpu(runner, current_source_tex.glo, stabilization_state,
+src/features/color/core/async_renderer.py:3361:                self.monitor_color_output_ready.emit(color_output_tex.glo, w, h)
+src/features/color/core/async_renderer.py:3363:                self.color_output_ready.emit(color_output_tex.glo, w, h)
+src/features/color/core/async_renderer.py:3371:            self.ctx.enable(moderngl.BLEND)
+src/features/color/core/async_renderer.py:3372:            self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+src/features/color/core/async_renderer.py:3389:            self.ctx.disable(moderngl.BLEND)
+src/features/color/core/async_renderer.py:3440:            self.current_front_tex_id = self.tex_pair[front_idx].glo
+src/features/color/core/async_renderer.py:3516:    ) -> Optional[moderngl.Texture]:
+src/features/color/core/async_renderer.py:3549:        if self._yuv_conv_fbo is not None and self._yuv_conv_fbo_tex_glo == output_tex.glo:
+src/features/color/core/async_renderer.py:3559:            self._yuv_conv_fbo_tex_glo = output_tex.glo
+src/features/color/core/async_renderer.py:3630:        y_tex: moderngl.Texture,
+src/features/color/core/async_renderer.py:3631:        u_tex: moderngl.Texture,
+src/features/color/core/async_renderer.py:3632:        v_tex: moderngl.Texture,
+src/features/color/core/async_renderer.py:3633:        output_fbo: moderngl.Framebuffer,
+src/features/color/core/async_renderer.py:3642:        a_tex: Optional[moderngl.Texture] = None
+src/features/color/core/async_renderer.py:3719:        y_tex: moderngl.Texture,
+src/features/color/core/async_renderer.py:3720:        uv_tex: moderngl.Texture,
+src/features/color/core/async_renderer.py:3721:        output_fbo: moderngl.Framebuffer,
+src/features/color/core/async_renderer.py:3848:        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4401:        prog_glo = prog.glo
+src/features/color/core/async_renderer.py:4407:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/async_renderer.py:4417:        prog_glo = prog.glo
+src/features/color/core/async_renderer.py:4433:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/async_renderer.py:4623:                fallback_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/async_renderer.py:4633:            vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/async_renderer.py:4688:        self.identity_lut.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4703:        self.default_curves_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4727:        self.default_hsl_curve_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4731:        self.default_warper_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4736:        self.white_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+src/features/color/core/async_renderer.py:4780:                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4788:                    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4802:                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4809:                    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4838:                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4849:                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4857:    def _upload_3dlut(self, path: str) -> Optional[moderngl.Texture]:
+src/features/color/core/async_renderer.py:4873:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4940:        tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:4978:    def _do_upload_video_frame(self, data: Dict[str, Any]) -> Optional[moderngl.Texture]:
+src/features/color/core/async_renderer.py:5051:    def _do_upload_decoded_video_frame(self, data: Dict[str, Any]) -> Optional[moderngl.Texture]:
+src/features/color/core/async_renderer.py:5377:    ) -> Optional[moderngl.Texture]:
+src/features/color/core/async_renderer.py:6364:        ExternalGLTexture objects that provide .glo, .size, .use().
+src/features/color/core/async_renderer.py:6377:        from OpenGL.GL import GL_TEXTURE_2D, GL_TEXTURE_RECTANGLE
+src/features/color/core/async_renderer.py:6492:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:6542:            new_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:7080:        return target_list[max(0, min(lod, len(target_list) - 1))].glo
+src/features/color/core/async_renderer.py:7160:                temp_full_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:7189:            bake_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:7193:            scratch_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:7324:            # Flip vertically (OpenGL origin is bottom-left, EXR uses top-left origin)
+src/features/color/core/async_renderer.py:7402:        # Flip vertically for OpenGL (origin is bottom-left)
+src/features/color/core/async_renderer.py:7404:        # OpenGL textures use bottom-left origin, so we need to flip
+src/features/color/core/async_renderer.py:7414:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/async_renderer.py:7513:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/video_spatial_denoise.py:19:import moderngl
+src/features/color/core/video_spatial_denoise.py:32:    def __init__(self, ctx: moderngl.Context, quad: QuadRenderer,
+src/features/color/core/video_spatial_denoise.py:37:        self._programs: Dict[str, moderngl.Program] = {}
+src/features/color/core/video_spatial_denoise.py:43:    def _prog(self, name: str, fragment: str) -> Optional[moderngl.Program]:
+src/features/color/core/video_spatial_denoise.py:55:    def process(self, source_tex: moderngl.Texture,
+src/features/color/core/video_spatial_denoise.py:56:                params: SpatialDenoiseParams) -> moderngl.Texture:
+src/features/color/core/video_spatial_denoise.py:83:    def _process_fast(self, source_tex: moderngl.Texture, p: SpatialDenoiseParams,
+src/features/color/core/video_spatial_denoise.py:84:                      width: int, height: int) -> moderngl.Texture:
+src/features/color/core/video_spatial_denoise.py:112:    def _process_separable(self, source_tex: moderngl.Texture, p: SpatialDenoiseParams,
+src/features/color/core/video_spatial_denoise.py:113:                           width: int, height: int) -> moderngl.Texture:
+src/features/color/core/video_spatial_denoise.py:152:    def _process_enhanced(self, source_tex: moderngl.Texture, p: SpatialDenoiseParams,
+src/features/color/core/video_spatial_denoise.py:153:                          width: int, height: int) -> moderngl.Texture:
+src/features/color/core/video_spatial_denoise.py:219:    def _apply_detail_recovery(self, original: moderngl.Texture, denoised: moderngl.Texture,
+src/features/color/core/video_spatial_denoise.py:220:                               p: SpatialDenoiseParams, width: int, height: int) -> moderngl.Texture:
+src/features/color/core/shader_compiler.py:10:    import moderngl
+src/features/color/core/shader_compiler.py:190:    def __init__(self, ctx: "moderngl.Context") -> None:
+src/features/color/core/shader_compiler.py:299:    ) -> "moderngl.Program | None":
+src/features/color/core/video_temporal_denoise.py:20:import moderngl
+src/features/color/core/video_temporal_denoise.py:120:    def __init__(self, ctx: moderngl.Context, quad: QuadRenderer,
+src/features/color/core/video_temporal_denoise.py:125:        self._programs: Dict[str, moderngl.Program] = {}
+src/features/color/core/video_temporal_denoise.py:140:    def _prog(self, name: str, fragment: str) -> Optional[moderngl.Program]:
+src/features/color/core/video_temporal_denoise.py:163:        source_tex: moderngl.Texture,
+src/features/color/core/video_temporal_denoise.py:169:    ) -> moderngl.Texture:
+src/features/color/core/video_temporal_denoise.py:195:    def _process_causal(self, source_tex: moderngl.Texture, p: TemporalDenoiseParams,
+src/features/color/core/video_temporal_denoise.py:196:                        width: int, height: int, history_usable: bool) -> moderngl.Texture:
+src/features/color/core/video_temporal_denoise.py:318:    def _downsample_luma(self, source_tex: moderngl.Texture, target_surface: RenderSurface,
+src/features/color/core/video_temporal_denoise.py:340:    def _estimate_motion(self, luma_cur: moderngl.Texture, luma_prev: moderngl.Texture,
+src/features/color/core/video_temporal_denoise.py:388:    def debug_overlay(self, source_tex: moderngl.Texture) -> moderngl.Texture:
+src/features/color/core/video_temporal_denoise.py:419:        neighbor_textures: Sequence[moderngl.Texture],
+src/features/color/core/video_temporal_denoise.py:420:        current_tex: moderngl.Texture,
+src/features/color/core/video_temporal_denoise.py:422:    ) -> moderngl.Texture:
+src/features/color/core/video_temporal_denoise.py:442:    def _replay_window(self, frames: Sequence[moderngl.Texture], p: TemporalDenoiseParams,
+src/features/color/core/video_temporal_denoise.py:443:                       width: int, height: int) -> moderngl.Texture:
+src/features/color/facade.py:73:        Returns the OpenGL texture ID of the current rendered output.
+src/features/color/core/video_denoise_gl.py:14:import moderngl
+src/features/color/core/video_denoise_gl.py:26:    def __init__(self, ctx: moderngl.Context) -> None:
+src/features/color/core/video_denoise_gl.py:39:        self._vaos: Dict[int, moderngl.VertexArray] = {}
+src/features/color/core/video_denoise_gl.py:41:    def draw(self, program: moderngl.Program) -> None:
+src/features/color/core/video_denoise_gl.py:42:        vao = self._vaos.get(program.glo)
+src/features/color/core/video_denoise_gl.py:49:            self._vaos[program.glo] = vao
+src/features/color/core/video_denoise_gl.py:50:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/video_denoise_gl.py:70:    def __init__(self, ctx: moderngl.Context, width: int, height: int,
+src/features/color/core/video_denoise_gl.py:73:        self.texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/video_denoise_gl.py:101:    def __init__(self, ctx: moderngl.Context) -> None:
+src/features/ai_workflow/adapters/composite_adapter.py:10:  content_hash；**不持有** GPU texture / OpenGL context）。
+src/features/ai_workflow/adapters/composite_adapter.py:24:  本模块**不 import** moderngl / PyQt6 / composite.core。
+src/features/ai_workflow/adapters/composite_adapter.py:25:- **render 生命周期由 Composite 管**：adapter 只持有 job ID；不持有 OpenGL context；
+src/features/ai_workflow/adapters/composite_adapter.py:144:    红线：**不持有** GPU texture / OpenGL context / Qt 对象。只持有 job ID + 状态。
+src/features/ai_workflow/adapters/composite_adapter.py:330:    不依赖真实 GPU / OpenGL / moderngl。生产环境替换为真实 Composite render service，
+src/features/color/core/corrector_render_service.py:52:    program: Any                      # moderngl.Program
+src/features/color/core/corrector_render_service.py:270:    import moderngl
+src/features/color/core/corrector_render_service.py:317:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/ui/canvas.py:3700:    Uses QWidget instead of QGraphicsItem to avoid OpenGL text rendering issues.
+src/features/color/ui/canvas.py:4015:        # DaVinci 级别视觉优化：OpenGL 视口下使用全量更新，避免 CPU 计算脏矩形开销
+src/features/color/ui/canvas.py:4084:        # Color inspector overlay (QWidget, not QGraphicsItem, to avoid OpenGL text issues)
+src/features/color/ui/canvas.py:4311:        """Return the canvas to the normal Color OpenGL presentation path."""
+src/features/color/ui/canvas.py:6600:                # to clear a QOpenGLWidget framebuffer.  Explicitly paint the
+src/features/ai_workflow/core/workflow_graph_edit.py:10:- 纯 Python 服务，**不 import Qt / moderngl / composite**（在 ai_workflow.core 层）。
+src/features/ai_workflow/core/workflow_graph_edit.py:21:- 纯 Python；不引入 ``moderngl`` / ``composite.core`` / Qt（源码扫描）。
+src/features/color/core/color_graph_texture.py:125:        vao = self._vaos.get(program.glo)
+src/features/color/core/color_graph_texture.py:128:            self._vaos[program.glo] = vao
+src/features/color/core/color_graph_texture.py:129:        import moderngl
+src/features/color/core/color_graph_texture.py:130:        vao.render(mode=moderngl.TRIANGLE_STRIP)
+src/features/color/core/color_graph_texture.py:157:        import moderngl
+src/features/color/core/color_graph_texture.py:158:        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/color_graph_texture.py:213:        import moderngl
+src/features/color/core/color_graph_texture.py:229:            texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/color_output.py:38:        """OpenGL texture ID of the cached Color result."""
+src/features/ai_workflow/core/workflow_models.py:8:  本模型是纯数据（frozen dataclass + JSON 可序列化），不含任何 Qt / OpenGL / 模型实例。
+src/features/ai_workflow/core/workflow_models.py:9:- **端口不传危险对象**（plan §3.1）：不传 Qt 对象 / OpenGL texture / 模型实例 /
+src/features/ai_workflow/tests/test_fake_workflow_service.py:17:- 红线：源码不 import moderngl / composite.core；不写 timeline。
+src/features/ai_workflow/tests/test_fake_workflow_service.py:31:# 红线：源码扫描（moderngl / composite.core / timeline 写）
+src/features/ai_workflow/tests/test_fake_workflow_service.py:64:    子串检查（``"import moderngl" not in source``）可被 ``from moderngl
+src/features/ai_workflow/tests/test_fake_workflow_service.py:90:    """红线：runtime 源码不 import moderngl / composite.core（任何导入形式）。"""
+src/features/ai_workflow/tests/test_fake_workflow_service.py:92:    assert not _imports_root(imports, "moderngl"), (
+src/features/ai_workflow/tests/test_fake_workflow_service.py:93:        f"runtime 包不允许 import moderngl（任何形式）；发现："
+src/features/ai_workflow/tests/test_fake_workflow_service.py:94:        f"{sorted(m for m in imports if 'moderngl' in m)}"
+src/features/color/core/image_engine.py:44:import moderngl
+src/features/color/core/image_engine.py:1199:            # while ensuring no full-resolution OpenGL call runs on the UI
+src/features/color/core/image_engine.py:3285:                raw_lut_tex_full.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/image_engine.py:3298:                vao_raw.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3334:            temp_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3481:                    temp_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3543:                temp_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3630:            self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3719:            self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3729:            self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3764:            self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3784:        self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3795:        self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:3814:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/image_engine.py:3825:        The Color worker and Canvas use different shared OpenGL contexts.
+src/features/color/core/image_engine.py:3838:            from OpenGL.GL import GL_TIMEOUT_IGNORED, glWaitSync
+src/features/color/core/image_engine.py:3845:            # A few drivers reject cross-context GLsync waits even when the
+src/features/color/core/image_engine.py:3860:            tex_id: OpenGL texture ID to render
+src/features/color/core/image_engine.py:3908:            logger.warning("_do_draw_background_tex_id: No current OpenGL context")
+src/features/color/core/image_engine.py:3910:        # PyQt6 只提供 QOpenGLFunctions_4_1_Core (OpenGL 4.1 是 3.3 的超集)
+src/features/color/core/image_engine.py:3911:        from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core
+src/features/color/core/image_engine.py:3914:            # Fallback: 尝试使用 QOpenGLFunctions (OpenGL 2.0 / ES 2.0 级别)
+src/features/color/core/image_engine.py:3918:            from PyQt6.QtOpenGL import QOpenGLFunctions
+src/features/color/core/image_engine.py:3931:        # ``letterbox`` draws a smaller native OpenGL quad.  QGraphicsView's
+src/features/color/core/image_engine.py:4004:                self.split_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:4023:            self.rotation_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:4026:            self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/image_engine.py:4231:        self.white_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/color/core/image_engine.py:4275:        self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/color/core/export_denoise_bridge.py:58:            import moderngl
+src/features/color/core/export_denoise_bridge.py:61:            # video_denoise 模块（也避免测试替身污染模块级 moderngl 绑定）
+src/features/color/core/export_denoise_bridge.py:62:            self._ctx = moderngl.create_standalone_context(require=330)
+src/features/edit/ai_editing/mcp_local_ipc.py:96:    never call Qt widgets or OpenGL APIs directly.
+src/features/color/core/video_denoise_pipeline.py:18:import moderngl
+src/features/color/core/video_denoise_pipeline.py:41:    def __init__(self, ctx: moderngl.Context) -> None:
+src/features/color/core/video_denoise_pipeline.py:116:        source_tex: moderngl.Texture,
+src/features/color/core/video_denoise_pipeline.py:121:    ) -> moderngl.Texture:
+src/features/color/core/video_denoise_pipeline.py:181:        source_tex: moderngl.Texture,
+src/features/color/core/video_denoise_pipeline.py:182:        neighbor_textures: Sequence[moderngl.Texture],
+src/features/color/core/video_denoise_pipeline.py:185:    ) -> moderngl.Texture:
+src/features/edit/core/gpu_transition_shaders.py:840:# Both preview and headless OpenGL export use the same unified program.  Keep
+src/features/ai_workflow/tests/test_workflow_graph_edit.py:16:- 红线：源码不 import moderngl / composite.core / Qt。
+src/features/ai_workflow/tests/test_workflow_graph_edit.py:39:    """红线：edit 层纯 Python，不 import moderngl / composite.core / Qt。"""
+src/features/ai_workflow/tests/test_workflow_graph_edit.py:42:    assert "import moderngl" not in source
+src/features/color/ui/scope_panel.py:473:        # ---- GPU scope page (display-only QOpenGLWidget presenters) ----
+src/features/ai_workflow/ui/workflow_canvas_view.py:19:- **不引入** ``moderngl`` / ``composite.core``。
+src/features/ai_workflow/ui/workflow_node_search.py:16:- 不引入 ``moderngl`` / ``composite.core``（纯 Qt 弹窗）。
+src/features/ai_workflow/ui/workflow_node_search.py:17:- 不传 GPU texture / OpenGL context。
+src/features/ai_workflow/ui/workflow_canvas_adapter.py:16:- **不引入** ``moderngl`` / ``composite.core``。
+src/features/ai_workflow/ui/workflow_panel.py:22:- **不引入** ``moderngl`` / ``composite.core``。
+src/features/ai_workflow/ui/workflow_gallery_page.py:8:- 纯 Qt 列表视图；不依赖画布 / moderngl。
+src/features/edit/core/edit_gpu_preview_renderer.py:110:# QOpenGLWidget 在 paint 结束后保持 context current（Qt 的合成优化），
+src/features/edit/core/edit_gpu_preview_renderer.py:541:    """Minimal moderngl.Texture-like wrapper around a foreign glo.
+src/features/edit/core/edit_gpu_preview_renderer.py:545:    moderngl.Texture objects with ``.glo`` / ``.use(unit)`` / ``.size``.
+src/features/edit/core/edit_gpu_preview_renderer.py:546:    Rather than wrap the glo in a real moderngl.Texture (which would take
+src/features/edit/core/edit_gpu_preview_renderer.py:581:        from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core
+src/features/edit/core/edit_gpu_preview_renderer.py:597:    Shares GL context with ProgramViewer's QOpenGLWidget.
+src/features/edit/core/edit_gpu_preview_renderer.py:861:        # 注意判据必须是栈深度而非 currentContext()：QOpenGLWidget 在
+src/features/edit/core/edit_gpu_preview_renderer.py:1248:        shared OpenGL contexts, but they share textures, fences and driver
+src/features/edit/core/edit_gpu_preview_renderer.py:1337:            import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:1338:            self.ctx = moderngl.create_context()
+src/features/edit/core/edit_gpu_preview_renderer.py:2060:        from OpenGL.GL import GL_TEXTURE_2D, GL_TEXTURE_RECTANGLE
+src/features/edit/core/edit_gpu_preview_renderer.py:2151:                            self._composite_tex.glo, w, h,
+src/features/edit/core/edit_gpu_preview_renderer.py:2727:                    task.frame, task.generation_id, final_tex.glo, w, h,
+src/features/edit/core/edit_gpu_preview_renderer.py:2732:                    from OpenGL.GL import glFinish
+src/features/edit/core/edit_gpu_preview_renderer.py:2741:                    task.frame, task.generation_id, final_tex.glo, w, h,
+src/features/edit/core/edit_gpu_preview_renderer.py:2812:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:2820:        from OpenGL.GL import GL_TEXTURE_2D, GL_TEXTURE_RECTANGLE
+src/features/edit/core/edit_gpu_preview_renderer.py:2844:        # NOTE: moderngl 5.12 never writes sampler2DRect uniform values to GL
+src/features/edit/core/edit_gpu_preview_renderer.py:2847:        from OpenGL.GL import glUseProgram, glUniform1i, glGetUniformLocation
+src/features/edit/core/edit_gpu_preview_renderer.py:2848:        glUseProgram(program.glo)
+src/features/edit/core/edit_gpu_preview_renderer.py:2849:        glUniform1i(glGetUniformLocation(program.glo, 'u_y_plane'), 0)
+src/features/edit/core/edit_gpu_preview_renderer.py:2850:        glUniform1i(glGetUniformLocation(program.glo, 'u_uv_plane'), 1)
+src/features/edit/core/edit_gpu_preview_renderer.py:2880:        from OpenGL.GL import glActiveTexture, glBindTexture, GL_TEXTURE0
+src/features/edit/core/edit_gpu_preview_renderer.py:2883:        glBindTexture(getattr(y_plane, 'target', GL_TEXTURE_2D), y_plane.glo)
+src/features/edit/core/edit_gpu_preview_renderer.py:2885:        glBindTexture(getattr(uv_plane, 'target', GL_TEXTURE_2D), uv_plane.glo)
+src/features/edit/core/edit_gpu_preview_renderer.py:2888:        vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3342:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:3365:            self._flip_blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3392:        self._blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3413:            self._blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3442:            self._dip_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3463:        self._flip_blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3545:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:3579:            self._blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3580:            accumulator = scratch_a  # moderngl.Texture — has .use()
+src/features/edit/core/edit_gpu_preview_renderer.py:3614:                self._blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3654:                self._blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3673:        self._flip_blend_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:3756:        The producer and this renderer use a shared OpenGL share group. The
+src/features/edit/core/edit_gpu_preview_renderer.py:4007:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:4030:                mode=moderngl.TRIANGLE_STRIP, vertices=4,
+src/features/edit/core/edit_gpu_preview_renderer.py:4044:                mode=moderngl.TRIANGLE_STRIP, vertices=4,
+src/features/edit/core/edit_gpu_preview_renderer.py:4126:                # Register slot with present pool (texture_glo = tex.glo)
+src/features/edit/core/edit_gpu_preview_renderer.py:4128:                    slot_id, texture_glo=tex.glo, width=w, height=h,
+src/features/edit/core/edit_gpu_preview_renderer.py:4357:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:4377:            vao.render(mode=moderngl.TRIANGLES, vertices=3)
+src/features/edit/core/edit_gpu_preview_renderer.py:4396:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:4402:            vao.render(mode=moderngl.TRIANGLES, vertices=3)
+src/features/edit/core/edit_gpu_preview_renderer.py:4506:                and self._adjustment_grade_texes[oldest].glo == pin_glo
+src/features/edit/core/edit_gpu_preview_renderer.py:4512:                     if t.glo != pin_glo),
+src/features/edit/core/edit_gpu_preview_renderer.py:4560:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:4581:        self._transform_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:4666:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:4667:        self._crop_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:4816:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:4817:        self._grade_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:4842:        ``source_tex`` is a moderngl ``Texture`` whose ``.glo`` we feed to
+src/features/edit/core/edit_gpu_preview_renderer.py:4849:            source_tex: graded track texture (moderngl.Texture).
+src/features/edit/core/edit_gpu_preview_renderer.py:4914:        current_glo = source_tex.glo
+src/features/edit/core/edit_gpu_preview_renderer.py:4931:        # Wrap the resulting glo in a moderngl.Texture-like handle the rest
+src/features/edit/core/edit_gpu_preview_renderer.py:5072:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:5073:        self.ctx.disable(moderngl.CULL_FACE)
+src/features/edit/core/edit_gpu_preview_renderer.py:5074:        self.ctx.disable(moderngl.DEPTH_TEST)
+src/features/edit/core/edit_gpu_preview_renderer.py:5075:        self.ctx.disable(moderngl.BLEND)
+src/features/edit/core/edit_gpu_preview_renderer.py:5110:        self._generator_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/edit/core/edit_gpu_preview_renderer.py:5132:        current_glo = composite_tex.glo
+src/features/edit/core/edit_gpu_preview_renderer.py:5148:                    if current_glo != composite_tex.glo else composite_tex)
+src/features/edit/core/edit_gpu_preview_renderer.py:5163:                    if current_glo == composite_tex.glo
+src/features/edit/core/edit_gpu_preview_renderer.py:5224:                if current_glo == composite_tex.glo
+src/features/edit/core/edit_gpu_preview_renderer.py:5345:        import moderngl
+src/features/edit/core/edit_gpu_preview_renderer.py:5400:            self._snapshot_vao.render(mode=moderngl.TRIANGLES, vertices=3)
+src/features/edit/core/edit_gpu_preview_renderer.py:5471:                texture_id=final_tex.glo,
+src/features/edit/core/edit_gpu_preview_renderer.py:5485:                tex_id=final_tex.glo, width=width, height=height,
+src/features/edit/core/edit_gpu_preview_renderer.py:5498:            from OpenGL.GL import (
+src/features/edit/core/edit_gpu_preview_renderer.py:5506:                # W05 修复：PyOpenGL 的 GLsync 在本机（Windows/PyOpenGL
+src/features/edit/core/edit_gpu_preview_renderer.py:5519:                # （闭包持有原始 GLsync 对象，不做 int 转换）
+src/features/edit/core/edit_gpu_preview_renderer.py:5522:                        from OpenGL.GL import glDeleteSync
+src/features/edit/core/edit_gpu_preview_renderer.py:5538:                texture_id=final_tex.glo,
+src/features/edit/core/edit_gpu_preview_renderer.py:5560:            tex_id=final_tex.glo, width=width, height=height,
+src/features/edit/core/edit_gpu_preview_renderer.py:5670:            from OpenGL.GL import (
+src/features/edit/core/edit_gpu_preview_renderer.py:5696:            from OpenGL.GL import (
+src/features/edit/core/edit_gpu_preview_renderer.py:5707:                    from OpenGL.GL import glFinish
+src/features/edit/core/edit_gpu_preview_renderer.py:5770:            from OpenGL.GL import (
+src/features/edit/core/edit_gpu_preview_renderer.py:5800:            # PyOpenGL sync APIs unavailable — fall back to glFinish for
+src/features/edit/core/edit_gpu_preview_renderer.py:5803:                from OpenGL.GL import glFinish
+src/features/edit/core/edit_gpu_preview_renderer.py:5810:                from OpenGL.GL import glFinish
+src/features/edit/core/edit_gpu_preview_renderer.py:6070:        # 随进程消亡——现代码里 moderngl ctx.release() 不会替我们销毁
+src/features/edit/core/edit_gpu_preview_renderer.py:6076:        # moderngl（需要 ctx current），再 doneCurrent/移交销毁。
+src/features/edit/core/timeline_export.py:2260:#: OpenGL 导出 GPU 效果链放行的 dispatch_key 集合（pass2.5 经
+src/features/edit/core/timeline_export.py:2801:        # ordinary exporters, but do not silently select OpenGL after the
+src/features/edit/core/timeline_export.py:8646:            # 管线无 moderngl.Context）。目前支持 blur/sharpen/glow 三种
+src/features/edit/core/timeline_export.py:9012:        §11.1/§11.5）：主机可见帧走 OpenGL 上传→合成→读回的固定往返
+src/features/edit/core/timeline_export.py:9079:        Metal 通用入口支持 10-bit 平面输出。调用侧在选定 OpenGL 单层
+src/features/edit/core/timeline_export.py:9156:        then only forwards those planes to the Topos encoder. OpenGL keeps its
+src/features/edit/core/timeline_export.py:9185:            # OpenGL compositor and report it as a D3D11 result.
+src/features/edit/core/timeline_export.py:9234:                # OpenGL 渲染器不实现 clip 几何（blend pass 逐像素 1:1，
+src/features/edit/core/timeline_export.py:9236:                # transform/crop 在 OpenGL 下被静默丢弃（实测 2x scale 的
+src/features/edit/core/timeline_export.py:9338:                            # 2026-09-17 导出提速：OpenGL 后端放行经
+src/features/edit/core/timeline_export.py:9513:                        # （side_properties 按 backend 选择），OpenGL 侧层
+src/features/edit/core/timeline_export.py:9864:                # 时序——moderngl 不做按调用 make-current）——丢弃重建自愈；
+src/features/edit/core/timeline_export.py:9926:        # normal development/compatibility route remains OpenGL when the
+src/features/edit/core/timeline_export.py:9995:        """解析 OpenGL 导出 GPU 效果链（fail-closed；与 Metal 门同构）。
+src/features/ai_workflow/tests/test_composite_adapter.py:10:- ``CompositeRenderJobRef``：合成渲染 Job 引用（不持有 GPU texture / OpenGL 对象）。
+src/features/ai_workflow/tests/test_composite_adapter.py:23:- **render 生命周期由 Composite 管**：AI workflow 不持有 OpenGL context；不直接修改
+src/features/ai_workflow/tests/test_composite_adapter.py:28:- 不依赖 moderngl / PyQt6（adapter 是纯 Python）。
+src/features/ai_workflow/tests/test_composite_adapter.py:161:        # 红线：RenderJobRef 只持有 job ID + 状态，不持有 texture / OpenGL context
+src/features/ai_workflow/tests/test_composite_adapter.py:216:        # 负例：texture 形状对象（模拟 moderngl.Texture 等不可序列化对象）
+src/features/ai_workflow/ui/workflow_connection_item.py:16:- **不引入** ``moderngl`` / ``composite.core``。
+src/features/ai_workflow/ui/workflow_form_page.py:9:- 纯 Qt；不依赖画布 / moderngl。
+src/features/ai_workflow/tests/test_node_canvas_protocol.py:13:- 不 import ``composite.core`` / ``moderngl``（本模块纯数据 + Protocol）。
+src/features/ai_workflow/tests/test_node_canvas_protocol.py:25:    子串检查可被 ``from moderngl import ...``、``import src.features.composite.core``、
+src/features/ai_workflow/tests/test_node_canvas_protocol.py:50:    """红线：本模块不 import moderngl / composite.core / PyQt6（任何导入形式）。"""
+src/features/ai_workflow/tests/test_node_canvas_protocol.py:52:    assert not _imports_root(imports, "moderngl"), (
+src/features/ai_workflow/tests/test_node_canvas_protocol.py:53:        f"本模块不允许 import moderngl；发现：{sorted(imports)}"
+src/features/ai_workflow/ui/workflow_node_item.py:16:- **不引入** ``moderngl`` / ``composite.core``（本文件是 UI 层，可引入 PyQt6）。
+src/features/ai_workflow/ui/workflow_node_item.py:17:- **不传 GPU texture / OpenGL context**（端口 artifact_type 是字符串）。
+src/features/color/ui/gl_viewport.py:2:from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+src/features/color/ui/gl_viewport.py:13:class GLCanvasViewport(QOpenGLWidget):
+src/features/color/ui/gl_viewport.py:17:    # Signal emitted when OpenGL context and async renderer are fully initialized
+src/features/color/ui/gl_viewport.py:25:        self.setUpdateBehavior(QOpenGLWidget.UpdateBehavior.PartialUpdate)
+src/features/color/ui/gl_viewport.py:64:        # QOpenGLWidget is insufficient for a QGraphicsView background: Qt may
+src/features/color/ui/gl_viewport.py:126:        # early here retained QOpenGLWidget's default black buffer, making
+src/features/ai_workflow/ui/workflow_inspector.py:21:- 不引入 ``moderngl`` / ``composite.core``（纯 Qt 面板）。
+src/features/ai_workflow/tests/test_workflow_models.py:15:- 端口不传 Qt 对象 / OpenGL texture / 模型实例 / 线程对象 / API key / 绝对路径。
+src/features/edit/core/timeline_gpu_export_renderer.py:4:standalone moderngl context、失败直通、幂等 release），把
+src/features/edit/core/timeline_gpu_export_renderer.py:990:            import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:992:            ctx = moderngl.create_standalone_context(require=330)
+src/features/edit/core/timeline_gpu_export_renderer.py:1204:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:1211:        self._vao["yuv420_luma"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:1218:        self._vao["yuv420_chroma"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:1230:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:1236:        except moderngl.Error as error:
+src/features/edit/core/timeline_gpu_export_renderer.py:1247:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:1270:        self._vao[key].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:1310:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:1341:            mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:1355:            mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:1484:                    spec, current.glo, params, width, height, dtype="f2")
+src/features/edit/core/timeline_gpu_export_renderer.py:1489:            if out_glo == current.glo:
+src/features/edit/core/timeline_gpu_export_renderer.py:1655:                    spec, current.glo, params, width, height, dtype="f1")
+src/features/edit/core/timeline_gpu_export_renderer.py:1660:            if out_glo == current.glo:
+src/features/edit/core/timeline_gpu_export_renderer.py:1708:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:1760:            ].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:1818:                self._vao["yuv_u16"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:1870:            self._vao["yuv"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2010:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:2031:            mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2045:            except (moderngl.Error, MemoryError) as error:
+src/features/edit/core/timeline_gpu_export_renderer.py:2146:            import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:2164:                # OpenGL 效果链：(EffectSpec, 原始参数 dict) 元组序列
+src/features/edit/core/timeline_gpu_export_renderer.py:2192:                self._vao[vao_key].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2205:                self._vao["dip"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2217:                    mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2231:                self._vao[quant_key].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2239:            self._vao[quant_key].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2268:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:2296:            self._vao[vao_key].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2332:        self._vao["wipe"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2343:        self._vao["blend_f4"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2416:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:2424:        self._vao["scale"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2441:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:2455:        self._vao["scale_rgb"].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/edit/core/timeline_gpu_export_renderer.py:2469:        import moderngl
+src/features/edit/core/timeline_gpu_export_renderer.py:2486:        self._vao[vao_key].render(mode=moderngl.TRIANGLE_STRIP)
+src/features/ai_workflow/tests/test_comfyui_models.py:516:        # 红线：ComfyJobRef 是外部 job 引用，不持有 RunRecord / MediaAsset / OpenGL 对象
+src/features/ai_workflow/runtime/workflow_run_bridge.py:16:- 不写 timeline；不引入 ``moderngl`` / ``composite.core``。
+src/features/ai_workflow/runtime/workflow_action_service.py:6:compiled macro.  It is pure Python and has no Qt/OpenGL dependency.
+src/features/ai_workflow/runtime/__init__.py:8:- **不 import** ``moderngl`` / ``composite.core``（源码扫描）。
+src/features/ai_workflow/runtime/workflow_run_controller.py:20:- **不引入** ``moderngl`` / ``composite.core``。
+src/features/ai_workflow/runtime/fake_workflow_service.py:21:- **不引入** ``moderngl`` / ``composite.core``；**不写 timeline**。
+src/features/composite/render3d/raycast.py:6:坐标系约定（与 math_utils 一致）：OpenGL 右手系，相机看向 -Z。
+src/features/composite/render3d/raycast.py:30:        ndc_y: 视口归一化设备坐标 Y（-1..1，下负上正，OpenGL 习惯）。
+src/features/composite/render3d/material_state.py:9:四视图下这些重复多次，Python 调用 + OpenGL state change 都是瓶颈。
+src/features/composite/render3d/math_utils.py:10:参考标准：OpenGL 右手坐标系，相机看向 -Z（gluPerspective / gluLookAt 语义）。
+src/features/composite/render3d/math_utils.py:22:    """透视投影矩阵（右手系，OpenGL 风格，看向 -Z）。
+src/features/composite/render3d/math_utils.py:51:    """正交投影矩阵（右手系，OpenGL 风格，看向 -Z）。
+src/features/composite/render3d/math_utils.py:255:    ModernGL/OpenGL 的 mat4 uniform 按列主序接受 16 个 float。
+src/features/composite/render3d/math_utils.py:373:    # OpenGL 投影矩阵的 [0][2] / [1][2] 控制 NDC x/y 的平移
+src/features/composite/render3d/cryptomatte.py:6:contract testable without an OpenGL context and prevents names/manifest JSON
+src/features/composite/render3d/model_loader.py:200:            FBX/OBJ 等 DCC 坐标和 OpenGL 贴图采样方向不一致的模型。
+src/features/composite/render3d/viewport_overlays.py:182:        # QOpenGLWidget paint pass, which is fragile across Qt/OpenGL backends.
+src/features/composite/render3d/hdri.py:9:平台约束：macOS OpenGL 上限 4.1，无 compute shader（#version 430）。
+src/features/composite/render3d/hdri.py:27:from OpenGL import GL as gl
+src/features/composite/render3d/hdri.py:28:import moderngl
+src/features/composite/render3d/hdri.py:40:# 立方面朝向：OpenGL cubemap 规范。
+src/features/composite/render3d/hdri.py:470:            # 会被 PyOpenGL 错误检查器误报到后续 _RawCube.use() 的 glActiveTexture 上）
+src/features/composite/render3d/hdri.py:585:        vao.render(moderngl.TRIANGLE_STRIP, vertices=3)
+src/features/composite/render3d/hdri.py:650:        vao.render(moderngl.TRIANGLE_STRIP, vertices=3)
+src/features/composite/render3d/hdri.py:660:        未消费的错误标志，PyOpenGL 的错误检查器会误报到后续第一个 raw GL 调用）。
+src/features/composite/render3d/hdri.py:722:        self.glo = glo
+src/features/composite/render3d/hdri.py:731:        gl.glBindTexture(gl.GL_TEXTURE_CUBE_MAP, self.glo)
+src/features/composite/render3d/hdri.py:734:        if self.glo:
+src/features/composite/render3d/hdri.py:735:            gl.glDeleteTextures([self.glo])
+src/features/composite/render3d/hdri.py:736:            self.glo = 0
+src/features/composite/render3d/material_texture_loader.py:44:        # cache_key (abs_path, mtime) -> (moderngl.Texture, applied_filter_wrap)
+src/features/composite/render3d/material_texture_loader.py:53:        """按 descriptor 解析路径并上传/复用纹理，返回 moderngl.Texture（失败 None）。
+src/features/composite/render3d/material_texture_loader.py:56:            ctx: moderngl.Context（render thread）。
+src/features/composite/render3d/material_texture_loader.py:61:            moderngl.Texture，或 None（路径空/文件不存在/解码失败）。
+src/features/composite/render3d/material_texture_loader.py:95:                    state.pop(int(stale_tex.glo), None)
+src/features/composite/render3d/material_texture_loader.py:113:        按 tex.glo + filter + wrap 查 _filter_wrap_state。命中返回 True（可跳过）。
+src/features/composite/render3d/material_texture_loader.py:119:            glo = int(tex.glo)
+src/features/composite/render3d/material_texture_loader.py:132:            glo = int(tex.glo)
+src/features/composite/render3d/material_texture_loader.py:170:            moderngl.Texture，或 None（解码失败）。
+src/features/composite/render3d/material_texture_loader.py:211:            tex.filter = (moderngl_filter_nearest(), moderngl_filter_nearest())
+src/features/composite/render3d/material_texture_loader.py:217:def moderngl_filter_nearest():
+src/features/composite/render3d/material_texture_loader.py:218:    """延迟导入 moderngl 常量，避免无 GL 环境下 import 失败。"""
+src/features/composite/render3d/material_texture_loader.py:219:    import moderngl
+src/features/composite/render3d/material_texture_loader.py:220:    return moderngl.NEAREST
+src/features/composite/render3d/material_texture_loader.py:227:        tex: moderngl.Texture。
+src/features/composite/render3d/material_texture_loader.py:231:    import moderngl
+src/features/composite/render3d/material_texture_loader.py:233:        tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
+src/features/composite/render3d/material_texture_loader.py:235:        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/render3d/material_texture_loader.py:237:        tex.filter = (moderngl.LINEAR_MIPMAP_LINEAR, moderngl.LINEAR)
+src/features/composite/render3d/material_texture_loader.py:250:    REPEAT/CLAMP_TO_EDGE/MIRRORED_REPEAT. Use raw OpenGL when available so
+src/features/composite/render3d/material_texture_loader.py:260:            from OpenGL import GL as gl
+src/features/composite/render3d/skeleton_renderer.py:184:            self._line_vao.render(__import__('moderngl').LINES)
+src/features/composite/render3d/skeleton_renderer.py:206:            self._point_vao.render(__import__('moderngl').POINTS)
+src/features/edit/core/timeline_preview_renderer.py:6373:            main_context: 主 OpenGL 上下文（可选，用于 GPU 渲染）
+src/features/edit/core/timeline_preview_renderer.py:12100:            tex_id: OpenGL 纹理 ID（共享上下文）
+src/features/edit/core/timeline_preview_renderer.py:12573:        main_context: 主 OpenGL 上下文
+src/features/composite/render3d/mesh_picking.py:88:    BVH 只持有 CPU 几何数据，不持有 OpenGL 对象。构建时会忽略越界三角形，
+src/features/composite/evaluators/histogram_manager.py:31:import moderngl
+src/features/composite/evaluators/histogram_manager.py:212:        """Check if compute shaders are supported (OpenGL 4.3+).
+src/features/composite/evaluators/histogram_manager.py:529:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/evaluators/histogram_manager.py:556:            # 注意 moderngl 的 simple_vertex_array 是 *varargs 签名，
+src/features/composite/evaluators/histogram_manager.py:562:            # (moderngl semantics) — keep the reference so release() can.
+src/features/composite/evaluators/histogram_manager.py:726:            # object.  A raw moderngl texture has no ``revision`` attribute,
+src/features/composite/evaluators/histogram_manager.py:742:                input_tex.glo,
+src/features/composite/evaluators/tile_evaluator.py:67:            texture_id=dst_tex.glo, width=dst_w, height=dst_h,
+src/features/composite/evaluators/tile_evaluator.py:110:            texture_id=dst_tex.glo, width=target_w, height=target_h,
+src/features/edit/core/timeline_clip_frame_provider.py:41:    would trigger the nodes package __init__.py and pull in moderngl.
+src/features/edit/core/timeline_clip_frame_provider.py:49:        GPU texture storage: OpenGL origin, bottom-left.
+src/features/edit/core/timeline_clip_frame_provider.py:108:    composite pipeline. If the import fails (no moderngl), returns the
+src/features/edit/core/timeline_clip_frame_provider.py:185:        # (GLsync, bridge_release, gpu_frame_release).  A source IOSurface
+src/features/edit/core/timeline_clip_frame_provider.py:316:            from OpenGL.GL import (
+src/features/edit/core/timeline_clip_frame_provider.py:335:            from OpenGL.GL import glFinish
+src/features/edit/core/timeline_clip_frame_provider.py:346:            from OpenGL.GL import (
+src/features/edit/core/timeline_clip_frame_provider.py:391:                from OpenGL.GL import glDeleteSync
+src/features/edit/core/timeline_clip_frame_provider.py:468:            import moderngl
+src/features/edit/core/timeline_clip_frame_provider.py:472:            output_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/edit/core/timeline_clip_frame_provider.py:482:            self._owned_textures[output_tex.glo] = output_tex
+src/features/edit/core/timeline_clip_frame_provider.py:484:                texture_id=output_tex.glo,
+src/features/edit/core/timeline_clip_frame_provider.py:522:            if output_tex is not None and output_tex.glo not in self._owned_textures:
+src/features/edit/core/timeline_clip_frame_provider.py:1656:            import moderngl
+src/features/edit/core/timeline_clip_frame_provider.py:1695:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/edit/core/timeline_clip_frame_provider.py:1703:            self._owned_textures[tex.glo] = tex
+src/features/edit/core/timeline_clip_frame_provider.py:1704:            self._last_source_texture_id = tex.glo
+src/features/edit/core/timeline_clip_frame_provider.py:1707:                texture_id=tex.glo,
+src/features/edit/core/timeline_clip_frame_provider.py:1736:            OpenGL textures use bottom-left origin (row 0 = bottom of image).
+src/features/edit/core/timeline_clip_frame_provider.py:1870:            import moderngl
+src/features/edit/core/timeline_clip_frame_provider.py:1923:            output_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/edit/core/timeline_clip_frame_provider.py:2011:            self._owned_textures[output_tex.glo] = output_tex
+src/features/edit/core/timeline_clip_frame_provider.py:2012:            self._last_source_texture_id = output_tex.glo
+src/features/edit/core/timeline_clip_frame_provider.py:2015:                texture_id=output_tex.glo,
+src/features/edit/core/timeline_clip_frame_provider.py:2085:            import moderngl
+src/features/edit/core/timeline_clip_frame_provider.py:2097:            tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/edit/core/timeline_clip_frame_provider.py:2100:            self._owned_textures[tex.glo] = tex
+src/features/edit/core/timeline_clip_frame_provider.py:2103:                texture_id=tex.glo,
+src/features/edit/core/timeline_clip_frame_provider.py:2114:                f"{width}x{height}, tex_id={tex.glo}"
+src/features/composite/render3d/gizmo_renderer.py:16:import moderngl
+src/features/composite/render3d/gizmo_renderer.py:169:        self._grid_prog: Optional[moderngl.Program] = None
+src/features/composite/render3d/gizmo_renderer.py:170:        self._grid_vao: Optional[moderngl.VertexArray] = None
+src/features/composite/render3d/gizmo_renderer.py:171:        self._axes_prog: Optional[moderngl.Program] = None
+src/features/composite/render3d/gizmo_renderer.py:172:        self._axes_vao: Optional[moderngl.VertexArray] = None
+src/features/composite/render3d/gizmo_renderer.py:173:        self._grid_vbo: Optional[moderngl.Buffer] = None
+src/features/composite/render3d/gizmo_renderer.py:174:        self._axes_vbo: Optional[moderngl.Buffer] = None
+src/features/composite/render3d/gizmo_renderer.py:341:            ctx.enable(moderngl.BLEND)
+src/features/composite/render3d/gizmo_renderer.py:342:            ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
+src/features/composite/render3d/gizmo_renderer.py:344:            # ModernGL 没有高层 depth-mask API；PyOpenGL 在某些 shared-context
+src/features/composite/render3d/gizmo_renderer.py:349:                from OpenGL.GL import glDepthMask
+src/features/composite/render3d/gizmo_renderer.py:355:                self._grid_vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/render3d/gizmo_renderer.py:359:                        from OpenGL.GL import glDepthMask
+src/features/composite/render3d/gizmo_renderer.py:363:            ctx.disable(moderngl.BLEND)
+src/features/composite/render3d/gizmo_renderer.py:367:            ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/render3d/gizmo_renderer.py:371:            self._axes_vao.render(moderngl.LINES, vertices=30)
+src/features/composite/render3d/gizmo_renderer.py:372:            ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/evaluators/filter_evaluator.py:18:import moderngl
+src/features/composite/evaluators/filter_evaluator.py:97:                                texture_id=current_tex_obj.glo,
+src/features/composite/evaluators/filter_evaluator.py:151:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:222:        bind_texture_unit(temp_tex.glo, 1)
+src/features/composite/evaluators/filter_evaluator.py:239:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:284:            texture_id=output.glo, width=w, height=h, format=input_tex.format,
+src/features/composite/evaluators/filter_evaluator.py:323:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:388:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:410:                    texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:451:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:471:                    texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:543:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:567:                    texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:613:            texture_id=matte_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:623:                texture_id=result_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:635:            texture_id=result_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:815:            texture_id=matte_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:821:                texture_id=result_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:831:            "result": TextureResult(texture_id=result_tex.glo, width=w,
+src/features/composite/evaluators/filter_evaluator.py:895:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:923:                texture_id=mask_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1059:                texture_id=result_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1067:                texture_id=mask_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1208:            texture_id=out_tex.glo,
+src/features/composite/evaluators/filter_evaluator.py:1262:            texture_id=out_tex.glo, width=out_w, height=out_h,
+src/features/composite/evaluators/filter_evaluator.py:1320:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1395:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1423:        # moderngl requires the full float array for `uniform float[32]`.
+src/features/composite/evaluators/filter_evaluator.py:1445:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1536:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1594:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1623:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1766:            texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1829:            # tmp_v 是池化裸纹理（.glo），非 TextureResult——初版误用
+src/features/composite/evaluators/filter_evaluator.py:1832:            _run(prog_blur, int(tmp_v.glo), low_tex,
+src/features/composite/evaluators/filter_evaluator.py:1839:            # low_tex 本就是池化 moderngl 纹理对象（非 TextureResult，
+src/features/composite/evaluators/filter_evaluator.py:1853:            "low": TextureResult(texture_id=low_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1855:            "high": TextureResult(texture_id=high_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1905:            texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:1951:            texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:2213:                    self._bind_external_texture(current_tex.glo)
+src/features/composite/evaluators/filter_evaluator.py:2228:            self._bind_external_texture(current_tex.glo)
+src/features/composite/evaluators/filter_evaluator.py:2241:                texture_id=final_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:2332:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:2411:            self._bind_mask_texture(self._get_white_mask_texture().glo)
+src/features/composite/evaluators/filter_evaluator.py:2418:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/filter_evaluator.py:2511:            lut_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/evaluators/keyer_evaluator.py:84:                texture_id=out_tex.glo,
+src/features/composite/evaluators/keyer_evaluator.py:259:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/keyer_evaluator.py:300:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/keyer_evaluator.py:344:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/keyer_evaluator.py:410:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/keyer_evaluator.py:456:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/keyer_evaluator.py:553:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/render3d/primitives.py:321:    用于场景参考。注意：索引语义是线段对，调用方需用 moderngl.LINES 渲染，
+src/features/composite/render3d/format_capabilities.py:791:            # 的上方向）→ 新 +Y，旧 +Y（前向）→ 新 -Z（OpenGL 相机看向
+src/features/composite/evaluators/graph_evaluator_mixin.py:79:    - self.ctx: moderngl.Context
+src/features/composite/evaluators/shader_library.py:110:    One instance per moderngl.Context. Programs are keyed by
+src/features/composite/evaluators/shader_library.py:314:        self._cache: Dict[Tuple, object] = {}  # key → moderngl.Program
+src/features/composite/evaluators/shader_library.py:347:            moderngl.Program on success, None on compile error.
+src/features/edit/core/metal_timeline_preview.py:147:        from OpenGL import GL
+src/features/edit/core/metal_timeline_preview.py:202:        from OpenGL.GL import glDeleteTextures
+src/features/edit/core/metal_timeline_preview.py:273:        from OpenGL import GL
+src/features/edit/core/metal_timeline_preview.py:274:        import moderngl
+src/features/edit/core/metal_timeline_preview.py:278:        GL.glUseProgram(self._program.glo)
+src/features/edit/core/metal_timeline_preview.py:279:        GL.glUniform1i(GL.glGetUniformLocation(self._program.glo, "u_surface"), 0)
+src/features/edit/core/metal_timeline_preview.py:282:        self._vao.render(mode=moderngl.TRIANGLES, vertices=3)
+src/features/edit/core/metal_timeline_preview.py:286:        from OpenGL.GL import glDeleteTextures
+src/features/edit/core/render_cache_worker.py:42:    A render-cache worker has no GUI/OpenGL context.  The old implementation
+src/features/composite/render3d/scene_payload.py:232:    vao: Any                   # moderngl.VertexArray（procedural mesh）
+src/features/composite/render3d/scene_payload.py:233:    program: Any = None        # VAO 绑定的 moderngl.Program（Scene3D 设 uniform 必须用它）
+src/features/composite/evaluators/cache_evaluator.py:196:            texture_id=tex.glo,
+src/features/edit/core/scene_cut/worker.py:22:- No OpenGL calls in worker thread
+src/features/edit/core/scene_cut/worker.py:674:        - No OpenGL calls in worker thread
+src/features/composite/evaluators/merge_evaluator.py:79:                texture_id=out_tex.glo, width=out_w, height=out_h,
+src/features/composite/evaluators/merge_evaluator.py:145:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/merge_evaluator.py:267:            # AUD-6105: moderngl's clear() needs a 4-component color, a
+src/features/composite/evaluators/merge_evaluator.py:308:                texture_id=out_tex.glo,
+src/features/composite/evaluators/merge_evaluator.py:315:                depth_texture_id=out_depth_tex.glo if out_depth_tex else None,
+src/features/composite/evaluators/merge_evaluator.py:366:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/transform_evaluator.py:204:                     f"in_tex={input_tex.texture_id} out_tex={out_tex.glo} size={out_w}x{out_h} "
+src/features/composite/evaluators/transform_evaluator.py:232:                texture_id=out_tex.glo, width=out_w, height=out_h,
+src/features/composite/evaluators/transform_evaluator.py:280:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/transform_evaluator.py:350:                texture_id=out_tex.glo, width=target_w, height=target_h,
+src/features/composite/evaluators/transform_evaluator.py:387:                texture_id=out_tex.glo, width=crop_w, height=crop_h,
+src/features/composite/evaluators/transform_evaluator.py:432:                texture_id=out_tex.glo, width=w, height=h,
+src/features/shared/effects/video_stabilization.py:49:        description='Clip camera stabilization v1; HDR GPU preview and CPU/OpenGL export.',
+src/features/composite/evaluators/base_evaluator.py:16:import moderngl
+src/features/composite/evaluators/base_evaluator.py:1710:            texture_id=tex.glo,
+src/features/composite/evaluators/base_evaluator.py:1737:            texture_id=tex.glo,
+src/features/composite/evaluators/base_evaluator.py:1757:        the plain moderngl.Context so they can access business-level context
+src/features/composite/evaluators/base_evaluator.py:1806:                # AUD-7101: effect nodes used to receive the bare moderngl
+src/features/composite/evaluators/base_evaluator.py:1965:            texture_id=tile_tex.glo, width=tw, height=th,
+src/features/composite/evaluators/base_evaluator.py:2080:                self._bind_texture_unit(acc_tex_obj.glo, 0)
+src/features/composite/evaluators/base_evaluator.py:2095:                texture_id=acc_tex_obj.glo, width=out_w, height=out_h,
+src/features/composite/evaluators/base_evaluator.py:2717:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/base_evaluator.py:3099:            texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/base_evaluator.py:3272:        """Bind an OpenGL 2D texture to a texture unit on the render thread."""
+src/features/composite/evaluators/base_evaluator.py:3304:        """Get a ModernGL texture object by its OpenGL texture ID."""
+src/features/composite/evaluators/base_evaluator.py:3307:                if tex.glo == texture_id:
+src/features/composite/evaluators/base_evaluator.py:3313:                    if tex.glo == texture_id:
+src/features/composite/evaluators/base_evaluator.py:3319:                    if hasattr(tex, 'glo') and tex.glo == texture_id:
+src/features/composite/evaluators/base_evaluator.py:3342:        self._vao_cache[prog_id].render(moderngl.TRIANGLE_STRIP)
+src/features/composite/evaluators/base_evaluator.py:3711:                texture_id=out_tex.glo, width=w, height=h,
+src/features/shared/effects/effect_spec.py:11:All three contexts live in the same OpenGL share group
+src/features/shared/effects/effect_spec.py:13:can be passed across them zero-copy. **However**, moderngl ``Program`` /
+src/features/composite/evaluators/color_evaluator.py:16:import moderngl
+src/features/composite/evaluators/color_evaluator.py:136:                self._bind_mask_texture(self._get_white_mask_texture().glo)
+src/features/composite/evaluators/color_evaluator.py:153:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:203:                self._bind_mask_texture(self._get_white_mask_texture().glo)
+src/features/composite/evaluators/color_evaluator.py:215:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:267:        lut_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/evaluators/color_evaluator.py:289:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:330:                self._bind_mask_texture(self._get_white_mask_texture().glo)
+src/features/composite/evaluators/color_evaluator.py:342:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:402:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:436:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:467:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:498:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:551:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:635:                src_glo = dst.glo
+src/features/composite/evaluators/color_evaluator.py:647:                result_glo = apply_stabilization_gpu(runner, out_tex.glo, stabilization, frame, w, h)
+src/features/composite/evaluators/color_evaluator.py:648:                if result_glo != out_tex.glo:
+src/features/composite/evaluators/color_evaluator.py:667:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/color_evaluator.py:766:            self._bind_mask_texture(white_tex.glo)
+src/features/shared/effects/__init__.py:6:on its own moderngl context — no program/FBO objects are shared across
+src/features/shared/effects/__init__.py:7:contexts (they cannot be, per the OpenGL share-group rules), only the
+src/features/teaching_animation/render/frame_adapter.py:60:        # preview and never an OpenGL context. QApplication is intentional:
+src/features/shared/effects/effect_pass_runner.py:1:"""Runs an :class:`EffectSpec` on a specific moderngl context.
+src/features/shared/effects/effect_pass_runner.py:19:the context (mirrors the contract of every other moderngl-using object in
+src/features/shared/effects/effect_pass_runner.py:56:    import moderngl  # noqa: F401  (avoid hard import at module load)
+src/features/shared/effects/effect_pass_runner.py:382:      * Construct with a ``moderngl.Context`` (must already be current on
+src/features/shared/effects/effect_pass_runner.py:393:    def __init__(self, ctx: "moderngl.Context", max_cache_size: int = 32) -> None:
+src/features/shared/effects/effect_pass_runner.py:397:            ctx: The moderngl context all programs/textures/VAOs will be
+src/features/shared/effects/effect_pass_runner.py:406:        # Program cache: key → moderngl.Program.
+src/features/shared/effects/effect_pass_runner.py:707:        """Compile the spec's fragment source(s) into a moderngl program.
+src/features/shared/effects/effect_pass_runner.py:771:        VAOs are cached per-program (moderngl requires the VAO be created
+src/features/shared/effects/effect_pass_runner.py:775:        import moderngl
+src/features/shared/effects/effect_pass_runner.py:783:        vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/shared/effects/effect_pass_runner.py:794:          ``moderngl.Texture`` wrapper for it, so raw GL binding is required.
+src/features/shared/effects/effect_pass_runner.py:795:        * **Standalone moderngl context (tests / no Qt)** — fall back to
+src/features/shared/effects/effect_pass_runner.py:796:          PyOpenGL direct calls. ``initializeOpenGLFunctions()`` would
+src/features/shared/effects/effect_pass_runner.py:805:        moderngl context.
+src/features/shared/effects/effect_pass_runner.py:813:                from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core
+src/features/shared/effects/effect_pass_runner.py:822:                "using PyOpenGL fallback", exc,
+src/features/shared/effects/effect_pass_runner.py:828:        # Path 2: standalone moderngl context (tests). PyOpenGL is a first-class
+src/features/shared/effects/effect_pass_runner.py:829:        # project dependency (see requirements.txt) and works on a bare moderngl
+src/features/shared/effects/effect_pass_runner.py:831:        from OpenGL.GL import (
+src/features/shared/effects/effect_pass_runner.py:975:        if input_glo == self._scratch_a.glo:
+src/features/shared/effects/effect_pass_runner.py:994:        return out_tex.glo
+src/features/shared/effects/effect_pass_runner.py:1085:        if input_glo == self._scratch_a.glo:
+src/features/shared/effects/effect_pass_runner.py:1088:        elif input_glo == self._scratch_b.glo:
+src/features/shared/effects/effect_pass_runner.py:1130:        return v_tex.glo
+src/features/shared/effects/effect_pass_runner.py:1213:            if input_glo == self._scratch_a.glo:
+src/features/shared/effects/effect_pass_runner.py:1223:            return out_tex.glo
+src/features/shared/effects/effect_pass_runner.py:1224:        if input_glo == self._scratch_a.glo:
+src/features/shared/effects/effect_pass_runner.py:1239:        import moderngl as _mgl
+src/features/shared/effects/effect_pass_runner.py:1243:        return out_tex.glo
+src/features/shared/effects/effect_pass_runner.py:1315:        # unit 1 = pass-1 output (bloom_tex)。2026-09-17：改用 moderngl
+src/features/shared/effects/effect_pass_runner.py:1334:        return out_tex.glo
+src/features/shared/effects/effect_pass_runner.py:1341:        if input_glo == self._scratch_a.glo:
+src/features/shared/effects/effect_pass_runner.py:1343:        if input_glo == self._scratch_b.glo:
+src/features/shared/effects/effect_pass_runner.py:1375:        return output.glo
+src/features/shared/effects/effect_pass_runner.py:1442:        if input_glo == self._scratch_a.glo:
+src/features/shared/effects/effect_pass_runner.py:1453:        return out_tex.glo
+src/features/shared/effects/effect_pass_runner.py:1488:        import moderngl
+src/features/shared/effects/effect_pass_runner.py:1491:        self._blit_vao.render(mode=moderngl.TRIANGLE_STRIP, vertices=4)
+src/features/shared/effects/effect_pass_runner.py:1535:        import moderngl
+src/features/shared/effects/effect_pass_runner.py:1537:        linear = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/shared/effects/effect_pass_runner.py:1591:        start_on_b = (input_glo == self._scratch_a.glo)
+src/features/shared/effects/effect_pass_runner.py:1601:                write_glo = self._scratch_b.glo
+src/features/shared/effects/effect_pass_runner.py:1604:                write_glo = self._scratch_a.glo
+src/features/shared/effects/effect_pass_runner.py:1623:            self._scratch_b if last_write_glo == self._scratch_b.glo
+src/features/shared/effects/effect_pass_runner.py:1688:                # so moderngl gets a length-3 value (a scalar would raise
+src/features/shared/effects/effect_capability.py:413:      （GPU 导出按实际分派链拆分为 Metal / OpenGL 两条轴）；
+src/features/shared/effects/effect_capability.py:431:        """是否有任何导出后端（CPU / Metal / OpenGL 任一）。"""
+src/features/shared/effects/effect_capability.py:556:                     "无 OpenGL 导出实现"))
+src/features/composite/evaluators/blur_evaluator.py:91:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/blur_evaluator.py:402:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/blur_evaluator.py:458:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/channel_evaluator.py:48:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/channel_evaluator.py:102:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/channel_evaluator.py:157:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/evaluators/channel_evaluator.py:204:            dummy = self._get_white_mask_texture().glo
+src/features/composite/evaluators/channel_evaluator.py:267:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/nodes/output_node.py:164:            if texture.glo == display.texture_id:
+src/features/composite/nodes/output_node.py:209:        blank = TextureResult(texture_id=texture.glo, width=width, height=height,
+src/features/composite/nodes/output_node.py:394:        import moderngl
+src/features/composite/nodes/output_node.py:437:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/output_node.py:445:                texture_id=out_tex.glo,
+src/features/composite/nodes/output_node.py:494:        import moderngl
+src/features/composite/nodes/output_node.py:495:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/output_node.py:503:                src, texture_id=out_tex.glo, alpha_premultiplied=True)
+src/features/composite/nodes/output_node.py:552:        import moderngl
+src/features/composite/nodes/output_node.py:553:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/output_node.py:560:            "display": self._result_like(src, texture_id=out_tex.glo)
+src/features/composite/nodes/output_node.py:578:            ctx: GL context (moderngl via CompositeEvalContext).
+src/features/composite/nodes/output_node.py:609:        import moderngl
+src/features/composite/nodes/output_node.py:621:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/output_node.py:630:                texture_id=out_tex.glo,
+src/features/composite/nodes/output_node.py:672:        import moderngl
+src/features/composite/nodes/output_node.py:673:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/output_node.py:685:                texture_id=out_tex.glo,
+src/features/composite/nodes/output_node.py:765:# Output canvas. Coordinates use the OpenGL bottom-left convention used by BBox.
+src/features/composite/nodes/_gpu_readback.py:28:    """Locate a ModernGL texture object by its OpenGL name (glo)."""
+src/features/teaching_animation/render/benchmark.py:500:        import moderngl
+src/features/teaching_animation/render/benchmark.py:501:        gl_context = moderngl.create_standalone_context()
+src/features/teaching_animation/render/benchmark.py:517:                source.glo,
+src/features/composite/nodes/text_node.py:8:to a self-managed moderngl texture once per content change.
+src/features/composite/nodes/text_node.py:25:import moderngl
+src/features/composite/nodes/text_node.py:266:        self._gpu_texture: Optional[moderngl.Texture] = None
+src/features/composite/nodes/text_node.py:1194:            self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/text_node.py:1205:            texture_id=self._gpu_texture.glo,
+src/features/teaching_animation/render/advanced.py:122:    moderngl: bool = False
+src/features/teaching_animation/render/advanced.py:144:        self._effects[effect_id] = {"effect_id": effect_id, "parameters": tuple(parameters), "backend": "moderngl-optional"}
+src/features/teaching_animation/ai/advanced_capabilities.py:262:            preview_backends=("svg", "html", "moderngl"),
+src/features/teaching_animation/ai/advanced_capabilities.py:286:            preview_backends=("moderngl",),
+src/features/teaching_animation/ai/advanced_capabilities.py:324:            preview_backends=("moderngl",),
+src/features/teaching_animation/ai/advanced_capabilities.py:337:            preview_backends=("svg", "moderngl"),
+src/features/teaching_animation/ai/advanced_capabilities.py:350:            preview_backends=("svg", "moderngl"),
+src/features/composite/nodes/pointcloud3d_node.py:221:                texture_id=self._gpu_texture.glo, width=width, height=height,
+src/features/composite/nodes/scene3d_node.py:24:import moderngl
+src/features/composite/nodes/scene3d_node.py:199:        self._mesh_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:200:        self._mesh_vbo: Optional[moderngl.Buffer] = None
+src/features/composite/nodes/scene3d_node.py:201:        self._mesh_ibo: Optional[moderngl.Buffer] = None
+src/features/composite/nodes/scene3d_node.py:203:        self._mesh_vao: Optional[moderngl.VertexArray] = None
+src/features/composite/nodes/scene3d_node.py:210:        self._mesh_skinned_prog: Optional[moderngl.Program] = None  # 蒙皮 PBR 程序
+src/features/composite/nodes/scene3d_node.py:223:        # glo）直接用 OpenGL 绑定，不经此 loader（已是 GPU 资源）。
+src/features/composite/nodes/scene3d_node.py:227:        self._mesh_instanced_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:228:        self._instance_vbo: Optional[moderngl.Buffer] = None
+src/features/composite/nodes/scene3d_node.py:234:        self._depth_texture: Optional[moderngl.Texture] = None     # R32F 线性深度
+src/features/composite/nodes/scene3d_node.py:235:        self._depth_write_prog: Optional[moderngl.Program] = None  # 第二遍深度写入程序
+src/features/composite/nodes/scene3d_node.py:236:        self._depth_write_skinned_prog: Optional[moderngl.Program] = None  # 蒙皮深度写入程序
+src/features/composite/nodes/scene3d_node.py:237:        self._depth_write_instanced_prog: Optional[moderngl.Program] = None  # 实例化深度写入程序
+src/features/composite/nodes/scene3d_node.py:238:        self._depth_fbo: Optional[moderngl.Framebuffer] = None     # depth-only FBO
+src/features/composite/nodes/scene3d_node.py:245:        self._shadow_texture: Optional[moderngl.Texture] = None
+src/features/composite/nodes/scene3d_node.py:246:        self._shadow_depth_rb: Optional[moderngl.Renderbuffer] = None
+src/features/composite/nodes/scene3d_node.py:247:        self._shadow_fbo: Optional[moderngl.Framebuffer] = None
+src/features/composite/nodes/scene3d_node.py:248:        self._shadow_depth_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:249:        self._shadow_depth_skinned_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:250:        self._shadow_depth_instanced_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:251:        self._shadow_catcher_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:252:        self._shadow_catcher_skinned_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:253:        self._shadow_catcher_instanced_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:262:        self._aov_textures: Dict[str, Optional[moderngl.Texture]] = {}
+src/features/composite/nodes/scene3d_node.py:263:        self._aov_fbos: Dict[str, Optional[moderngl.Framebuffer]] = {}
+src/features/composite/nodes/scene3d_node.py:264:        self._aov_depth_rbs: Dict[str, Optional[moderngl.Renderbuffer]] = {}
+src/features/composite/nodes/scene3d_node.py:265:        self._aov_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:266:        self._aov_instanced_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:267:        self._aov_skinned_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:274:        self._motion_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:275:        self._motion_instanced_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:276:        self._motion_skinned_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:291:        self._id_texture: Optional[moderngl.Texture] = None        # RGBA8 object id
+src/features/composite/nodes/scene3d_node.py:292:        self._id_write_prog: Optional[moderngl.Program] = None     # 常量输出 id 的 fragment
+src/features/composite/nodes/scene3d_node.py:293:        self._id_write_skinned_prog: Optional[moderngl.Program] = None  # 蒙皮 ID 写入程序
+src/features/composite/nodes/scene3d_node.py:294:        self._id_fbo: Optional[moderngl.Framebuffer] = None        # id-only FBO
+src/features/composite/nodes/scene3d_node.py:303:        self._outline_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/scene3d_node.py:311:        self._gpu_texture: Optional[moderngl.Texture] = None   # 最终输出（resolve 目标）
+src/features/composite/nodes/scene3d_node.py:312:        self._depth_rb: Optional[moderngl.Renderbuffer] = None  # msaa=0: 主深度；msaa>0: msaa 深度
+src/features/composite/nodes/scene3d_node.py:313:        self._render_fbo: Optional[moderngl.Framebuffer] = None
+src/features/composite/nodes/scene3d_node.py:315:        self._msaa_color: Optional[moderngl.Texture] = None     # msaa color（多重采样）
+src/features/composite/nodes/scene3d_node.py:316:        self._resolve_fbo: Optional[moderngl.Framebuffer] = None  # resolve-only FBO（绑 _gpu_texture）
+src/features/composite/nodes/scene3d_node.py:321:        self._nav_render_color: Optional[moderngl.Texture] = None
+src/features/composite/nodes/scene3d_node.py:322:        self._nav_render_fbo: Optional[moderngl.Framebuffer] = None
+src/features/composite/nodes/scene3d_node.py:367:        self._ortho_textures: Dict[str, Optional[moderngl.Texture]] = {
+src/features/composite/nodes/scene3d_node.py:370:        self._ortho_fbos: Dict[str, Optional[moderngl.Framebuffer]] = {
+src/features/composite/nodes/scene3d_node.py:376:        self._ortho_depth_rbs: Dict[str, Optional[moderngl.Renderbuffer]] = {
+src/features/composite/nodes/scene3d_node.py:426:    def _ensure_mesh_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:436:    def _ensure_skinned_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:446:    def _ensure_instanced_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:456:    def _ensure_depth_write_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:466:    def _ensure_depth_write_skinned_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:476:    def _ensure_depth_write_instanced_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:487:    def _ensure_shadow_depth_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:497:    def _ensure_shadow_depth_skinned_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:508:    def _ensure_shadow_depth_instanced_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:519:    def _ensure_shadow_catcher_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:529:    def _ensure_shadow_catcher_skinned_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:540:    def _ensure_shadow_catcher_instanced_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:562:            self._shadow_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/scene3d_node.py:1032:            ctx: moderngl.Context。
+src/features/composite/nodes/scene3d_node.py:1043:        from OpenGL import GL as gl
+src/features/composite/nodes/scene3d_node.py:1081:            """用 OpenGL 直接绑外部 glo 到 sampler location。"""
+src/features/composite/nodes/scene3d_node.py:1116:                gl.glBindTexture(gl.GL_TEXTURE_2D, tex.glo)
+src/features/composite/nodes/scene3d_node.py:1152:        from OpenGL import GL as gl
+src/features/composite/nodes/scene3d_node.py:1167:        orm/ao/emissive_map）。若不显式给这些 sampler uniform 赋值，OpenGL 默认
+src/features/composite/nodes/scene3d_node.py:1185:        from OpenGL import GL as gl
+src/features/composite/nodes/scene3d_node.py:1202:                    # AUD-7310: 收窄为 KeyError——moderngl 对不存在的 uniform
+src/features/composite/nodes/scene3d_node.py:1441:        ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:1504:                        vao.render(moderngl.TRIANGLES, instances=instance_count)
+src/features/composite/nodes/scene3d_node.py:1506:                        vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:1538:                    draw_mode = (moderngl.LINES if getattr(geo_payload, "is_lines", False)
+src/features/composite/nodes/scene3d_node.py:1539:                                 else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:1540:                    if is_instanced and draw_mode != moderngl.LINES:
+src/features/composite/nodes/scene3d_node.py:1550:                    mode = moderngl.LINES if self._mesh_is_lines else moderngl.TRIANGLES
+src/features/composite/nodes/scene3d_node.py:1556:            ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:1714:        ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:1764:                        vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:1793:                    draw_mode = (moderngl.LINES if getattr(
+src/features/composite/nodes/scene3d_node.py:1794:                        geo_payload, "is_lines", False) else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:1795:                    if is_instanced and draw_mode != moderngl.LINES:
+src/features/composite/nodes/scene3d_node.py:1801:            ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:1829:        ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:1830:        ctx.enable(moderngl.BLEND)
+src/features/composite/nodes/scene3d_node.py:1842:        ctx.blend_func = (moderngl.ONE, moderngl.ONE_MINUS_SRC_ALPHA)
+src/features/composite/nodes/scene3d_node.py:1845:            from OpenGL.GL import glDepthMask
+src/features/composite/nodes/scene3d_node.py:1909:                    vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:1929:                draw_mode = (moderngl.LINES if getattr(
+src/features/composite/nodes/scene3d_node.py:1930:                    geo_payload, "is_lines", False) else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:1931:                if is_instanced and draw_mode != moderngl.LINES:
+src/features/composite/nodes/scene3d_node.py:1940:                    from OpenGL.GL import glDepthMask
+src/features/composite/nodes/scene3d_node.py:1944:            ctx.disable(moderngl.BLEND)
+src/features/composite/nodes/scene3d_node.py:1945:            ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:1957:    def _ensure_aov_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:1967:    def _ensure_aov_skinned_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:1977:    def _ensure_aov_instanced_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:1987:    def _ensure_motion_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:1997:    def _ensure_motion_instanced_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:2008:    def _ensure_motion_skinned_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:2120:        ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:2166:                        vao.render(moderngl.TRIANGLES, instances=instance_count)
+src/features/composite/nodes/scene3d_node.py:2168:                        vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2196:                    draw_mode = (moderngl.LINES
+src/features/composite/nodes/scene3d_node.py:2198:                                 else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2222:                    draw_mode = (moderngl.LINES if self._mesh_is_lines
+src/features/composite/nodes/scene3d_node.py:2223:                                 else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2229:            ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:2325:        ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:2385:                        vao.render(moderngl.TRIANGLES, instances=instance_count)
+src/features/composite/nodes/scene3d_node.py:2387:                        vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2418:                    draw_mode = (moderngl.LINES
+src/features/composite/nodes/scene3d_node.py:2420:                                 else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2448:                    draw_mode = (moderngl.LINES if self._mesh_is_lines
+src/features/composite/nodes/scene3d_node.py:2449:                                 else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2455:            ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:2466:    def _ensure_id_write_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:2476:    def _ensure_id_write_skinned_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:2704:        ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:2759:                        vao.render(moderngl.TRIANGLES, instances=instance_count)
+src/features/composite/nodes/scene3d_node.py:2761:                        vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2786:                _gmode = moderngl.LINES if getattr(gp, "is_lines", False) else moderngl.TRIANGLES
+src/features/composite/nodes/scene3d_node.py:2798:            ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:2801:            "tex_glo": self._id_texture.glo,
+src/features/composite/nodes/scene3d_node.py:2813:    def _ensure_outline_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/scene3d_node.py:2900:            ctx.enable(moderngl.CULL_FACE)
+src/features/composite/nodes/scene3d_node.py:2901:            ctx.cull_face = 'front'  # moderngl 无 FRONT 常量，用字符串
+src/features/composite/nodes/scene3d_node.py:2902:            ctx.disable(moderngl.DEPTH_TEST)  # 描边恒在前（不被自身遮挡）
+src/features/composite/nodes/scene3d_node.py:2931:                    vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2943:                    _gmode = (moderngl.LINES if getattr(gp, "is_lines", False)
+src/features/composite/nodes/scene3d_node.py:2944:                              else moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:2948:            ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:2949:            ctx.disable(moderngl.CULL_FACE)
+src/features/composite/nodes/scene3d_node.py:3234:                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/scene3d_node.py:3255:            ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:3279:                    mode = moderngl.LINES if self._mesh_is_lines else moderngl.TRIANGLES
+src/features/composite/nodes/scene3d_node.py:3314:                    _gmode = moderngl.LINES if _gp.is_lines else moderngl.TRIANGLES
+src/features/composite/nodes/scene3d_node.py:3390:                            m['vao'].render(moderngl.TRIANGLES, instances=instance_count)
+src/features/composite/nodes/scene3d_node.py:3392:                            m['vao'].render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:3421:                ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:3580:        # payload 收集必须用原始 ctx，不能用解包后的裸 moderngl.Context。
+src/features/composite/nodes/scene3d_node.py:4032:                self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/scene3d_node.py:4036:                    self._depth_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/scene3d_node.py:4043:                    self._id_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+src/features/composite/nodes/scene3d_node.py:4062:                    _aov_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/scene3d_node.py:4111:                        self._nav_render_color.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/scene3d_node.py:4286:            ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:4313:                ctx.enable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:4521:                            ctx.enable(moderngl.CULL_FACE)
+src/features/composite/nodes/scene3d_node.py:4693:                                _lod_vao.render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:4696:                                m['vao'].render(moderngl.TRIANGLES, instances=instance_count)
+src/features/composite/nodes/scene3d_node.py:4700:                                m['vao'].render(moderngl.TRIANGLES)
+src/features/composite/nodes/scene3d_node.py:4712:                            ctx.disable(moderngl.CULL_FACE)
+src/features/composite/nodes/scene3d_node.py:4762:                        _gmode = moderngl.LINES if _gp.is_lines else moderngl.TRIANGLES
+src/features/composite/nodes/scene3d_node.py:4794:                    mode = moderngl.LINES if self._mesh_is_lines else moderngl.TRIANGLES
+src/features/composite/nodes/scene3d_node.py:4891:                ctx.disable(moderngl.DEPTH_TEST)
+src/features/composite/nodes/scene3d_node.py:5172:                    k: (tex.glo, ow, oh)
+src/features/composite/nodes/scene3d_node.py:5387:            aov_texture_ids[AOVPass.DEPTH.value] = self._depth_texture.glo
+src/features/composite/nodes/scene3d_node.py:5394:                aov_texture_ids[_aov_name] = _aov_texture.glo
+src/features/composite/nodes/scene3d_node.py:5397:            aov_texture_ids[AOVPass.OBJECT_ID.value] = self._id_texture.glo
+src/features/composite/nodes/scene3d_node.py:5401:                texture_id=self._gpu_texture.glo,
+src/features/composite/nodes/scene3d_node.py:5410:                depth_texture_id=self._depth_texture.glo if has_depth else None,
+src/features/teaching_animation/ai/preview.py:74:    backend: str = "svg"               # svg / html / moderngl / webgl
+src/features/composite/render/gl_utils.py:15:    - Test environments can run without OpenGL dependency
+src/features/composite/render/gl_utils.py:120:        texture_id: OpenGL texture ID (from TextureResult.texture_id)
+src/features/composite/render/gl_utils.py:148:    import moderngl
+src/features/composite/render/gl_utils.py:166:        readback_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/render/gl_utils.py:179:        from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core
+src/features/composite/render/gl_utils.py:195:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/render/gl_utils.py:206:        # Flip vertically (OpenGL bottom-left origin → image top-left)
+src/features/composite/render/gl_utils.py:274:        Texture ID (OpenGL texture name). For mock context: returns mock ID.
+src/features/composite/render/gl_utils.py:283:        # Mock context has texture() method that returns mock with .glo
+src/features/composite/render/gl_utils.py:288:            return mock_tex.glo
+src/features/composite/render/gl_utils.py:293:    import moderngl
+src/features/composite/render/gl_utils.py:302:    # Prepare data (OpenGL expects bottom-left origin, flip)
+src/features/composite/render/gl_utils.py:315:            return tex.glo
+src/features/composite/render/gl_utils.py:324:            return tex.glo
+src/features/composite/render/gl_utils.py:333:        tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/render/gl_utils.py:337:        return tex.glo
+src/features/composite/render/gl_utils.py:357:        return tex.glo
+src/features/composite/render/composite_graph_render_service.py:7:an active OpenGL context and shared GL context configuration.
+src/features/composite/nodes/particle_node.py:612:        import moderngl
+src/features/composite/nodes/particle_node.py:614:        self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/particle_node.py:666:        import moderngl
+src/features/composite/nodes/particle_node.py:701:        gl.enable(moderngl.BLEND)
+src/features/composite/nodes/particle_node.py:702:        gl.blend_func = moderngl.ONE, moderngl.ONE
+src/features/composite/nodes/particle_node.py:714:        vao.render(moderngl.TRIANGLE_STRIP, instances=n)
+src/features/composite/nodes/particle_node.py:716:        gl.disable(moderngl.BLEND)
+src/features/composite/nodes/particle_node.py:728:        nvao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/particle_node.py:736:        gl.disable(moderngl.BLEND)
+src/features/composite/nodes/particle_node.py:742:        import moderngl
+src/features/composite/nodes/particle_node.py:751:        self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/particle_node.py:757:        # bare moderngl context has no frame_number, so latching after the
+src/features/composite/nodes/particle_node.py:788:                texture_id=self._gpu_texture.glo,
+src/features/composite/render/composite_render_output.py:29:      via moderngl.create_context(), so it is NOT bound to the main
+src/features/composite/nodes/video_frame_node.py:56:import moderngl
+src/features/composite/nodes/video_frame_node.py:247:        self._gpu_texture: Optional[moderngl.Texture] = None
+src/features/composite/nodes/video_frame_node.py:256:        self._yuv_uploader_ctx: Optional[moderngl.Context] = None
+src/features/composite/nodes/video_frame_node.py:257:        self._gpu_fbo: Optional[moderngl.Framebuffer] = None
+src/features/composite/nodes/video_frame_node.py:261:        self._gpu_mid_fbo: Optional[moderngl.Framebuffer] = None
+src/features/composite/nodes/video_frame_node.py:264:        self._gpu_mid_tex: Optional[moderngl.Texture] = None
+src/features/composite/nodes/video_frame_node.py:265:        self._flip_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/video_frame_node.py:266:        self._flip_vbo: Optional[moderngl.Buffer] = None
+src/features/composite/nodes/video_frame_node.py:268:        self._flip_ibo: Optional[moderngl.Buffer] = None
+src/features/composite/nodes/video_frame_node.py:283:        self._vt_bridge_ctx: Optional[moderngl.Context] = None
+src/features/composite/nodes/video_frame_node.py:292:        self._vt_quad_vbo: Optional[moderngl.Buffer] = None
+src/features/composite/nodes/video_frame_node.py:317:        # Format: {frame_number: moderngl.Texture}
+src/features/composite/nodes/video_frame_node.py:318:        self._texture_cache: Dict[int, moderngl.Texture] = {}
+src/features/composite/nodes/video_frame_node.py:1993:        ctx: moderngl.Context,
+src/features/composite/nodes/video_frame_node.py:2161:                self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/video_frame_node.py:2187:    def _upload_frame_gpu(self, ctx: moderngl.Context, entry: _PlanarFrameData) -> bool:
+src/features/composite/nodes/video_frame_node.py:2258:    def _ensure_gpu_target(self, ctx: moderngl.Context, w: int, h: int) -> bool:
+src/features/composite/nodes/video_frame_node.py:2286:            self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/video_frame_node.py:2293:            mid_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/video_frame_node.py:2321:    def _flip_blit(self, ctx: moderngl.Context) -> None:
+src/features/composite/nodes/video_frame_node.py:2349:            self._flip_vao.render(moderngl.TRIANGLES, vertices=6)
+src/features/composite/nodes/video_frame_node.py:2479:    def _ensure_vt_program(self, ctx: moderngl.Context, use_rect: bool) -> Optional[Tuple[Any, Any]]:
+src/features/composite/nodes/video_frame_node.py:2558:    def _upload_frame_gpu_vt(self, ctx: moderngl.Context, entry: "_VtFrameData") -> bool:
+src/features/composite/nodes/video_frame_node.py:2647:            from OpenGL.GL import (
+src/features/composite/nodes/video_frame_node.py:2662:            glUseProgram(prog.glo)
+src/features/composite/nodes/video_frame_node.py:2663:            glUniform1i(glGetUniformLocation(prog.glo, 'u_y_plane'), 0)
+src/features/composite/nodes/video_frame_node.py:2664:            glUniform1i(glGetUniformLocation(prog.glo, 'u_uv_plane'), 1)
+src/features/composite/nodes/video_frame_node.py:2681:            vao.render(moderngl.TRIANGLES, vertices=6)
+src/features/composite/nodes/video_frame_node.py:2729:    def _upload_fallback(self, ctx: moderngl.Context) -> bool:
+src/features/composite/nodes/video_frame_node.py:2767:        self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/video_frame_node.py:2781:        ctx: moderngl.Context,
+src/features/composite/nodes/video_frame_node.py:2796:        # like ctx.texture() need the real moderngl.Context.
+src/features/composite/nodes/video_frame_node.py:2869:                texture_id=self._gpu_texture.glo,
+src/features/composite/render/metal_compute_bridge.py:3:macOS 的 OpenGL 4.1 与 Metal 之间不存在可用的纹理共享通道（IOSurface
+src/features/composite/nodes/image_input_node.py:31:import moderngl
+src/features/composite/nodes/image_input_node.py:167:        self._gpu_texture = None  # moderngl.Texture
+src/features/composite/nodes/image_input_node.py:168:        self._gpu_depth_texture: Optional[moderngl.Texture] = None  # Depth texture (single channel)
+src/features/composite/nodes/image_input_node.py:334:            self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/image_input_node.py:349:                    self._gpu_depth_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/image_input_node.py:439:        self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/image_input_node.py:675:        # like ctx.texture() need the real moderngl.Context.
+src/features/composite/nodes/image_input_node.py:683:            # like ctx.texture() need the real moderngl.Context.
+src/features/composite/nodes/image_input_node.py:766:        depth_texture_id = self._gpu_depth_texture.glo if has_depth else None
+src/features/composite/nodes/image_input_node.py:770:                texture_id=self._gpu_texture.glo,
+src/features/composite/nodes/timeline_clip_input_node.py:96:        backward compatibility with plain moderngl.Context.
+src/features/composite/nodes/timeline_clip_input_node.py:106:            # Backward compat: try getattr on plain moderngl.Context
+src/features/composite/ui/viewer_tool_system.py:88:    - drag_start_ndc_pos: OpenGL normalized device coordinates (-1 to 1)
+src/features/composite/ui/viewer_tool_system.py:325:    """Convert Qt widget pixel coordinates to OpenGL NDC (-1 to 1).
+src/features/composite/ui/viewer_tool_system.py:354:    """Convert OpenGL NDC to Qt widget pixel coordinates.
+src/features/teaching_animation/composite_node.py:210:                    self._texture.glo, scene.width, scene.height, gpu_effects,
+src/features/teaching_animation/composite_node.py:216:                output_texture_id = self._texture.glo
+src/features/teaching_animation/composite_node.py:220:            output_texture_id = self._texture.glo
+src/features/composite/nodes/frame_interpolate_node.py:261:            import moderngl
+src/features/composite/nodes/frame_interpolate_node.py:285:            bind_texture_unit(tex_a.glo, 0)
+src/features/composite/nodes/frame_interpolate_node.py:286:            bind_texture_unit(tex_b.glo, 1)
+src/features/composite/nodes/frame_interpolate_node.py:291:            vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/frame_interpolate_node.py:299:                texture_id=out_tex.glo, width=w, height=h,
+src/features/composite/nodes/frame_interpolate_node.py:326:                texture_id=tex.glo, width=w, height=h,
+src/features/composite/nodes/base_node.py:85:        texture_id: OpenGL texture ID (glo).
+src/features/composite/nodes/base_node.py:103:        depth_texture_id: Optional OpenGL texture ID for depth channel.
+src/features/composite/nodes/base_node.py:111:    texture_id: int  # OpenGL texture ID (glo)
+src/features/composite/render/composite_export_renderer.py:38:import moderngl
+src/features/composite/render/composite_export_renderer.py:122:        context: Optional[moderngl.Context] = None,
+src/features/composite/render/composite_export_renderer.py:124:        self.ctx: Optional[moderngl.Context] = context
+src/features/composite/render/composite_export_renderer.py:127:        self.utility_shaders: Dict[str, moderngl.Program] = {}
+src/features/composite/render/composite_export_renderer.py:276:        Must be called with a current OpenGL context on the calling thread.
+src/features/composite/render/composite_export_renderer.py:555:        ``moderngl.create_context()`` dies with SIGSEGV inside native code
+src/features/composite/render/composite_export_renderer.py:563:                self.ctx = moderngl.create_context()
+src/features/composite/render/composite_export_renderer.py:590:    def _create_headless_context(self) -> "moderngl.Context":
+src/features/composite/render/composite_export_renderer.py:620:                ctx = moderngl.create_standalone_context(require=require)
+src/features/composite/render/composite_export_renderer.py:632:        ctx = moderngl.create_standalone_context()
+src/features/composite/render/composite_export_renderer.py:737:                from OpenGL.GL import (
+src/features/composite/render/composite_export_renderer.py:775:                texture_id=int(out_tex.glo),
+src/features/composite/render/composite_export_renderer.py:1478:            # Flip vertically (OpenGL bottom-left origin -> image top-left)
+src/features/composite/render/composite_export_renderer.py:1515:        - BBox y=0 is at the bottom (OpenGL convention)
+src/features/composite/render/composite_export_renderer.py:1525:        # Convert OpenGL y-coords to image row indices
+src/features/composite/render/composite_export_renderer.py:1633:            # Flip vertically (OpenGL bottom-left origin → image top-left)
+src/features/composite/render/composite_export_renderer.py:1697:        # Note: we do NOT release the wrapped moderngl context here because
+src/features/composite/render/composite_export_renderer.py:1698:        # it's the shared main context (moderngl.create_context() wraps the
+src/features/composite/ui/viewer_handles.py:187:        ndc_position: Position in OpenGL NDC coordinates (-1 to 1)
+src/features/edit/ui/program_viewer.py:23:    │  ProgramViewer (QOpenGLWidget)                         │
+src/features/edit/ui/program_viewer.py:52:from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+src/features/edit/ui/program_viewer.py:141:# ── OpenGL bindings via PyOpenGL ──────────────────────────────────────────────
+src/features/edit/ui/program_viewer.py:142:# Windows 上 ctypes 直接加载 opengl32.dll 无法获取 OpenGL 2.0+ 函数
+src/features/edit/ui/program_viewer.py:143:# 使用 PyOpenGL 提供跨平台的 OpenGL 绑定
+src/features/edit/ui/program_viewer.py:145:from OpenGL.GL import (
+src/features/edit/ui/program_viewer.py:177:# PyOpenGL wrapper for easier usage (matches original _gl.xxx pattern)
+src/features/edit/ui/program_viewer.py:179:    """Wrapper to make PyOpenGL functions callable with _gl.xxx pattern."""
+src/features/edit/ui/program_viewer.py:806:# ProgramViewer - OpenGL Viewport
+src/features/edit/ui/program_viewer.py:809:class ProgramViewer(QOpenGLWidget):
+src/features/edit/ui/program_viewer.py:811:    OpenGL viewport for the Program Viewer (Edit page).
+src/features/edit/ui/program_viewer.py:957:        """Initialize OpenGL resources."""
+src/features/edit/ui/program_viewer.py:960:        # QOpenGLWidget 的正常状态，不应阻塞初始化）。
+src/features/edit/ui/program_viewer.py:1425:        # only for raw OpenGL and bypasses QPainter's antialiasing pipeline.
+src/features/edit/ui/program_viewer.py:1735:            tex_id: OpenGL texture ID
+src/features/edit/ui/program_viewer.py:1763:            tex_id: OpenGL texture ID from shared context
+src/features/edit/ui/program_viewer.py:1772:        # Queue for paintGL(), where this QOpenGLWidget context is current.
+src/features/edit/ui/program_viewer.py:1935:                    from OpenGL.GL import (
+src/features/edit/ui/program_viewer.py:2737:        """Paint OpenGL content.
+src/features/edit/ui/program_viewer.py:3267:    - ProgramViewer (OpenGL viewport)
+src/features/edit/ui/program_viewer.py:3334:        # OpenGL Viewer
+src/features/edit/ui/program_viewer.py:3554:        将 QImage 存储为 pending_qimage，在 paintGL 中上传为 OpenGL 纹理。
+src/features/composite/render/composite_renderer.py:5:- Own shared OpenGL context (texture IDs valid across all shared contexts)
+src/features/composite/render/composite_renderer.py:22:import moderngl
+src/features/composite/render/composite_renderer.py:122:        # OpenGL context
+src/features/composite/render/composite_renderer.py:425:        legacy delivery APIs compatible; no OpenGL call occurs on the caller.
+src/features/composite/render/composite_renderer.py:450:                self.error_occurred.emit("Failed to make OpenGL context current")
+src/features/composite/render/composite_renderer.py:455:                self.ctx = moderngl.create_context()
+src/features/composite/render/composite_renderer.py:523:                    logger.debug("Shared OpenGL context release failed: %s", exc)
+src/features/composite/render/composite_renderer.py:1310:            FBO readback returns OpenGL bottom-left float32 RGBA.
+src/features/composite/render/composite_renderer.py:1378:            color_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/render/composite_renderer.py:1383:                color_texture_id=int(color_tex.glo),
+src/features/composite/render/composite_renderer.py:1837:        out_tex_id = self.tex_ring[front_idx].glo
+src/features/composite/render/composite_renderer.py:1924:            from OpenGL.GL import (
+src/features/composite/render/composite_renderer.py:1953:            from OpenGL.GL import (
+src/features/composite/render/composite_renderer.py:2022:                    tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/ui/viewer_handle_drawing.py:59:        overlay_prog: OpenGL shader program ID.
+src/features/composite/render/composite_render_worker.py:25:own GL context via moderngl.create_context() on the worker thread, so it
+src/features/edit/ui/edit_page.py:3097:            tex_id: OpenGL texture ID
+src/features/composite/nodes/ai_gen_expand_node.py:606:                texture_id=tex.glo, width=w, height=h,
+src/features/composite/ui/composite_viewport.py:2:CompositeViewer - Independent OpenGL viewport for the Composite page.
+src/features/composite/ui/composite_viewport.py:7:Uses ctypes to call OpenGL directly, since QOpenGLFunctions_4_1_Core in PyQt6
+src/features/composite/ui/composite_viewport.py:22:from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+src/features/composite/ui/composite_viewport.py:82:# ── OpenGL bindings via PyOpenGL ──────────────────────────────────────────────
+src/features/composite/ui/composite_viewport.py:83:# Windows 上 ctypes 直接加载 opengl32.dll 无法获取 OpenGL 2.0+ 函数
+src/features/composite/ui/composite_viewport.py:84:# 使用 PyOpenGL 提供跨平台的 OpenGL 绑定
+src/features/composite/ui/composite_viewport.py:86:from OpenGL.GL import (
+src/features/composite/ui/composite_viewport.py:119:# PyOpenGL wrapper for easier usage (matches original _gl.xxx pattern)
+src/features/composite/ui/composite_viewport.py:121:    """Wrapper to make PyOpenGL functions callable with _gl.xxx pattern."""
+src/features/composite/ui/composite_viewport.py:976:class CompositeViewer(QOpenGLWidget):
+src/features/composite/ui/composite_viewport.py:978:    Independent OpenGL viewport for the Composite page.
+src/features/composite/ui/composite_viewport.py:1412:            tex_id: OpenGL texture ID from the shared renderer context.
+src/features/composite/ui/composite_viewport.py:1432:                        f"expected={width}x{height}; OpenGL context sharing may be unavailable"
+src/features/composite/ui/composite_viewport.py:1563:        accessed from this QOpenGLWidget context.
+src/features/composite/ui/composite_viewport.py:1567:            OpenGL textures use bottom-left origin, so we must flip once
+src/features/composite/ui/composite_viewport.py:1587:            # then BGR -> RGB for OpenGL texture format
+src/features/composite/ui/composite_viewport.py:2965:    # ── OpenGL Lifecycle ────────────────────────────────────────────────────
+src/features/composite/ui/composite_viewport.py:3004:        """Initialize OpenGL resources.
+src/features/composite/ui/composite_viewport.py:3746:        """Release OpenGL resources. Safe to call even after partial init."""
+src/features/composite/ui/composite_viewport.py:4803:        CPU BVHs and never calls OpenGL.
+src/features/composite/ui/composite_viewport.py:4897:            from OpenGL import GL as gl
+src/features/composite/ui/composite_viewport.py:5117:        NDC 坐标系：x∈[-1,1] 横向，y∈[-1,1] 纵向（OpenGL 标准）。
+src/features/composite/ui/composite_viewport.py:5538:        # CompositionMode_Clear in QOpenGLWidget paint passes.
+src/features/composite/ui/composite_viewport.py:5996:        from OpenGL import GL as GL
+src/features/composite/ui/composite_viewport.py:10183:            pos_loc, color_loc: OpenGL uniform/attribute locations.
+src/features/composite/ui/composite_viewport.py:10318:        # QPainter on a QOpenGLWidget draws on top of the GL framebuffer after
+src/features/composite/ui/composite_viewport.py:10597:        QOpenGLWidget composites on top of the GL framebuffer.
+src/features/composite/core/shaders.py:6062:# moderngl 通过 VAO content 的 instance buffer 自动按实例推进（divisor）。
+src/features/composite/core/shaders.py:6324:# macOS OpenGL 4.1 上限，无 compute shader；IBL 卷积用 fragment shader 完成（见 hdri.py）。
+src/features/composite/render/gpu_resource_pool.py:31:    pool.pin_texture(output_tex.glo)  # Protect from eviction
+src/features/composite/render/gpu_resource_pool.py:32:    pool.unpin_texture(output_tex.glo)  # Allow eviction again
+src/features/composite/render/gpu_resource_pool.py:320:        池化纹理包装对象（含 .glo）。
+src/features/composite/render/gpu_resource_pool.py:632:    glo: int                          # OpenGL texture name
+src/features/composite/render/gpu_resource_pool.py:637:    fence: object = field(default=None, repr=False)  # GLsync fence for reuse safety
+src/features/composite/render/gpu_resource_pool.py:721:        self._current_fence: object = None  # GLsync — set after each frame
+src/features/composite/render/gpu_resource_pool.py:851:        self._pinned_texture_ids.add(tex.glo)
+src/features/composite/render/gpu_resource_pool.py:1054:            info = self._pool_lru.pop(tex.glo, None)
+src/features/composite/render/gpu_resource_pool.py:1070:                info = TextureInfo(glo=tex.glo, key=key)
+src/features/composite/render/gpu_resource_pool.py:1071:            self._active_textures[tex.glo] = info
+src/features/composite/render/gpu_resource_pool.py:1079:            self._pool_lru[tex.glo] = info
+src/features/composite/render/gpu_resource_pool.py:1092:        info = TextureInfo(glo=tex.glo, key=key)
+src/features/composite/render/gpu_resource_pool.py:1093:        self._active_textures[tex.glo] = info
+src/features/composite/render/gpu_resource_pool.py:1105:        this permanently destroys the OpenGL resource.
+src/features/composite/render/gpu_resource_pool.py:1133:        if tex.glo not in self._active_textures:
+src/features/composite/render/gpu_resource_pool.py:1138:        info = self._active_textures.pop(tex.glo)
+src/features/composite/render/gpu_resource_pool.py:1139:        self._pinned_texture_ids.discard(tex.glo)
+src/features/composite/render/gpu_resource_pool.py:1162:        self._pool_lru[tex.glo] = info
+src/features/composite/render/gpu_resource_pool.py:1165:        """Release a texture by its OpenGL ID.
+src/features/composite/render/gpu_resource_pool.py:1173:                if tex.glo == tex_id:
+src/features/composite/render/gpu_resource_pool.py:1184:            if tex.glo == tex_id:
+src/features/composite/render/gpu_resource_pool.py:1276:        Uses raw ctypes to call glFenceSync — avoids heavy OpenGL bindings.
+src/features/composite/render/gpu_resource_pool.py:1510:            if tex.glo == glo:
+src/features/composite/render/gpu_resource_pool.py:1533:                info = self._pool_lru.pop(tex.glo, None)
+src/features/composite/render/gpu_resource_pool.py:1583:                    if tex.glo == tex_id:
+src/features/composite/ui/material_panel.py:5:document back to ``CompositePage``.  It never touches OpenGL objects or the
+src/features/composite/render/compute_shader_manager.py:54:# On macOS the compatibility OpenGL context is commonly 4.1, so the same
+src/features/composite/render/compute_shader_manager.py:111:        self._cache: Dict[str, object] = {}  # name → moderngl.ComputeShaderProgram
+src/features/composite/render/compute_shader_manager.py:128:        """Parse OpenGL version string robustly.
+src/features/composite/render/compute_shader_manager.py:158:        """Check if compute shaders are supported (OpenGL 4.3+).
+src/features/composite/render/compute_shader_manager.py:161:        - OpenGL 4.3 or higher
+src/features/composite/render/compute_shader_manager.py:178:                        self._last_error = f"OpenGL {major}.{minor} detected, requires 4.3+"
+src/features/composite/render/compute_shader_manager.py:181:                            "Compute shaders unavailable: OpenGL %d.%d detected, requires 4.3+. "
+src/features/composite/render/compute_shader_manager.py:309:            moderngl.ComputeShaderProgram on success, None on error
+src/features/composite/render/compute_shader_manager.py:428:        ``texture()`` fetches. Per the OpenGL spec (§2.13.6/7.11) image
+src/features/composite/render/compute_shader_manager.py:440:            import moderngl
+src/features/composite/render/compute_shader_manager.py:441:            barrier(moderngl.TEXTURE_FETCH_BARRIER_BIT
+src/features/composite/render/compute_shader_manager.py:442:                    | moderngl.SHADER_IMAGE_ACCESS_BARRIER_BIT)
+src/features/composite/render/compute_shader_manager.py:541:        prog['u_output'].value = 0  # Image binding (moderngl maps same slot)
+src/features/composite/nodes/transform_node.py:185:        bottom-left-origin (Y-up, OpenGL convention). Naively feeding Y-up
+src/features/composite/core/format.py:29:        y: Bottom edge in pixels (OpenGL convention: 0 = bottom).
+src/features/composite/render/pbo_readback.py:8:macOS OpenGL 4.1 supports PBO but not compute shaders (4.3).
+src/features/composite/render/pbo_readback.py:17:- Renderer FBO content is OpenGL bottom-left (float32 RGBA).
+src/features/composite/render/pbo_readback.py:27:    import moderngl
+src/features/composite/render/pbo_readback.py:31:# OpenGL constants for PBO
+src/features/composite/render/pbo_readback.py:49:# GL type per moderngl dtype vocabulary
+src/features/composite/render/pbo_readback.py:55:# numpy dtype per moderngl dtype vocabulary
+src/features/composite/render/pbo_readback.py:84:        dtype: moderngl dtype vocabulary of the source FBO attachment
+src/features/composite/render/pbo_readback.py:92:    def __init__(self, gl_context: "moderngl.Context", ring_size: int = 3,
+src/features/composite/render/pbo_readback.py:101:        self._pbos: list[int] = []  # OpenGL buffer IDs
+src/features/composite/render/pbo_readback.py:111:                from OpenGL import GL as _gl
+src/features/composite/render/pbo_readback.py:113:                logger.warning("[PBO-READBACK] PyOpenGL not available, PBO readback disabled")
+src/features/composite/render/pbo_readback.py:116:            # PyOpenGL on macOS does not consistently expose glGetCurrentContext.
+src/features/composite/render/pbo_readback.py:179:            from OpenGL import GL as _gl
+src/features/composite/render/pbo_readback.py:189:            # GLsync alive — consumers that stopped collecting (e.g. preview
+src/features/composite/render/pbo_readback.py:207:            _gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo.glo)
+src/features/composite/render/pbo_readback.py:217:                from OpenGL.GL import GL_SYNC_GPU_COMMANDS_COMPLETE, glFenceSync
+src/features/composite/render/pbo_readback.py:240:        待——macOS 遗留 OpenGL 软渲染器（GLEngine/GLRendererFloat）在
+src/features/composite/render/pbo_readback.py:250:            from OpenGL.GL import glClientWaitSync
+src/features/composite/render/pbo_readback.py:261:            from OpenGL.GL import glDeleteSync
+src/features/composite/render/pbo_readback.py:276:            from OpenGL import GL as _gl
+src/features/composite/render/pbo_readback.py:342:            # Flip vertically (OpenGL bottom-left origin → CPU top-left)
+src/features/composite/render/pbo_readback.py:391:                    from OpenGL.GL import glClientWaitSync
+src/features/composite/render/pbo_readback.py:483:            from OpenGL import GL as _gl
+src/features/composite/render/pbo_readback.py:502:    fence: Any = None  # GLsync (opaque pointer) guarding the DMA
+src/features/edit/ui/timeline_panel.py:2170:        # QOpenGLWidget to initialise with no surface and aborts on macOS; the
+src/features/composite/nodes/volume3d_node.py:253:                texture_id=self._gpu_texture.glo, width=width, height=height,
+src/features/composite/nodes/volume3d_node.py:328:                texture_id=self._gpu_texture.glo, width=width, height=height,
+src/features/composite/core/gl_bind.py:8:ModernGL context). PyOpenGL dispatches against whatever context is
+src/features/composite/core/gl_bind.py:16:from OpenGL import GL as _gl
+src/features/composite/core/gl_bind.py:17:from OpenGL.GL import (  # noqa: F401  (re-export for call sites)
+src/features/composite/core/gl_bind.py:29:        texture_id: raw GL texture name (``Texture.glo``).
+src/features/composite/core/gl_bind.py:33:    runs), PyOpenGL cannot resolve the platform entry points and the
+src/features/edit/ui/source_viewer.py:13:- 与 ProgramViewer 类似的 OpenGL 渲染架构
+src/features/edit/ui/source_viewer.py:19:    │  SourceViewer (QOpenGLWidget)                          │
+src/features/edit/ui/source_viewer.py:59:from PyQt6.QtOpenGLWidgets import QOpenGLWidget
+src/features/edit/ui/source_viewer.py:176:# ── OpenGL bindings via PyOpenGL ──────────────────────────────────────────────
+src/features/edit/ui/source_viewer.py:177:# Windows 上 ctypes 直接加载 opengl32.dll 无法获取 OpenGL 2.0+ 函数
+src/features/edit/ui/source_viewer.py:178:# 使用 PyOpenGL 提供跨平台的 OpenGL 绑定
+src/features/edit/ui/source_viewer.py:180:from OpenGL.GL import (
+src/features/edit/ui/source_viewer.py:200:from OpenGL.error import GLError
+src/features/edit/ui/source_viewer.py:202:# PyOpenGL wrapper for easier usage (matches original _gl.xxx pattern)
+src/features/edit/ui/source_viewer.py:204:    """Wrapper to make PyOpenGL functions callable with _gl.xxx pattern."""
+src/features/edit/ui/source_viewer.py:246:# 防止类属性函数在某些 PyOpenGL 平台实现上是真 Python 函数时被实例
+src/features/edit/ui/source_viewer.py:680:# SourceViewer - OpenGL Viewport
+src/features/edit/ui/source_viewer.py:683:class SourceViewer(QOpenGLWidget):
+src/features/edit/ui/source_viewer.py:685:    OpenGL viewport for the Source Viewer.
+src/features/edit/ui/source_viewer.py:754:        """Initialize OpenGL resources."""
+src/features/edit/ui/source_viewer.py:979:            # 上传曾在 UI 槽内无 makeCurrent 直调，PyOpenGL 无当前上下文
+src/features/edit/ui/source_viewer.py:1171:            tex_id: OpenGL texture ID from shared context
+src/features/edit/ui/source_viewer.py:1214:        # PyOpenGL 的 glTexImage2D 需要 numpy array 或 bytes，不接受 ctypes.c_void_p
+src/features/edit/ui/source_viewer.py:1746:    - SourceViewer (OpenGL viewport) — top
+src/features/edit/ui/source_viewer.py:1964:        # OpenGL viewer (top)
+src/features/edit/ui/source_viewer.py:2353:            tex_id: OpenGL texture ID from shared context
+src/features/composite/core/node_capabilities.py:96:        requires_gl: True if this node requires OpenGL context for evaluation.
+src/features/composite/core/eval_context.py:10:        gl=moderngl_ctx,
+src/features/composite/core/eval_context.py:40:        gl: Core ModernGL context (moderngl.Context).
+src/features/composite/core/eval_context.py:49:    # Core GL context (moderngl.Context)
+src/features/edit/ui/scene_cut_timeline_overlay.py:16:- No OpenGL calls (pure Qt painting)
+src/features/composite/nodes/deflicker_node.py:567:                texture_id=tex.glo, width=w, height=h,
+src/features/composite/nodes/deflicker_node.py:605:            import moderngl
+src/features/composite/nodes/deflicker_node.py:631:            bind_texture_unit(src_tex.glo, 0)
+src/features/composite/nodes/deflicker_node.py:635:            vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/deflicker_node.py:657:            import moderngl
+src/features/composite/nodes/deflicker_node.py:694:            bind_texture_unit(src_tex.glo, 0)
+src/features/composite/nodes/deflicker_node.py:698:            bind_texture_unit(gain_tex.glo if gain_tex is not None
+src/features/composite/nodes/deflicker_node.py:699:                              else src_tex.glo, 1)
+src/features/composite/nodes/deflicker_node.py:706:            vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/deflicker_node.py:711:                texture_id=out_tex.glo, width=w, height=h,
+src/features/edit/ui/scene_cut_graph_widget.py:13:- Following .clinerules: strong typing, no OpenGL in UI thread
+src/features/composite/nodes/constant_node.py:18:import moderngl
+src/features/composite/nodes/constant_node.py:162:        self._gpu_texture: Optional[moderngl.Texture] = None
+src/features/composite/nodes/constant_node.py:168:        self._gradient_prog: Optional[moderngl.Program] = None
+src/features/composite/nodes/constant_node.py:169:        self._render_fbo: Optional[moderngl.Framebuffer] = None
+src/features/composite/nodes/constant_node.py:170:        self._quad_vbo: Optional[moderngl.Buffer] = None
+src/features/composite/nodes/constant_node.py:490:    def _ensure_gradient_program(self, ctx) -> moderngl.Program:
+src/features/composite/nodes/constant_node.py:501:    def _ensure_quad_vbo(self, ctx) -> moderngl.Buffer:
+src/features/composite/nodes/constant_node.py:521:        self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/constant_node.py:562:        vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/constant_node.py:574:        # like ctx.texture() need the real moderngl.Context.
+src/features/composite/nodes/constant_node.py:660:                self._gpu_texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/constant_node.py:671:                texture_id=self._gpu_texture.glo,
+src/features/composite/nodes/file_output_node.py:26:import moderngl
+src/features/composite/nodes/file_output_node.py:261:        """查询当前绘制 FBO 的原生绑定名；OpenGL 模块不可用时返回 None。"""
+src/features/composite/nodes/file_output_node.py:263:            from OpenGL import GL as gl
+src/features/composite/nodes/file_output_node.py:272:            from OpenGL import GL as gl
+src/features/composite/nodes/file_output_node.py:301:            # AUD-6708: ``moderngl`` must resolve from the module-level
+src/features/composite/nodes/file_output_node.py:307:            readback_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+src/features/composite/nodes/file_output_node.py:333:            vao.render(moderngl.TRIANGLE_STRIP)
+src/features/composite/nodes/file_output_node.py:345:            # Flip vertically (OpenGL bottom-left → image top-left)
+src/features/edit/ui/timeline_view.py:1119:        # The timeline is a 2D QGraphicsView. Using QOpenGLWidget as its
+src/features/edit/ui/timeline_view.py:1122:        # crash inside QGraphicsView::paintEvent. Keep OpenGL for the actual

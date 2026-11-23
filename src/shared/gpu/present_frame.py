@@ -51,6 +51,18 @@ take 之前消失，该 present **必须** ``pool.ack(slot_id)`` 或
 模块本身不依赖 Qt/GL，fence 用 opaque int 表示（实际是 GLsync 指针），
 便于在测试中用 mock 验证状态机。
 
+原生发布分支（Metal 迁移阶段 1.1）：
+
+- 非 GL 后端的槽位经 ``register_slot(..., resource=...)`` 注册，
+  ``lease.mark_ready(0)`` 后用 ``lease.make_present_frame(native=...)`` 发布。
+  原生描述符 ``texture_id=0``、``fence_ns=0``，``native`` 字段带 api、
+  device 身份、像素格式、可见区域、方向、色彩四元组与帧号。
+- GL 槽位描述符的字段与构造参数完全不变，``native`` 为 ``None``；只认
+  ``texture_id`` / ``fence_ns`` 的旧消费者照常收到原来的描述符。
+- 每个描述符带租约键 ``lease_key = (资源池代次, 槽号, 递增提交号)``。
+  ack / discard 可携带该键：键不匹配即过期确认（来自退役池、或同槽位
+  更早的一次提交），不作用于当前占用者。不带键的调用保持旧语义。
+
 线程边界与交接契约（renderer → viewer）：
 
 - ``OutputSlotPool`` / ``TextureLease`` 的公开方法内部有锁，渲染线程与
@@ -72,13 +84,152 @@ take 之前消失，该 present **必须** ``pool.ack(slot_id)`` 或
 
 from __future__ import annotations
 
+import itertools
 import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# 原生发布：色彩 / 租约键 / 描述符
+# =============================================================================
+
+
+# 纹理第 0 行在图像的哪一端。IOSurface / CVPixelBuffer 约定为 top_left；
+# GL / Metal 渲染附件（FBO）约定为 bottom_left。
+NATIVE_ORIGIN_TOP_LEFT = "top_left"
+NATIVE_ORIGIN_BOTTOM_LEFT = "bottom_left"
+NATIVE_ORIGINS = frozenset({NATIVE_ORIGIN_TOP_LEFT, NATIVE_ORIGIN_BOTTOM_LEFT})
+
+
+@dataclass(frozen=True)
+class PresentColorInfo:
+    """帧色彩四元组；取值词表沿用 ``gpu_frame.normalize_color_*``。"""
+
+    color_range: str = "limited"
+    color_matrix: str = "bt709"
+    color_primaries: str = "bt709"
+    color_transfer: str = "bt709"
+
+
+@dataclass(frozen=True)
+class PresentLeaseKey:
+    """一次槽位提交的身份：资源池代次 + 槽号 + 递增提交号。
+
+    ``slot_id`` 只在单个池实例内唯一，且每次 ``begin_writing`` 都会复用
+    同一个号。池因尺寸重建而退役后，迟到的 ack 只凭 ``slot_id`` 会落到
+    新池里另一个帧占用的同号槽上，把它误标为已确认。完整键让确认只
+    作用于它真正对应的那一次提交。
+    """
+
+    pool_generation: int
+    slot_id: int
+    submission_id: int
+
+
+@dataclass(frozen=True)
+class NativePresentDescriptor:
+    """后端原生的可呈现帧（不经过 OpenGL）。
+
+    ``resource`` 是后端原生句柄（Metal → MTLTexture），只有拥有它的后端
+    可以解读；上层只读描述。``visible_rect`` 是图像在纹理内的可见区域
+    ``(left, top, right, bottom)``（半开区间，纹理坐标，行 0 起算端见
+    ``origin``）；为空表示整张纹理。
+    """
+
+    api: str
+    device_identity: str
+    # 原生句柄不参与相等比较与日志输出（PyObjC 代理的 == / repr 无意义）。
+    resource: object = field(compare=False, repr=False)
+    resource_format: str = ""
+    width: int = 0
+    height: int = 0
+    visible_rect: tuple[int, int, int, int] = ()
+    origin: str = NATIVE_ORIGIN_BOTTOM_LEFT
+    color: PresentColorInfo = field(default_factory=PresentColorInfo)
+
+    def __post_init__(self) -> None:
+        api = str(self.api or "").strip().lower()
+        if api not in NATIVE_PRESENT_APIS:
+            raise ValueError(
+                f"NativePresentDescriptor.api={self.api!r} is not a native present API "
+                f"(GL slots publish through the GL branch)"
+            )
+        if int(self.width) < 0 or int(self.height) < 0:
+            raise ValueError("NativePresentDescriptor dimensions cannot be negative")
+        if self.origin not in NATIVE_ORIGINS:
+            raise ValueError(
+                f"NativePresentDescriptor.origin={self.origin!r} not in {sorted(NATIVE_ORIGINS)}"
+            )
+
+    @classmethod
+    def from_resource(
+        cls,
+        resource: object,
+        *,
+        origin: str,
+        color: Optional[PresentColorInfo] = None,
+        visible_rect: tuple[int, int, int, int] = (),
+    ) -> "NativePresentDescriptor":
+        """从后端中立的平面资源描述（``gpu_frame.GpuPlaneResource``）构造。"""
+        return cls(
+            api=str(getattr(resource, "api", "") or ""),
+            device_identity=str(getattr(resource, "device_identity", "") or ""),
+            resource=getattr(resource, "native_handle", None),
+            resource_format=str(getattr(resource, "resource_format", "") or ""),
+            width=int(getattr(resource, "width", 0) or 0),
+            height=int(getattr(resource, "height", 0) or 0),
+            visible_rect=tuple(visible_rect) if visible_rect else (),
+            origin=origin,
+            color=color or PresentColorInfo(),
+        )
+
+    def validate_for_consumer(
+        self,
+        *,
+        api: str,
+        device_identity: str = "",
+        resource_formats: Iterable[str] = (),
+    ) -> str:
+        """返回机器可读的消费方契约失败原因，``""`` 表示可以消费。
+
+        与 ``GpuDecodedFrame.validate_for_device`` 同一约定：双方都提供了
+        device 身份而互不相同时为致命（跨设备读取会破坏零拷贝契约）；
+        任一方为空则不做设备比对。调用方拿到原因后应经既有路径重取本帧
+        并记录原因，而不是尝试搬运像素。
+        """
+        expected_api = str(api or "").strip().lower()
+        if expected_api and self.api != expected_api:
+            return f"graphics_api_mismatch:{self.api}|consumer={expected_api}"
+        if (device_identity and self.device_identity
+                and self.device_identity != device_identity):
+            return (
+                f"device_mismatch:frame={self.device_identity}"
+                f"|consumer={device_identity}"
+            )
+        formats = {str(name).strip().lower() for name in resource_formats if name}
+        if formats and self.resource_format.strip().lower() not in formats:
+            return (
+                f"resource_format_unsupported:{self.resource_format}"
+                f"|consumer={','.join(sorted(formats))}"
+            )
+        return ""
+
+
+# 已登记原生发布能力的图形 API（OpenGL 槽位走 GL 分支，不在此列）。
+NATIVE_PRESENT_APIS = frozenset({"metal"})
+
+# 池代次计数：进程内单调递增，未显式指定代次的池各取一个新值。
+_POOL_GENERATION = itertools.count(1)
+
+
+def _key_matches(slot: "TextureLease", lease_key: Optional[PresentLeaseKey]) -> bool:
+    """租约键是否指向该槽位当前这一次提交（``None`` = 不校验，旧语义）。"""
+    return lease_key is None or slot.lease_key == lease_key
 
 
 # =============================================================================
@@ -115,6 +266,8 @@ class TextureLease:
         frame_index: 当前写入的 timeline frame（debug/trace 用）
         fence_ns: renderer 写完后插入的 fence（opaque，实际是 GLsync 指针）
         acked: Viewer 是否已确认完成拷贝
+        pool_generation: 所在资源池的代次（池创建时分配，进程内单调递增）
+        submission_id: 本槽位第几次被 acquire 写入（每次 begin_writing +1）
     """
 
     slot_id: int
@@ -128,6 +281,8 @@ class TextureLease:
     fence_cleanup: Optional[Callable[[int], None]] = None  # 清理 fence 的回调
     acked: bool = False
     acquired_count: int = 0  # 统计：被 acquire 写入的总次数
+    pool_generation: int = 0
+    submission_id: int = 0
     # P2-03：后端无关资源描述（可选）。None = 纯 GL slot（texture_glo 即 handle）。
     # 非 GL 后端必须填 resource；texture_glo 仅在 graphics=opengl 时有意义。
     resource: "Optional[object]" = None  # GpuPlaneResource | None（避免循环导入）
@@ -173,6 +328,15 @@ class TextureLease:
         """texture_glo 是否为本 slot 的有效 handle。"""
         return self.resource is None or getattr(self.resource, "api", "opengl") == "opengl"
 
+    @property
+    def lease_key(self) -> PresentLeaseKey:
+        """本次提交的租约键（池代次 + 槽号 + 提交号）。"""
+        return PresentLeaseKey(
+            pool_generation=int(self.pool_generation),
+            slot_id=int(self.slot_id),
+            submission_id=int(self.submission_id),
+        )
+
     # ------------------------------------------------------------------
     # 状态转移
     # ------------------------------------------------------------------
@@ -190,6 +354,7 @@ class TextureLease:
             self.acked = False
             self.fence_ns = 0
             self.acquired_count += 1
+            self.submission_id += 1
 
     def mark_ready(self, fence_ns: int, fence_cleanup: Optional[Callable[[int], None]] = None) -> None:
         """WRITING -> READY。renderer 写完，附带 fence。
@@ -310,17 +475,34 @@ class TextureLease:
         is_gl_oriented: bool = True,
         source_kinds: tuple = (),
         extra: Optional[dict] = None,
+        native: Optional[NativePresentDescriptor] = None,
     ) -> "GpuPresentFrame":
-        """从 READY slot 构造 GpuPresentFrame（不改变 slot 状态）。"""
+        """从 READY slot 构造 GpuPresentFrame（不改变 slot 状态）。
+
+        ``native=None`` 是 GL 分支：字段与此前完全一致。传入
+        ``native`` 走原生分支：本槽位必须是以非 GL 资源注册的，且描述符
+        的 api 与资源一致；尺寸与可见区域缺省取槽位自身的值。
+        """
         with self._lock:
             if self.state is not SlotState.READY:
                 raise RuntimeError(
                     f"TextureLease {self.slot_id}: make_present_frame requires READY, got {self.state.name}"
                 )
             fence_ns = self.fence_ns
+            key = PresentLeaseKey(
+                pool_generation=int(self.pool_generation),
+                slot_id=int(self.slot_id),
+                submission_id=int(self.submission_id),
+            )
         # AUD-1602: 浅拷贝切断与调用方 dict 的引用共享——frozen descriptor
         # 会随信号跨线程传引用，emit 后调用方继续改写原 dict 会让消费端
         # 读到半更新状态。
+        extra_copy = dict(extra) if extra else {}
+        if native is not None:
+            return self._make_native_present_frame(
+                native, frame=frame, generation_id=generation_id,
+                source_kinds=source_kinds, extra=extra_copy, key=key,
+            )
         return GpuPresentFrame(
             texture_id=self.texture_glo,
             width=self.width,
@@ -332,7 +514,54 @@ class TextureLease:
             color_space=color_space,
             is_gl_oriented=is_gl_oriented,
             source_kinds=source_kinds,
-            extra=dict(extra) if extra else {},
+            extra=extra_copy,
+            lease_key=key,
+        )
+
+    def _make_native_present_frame(
+        self,
+        native: NativePresentDescriptor,
+        *,
+        frame: int,
+        generation_id: int,
+        source_kinds: tuple,
+        extra: dict,
+        key: PresentLeaseKey,
+    ) -> "GpuPresentFrame":
+        """原生发布分支：GL 纹理名与 fence 留空，后端信息进 ``native``。"""
+        resource = self.resource
+        resource_api = str(getattr(resource, "api", "") or "") if resource is not None else ""
+        if resource is None or resource_api == "opengl":
+            raise RuntimeError(
+                f"TextureLease {self.slot_id}: native publish requires a non-GL "
+                f"resource lease (got api={resource_api or 'none'!r})"
+            )
+        if resource_api != native.api:
+            raise RuntimeError(
+                f"TextureLease {self.slot_id}: native descriptor api={native.api!r} "
+                f"does not match slot resource api={resource_api!r}"
+            )
+        descriptor = replace(
+            native,
+            width=native.width or int(self.width),
+            height=native.height or int(self.height),
+            visible_rect=native.visible_rect
+            or (0, 0, native.width or int(self.width), native.height or int(self.height)),
+        )
+        extra.setdefault("render_backend", descriptor.api)
+        return GpuPresentFrame(
+            texture_id=0,
+            width=descriptor.width,
+            height=descriptor.height,
+            frame=frame,
+            generation_id=generation_id,
+            slot_id=self.slot_id,
+            fence_ns=0,
+            is_gl_oriented=False,
+            source_kinds=source_kinds,
+            extra=extra,
+            native=descriptor,
+            lease_key=key,
         )
 
 
@@ -361,6 +590,9 @@ class GpuPresentFrame:
         source_kinds: 本帧各 layer 的 source kind（telemetry/trace 用）
         extra: 额外元数据（构造时浅拷贝，AUD-1602：emit 后调用方对原
             dict 的后续修改不会影响本 descriptor；仍不要向 extra 写入）
+        native: 原生发布描述（非 GL 槽位才有；GL 槽位恒为 None）
+        lease_key: 本描述符对应的槽位提交身份（见 PresentLeaseKey）；
+            直接构造的旧式描述符没有键，ack 按 slot_id 走旧语义
     """
 
     texture_id: int
@@ -374,15 +606,49 @@ class GpuPresentFrame:
     is_gl_oriented: bool = True
     source_kinds: tuple = ()
     extra: dict = field(default_factory=dict)
+    native: Optional[NativePresentDescriptor] = None
+    lease_key: Optional[PresentLeaseKey] = None
 
     @property
     def has_fence(self) -> bool:
         """是否携带有效 fence（Viewer 需要等待的写完成信号）。"""
         return self.fence_ns != 0
 
+    @property
+    def is_native(self) -> bool:
+        """是否为原生（非 OpenGL）发布帧。"""
+        return self.native is not None
+
+    @property
+    def api(self) -> str:
+        """发布该帧的图形 API：``native.api`` 或 ``"opengl"``。"""
+        return self.native.api if self.native is not None else "opengl"
+
     def as_legacy_tuple(self) -> tuple:
         """兼容旧 (tex_id, w, h) 接口（过渡期用）。"""
         return (self.texture_id, self.width, self.height)
+
+    def validate_for_consumer(
+        self,
+        *,
+        api: str,
+        device_identity: str = "",
+        resource_formats: Iterable[str] = (),
+    ) -> str:
+        """消费方（视口）能否直接呈现本帧；返回失败原因，``""`` 表示可以。
+
+        GL 描述符只能由 OpenGL 消费方呈现；原生描述符按
+        ``NativePresentDescriptor.validate_for_consumer`` 校验 api、设备
+        与像素格式。
+        """
+        if self.native is None:
+            expected = str(api or "").strip().lower()
+            return "" if expected in ("", "opengl") else (
+                f"graphics_api_mismatch:opengl|consumer={expected}"
+            )
+        return self.native.validate_for_consumer(
+            api=api, device_identity=device_identity, resource_formats=resource_formats,
+        )
 
 
 # =============================================================================
@@ -412,34 +678,59 @@ class OutputSlotPool:
         pool.ack(present.slot_id)
     """
 
-    def __init__(self, size: int = 3) -> None:
+    def __init__(self, size: int = 3, *, pool_generation: Optional[int] = None) -> None:
         """创建 slot 池。
 
         Args:
             size: 名义池容量（下限 1）。仅用于容量规划与统计展示，
                 实际可同时存在的 slot 数由 ``register_slot`` 次数决定
                 （渲染线程创建纹理后注册）。
+            pool_generation: 池代次，进入本池所有租约键。缺省取进程级
+                单调计数，保证不同池实例（含已退役的）代次互不相同；
+                测试可显式指定。
         """
         self._size = max(1, int(size))
         self._slots: dict[int, TextureLease] = {}
         self._lock = threading.RLock()
+        self._generation = (
+            int(pool_generation) if pool_generation is not None
+            else next(_POOL_GENERATION)
+        )
         # 统计
         self._acquire_failures = 0
         self._reuse_violations = 0  # 试图复用未 ack 的 slot（必须为 0）
+        self._stale_acks = 0  # 携带租约键但不匹配的 ack / discard
+
+    @property
+    def generation(self) -> int:
+        """池代次（租约键第一分量）。"""
+        return self._generation
 
     # ------------------------------------------------------------------
     # 注册
     # ------------------------------------------------------------------
 
-    def register_slot(self, slot_id: int, *, texture_glo: int, width: int, height: int) -> TextureLease:
-        """注册一个 output slot（纹理对象由调用方创建/管理）。
+    def register_slot(
+        self,
+        slot_id: int,
+        *,
+        texture_glo: int,
+        width: int,
+        height: int,
+        resource: Optional[object] = None,
+    ) -> TextureLease:
+        """注册一个 output slot（纹理/资源对象由调用方创建、管理）。
 
         AUD-1604：尺寸/句柄做正值校验（坏参数不再沿协议传到 Viewer 端
         才暴露）；重复 slot_id 不再静默覆盖——旧 lease 持有未清理的
         fence 时先回收（否则其 fence_cleanup 永不可达，GLsync 泄漏）
         并告警，再以新 lease 顶替。
+
+        ``resource`` 是后端中立的平面资源描述（``gpu_frame.GpuPlaneResource``，
+        鸭子类型）：给出即原生槽位，``texture_glo`` 可为 0；不给则是 GL
+        槽位，``texture_glo`` 必须为正。
         """
-        if int(texture_glo) <= 0:
+        if resource is None and int(texture_glo) <= 0:
             raise ValueError(
                 f"register_slot: texture_glo must be > 0 (got {texture_glo})"
             )
@@ -462,9 +753,11 @@ class OutputSlotPool:
                 old.recover_fence()
             lease = TextureLease(
                 slot_id=slot_id,
-                texture_glo=int(texture_glo),
+                texture_glo=int(texture_glo) if resource is None else 0,
                 width=int(width),
                 height=int(height),
+                resource=resource,
+                pool_generation=self._generation,
             )
             self._slots[slot_id] = lease
             return lease
@@ -519,28 +812,47 @@ class OutputSlotPool:
                 )
             return None
 
-    def mark_in_viewer(self, slot_id: int) -> None:
-        """Viewer 取走 slot（READY -> IN_VIEWER）。"""
-        with self._lock:
-            slot = self._slots.get(slot_id)
-            if slot is None:
-                return
-            if slot.state is SlotState.READY:
-                slot.begin_viewer_use()
+    def mark_in_viewer(self, slot_id: int, lease_key: Optional[PresentLeaseKey] = None) -> bool:
+        """Viewer 取走 slot（READY -> IN_VIEWER）。
 
-    def ack(self, slot_id: int) -> None:
-        """Viewer 完成拷贝（IN_VIEWER/READY -> RELEASABLE）。"""
+        带 ``lease_key`` 时只对匹配的那次提交生效；键过期返回 False。
+        """
+        with self._lock:
+            slot = self._slots.get(slot_id)
+            if slot is None or not _key_matches(slot, lease_key):
+                return False
+            if slot.state is not SlotState.READY:
+                return False
+            slot.begin_viewer_use()
+            return True
+
+    def ack(self, slot_id: int, lease_key: Optional[PresentLeaseKey] = None) -> bool:
+        """Viewer 完成拷贝（IN_VIEWER/READY -> RELEASABLE）。
+
+        不带 ``lease_key``：旧语义，按 slot_id 确认当前占用者。带键时键
+        必须与槽位当前提交一致，否则是过期确认——计入 ``stale_acks``、
+        不改变任何状态并返回 False。返回 True 表示本次调用完成了确认。
+        """
         with self._lock:
             slot = self._slots.get(slot_id)
             if slot is None:
-                return
+                return False
+            if not _key_matches(slot, lease_key):
+                self._stale_acks += 1
+                logger.debug(
+                    "OutputSlotPool ack: stale lease key %s for slot %d "
+                    "(current %s)", lease_key, slot_id, slot.lease_key,
+                )
+                return False
             try:
                 slot.ack()
+                return True
             except RuntimeError as e:
                 # 双重 ack 或非法状态：记录但不崩溃
                 logger.debug(f"OutputSlotPool ack error: {e}")
+                return False
 
-    def discard(self, slot_id: int) -> bool:
+    def discard(self, slot_id: int, lease_key: Optional[PresentLeaseKey] = None) -> bool:
         """回收一个"消费端已消失/迟到"的 slot（READY/IN_VIEWER -> RELEASABLE）。
 
         AUD-1603：核心不变量"未 ack 永不复用"的另一面是——帧 emit 后
@@ -548,11 +860,15 @@ class OutputSlotPool:
         slot 会永久滞留 READY；池容量典型为 3，数次之后
         ``acquire_for_writing`` 恒为 None，画面静默冻结。任何被丢弃的
         present **必须** ``ack`` 或 ``discard`` 二选一。discard 与 ack
-        一样清理 fence。返回 False 表示 slot 不存在或状态不允许回收。
+        一样清理 fence。返回 False 表示 slot 不存在、租约键过期或状态不
+        允许回收。
         """
         with self._lock:
             slot = self._slots.get(slot_id)
             if slot is None:
+                return False
+            if not _key_matches(slot, lease_key):
+                self._stale_acks += 1
                 return False
             if slot.state not in (SlotState.READY, SlotState.IN_VIEWER):
                 logger.debug(
@@ -596,7 +912,8 @@ class OutputSlotPool:
 
     def stats(self) -> dict:
         """池统计快照（size / registered / states / acquire_failures /
-        reuse_violations），供 telemetry 与验收断言使用。"""
+        reuse_violations / stale_acks / pool_generation），供 telemetry 与
+        验收断言使用。"""
         with self._lock:
             return {
                 "size": self._size,
@@ -604,6 +921,8 @@ class OutputSlotPool:
                 "states": self._state_summary(),
                 "acquire_failures": self._acquire_failures,
                 "reuse_violations": self._reuse_violations,  # 必须为 0
+                "stale_acks": self._stale_acks,
+                "pool_generation": self._generation,
             }
 
     def report_reuse_violation(self, detail: str) -> None:
