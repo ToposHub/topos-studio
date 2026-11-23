@@ -1,0 +1,42 @@
+tests_test_ai_gen_job.py | exit=0 | 2s | ============================== 11 passed in 0.43s ==============================
+tests_test_batch_c_quality_perf.py | exit=0 | 4s | ============================== 20 passed in 2.73s ==============================
+tests_test_topos_abi_smoke.py | exit=0 | 1s | ============================== 1 passed in 0.40s ===============================
+tests_test_topos_benchmark_protocol.py | exit=0 | 2s | ============================== 10 passed in 0.82s ==============================
+tests_test_topos_oiio_contract.py | exit=0 | 3s | ============================== 2 passed in 1.39s ===============================
+tests_test_topos_render_cli.py | exit=0 | 10s | ========================= 6 passed, 1 skipped in 8.68s =========================
+tests___pycache__ | exit=5 | 1s | ============================ no tests ran in 0.02s =============================
+tests_ai | exit=0 | 11s | ======================= 625 passed, 10 skipped in 10.18s =======================
+tests_app | exit=1 | 67s | ============ 13 failed, 2095 passed, 1 warning in 64.66s (0:01:04) =============
+tests_architecture | exit=1 | 9s | =================== 8 failed, 407 passed, 1 xfailed in 7.95s ===================
+tests_benchmark | exit=1 | 37s | ================= 2 failed, 189 passed, 10 warnings in 35.89s ==================
+tests_color | exit=1 | 107s | ====== 4631 passed, 25 skipped, 1 warning, 4 errors in 104.68s (0:01:44) =======
+tests_composite | exit=1 | 118s | = 1 failed, 8005 passed, 14 skipped, 1 xfailed, 7 warnings in 113.88s (0:01:53) =
+tests_content_library_v1 | exit=0 | 18s | ============================ 1064 passed in 17.45s =============================
+tests_core | exit=1 | 4s | ======================== 1 failed, 323 passed in 2.63s =========================
+tests_deliver | exit=0 | 23s | ============================= 314 passed in 21.14s =============================
+tests_edit | exit=1 | 2322s | ========== 22 failed, 15253 passed, 60 skipped in 2317.46s (0:38:37) ===========
+tests_export | exit=0 | 4s | ============================= 295 passed in 3.28s ==============================
+tests_feature_availability | exit=1 | 6s | ========================= 7 failed, 36 passed in 5.74s =========================
+tests_file_explorer | exit=0 | 1s | ======================== 16 passed, 2 skipped in 0.69s =========================
+tests_files | exit=0 | 23s | ================== 337 passed, 1 skipped, 1 warning in 21.90s ==================
+tests_fixtures | exit=5 | 1s | ============================ no tests ran in 0.03s =============================
+tests_integration | exit=0 | 6s | ======================== 12 passed, 1 skipped in 4.78s =========================
+tests_media | exit=1 | 139s | ====== 27 failed, 3601 passed, 78 skipped, 7 errors in 136.99s (0:02:16) =======
+tests_mixer | exit=0 | 117s | ======================= 403 passed in 115.39s (0:01:55) ========================
+tests_motion | exit=0 | 8s | ============================= 154 passed in 6.80s ==============================
+tests_native | exit=1 | 14s | ================== 17 failed, 113 passed, 2 skipped in 12.62s ==================
+tests_plugins | exit=0 | 14s | ============================= 478 passed in 12.94s =============================
+tests_project | exit=0 | 26s | ============================= 533 passed in 24.70s =============================
+tests_render | exit=0 | 70s | ================== 424 passed, 2 skipped in 68.85s (0:01:08) ===================
+tests_scripting | exit=0 | 3s | ============================== 33 passed in 2.56s ==============================
+tests_shared | exit=1 | 171s | = 20 failed, 3469 passed, 14 skipped, 10 warnings, 92 errors in 168.18s (0:02:48) =
+tests_support | exit=5 | 1s | ============================ no tests ran in 0.02s =============================
+tests_teaching_animation | exit=0 | 21s | ============================= 605 passed in 19.14s =============================
+tests_test_videos | exit=5 | 1s | ============================ no tests ran in 0.03s =============================
+tests_ui | exit=1 | 164s | ======= 9 failed, 2879 passed, 2 skipped, 6 errors in 161.22s (0:02:41) ========
+tests_validation | exit=5 | 1s | ============================ no tests ran in 0.02s =============================
+tests_vault | exit=1 | 8s | ================== 11 failed, 265 passed, 5 skipped in 6.64s ===================
+tests_video | exit=139 | 33s | ============ 2 failed, 1066 passed, 7 skipped, 4 warnings in 32.33s ============
+tests_video_denoise | exit=0 | 5s | ============================== 54 passed in 4.72s ==============================
+tests_visual | exit=1 | 12s | ======================== 3 passed, 15 errors in 10.97s =========================
+DONE 23:38:40

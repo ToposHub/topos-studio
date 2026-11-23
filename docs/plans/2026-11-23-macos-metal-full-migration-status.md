@@ -604,6 +604,34 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 
 证据：`evidence/graphics-ledger-{startup,export-native,export-regular}-2026-11-23.json`。
 
+## 全量套件回归（`afd9deb7` 对基线 `6249e136`）
+
+逐顶层目录各跑一次 pytest（串行、离屏平台、`-p no:cacheprovider`），本机 Intel + AMD，2026-11-23 22:38–23:38。
+逐目录结果见 `evidence/fullsuite-afd9deb7-summary.txt`。
+
+| | 基线 `6249e136` | `afd9deb7` |
+|---|---:|---:|
+| 通过 | — | 47732 |
+| 失败 + 错误（条目） | 219 | 264 |
+| 跳过 | — | 224 |
+
+比对方法：把 HEAD 上有失败的全部 70 个文件在 `6249e136` 的干净检出里原样重跑，逐条比对测试 ID。
+
+- **208 条与基线相同**（基线 219 条里有 11 条在 HEAD 上不再失败）：既有的 `tracking/` 夹具错误 92 条、
+  `test_edit_page_visual` 15 条、架构守卫与菜单/模块隔离、`toos` 工具、原生编解码库等。
+- **HEAD 多出 56 条，没有一条归因于迁移的提交**：
+  - 15 个文件在**干净的 HEAD 检出**里整文件通过（`toos_tools`、`topos_raw_sequence`、`release_scripts`、
+    `gl_render_worker_e5`、`registered_ai_library` 等）——它们在主目录全量跑时失败，是主目录里的未跟踪构建产物
+    等环境差异造成的；基线检出同样没有这些产物，所以这一组在基线上是「通过」。
+  - `test_topos_video_16bit.py` 的 4 条在基线检出里一模一样地失败（原生构建，既有）。
+  - `test_timeline_clip_affordance_gestures.py` 本身不稳定：基线检出与 HEAD 检出各自重复跑，都是偶尔失败且每次是
+    不同的测试（基线 4 次里 1 次，HEAD 4 次里 1 次，主目录 5 次里 1 次失败 3 条）；全量跑时集中失败了 8 条。
+- `tests/video` 以 139 退出是跑完之后的进程退出段错误，基线同样如此。
+- 架构守卫 `test_boundary_guardrails` 在两边都报「漂移」，违规条数完全一致（app 253、shared 87），迁移新增的文件
+  不在违规清单里。
+- 之后提交的 `55f1eea4`（视频）与 `e237b7cf`（调色 4.6）不在这次全量里；它们各自的定向测试已通过，最终交付前需
+  再跑一次全量。
+
 ## 阶段 8.1 能力矩阵（逻辑层：剪辑预览）
 
 `tests/edit/test_metal_capability_matrix.py` 把这张表写成可执行断言：12 类帧 × 4 种配置，无需 GPU
