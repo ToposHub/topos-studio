@@ -596,7 +596,40 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 
 - 设备不可用的一列：构建 Metal 预览失败 → 帧未被消费、会话回到 GL、日志写明原因。回退开关
   （`TOPOS_METAL_DISABLE`）把整列移到 GL；只关 `edit_metal_composite` 时单片段仍走 Metal。
-- **未做**：导出、插件、合成、调色域的矩阵（等对应实现落地）；真机上的实际运行结果、日志、机器配置与日期。
+### 合成域（`tests/composite/test_metal_capability_matrix.py`，67 项）
+
+15 类图 × 预览 / 导出两种模式 × 调用方是否已解析动画参数，外加服务闸门（默认关闭、回退开关、无设备、无节点图）。
+无需 GPU，并断言整张表不触碰 Metal。
+
+| 图 | 判定 |
+|---|---|
+| Constant → Output、亚像素变换、两层 Merge、Crop / Premult / Unpremult / 矩形遮罩 | 走 Metal 链 |
+| Keyer、Blur、Text、图像输入 | `node.metal_unmigrated`（列出节点 ID） |
+| 椭圆遮罩、带运动模糊的变换 | `node.metal_param_unsupported` |
+| 3D 场景 | `node.metal_3d_unmapped` |
+| 时域节点（deflicker） | `node.metal_history_span`（含所需先前帧数） |
+| 未解析的动画参数 | `node.metal_animated_params`；调用方声明已解析后走 Metal 链 |
+| 结构错误（环） | 结构预检错误 |
+| 渲染锥之外的未迁移节点 | 不阻断，走 Metal 链 |
+
+### 调色域（`tests/color/test_metal_capability_matrix.py`，49 项、12 项跳过）
+
+调色图的节点类型在三种后端的能力目录里完全一致，计划对任何图都能编译；差别在节点参数域，由 Metal 纹理执行器
+按名字拒绝。
+
+| 参数域 | 域检查 | 共享入口在真机上的结果 |
+|---|---|---|
+| 中性 Corrector、一级调色、RGB 曲线、两个调色串联、qualifier + 窗口 | 通过 | `metal_texture`，已发布 |
+| qualifier 后处理（clean / blur / denoise） | `后处理` | 回退兼容图 `cpu_compat`，记下回退原因 |
+| 插件、邻域锐化（sharpness / mid-detail）、fx / blur 组 | `插件` / `邻域` / `fx/blur` | Metal 与 CPU 都拒绝：**不发布任何结果** |
+| warper 多空间、曲线未预构建 LUT、未知调色参数 | `多空间` / `未预构建` / `未支持` | 载荷不变量，没有对应的图，只在域检查层验证 |
+
+### 插件与效果域
+
+见 `docs/macos_metal_migration/effect-compat-matrix.md`（由生成器从效果目录产出，声明集合与已验证集合不一致时
+构建失败）。
+
+- **未做**：导出域的矩阵（等 3.3 / 3.4 落地）；真机上的实际运行结果、日志、机器配置与日期。
 
 ## 阶段 3 H.264 导出扩展（3.1 / 3.2）
 
