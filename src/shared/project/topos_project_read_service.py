@@ -79,7 +79,7 @@ class ToposProjectReadService:
             return None
         return project.project_id, data
 
-    def load(self, topos_path: str) -> ToposProjectBundle | None:
+    def load(self, topos_path: str, *, activate_resources: bool = True) -> ToposProjectBundle | None:
         """
         统一读取 .topos 工程包。
 
@@ -93,14 +93,16 @@ class ToposProjectReadService:
             return None
 
         # 1. 尝试新格式读取
-        result = self._load_from_topos_io(topos_path)
+        result = self._load_from_topos_io(topos_path, activate_resources=activate_resources)
         if result is not None:
             return result
 
         # 2. Fallback 到旧格式读取
         return self._load_from_project_manager(topos_path)
 
-    def _load_from_topos_io(self, topos_path: str) -> ToposProjectBundle | None:
+    def _load_from_topos_io(
+        self, topos_path: str, *, activate_resources: bool = True,
+    ) -> ToposProjectBundle | None:
         """通过 ToposProjectIO 读取新格式数据。"""
         try:
             from src.shared.project.topos_project_io import ToposProjectIO, ToposProjectIOConfig
@@ -110,6 +112,7 @@ class ToposProjectReadService:
                 filepath=topos_path,
                 config=config,
                 load_full_data=True,
+                activate_resources=activate_resources,
             )
 
             if full_data is None:

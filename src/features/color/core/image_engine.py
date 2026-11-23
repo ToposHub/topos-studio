@@ -46,6 +46,7 @@ import time  # noqa: F401 — 回归守卫 patch 锚点（tests/color/test_quali
 import os
 import logging
 import threading
+from contextlib import AbstractContextManager, nullcontext
 from typing import Optional, List, Dict, Any
 from PyQt6.QtGui import QOpenGLContext
 from PyQt6.QtCore import (
@@ -1197,7 +1198,9 @@ class ImageEngine(QObject, WindowRasterizer):
             return False
         return bool(cancel(rid))
 
-    def render_full_resolution(self) -> Optional[np.ndarray]:
+    def render_full_resolution(
+        self, *, prepare_request: AbstractContextManager[None] | None = None,
+    ) -> Optional[np.ndarray]:
         """同步渲染全分辨率结果并返回 BGR ndarray（失败/超时为 None）。
 
         生产路径：提交 RENDER_FULL_RESOLUTION 给渲染线程，在嵌套
@@ -1205,8 +1208,11 @@ class ImageEngine(QObject, WindowRasterizer):
         兜底）——保留导出/脚本用的同步 API 语义，同时不在 UI 线程执行
         任何全分辨率 GL 调用。无 AsyncRenderer 的 headless 场景退化为
         本地 legacy 渲染路径。失败时绝不返回上一次的过期导出结果。
+
+        prepare_request only surrounds the async submission, so temporary
+        image state is restored before the event loop processes UI events.
         """
-        if self.img_full_original is None:
+        if self.img_full_original is None and prepare_request is None:
             return None
         if bool(self.__dict__.get("_full_res_render_active", False)):
             logger.warning("Ignoring re-entrant full-resolution render request")
@@ -1253,7 +1259,8 @@ class ImageEngine(QObject, WindowRasterizer):
                     # quickly enough that attaching listeners afterwards would
                     # otherwise leave the nested loop waiting for a signal it
                     # already missed.
-                    submitted_id = self.request_full_resolution(request_id)
+                    with prepare_request if prepare_request is not None else nullcontext():
+                        submitted_id = self.request_full_resolution(request_id)
                     if not submitted_id:
                         return None
                     request_id = submitted_id
@@ -1273,17 +1280,21 @@ class ImageEngine(QObject, WindowRasterizer):
                     except (TypeError, RuntimeError):
                         pass
                 if result['image'] is not None:
-                    self.temp_image = result['image']
+                    if prepare_request is None:
+                        self.temp_image = result['image']
+                    return result['image'].copy()
                 elif result['reason']:
                     logger.warning(
                         "Full-resolution render did not produce output "
                         "(request_id=%s, reason=%s)", request_id, result['reason']
                     )
-                return self.temp_image.copy() if self.temp_image is not None else None
+                return None
 
             # Compatibility fallback for headless/legacy callers that have not
             # created an AsyncRenderer yet.  This path is not used by the
             # application once the shared context is initialized.
+            if prepare_request is not None:
+                return None
             self._full_res_render_active = True
             self.temp_image = None
             self.render_pipeline(is_full_res=True)

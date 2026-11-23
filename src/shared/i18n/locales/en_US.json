@@ -6,6 +6,78 @@
   },
   "files": {
     "native": {
+      "lightbox": {
+        "zoom": "{percent}% of fit",
+        "video": "Video",
+        "external": "Open in Media Viewer",
+        "unavailable": "No preview available for this file",
+        "fit": "Toggle fit and actual size (F)",
+        "close": "Close preview (Esc)",
+        "previous": "Previous image (←)",
+        "next": "Next image (→)"
+      },
+      "file_filter": "File Filter",
+      "card_display": "Display Options",
+      "all_colors": "All Color Labels",
+      "no_color": "No Color Label",
+      "all_tags": "All Tags",
+      "graded_only": "Graded Only",
+      "clear_filters": "Clear Filters",
+      "flag_filter": "Flag",
+      "sort_order": "Sort Order",
+      "view": "View",
+      "layout_heading": "Layout",
+      "grid_fill_heading": "Grid Fill",
+      "card": {
+        "resolution": "Dimensions",
+        "size": "File Size",
+        "tags": "Tags",
+        "rating": "Star Rating"
+      },
+      "type": {
+        "all": "All Types",
+        "image": "Images",
+        "video": "Video",
+        "audio": "Audio",
+        "doc": "Documents",
+        "model": "3D Models",
+        "subtitle": "Subtitles",
+        "project": "Topos Files",
+        "other": "Other Files"
+      },
+      "sort": {
+        "name": "Name A–Z",
+        "date": "Recently Modified",
+        "size": "Largest First",
+        "rating": "Highest Rating",
+        "type": "File Type"
+      },
+      "flag": {
+        "-1": "All Flags",
+        "1": "Flagged",
+        "2": "Rejected"
+      },
+      "layout": {
+        "adaptive": "Adaptive",
+        "masonry": "Masonry",
+        "grid": "Grid",
+        "list": "List"
+      },
+      "grid_fill": {
+        "fit": "Fit",
+        "fill": "Fill"
+      },
+      "kind": {
+        "dir": "Folder",
+        "image": "Image",
+        "video": "Video",
+        "audio": "Audio",
+        "doc": "File",
+        "other": "File",
+        "model": "3D Model",
+        "subtitle": "Subtitle",
+        "project": "Topos File"
+      },
       "add_to_media_pool": "Add to Media Pool",
       "volumes_heading": "Drives",
       "cut": "Cut Files",
@@ -25,6 +97,7 @@
       "rating": "Rating",
       "rating_stars": "{count} / 5 stars",
       "clear_rating": "Clear rating",
+      "rename_title": "Rename",
       "color_label": "Color Label",
       "label_color": {
         "none": "Clear color label",
@@ -49,6 +122,15 @@
         "codec": "Codec"
       },
       "add_library": "Add Media Library…",
+      "library_import": "Import Library…",
+      "library_export": "Export Library…",
+      "library_package_filter": "Topos Library Package ({pattern})",
+      "library_import_destination": "Choose a Location for the Imported Library",
+      "library_importing": "Importing library…",
+      "library_exporting": "Exporting library…",
+      "library_imported": "Imported library “{name}”",
+      "library_exported": "Library exported to {path}",
+      "library_transfer_failed": "Library Transfer Failed",
       "register_current": "Add Current Folder as a Library",
       "library_updated": "Media library updated",
       "library_update_failed": "Unable to update media library",
@@ -824,9 +906,11 @@
     "layout_adaptive": "Adaptive",
     "layout_grid": "Grid",
     "show_filenames": "Show File Names",
+    "rating_at_bottom": "Show Rating Below Card",
     "rating": "Rating {rating} of 5",
     "copy_grade": "Copy This Photo’s Grade",
     "paste_grade": "Paste Grade to This Photo",
+    "add_to_export_queue": "Add to Export Queue",
     "grade_copied": "Grade copied",
     "grade_copied_portable": "Grade copied. Source-specific masks and baked effects were excluded.",
     "grade_pasted": "Grade pasted to {name}",
@@ -3238,6 +3322,13 @@
     "grade_paste_all_macro": "Paste grade to all clips"
   },
   "welcome": {
+    "title": "Welcome to Topos",
+    "close": "Close",
+    "open_image": "Open Image…",
+    "recent_files": "Recent Files",
+    "no_recent": "No recent files",
+    "loading_projects": "Loading recent projects…",
+    "show_at_startup": "Show this window at startup",
     "work_mode": "Work Mode:",
     "recent_projects": "Recent Projects",
     "no_recent_projects": "No recent projects",

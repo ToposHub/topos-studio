@@ -146,6 +146,7 @@ class FilesGalleryView(QAbstractItemView):
         self._path_rows: dict[str, int] = {}
         self._known_aspect_paths: set[str] = set()
         self._model_aspects: list[float | None] = []
+        self._rated_entries: list[tuple[int, Entry]] = []
         self._snapshot_dirty = True
         self._aspect_hints: dict[str, float] = {}
         self._buckets: dict[int, list[int]] = {}
@@ -298,11 +299,14 @@ class FilesGalleryView(QAbstractItemView):
             if self._snapshot_dirty or count != len(self._paths):
                 paths: list[str] = []
                 model_aspects: list[float | None] = []
+                rated_entries: list[tuple[int, Entry]] = []
                 known: set[str] = set()
                 for row in range(count):
                     entry = model.index(row, 0, self.rootIndex()).data(GALLERY_ENTRY_ROLE)
                     if isinstance(entry, Entry):
                         path = entry.path
+                        if entry.user.rating:
+                            rated_entries.append((row, entry))
                         width, height = entry.technical.width, entry.technical.height
                         if width and height and width > 0 and height > 0:
                             ratio = width / height
@@ -317,6 +321,7 @@ class FilesGalleryView(QAbstractItemView):
                 self._path_rows = {path: row for row, path in enumerate(paths)}
                 self._known_aspect_paths = known
                 self._model_aspects = model_aspects
+                self._rated_entries = rated_entries
                 self._snapshot_dirty = False
             aspects = [ratio if ratio is not None else self._aspect_hints.get(path, 1.0)
                        for path, ratio in zip(self._paths, self._model_aspects)]
@@ -338,11 +343,16 @@ class FilesGalleryView(QAbstractItemView):
                 bar.setRange(0, max(0, self._content_height - self.viewport().height()))
                 if self.viewport().width() == width:
                     break
+            update_rating_layout = getattr(self.itemDelegate(), "update_rating_layout", None)
+            if callable(update_rating_layout):
+                update_rating_layout(self._rated_entries, self._rectangles, self.font())
             if self._anchor is not None:
                 path, offset = self._anchor
                 row = self._path_rows.get(path)
                 self.verticalScrollBar().setValue(self._rectangles[row].top() - offset if row is not None else 0)
             self._anchor = None
+            if self.state() == QAbstractItemView.State.EditingState:
+                self.updateEditorGeometries()
         finally:
             self._laying_out = False
         self.viewport().update()
@@ -535,7 +545,8 @@ class FilesGalleryView(QAbstractItemView):
         self._rubber_active = False
         self._rubber_base_rows = set()
         self._rubber_timer.stop()
-        self.setState(QAbstractItemView.State.NoState)
+        if self.state() == QAbstractItemView.State.DragSelectingState:
+            self.setState(QAbstractItemView.State.NoState)
         self.viewport().update()
 
     def cancelSelectionDrag(self) -> bool:
@@ -679,4 +690,6 @@ class FilesGalleryView(QAbstractItemView):
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         del dx, dy
+        if not self._laying_out and self.state() == QAbstractItemView.State.EditingState:
+            self.updateEditorGeometries()
         self.viewport().update()

@@ -363,13 +363,18 @@ def test_metadata_patch_publishes_snapshot_and_failures(qtbot, env):
         snapshot = snap.args[0]
         assert sorted(snapshot[str(pinned)]["tags"]) == ["夜", "航拍"]
 
-        # 未固定库的路径：逐条失败并说明原因，不假装成功
         outsider = env.root / "outside.png"
-        outsider.write_bytes(b"x")
         with qtbot.waitSignal(transport.metadata_failed, timeout=8000) as received:
             transport.patch_metadata([str(outsider)], {"rating": 3})
-        assert "固定" in received.args[2]
         assert received.args[0] == [str(outsider)]
+
+        outsider.write_bytes(b"x")
+        with qtbot.waitSignal(transport.metadata_snapshot, timeout=8000) as snap:
+            transport.patch_metadata([str(outsider)], {"rating": 3})
+        assert snap.args[0][str(outsider)]["rating"] == 3
+        with qtbot.waitSignal(transport.loaded, timeout=8000) as loaded:
+            transport.load_directory(str(env.root))
+        assert next(entry for entry in loaded.args[1] if entry.path == str(outsider)).user.rating == 3
     finally:
         transport.shutdown()
 
@@ -1234,5 +1239,136 @@ def test_collection_write_roundtrip(qtbot, env):
         with qtbot.waitSignal(transport.collection_changed, timeout=8000) as refused:
             transport.create_collection("   ", [str(a)])
         assert refused.args[0] is False
+    finally:
+        transport.shutdown()
+
+
+def test_local_inspector_metadata_and_source_dimensions_roundtrip(qtbot, env, monkeypatch):
+    from PyQt6.QtCore import QItemSelectionModel, QSettings, Qt
+    from PyQt6.QtGui import QColor, QImage
+
+    from src.app.ui.native_files_panel import NativeFilesPanel
+    from src.app.ui.native_files_prefs import NativeFilesPreferences
+
+    local = env.root / "local"
+    local.mkdir()
+    asset = local / "wide.png"
+    image = QImage(960, 400, QImage.Format.Format_RGB32)
+    image.fill(QColor("#29515a"))
+    assert image.save(str(asset))
+    preference_file = env.root / "prefs.ini"
+    prefs = NativeFilesPreferences(QSettings(str(preference_file), QSettings.Format.IniFormat))
+    transport = make_transport(env)
+    panel = NativeFilesPanel(preferences=prefs, transport=transport)
+    monkeypatch.setattr(panel, "is_browsable_path", lambda path: path in (str(local), str(asset)))
+    qtbot.addWidget(panel)
+    panel.resize(1020, 600)
+    panel.show()
+    transport.loaded.connect(panel.set_entries)
+    transport.metadata_snapshot.connect(panel.apply_metadata_snapshot)
+    transport.metadata_applied.connect(panel.apply_metadata_result)
+    panel.metadata_patch_requested.connect(transport.patch_metadata)
+    try:
+        with qtbot.waitSignal(transport.loaded):
+            transport.load_directory(str(local))
+        panel.inspector_button.setChecked(True)
+        panel.selection.setCurrentIndex(panel.proxy.index(0, 0), QItemSelectionModel.SelectionFlag.ClearAndSelect
+                                        | QItemSelectionModel.SelectionFlag.Rows)
+        with qtbot.waitSignal(transport.metadata_applied):
+            qtbot.mouseClick(panel.color_buttons[3], Qt.MouseButton.LeftButton)
+        panel.comment_edit.setFocus()
+        qtbot.keyClicks(panel.comment_edit, "Keep for export")
+        with qtbot.waitSignal(transport.metadata_applied):
+            qtbot.keyClick(panel.comment_edit, Qt.Key.Key_Return)
+        panel.tag_edit.setFocus()
+        qtbot.keyClicks(panel.tag_edit, "Portrait, Travel")
+        with qtbot.waitSignal(transport.metadata_applied):
+            qtbot.keyClick(panel.tag_edit, Qt.Key.Key_Return)
+        with qtbot.waitSignal(transport.loaded):
+            transport.load_directory(str(local))
+        entry = panel.model.entries[0]
+        assert (entry.user.color, entry.user.comments, entry.user.tags) == (3, "Keep for export", ("Portrait", "Travel"))
+        panel._set_card_metadata(frozenset({"resolution", "size", "tags"}))
+        qtbot.waitUntil(lambda: panel.card_delegate.metadata_lines(entry)[0] == "960×400")
+        rect = panel.icon_view.visualRect(panel.proxy.index(0, 0))
+        assert panel.card_delegate.name_rect(rect).height() == 20
+        assert panel.card_delegate.metadata_lines(entry) == ["960×400", entry.size_label, entry.user.tag_text]
+        assert prefs.card_metadata == ["resolution", "size", "tags"]
+
+        lib = env.catalog.register_library(local)
+        env.catalog.upsert_asset(lib.library_id, asset, width=960, height=400)
+        matches = FilesQueryService(env.catalog).search("Keep for export", library_id=lib.library_id)
+        assert len(matches.entries) == 1
+        assert matches.entries[0].user == entry.user
+        assert matches.entries[0].technical.resolution == "960×400"
+        assert env.catalog.asset("", asset) is None
+    finally:
+        panel.shutdown()
+        transport.shutdown()
+
+
+def test_sidebar_counts_direct_visible_files_and_refreshes_aliases(qtbot, env):
+    from src.app.ui.native_files_locations import HomeDirectoryTree
+
+    transport = make_transport(env)
+    tree = HomeDirectoryTree(str(env.root), lambda entry: True)
+    qtbot.addWidget(tree)
+    empty = env.lib / "Empty"
+    empty.mkdir()
+    (env.lib / ".hidden").touch()
+    visible_file = env.lib / "notes.docx"
+    visible_file.touch()
+    home_folder = {"name": env.lib.name, "path": str(env.lib)}
+    tree.enable_grade_sets()
+    tree.set_grade_sets(((1, "Portraits", 12),))
+    tree.set_libraries([{"library_id": env.library.library_id, "name": "Library alias", "path": str(env.lib)}])
+    tree.set_children(str(env.root), [home_folder])
+    tree.set_children(str(env.lib), [{"name": empty.name, "path": str(empty)}])
+    tree.setExpanded(tree.home_item.index(), True)
+    tree.setExpanded(tree.home_item.child(0).index(), True)
+    tree.folder_counts_requested.connect(transport.load_folder_counts)
+    transport.folder_counts_loaded.connect(tree.apply_folder_counts)
+    tree.resize(260, 420)
+    tree.show()
+    try:
+        home_item = tree.home_item.child(0)
+        alias = tree._library_roots[env.library.library_id]
+        grade_set = tree._grade_set_group.child(0)
+        assert grade_set.text() == "Portraits"
+        assert grade_set.data(tree.COUNT_ROLE) == 12
+        qtbot.waitUntil(lambda: home_item.data(tree.COUNT_ROLE) == 1
+                        and alias.data(tree.COUNT_ROLE) == 1
+                        and home_item.child(0).data(tree.COUNT_ROLE) == 0)
+        assert home_item.text() == env.lib.name
+        assert alias.text() == "Library alias"
+        visible_file.unlink()
+        tree.refresh(str(env.lib))
+        qtbot.waitUntil(lambda: home_item.data(tree.COUNT_ROLE) == 0 and alias.data(tree.COUNT_ROLE) == 0)
+        assert FilesQueryService(env.catalog).directory_file_counts([str(env.lib / "missing")]) == {
+            str(env.lib / "missing"): None,
+        }
+    finally:
+        transport.shutdown()
+
+
+def test_library_transfer_publishes_imported_library(qtbot: QtBot, env) -> None:
+    _seed(env, "photo.jpg")
+    package = env.root / "library.toposlibrary"
+    receiver = env.root / "receiver"
+    receiver.mkdir()
+    transport = make_transport(env)
+    try:
+        with qtbot.waitSignal(transport.library_transfer_finished, timeout=5000) as exported:
+            transport.export_library(env.library.library_id, str(package))
+        assert exported.args[0] is True
+        assert package.is_file()
+
+        with qtbot.waitSignals(
+            [transport.library_transfer_finished, transport.libraries_loaded], timeout=5000
+        ) as imported:
+            transport.import_library(str(package), str(receiver))
+        assert imported.all_signals_and_args[0].args[0] is True
+        assert any(item["path"] == str(receiver / env.library.name)
+                   for item in imported.all_signals_and_args[1].args[0])
     finally:
         transport.shutdown()

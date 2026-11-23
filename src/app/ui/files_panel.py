@@ -266,6 +266,10 @@ class FilesPanel(QWidget):
             self._native_panel.library_register_requested.connect(self._native_transport.register_library)
             self._native_panel.library_remove_requested.connect(self._native_transport.remove_library)
             self._native_panel.library_rename_requested.connect(self._native_transport.rename_library)
+            self._native_panel.library_import_requested.connect(self._native_transport.import_library)
+            self._native_panel.library_export_requested.connect(self._native_transport.export_library)
+            self._native_transport.library_transfer_finished.connect(
+                self._native_panel.show_library_transfer_result)
             self._native_transport.library_changed.connect(
                 self._native_panel.show_library_change)
             self._native_transport.library_registry_changed.connect(self.library_registry_changed)
@@ -286,6 +290,8 @@ class FilesPanel(QWidget):
                 self._open_batch_rename)
             self._native_panel.compare_requested.connect(self._open_compare)
             self._native_transport.tree_loaded.connect(self._native_panel.locations.set_children)
+            self._native_panel.locations.folder_counts_requested.connect(self._native_transport.load_folder_counts)
+            self._native_transport.folder_counts_loaded.connect(self._native_panel.locations.apply_folder_counts)
             self._native_transport.tree_failed.connect(self._native_panel.locations.set_error)
             self._native_panel.locations.tree_reload_requested.connect(self._native_transport.reload_tree)
             self._native_panel.locations.tree_path_removed.connect(self._native_transport.invalidate_tree_path)

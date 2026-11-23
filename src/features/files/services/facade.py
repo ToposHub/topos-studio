@@ -35,6 +35,7 @@ from src.features.files.contracts import (
 )
 from src.features.files.repository.catalog import FilesCatalog, LibraryRecord
 from src.features.files.services.domain import (
+    GRADE_SET_SCOPE,
     FilesCollectionsService,
     FilesMetadataService,
     FilesScanService,
@@ -277,6 +278,16 @@ class FilesFacade:
             return self._operations.create_library(str(root), name)
         return self.libraries.register(root)
 
+    def export_library(self, library_id: str, destination: str) -> Path:
+        from src.features.files.services.library_transfer import FilesLibraryTransfer
+
+        return FilesLibraryTransfer(self._catalog, self.metadata).export_library(library_id, destination)
+
+    def import_library(self, package: str, destination_parent: str) -> LibraryRecord:
+        from src.features.files.services.library_transfer import FilesLibraryTransfer
+
+        return FilesLibraryTransfer(self._catalog, self.metadata).import_library(package, destination_parent)
+
     def thumbnail_bytes(self, path: str, version: int, *, cancel: threading.Event) -> bytes:
         from src.features.files.services.media import thumbnail_bytes
 
@@ -290,11 +301,12 @@ class FilesFacade:
     def cache_graded_thumbnail(self, stamp: GradedThumbnailStamp, rgb: ndarray) -> bool:
         import cv2
 
-        if self.graded_thumbnail(stamp.source) is not None:
+        long_edge = max(rgb.shape[:2])
+        if self._thumbnail_cache.read_graded(stamp.source, minimum_edge=long_edge) is not None:
             return True
         bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        ok, data = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 48, cv2.IMWRITE_JPEG_OPTIMIZE, 1])
-        return bool(ok and self._thumbnail_cache.store_graded(stamp, data.tobytes()))
+        ok, data = cv2.imencode(".webp", bgr, [cv2.IMWRITE_WEBP_QUALITY, 80])
+        return bool(ok and self._thumbnail_cache.store_graded(stamp, data.tobytes(), long_edge=long_edge))
 
     @property
     def dropped_results(self) -> int:
@@ -383,7 +395,7 @@ class FilesFacade:
                 self.collections.member_paths(collection_id),
                 request_id=request_id,
                 path_label=f"collection://{collection_id}",
-                library_id=library_id)
+                library_id=None if library_id == GRADE_SET_SCOPE else library_id)
 
         self._submit(
             key="collection", request_id=request_id,

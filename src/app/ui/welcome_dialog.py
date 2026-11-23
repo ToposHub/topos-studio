@@ -7,16 +7,22 @@ Shown on startup when `show_welcome_on_startup` config is True.
 
 import logging
 import os
+from pathlib import Path
+
+import qtawesome as qta
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem,
+    QButtonGroup, QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, QListWidget,
+    QListWidgetItem, QPushButton, QVBoxLayout,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QRunnable, QThreadPool
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon
 from src.shared.i18n.i18n import I18N
 from src.app.update_checker import CURRENT_VERSION
 
 logger = logging.getLogger(__name__)
+
+_OPEN_ICON = (Path(__file__).resolve().parents[2] / "shared" / "assets" / "icons"
+              / "buttons" / "folder-open.svg")
 
 
 class _ProjectClassifyWorker(QRunnable):
@@ -83,126 +89,144 @@ class WelcomeDialog(QDialog):
         self._apply_styles()
 
     def _setup_ui(self) -> None:
-        self.setWindowTitle(I18N.tr("welcome.title", "Welcome to Topos"))
-        self.setMinimumSize(480, 400)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(48, 40, 48, 32)
-        layout.setSpacing(0)
-
-        # ── Header ─────────────────────────────────────────────
-        title = QLabel(I18N.tr("app.brand", "Topos"))
-        title.setObjectName("title")
-        title.setFont(QFont("Segoe UI", 36, QFont.Weight.Bold))
-        layout.addWidget(title)
-
-        version = QLabel(f"v{CURRENT_VERSION}")
-        version.setObjectName("version")
-        version.setFont(QFont("Segoe UI", 11))
-        layout.addWidget(version)
-
-        layout.addSpacing(4)
-
-        subtitle = QLabel(
-            I18N.tr("welcome.subtitle", "Professional color grading & image editing")
-        )
-        subtitle.setObjectName("subtitle")
-        subtitle.setWordWrap(True)
-        layout.addWidget(subtitle)
-
-        layout.addSpacing(32)
-
-        # ── Work Mode Switch ───────────────────────────────────
-        # One-click mode toggle right on the welcome screen (no need to dig
-        # into Preferences). Studio only; other launchers ignore work_mode.
         from src.shared.feature_flags import get_product_mode, get_work_mode
-        if get_product_mode() == "studio":
-            mode_row = QHBoxLayout()
-            mode_row.setSpacing(8)
-            mode_label = QLabel(I18N.tr("welcome.work_mode", "Work Mode:"))
-            mode_label.setObjectName("sectionLabel")
-            mode_row.addWidget(mode_label)
 
+        self.setWindowTitle(I18N.tr("welcome.title", "Welcome to Topos"))
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMinimumWidth(500)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        surface = QFrame()
+        surface.setObjectName("welcomeSurface")
+        outer.addWidget(surface)
+        layout = QVBoxLayout(surface)
+        layout.setContentsMargins(24, 20, 24, 18)
+        layout.setSpacing(16)
+
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        title = QLabel(I18N.tr("app.brand", "Topos"))
+        title.setObjectName("welcomeTitle")
+        header.addWidget(title, alignment=Qt.AlignmentFlag.AlignBaseline)
+        version = QLabel(f"v{CURRENT_VERSION}")
+        version.setObjectName("welcomeVersion")
+        header.addWidget(version, alignment=Qt.AlignmentFlag.AlignBaseline)
+        header.addStretch()
+
+        close_text = I18N.tr("welcome.close", "Close")
+        self.close_btn = QPushButton()
+        self.close_btn.setObjectName("welcomeClose")
+        self.close_btn.setIcon(qta.icon("fa5s.times", color="#b8b8bf"))
+        self.close_btn.setIconSize(QSize(14, 14))
+        self.close_btn.setFixedSize(28, 28)
+        self.close_btn.setAccessibleName(close_text)
+        self.close_btn.setToolTip(close_text)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setAutoDefault(False)
+        self.close_btn.clicked.connect(self.reject)
+        header.addWidget(self.close_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(12)
+
+        studio = get_product_mode() == "studio"
+        if studio:
+            modes = QFrame()
+            modes.setObjectName("welcomeModes")
+            mode_row = QHBoxLayout(modes)
+            mode_row.setContentsMargins(3, 3, 3, 3)
+            mode_row.setSpacing(2)
+            mode_group = QButtonGroup(modes)
             current_mode = get_work_mode(self._config)
             self._mode_btns = {}
-            for mode_value, mode_text_key, mode_text_default in (
-                ("image", "preferences.general.work_mode.image", "Image Grading"),
-                ("video", "preferences.general.work_mode.video", "Video Grading"),
+            for mode_value, mode_text_default in (
+                ("image", "Image Grading"),
+                ("video", "Video Grading"),
             ):
-                btn = QPushButton(I18N.tr(mode_text_key, mode_text_default))
-                btn.setObjectName("modeBtn")
+                btn = QPushButton(
+                    I18N.tr(f"preferences.general.work_mode.{mode_value}", mode_text_default)
+                )
+                btn.setObjectName("welcomeMode")
                 btn.setCheckable(True)
+                mode_group.addButton(btn)
                 btn.setChecked(mode_value == current_mode)
-                btn.setFixedHeight(28)
+                btn.setFixedHeight(30)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setAutoDefault(False)
                 btn.clicked.connect(lambda checked, m=mode_value: self._on_mode_clicked(m))
                 mode_row.addWidget(btn)
                 self._mode_btns[mode_value] = btn
-            mode_row.addStretch()
-            layout.addLayout(mode_row)
-            layout.addSpacing(20)
+            actions.addWidget(modes)
+            actions.addStretch()
 
-        # ── Quick Actions ──────────────────────────────────────
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(16)
-
-        self.open_btn = QPushButton(I18N.tr("welcome.open_image", "Open Image..."))
-        self.open_btn.setObjectName("primaryBtn")
-        self.open_btn.setFixedHeight(34)
+        self.open_btn = QPushButton(I18N.tr("welcome.open_image", "Open Image…"))
+        self.open_btn.setObjectName("welcomeOpen")
+        self.open_btn.setProperty("withWorkModes", studio)
+        icon = QIcon(str(_OPEN_ICON))
+        icon.addFile(str(_OPEN_ICON), mode=QIcon.Mode.Active)
+        self.open_btn.setIcon(icon)
+        self.open_btn.setIconSize(QSize(18, 18))
+        self.open_btn.setFixedHeight(36)
         self.open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.open_btn.setAutoDefault(False)
         self.open_btn.clicked.connect(self._on_open)
-        btn_layout.addWidget(self.open_btn)
+        actions.addWidget(self.open_btn)
+        if not studio:
+            actions.addStretch()
+        layout.addLayout(actions)
 
-        self.close_btn = QPushButton(I18N.tr("welcome.close", "Close"))
-        self.close_btn.setObjectName("secondaryBtn")
-        self.close_btn.setFixedHeight(34)
-        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(self.close_btn)
-        btn_layout.addStretch()
-
-        layout.addLayout(btn_layout)
-        layout.addSpacing(28)
-
-        # ── Recent Files ───────────────────────────────────────
-        recent_label = QLabel(I18N.tr("welcome.recent_files", "Recent Files"))
-        recent_label.setObjectName("sectionLabel")
-        layout.addWidget(recent_label)
-
-        self.recent_list = QListWidget()
-        self.recent_list.setObjectName("recentList")
-        self.recent_list.setMaximumHeight(110)
+        self.recent_list = self._add_recent_section(
+            layout, I18N.tr("welcome.recent_files", "Recent Files")
+        )
         self.recent_list.itemDoubleClicked.connect(self._on_recent_double_click)
         self._populate_recent()
-        layout.addWidget(self.recent_list, 1)
 
-        # ── Recent Projects ────────────────────────────────────
-        from src.shared.feature_flags import get_product_mode
-        if get_product_mode() == "studio":
-            layout.addSpacing(20)
-            projects_label = QLabel(I18N.tr("welcome.recent_projects", "Recent Projects"))
-            projects_label.setObjectName("sectionLabel")
-            layout.addWidget(projects_label)
-
-            self.projects_list = QListWidget()
-            self.projects_list.setObjectName("recentList")
-            self.projects_list.setMaximumHeight(90)
+        if studio:
+            self.projects_list = self._add_recent_section(
+                layout, I18N.tr("welcome.recent_projects", "Recent Projects")
+            )
             self.projects_list.itemDoubleClicked.connect(self._on_project_double_click)
             self._populate_recent_projects()
-            layout.addWidget(self.projects_list, 1)
 
-        # ── Footer ─────────────────────────────────────────────
-        layout.addSpacing(16)
-        self.show_check = QPushButton(I18N.tr("welcome.show_at_startup", "Show at startup"))
-        self.show_check.setObjectName("toggleBtn")
-        self.show_check.setCheckable(True)
+        self.show_check = QCheckBox(I18N.tr("welcome.show_at_startup", "Show at startup"))
+        self.show_check.setObjectName("welcomeStartup")
         self.show_check.setChecked(
             self._config_bool(self._config.get("show_welcome_on_startup"), default=True)
         )
         self.show_check.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.show_check.clicked.connect(self._on_toggle_startup)
-        layout.addWidget(self.show_check)
+        self.show_check.toggled.connect(self._on_toggle_startup)
+        layout.addWidget(self.show_check, alignment=Qt.AlignmentFlag.AlignLeft)
+        self.open_btn.setFocus()
+
+    @staticmethod
+    def _add_recent_section(layout: QVBoxLayout, title: str) -> QListWidget:
+        section = QVBoxLayout()
+        section.setSpacing(7)
+        label = QLabel(title)
+        label.setObjectName("welcomeSection")
+        section.addWidget(label)
+        recent = QListWidget()
+        recent.setObjectName("welcomeRecent")
+        recent.setAccessibleName(title)
+        recent.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        recent.setTextElideMode(Qt.TextElideMode.ElideRight)
+        recent.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        recent.setFixedHeight(98)
+        section.addWidget(recent)
+        layout.addLayout(section)
+        return recent
+
+    @staticmethod
+    def _recent_item(path: str) -> QListWidgetItem:
+        filename = os.path.basename(path)
+        parent = os.path.basename(os.path.dirname(path))
+        item = QListWidgetItem(f"{filename}  ·  {parent}" if parent else filename)
+        item.setData(Qt.ItemDataRole.UserRole, path)
+        item.setToolTip(path)
+        return item
 
     def _populate_recent(self) -> None:
         # [AUD-4110] 列表元素类型收敛，非 str 条目不进入 basename/exists
@@ -225,12 +249,9 @@ class WelcomeDialog(QDialog):
             return
 
         for filepath in recent:
-            basename = os.path.basename(filepath)
-            dirname = os.path.dirname(filepath)
-            item = QListWidgetItem(f"{basename}  —  {dirname}")
-            item.setData(Qt.ItemDataRole.UserRole, filepath)
+            item = self._recent_item(filepath)
             if not os.path.exists(filepath):
-                item.setForeground(item.foreground())
+                item.setForeground(QColor("#a6a6ae"))
                 font = item.font()
                 font.setItalic(True)
                 item.setFont(font)
@@ -283,11 +304,7 @@ class WelcomeDialog(QDialog):
             return
 
         for path in matching:
-            basename = os.path.basename(path)
-            dirname = os.path.dirname(path)
-            item = QListWidgetItem(f"{basename}  —  {dirname}")
-            item.setData(Qt.ItemDataRole.UserRole, path)
-            self.projects_list.addItem(item)
+            self.projects_list.addItem(self._recent_item(path))
 
     @staticmethod
     def _classify_project(filepath: str) -> str:
@@ -312,104 +329,129 @@ class WelcomeDialog(QDialog):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet("""
-            WelcomeDialog {
-                background: #27272b;
-                border: 1px solid #3a3a3a;
+            QFrame#welcomeSurface {
+                background: #232327;
+                border: 1px solid #414147;
                 border-radius: 12px;
             }
-            QLabel#title {
-                color: #ff8800;
-            }
-            QLabel#version {
-                color: #666;
-            }
-            QLabel#subtitle {
-                color: #888;
-            }
-            QLabel#sectionLabel {
-                color: #aaa;
-                font-size: 11px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-            }
-            QPushButton#primaryBtn {
-                background: transparent;
-                color: #ff8800;
-                border: 1px solid #ff8800;
-                border-radius: 4px;
-                padding: 0 20px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            QPushButton#primaryBtn:hover {
-                background: rgba(255, 136, 0, 0.12);
-            }
-            QPushButton#primaryBtn:pressed {
-                background: rgba(255, 136, 0, 0.2);
-            }
-            QPushButton#secondaryBtn {
-                background: transparent;
-                color: #aaa;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 0 20px;
-                font-size: 12px;
-            }
-            QPushButton#secondaryBtn:hover {
-                color: #ddd;
-                border-color: #777;
-            }
-            QPushButton#secondaryBtn:pressed {
-                background: rgba(255, 255, 255, 0.05);
-            }
-            QPushButton#modeBtn {
-                background: transparent;
-                color: #aaa;
-                border: 1px solid #555;
-                border-radius: 4px;
-                padding: 0 16px;
-                font-size: 12px;
-            }
-            QPushButton#modeBtn:hover {
-                color: #ddd;
-                border-color: #777;
-            }
-            QPushButton#modeBtn:checked {
-                color: #ff8800;
-                border-color: #ff8800;
-                font-weight: bold;
-            }
-            QPushButton#toggleBtn {
+            QLabel#welcomeTitle, QLabel#welcomeVersion, QLabel#welcomeSection {
                 background: transparent;
                 border: none;
-                color: #555;
+            }
+            QLabel#welcomeTitle {
+                color: #f1f0f2;
+                font-size: 32px;
+                font-weight: 700;
+            }
+            QLabel#welcomeVersion {
+                color: #a3a3ad;
                 font-size: 11px;
-                text-align: left;
-                padding: 4px 0;
+                font-weight: 400;
             }
-            QPushButton#toggleBtn:hover {
-                color: #888;
-            }
-            QPushButton#toggleBtn:checked {
-                color: #888;
-            }
-            QListWidget#recentList {
-                background: transparent;
-                border: none;
-                color: #bbb;
+            QLabel#welcomeSection {
+                color: #d4d4db;
                 font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton#welcomeClose {
+                background: transparent;
+                border: 1px solid transparent;
+                border-radius: 6px;
+                padding: 0;
+            }
+            QPushButton#welcomeClose:hover { background: #36363d; }
+            QPushButton#welcomeClose:pressed { background: #414149; }
+            QPushButton#welcomeClose:focus { border-color: #a3a3ad; }
+            QPushButton#welcomeOpen {
+                background: #b64a00;
+                color: #ffffff;
+                border: 1px solid transparent;
+                border-radius: 7px;
+                padding: 0 14px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton#welcomeOpen:hover { background: #bf5000; }
+            QPushButton#welcomeOpen:pressed { background: #a14000; }
+            QPushButton#welcomeOpen:focus { border-color: #ffbf75; }
+            QPushButton#welcomeOpen[withWorkModes="true"] {
+                background: #2e2e34;
+                border-color: #43434a;
+            }
+            QPushButton#welcomeOpen[withWorkModes="true"]:hover { background: #393940; }
+            QPushButton#welcomeOpen[withWorkModes="true"]:pressed { background: #26262b; }
+            QPushButton#welcomeOpen[withWorkModes="true"]:focus { border-color: #a3a3ad; }
+            QFrame#welcomeModes {
+                background: #1c1c20;
+                border: 1px solid #35353b;
+                border-radius: 8px;
+            }
+            QPushButton#welcomeMode {
+                background: #68371f;
+                color: #ffe0c8;
+                border: 1px solid transparent;
+                border-radius: 5px;
+                padding: 0 10px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton#welcomeMode:hover { background: #814523; }
+            QPushButton#welcomeMode:checked {
+                background: #b64a00;
+                color: #ffffff;
+            }
+            QPushButton#welcomeMode:checked:hover { background: #bf5000; }
+            QPushButton#welcomeMode:focus { border-color: #ffbf75; }
+            QListWidget#welcomeRecent {
+                background: #1e1e22;
+                border: 1px solid #34343a;
+                border-radius: 7px;
+                padding: 3px;
+                color: #d1d1d8;
+                font-size: 12px;
+                font-weight: 400;
                 outline: none;
             }
-            QListWidget#recentList::item {
-                padding: 6px 4px;
-                border-bottom: 1px solid #333;
+            QListWidget#welcomeRecent::item {
+                padding: 5px 8px;
+                min-height: 18px;
+                border-radius: 4px;
             }
-            QListWidget#recentList::item:hover {
-                background: rgba(255, 255, 255, 0.03);
+            QListWidget#welcomeRecent::item:disabled { color: #a2a2ab; }
+            QListWidget#welcomeRecent::item:hover:enabled { background: #2b2b31; }
+            QListWidget#welcomeRecent::item:selected {
+                background: #3c3128;
+                color: #ffc183;
             }
-            QListWidget#recentList::item:selected {
-                background: rgba(255, 136, 0, 0.1);
-                color: #ff8800;
+            QListWidget#welcomeRecent QScrollBar:vertical {
+                width: 8px;
+                border: none;
+                background: transparent;
+                margin: 2px 0;
+            }
+            QListWidget#welcomeRecent QScrollBar::handle:vertical {
+                min-height: 20px;
+                background: #424249;
+                border: none;
+                border-radius: 3px;
+                margin: 0 1px;
+            }
+            QListWidget#welcomeRecent QScrollBar::handle:vertical:hover {
+                background: #5a5a63;
+            }
+            QListWidget#welcomeRecent QScrollBar::add-line:vertical,
+            QListWidget#welcomeRecent QScrollBar::sub-line:vertical {
+                height: 0;
+                border: none;
+            }
+            QListWidget#welcomeRecent QScrollBar::add-page:vertical,
+            QListWidget#welcomeRecent QScrollBar::sub-page:vertical {
+                background: transparent;
+            }
+            QCheckBox#welcomeStartup {
+                color: #b6b6bf;
+                font-size: 12px;
+                font-weight: 400;
             }
         """)
 

@@ -258,6 +258,14 @@ def generate_analysis(
             os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "checkmark.svg"),
             "src/shared/assets/icons",
         ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "locations"),
+            "src/shared/assets/icons/locations",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "buttons", "folder-open.svg"),
+            "src/shared/assets/icons/buttons",
+        ),
         # Fonts used by the cross-platform Qt UI and their licenses.
         *[
             (os.path.join(PROJECT_ROOT, "src", "assets", "fonts", filename),

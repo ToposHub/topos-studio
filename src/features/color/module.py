@@ -268,7 +268,7 @@ class ColorModule:
             fallback_title="Grade Sets",
             feature_id="color",
             category="Color",
-            page_ids=("Color",),
+            page_ids=("Color", "Deliver"),
             dock_attr="dock_grade_sets",
             order=950,
             default_visible=True,

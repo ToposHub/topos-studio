@@ -60,6 +60,7 @@ class C:
     BG_DEEPEST      = "#121212"   # 画布 / 最深区域
     BG_DARKEST      = "#1a1a1a"   # 主窗口 / 分隔条
     BG_DARK         = "#1e1e1e"   # 面板标题 / 停靠窗口
+    BG_PANEL_HEADER = "#222226"   # 独立面板标题栏
     BG_PANEL        = "#27272b"   # 面板背景（标准）
     KEYFRAMES_BG    = BG_PANEL
     TIMELINE_TIMECODE_BG = "#202025"

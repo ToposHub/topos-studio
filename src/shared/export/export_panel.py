@@ -23,6 +23,8 @@ from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QIcon, QPixmap, QColor
 import os
 import logging
 from typing import List, Dict, Any, Optional
+from collections.abc import Iterable
+from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +121,13 @@ class ExportSectionWidget(QFrame):
         v_expand: 内容区垂直 sizePolicy。默认 False（Maximum，只占内容高度，
             适合参数行 section）；传 True 时用 Expanding，让 section 撑满面板
             剩余垂直空间（适合内嵌 Expanding 列表的 Export Queue section）。
+        flat: 使用纯色标题栏，以顶部细线替代分组外框。
         header_mode: 标题栏模式。
             - ``"full"``（默认）：显示 ▼ 折叠按钮 + 标题 + 右侧重置按钮，标题栏用中性灰渐变。
               适合 Batch Export 面板（需要折叠/重置）。
             - ``"plain"``：不显示折叠/重置按钮，标题栏背景与内容区一致（无渐变），
               只作为分组的静态标题。适合 Quick Export 弹窗（无需折叠/重置）。
+            - ``"fixed"``：静态标题栏，内容区始终展开。适合 Export Queue。
             - ``"none"``：完全不渲染标题栏，只有内容区。最紧凑，适合标题已由外层
               （如 TabBar / 参数行标签）暗示、无需重复分组名的场景。
 
@@ -135,14 +139,25 @@ class ExportSectionWidget(QFrame):
     reset_requested = pyqtSignal()
 
     def __init__(self, title: str, v_expand: bool = False,
-                 header_mode: str = "full", parent=None) -> None:
+                 header_mode: str = "full", parent=None, *, flat: bool = False) -> None:
         super().__init__(parent)
         self.title = title
         self._is_collapsed = False
         self._header_mode = header_mode
+        self._flat = flat
 
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(NODE_SECTION_STYLE)
+        if flat:
+            self.setFrameShape(QFrame.Shape.NoFrame)
+            self.setStyleSheet(f"""
+                ExportSectionWidget {{
+                    background: {C.BG_PANEL};
+                    border: none;
+                    border-top: 1px solid {C.PANEL_DIVIDER};
+                }}
+            """)
+        else:
+            self.setFrameShape(QFrame.Shape.StyledPanel)
+            self.setStyleSheet(NODE_SECTION_STYLE)
         # section 自身的垂直策略：v_expand 时 Expanding（争取垂直空间），
         # 否则 Preferred（跟随内容，不主动撑高）。
         self.setSizePolicy(
@@ -161,10 +176,10 @@ class ExportSectionWidget(QFrame):
         self._title_label = None
         if header_mode != "none":
             self._header = QWidget()
+            self._header.setObjectName("exportSectionHeader")
             self._header.setFixedHeight(28)
             header_layout = QHBoxLayout(self._header)
-            # plain 模式标题左侧无折叠按钮，多留一点左内边距对齐内容
-            header_layout.setContentsMargins(8 if header_mode == "plain" else 6, 0, 2, 0)
+            header_layout.setContentsMargins(6 if header_mode == "full" else 8, 0, 2, 0)
             header_layout.setSpacing(2)
 
             # Collapse toggle（仅 full 模式）
@@ -217,9 +232,17 @@ class ExportSectionWidget(QFrame):
         return self._content_layout
 
     def _update_header_style(self) -> None:
-        """标题栏配色：full 模式用中性灰渐变（文字白）；plain 模式与内容区背景一致（文字浅灰）。"""
+        """Apply the section header's color scheme."""
         # none 模式无标题栏，直接返回（防御性，构造时也不会调用）
         if self._header is None:
+            return
+        if self._flat:
+            self._header.setStyleSheet(f"""
+                QWidget#exportSectionHeader {{ background: {C.BG_PANEL_HEADER}; border: none; }}
+            """)
+            self._title_label.setStyleSheet(
+                f"color: {C.TEXT_PRIMARY}; font-weight: bold; font-size: 12px; border: none;"
+            )
             return
         if self._header_mode == "plain":
             # plain：背景与内容区一致（NODE_CONTENT_STYLE 的 #27272b），无渐变、无分隔线
@@ -247,16 +270,17 @@ class ExportSectionWidget(QFrame):
             )
 
     def toggle_collapse(self) -> None:
+        if self._collapse_btn is None:
+            return
         self._is_collapsed = not self._is_collapsed
         self._content_widget.setVisible(not self._is_collapsed)
-        if self._collapse_btn is not None:
-            self._collapse_btn.setText("▶" if self._is_collapsed else "▼")
+        self._collapse_btn.setText("▶" if self._is_collapsed else "▼")
 
 
-def _make_param_label(text: str) -> QLabel:
+def _make_param_label(text: str, *, font_size: int = 10) -> QLabel:
     """统一的参数标签（与节点面板 _ParamLabel 视觉一致）。"""
     label = QLabel(text)
-    label.setStyleSheet("color: #bbb; font-size: 10px;")
+    label.setStyleSheet(f"color: #bbb; font-size: {font_size}px;")
     label.setMinimumWidth(_LABEL_MIN_WIDTH)
     label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
     return label
@@ -476,20 +500,26 @@ class BatchExportListWidget(QListWidget):
     def dropEvent(self, event: QDropEvent):
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
-            added = False
-            for url in event.mimeData().urls():
-                file_path = url.toLocalFile()
-                if os.path.isfile(file_path):
-                    self.add_file(file_path)
-                    added = True
-            if added:
-                self.files_changed.emit()
+            self.add_files(url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile())
+
+    def add_files(self, paths: Iterable[str]) -> None:
+        """Queue explicit selections, including a photo currently auto-tracked."""
+        changed = False
+        for path in paths:
+            if os.path.isfile(path) and self.add_file(path):
+                changed = True
+        if changed:
+            self.files_changed.emit()
 
     def add_file(self, file_path: str, is_auto: bool = False, status: str = "pending") -> bool:
         """Add file to list, returns True if successfully added"""
         # Check if already exists
         for i in range(self.count()):
-            if self.item(i).data(Qt.ItemDataRole.UserRole) == file_path:
+            item = self.item(i)
+            if item.data(Qt.ItemDataRole.UserRole) == file_path:
+                if not is_auto and item.data(self.AUTO_ROLE):
+                    item.setData(self.AUTO_ROLE, False)
+                    return True
                 return False
 
         item = QListWidgetItem()
@@ -741,38 +771,57 @@ class ExportPanel(QWidget):
         self.batch_list.set_auto_file(file_path)
         self._update_export_button()
 
-    def setup_ui(self):
+    def setup_ui(self) -> None:
         # Main layout with compact margins
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 16, 16, 16)
-        self.main_layout.setSpacing(10)
+        edge = 0 if self._image_mode else 16
+        self.main_layout.setContentsMargins(edge, edge, edge, edge)
+        self.main_layout.setSpacing(0 if self._image_mode else 10)
+        small_text_size = 11 if self._image_mode else 10
+        make_label = partial(_make_param_label, font_size=small_text_size)
 
         # Title (与 Properties 头部一致的暗灰标题)
         title = QLabel(I18N.tr("export.batch_title"))
-        title.setStyleSheet(PROPS_TITLE_LABEL_STYLE)
+        if self._image_mode:
+            title.setObjectName("imageBatchExportTitle")
+            title.setStyleSheet(f"""
+                QLabel#imageBatchExportTitle {{
+                    background: {C.BG_PANEL_HEADER};
+                    color: {C.TEXT_PRIMARY};
+                    border: none;
+                    padding: 0 12px;
+                    font-size: 14px;
+                    font-weight: 600;
+                }}
+            """)
+            title.setFixedHeight(36)
+        else:
+            title.setStyleSheet(PROPS_TITLE_LABEL_STYLE)
         self.main_layout.addWidget(title)
 
         # ──────────────────────────────────────────────────────────────
         # 1. Export Queue section（文件列表，不折叠，列表为主）
         # ──────────────────────────────────────────────────────────────
-        queue_section = ExportSectionWidget(I18N.tr("export.queue_label"), v_expand=True)
-        # Queue 是文件列表，没有"默认设置"可重置 → 隐藏标题栏的重置按钮
-        queue_section._reset_btn.hide()
+        queue_section = ExportSectionWidget(
+            I18N.tr("export.queue_label"), v_expand=True, header_mode="fixed", flat=self._image_mode,
+        )
         queue_layout = queue_section.content_layout()
 
         # 文件计数（右侧靠齐，放在 title 同行的下方一行）
         self.file_count_label = QLabel(I18N.tr("export.file_count", "0 个文件"))
-        self.file_count_label.setStyleSheet(f"color: {C.TEXT_HINT}; font-size: 10px;")
+        self.file_count_label.setStyleSheet(f"color: {C.TEXT_HINT}; font-size: {small_text_size}px;")
         queue_layout.addWidget(self.file_count_label)
 
         self.batch_list = BatchExportListWidget()
         # Use Expanding size policy to let list box fill remaining vertical space
         size_policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.batch_list.setSizePolicy(size_policy)
+        queue_border = f"1px solid {C.PANEL_DIVIDER}" if self._image_mode else f"1px dashed {C.BORDER}"
+        queue_background = C.BG_PANEL_HEADER if self._image_mode else C.BG_DARK
         self.batch_list.setStyleSheet(f"""
             QListWidget {{
-                background-color: {C.BG_DARK};
-                border: 1px dashed {C.BORDER};
+                background-color: {queue_background};
+                border: {queue_border};
                 border-radius: 4px;
                 color: {C.TEXT_SECONDARY};
             }}
@@ -796,7 +845,7 @@ class ExportPanel(QWidget):
         # Hint text - fixed height
         hint_label = QLabel(I18N.tr("export.drag_drop_hint"))
         hint_label.setFixedHeight(24)
-        hint_label.setStyleSheet(f"color: {C.TEXT_HINT}; font-size: 10px; font-style: italic;")
+        hint_label.setStyleSheet(f"color: {C.TEXT_HINT}; font-size: {small_text_size}px; font-style: italic;")
         queue_layout.addWidget(hint_label)
 
         self.main_layout.addWidget(queue_section, stretch=1)
@@ -804,14 +853,14 @@ class ExportPanel(QWidget):
         # ──────────────────────────────────────────────────────────────
         # 2. Output section（输出路径）
         # ──────────────────────────────────────────────────────────────
-        output_section = ExportSectionWidget(I18N.tr("export.output_section", "Output"))
+        output_section = ExportSectionWidget(I18N.tr("export.output_section", "Output"), flat=self._image_mode)
         output_section.reset_requested.connect(self._reset_output_section)
         output_layout = output_section.content_layout()
 
         path_row = QHBoxLayout()
         path_row.setContentsMargins(0, 2, 0, 2)
         path_row.setSpacing(4)
-        path_label = _make_param_label(I18N.tr("export.output_location"))
+        path_label = make_label(I18N.tr("export.output_location"))
         path_row.addWidget(path_label)
         self.path_input = QLineEdit(self.default_dir)
         self.path_input.setPlaceholderText(I18N.tr("export.select_dir_placeholder"))
@@ -830,7 +879,7 @@ class ExportPanel(QWidget):
         composite_row = QHBoxLayout(self.composite_options)
         composite_row.setContentsMargins(0, 2, 0, 2)
         composite_row.setSpacing(4)
-        composite_label = _make_param_label(I18N.tr("export.apply_composite", "应用 Composite 合成"))
+        composite_label = make_label(I18N.tr("export.apply_composite", "应用 Composite 合成"))
         composite_row.addWidget(composite_label)
         composite_row.addStretch()
         # 用 ToggleSwitch 替代 QCheckBox，但保留 apply_composite_check 名称以维持契约
@@ -850,7 +899,7 @@ class ExportPanel(QWidget):
         # ──────────────────────────────────────────────────────────────
         # 3. Naming section（文件命名）
         # ──────────────────────────────────────────────────────────────
-        naming_section = ExportSectionWidget(I18N.tr("export.naming_section", "Naming"))
+        naming_section = ExportSectionWidget(I18N.tr("export.naming_section", "Naming"), flat=self._image_mode)
         naming_section.reset_requested.connect(self._reset_naming_section)
         naming_layout = naming_section.content_layout()
 
@@ -858,7 +907,7 @@ class ExportPanel(QWidget):
         mode_row = QHBoxLayout()
         mode_row.setContentsMargins(0, 2, 0, 2)
         mode_row.setSpacing(4)
-        mode_label = _make_param_label(I18N.tr("export.naming_mode"))
+        mode_label = make_label(I18N.tr("export.naming_mode"))
         mode_row.addWidget(mode_label)
         self.naming_mode_combo = ChevronComboBox()
         # AUD-33101：itemData 存内部模式名（generate_export_filename 与
@@ -876,7 +925,7 @@ class ExportPanel(QWidget):
         prefix_row = QHBoxLayout(self.prefix_widget)
         prefix_row.setContentsMargins(0, 2, 0, 2)
         prefix_row.setSpacing(4)
-        self.prefix_label = _make_param_label(I18N.tr("export.prefix"))
+        self.prefix_label = make_label(I18N.tr("export.prefix"))
         prefix_row.addWidget(self.prefix_label)
         self.prefix_input = QLineEdit("img_")
         self.prefix_input.setPlaceholderText(I18N.tr("export.prefix_placeholder"))
@@ -890,7 +939,7 @@ class ExportPanel(QWidget):
         suffix_row = QHBoxLayout(self.suffix_widget)
         suffix_row.setContentsMargins(0, 2, 0, 2)
         suffix_row.setSpacing(4)
-        self.suffix_label = _make_param_label(I18N.tr("export.suffix"))
+        self.suffix_label = make_label(I18N.tr("export.suffix"))
         suffix_row.addWidget(self.suffix_label)
         self.suffix_input = QLineEdit("_exported")
         self.suffix_input.setPlaceholderText(I18N.tr("export.suffix_placeholder"))
@@ -905,7 +954,7 @@ class ExportPanel(QWidget):
         seq_layout = QHBoxLayout(self.seq_widget)
         seq_layout.setContentsMargins(0, 2, 0, 2)
         seq_layout.setSpacing(4)
-        self.seq_label = _make_param_label(I18N.tr("export.sequence_digits"))
+        self.seq_label = make_label(I18N.tr("export.sequence_digits"))
         seq_layout.addWidget(self.seq_label)
         # DragValue 替代 QSpinBox：2-8 整数，suffix " digits"，decimals=0
         self.seq_digits_spin = DragValue("", min_v=2, max_v=8, default=3, decimals=0, suffix=" digits")
@@ -920,7 +969,7 @@ class ExportPanel(QWidget):
         custom_row = QHBoxLayout(self.custom_widget)
         custom_row.setContentsMargins(0, 2, 0, 2)
         custom_row.setSpacing(4)
-        custom_label = _make_param_label(I18N.tr("export.custom_pattern", "Pattern"))
+        custom_label = make_label(I18N.tr("export.custom_pattern", "Pattern"))
         custom_row.addWidget(custom_label)
         self.custom_pattern_input = QLineEdit("{name}_{n:03d}")
         self.custom_pattern_input.setPlaceholderText(I18N.tr("export.custom_pattern_placeholder"))
@@ -931,7 +980,7 @@ class ExportPanel(QWidget):
 
         # Naming preview
         self.naming_preview_label = QLabel(I18N.tr("export.preview") + ": image_exported.jpg")
-        self.naming_preview_label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
+        self.naming_preview_label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: {small_text_size}px;")
         naming_layout.addWidget(self.naming_preview_label)
 
         self.main_layout.addWidget(naming_section)
@@ -939,7 +988,7 @@ class ExportPanel(QWidget):
         # ──────────────────────────────────────────────────────────────
         # 4. Resize section（缩放设置）
         # ──────────────────────────────────────────────────────────────
-        resize_section = ExportSectionWidget(I18N.tr("export.resize"))
+        resize_section = ExportSectionWidget(I18N.tr("export.resize"), flat=self._image_mode)
         resize_section.reset_requested.connect(self._reset_resize_section)
         resize_layout = resize_section.content_layout()
 
@@ -947,7 +996,7 @@ class ExportPanel(QWidget):
         enable_row = QHBoxLayout()
         enable_row.setContentsMargins(0, 2, 0, 2)
         enable_row.setSpacing(4)
-        enable_label = _make_param_label(I18N.tr("export.resize"))
+        enable_label = make_label(I18N.tr("export.resize"))
         enable_row.addWidget(enable_label)
         enable_row.addStretch()
         self.resize_check = ToggleSwitch(checked=False)
@@ -966,7 +1015,7 @@ class ExportPanel(QWidget):
         mode_row = QHBoxLayout()
         mode_row.setContentsMargins(0, 2, 0, 2)
         mode_row.setSpacing(4)
-        mode_param_label = _make_param_label(I18N.tr("export.resize_mode_label", "Mode"))
+        mode_param_label = make_label(I18N.tr("export.resize_mode_label", "Mode"))
         mode_row.addWidget(mode_param_label)
         self.resize_mode = ChevronComboBox()
         self.resize_mode.addItems([
@@ -985,7 +1034,7 @@ class ExportPanel(QWidget):
         value_row = QHBoxLayout()
         value_row.setContentsMargins(0, 2, 0, 2)
         value_row.setSpacing(4)
-        value_param_label = _make_param_label(I18N.tr("export.resize_value_label", "Value"))
+        value_param_label = make_label(I18N.tr("export.resize_value_label", "Value"))
         value_row.addWidget(value_param_label)
         # resize_value 改名指向 DragValue（维持属性名契约；value() 返回 float，读取处强转 int）
         self.resize_value = DragValue("", min_v=1, max_v=10000, default=2048, decimals=0, suffix=" px")
@@ -997,7 +1046,7 @@ class ExportPanel(QWidget):
 
         # Output size label
         self.output_size_label = QLabel(I18N.tr("export.result") + f": {self.orig_w} x {self.orig_h}")
-        self.output_size_label.setStyleSheet(f"color: {C.TEXT_BRIGHT}; font-weight: bold; font-size: 10px;")
+        self.output_size_label.setStyleSheet(f"color: {C.TEXT_BRIGHT}; font-weight: bold; font-size: {small_text_size}px;")
         resize_controls.addWidget(self.output_size_label)
 
         resize_layout.addWidget(self.resize_widget)
@@ -1008,7 +1057,7 @@ class ExportPanel(QWidget):
         # ──────────────────────────────────────────────────────────────
         # 5. Format section（格式与质量）
         # ──────────────────────────────────────────────────────────────
-        format_section = ExportSectionWidget(I18N.tr("export.format"))
+        format_section = ExportSectionWidget(I18N.tr("export.format"), flat=self._image_mode)
         format_section.reset_requested.connect(self._reset_format_section)
         # options_layout 直接复用 section 的 content_layout（on_format_changed 用它切换 EXR 显隐）
         self.options_layout = format_section.content_layout()
@@ -1017,7 +1066,7 @@ class ExportPanel(QWidget):
         format_row = QHBoxLayout()
         format_row.setContentsMargins(0, 2, 0, 2)
         format_row.setSpacing(4)
-        format_param_label = _make_param_label(I18N.tr("export.format"))
+        format_param_label = make_label(I18N.tr("export.format"))
         format_row.addWidget(format_param_label)
         self.format_combo = ChevronComboBox()
         self.format_combo.addItems([I18N.tr("export.fmt_jpeg"), I18N.tr("export.fmt_png"), I18N.tr("export.fmt_exr"), I18N.tr("export.fmt_tiff"), I18N.tr("export.fmt_webp")])
@@ -1031,7 +1080,7 @@ class ExportPanel(QWidget):
         quality_row = QHBoxLayout()
         quality_row.setContentsMargins(0, 2, 0, 2)
         quality_row.setSpacing(4)
-        quality_param_label = _make_param_label(I18N.tr("export.quality"))
+        quality_param_label = make_label(I18N.tr("export.quality"))
         quality_row.addWidget(quality_param_label)
         self.quality_slider = ToposClickableSlider(Qt.Orientation.Horizontal)
         self.quality_slider.setRange(0, 100)
@@ -1065,7 +1114,7 @@ class ExportPanel(QWidget):
         exr_type_row = QHBoxLayout()
         exr_type_row.setContentsMargins(0, 2, 0, 2)
         exr_type_row.setSpacing(4)
-        exr_type_label = _make_param_label(I18N.tr("export.precision"))
+        exr_type_label = make_label(I18N.tr("export.precision"))
         exr_type_row.addWidget(exr_type_label)
         self.exr_type_combo = ChevronComboBox()
         self.exr_type_combo.addItems([I18N.tr("export.exr_half"), I18N.tr("export.exr_full")])
@@ -1077,7 +1126,7 @@ class ExportPanel(QWidget):
         exr_comp_row = QHBoxLayout()
         exr_comp_row.setContentsMargins(0, 2, 0, 2)
         exr_comp_row.setSpacing(4)
-        exr_comp_label = _make_param_label(I18N.tr("export.compression"))
+        exr_comp_label = make_label(I18N.tr("export.compression"))
         exr_comp_row.addWidget(exr_comp_label)
         self.exr_comp_combo = ChevronComboBox()
         self.exr_comp_combo.addItems([
@@ -1101,6 +1150,17 @@ class ExportPanel(QWidget):
 
         self.main_layout.addWidget(format_section)
 
+        actions = self.main_layout
+        if self._image_mode:
+            rule = QFrame()
+            rule.setFixedHeight(1)
+            rule.setStyleSheet(f"background: {C.PANEL_DIVIDER}; border: none;")
+            self.main_layout.addWidget(rule)
+            actions = QVBoxLayout()
+            actions.setContentsMargins(8, 8, 8, 8)
+            actions.setSpacing(8)
+            self.main_layout.addLayout(actions)
+
         # 6. Progress Bar
         self.batch_progress = QProgressBar()
         self.batch_progress.setMaximumHeight(12)
@@ -1117,7 +1177,7 @@ class ExportPanel(QWidget):
             }}
         """)
         self.batch_progress.hide()
-        self.main_layout.addWidget(self.batch_progress)
+        actions.addWidget(self.batch_progress)
 
         # Cancel button (hidden by default, shown during batch export)
         self.cancel_btn = QPushButton(I18N.tr("export.cancel_export", "Cancel Export"))
@@ -1140,7 +1200,7 @@ class ExportPanel(QWidget):
         """)
         self.cancel_btn.clicked.connect(lambda: self.batch_cancel_requested.emit())
         self.cancel_btn.hide()
-        self.main_layout.addWidget(self.cancel_btn)
+        actions.addWidget(self.cancel_btn)
 
         # Pause/Resume button (hidden by default, shown during batch export)
         # 主题橙家族（与取消按钮的红色区分）；暂停/继续共用一个按钮，文字切换
@@ -1164,14 +1224,14 @@ class ExportPanel(QWidget):
         """)
         self.pause_btn.clicked.connect(self._on_pause_btn_clicked)
         self.pause_btn.hide()
-        self.main_layout.addWidget(self.pause_btn)
+        actions.addWidget(self.pause_btn)
 
         # 7. Export Button
         self.export_btn = QPushButton(I18N.tr("export.start_export"))
         self.export_btn.setObjectName("PrimaryButton")
         self.export_btn.setMinimumHeight(40)
         self.export_btn.clicked.connect(self._start_export)
-        self.main_layout.addWidget(self.export_btn)
+        actions.addWidget(self.export_btn)
 
         # Initialize UI state
         self._on_naming_mode_changed(self.naming_mode_combo.currentText())
@@ -1305,7 +1365,7 @@ class ExportPanel(QWidget):
         if count == 0:
             self.export_btn.setText(I18N.tr("export.start_export", "开始导出"))
             self.export_btn.setEnabled(False)
-        elif count == 1:
+        elif count == 1 and self._queue_uses_current_photo():
             self.export_btn.setText(I18N.tr("export.export_current_file", "导出当前文件"))
             self.export_btn.setEnabled(True)
         else:
@@ -1468,13 +1528,19 @@ class ExportPanel(QWidget):
 
         if len(files) == 0:
             return
-        elif len(files) == 1:
+        elif len(files) == 1 and self._queue_uses_current_photo():
             # Single file: use current engine state to export directly
             settings = self.get_settings()
             self.export_requested.emit(settings)
         else:
-            # Multiple files: trigger batch export
             self._start_batch_export(files)
+
+    def _queue_uses_current_photo(self) -> bool:
+        if not self._image_mode:
+            return True
+        item = self.batch_list.item(0)
+        return bool(item and item.data(self.batch_list.AUTO_ROLE)
+                    and item.data(Qt.ItemDataRole.UserRole) == self._current_file_path)
 
     def _start_batch_export(self, files: List[str]):
         """Start batch export"""
@@ -1603,6 +1669,7 @@ class ExportPanel(QWidget):
 
     def start_batch_ui(self, total: int):
         """Switch UI to batch export mode"""
+        self.batch_list.setEnabled(False)
         self.export_btn.hide()
         self.cancel_btn.show()
         self.pause_btn.show()
@@ -1615,6 +1682,7 @@ class ExportPanel(QWidget):
 
     def finish_batch_ui(self):
         """Restore UI from batch export mode"""
+        self.batch_list.setEnabled(True)
         self.cancel_btn.hide()
         self.pause_btn.hide()
         self.export_btn.show()

@@ -1238,6 +1238,9 @@ class FileOpsMixin:
         self.request_render()
 
         # 将当前文件添加到导出队列
+        if managed_photo and self.current_page == "Deliver":
+            height, width = full.shape[:2]
+            self.export_panel.set_original_size(width, height)
         self.export_panel.add_current_file(path)
         if grade_set_panel is not None:
             grade_set_panel.set_active_path(path)

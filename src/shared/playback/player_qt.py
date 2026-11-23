@@ -601,7 +601,17 @@ class UltimatePlayer(QFrame):
             self._wake_ui()
         return super().eventFilter(obj, ev)
 
+    def set_lightbox_tools(self, visible: bool) -> None:
+        """Use the host's top chrome and reveal transport controls on demand."""
+        self._lightbox_tools = visible
+        self.hide_cursor_timer.stop()
+        self.header_container.hide()
+        self.controls_container.setVisible(visible)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
     def _wake_ui(self):
+        if getattr(self, "_lightbox_tools", None) is not None:
+            return
         self.ui_visible = True
         self.header_container.show()
         self.controls_container.show()

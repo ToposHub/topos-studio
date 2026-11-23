@@ -80,9 +80,11 @@ class NativeFilesTransport(QObject):
     # Apply pagination after the panel has installed the page's rows.
     page_meta = pyqtSignal(str, int, bool)
     thumbnail_loaded = pyqtSignal(str, bytes)
+    card_dimensions_loaded = pyqtSignal(str, object)
     thumbnail_failed = pyqtSignal(str)
     thumbnail_pending = pyqtSignal(str)
     tree_loaded = pyqtSignal(str, list)
+    folder_counts_loaded = pyqtSignal(str, object)
     tree_failed = pyqtSignal(str, str)
     volumes_loaded = pyqtSignal(tuple)
     metadata_applied = pyqtSignal(list, dict, str)
@@ -110,6 +112,7 @@ class NativeFilesTransport(QObject):
     libraries_loaded = pyqtSignal(list)
     libraries_failed = pyqtSignal(str)
     library_changed = pyqtSignal(bool, str)
+    library_transfer_finished = pyqtSignal(bool, str)
     library_registry_changed = pyqtSignal()
     scan_status_loaded = pyqtSignal(dict)
     scan_failed = pyqtSignal(str)
@@ -740,7 +743,45 @@ class NativeFilesTransport(QObject):
             return
         self.tree_loaded.emit(path, entries)
 
+    def load_folder_counts(self, request_id: str, paths: list[str]) -> None:
+        if self._closed:
+            return
+        facade = self._runtime()
+        if facade is None:
+            self.folder_counts_loaded.emit(request_id, {})
+            return
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                counts = outcome.result
+                if outcome.error is not None:
+                    counts = None if outcome.error.code == "busy" else {}
+                self.folder_counts_loaded.emit(request_id, counts)
+
+        facade.run(key=f"files-folder-counts:{request_id}", request_id=request_id,
+                   work=lambda: facade.query.directory_file_counts(paths), listener=deliver)
+
     # ------------------------------------------------------------ 本地缩略图
+    def read_card_dimensions(self, request_id: str, paths: dict[str, str]) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.card_dimensions_loaded.emit(request_id, {})
+            return
+
+        def read() -> dict[str, str | None]:
+            from src.features.files.services.media import source_dimensions
+
+            return {path: source_dimensions(path, kind) for path, kind in paths.items()}
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed:
+                dimensions = outcome.result
+                if outcome.error is not None:
+                    dimensions = None if outcome.error.code == "busy" else {}
+                self.card_dimensions_loaded.emit(request_id, dimensions)
+
+        facade.run(key="files-card-dimensions", request_id=request_id, work=read, listener=deliver)
+
     def request_thumbnail(self, path: str, version: int = 0) -> None:
         """Request only painted items; one attempt per path/version/directory.
 
@@ -903,7 +944,6 @@ class NativeFilesTransport(QObject):
 
         tags_op 显式语义（replace/add/remove/clear）；失败逐条汇总，不写
         "已保存"的假状态；成功时随 metadata_snapshot 发布落库最终快照。
-        路径不在任何已固定库内时逐条失败并说明原因（不静默假装成功）。
         """
         if self._closed or not paths or not patch:
             return
@@ -926,26 +966,7 @@ class NativeFilesTransport(QObject):
         self._metadata_writing = True
 
         def _work() -> list[ItemResult]:
-            groups: dict[str, list[str]] = {}
-            for raw in job.paths:
-                record = facade.libraries.library_for_path(raw)
-                groups.setdefault(record.library_id if record else "", []).append(nfc(raw))
-            items: list[ItemResult] = []
-            for library_id, group in groups.items():
-                if not library_id:
-                    items.extend(
-                        ItemResult(path, ok=False, error_code="NOT_FOUND",
-                                   message="路径不在任何已固定库内；先固定常用位置并建立索引。")
-                        for path in group)
-                    continue
-                result = facade.metadata.patch_metadata(
-                    group, job.patch, library_id=library_id, tags_op=tags_op)
-                if result.accepted:
-                    items.extend(result.items)
-                else:
-                    items.extend(ItemResult(path, ok=False, error_code=result.error_code,
-                                            message=result.message) for path in group)
-            return items
+            return facade.metadata.patch_owned_paths(job.paths, job.patch, tags_op=tags_op)
 
         facade.run(key=f"meta:{uuid.uuid4().hex}", request_id=uuid.uuid4().hex,
                    work=_work, listener=lambda outcome: self._metadata_done.emit(job, outcome))
@@ -1148,6 +1169,38 @@ class NativeFilesTransport(QObject):
             lambda facade: "" if facade.libraries.unpin(library_id) else
             I18N.tr("files.ai_library.library_missing", "该素材库已移除，请重新选择。"),
             I18N.tr("files.ai_library.library_removed", "已移除素材库。"))
+
+    def import_library(self, package: str, parent: str) -> None:
+        self._transfer_library(lambda facade: facade.import_library(package, parent), importing=True)
+
+    def export_library(self, library_id: str, destination: str) -> None:
+        self._transfer_library(lambda facade: facade.export_library(library_id, destination), importing=False)
+
+    def _transfer_library(self, work: Callable[[FilesFacade], Any], *, importing: bool) -> None:
+        facade = self._runtime()
+        if facade is None:
+            self.library_transfer_finished.emit(False, self._runtime_error_message())
+            return
+
+        def deliver(outcome: FacadeOutcome) -> None:
+            if self._closed:
+                return
+            if outcome.error is not None:
+                self.library_transfer_finished.emit(False, str(outcome.error.message))
+                return
+            if importing:
+                self.load_libraries()
+                self.library_registry_changed.emit()
+                message = I18N.tr("files.native.library_imported", "已导入素材库「{name}」").format(
+                    name=outcome.result.name)
+            else:
+                message = I18N.tr("files.native.library_exported", "素材库已导出到 {path}").format(
+                    path=outcome.result)
+            self.library_transfer_finished.emit(True, message)
+
+        request_id = uuid.uuid4().hex
+        facade.run(key=f"library-transfer:{request_id}", request_id=request_id,
+                   work=lambda: work(facade), listener=deliver)
 
     def _library_change(self, work: Callable[[FilesFacade], Any],
                         ok_message: str) -> None:

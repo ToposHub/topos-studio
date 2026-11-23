@@ -1383,6 +1383,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             self.grade_set_panel = GradeSetPanel(
                 self.grade_set_model, self,
                 show_filenames=self.config_manager.get("grade_set_show_filenames") is True,
+                rating_at_bottom=self.config_manager.get("grade_set_rating_at_bottom") is True,
             )
             self._grade_set_transfer = GradeSetTransfer(self)
             self._grade_set_image_loader = GradeSetImageLoader(self)
@@ -1396,6 +1397,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             self.grade_set_panel.active_photo_name_changed.connect(lambda _name: self._grade_set_prefetch_timer.start())
             self.grade_set_panel.filename_visibility_changed.connect(
                 lambda visible: self.config_manager.set("grade_set_show_filenames", visible))
+            self.grade_set_panel.rating_at_bottom_changed.connect(
+                lambda enabled: self.config_manager.set("grade_set_rating_at_bottom", enabled))
             self.grade_set_panel.copy_grade_requested.connect(self._grade_set_transfer.copy)
             self.grade_set_panel.paste_grade_requested.connect(self._grade_set_transfer.paste)
             for panel in (self.library_panel, self.files_panel):
@@ -1442,6 +1445,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.raw_panel = RawPanel()
         self.crop_panel = CropPanel()
         self.export_panel = ExportPanel(image_mode=image_workflow)
+        if self.grade_set_panel is not None:
+            self.grade_set_panel.export_queue_requested.connect(self.export_panel.batch_list.add_files)
         self.export_panel.set_default_export_settings(
             self.config_manager.get("default_export_format") or "JPEG",
             self.config_manager.get("default_export_quality") or 85
@@ -2156,11 +2161,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.files_panel.transfer_directories_changed.connect(self.library_panel.refresh_transfer_directories)
         self.library_panel.transfer_directories_changed.connect(self.files_panel.refresh_transfer_directories)
 
-        # 新增：星级评定双向同步 (Files → Library)
-        self.files_panel.rating_changed.connect(self.library_panel.refresh_file_rating)
-
-        # 新增：星级评定双向同步 (Library → Files)
-        self.library_panel.rating_changed.connect(self.files_panel.refresh_file_rating)
+        self.files_panel._native_transport.metadata_snapshot.connect(
+            self.library_panel._native_panel.apply_metadata_snapshot)
+        self.library_panel._native_transport.metadata_snapshot.connect(
+            self.files_panel._native_panel.apply_metadata_snapshot)
 
         self.export_panel.export_requested.connect(self.perform_panel_export)
         self.export_panel.batch_export_requested.connect(self.perform_batch_export)

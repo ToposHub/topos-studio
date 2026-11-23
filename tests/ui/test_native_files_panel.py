@@ -1,7 +1,7 @@
 """Native Files interaction contracts without disk scanning or WebEngine."""
-from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, Qt
-from PyQt6.QtGui import QColor, QImage
-from PyQt6.QtWidgets import QFrame
+from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, QSize, Qt
+from PyQt6.QtGui import QColor, QFont, QIcon, QImage
+from PyQt6.QtWidgets import QFrame, QMenu
 from pytestqt.qtbot import QtBot
 
 from src.app.ui.native_files_locations import MountedVolume
@@ -50,7 +50,7 @@ def test_filter_searches_tags_and_combines_type(qtbot):
     panel = _panel(qtbot)
     panel.search_edit.setText("INTERVIEW")
     assert panel.proxy.rowCount() == 1
-    panel.type_combo.setCurrentIndex(panel.type_combo.findData("image"))
+    panel._set_file_filter("kind", "image")
     assert panel.proxy.rowCount() == 0
     panel.search_edit.clear()
     assert panel.proxy.rowCount() == 2  # Folder stays available for navigation.
@@ -494,3 +494,61 @@ def test_refresh_reloads_current_home_tree_node_and_file_list(qtbot):
     panel.locations.set_children(panel.home_path, [{"name": "New", "path": panel.home_path + "/New"}])
     assert panel.locations.home_item.child(0).text() == "New"
     assert panel.home_path + "/Old" not in panel.locations._nodes
+
+
+def test_file_filter_menu_combines_facets_and_sorts_by_file_type(qtbot):
+    panel = _panel(qtbot)
+    panel.set_entries("/media", _entries() + [
+        {"name": "A.jpg", "path": "/media/A.jpg", "type": "image", "color": 1, "tags": "unsorted"},
+        {"name": "Notes.docx", "path": "/media/Notes.docx", "type": "doc"},
+        {"name": "Model.obj", "path": "/media/Model.obj", "type": "other"},
+    ])
+    menu = QMenu(panel)
+    panel._file_filter_menu(menu)
+    types, _flags, colors, tags = [action.menu() for action in menu.actions()[:4]]
+    assert types.actions()[0].isChecked()
+    colors.actions()[2].trigger()
+    assert panel.file_filter_button.isChecked()
+    tags.actions()[2].trigger()
+    assert [panel.proxy.index(row, 0).data() for row in range(panel.proxy.rowCount())] == ["Folder", "A.jpg"]
+    tags.actions()[1].trigger()
+    assert [panel.proxy.index(row, 0).data() for row in range(panel.proxy.rowCount())] == ["Folder"]
+    menu.actions()[-1].trigger()
+    assert not panel.file_filter_button.isChecked()
+    panel.sort_combo.setCurrentIndex(panel.sort_combo.findData("type"))
+    assert [panel.proxy.index(row, 0).data() for row in range(panel.proxy.rowCount())] == [
+        "Folder", "Notes.docx", "A.jpg", "B.png", "Model.obj", "A #100% 素材.mov",
+    ]
+
+
+def test_location_tree_uses_monochrome_icons_and_quiet_folder_names(qtbot: QtBot) -> None:
+    panel = NativeFilesPanel(home_path="/Users/creator")
+    qtbot.addWidget(panel)
+    panel.enable_grade_set_locations(lambda: None)
+    panel.show_libraries([{"library_id": "media", "name": "Media", "path": "/Volumes/Archive/Media"}])
+    tree = panel.locations
+    tree.set_volumes((MountedVolume("/Volumes/Archive", "Archive", b"archive"),))
+    tree.set_grade_sets(((1, "Grade Set", 3),))
+    pictures = "/Users/creator/Pictures"
+    tree.set_children(panel.home_path, [{"name": "Pictures", "path": pictures}])
+    panel.set_entries(panel.home_path, [{"name": "Pictures", "path": pictures, "type": "dir"}])
+
+    for heading in (tree._library_group, tree._grade_set_group, tree._volume_group, tree.home_item):
+        child = heading.child(0)
+        assert heading.font().weight() == QFont.Weight.Bold
+        expected_weight = QFont.Weight.Light if heading is tree.home_item else QFont.Weight.Normal
+        assert child.font().weight() == expected_weight
+        assert heading.foreground().color() == QColor(C.TEXT_PRIMARY)
+        assert child.foreground().color().lightness() < heading.foreground().color().lightness()
+        for item in (heading, child):
+            icon = item.icon()
+            normal = icon.pixmap(QSize(32, 32), QIcon.Mode.Normal).toImage()
+            assert not normal.isNull()
+            assert normal == icon.pixmap(QSize(32, 32), QIcon.Mode.Selected).toImage()
+            colors = [normal.pixelColor(x, y) for y in range(normal.height()) for x in range(normal.width())
+                      if normal.pixelColor(x, y).alpha() > 220]
+            assert colors and all(color.red() == color.green() == color.blue() for color in colors)
+
+    assert tree.home_item.child(0).font().weight() == QFont.Weight.Light
+    assert tree.home_item.child(0).toolTip() == ""
+    assert panel.proxy.index(0, 0).data(Qt.ItemDataRole.ToolTipRole) is None

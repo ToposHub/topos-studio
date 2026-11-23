@@ -6,6 +6,78 @@
   },
   "files": {
     "native": {
+      "lightbox": {
+        "zoom": "{percent}% · 相对适配",
+        "video": "视频",
+        "external": "使用素材查看器打开",
+        "unavailable": "此文件没有可用的预览",
+        "fit": "切换适配与原尺寸（F）",
+        "close": "关闭预览（Esc）",
+        "previous": "上一张（←）",
+        "next": "下一张（→）"
+      },
+      "file_filter": "文件筛选",
+      "card_display": "显示选项",
+      "all_colors": "全部颜色标签",
+      "no_color": "无颜色标签",
+      "all_tags": "全部标签",
+      "graded_only": "仅显示已调色",
+      "clear_filters": "清除筛选",
+      "flag_filter": "旗标",
+      "sort_order": "排序方式",
+      "view": "文件视图",
+      "layout_heading": "布局方式",
+      "grid_fill_heading": "网格填充方式",
+      "card": {
+        "resolution": "尺寸",
+        "size": "文件大小",
+        "tags": "标签",
+        "rating": "星级评分"
+      },
+      "type": {
+        "all": "全部类型",
+        "image": "图片",
+        "video": "视频",
+        "audio": "音频",
+        "doc": "文档",
+        "model": "3D 模型",
+        "subtitle": "字幕",
+        "project": "Topos 文件",
+        "other": "其他文件"
+      },
+      "sort": {
+        "name": "名称 A–Z",
+        "date": "最近修改",
+        "size": "最大文件",
+        "rating": "最高评分",
+        "type": "文件类型"
+      },
+      "flag": {
+        "-1": "全部旗标",
+        "1": "已标旗",
+        "2": "已拒收"
+      },
+      "layout": {
+        "adaptive": "自适应",
+        "masonry": "瀑布流",
+        "grid": "网格",
+        "list": "列表"
+      },
+      "grid_fill": {
+        "fit": "适应",
+        "fill": "填充"
+      },
+      "kind": {
+        "dir": "文件夹",
+        "image": "图片",
+        "video": "视频",
+        "audio": "音频",
+        "doc": "文件",
+        "other": "文件",
+        "model": "3D 模型",
+        "subtitle": "字幕",
+        "project": "Topos 文件"
+      },
       "add_to_media_pool": "添加到媒体池",
       "volumes_heading": "磁盘",
       "cut": "剪切文件",
@@ -23,6 +95,7 @@
       "rating": "评分",
       "rating_stars": "{count} 星",
       "clear_rating": "清除评分",
+      "rename_title": "重命名",
       "color_label": "颜色标签",
       "label_color": {
         "none": "清除颜色标签",
@@ -47,6 +120,15 @@
         "codec": "编码"
       },
       "add_library": "添加素材库…",
+      "library_import": "导入素材库…",
+      "library_export": "导出素材库…",
+      "library_package_filter": "Topos 素材库包 ({pattern})",
+      "library_import_destination": "选择新素材库的存放位置",
+      "library_importing": "正在导入素材库…",
+      "library_exporting": "正在导出素材库…",
+      "library_imported": "已导入素材库「{name}」",
+      "library_exported": "素材库已导出到 {path}",
+      "library_transfer_failed": "素材库传输失败",
       "register_current": "将当前文件夹添加为素材库",
       "library_updated": "已更新素材库",
       "library_update_failed": "素材库更新失败",
@@ -822,9 +904,11 @@
     "layout_adaptive": "自适应",
     "layout_grid": "网格",
     "show_filenames": "显示文件名",
+    "rating_at_bottom": "在卡片底部显示评分",
     "rating": "评分 {rating} / 5",
     "copy_grade": "复制此图调色",
     "paste_grade": "粘贴调色到此图",
+    "add_to_export_queue": "添加到导出队列",
     "grade_copied": "已复制调色",
     "grade_copied_portable": "已复制可移用的调色。依赖原图的遮罩和烘焙效果未带入。",
     "grade_pasted": "已将调色粘贴到 {name}",
@@ -3301,6 +3385,13 @@
     "grade_paste_all_macro": "粘贴调色到全部镜头"
   },
   "welcome": {
+    "title": "欢迎使用 Topos",
+    "close": "关闭",
+    "open_image": "打开图片…",
+    "recent_files": "最近打开的图片",
+    "no_recent": "暂无最近打开的图片",
+    "loading_projects": "正在加载最近工程…",
+    "show_at_startup": "启动时显示此窗口",
     "work_mode": "工作模式：",
     "recent_projects": "最近工程",
     "no_recent_projects": "无最近工程",

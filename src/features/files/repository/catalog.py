@@ -20,7 +20,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 from src.features.files.repository.locator import FilesDataLocator
 
@@ -355,15 +355,46 @@ class FilesCatalog:
         existing = [lib for lib in self.libraries() if lib.root == abs_root]
         if existing:
             return existing[0]
-        record = LibraryRecord(
-            library_id=secrets.token_hex(4),
-            name=name or Path(abs_root).name,
-            root=abs_root,
-            created_at=time.time(),
-        )
+        record = self._new_library_record(abs_root, name)
         self.locator.trash_dir(record.library_id).mkdir(parents=True, exist_ok=True)
         self._save_libraries(self.libraries() + (record,))
         return record
+
+    @staticmethod
+    def _new_library_record(root: str, name: str) -> LibraryRecord:
+        return LibraryRecord(
+            library_id=secrets.token_hex(4),
+            name=name or Path(root).name,
+            root=root,
+            created_at=time.time(),
+        )
+
+    def register_imported_library(
+        self, root: Path, name: str, restore: Callable[[LibraryRecord], None],
+    ) -> LibraryRecord:
+        """Publish a new library only after its imported metadata is committed."""
+        with self._lock:
+            records = self.libraries()
+            destination = nfc(root.resolve())
+            if any(record.root == destination for record in records):
+                raise FileExistsError(destination)
+            record = self._new_library_record(destination, name)
+            trash = self.locator.trash_dir(record.library_id)
+            trash.mkdir()
+            committed = False
+            try:
+                with self._write():
+                    restore(record)
+                committed = True
+                self._save_libraries(records + (record,))
+            except BaseException:
+                if committed:
+                    with self._write() as cursor:
+                        for table in ("collections", "tags", "assets"):
+                            cursor.execute(f"DELETE FROM {table} WHERE library_id = ?", (record.library_id,))
+                trash.rmdir()
+                raise
+            return record
 
     def unregister_library(self, library_id: str) -> bool:
         with self._lock:
@@ -405,6 +436,55 @@ class FilesCatalog:
         )
         os.replace(tmp, file)
 
+    def library_share_metadata(self, library_id: str, paths: dict[str, str]) -> dict[str, Any]:
+        """Snapshot user metadata for the exported paths without leaking other library records."""
+        assets: dict[str, dict[str, Any]] = {}
+        owners: dict[str, str] = {}
+        with self._read() as cursor:
+            for row in cursor.execute(
+                "SELECT library_id, path, rating, color, flag, comment FROM assets"
+                " WHERE library_id IN ('', ?) ORDER BY library_id", (library_id,),
+            ):
+                relative = paths.get(row["path"])
+                if relative is not None:
+                    owners[relative] = row["library_id"]
+                    assets[relative] = {"rating": row["rating"], "color": row["color"],
+                                        "flag": row["flag"], "comments": row["comment"],
+                                        "tags": []}
+            tags = {row["name"]: dict(row) for row in cursor.execute(
+                "SELECT t.name, t.color, p.name AS parent FROM tags t"
+                " LEFT JOIN tags p ON p.id = t.parent_id AND p.library_id = t.library_id"
+                " WHERE t.library_id = ? ORDER BY t.id", (library_id,),
+            )}
+            for row in cursor.execute(
+                "SELECT a.library_id, a.path, t.name, t.color FROM asset_tags a"
+                " JOIN tags t ON t.id = a.tag_id AND t.library_id = a.library_id"
+                " WHERE a.library_id IN ('', ?) ORDER BY t.name", (library_id,),
+            ):
+                relative = paths.get(row["path"])
+                if relative is not None and owners.get(relative) == row["library_id"]:
+                    assets[relative]["tags"].append(row["name"])
+                    tags.setdefault(row["name"],
+                                    {"name": row["name"], "color": row["color"], "parent": None})
+            collections = {row["id"]: {"name": row["name"], "color": row["color"], "members": []}
+                           for row in cursor.execute(
+                               "SELECT id, name, color FROM collections WHERE library_id = ? ORDER BY id",
+                               (library_id,),
+                           )}
+            for row in cursor.execute(
+                "SELECT ci.collection_id, ci.path FROM collection_items ci"
+                " JOIN collections c ON c.id = ci.collection_id WHERE c.library_id = ?"
+                " ORDER BY ci.sort_order, ci.added_at, ci.rowid", (library_id,),
+            ):
+                relative = paths.get(row["path"])
+                if relative is not None:
+                    collections[row["collection_id"]]["members"].append(relative)
+        return {
+            "assets": {path: fields for path, fields in assets.items() if any(fields.values())},
+            "tags": list(tags.values()),
+            "collections": list(collections.values()),
+        }
+
     # ------------------------------------------------------------ 资产
 
     def upsert_asset(self, library_id: str, path: str | Path, **technical: Any) -> None:
@@ -434,12 +514,40 @@ class FilesCatalog:
                     f"INSERT INTO assets ({','.join(columns)}) VALUES ({placeholders})",
                     values,
                 )
+                if library_id:
+                    self._adopt_loose_metadata(cursor, library_id, key)
             elif fields:
                 assignments = ",".join(f"{c} = ?" for c in fields)
                 cursor.execute(
                     f"UPDATE assets SET {assignments} WHERE library_id = ? AND path = ?",
                     (*fields.values(), library_id, key),
                 )
+
+    def _adopt_loose_metadata(self, cursor: sqlite3.Cursor, library_id: str, path: str) -> None:
+        loose = cursor.execute(
+            "SELECT rating, color, flag, comment FROM assets WHERE library_id = '' AND path = ?",
+            (path,),
+        ).fetchone()
+        if loose is None:
+            return
+        cursor.execute(
+            "UPDATE assets SET rating = ?, color = ?, flag = ?, comment = ?"
+            " WHERE library_id = ? AND path = ?", (*loose, library_id, path),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO tags (library_id, name, color)"
+            " SELECT ?, t.name, t.color FROM asset_tags a JOIN tags t ON t.id = a.tag_id"
+            " WHERE a.library_id = '' AND a.path = ?", (library_id, path),
+        )
+        cursor.execute(
+            "INSERT OR IGNORE INTO asset_tags (library_id, path, tag_id)"
+            " SELECT ?, ?, target.id FROM asset_tags a JOIN tags t ON t.id = a.tag_id"
+            " JOIN tags target ON target.library_id = ? AND target.name = t.name"
+            " WHERE a.library_id = '' AND a.path = ?", (library_id, path, library_id, path),
+        )
+        self._refresh_fts_tags(cursor, library_id, path)
+        cursor.execute("DELETE FROM asset_tags WHERE library_id = '' AND path = ?", (path,))
+        cursor.execute("DELETE FROM assets WHERE library_id = '' AND path = ?", (path,))
 
     def asset(self, library_id: str, path: str | Path) -> dict[str, Any] | None:
         with self._read() as cursor:

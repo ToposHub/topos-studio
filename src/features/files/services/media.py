@@ -25,6 +25,43 @@ RAW_PREVIEW_SUFFIXES = frozenset({
 })
 
 
+def source_dimensions(path: str, kind: str) -> str | None:
+    """Read source geometry for gallery captions without decoding a thumbnail."""
+    from src.features.files.contracts import format_resolution
+
+    if kind == "image":
+        from PyQt6.QtGui import QImageIOHandler, QImageReader
+
+        reader = QImageReader(path)
+        size = reader.size()
+        if size.isValid():
+            if reader.transformation() & QImageIOHandler.Transformation.TransformationRotate90:
+                size.transpose()
+            return format_resolution(size.width(), size.height())
+        if Path(path).suffix.lower() in RAW_PREVIEW_SUFFIXES:
+            try:
+                import rawpy
+            except ImportError:
+                return None
+            try:
+                if Path(path).stat().st_size <= MAX_SOURCE_BYTES:
+                    with rawpy.imread(path) as raw:
+                        size = raw.sizes
+                        width, height = size.width, size.height
+                        if size.flip in (5, 6):
+                            width, height = height, width
+                        return format_resolution(width, height)
+            except (OSError, rawpy.LibRawError):
+                return None
+    elif kind == "video":
+        from src.shared.media.factory import MediaSourceFactory
+
+        metadata = MediaSourceFactory.probe_video_metadata(path)
+        if metadata is not None:
+            return format_resolution(metadata.width, metadata.height)
+    return None
+
+
 def embedded_raw_preview(path: str, *, max_bytes: int) -> bytes:
     """Read the camera's display preview without demosaicing the sensor image."""
     import rawpy

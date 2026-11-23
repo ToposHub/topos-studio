@@ -420,7 +420,13 @@ def read_project_meta(path: str, *, require_manifest_mode: bool = False) -> Opti
     for asset in (project.get("assets") or {}).values():
         if not isinstance(asset, dict):
             continue
-        asset_path = asset.get("path") or asset.get("path_relative")
+        relative = asset.get("path_relative")
+        if isinstance(relative, str) and relative and "\x00" not in relative:
+            candidate = project_dir / relative
+            if not Path(relative).is_absolute() and os.path.isfile(candidate):
+                preview_path = str(candidate)
+                break
+        asset_path = asset.get("path") or relative
         if not asset_path:
             continue
         candidate = Path(str(asset_path))

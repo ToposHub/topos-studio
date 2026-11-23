@@ -32,7 +32,7 @@ def panel(qtbot):
 
 
 def test_flag_filter_keeps_rejected_only(panel):
-    panel.flag_combo.setCurrentIndex(2)  # 已拒收
+    panel._set_file_filter("flag", 2)
     names = [panel.proxy.index(row, 0).data(panel_module_role()).name
              for row in range(panel.proxy.rowCount())]
     assert names == ["b.jpg"]

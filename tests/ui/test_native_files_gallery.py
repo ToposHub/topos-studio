@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import pytest
 from pytestqt.qtbot import QtBot
-from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtCore import QRect, QSettings, Qt
 from PyQt6.QtGui import QImage, QPainter
-from PyQt6.QtWidgets import QStyleOptionViewItem, QWidget
+from PyQt6.QtWidgets import QMenu, QStyleOptionViewItem, QWidget
 
 from src.app.ui.native_files_gallery import FilesCardDelegate
 from src.app.ui.native_files_panel import FilesEntryModel
+from src.features.files.contracts import Entry, UserMetadata
 from src.shared.i18n.i18n import I18N
 
 
@@ -74,3 +75,47 @@ def test_grade_badge_is_drawn_only_for_a_confirmed_photo(qtbot: QtBot) -> None:
         delegate.paint(painter, option, index)
         painter.end()
         assert (I18N.tr("files.native.graded", "Graded") in painter.labels) is expected
+
+
+def test_library_card_ratings_hide_together_and_can_move_below_names(qtbot: QtBot, tmp_path) -> None:
+    from src.app.ui.native_files_panel import NativeFilesPanel
+    from src.app.ui.native_files_prefs import NativeFilesPreferences
+
+    settings_path = str(tmp_path / "files.ini")
+    prefs = NativeFilesPreferences(QSettings(settings_path, QSettings.Format.IniFormat))
+    panel = NativeFilesPanel(home_path=str(tmp_path), preferences=prefs)
+    qtbot.addWidget(panel)
+    entries = [
+        Entry(str(tmp_path / name), name, "image", user=UserMetadata(rating=rating))
+        for name, rating in (("wide.jpg", 3), ("portrait.jpg", 5))
+    ]
+    panel.model.set_entries(entries)
+    panel.resize(950, 600)
+    panel.show()
+    view = panel.icon_view
+    delegate = panel.card_delegate
+    qtbot.waitUntil(lambda: view.visualRect(panel.proxy.index(1, 0)).isValid())
+    assert delegate.show_rating_badges
+    view.setAspectRatio(entries[1].path, 0.2)
+    qtbot.waitUntil(lambda: not delegate.show_rating_badges)
+    view.setAspectRatio(entries[1].path, 1.2)
+    qtbot.waitUntil(lambda: delegate.show_rating_badges)
+
+    menu = QMenu(panel)
+    panel._card_display_menu(menu)
+    rating = next(action for action in menu.actions()
+                  if action.text() == I18N.tr("files.native.card.rating", "星级评分"))
+    assert not rating.isChecked()
+    rating.trigger()
+    assert rating.isChecked()
+    assert delegate.rating_at_bottom
+    panel._set_card_metadata(frozenset({"rating", "resolution", "size", "tags"}))
+    rect = view.visualRect(panel.proxy.index(0, 0))
+    assert delegate.name_rect(rect).height() == 20
+    restored = NativeFilesPanel(
+        home_path=str(tmp_path),
+        preferences=NativeFilesPreferences(QSettings(settings_path, QSettings.Format.IniFormat)),
+    )
+    qtbot.addWidget(restored)
+    assert restored.card_delegate.rating_at_bottom
+    assert restored.card_delegate.caption_fields == {"rating", "resolution", "size", "tags"}

@@ -46,7 +46,11 @@ class FilesMetadataService:
         items: list[ItemResult] = []
         for raw in paths:
             path = nfc(raw)
-            row = self._catalog.asset(library_id, path) if library_id else None
+            library_id_for_row = library_id
+            row = self._catalog.asset(library_id, path)
+            if row is None and library_id:
+                library_id_for_row = ""
+                row = self._catalog.asset("", path)
             if row is None:
                 items.append(ItemResult(path, ok=False, error_code="NOT_FOUND",
                                         message="资产未登记（先扫描或固定库）"))
@@ -55,11 +59,29 @@ class FilesMetadataService:
                 path, ok=True,
                 result={"rating": row["rating"], "color": row["color"],
                         "flag": row["flag"], "comments": row["comment"],
-                        "tags": self._catalog.tags_of(library_id, path)}))
+                        "tags": self._catalog.tags_of(library_id_for_row, path)}))
         return ServiceResult(
             command_id="files.metadata.get", ok=all(i.ok for i in items),
             accepted=True, stage="completed", items=tuple(items),
             revision=self._catalog.revision)
+
+    def patch_owned_paths(self, paths: Iterable[str], patch: dict[str, Any], *,
+                          tags_op: str = "replace") -> list[ItemResult]:
+        """Resolve each browser path and write against a stable library registry."""
+        with self._catalog._lock:
+            groups: dict[str, list[str]] = {}
+            for path in paths:
+                record = self._catalog.library_for_path(path)
+                groups.setdefault(record.library_id if record else "", []).append(path)
+            items: list[ItemResult] = []
+            for library_id, group in groups.items():
+                result = self.patch_metadata(group, patch, library_id=library_id, tags_op=tags_op)
+                if result.accepted:
+                    items.extend(result.items)
+                else:
+                    items.extend(ItemResult(path, ok=False, error_code=result.error_code,
+                                            message=result.message) for path in group)
+            return items
 
     def patch_metadata(self, paths: Iterable[str], patch: dict[str, Any], *,
                        library_id: str = "",
@@ -72,7 +94,7 @@ class FilesMetadataService:
         if tags_op not in ("replace", "add", "remove", "clear"):
             return rejected("files.metadata.patch", error_code="INVALID_PATCH",
                             message=f"未知 tags_op: {tags_op}")
-        for name, low, high in (("rating", 0, 5), ("color", 0, 9), ("flag", -1, 1)):
+        for name, low, high in (("rating", 0, 5), ("color", 0, 9), ("flag", -1, 2)):
             if name in patch and (isinstance(patch[name], bool) or not isinstance(patch[name], int)
                                   or not low <= patch[name] <= high):
                 return rejected("files.metadata.patch", error_code="INVALID_PATCH", message=f"{name} 超出合法范围")
@@ -81,23 +103,38 @@ class FilesMetadataService:
         items: list[ItemResult] = []
         for raw in paths:
             path = nfc(raw)
-            row = self._catalog.asset(library_id, path)
-            if row is None:
-                items.append(ItemResult(path, ok=False, error_code="NOT_FOUND"))
-                continue
             field_patch = {("comment" if k == "comments" else k): v for k, v in patch.items() if k != "tags"}
             with self._catalog._write():
+                if self._catalog.asset(library_id, path) is None:
+                    # Browsing does not index files; the first edit creates a catalog row.
+                    if not os.path.isabs(raw):
+                        items.append(ItemResult(path, ok=False, error_code="NOT_FOUND"))
+                        continue
+                    try:
+                        info = os.stat(raw)
+                    except FileNotFoundError:
+                        items.append(ItemResult(path, ok=False, error_code="NOT_FOUND"))
+                        continue
+                    except PermissionError as error:
+                        items.append(ItemResult(path, ok=False, error_code="PERMISSION", message=str(error)))
+                        continue
+                    except OSError as error:
+                        items.append(ItemResult(path, ok=False, error_code="IO_ERROR", message=str(error)))
+                        continue
+                    self._catalog.upsert_asset(library_id, path, is_dir=stat.S_ISDIR(info.st_mode),
+                                               size=info.st_size, mtime=info.st_mtime)
                 if "tags" in patch:
                     self._apply_tags(library_id, path, patch["tags"], tags_op)
                 if field_patch:
                     self._catalog.patch_user_fields(library_id, path, **field_patch)
-            final = self._catalog.asset(library_id, path) or {}
+                final = self._catalog.asset(library_id, path) or {}
+                tags = self._catalog.tags_of(library_id, path)
             items.append(ItemResult(path, ok=True, result={
                 "rating": final.get("rating", 0),
                 "color": final.get("color", 0),
                 "flag": final.get("flag", 0),
                 "comments": final.get("comment", ""),
-                "tags": self._catalog.tags_of(library_id, path)}))
+                "tags": tags}))
         return ServiceResult(
             command_id="files.metadata.patch",
             ok=all(i.ok for i in items), accepted=True, stage="completed",

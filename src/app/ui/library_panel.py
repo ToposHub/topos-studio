@@ -45,17 +45,24 @@ class LibraryPanel(FilesPanel):
         self.path_edit = panel.path_edit
         self._image_grade_badges = LibraryGradeBadges(self._native_transport._runtime, self)
         panel.card_delegate.is_graded = self._image_grade_badges.is_graded
+        panel.proxy.is_graded = self._image_grade_badges.has_grade
         panel.card_delegate.image_for_entry = self._image_for_card
         panel.image_lightbox_active.connect(self.image_lightbox_active)
         panel.preview_grade_requested.connect(self._grade_photo)
-        self._image_grade_badges.changed.connect(self.list_view.viewport().update)
-        self.model.modelReset.connect(self._image_grade_badges.reset)
+        self._image_grade_badges.changed.connect(self._grade_badges_changed)
+        self.model.modelAboutToBeReset.connect(self._image_grade_badges.reset)
         for view in (panel.icon_view, panel.detail_view):
             view.viewport().installEventFilter(self)
         self.directory_changed.connect(self._remember_directory)
         initial = start_path or self.config.get("last_library_path")
         if initial:
             self.set_root_path(str(initial))
+
+    def _grade_badges_changed(self) -> None:
+        panel = self._native_panel
+        if panel.proxy.graded_only:
+            panel.refresh_file_filters()
+        self.list_view.viewport().update()
 
     def invalidate_image_grade_badge(self, path: str) -> None:
         """Recheck the affected card after a standalone image project is saved."""
@@ -76,6 +83,8 @@ class LibraryPanel(FilesPanel):
         from src.shared.media.format_registry import VIDEO_EXTENSIONS
         if self._grade_set_view is not None and is_image(path):
             self._grade_photo(path)
+        elif Path(path).suffix.lower() != ".topos" and self._native_panel.open_path_native(path):
+            return
         elif Path(path).suffix.lower() in VIDEO_EXTENSIONS and not (
                 self._grade_sets is not None and is_image(path)):
             self.quick_project_requested.emit(path)
@@ -283,9 +292,7 @@ class LibraryPanel(FilesPanel):
         self._native_transport.patch_metadata([path], {"rating": int(rating)}, "replace")
 
     def rename_item(self, path: str) -> None:
-        name, accepted = QInputDialog.getText(self, "重命名", "新名称：", text=Path(path).name)
-        if accepted and name and name != Path(path).name:
-            self._native_transport.run_task("rename", [path], options={"new_name": name})
+        self._native_panel.rename_visible_file(path)
 
     def delete_item(self, path: str) -> None:
         self._native_transport.run_task("trash", [path])

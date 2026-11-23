@@ -2,18 +2,17 @@
 
 from pathlib import Path
 
-from PyQt6.QtCore import QItemSelectionModel, QMimeData, QPointF, Qt, QUrl
-from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QImage
-from PyQt6.QtWidgets import QApplication, QPushButton, QStyle, QWidget
+from PyQt6.QtCore import QEvent, QItemSelectionModel, QMimeData, QPoint, QPointF, QSize, Qt, QUrl
+from PyQt6.QtGui import QColor, QDragEnterEvent, QDragMoveEvent, QDropEvent, QImage, QMouseEvent
+from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
 from src.app.controllers.grade_sets import GradeSetModel
 from src.app.ui.library_panel import LibraryPanel
-from src.app.ui.native_files_locations import MountedVolume, library_icon
+from src.app.ui.native_files_locations import MountedVolume, location_icon
 from src.app.ui.native_files_panel import FilesEntryModel, NativeFilesPanel
 from src.features.files.repository import FilesDataLocator
-from src.shared.assets.icon_manager import get_icon
 from src.shared.i18n.i18n import I18N
 
 
@@ -56,13 +55,22 @@ def test_library_grade_set_sidebar_and_multi_selection(
     registered_library = tree_model.index(0, 0, libraries)
     assert locations.library_root(registered_library)
     decoration = Qt.ItemDataRole.DecorationRole
-    database = get_icon("fa5s.database").pixmap(16, 16).toImage()
-    photo_video = library_icon().pixmap(16, 16).toImage()
-    drive = locations.style().standardIcon(QStyle.StandardPixmap.SP_DriveHDIcon).pixmap(16, 16).toImage()
+    database = location_icon("library").pixmap(16, 16).toImage()
+    photo_video = location_icon("grade-set").pixmap(16, 16).toImage()
+    drive = location_icon("drive").pixmap(16, 16).toImage()
     assert libraries.data(decoration).pixmap(16, 16).toImage() == database
     assert registered_library.data(decoration).pixmap(16, 16).toImage() == database
     assert grade_sets.data(decoration).pixmap(16, 16).toImage() == photo_video
     assert drives.data(decoration).pixmap(16, 16).toImage() == drive
+    for button_name, icon_name in (("addMediaLibrary", "library-add"), ("newGradeSet", "grade-set-add")):
+        button = library.findChild(QPushButton, button_name)
+        size = QSize(18, 18)
+        icon = button.icon().pixmap(size).toImage()
+        assert button.iconSize() == size
+        assert button.height() == 20
+        assert icon == location_icon(icon_name).pixmap(size).toImage()
+        assert icon.pixelColor(14, 3).name() == "#e0e0e0"
+    assert panel._library_header.sizeHint().height() == 20
     assert database != photo_video
     assert len({index.data(Qt.ItemDataRole.FontRole).toString() for index in (libraries, grade_sets, drives)}) == 1
     library.resize(1200, 680)
@@ -150,6 +158,11 @@ def test_library_grade_set_sidebar_and_multi_selection(
         with qtbot.waitSignal(library.image_lightbox_active) as opened:
             assert panel.open_path_native(photo_path)
         assert opened.args == [True]
+        point = QPoint(100, 4)
+        QApplication.sendEvent(panel._preview, QMouseEvent(
+            QEvent.Type.MouseMove, QPointF(point), QPointF(panel._preview.mapToGlobal(point)),
+            Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+        assert panel._preview.grade_button.isVisible()
         with qtbot.waitSignal(library.photo_grade_requested) as grade:
             panel._preview.grade_button.click()
         assert grade.args == [photo_path] and not panel._preview.is_open
@@ -181,3 +194,45 @@ def test_library_grade_set_sidebar_and_multi_selection(
         model.shutdown()
         library.shutdown()
         assert library.wait_for_shutdown(3)
+
+
+def test_home_doubles_clicks_open_lightbox_and_use_escape(qtbot, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QLineEdit
+    from src.shared.playback.player_host import NativePlayerHost
+
+    monkeypatch.setenv("TOPOS_CONFIG_PATH", str(tmp_path / "config.json"))
+    locator = FilesDataLocator.for_config_root(tmp_path / "catalog")
+    monkeypatch.setattr(FilesDataLocator, "default", classmethod(lambda cls: locator))
+    played = []
+    monkeypatch.setattr(NativePlayerHost, "play", lambda self, path: played.append(path))
+    library = LibraryPanel(start_path=str(tmp_path))
+    qtbot.addWidget(library)
+    library.resize(1000, 620)
+    library.show()
+    panel = library._native_panel
+    home = panel.home_path
+    files = [
+        {"name": "Photo.jpg", "path": f"{home}/Photo.jpg", "type": "image"},
+        {"name": "Movie.mov", "path": f"{home}/Movie.mov", "type": "video"},
+    ]
+    panel.set_entries(home, files)
+    view = panel.pages.currentWidget()
+    try:
+        for file in files:
+            index = panel.proxy.mapFromSource(panel.model.index(panel._entry_rows[file["path"]], 0))
+            panel.selection.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.ClearAndSelect
+                                            | QItemSelectionModel.SelectionFlag.Rows)
+            position = view.itemDelegate().name_rect(view.visualRect(index)).center()
+            qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=position)
+            with qtbot.waitSignal(library.image_lightbox_active, check_params_cb=lambda active: active):
+                qtbot.mouseDClick(view.viewport(), Qt.MouseButton.LeftButton, pos=position)
+            assert not view.findChild(QLineEdit, "filesNameEditor")
+            assert panel._preview.current_path == file["path"]
+            qtbot.keyClick(panel._preview, Qt.Key.Key_Space)
+            assert panel._preview.is_open
+            with qtbot.waitSignal(library.image_lightbox_active, check_params_cb=lambda active: not active):
+                qtbot.keyClick(panel._preview, Qt.Key.Key_Escape)
+            assert not panel._preview.is_open
+        assert played == [files[1]["path"]]
+    finally:
+        library.shutdown()

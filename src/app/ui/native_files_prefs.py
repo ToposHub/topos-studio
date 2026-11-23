@@ -187,6 +187,14 @@ class NativeFilesPreferences:
         self.view_index = 1 if value == "list" else 0
 
     @property
+    def card_metadata(self) -> list[str]:
+        return self._read_list("card_metadata", 4)
+
+    @card_metadata.setter
+    def card_metadata(self, fields: list[str]) -> None:
+        self._write("card_metadata", fields)
+
+    @property
     def grid_fill(self) -> bool:
         return bool(self._read("grid_fill", False))
 

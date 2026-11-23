@@ -134,8 +134,7 @@ class GradeSetModel(QObject):
             groups: dict[str, list[str]] = {}
             for path in paths:
                 library = facade.libraries.library_for_path(path)
-                if library is not None:
-                    groups.setdefault(library.library_id, []).append(path)
+                groups.setdefault(library.library_id if library else "", []).append(path)
             ratings = {}
             for library_id, members in groups.items():
                 for item in facade.metadata.get_metadata(members, library_id=library_id).items:

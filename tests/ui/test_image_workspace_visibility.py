@@ -29,7 +29,7 @@ VIDEO_DOCKS = ("dock_tracker", "dock_color_keyframes", "dock_color_timeline_clip
                "dock_audio_mixer", "dock_deliver", "dockVideoBatchExport")
 IMAGE_DOCKS = ("dock_export", "dock_grading", "dock_curves", "dock_masks", "dock_qualifier",
                "dock_analysis", "dock_mixer", "dock_grain", "dock_denoise", "dock_deblur",
-               "dock_crop", "dock_viewport", "dock_layers", "dock_lut", "dock_plugin")
+               "dock_crop", "dock_viewport", "dock_layers", "dock_lut", "dock_plugin", "dock_grade_sets")
 
 
 class Window(QMainWindow, DockLayoutMixin, MenuToolbarMixin):
@@ -42,6 +42,7 @@ class Window(QMainWindow, DockLayoutMixin, MenuToolbarMixin):
         self.deliver_page = None
         self.all_docks = []
         self.setCentralWidget(QWidget())
+        self.centralWidget().hide()
         for attr in (*VIDEO_DOCKS, *IMAGE_DOCKS):
             dock = QDockWidget(attr, self)
             dock.setObjectName(attr)
@@ -97,15 +98,43 @@ def test_image_menu_toolbar_and_saved_layout_cannot_reveal_video_tools(qtbot, mo
     assert window.dock_grain in bar._color_tools
 
 
-def test_image_deliver_only_shows_batch_even_after_delayed_migration(qtbot, monkeypatch, registry):
+def test_image_deliver_places_grade_sets_and_batch_export(qtbot, monkeypatch, registry):
     monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
     window = Window("image")
     qtbot.addWidget(window)
+    window.resize(1200, 720)
+    window.show()
+    grade_sets, batch_export = window.dock_grade_sets, window.dock_export
+    window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, window.dock_lut)
+    window.tabifyDockWidget(window.dock_lut, grade_sets)
+    color_state = window.saveState()
+    grade_sets.hide()
     window.current_page = "Deliver"
     window._enforce_page_dock_visibility()
     window._migrate_deliver_layout()
-    assert not window.dock_export.isHidden()
-    assert all(d.isHidden() for d in window.all_docks if d is not window.dock_export)
+    assert {d for d in window.all_docks if not d.isHidden()} == {grade_sets, batch_export}
+    assert grade_sets.toggleViewAction().isEnabled()
+    assert window.dockWidgetArea(grade_sets) == Qt.DockWidgetArea.LeftDockWidgetArea
+    assert window.dockWidgetArea(batch_export) == Qt.DockWidgetArea.RightDockWidgetArea
+    assert not window.tabifiedDockWidgets(grade_sets)
+
+    def verify_columns() -> None:
+        assert grade_sets.geometry().right() < batch_export.geometry().left()
+        assert grade_sets.geometry().y() == batch_export.geometry().y()
+        assert grade_sets.geometry().height() == batch_export.geometry().height()
+        assert grade_sets.width() / (grade_sets.width() + batch_export.width()) == pytest.approx(2 / 3, abs=0.01)
+
+    qtbot.waitUntil(verify_columns)
+    window.resizeDocks([grade_sets, batch_export], [650, 550], Qt.Orientation.Horizontal)
+    qtbot.waitUntil(lambda: abs(grade_sets.width() - batch_export.width()) < 150)
+    customized = grade_sets.width()
+    window._migrate_deliver_layout()
+    assert grade_sets.width() == customized
+    window.current_page = "Color"
+    assert window.restoreState(color_state)
+    window._guard_image_batch_export(True)
+    assert grade_sets in window.tabifiedDockWidgets(window.dock_lut)
+    assert batch_export.isHidden()
     assert not window.feature_flags.composite
     window._deliver_available = True
     window.switch_to_page = Mock()
@@ -183,3 +212,40 @@ def test_image_quick_export_hides_video_tab_and_composite_source(qtbot):
     assert not dialog.tab_bar.isTabVisible(2)
     assert dialog.source_combo.count() == 1
     assert dialog.source_combo.currentIndex() == 0
+
+
+def test_image_export_queue_stays_expanded(qtbot) -> None:
+    from src.shared.export.export_panel import ExportPanel, ExportSectionWidget
+    from PyQt6.QtWidgets import QLabel
+
+    panel = ExportPanel(image_mode=True)
+    qtbot.addWidget(panel)
+    panel.show()
+    sections = panel.findChildren(ExportSectionWidget)
+    queue = next(section for section in sections if section.isAncestorOf(panel.batch_list))
+    assert queue._collapse_btn is None
+    assert panel.findChild(QLabel, "imageBatchExportTitle").font().pixelSize() == 14
+    assert queue._title_label.font().pixelSize() == 12
+    assert panel.file_count_label.font().pixelSize() == 11
+    queue.toggle_collapse()
+    assert panel.batch_list.isVisible()
+
+    output = next(section for section in sections if section.isAncestorOf(panel.path_input))
+    output._collapse_btn.click()
+    assert not panel.path_input.isVisible()
+    assert panel.batch_list.isVisible()
+
+
+def test_single_manually_queued_photo_uses_its_saved_grade(qtbot, tmp_path) -> None:
+    from src.shared.export.export_panel import ExportPanel
+
+    panel = ExportPanel(image_mode=True)
+    qtbot.addWidget(panel)
+    path = str(tmp_path / "photo.jpg")
+    panel.add_current_file(path)
+    (tmp_path / "photo.jpg").touch()
+    panel.batch_list.add_files([path])
+    panel.path_input.setText(str(tmp_path))
+    with qtbot.waitSignal(panel.batch_export_requested) as received:
+        panel.export_btn.click()
+    assert received.args[0]["files"] == [path]

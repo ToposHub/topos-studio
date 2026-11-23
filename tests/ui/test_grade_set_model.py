@@ -103,9 +103,26 @@ def test_grade_set_ratings_follow_members_from_their_own_libraries(qtbot, tmp_pa
             catalog.upsert_asset(library.library_id, source)
             catalog.patch_user_fields(library.library_id, source, rating=score)
             ratings[str(source)] = score
-        model.create("Both libraries", ratings)
+        loose = tmp_path / "desktop" / "outside.jpg"
+        loose.parent.mkdir()
+        loose.write_bytes(b"photo")
+        model.create("Both libraries", [*ratings, str(loose)])
+        qtbot.waitUntil(lambda: model.ratings == ratings and str(loose) in model.paths)
+        assert facade.metadata.patch_metadata([str(loose)], {"rating": 3}).ok
+        model.refresh_ratings({str(loose): {"rating": 3}})
+        ratings[str(loose)] = 3
         qtbot.waitUntil(lambda: model.ratings == ratings)
         collection = model.active_id
+        snapshots = []
+        facade.collection_members(collection, request_id="ratings", listener=snapshots.append)
+        qtbot.waitUntil(lambda: bool(snapshots))
+        assert {entry.path: entry.user.rating for entry in snapshots[0].result.entries} == ratings
+
+        # Pinning and indexing a previously rated location keeps the score.
+        new_library = catalog.register_library(loose.parent)
+        catalog.upsert_asset(new_library.library_id, loose)
+        assert catalog.asset(new_library.library_id, loose)["rating"] == 3
+
         model.create("Second only", [str(source)])
         qtbot.waitUntil(lambda: model.ratings == {str(source): 2})
         catalog.patch_user_fields(library.library_id, source, rating=5)

@@ -18,7 +18,7 @@ from src.shared.project.image_sidecar import resolve_image_sidecar
 @dataclass
 class _BadgeRead:
     request_id: str
-    paths: set[str]
+    paths: dict[str, bool]
     cancel: CancelToken
 
 
@@ -32,7 +32,8 @@ class LibraryGradeBadges(QObject):
         self._get_facade = get_facade
         self._results: dict[str, bool] = {}
         self._previews: OrderedDict[str, QImage] = OrderedDict()
-        self._queue: dict[str, None] = {}
+        self._queue: dict[str, bool] = {}
+        self._preview_checked: set[str] = set()
         self._running: _BadgeRead | None = None
         self._closed = False
         self._timer = QTimer(self)
@@ -41,23 +42,33 @@ class LibraryGradeBadges(QObject):
         self._finished.connect(self._accept, Qt.ConnectionType.QueuedConnection)
 
     def is_graded(self, path: str) -> bool:
-        """Return cached status and request a check for newly painted cards."""
+        """Request the status and preview for an on-screen card."""
+        return self._request(path, preview=True)
+
+    def has_grade(self, path: str) -> bool:
+        """Filtering needs project ownership only, even for off-screen cards."""
+        return self._request(path, preview=False)
+
+    def _request(self, path: str, *, preview: bool) -> bool:
         if self._closed:
             return False
         path = nfc(path)
-        if path not in self._results and (self._running is None or path not in self._running.paths):
-            self._queue[path] = None
+        marked = self._results.get(path)
+        needs_preview = preview and marked is not False and path not in self._preview_checked
+        if (marked is None or needs_preview) and (self._running is None or path not in self._running.paths):
+            self._queue[path] = needs_preview or self._queue.get(path, False)
             if self._running is None and not self._timer.isActive():
                 self._timer.start(0)
-        return self._results.get(path, False)
+        return bool(marked)
 
     def invalidate(self, path: str) -> None:
         """Re-resolve one source after the host confirms a save."""
         path = nfc(path)
         known = self._results.pop(path, None) is not None
         self._previews.pop(path, None)
+        self._preview_checked.discard(path)
         if self._running is not None and path in self._running.paths:
-            self._running.paths.discard(path)
+            self._running.paths.pop(path)
             known = True
         if known:
             self.changed.emit()
@@ -73,6 +84,7 @@ class LibraryGradeBadges(QObject):
         self._timer.stop()
         self._results.clear()
         self._previews.clear()
+        self._preview_checked.clear()
         self._queue.clear()
         if self._running is not None:
             self._running.cancel.request()
@@ -90,22 +102,21 @@ class LibraryGradeBadges(QObject):
             self._results.update(dict.fromkeys(self._queue, False))
             self._queue.clear()
             return
-        paths = tuple(list(self._queue)[:64])
-        for path in paths:
-            self._queue.pop(path)
+        batch = {path: self._queue.pop(path) for path in tuple(self._queue)[:64]}
         request_id = uuid4().hex
         cancel = CancelToken()
-        self._running = _BadgeRead(request_id, set(paths), cancel)
+        self._running = _BadgeRead(request_id, dict(batch), cancel)
 
-        def work() -> dict[str, tuple[bool, QImage | None]]:
-            marks: dict[str, tuple[bool, QImage | None]] = {}
-            for path in paths:
+        def work() -> dict[str, tuple[bool, bool, QImage | None]]:
+            marks: dict[str, tuple[bool, bool, QImage | None]] = {}
+            for path, preview in batch.items():
                 if cancel.requested:
                     break
                 sidecar, owned = resolve_image_sidecar(path)
-                jpeg = facade.graded_thumbnail(path, verified_sidecar=sidecar) if owned else None
-                image = QImage.fromData(jpeg, "JPEG") if jpeg is not None else None
-                marks[path] = (owned, image)
+                cached = facade.graded_thumbnail(path, verified_sidecar=sidecar) if owned and preview else None
+                image = (QImage.fromData(cached).convertToFormat(QImage.Format.Format_RGB888)
+                         if cached is not None else None)
+                marks[path] = (owned, preview, image)
             return marks
 
         def deliver(outcome: FacadeOutcome) -> None:
@@ -119,15 +130,23 @@ class LibraryGradeBadges(QObject):
             return
         paths = self._running.paths
         self._running = None
+        if outcome.error is not None and outcome.error.code == "busy":
+            for path, preview in paths.items():
+                self._queue[path] = preview or self._queue.get(path, False)
+            if self._queue:
+                self._timer.start(250)
+            return
         result = outcome.result if outcome.error is None else {}
         for path in paths:
-            marked, image = result.get(path, (False, None))
+            marked, preview, image = result.get(path, (False, False, None))
+            if preview:
+                self._preview_checked.add(path)
             self._results[path] = marked
             if image is not None and not image.isNull():
                 self._previews[path] = image
                 if len(self._previews) > 256:
                     evicted, _image = self._previews.popitem(last=False)
-                    self._results.pop(evicted, None)
+                    self._preview_checked.discard(evicted)
         if any(self._results[path] for path in paths):
             self.changed.emit()
         self._start()

@@ -69,6 +69,7 @@ from src.shared.gpu.gl_resource_registry import (
 )
 from src.features.color.core.opengl_render_backend import OpenGLRenderBackend
 from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+from src.shared.media.graded_thumbnail import GRADED_PREVIEW_MAX_EDGE
 from src.shared.media.gpu_frame import (
     GpuDecodedFrame,
     GpuFrameRelease,
@@ -866,6 +867,8 @@ class AsyncRenderer(QThread):
             # 单槽会在 sync_all_resources / 多层 mask 上传的紧循环里把
             # 不同资源的更新互相覆盖掉，导致加载后曲线/LUT/蒙版静默失效。
             d = data or {}
+            if d.get("ordered"):
+                return None
             return (RenderLane.AUX_TEX,
                     str(d.get('layer_id')), str(d.get('type')))
         elif cmd_type == RenderCommand.RENDER_COLOR_OUTPUT:
@@ -1684,7 +1687,13 @@ class AsyncRenderer(QThread):
         if texture is None:
             return None
         try:
-            scale = min(1.0, 192 / max(width, height))
+            if uv is None:
+                available_w, available_h = texture.size
+            else:
+                available_w = front_w * (uv[2] - uv[0])
+                available_h = front_h * (uv[1] - uv[3])
+            scale = min(1.0, GRADED_PREVIEW_MAX_EDGE / max(width, height),
+                        available_w / width, available_h / height)
             size = (max(1, round(width * scale)), max(1, round(height * scale)))
             pixels = self._read_scaled_texture(texture, size, dtype='f1', uv=uv)
             rgb = np.frombuffer(pixels, dtype=np.uint8).reshape(size[1], size[0], 3)

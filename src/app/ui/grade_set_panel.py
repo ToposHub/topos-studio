@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import (
     QAbstractListModel, QMimeData, QModelIndex, QPoint, QSize, QSignalBlocker,
-    QSortFilterProxyModel, Qt, QTimer, pyqtSignal,
+    QSortFilterProxyModel, Qt, QTimer, QUrl, pyqtSignal,
 )
 from PyQt6.QtGui import (
     QAction, QActionGroup, QDragEnterEvent, QDragMoveEvent, QDropEvent, QHideEvent,
@@ -22,13 +22,14 @@ from PyQt6.QtWidgets import (
 )
 import qtawesome as qta
 
-from src.app.ui.native_files_gallery import FilesCardDelegate
+from src.app.ui.native_files_gallery import FilesCardDelegate, RATING_CAPTION_HEIGHT
 from src.app.ui.native_files_gallery_view import GALLERY_ENTRY_ROLE, GALLERY_MARGIN, FilesGalleryView, GallerySpacing
 from src.app.ui.native_files_transport import NativeFilesTransport
 from src.features.files.contracts import Entry, UserMetadata
 from src.features.files.repository.catalog import nfc
 from src.shared.i18n.i18n import I18N
 from src.shared.media.format_registry import IMAGE_EXTENSIONS, is_image
+from src.shared.media.graded_thumbnail import GRADED_PREVIEW_JPEG_HEADER, GRADED_PREVIEW_MAX_EDGE, is_webp_preview
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
@@ -91,6 +92,22 @@ class _GradeSetImages(QAbstractListModel):
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self.paths)
+
+    def flags(self, index: QModelIndex) -> Qt.ItemFlag:
+        flags = super().flags(index)
+        return flags | Qt.ItemFlag.ItemIsDragEnabled if index.isValid() else flags
+
+    def supportedDragActions(self) -> Qt.DropAction:
+        return Qt.DropAction.CopyAction
+
+    def mimeTypes(self) -> list[str]:
+        return ["text/uri-list"]
+
+    def mimeData(self, indexes: Iterable[QModelIndex]) -> QMimeData:
+        mime = QMimeData()
+        rows = sorted({index.row() for index in indexes if index.isValid()})
+        mime.setUrls([QUrl.fromLocalFile(self.paths[row]) for row in rows])
+        return mime
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Entry | str | int | None:
         if not index.isValid() or not 0 <= index.row() < len(self.paths):
@@ -170,7 +187,8 @@ class _GradeSetView(FilesGalleryView):
         self.setMinimumWidth(_MIN_THUMBNAIL_SIZE)
         self.setThumbnailSize(_DEFAULT_THUMBNAIL_SIZE)
         self.setDropIndicatorShown(False)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
         self.accept_files = False
         self.clicked.connect(self._on_click)
 
@@ -211,7 +229,8 @@ class _GradeSetView(FilesGalleryView):
             self._open_index(self.currentIndex())
 
     def _accept_image_drag(self, event: QDropEvent) -> None:
-        if (self.accept_files and event.possibleActions() & Qt.DropAction.CopyAction
+        if (event.source() is not self and self.accept_files
+                and event.possibleActions() & Qt.DropAction.CopyAction
                 and _dropped_images(event.mimeData())):
             event.setDropAction(Qt.DropAction.CopyAction)
             event.accept()
@@ -225,7 +244,8 @@ class _GradeSetView(FilesGalleryView):
         self._accept_image_drag(event)
 
     def dropEvent(self, event: QDropEvent) -> None:
-        allow_copy = self.accept_files and event.possibleActions() & Qt.DropAction.CopyAction
+        allow_copy = (event.source() is not self and self.accept_files
+                      and event.possibleActions() & Qt.DropAction.CopyAction)
         files = _dropped_images(event.mimeData()) if allow_copy else []
         if not files:
             event.ignore()
@@ -241,11 +261,13 @@ class GradeSetPanel(QWidget):
     image_requested = pyqtSignal(str)
     active_photo_name_changed = pyqtSignal(str)
     filename_visibility_changed = pyqtSignal(bool)
+    rating_at_bottom_changed = pyqtSignal(bool)
     copy_grade_requested = pyqtSignal(str)
     paste_grade_requested = pyqtSignal(str)
+    export_queue_requested = pyqtSignal(list)
 
     def __init__(self, model: GradeSetModel, parent: QWidget | None = None,
-                 *, show_filenames: bool = False) -> None:
+                 *, show_filenames: bool = False, rating_at_bottom: bool = False) -> None:
         super().__init__(parent)
         self.setObjectName("gradeSetPanel")
         self._model = model
@@ -271,7 +293,7 @@ class GradeSetPanel(QWidget):
         self.message.setTextFormat(Qt.TextFormat.PlainText)
         self.message.setWordWrap(True)
         self.message.setStyleSheet(f"color: {C.TEXT_HINT};")
-        spacing = _NAMED_CARD_SPACING if show_filenames else _CARD_SPACING
+        spacing = self._caption_spacing(show_filenames, rating_at_bottom)
         self.view = _GradeSetView(self, spacing)
         self.view.setAccessibleName(_tr("images", "Grade Set Images"))
         self._images = _GradeSetImages(model, self.view)
@@ -280,6 +302,8 @@ class GradeSetPanel(QWidget):
         self._card_delegate = FilesCardDelegate(
             GALLERY_ENTRY_ROLE, lambda entry: self.thumbnail_for_paint(entry.path), self.view,
             is_active=lambda path: path == self.active_path, spacing=spacing, title_font_size=9.0)
+        self._card_delegate.show_filename = show_filenames
+        self._card_delegate.rating_at_bottom = rating_at_bottom
         self.view.setItemDelegate(self._card_delegate)
         self.view.image_requested.connect(self._open_image)
         self.view.images_dropped.connect(self._add_images)
@@ -401,11 +425,27 @@ class GradeSetPanel(QWidget):
         self._keep_current_visible()
 
     def _set_filenames_visible(self, visible: bool) -> None:
-        spacing = _NAMED_CARD_SPACING if visible else _CARD_SPACING
+        self._card_delegate.show_filename = visible
+        self._update_caption_spacing()
+        self.filename_visibility_changed.emit(visible)
+
+    def _set_rating_at_bottom(self, enabled: bool) -> None:
+        self._card_delegate.rating_at_bottom = enabled
+        self._update_caption_spacing()
+        self.rating_at_bottom_changed.emit(enabled)
+
+    @staticmethod
+    def _caption_spacing(show_filenames: bool, rating_at_bottom: bool) -> GallerySpacing:
+        spacing = _NAMED_CARD_SPACING if show_filenames else _CARD_SPACING
+        if rating_at_bottom:
+            return replace(spacing, caption_height=spacing.caption_height + RATING_CAPTION_HEIGHT)
+        return spacing
+
+    def _update_caption_spacing(self) -> None:
+        spacing = self._caption_spacing(self._card_delegate.show_filename, self._card_delegate.rating_at_bottom)
         self._card_delegate.spacing = spacing
         self.view.setGallerySpacing(spacing)
         self._keep_current_visible()
-        self.filename_visibility_changed.emit(visible)
 
     def _keep_current_visible(self) -> None:
         current = self.view.currentIndex()
@@ -545,15 +585,20 @@ class GradeSetPanel(QWidget):
         under_mouse = self.view.indexAt(pos)
         if under_mouse.isValid() and under_mouse not in selected:
             selected = [under_mouse]
-        paths = [index.data(_PATH_ROLE) for index in selected]
+        paths = [index.data(_PATH_ROLE) for index in sorted(selected, key=lambda index: index.row())]
         menu = QMenu(self)
         add = menu.addAction(_tr("add_images", "Add Images…"), self._pick_images)
         add.setObjectName("gradeSetAddImages")
         show_names = menu.addAction(_tr("show_filenames", "Show File Names"))
         show_names.setObjectName("gradeSetShowFilenames")
         show_names.setCheckable(True)
-        show_names.setChecked(bool(self._card_delegate.spacing.caption_height))
+        show_names.setChecked(self._card_delegate.show_filename)
         show_names.toggled.connect(self._set_filenames_visible)
+        rating_at_bottom = menu.addAction(_tr("rating_at_bottom", "Show Rating Below Card"))
+        rating_at_bottom.setObjectName("gradeSetRatingAtBottom")
+        rating_at_bottom.setCheckable(True)
+        rating_at_bottom.setChecked(self._card_delegate.rating_at_bottom)
+        rating_at_bottom.toggled.connect(self._set_rating_at_bottom)
         target = under_mouse.data(_PATH_ROLE)
         if target:
             menu.addSeparator()
@@ -567,6 +612,9 @@ class GradeSetPanel(QWidget):
             paste.setEnabled(self._grade_clipboard_available)
         if paths:
             menu.addSeparator()
+            enqueue = menu.addAction(_tr("add_to_export_queue", "Add to Export Queue"),
+                                     lambda: self.export_queue_requested.emit(paths))
+            enqueue.setObjectName("gradeSetAddToExportQueue")
             menu.addAction(_tr("remove", "Remove from Grade Set"),
                            lambda: self._model.remove(collection_id, paths))
         return menu
@@ -620,7 +668,8 @@ class GradeSetPanel(QWidget):
             self._thumbnail_failed(path)
             return
         self._pending.remove(path)
-        self._cache(self._source_previews, path, image)
+        graded = is_webp_preview(raw) or raw.startswith(GRADED_PREVIEW_JPEG_HEADER)
+        self._cache(self._source_previews, path, image, graded=graded)
         self.view.setAspectRatio(path, image.width() / image.height())
         self._update_card(path)
         self._request_timer.start(0)
@@ -631,14 +680,17 @@ class GradeSetPanel(QWidget):
             self._failed.add(path)
             self._request_timer.start(0)
 
-    def _cache(self, cache: OrderedDict[str, QImage], path: str, image: QImage) -> None:
-        size = QSize(_THUMBNAIL_SIZE, _THUMBNAIL_SIZE)
+    def _cache(self, cache: OrderedDict[str, QImage], path: str, image: QImage, *, graded: bool) -> None:
+        edge = GRADED_PREVIEW_MAX_EDGE if graded else _THUMBNAIL_SIZE
+        size = QSize(edge, edge)
         if image.width() > size.width() or image.height() > size.height():
             image = image.scaled(size, Qt.AspectRatioMode.KeepAspectRatio,
                                  Qt.TransformationMode.SmoothTransformation)
-        else:
+        elif not graded or image.format() == QImage.Format.Format_RGB888:
             # Rendered previews may wrap a temporary pixel buffer.
             image = image.copy()
+        if graded:
+            image = image.convertToFormat(QImage.Format.Format_RGB888)
         cache[path] = image
         cache.move_to_end(path)
         if len(cache) > _MAX_CACHED_THUMBNAILS:
@@ -650,7 +702,7 @@ class GradeSetPanel(QWidget):
         """Cache a display image from the established render path."""
         if not self._closed and not image.isNull():
             path = nfc(path)
-            self._cache(self._graded_previews, path, image)
+            self._cache(self._graded_previews, path, image, graded=True)
             self.view.set_initial_aspect(path, image)
             self._update_card(path)
 

@@ -128,10 +128,10 @@ def make_fullres_bookkeeping(**overrides: Any) -> AsyncRenderer:
 
 def test_grade_set_preview_crops_fit_margins_and_reuses_only_matching_scope() -> None:
     key = (2, 5)
-    front, scope = Mock(glo=12), Mock(glo=42)
+    front, scope = Mock(glo=12), Mock(glo=42, size=(120, 180))
     params = dict(grade_set_preview_key=key, photo_size=(800, 1200),
                   scene_visible_rect=(-400, 0, 1600, 1200))
-    raw = np.zeros((192, 128, 3), dtype=np.uint8)
+    raw = np.zeros((450, 300, 3), dtype=np.uint8)
     raw[-1] = 251
     render = make_qt_stub(
         _last_scope_render_params=params, ctx=Mock(), pyramid_textures=[Mock()],
@@ -141,12 +141,19 @@ def test_grade_set_preview_crops_fit_margins_and_reuses_only_matching_scope() ->
         _scope_color_output_tex=scope, _do_render_color_output=Mock())
     preview = render._read_grade_set_preview(key)
     assert preview is not None and np.all(preview[0] == 251)
-    render._read_scaled_texture.assert_called_once_with(front, (128, 192), dtype="f1", uv=(0.25, 1., 0.75, 0.))
+    render._read_scaled_texture.assert_called_once_with(front, (300, 450), dtype="f1", uv=(0.25, 1., 0.75, 0.))
+
+    render._read_scaled_texture.reset_mock(return_value=True)
+    render.current_front_size = (320, 240)
+    render._read_scaled_texture.return_value = bytes(160 * 240 * 3)
+    assert render._read_grade_set_preview(key).shape == (240, 160, 3)
+    render._read_scaled_texture.assert_called_once_with(front, (160, 240), dtype="f1", uv=(0.25, 1., 0.75, 0.))
 
     render._read_scaled_texture.reset_mock()
     params["scene_visible_rect"] = (80, 80, 300, 300)
-    assert render._read_grade_set_preview(key) is not None
-    render._read_scaled_texture.assert_called_once_with(scope, (128, 192), dtype="f1", uv=None)
+    render._read_scaled_texture.return_value = bytes(120 * 180 * 3)
+    assert render._read_grade_set_preview(key).shape == (180, 120, 3)
+    render._read_scaled_texture.assert_called_once_with(scope, (120, 180), dtype="f1", uv=None)
     render._read_scaled_texture.reset_mock()
     render._scope_color_output_photo_key = (2, 4)
     assert render._read_grade_set_preview(key) is None

@@ -59,7 +59,7 @@ def test_invalidation_cannot_publish_an_older_worker_result(qtbot, tmp_path: Pat
         def graded_thumbnail(self, path: str, *, verified_sidecar: str | None = None) -> bytes | None:
             return None
 
-        def finish(self, index: int, *, value: dict[str, tuple[bool, QImage | None]] | None = None) -> None:
+        def finish(self, index: int, *, value: dict[str, tuple[bool, bool, QImage | None]] | None = None) -> None:
             key, request, work, listener = self.jobs[index]
             listener(FacadeOutcome(request, key, index, result=work() if value is None else value))
 
@@ -73,7 +73,7 @@ def test_invalidation_cannot_publish_an_older_worker_result(qtbot, tmp_path: Pat
         qtbot.waitUntil(lambda: len(facade.jobs) == 1)
         badges.invalidate(path)
         assert not badges.is_graded(path)
-        facade.finish(0, value={path: (True, None)})
+        facade.finish(0, value={path: (True, True, None)})
         qtbot.waitUntil(lambda: len(facade.jobs) == 2)
         assert not badges.is_graded(path)
         _project(tmp_path / "photo.topos", source)
@@ -84,7 +84,54 @@ def test_invalidation_cannot_publish_an_older_worker_result(qtbot, tmp_path: Pat
         assert not badges.is_graded(path)
         qtbot.waitUntil(lambda: len(facade.jobs) == 3)
         badges.reset()
-        facade.finish(2, value={path: (True, None)})
+        facade.finish(2, value={path: (True, True, None)})
         assert not badges.is_graded(path)
+    finally:
+        badges.shutdown()
+
+
+def test_graded_filter_retries_busy_and_checks_offscreen_paths_without_previews(qtbot, tmp_path: Path) -> None:
+    from PyQt6.QtWidgets import QMenu
+
+    from src.app.ui.native_files_panel import NativeFilesPanel
+    from src.features.files.contracts import FilesError
+
+    class _Facade:
+        def __init__(self) -> None:
+            self.loads = 0
+
+        def run(self, key, request_id, work, listener) -> None:
+            self.loads += 1
+            if self.loads == 1:
+                listener(FacadeOutcome(request_id, key, 0, error=FilesError("busy", "Busy", True)))
+            else:
+                listener(FacadeOutcome(request_id, key, self.loads, result=work()))
+
+        def graded_thumbnail(self, path: str, *, verified_sidecar: str | None = None) -> bytes | None:
+            raise AssertionError("Filtering should only check project ownership")
+
+    graded = tmp_path / "graded.jpg"
+    plain = tmp_path / "plain.jpg"
+    graded.touch()
+    plain.touch()
+    _project(tmp_path / "graded.topos", graded)
+    facade = _Facade()
+    panel = NativeFilesPanel()
+    qtbot.addWidget(panel)
+    badges = LibraryGradeBadges(lambda: facade, panel)
+    panel.proxy.is_graded = badges.has_grade
+    badges.changed.connect(panel.refresh_file_filters)
+    panel.model.set_entries([
+        {"name": "plain.jpg", "path": str(plain), "type": "image"},
+        {"name": "graded.jpg", "path": str(graded), "type": "image"},
+    ])
+    menu = QMenu(panel)
+    panel._file_filter_menu(menu)
+    menu.actions()[-3].trigger()
+    try:
+        assert panel.proxy.graded_only
+        qtbot.waitUntil(lambda: panel.proxy.rowCount() == 1)
+        assert panel.proxy.index(0, 0).data() == "graded.jpg"
+        assert facade.loads == 2
     finally:
         badges.shutdown()

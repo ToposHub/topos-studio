@@ -806,8 +806,18 @@ class BasePlayer(QFrame):
             self._wake_ui()
         return super().eventFilter(obj, ev)
 
+    def set_lightbox_tools(self, visible: bool) -> None:
+        """Use the host's top chrome and reveal transport controls on demand."""
+        self._lightbox_tools = visible
+        self._idle_timer.stop()
+        self._header.hide()
+        self._controls.setVisible(visible)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
     def _wake_ui(self) -> None:
         """显示顶栏/播放条并重置空闲计时；暂停状态下保持常显。"""
+        if getattr(self, "_lightbox_tools", None) is not None:
+            return
         self._header.show()
         self._controls.show()
         self._header.raise_()

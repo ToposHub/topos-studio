@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QItemSelectionModel, Qt
+from PyQt6.QtWidgets import QStyleOptionToolButton
 
 from src.app.ui.native_files_panel import NativeFilesPanel
 
@@ -42,6 +43,14 @@ def test_single_selection_fills_metadata_and_technical_info(qtbot):
     _select(panel, "A.mov")
     assert len(panel.rating_buttons) == 5
     assert all(not button.icon().isNull() for button in panel.rating_buttons + panel.color_buttons)
+    colors = []
+    for button in panel.rating_buttons:
+        option = QStyleOptionToolButton()
+        button.initStyleOption(option)
+        assert not option.features & QStyleOptionToolButton.ToolButtonFeature.HasMenu
+        star = button.icon().pixmap(button.iconSize()).toImage()
+        colors.append(star.pixelColor(star.width() // 2, star.height() // 2).name())
+    assert colors == ["#ed951a"] * 3 + ["#505353"] * 2
     assert panel.rating_buttons[2].isChecked()
     assert panel.color_buttons[1].isChecked()
     assert panel.tag_edit.text() == "采访,夜景"  # tag_text 统一为无空格分隔
@@ -108,7 +117,7 @@ def test_markers_can_be_cleared_and_only_commit_the_clicked_field(qtbot):
     panel = _panel(qtbot)
     _select(panel, "A.mov")
     with qtbot.waitSignal(panel.metadata_patch_requested) as received:
-        panel.rating_clear_button.click()
+        panel.rating_clear_action.trigger()
     assert received.args[:2] == [["/m/A.mov"], {"rating": 0}]
     panel.apply_metadata_result(["/m/A.mov"], {"rating": 0})
     assert not any(button.isChecked() for button in panel.rating_buttons)
@@ -118,7 +127,8 @@ def test_markers_can_be_cleared_and_only_commit_the_clicked_field(qtbot):
             panel.color_buttons[value].click()
         assert received.args[:2] == [["/m/A.mov"], {"color": value}]
         panel.apply_metadata_result(["/m/A.mov"], {"color": value})
-        assert panel.color_buttons[value].isChecked()
+        assert panel.color_buttons[value].isChecked() == bool(value)
+        assert not panel.color_buttons[0].isCheckable()
 
 
 def test_marker_reply_preserves_a_note_being_typed(qtbot):

@@ -6,15 +6,16 @@ import os
 import unicodedata
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from PyQt6.QtCore import (
     QAbstractTableModel, QBuffer, QByteArray, QDir, QEvent, QFileInfo, QIODevice, QObject,
-    QItemSelectionModel, QMimeData, QModelIndex, QPersistentModelIndex, QPoint, QRect, QSignalBlocker,
+    QItemSelectionModel, QMimeData, QModelIndex, QPersistentModelIndex, QPoint, QRect, QRectF, QSignalBlocker,
     QSize, QSortFilterProxyModel, Qt, QTimer, QUrl, pyqtSignal,
 )
-from PyQt6.QtGui import QBrush, QColor, QDrag, QImage, QImageReader, QIcon, QKeySequence, QPainter, QPen, QPixmap, QResizeEvent
+from PyQt6.QtGui import QBrush, QColor, QDrag, QImage, QImageReader, QIcon, QKeySequence, QMouseEvent, QPainter, QPen, QPixmap, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView, QApplication, QBoxLayout, QDialog, QFileDialog, QHBoxLayout, QInputDialog,
     QFrame, QFormLayout, QHeaderView, QLabel, QLayout, QLineEdit,
@@ -24,18 +25,23 @@ from PyQt6.QtWidgets import (
 )
 
 from src.app.ui.add_library_dialog import AddLibraryDialog
-from src.shared.assets.icon_manager import IconColors, get_icon, icon_export, icon_new_folder
+from src.shared.assets.icon_manager import get_icon, icon_export
 from src.shared.i18n.i18n import I18N
-from src.shared.media.format_registry import get_media_type, is_image
+from src.shared.media.format_registry import MODEL_3D_EXTENSIONS, SUBTITLE_EXTENSIONS, get_media_type, is_image
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
-from src.app.ui.native_files_gallery import FilesCardDelegate, FilesListDelegate
-from src.app.ui.native_files_gallery_view import GALLERY_ENTRY_ROLE, FilesGalleryView
-from src.app.ui.native_files_locations import HomeDirectoryTree
+from src.app.ui.native_files_gallery import (
+    FILE_CAPTION_FIELDS, FILE_CAPTION_LINE_HEIGHT, FILE_LABEL_COLORS, FILES_LOCATION_BACKGROUND,
+    FilesCardDelegate, FilesListDelegate, FilesNameDelegate, RATING_BADGE_STAR_SIZE, RATING_STAR_COLOR,
+    RATING_CAPTION_HEIGHT, UNRATED_STAR_COLOR, paint_rating_badge, rating_star_icon,
+)
+from src.app.ui.native_files_gallery_view import GALLERY_ENTRY_ROLE, FilesGalleryView, GallerySpacing
+from src.app.ui.native_files_locations import HomeDirectoryTree, location_icon, location_icon_path
 from src.app.ui.native_files_transfer import DRAG_SOURCE_PROPERTY, FileDropTarget, cut_token, local_file_paths, mark_cut
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.app.ui.native_files_preview import MAX_DECODE_PIXELS, NativeFilesPreview, PreviewDecoder
 from src.shared.playback.player_host import NativePlayerHost
+from src.features.files.services.library_transfer import LIBRARY_PACKAGE_SUFFIX
 from src.features.files.services.media import RAW_PREVIEW_SUFFIXES
 from src.features.files.contracts import (
     Availability, Entry, FilesError, format_bytes, format_duration,
@@ -44,6 +50,9 @@ from src.features.files.contracts import (
 
 if TYPE_CHECKING:
     from src.app.ui.native_files_transport import NativeFilesTransport
+
+_LOCATION_DEFAULT_WIDTH = 240
+_INSPECTOR_DEFAULT_WIDTH = 210
 
 
 def _tr(key: str, default: str) -> str:
@@ -61,14 +70,38 @@ def _number(value: Any) -> float:
 
 KIND_LABELS = {"dir": "文件夹", "image": "图片", "video": "视频", "audio": "音频",
                "doc": "文档", "other": "文件"}
-INSPECTOR_COLORS = (
-    ("none", "清除颜色标签", C.TEXT_DIM),
-    ("red", "红色", "#e16a65"),
-    ("yellow", "黄色", "#eac363"),
-    ("green", "绿色", "#74bd83"),
-    ("blue", "蓝色", "#6da5e3"),
-    ("purple", "紫色", "#aa8bd8"),
+FILES_CONTENT_SCROLLBAR_STYLE = """
+QScrollBar:vertical {
+    background: transparent; border: none; width: 10px; margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #343438; border: none; border-radius: 3px;
+    min-height: 24px; margin: 0 2px;
+}
+QScrollBar::handle:vertical:hover,
+QScrollBar::handle:vertical:pressed { background: #454549; }
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical { background: transparent; }
+"""
+LIBRARY_GALLERY_SPACING = GallerySpacing(inset=3, gap=4, caption_height=20)
+FILE_TYPES = (
+    ("all", "全部类型"), ("image", "图片"), ("video", "视频"), ("audio", "音频"),
+    ("doc", "文档"), ("model", "3D 模型"), ("subtitle", "字幕"), ("project", "Topos 文件"),
+    ("other", "其他文件"),
 )
+
+
+def _file_type(entry: Entry) -> str:
+    suffix = os.path.splitext(entry.name)[1].lower()
+    if suffix in MODEL_3D_EXTENSIONS:
+        return "model"
+    if suffix in SUBTITLE_EXTENSIONS and suffix != ".xml":
+        return "subtitle"
+    if suffix == ".topos":
+        return "project"
+    return entry.kind
 
 
 def _kind_label(kind: str) -> str:
@@ -78,6 +111,7 @@ def _kind_label(kind: str) -> str:
 class FilesEntryModel(QAbstractTableModel):
     """Presentation snapshot, never a second source of filesystem truth."""
     ENTRY_ROLE = GALLERY_ENTRY_ROLE
+    rename_requested = pyqtSignal(str, str)
     HEADERS = ("名称", "类型", "大小", "修改日期", "评分", "尺寸", "扩展名")
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -93,9 +127,23 @@ class FilesEntryModel(QAbstractTableModel):
 
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         flags = super().flags(index)
-        if index.isValid() and not self.entries[index.row()].is_dir:
-            flags |= Qt.ItemFlag.ItemIsDragEnabled
+        if index.isValid():
+            entry = self.entries[index.row()]
+            if not entry.is_dir:
+                flags |= Qt.ItemFlag.ItemIsDragEnabled
+            if index.column() == 0 and entry.availability != Availability.OFFLINE:
+                flags |= Qt.ItemFlag.ItemIsEditable
         return flags
+
+    def setData(self, index: QModelIndex, value: Any, role: int = int(Qt.ItemDataRole.EditRole)) -> bool:
+        if role != Qt.ItemDataRole.EditRole or not index.flags() & Qt.ItemFlag.ItemIsEditable:
+            return False
+        entry = self.entries[index.row()]
+        name = value.strip() if isinstance(value, str) else ""
+        if name and name != entry.name:
+            self.rename_requested.emit(entry.path, name)
+            return True
+        return False
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = int(Qt.ItemDataRole.DisplayRole)) -> Any:
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
@@ -108,10 +156,8 @@ class FilesEntryModel(QAbstractTableModel):
         entry = self.entries[index.row()]
         if role == self.ENTRY_ROLE:
             return entry
-        if role == Qt.ItemDataRole.ToolTipRole:
-            return entry.path
         if role == Qt.ItemDataRole.DisplayRole:
-            return (entry.name, _kind_label(entry.kind), entry.size_label,
+            return (entry.name, _kind_label(_file_type(entry)), entry.size_label,
                     entry.mtime_label or "—", "★" * entry.user.rating,
                     entry.technical.resolution or "—",
                     entry.name.rsplit(".", 1)[-1].upper() if "." in entry.name and not entry.is_dir else "—")[index.column()]
@@ -192,17 +238,31 @@ class FilesFilterModel(QSortFilterProxyModel):
         self.query = ""
         self.kind = "all"
         self.flag = -1
+        self.color = -1
+        self.tag = ""
+        self.graded_only = False
+        self.is_graded: Callable[[str], bool] | None = None
         self.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
 
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:
         entry = self.sourceModel().index(row, 0, parent).data(FilesEntryModel.ENTRY_ROLE)
         if entry is None:
             return False
-        in_kind = self.kind == "all" or entry.is_dir or entry.kind == self.kind
-        if not in_kind:
-            return False
-        if self.flag >= 0 and not entry.is_dir and entry.user.flag != self.flag:
-            return False
+        if entry.is_dir:
+            if self.graded_only:
+                return False
+        else:
+            if self.kind != "all" and _file_type(entry) != self.kind:
+                return False
+            if self.flag >= 0 and entry.user.flag != self.flag:
+                return False
+            if self.color >= 0 and entry.user.color != self.color:
+                return False
+            if self.tag and self.tag not in entry.user.tags:
+                return False
+            if self.graded_only and (self.is_graded is None or not is_image(entry.path)
+                                     or not self.is_graded(entry.path)):
+                return False
         if not self.query:
             return True
         haystack = " ".join((entry.name, entry.user.tag_text, entry.user.comments)).casefold()
@@ -224,7 +284,9 @@ class FilesFilterModel(QSortFilterProxyModel):
         if left.column() == 4:
             return a.user.rating < b.user.rating
         if left.column() == 1:
-            return a.kind.casefold() < b.kind.casefold()
+            def type_key(entry: Entry) -> tuple[str, str, str]:
+                return (_file_type(entry), os.path.splitext(entry.name)[1].casefold(), entry.name.casefold())
+            return type_key(a) < type_key(b)
         if left.column() == 5:
             return (_number(a.technical.width) * _number(a.technical.height)
                     < _number(b.technical.width) * _number(b.technical.height))
@@ -236,6 +298,62 @@ class FilesFilterModel(QSortFilterProxyModel):
 class _DragView:
     """Shared native drag and scoped keyboard behavior for the two views."""
     panel: NativeFilesPanel
+    _rename_press: tuple[QPersistentModelIndex, QPoint] | None = None
+    _rename_click_timer: QTimer | None = None
+
+    def _name_at(self, pos: QPoint) -> QModelIndex:
+        index = self.indexAt(pos)
+        if index.isValid() and index.column() == 0:
+            delegate = self.itemDelegateForIndex(index)
+            if isinstance(delegate, FilesNameDelegate) and delegate.name_rect(self.visualRect(index)).contains(pos):
+                return index
+        return QModelIndex()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        self._cancel_click_rename()
+        self._rename_press = None
+        if event.button() == Qt.MouseButton.LeftButton and not event.modifiers():
+            pos = event.position().toPoint()
+            index = self._name_at(pos)
+            if index.isValid() and self.selectionModel().selectedRows(0) == [index]:
+                self._rename_press = QPersistentModelIndex(index), pos
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        pressed, self._rename_press = self._rename_press, None
+        super().mouseReleaseEvent(event)
+        if pressed and event.button() == Qt.MouseButton.LeftButton and not event.modifiers():
+            index = self._name_at(event.position().toPoint())
+            if index.isValid() and pressed[0] == index:
+                timer = QTimer(self)
+                timer.setSingleShot(True)
+                target = pressed[0]
+
+                def rename_if_selected() -> None:
+                    self._cancel_click_rename()
+                    if (self.isVisible() and self.window().focusWidget() is self
+                            and self.selectionModel().selectedRows(0) == [target]):
+                        self.panel.request_rename()
+
+                timer.timeout.connect(rename_if_selected)
+                self._rename_click_timer = timer
+                timer.start(QApplication.doubleClickInterval())
+
+    def _cancel_click_rename(self) -> None:
+        if self._rename_click_timer is not None:
+            self._rename_click_timer.stop()
+            self._rename_click_timer.deleteLater()
+            self._rename_click_timer = None
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        self._cancel_click_rename()
+        self._rename_press = None
+        index = self.indexAt(event.position().toPoint())
+        if event.button() == Qt.MouseButton.LeftButton and index.isValid():
+            self.doubleClicked.emit(index)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def startDrag(self, supported_actions: Qt.DropAction) -> None:
         mime = self.panel.mime_data_for_selection()
@@ -245,6 +363,10 @@ class _DragView:
             drag.exec(Qt.DropAction.CopyAction)
 
     def mouseMoveEvent(self, event: Any) -> None:
+        if self._rename_press is not None:
+            distance = (event.position().toPoint() - self._rename_press[1]).manhattanLength()
+            if distance >= QApplication.startDragDistance():
+                self._rename_press = None
         super().mouseMoveEvent(event)
         if not event.buttons():
             self.panel.hover_index(self.indexAt(event.position().toPoint()))
@@ -267,7 +389,8 @@ class _DragView:
             event.accept()
         elif event.key() == Qt.Key.Key_Space:
             # Space 只做预览；Enter 仍走原来的打开语义（目录进入 / 文件打开）。
-            self.panel.preview_selected()
+            if not event.isAutoRepeat():
+                self.panel.preview_selected()
             event.accept()
         elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.panel.activate_current()
@@ -335,6 +458,8 @@ class NativeFilesPanel(QWidget):
     library_register_requested = pyqtSignal(str, str)
     library_remove_requested = pyqtSignal(str)
     library_rename_requested = pyqtSignal(str, str)
+    library_import_requested = pyqtSignal(str, str)
+    library_export_requested = pyqtSignal(str, str)
     scan_requested = pyqtSignal()
     scan_cancel_requested = pyqtSignal()
     thumbnail_retry_requested = pyqtSignal(str, int)
@@ -352,6 +477,7 @@ class NativeFilesPanel(QWidget):
                  preferences: Any = None, transport: NativeFilesTransport | None = None) -> None:
         super().__init__(parent)
         self._transport = transport
+        self._library_transfer_busy = False
         self.home_path = unicodedata.normalize("NFC", QDir.cleanPath(home_path or QDir.homePath()))
         self.current_path = ""
         self._requested_path = ""
@@ -378,6 +504,14 @@ class NativeFilesPanel(QWidget):
         self._entry_rows: dict[str, int] = {}
         self._thumbnail_timers: dict[str, QTimer] = {}
         self._thumbnail_attempts: dict[str, int] = {}
+        self._card_dimensions: dict[str, str | None] = {}
+        self._dimension_queue: dict[str, str] = {}
+        self._dimension_batch: tuple[str, dict[str, str]] | None = None
+        self._dimension_timer = QTimer(self)
+        self._dimension_timer.setSingleShot(True)
+        self._dimension_timer.timeout.connect(self._read_card_dimensions)
+        if transport is not None:
+            transport.card_dimensions_loaded.connect(self._apply_card_dimensions)
         self._thumbnail_generation = 0
         self._sidebar_preference: bool | None = None
         self._inspector_preference: bool | None = None
@@ -421,6 +555,7 @@ class NativeFilesPanel(QWidget):
         self._apply_preferences()
         self._preview_path = ""
         self._library_lightbox = False
+        self._space_preview = False
         self._preview_edge = MAX_DECODE_PIXELS
         self._preview_loading = False
         self._preview_cache: OrderedDict[tuple, tuple[QImage, bool]] = OrderedDict()
@@ -436,8 +571,8 @@ class NativeFilesPanel(QWidget):
         self._preview_decoder.image_ready.connect(self._on_preview_image)
         self._preview_decoder.decode_failed.connect(self._on_preview_decode_failed)
         self._preview.closed.connect(self._on_preview_closed)
-        self._preview.next_requested.connect(lambda: self._step_preview(1))
-        self._preview.previous_requested.connect(lambda: self._step_preview(-1))
+        self._preview.next_requested.connect(lambda: self._navigate_lightbox(1))
+        self._preview.previous_requested.connect(lambda: self._navigate_lightbox(-1))
         self._preview.detail_requested.connect(self._request_preview_detail)
         self._preview.open_in_legacy_requested.connect(self.preview_external_requested)
         self._preview.grade_requested.connect(self._grade_previewed_image)
@@ -459,6 +594,7 @@ class NativeFilesPanel(QWidget):
         with QSignalBlocker(self.view_combo):
             self.view_combo.setCurrentIndex(self.view_combo.findData(prefs.layout_mode))
         self.card_delegate.grid_fill = prefs.grid_fill
+        self._set_card_metadata(frozenset(prefs.card_metadata), persist=False)
         self._change_layout(self.view_combo.currentIndex(), persist=False)
         with QSignalBlocker(self.density_slider):
             self.density_slider.setValue(max(self.density_slider.minimum(),
@@ -504,10 +640,10 @@ class NativeFilesPanel(QWidget):
             QWidget#nativeFiles, QWidget#filesGalleryToolbar {{ background: {C.BG_PANEL}; color: {C.TEXT_PRIMARY}; }}
             QLabel {{ background: transparent; color: {C.TEXT_SECONDARY}; }}
             QLabel#filesSection {{ color: {C.TEXT_PRIMARY}; font-size: 13px; font-weight: 600; }}
-            QLabel#filesSidebarHeading {{ color: {C.TEXT_DIM}; font-size: 11px; font-weight: 600; padding-left: 5px; }}
+            QLabel#filesSidebarHeading {{ color: {C.TEXT_PRIMARY}; font-size: 11px; font-weight: 600; padding-left: 5px; }}
             QLabel#filesHint {{ color: {C.TEXT_HINT}; font-size: 11px; }}
-            QWidget#filesSidebar, QTreeView#filesHomeTree,
-            QWidget#filesInspector, QWidget#filesInspectorBody {{ background: #222226; }}
+            QWidget#filesSidebar, QWidget#filesLocationToolbar, QTreeView#filesHomeTree,
+            QWidget#filesInspector, QWidget#filesInspectorBody {{ background: {FILES_LOCATION_BACKGROUND}; }}
             QScrollArea#filesInspectorScroll {{ background: transparent; border: none; }}
             QWidget#filesInspectorBody QLabel[filesInfoDetail="true"] {{ color: {C.TEXT_DIM}; font-size: 11px; }}
             QWidget#filesInspectorBody QLineEdit {{ font-size: 11px; }}
@@ -516,8 +652,11 @@ class NativeFilesPanel(QWidget):
                 background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 0;
             }}
             QToolButton[filesMetadataButton="true"]:hover {{ background: {C.BG_ACTIVE}; }}
+            QToolButton#filesRatingStar:hover {{ background: transparent; }}
             QToolButton#filesColorDot:checked {{ border-color: {C.TEXT_PRIMARY}; }}
             QToolButton[filesMetadataButton="true"]:focus {{ border-color: {C.ORANGE}; }}
+            QToolButton#filesClearColor:focus:!pressed {{ border-color: transparent; background: {C.BG_HOVER}; }}
+            QToolButton#filesClearColor:pressed {{ border-color: {C.TEXT_PRIMARY}; }}
             QPushButton#filesInspectorExport {{ background: {C.BG_ACTIVE}; color: {C.TEXT_PRIMARY}; }}
             QPushButton#filesInspectorExport:hover {{ border-color: {C.TEXT_DIM}; }}
             QPushButton#filesInspectorExport:focus {{ border-color: {C.ORANGE}; }}
@@ -526,6 +665,12 @@ class NativeFilesPanel(QWidget):
             QTreeView#filesDetails {{ alternate-background-color: {C.BG_HOVER}; }}
             QTreeView#filesDetails::item:selected {{ background: {C.BG_ACTIVE}; color: {C.ORANGE}; }}
             QTreeView#filesHomeTree {{ show-decoration-selected: 0; }}
+            QTreeView#filesHomeTree::branch:has-children:closed {{
+                image: url("{location_icon_path("collapsed")}");
+            }}
+            QTreeView#filesHomeTree::branch:has-children:open {{
+                image: url("{location_icon_path("expanded")}");
+            }}
             QTreeView#filesHomeTree::item {{ height: 24px; border: none; border-radius: 4px; }}
             QTreeView#filesHomeTree::item {{ border-left: 2px solid transparent; }}
             QTreeView#filesHomeTree::item:selected {{
@@ -535,8 +680,11 @@ class NativeFilesPanel(QWidget):
             QHeaderView::section {{ background: {C.BG_PANEL}; color: {C.TEXT_HINT}; border: none; padding: 8px; font-size: 11px; }}
             QLineEdit {{ background: {C.BG_INPUT}; color: {C.TEXT_PRIMARY}; border: 1px solid {C.BORDER}; border-radius: 4px; padding: 3px 7px; }}
             QLineEdit:focus {{ border-color: {C.ORANGE_PRESS}; }}
+            QLineEdit#filesNameEditor {{ border: 1px solid {C.ORANGE}; border-radius: 2px; padding: 0 2px;
+                selection-background-color: {C.ORANGE}; selection-color: {C.BG_DEEPEST}; }}
             QPushButton {{ background: transparent; color: {C.TEXT_SECONDARY}; border: 1px solid transparent; border-radius: 5px; padding: 5px 9px; }}
             QPushButton[filesFavoriteAction="true"] {{ padding: 0; font-size: 15px; font-weight: 600; }}
+            QPushButton[filesLocationNav="true"] {{ padding: 0; }}
             QPushButton:hover, QPushButton:checked {{ background: {C.BG_ACTIVE}; color: {C.TEXT_PRIMARY}; }}
             QPushButton[workspacePanelSwitch="true"]:checked,
             QPushButton[workspacePanelSwitch="true"]:hover {{
@@ -575,13 +723,15 @@ class NativeFilesPanel(QWidget):
         self.sidebar_button.setChecked(True)
         navigation.addWidget(self.sidebar_button)
         navigation.addSpacing(6)
-        self.back_button = self._button("‹", _tr("back", "后退"), lambda: self._travel(-1))
-        self.forward_button = self._button("›", _tr("forward", "前进"), lambda: self._travel(1))
-        for button in (self.back_button, self.forward_button):
-            button.setFixedWidth(28)
+        self.back_button = self._button("", _tr("back", "后退"), lambda: self._travel(-1))
+        self.forward_button = self._button("", _tr("forward", "前进"), lambda: self._travel(1))
+        self.up_button = self._button("", _tr("up", "上一级"), self.go_up)
+        for button, icon in ((self.back_button, "back"), (self.forward_button, "forward"), (self.up_button, "up")):
+            button.setProperty("filesLocationNav", True)
+            button.setIcon(location_icon(icon))
+            button.setIconSize(QSize(20, 20))
+            button.setFixedSize(28, 26)
             navigation.addWidget(button)
-        self.up_button = self._button("↑", _tr("up", "上一级"), self.go_up)
-        navigation.addWidget(self.up_button)
         self.path_stack = QStackedWidget(self)
         self.breadcrumb_button = self._button("", _tr("edit_path", "点击编辑完整路径"), self._edit_path)
         self.breadcrumb_button.setObjectName("filesBreadcrumb")
@@ -643,24 +793,33 @@ class NativeFilesPanel(QWidget):
         self.splitter = PanelSplitter(Qt.Orientation.Horizontal, self)
         self.sidebar = QWidget(self.splitter)
         self.sidebar.setObjectName("filesSidebar")
-        self.sidebar.setMinimumWidth(144)
+        self.sidebar.setMinimumWidth(210)
         side_layout = QVBoxLayout(self.sidebar)
-        side_layout.setContentsMargins(8, 8, 8, 6)
-        side_layout.setSpacing(4)
+        side_layout.setContentsMargins(0, 0, 0, 6)
+        side_layout.setSpacing(0)
+        self._location_toolbar = QWidget(self.sidebar)
+        self._location_toolbar.setObjectName("filesLocationToolbar")
         self._library_heading = QLabel(_tr("libraries_heading", "素材库"))
         self._library_heading.setObjectName("filesSidebarHeading")
         self._library_heading.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-        self._library_header = QHBoxLayout()
+        self._library_header = QHBoxLayout(self._location_toolbar)
+        self._library_header.setContentsMargins(8, 8, 8, 0)
         self._library_header.setSpacing(2)
-        self._library_header.addWidget(self._library_heading, 1)
-        ai_button = self._button("AI", I18N.tr("files.ai_library.open", "AI 素材库…"),
+        self._library_header.addWidget(self._library_heading, 1, Qt.AlignmentFlag.AlignTop)
+        ai_button = self._button("", I18N.tr("files.ai_library.open", "AI 素材库…"),
                                  lambda _checked=False: self.ai_library_requested.emit())
-        add_library_button = self._button("+", _tr("add_library", "添加素材库…"), self.open_add_library)
+        ai_button.setObjectName("openAILibrary")
+        ai_button.setIcon(location_icon("ai-add"))
+        add_library_button = self._button("", _tr("add_library", "添加素材库…"), self.open_add_library)
+        add_library_button.setObjectName("addMediaLibrary")
+        add_library_button.setIcon(location_icon("library-add"))
         for button in (ai_button, add_library_button):
             button.setProperty("filesFavoriteAction", True)
-            button.setFixedSize(26, 24)
-            self._library_header.addWidget(button)
-        side_layout.addLayout(self._library_header)
+            button.setIconSize(QSize(20, 20))
+            button.setFixedSize(28, 20)
+            self._library_header.addWidget(button, alignment=Qt.AlignmentFlag.AlignTop)
+        side_layout.addWidget(self._location_toolbar)
+        side_layout.addWidget(self._rule())
         self.locations = HomeDirectoryTree(self.home_path, self._is_visible_entry, self.sidebar)
         self.locations.setMinimumWidth(112)
         self.locations.setAccessibleName(_tr("locations", "位置"))
@@ -671,7 +830,10 @@ class NativeFilesPanel(QWidget):
         self.locations.customContextMenuRequested.connect(self._show_library_menu)
         FileDropTarget(self.locations, destination_at=self._sidebar_drop_target, transfer=self._queue_file_transfer,
                        expand_folders=True, reference_at=self.locations.reference_drop_target)
-        side_layout.addWidget(self.locations, 1)
+        tree_layout = QVBoxLayout()
+        tree_layout.setContentsMargins(8, 4, 8, 0)
+        tree_layout.addWidget(self.locations)
+        side_layout.addLayout(tree_layout, 1)
         content = QWidget(self.splitter)
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -711,19 +873,12 @@ class NativeFilesPanel(QWidget):
         self.gallery_options = QHBoxLayout()
         self.gallery_options.setSpacing(2)
         self.gallery_options.addStretch()
-        self.type_combo = self._toolbar_combo(_tr("type_filter", "文件类型筛选"))
-        for label, kind in (("全部类型", "all"), ("图片", "image"), ("视频", "video"), ("音频", "audio"), ("文档", "doc")):
-            self.type_combo.addItem(_tr(f"type.{kind}", label), kind)
-        self.type_combo.currentIndexChanged.connect(self._filter_changed)
-        self.gallery_options.addWidget(self.type_combo)
-        self.flag_combo = self._toolbar_combo(_tr("flag_filter", "旗标筛选"))
-        for label, flag in (("全部旗标", -1), ("已标旗", 1), ("已拒收", 2)):
-            self.flag_combo.addItem(_tr(f"flag.{flag}", label), flag)
-        self.flag_combo.currentIndexChanged.connect(self._filter_changed)
-        self.gallery_options.addWidget(self.flag_combo)
-        self.sort_combo = self._toolbar_combo(_tr("sort", "排序方式"))
-        for label, key in (("名称 A–Z", "name"), ("最近修改", "date"), ("最大文件", "size"), ("最高评分", "rating")):
-            self.sort_combo.addItem(_tr(f"sort.{key}", label))
+        self.file_filter_button = self._toolbar_menu_button(
+            _tr("file_filter", "文件筛选"), self._file_filter_menu, checkable=True)
+        self.gallery_options.addWidget(self.file_filter_button)
+        self.sort_combo = self._toolbar_combo(_tr("sort_order", "排序方式"))
+        for label, key in (("名称 A–Z", "name"), ("最近修改", "date"), ("最大文件", "size"), ("最高评分", "rating"), ("文件类型", "type")):
+            self.sort_combo.addItem(_tr(f"sort.{key}", label), key)
         self.sort_combo.currentIndexChanged.connect(self._sort_changed)
         self.sort_combo.currentIndexChanged.connect(
             lambda index: setattr(self._preferences(), "sort_index", index))
@@ -733,17 +888,25 @@ class NativeFilesPanel(QWidget):
                             ("grid", "网格"), ("list", "列表")):
             self.view_combo.addItem(_tr(f"layout.{mode}", label), mode)
         self.gallery_options.addWidget(self.view_combo)
+        self.display_button = self._toolbar_menu_button(
+            _tr("card_display", "显示选项"), self._card_display_menu)
+        self.gallery_options.addWidget(self.display_button)
         self.gallery_toolbar_layout.addLayout(self.gallery_options)
-        self.gallery_toolbar.installEventFilter(self)
         content_layout.addWidget(self.gallery_toolbar)
         content_layout.addWidget(self._rule())
         self.pages = QStackedWidget(content)
-        self.icon_view = FilesIconView(self.pages)
+        gallery_spacing = LIBRARY_GALLERY_SPACING
+        self.icon_view = FilesIconView(self.pages, spacing=gallery_spacing)
         self.icon_view.setMouseTracking(True)
         self.icon_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.card_delegate = FilesCardDelegate(
             FilesEntryModel.ENTRY_ROLE, self._image_for_entry, self.icon_view,
-            strip_for_entry=self.strip_for_entry, ai_analyzed=lambda path: path in self._ai_marked_paths)
+            strip_for_entry=self.strip_for_entry, ai_analyzed=lambda path: path in self._ai_marked_paths,
+            spacing=gallery_spacing)
+        self.card_delegate.placeholder_color = FILES_LOCATION_BACKGROUND
+        self.card_delegate.show_color_label = True
+        self.card_delegate.resolution_for_entry = self._card_resolution
+        self.model.rename_requested.connect(self._commit_filename)
         self.model.modelReset.connect(self._reset_ai_marks)
         self.model.rowsInserted.connect(self.refresh_ai_marks)
         self.icon_view.setItemDelegate(self.card_delegate)
@@ -760,6 +923,7 @@ class NativeFilesPanel(QWidget):
         self.detail_view.setSortingEnabled(True)
         self.detail_view.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         for view in (self.icon_view, self.detail_view):
+            view.verticalScrollBar().setStyleSheet(FILES_CONTENT_SCROLLBAR_STYLE)
             view.panel = self
             view.setModel(self.proxy)
             view.setSelectionModel(self.selection)
@@ -804,23 +968,25 @@ class NativeFilesPanel(QWidget):
         inspector_layout = QVBoxLayout(self.inspector)
         inspector_layout.setContentsMargins(0, 0, 0, 0)
         inspector_layout.setSpacing(0)
+        self._inspector_heading = QLabel(_tr("inspector", "文件信息"), self.inspector)
+        self._inspector_heading.setObjectName("filesSection")
+        self._inspector_heading.setContentsMargins(12, 0, 12, 0)
+        inspector_layout.addWidget(self._inspector_heading)
+        inspector_layout.addWidget(self._rule())
         self.inspector_scroll = QScrollArea(self.inspector)
         self.inspector_scroll.setObjectName("filesInspectorScroll")
+        self.inspector_scroll.verticalScrollBar().setStyleSheet(FILES_CONTENT_SCROLLBAR_STYLE)
         self.inspector_scroll.setWidgetResizable(True)
         self.inspector_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.inspector_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self.inspector_body = QWidget(self.inspector_scroll)
         self.inspector_body.setObjectName("filesInspectorBody")
         info_layout = QVBoxLayout(self.inspector_body)
-        info_layout.setContentsMargins(12, 10, 12, 14)
+        info_layout.setContentsMargins(12, 7, 12, 14)
         info_layout.setSpacing(7)
         info_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.inspector_scroll.setWidget(self.inspector_body)
         inspector_layout.addWidget(self.inspector_scroll)
-        info_heading = QLabel(_tr("inspector", "文件信息"))
-        info_heading.setObjectName("filesSection")
-        info_layout.addWidget(info_heading)
-        info_layout.addWidget(self._rule())
         self.preview_cover = QLabel(self.inspector)
         self.preview_cover.setFixedHeight(180)
         self.preview_cover.setMinimumWidth(0)
@@ -872,23 +1038,36 @@ class NativeFilesPanel(QWidget):
         meta_form.setVerticalSpacing(5)
         meta_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         self._rating_value = self._color_value = 0
-        self._star_filled = get_icon("mdi.star", color=C.ORANGE)
-        self._star_outline = get_icon("mdi.star-outline", color=C.TEXT_DIM)
+        star_size = 20
+        self._star_filled = rating_star_icon(star_size, RATING_STAR_COLOR)
+        self._star_unrated = rating_star_icon(star_size, UNRATED_STAR_COLOR)
         self.rating_stars = self._marker_row(meta_form, _tr("rating", "评分"))
+        self.rating_stars.setSpacing(0)
         self.rating_buttons = [self._add_marker_button(
             self.rating_stars, _tr("rating_stars", "{count} 星").format(count=value),
             lambda value=value: self._rating_clicked(value)) for value in range(1, 6)]
-        self.rating_clear_button = self._add_marker_button(
-            self.rating_stars, _tr("clear_rating", "清除评分"), lambda: self._rating_clicked(0))
-        self.rating_clear_button.setIcon(get_icon("mdi.close-circle-outline", color=C.TEXT_DIM))
-        self.rating_clear_button.setCheckable(False)
+        rating_row = self.rating_stars.parentWidget()
+        self.rating_clear_menu = QMenu(rating_row)
+        self.rating_clear_action = self.rating_clear_menu.addAction(_tr("clear_rating", "清除评分"))
+        self.rating_clear_action.triggered.connect(lambda: self._rating_clicked(0))
+        for button in self.rating_buttons:
+            button.setObjectName("filesRatingStar")
+            button.setFixedSize(21, 24)
+            button.setIconSize(QSize(star_size, star_size))
+            button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+            button.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            button.customContextMenuRequested.connect(
+                lambda pos, star=button: self.rating_clear_menu.popup(star.mapToGlobal(pos)))
         self.rating_mixed = self._finish_marker_row(self.rating_stars)
         self.color_dots = self._marker_row(meta_form, _tr("color_label", "颜色标签"))
         self.color_buttons: list[QToolButton] = []
-        for value, (key, label, color) in enumerate(INSPECTOR_COLORS):
+        for value, (key, label, color) in enumerate(FILE_LABEL_COLORS):
             button = self._add_marker_button(self.color_dots, _tr(f"label_color.{key}", label),
                                              lambda value=value: self._color_clicked(value))
-            button.setObjectName("filesColorDot")
+            button.setObjectName("filesColorDot" if value else "filesClearColor")
+            button.setCheckable(value != 0)
+            if value == 0:
+                button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             button.setIcon(get_icon("mdi.circle" if value else "mdi.close-circle-outline", color=color))
             self.color_buttons.append(button)
         self.color_mixed = self._finish_marker_row(self.color_dots)
@@ -926,8 +1105,10 @@ class NativeFilesPanel(QWidget):
         info_layout.addWidget(self.inspector_export_button)
         info_layout.addStretch()
         self.inspector.hide()
-        self.splitter.setSizes([184, 680, 260])
+        self.gallery_toolbar.installEventFilter(self)
+        self.splitter.setCollapsible(0, False)
         self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([_LOCATION_DEFAULT_WIDTH, 680, _INSPECTOR_DEFAULT_WIDTH])
         root.addWidget(self.splitter, 1)
         root.addWidget(self._rule())
         footer = QHBoxLayout()
@@ -994,12 +1175,12 @@ class NativeFilesPanel(QWidget):
         margins = layout.contentsMargins()
         available = self.gallery_toolbar.width() - margins.left() - margins.right()
         spacing = self.gallery_options.spacing()
-        primary_width = self.type_combo.sizeHint().width() + self.view_combo.sizeHint().width() + spacing
-        filter_width = primary_width + self.flag_combo.sizeHint().width() + spacing
-        self.view_combo.setVisible(available >= primary_width)
-        self.flag_combo.setVisible(available >= filter_width)
-        self.sort_combo.setVisible(self.width() >= 800 and
-                                   available >= filter_width + self.sort_combo.sizeHint().width() + spacing)
+        spare = available - self.file_filter_button.sizeHint().width() - spacing
+        for control in (self.display_button, self.view_combo, self.sort_combo):
+            width = control.sizeHint().width() + spacing
+            control.setVisible(spare >= width)
+            if not control.isHidden():
+                spare -= width
         zoom_width = (self.density_label.sizeHint().width() + self.density_slider.maximumWidth()
                       + 2 * self.gallery_title_row.spacing())
         self.density_label.setVisible(available >= zoom_width + 56)
@@ -1015,6 +1196,10 @@ class NativeFilesPanel(QWidget):
         if watched is getattr(self, "preview_cover", None) and event.type() == QEvent.Type.Resize:
             self._refresh_inspector_cover()
         if watched is getattr(self, "gallery_toolbar", None) and event.type() in (QEvent.Type.Resize, QEvent.Type.LayoutRequest):
+            if event.type() == QEvent.Type.Resize:
+                height = self.gallery_toolbar.height()
+                self._location_toolbar.setFixedHeight(height)
+                self._inspector_heading.setFixedHeight(height)
             self._layout_gallery_toolbar()
         if watched is self.search_edit and event.type() == QEvent.Type.KeyPress and event.key() == Qt.Key.Key_Escape:
             self._toggle_search(False)
@@ -1031,6 +1216,153 @@ class NativeFilesPanel(QWidget):
             action.setChecked(combo.currentIndex() == index)
             action.triggered.connect(lambda checked=False, i=index: combo.setCurrentIndex(i))
         return submenu
+
+    def _toolbar_menu_button(self, title: str, menu_builder: Callable[[QMenu], None],
+                             *, checkable: bool = False) -> QPushButton:
+        button = QPushButton(title, self.gallery_toolbar)
+        button.setAccessibleName(title)
+        button.setCheckable(checkable)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+        def show_menu() -> None:
+            menu = QMenu(button)
+            menu_builder(menu)
+            if button.isCheckable():
+                self._refresh_filter_button()
+            menu.aboutToHide.connect(menu.deleteLater)
+            menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
+
+        button.clicked.connect(show_menu)
+        return button
+
+    def _filter_group(self, menu: QMenu, title: str, key: str,
+                      choices: list[tuple[Any, str]]) -> None:
+        group = menu.addMenu(title)
+        for value, label in choices:
+            action = group.addAction(label.replace("&", "&&"))
+            action.setCheckable(True)
+            action.setChecked(getattr(self.proxy, key) == value)
+            action.triggered.connect(lambda checked, option=value: self._set_file_filter(key, option))
+
+    def _file_filter_menu(self, menu: QMenu) -> None:
+        self._filter_group(menu, _tr("sort.type", "文件类型"), "kind",
+                           [(key, _tr(f"type.{key}", title)) for key, title in FILE_TYPES])
+        self._filter_group(menu, _tr("flag_filter", "旗标筛选"), "flag",
+                           [(key, _tr(f"flag.{key}", title)) for key, title in
+                            ((-1, "全部旗标"), (1, "已标旗"), (2, "已拒收"))])
+        self._filter_group(menu, _tr("color_label", "颜色标签"), "color",
+                           [(-1, _tr("all_colors", "全部颜色标签"))] +
+                           [(index, _tr(f"label_color.{key}", title) if index else _tr("no_color", "无颜色标签"))
+                            for index, (key, title, _) in enumerate(FILE_LABEL_COLORS)])
+        tags = {tag for entry in self.model.entries for tag in entry.user.tags}
+        if self.proxy.tag:
+            tags.add(self.proxy.tag)
+        self._filter_group(menu, _tr("tags", "标签"), "tag",
+                           [("", _tr("all_tags", "全部标签"))] +
+                           [(tag, tag) for tag in sorted(tags, key=str.casefold)])
+        if self.proxy.is_graded is not None:
+            action = menu.addAction(_tr("graded_only", "仅显示已调色"))
+            action.setCheckable(True)
+            action.setChecked(self.proxy.graded_only)
+            action.triggered.connect(lambda checked: self._set_file_filter("graded_only", checked))
+        menu.addSeparator()
+        menu.addAction(_tr("clear_filters", "清除筛选"), self._reset_file_filters)
+
+    def _set_file_filter(self, key: str, value: Any) -> None:
+        setattr(self.proxy, key, value)
+        self.refresh_file_filters()
+
+    def _reset_file_filters(self) -> None:
+        self.proxy.kind = "all"
+        self.proxy.flag = self.proxy.color = -1
+        self.proxy.tag = ""
+        self.proxy.graded_only = False
+        self.refresh_file_filters()
+
+    def _refresh_filter_button(self) -> None:
+        active = (self.proxy.kind != "all" or self.proxy.flag >= 0 or self.proxy.color >= 0
+                  or bool(self.proxy.tag) or self.proxy.graded_only)
+        self.file_filter_button.setChecked(active)
+
+    def refresh_file_filters(self) -> None:
+        self._refresh_filter_button()
+        self.proxy.invalidateFilter()
+        self._update_info()
+
+    def _card_display_menu(self, menu: QMenu) -> None:
+        for key, title in FILE_CAPTION_FIELDS:
+            action = menu.addAction(_tr(f"card.{key}", title))
+            action.setCheckable(True)
+            action.setChecked(key in self.card_delegate.caption_fields)
+            action.triggered.connect(lambda checked, field=key: self._toggle_card_field(field, checked))
+        menu.addSeparator()
+        fill_menu = menu.addMenu(_tr("grid_fill_heading", "网格填充方式"))
+        for fill, label in ((False, "适应"), (True, "填充")):
+            action = fill_menu.addAction(_tr("grid_fill.fill" if fill else "grid_fill.fit", label))
+            action.setCheckable(True)
+            action.setChecked(self.card_delegate.grid_fill == fill)
+            action.triggered.connect(lambda checked=False, value=fill: self._set_grid_fill(value))
+
+    def _toggle_card_field(self, field: str, enabled: bool) -> None:
+        fields = self.card_delegate.caption_fields
+        self._set_card_metadata(fields | {field} if enabled else fields - {field})
+
+    def _set_card_metadata(self, fields: frozenset[str], *, persist: bool = True) -> None:
+        fields = fields & {key for key, _ in FILE_CAPTION_FIELDS}
+        rating_at_bottom = "rating" in fields
+        caption_height = LIBRARY_GALLERY_SPACING.caption_height + FILE_CAPTION_LINE_HEIGHT * len(fields - {"rating"})
+        if rating_at_bottom:
+            caption_height += RATING_CAPTION_HEIGHT
+        spacing = replace(LIBRARY_GALLERY_SPACING, caption_height=caption_height)
+        self.card_delegate.caption_fields = fields
+        self.card_delegate.rating_at_bottom = rating_at_bottom
+        self.card_delegate.spacing = spacing
+        self.icon_view.setGallerySpacing(spacing)
+        self.icon_view.viewport().update()
+        if persist:
+            self._preferences().card_metadata = sorted(fields)
+
+    def _card_resolution(self, entry: Entry) -> str | None:
+        if entry.technical.resolution:
+            return entry.technical.resolution
+        if (self._transport is not None and self._ready and entry.path not in self._card_dimensions
+                and not entry.is_dir and entry.availability != Availability.OFFLINE
+                and _file_type(entry) in ("image", "video")):
+            self._dimension_queue[entry.path] = entry.kind
+            if self._dimension_batch is None and not self._dimension_timer.isActive():
+                self._dimension_timer.start(0)
+        return self._card_dimensions.get(entry.path)
+
+    def _read_card_dimensions(self) -> None:
+        if self._transport is None or "resolution" not in self.card_delegate.caption_fields:
+            self._dimension_queue.clear()
+            return
+        self._dimension_queue = {path: kind for path, kind in self._dimension_queue.items()
+                                 if self._entry_visible(path)}
+        if not self._dimension_queue:
+            return
+        paths = {path: self._dimension_queue.pop(path) for path in tuple(self._dimension_queue)[:16]}
+        self._card_dimensions.update(dict.fromkeys(paths))
+        request_id = uuid4().hex
+        self._dimension_batch = (request_id, paths)
+        self._transport.read_card_dimensions(request_id, paths)
+
+    def _apply_card_dimensions(self, request_id: str, dimensions: dict[str, str | None] | None) -> None:
+        if self._dimension_batch is None or request_id != self._dimension_batch[0]:
+            return
+        _, paths = self._dimension_batch
+        self._dimension_batch = None
+        if dimensions is None:
+            for path, kind in paths.items():
+                self._card_dimensions.pop(path, None)
+                self._dimension_queue[path] = kind
+            self._dimension_timer.start(250)
+            return
+        self._card_dimensions.update({path: value for path, value in dimensions.items()
+                                      if path in self._card_dimensions})
+        self.icon_view.viewport().update()
+        if self._dimension_queue:
+            self._dimension_timer.start(0)
 
     def _show_tools(self) -> None:
         menu = QMenu(self)
@@ -1056,15 +1388,10 @@ class NativeFilesPanel(QWidget):
                        lambda _checked=False: self.ai_library_requested.emit())
         menu.addAction(_tr("register_current", "将当前文件夹添加为素材库"), self.pin_current_directory)
         menu.addAction(_tr("jobs", "文件任务…"), self.jobs_requested.emit)
-        if self.flag_combo.isHidden():
-            self._add_combo_menu(menu, self.flag_combo.accessibleName(), self.flag_combo)
-        layout_menu = self._add_combo_menu(menu, _tr("layout_heading", "布局方式"), self.view_combo)
-        fill_menu = layout_menu.addMenu(_tr("grid_fill_heading", "网格填充方式"))
-        for fill, label in ((False, "适应"), (True, "填充")):
-            action = fill_menu.addAction(_tr("grid_fill.fill" if fill else "grid_fill.fit", label))
-            action.setCheckable(True)
-            action.setChecked(self.card_delegate.grid_fill == fill)
-            action.triggered.connect(lambda checked=False, value=fill: self._set_grid_fill(value))
+        if self.file_filter_button.isHidden():
+            self._file_filter_menu(menu.addMenu(self.file_filter_button.text()))
+        self._add_combo_menu(menu, _tr("layout_heading", "布局方式"), self.view_combo)
+        self._card_display_menu(menu.addMenu(self.display_button.text()))
         self._add_combo_menu(menu, self.sort_combo.accessibleName(), self.sort_combo)
         menu.addSeparator()
         menu.addAction(_tr("plugin_center", "素材插件中心…"), self.plugin_center_requested.emit)
@@ -1095,11 +1422,19 @@ class NativeFilesPanel(QWidget):
         self.inspector.setVisible(checked)
         self._preferences().inspector_preference = checked
         if checked:
-            self.splitter.setSizes([184, max(200, self.width() - 446), 260])
+            self._apply_default_inspector_layout()
+
+    def _apply_default_inspector_layout(self) -> None:
+        sidebar_visible = not self.sidebar.isHidden()
+        sidebar_width = _LOCATION_DEFAULT_WIDTH if sidebar_visible else 0
+        handle_width = self.splitter.handleWidth() * (2 if sidebar_visible else 1)
+        gallery_width = max(1, self.splitter.width() - sidebar_width - _INSPECTOR_DEFAULT_WIDTH - handle_width)
+        self.splitter.setSizes([_LOCATION_DEFAULT_WIDTH, gallery_width, _INSPECTOR_DEFAULT_WIDTH])
 
     def _sort_changed(self, index: int) -> None:
-        column = (0, 3, 2, 4)[index]
-        self.proxy.sort(column, Qt.SortOrder.AscendingOrder if index == 0 else Qt.SortOrder.DescendingOrder)
+        column = (0, 3, 2, 4, 1)[index]
+        order = Qt.SortOrder.AscendingOrder if column in (0, 1) else Qt.SortOrder.DescendingOrder
+        self.proxy.sort(column, order)
 
     def _change_layout(self, index: int, *, persist: bool = True) -> None:
         mode = str(self.view_combo.itemData(index) or "adaptive")
@@ -1208,7 +1543,7 @@ class NativeFilesPanel(QWidget):
         with QSignalBlocker(self.inspector_button):
             self.inspector_button.setChecked(show)
         if show and changed:
-            self.splitter.setSizes([184, max(240, self.width() - 446), 260])
+            self._apply_default_inspector_layout()
 
     def _image_for_entry(self, entry: Any) -> QImage | None:
         if not isinstance(entry, Entry):
@@ -1323,6 +1658,10 @@ class NativeFilesPanel(QWidget):
 
     def _clear_thumbnail_work(self) -> None:
         self._thumbnail_generation += 1
+        self._dimension_batch = None
+        self._dimension_timer.stop()
+        self._dimension_queue.clear()
+        self._card_dimensions.clear()
         for path in list(self._thumbnail_timers):
             self._stop_thumbnail_timer(path)
         self._thumbnail_attempts.clear()
@@ -1431,7 +1770,10 @@ class NativeFilesPanel(QWidget):
 
     def invalidate_external_files(self, paths: list[str]) -> None:
         """Drop only confirmed changed files from the browser's image caches."""
+        for directory in {QFileInfo(path).absolutePath() for path in paths}:
+            self.locations.invalidate_folder_count(directory)
         for path in paths:
+            self._card_dimensions.pop(path, None)
             self._images.pop(path, None)
             self._deferred_thumbnails.pop(path, None)
             self._thumbnail_failed.discard(path)
@@ -1476,9 +1818,10 @@ class NativeFilesPanel(QWidget):
             self.show_error(path, error.message)
             return
         entries = [entry for entry in parsed if self._is_visible_entry(entry)]
+        path_changed = path != self.current_path
         if self._history_target is not None and self._history[self._history_target] == path:
             self._history_index = self._history_target
-        elif path != self.current_path:
+        elif path_changed:
             self._history = self._history[:self._history_index + 1] + [path]
             self._history_index = len(self._history) - 1
         self._history_target = None
@@ -1505,6 +1848,8 @@ class NativeFilesPanel(QWidget):
         self.message.setText("" if entries else _tr("empty", "此文件夹为空。"))
         self.message.setVisible(not entries)
         self.locations.reveal(path)
+        if path_changed:
+            self.locations.invalidate_folder_count(path)
         self._update_navigation()
         self._update_info()
 
@@ -1598,10 +1943,7 @@ class NativeFilesPanel(QWidget):
             self.proxy.query = text.casefold().strip()
         else:
             self.proxy.query = ""
-        self.proxy.kind = self.type_combo.currentData()
-        self.proxy.flag = int(self.flag_combo.currentData())
-        self.proxy.invalidateFilter()
-        self._update_info()
+        self.refresh_file_filters()
         # [FR-09] 连续输入防抖：每次按键立即全库查询会堆在途请求，
         # 旧响应与新结果竞争覆盖
         if self.library_button.isChecked() and text.strip():
@@ -1719,6 +2061,12 @@ class NativeFilesPanel(QWidget):
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QBrush(cover))
                 painter.drawRoundedRect(rounded.rect(), 6, 6)
+                rating = entry.user.rating
+                width = rating * RATING_BADGE_STAR_SIZE + 8
+                width = min(width, rounded.width() - 12)
+                if rating and width >= 23 and rounded.height() >= 30:
+                    paint_rating_badge(painter, QRectF(rounded.width() - width - 6,
+                                                      rounded.height() - 24, width, 18), rating)
                 painter.end()
             self.preview_cover.setPixmap(rounded)
         else:
@@ -1804,10 +2152,10 @@ class NativeFilesPanel(QWidget):
 
     def _sync_marker_buttons(self, has_selection: bool = True) -> None:
         for value, button in enumerate(self.rating_buttons, 1):
-            button.setIcon(self._star_filled if value <= self._rating_value else self._star_outline)
+            button.setIcon(self._star_filled if value <= self._rating_value else self._star_unrated)
             button.setChecked(value == self._rating_value)
         for value, button in enumerate(self.color_buttons):
-            button.setChecked(has_selection and value == self._color_value)
+            button.setChecked(has_selection and value > 0 and value == self._color_value)
         self.rating_mixed.setVisible(self._rating_value == -1)
         self.color_mixed.setVisible(self._color_value == -1)
 
@@ -1918,6 +2266,7 @@ class NativeFilesPanel(QWidget):
         if not isinstance(snapshots, dict):
             return
         touched = False
+        rating_paths = set()
         for path, snapshot in snapshots.items():
             if not isinstance(snapshot, dict):
                 continue
@@ -1926,16 +2275,21 @@ class NativeFilesPanel(QWidget):
             if not patch:
                 continue
             self.model.apply_patch([str(path)], patch)
+            if "rating" in patch:
+                rating_paths.add(path)
             touched = True
         if touched:
             selected = self._selected_entries()
             if selected:
                 self._fill_metadata_controls(selected)
+                if len(selected) == 1 and selected[0].path in rating_paths:
+                    self._refresh_inspector_cover()
 
     def apply_metadata_result(self, paths: list[str], patch: dict[str, Any], message: str = "") -> None:
         """服务确认后才更新模型；失败不留下"已保存"的假像。"""
         self._pending_patch = None
-        self.model.apply_patch(paths, patch)
+        if self._transport is None:
+            self.model.apply_patch(paths, patch)
         self.meta_status.setText(message or _tr("saved", "已保存"))
         self._update_info()
 
@@ -1945,24 +2299,27 @@ class NativeFilesPanel(QWidget):
         self._fill_metadata_controls(self._selected_entries())
 
     def preview_selected(self) -> None:
-        """Space / 预览入口：图片与视频走原生浮层，其余媒体暂交旧查看器。"""
+        """Open the selected file in a Space-dismissible lightbox."""
+        if self._preview.is_open:
+            if self._space_preview:
+                self.close_preview()
+            return
         entries = self._selected_entries()
-        if len(entries) == 1 and self._ready:
-            entry = entries[0]
-            if entry.kind == "image" and entry.availability != Availability.OFFLINE:
-                self._start_preview(entry)
-                return
-            if entry.kind == "video" and entry.availability != Availability.OFFLINE:
-                self._start_video_preview(entry)
-                return
-            if entry.has_known_media:
-                # 音频/模型：音频页在 M2 接入；模型仍交给既有查看器。
-                self.preview_external_requested.emit(entry.path)
-                return
-            if entry.is_dir:
-                self.navigate(entry.path)
-                return
-        self.activate_current()
+        if not self._ready or len(entries) != 1:
+            return
+        entry = entries[0]
+        if entry.is_dir:
+            self.navigate(entry.path)
+            return
+        self._space_preview = True
+        if not self._open_preview_entry(entry):
+            self._preview_path = entry.path
+            self._preview.open_for(entry.path, entry.name, preview_only=True, close_on_space=True)
+            self._preview.set_steppers_enabled(False)
+            message = (_tr("offline", "离线") if entry.availability == Availability.OFFLINE else
+                       _tr("lightbox.unavailable", "此文件没有可用的预览"))
+            self._preview.show_message(entry.path, message, open_in_legacy=entry.availability != Availability.OFFLINE)
+            self.image_lightbox_active.emit(True)
 
     # -- U03 预览会话 --------------------------------------------------------
     def _cache_opened_thumbnail(self, entry: Entry) -> None:
@@ -1978,10 +2335,9 @@ class NativeFilesPanel(QWidget):
         self._preview_path = entry.path
         preview_only = os.path.splitext(entry.path)[1].lower() in RAW_PREVIEW_SUFFIXES | {".toos"}
         self._preview.open_for(
-            entry.path, entry.name, preview_only=preview_only, auto_hide_info=self._library_lightbox,
+            entry.path, entry.name, preview_only=preview_only, close_on_space=self._space_preview,
             can_grade=self._library_lightbox and is_image(entry.path))
-        if self._library_lightbox:
-            self.image_lightbox_active.emit(True)
+        self.image_lightbox_active.emit(True)
         if paths is None:
             paths = self._previewable_paths()
         self._preview.set_steppers_enabled(len(paths) > 1)
@@ -2032,6 +2388,12 @@ class NativeFilesPanel(QWidget):
             if not os.path.isabs(path) or not name:
                 return False
             entry = Entry(path=path, name=name, kind=classify(name))
+        if entry.availability == Availability.OFFLINE or entry.kind not in ("image", "video"):
+            return False
+        self._space_preview = False
+        return self._open_preview_entry(entry)
+
+    def _open_preview_entry(self, entry: Entry) -> bool:
         if entry.availability == Availability.OFFLINE:
             return False
         if entry.kind == "image":
@@ -2046,17 +2408,21 @@ class NativeFilesPanel(QWidget):
         """视频预览走应用内共享播放器，不再切回旧 Files WebView。"""
         if self._video_host is not None:
             self._video_host.stop()
-        if self._preview.is_open:
-            self._preview.close_preview()
+        self._preview_decoder.cancel()
+        self._preview_loading = False
         self._preview_path = entry.path
-        self._preview.open_video(entry.path, entry.name)
+        self._preview.open_video(entry.path, entry.name, close_on_space=self._space_preview)
+        self._preview.set_steppers_enabled(len(self._video_paths()) > 1)
+        self.image_lightbox_active.emit(True)
         host = self._ensure_video_host()
+        host.set_lightbox_tools(self._preview.tools_visible)
         host.play(entry.path)
         self._cache_opened_thumbnail(entry)
 
     def _ensure_video_host(self) -> NativePlayerHost:
         if self._video_host is None:
-            host = NativePlayerHost(self._preview.video_slot, self)
+            host = NativePlayerHost(self._preview.video_slot, self, lightbox=True)
+            self._preview.tools_visibility_changed.connect(host.set_lightbox_tools)
             host.closed.connect(self._on_video_player_closed)
             host.prev_requested.connect(lambda: self._step_video_preview(-1))
             host.next_requested.connect(lambda: self._step_video_preview(1))
@@ -2091,7 +2457,7 @@ class NativeFilesPanel(QWidget):
 
     def _step_video_preview(self, delta: int) -> None:
         paths = self._video_paths()
-        if not paths:
+        if len(paths) < 2:
             return
         try:
             index = paths.index(self._preview_path)
@@ -2154,8 +2520,9 @@ class NativeFilesPanel(QWidget):
         self._preview_path = ""
         self._preview_loading = False
         self._preview_decoder.cancel()
-        if self._library_lightbox:
-            self.image_lightbox_active.emit(False)
+        self.image_lightbox_active.emit(False)
+        self._space_preview = False
+        self.pages.currentWidget().setFocus(Qt.FocusReason.OtherFocusReason)
         self.preview_closed.emit()
 
     def enable_grade_lightbox(self) -> None:
@@ -2184,9 +2551,16 @@ class NativeFilesPanel(QWidget):
                 paths.append(entry.path)
         return paths
 
+    def _navigate_lightbox(self, delta: int) -> None:
+        entry = self._entry_for_path(self._preview_path)
+        if self._preview.is_video or (entry is not None and entry.kind == "video"):
+            self._step_video_preview(delta)
+        else:
+            self._step_preview(delta)
+
     def _step_preview(self, delta: int) -> None:
         paths = self._previewable_paths()
-        if not paths:
+        if len(paths) < 2:
             return
         try:
             index = paths.index(self._preview_path)
@@ -2195,6 +2569,7 @@ class NativeFilesPanel(QWidget):
         target = paths[(index + delta) % len(paths)]
         entry = self._entry_for_path(target)
         if entry is not None:
+            self._select_path(target)
             self._start_preview(entry, paths)
 
     def _entry_for_path(self, path: str) -> Entry | None:
@@ -2285,22 +2660,34 @@ class NativeFilesPanel(QWidget):
         self.file_task_requested.emit("trash", targets, {"policy": "error", "options": {}})
 
     def request_rename(self) -> None:
-        entries = self._task_selection()
-        if len(entries) != 1:
+        selected = self.selection.selectedRows(0)
+        if len(selected) != 1:
             self.meta_status.setText(_tr("rename_single", "重命名一次只能处理一个文件"))
             return
-        entry = entries[0]
-        self._request_rename_path(entry.path, entry.name)
+        self._edit_filename(selected[0])
 
-    def _request_rename_path(self, path: str, name: str) -> None:
-        new_name, accepted = QInputDialog.getText(
-            self, _tr("rename_title", "重命名"),
-            _tr("rename_prompt", "新名称："), text=name)
-        if not accepted or not new_name.strip() or new_name.strip() == name:
+    def rename_visible_file(self, path: str) -> None:
+        row = self._entry_rows.get(path)
+        if row is None:
             return
+        index = self.proxy.mapFromSource(self.model.index(row, 0))
+        if index.isValid():
+            self.selection.select(index, QItemSelectionModel.SelectionFlag.ClearAndSelect
+                                  | QItemSelectionModel.SelectionFlag.Rows)
+            self._edit_filename(index)
+
+    def _edit_filename(self, index: QModelIndex) -> None:
+        if not self._ready or not index.flags() & Qt.ItemFlag.ItemIsEditable:
+            return
+        view = self.pages.currentWidget()
+        view.setCurrentIndex(index)
+        view.scrollTo(index)
+        view.edit(index)
+
+    def _commit_filename(self, path: str, new_name: str) -> None:
         self.meta_status.setText(_tr("rename_started", "正在重命名…"))
         self.file_task_requested.emit("rename", [path],
-                                      {"policy": "error", "options": {"new_name": new_name.strip()}})
+                                      {"policy": "error", "options": {"new_name": new_name}})
 
     def request_new_folder(self) -> None:
         if self._refuse_virtual_location(_tr("new_folder_title", "新建文件夹")):
@@ -2361,7 +2748,9 @@ class NativeFilesPanel(QWidget):
                     parents.add(QFileInfo(path).absolutePath())
         for parent in parents - {self._current_directory()}:
             self.locations.refresh(parent)
-        if operation in ("mkdir", "rename", "trash", "restore", "copy", "move", "purge"):
+        if operation == "rename" and failures and not successes:
+            self.status.setText(self.meta_status.text())
+        elif operation in ("mkdir", "rename", "trash", "restore", "copy", "move", "purge"):
             self.refresh()
         if operation in ("copy", "move") and parents:
             self.transfer_directories_changed.emit(sorted(parents))
@@ -2573,10 +2962,11 @@ class NativeFilesPanel(QWidget):
         tooltip = I18N.tr("grade_sets.new", "新建调色集…")
         button = self._button("", tooltip, create)
         button.setObjectName("newGradeSet")
-        button.setIcon(icon_new_folder(IconColors.BLUE))
+        button.setIcon(location_icon("grade-set-add"))
+        button.setIconSize(QSize(20, 20))
         button.setProperty("filesFavoriteAction", True)
-        button.setFixedSize(26, 24)
-        self._library_header.addWidget(button)
+        button.setFixedSize(28, 20)
+        self._library_header.addWidget(button, alignment=Qt.AlignmentFlag.AlignTop)
 
     def show_libraries(self, items: list[Any]) -> None:
         libraries = []
@@ -2596,6 +2986,54 @@ class NativeFilesPanel(QWidget):
         self.meta_status.setText(message)
         self.status.setText(message)
 
+    def _library_package_filter(self) -> str:
+        return _tr("library_package_filter", "Topos 素材库包 ({pattern})").format(
+            pattern=f"*{LIBRARY_PACKAGE_SUFFIX}")
+
+    def _import_library(self) -> None:
+        if self._library_transfer_busy:
+            return
+        title = _tr("library_import", "导入素材库…")
+        archive, _ = QFileDialog.getOpenFileName(self, title, QDir.homePath(), self._library_package_filter())
+        if not archive:
+            return
+        parent = QFileDialog.getExistingDirectory(
+            self, _tr("library_import_destination", "选择新素材库的存放位置"), os.path.dirname(archive))
+        if parent:
+            self._begin_library_transfer(_tr("library_importing", "正在导入素材库…"))
+            self.library_import_requested.emit(archive, parent)
+
+    def _export_library(self, library_id: str, path: str) -> None:
+        if self._library_transfer_busy:
+            return
+        title = _tr("library_export", "导出素材库…")
+        suggested = os.path.join(QDir.homePath(), os.path.basename(path) + LIBRARY_PACKAGE_SUFFIX)
+        if os.path.dirname(path) == path or self._path_key(path) == self._path_key(QDir.homePath()):
+            suggested = ""
+        target, _ = QFileDialog.getSaveFileName(
+            self, title, suggested, self._library_package_filter(),
+            options=QFileDialog.Option.DontConfirmOverwrite)
+        if target:
+            if not target.lower().endswith(LIBRARY_PACKAGE_SUFFIX):
+                target += LIBRARY_PACKAGE_SUFFIX
+            self._begin_library_transfer(_tr("library_exporting", "正在导出素材库…"))
+            self.library_export_requested.emit(library_id, target)
+
+    def _begin_library_transfer(self, message: str) -> None:
+        self._library_transfer_busy = True
+        self.show_library_change(True, message)
+
+    def show_library_transfer_result(self, ok: bool, message: str) -> None:
+        self._library_transfer_busy = False
+        self.show_library_change(ok, message)
+        if not ok:
+            dialog = QMessageBox(self)
+            dialog.setIcon(QMessageBox.Icon.Warning)
+            dialog.setWindowTitle(_tr("library_transfer_failed", "素材库传输失败"))
+            dialog.setTextFormat(Qt.TextFormat.PlainText)
+            dialog.setText(message)
+            dialog.exec()
+
     def open_add_library(self) -> None:
         dialog = AddLibraryDialog(self, initial_path=self._current_directory() or self.home_path,
                                   transport=self._transport)
@@ -2614,6 +3052,13 @@ class NativeFilesPanel(QWidget):
 
     def _show_library_menu(self, pos: QPoint) -> None:
         index = self.locations.indexAt(pos)
+        menu_position = self.locations.viewport().mapToGlobal(pos)
+        if self.locations.is_library_heading(index):
+            menu = QMenu(self)
+            menu.addAction(_tr("add_library", "添加素材库…"), self.open_add_library)
+            self._add_import_library_action(menu)
+            menu.exec(menu_position)
+            return
         library_id = index.data(self.locations.LIBRARY_ROLE)
         path = index.data(self.locations.PATH_ROLE)
         if not path:
@@ -2630,11 +3075,15 @@ class NativeFilesPanel(QWidget):
             menu.addSeparator()
             search = menu.addAction(_tr("library_analyze", "AI 搜索与分析…"))
         if root:
+            export = menu.addAction(_tr("library_export", "导出素材库…"),
+                                    lambda: self._export_library(library_id, path))
+            export.setEnabled(not self._library_transfer_busy)
+            self._add_import_library_action(menu)
             rename = menu.addAction(_tr("library_rename", "重命名素材库…"))
             remove = menu.addAction(_tr("library_remove", "移除素材库…"))
         elif library_id:
             rename_folder = menu.addAction(_tr("rename_folder", "重命名文件夹…"))
-        action = menu.exec(self.locations.viewport().mapToGlobal(pos))
+        action = menu.exec(menu_position)
         if action is None:
             return
         if action == new_folder:
@@ -2643,7 +3092,11 @@ class NativeFilesPanel(QWidget):
         elif action == search:
             self.scoped_ai_library_requested.emit(library_id, None if root else path)
         elif action == rename_folder:
-            self._request_rename_path(path, name)
+            new_name, accepted = QInputDialog.getText(
+                self, _tr("rename_title", "重命名"),
+                _tr("rename_prompt", "新名称："), text=name)
+            if accepted and (new_name := new_name.strip()) and new_name != name:
+                self._commit_filename(path, new_name)
         elif action == rename:
             title, ok = QInputDialog.getText(self, rename.text(), _tr("library_name", "素材库名称"), text=name)
             if ok and (title := title.strip()) and title != name:
@@ -2657,6 +3110,10 @@ class NativeFilesPanel(QWidget):
             confirm.setDefaultButton(QMessageBox.StandardButton.Cancel)
             if confirm.exec() == QMessageBox.StandardButton.Yes:
                 self.library_remove_requested.emit(library_id)
+
+    def _add_import_library_action(self, menu: QMenu) -> None:
+        action = menu.addAction(_tr("library_import", "导入素材库…"), self._import_library)
+        action.setEnabled(not self._library_transfer_busy)
 
     def toggle_scan(self) -> None:
         if self._scan_state.get("running"):
@@ -2870,7 +3327,10 @@ class NativeFilesPanel(QWidget):
             cut_action = menu.addAction(_tr("cut", "剪切文件"), self.cut_files)
             cut_action.setEnabled(copy_action.isEnabled())
             if len(selected) == 1:
-                menu.addAction(_tr("rename", "重命名…"), self.request_rename)
+                target = QPersistentModelIndex(self.selection.selectedRows(0)[0])
+                rename = menu.addAction(_tr("rename_title", "重命名"),
+                                        lambda: QTimer.singleShot(0, lambda: self._edit_filename(QModelIndex(target))))
+                rename.setEnabled(selected[0].availability != Availability.OFFLINE)
             if len(selected) >= 2:
                 menu.addAction(_tr("batch_rename", "批量改名…"),
                                lambda: self.batch_rename_requested.emit(

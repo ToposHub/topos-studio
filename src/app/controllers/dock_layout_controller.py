@@ -2217,11 +2217,10 @@ class DockLayoutMixin:
 
         # 3. Deliver Layout (P9.3) - conditional
         if self._deliver_available and self._current_work_mode() == "image":
-            for d in self.all_docks:
-                d.hide()
-            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_export)
-            self.dock_export.show()
+            self._apply_image_deliver_layout(reset=True)
             self.page_layouts["Deliver"] = self.saveState()
+            if "Deliver" not in saved_page_layouts:
+                self._image_deliver_default_size_pending = True
         elif self._deliver_available and self.dock_deliver:
             for d in self.all_docks: d.setVisible(False)
             self.dock_viewport.setVisible(True)
@@ -4075,6 +4074,8 @@ class DockLayoutMixin:
             )
         elif self.current_page == "Composite":
             QTimer.singleShot(0, self._migrate_composite_scopes_dock_visibility)
+        elif self.current_page == "Deliver" and self._current_work_mode() == "image":
+            QTimer.singleShot(50, self._migrate_deliver_layout)
 
         # Deferred dock-size restoration (``resizeDocks`` and the migrations
         # above) can grow the main window back beyond the screen when the
@@ -4132,6 +4133,43 @@ class DockLayoutMixin:
         if visible and self.current_page != "Deliver":
             self.dock_export.hide()
 
+    def _apply_image_deliver_layout(self, *, reset: bool = False) -> None:
+        """Place the shared Grade Sets dock beside image Batch Export."""
+        grade_sets = getattr(self, "dock_grade_sets", None)
+        batch_export = self.dock_export
+        left = Qt.DockWidgetArea.LeftDockWidgetArea
+        right = Qt.DockWidgetArea.RightDockWidgetArea
+        placements = [(grade_sets, left), (batch_export, right)] if grade_sets is not None else [
+            (batch_export, right)
+        ]
+        visible = {dock for dock, _ in placements}
+        for dock in self.all_docks:
+            if dock not in visible:
+                dock.hide()
+
+        repair = reset or any(
+            dock.isHidden() or dock.isFloating() or self.dockWidgetArea(dock) != area
+            or self.tabifiedDockWidgets(dock)
+            for dock, area in placements
+        )
+        if repair:
+            for dock, area in placements:
+                dock.setFloating(False)
+                self.removeDockWidget(dock)
+                self.addDockWidget(area, dock)
+        for dock, _ in placements:
+            dock.show()
+        if repair and grade_sets is not None:
+            self._resize_image_deliver_docks(grade_sets, batch_export)
+            if not reset:
+                self._image_deliver_default_size_pending = True
+
+    def _resize_image_deliver_docks(self, grade_sets: QDockWidget, batch_export: QDockWidget) -> None:
+        width = self.contentsRect().width()
+        export_width = width // 3
+        self.resizeDocks([grade_sets, batch_export], [width - export_width, export_width],
+                         Qt.Orientation.Horizontal)
+
     def _enforce_work_mode_dock_visibility(self) -> None:
         """Keep unavailable tools hidden after old Qt layouts are restored."""
         mode = self._current_work_mode()
@@ -4188,15 +4226,13 @@ class DockLayoutMixin:
             return
         grade_sets = getattr(self, "dock_grade_sets", None)
         if grade_sets is not None:
-            in_color = self.current_page == "Color"
-            grade_sets.toggleViewAction().setEnabled(in_color)
-            if not in_color:
+            grade_sets_available = self.current_page == "Color" or (
+                image_workflow and self.current_page == "Deliver")
+            grade_sets.toggleViewAction().setEnabled(grade_sets_available)
+            if not grade_sets_available:
                 grade_sets.hide()
         if image_workflow and self.current_page == "Deliver":
-            for dock in self.all_docks:
-                if dock is not self.dock_export:
-                    dock.hide()
-            self.dock_export.show()
+            self._apply_image_deliver_layout()
             return
         activate_deliver = getattr(getattr(self, "deliver_page", None), "set_workspace_active", None)
         if callable(activate_deliver):
@@ -4492,6 +4528,12 @@ class DockLayoutMixin:
         if self._current_work_mode() == "image":
             if self.current_page == "Deliver":
                 self._enforce_page_dock_visibility()
+                if getattr(self, "_image_deliver_default_size_pending", False):
+                    self._image_deliver_default_size_pending = False
+                    grade_sets = getattr(self, "dock_grade_sets", None)
+                    if grade_sets is not None:
+                        # Factory states are captured before the window reaches its restored size.
+                        self._resize_image_deliver_docks(grade_sets, self.dock_export)
             return
         dock = getattr(self, "dock_deliver", None)
         if dock is None:

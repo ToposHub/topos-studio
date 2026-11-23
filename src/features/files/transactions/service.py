@@ -44,15 +44,17 @@ class IdentityPropagation:
     def __init__(self, catalog: FilesCatalog) -> None:
         self._catalog = catalog
 
-    def on_moved(self, library_id: str, old: str, new: str) -> int:
+    def on_moved(self, library_id: str, old: str, new: str, *, recovering: bool = False) -> int:
         """Update the catalog ownership and path after a published move.
 
         回调在移动完成后执行：目录判断看新路径（旧路径已不存在）。
         """
-        if not library_id:
-            return 0
         old_path, new_path = Path(old), Path(new)
         is_dir = new_path.is_dir() or (not new_path.exists() and old_path.is_dir())
+        if (not library_id and not is_dir and nfc(old) != nfc(new)
+                and (not recovering or self._catalog.asset("", old) is not None)):
+            # The replaced file must not leave its user metadata on the new one.
+            self._catalog.delete_asset_tree("", new)
         target = self._catalog.library_for_path(new_path)
         if target is not None and target.library_id != library_id:
             return self._catalog.move_to_library(library_id, target.library_id, old_path, new_path, is_dir=is_dir)

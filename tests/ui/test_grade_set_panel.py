@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 from PyQt6.QtCore import QBuffer, QIODevice, QItemSelectionModel, QMimeData, QObject, QPoint, QPointF, QRect, QSize, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QDropEvent, QImage, QPainter
+from PyQt6.QtGui import QAction, QColor, QDragEnterEvent, QDropEvent, QImage, QPainter
 from PyQt6.QtWidgets import QFrame, QStyleOptionViewItem
 
 import src.app.ui.grade_set_panel as grade_set_panel
@@ -143,6 +143,26 @@ def test_compact_toolbar_stays_on_one_row_and_zoom_respects_dock_width(qtbot, mo
     assert view.thumbnailSize() == panel.size_slider.value()
 
 
+def test_cards_keep_high_resolution_graded_thumbnails(qtbot, monkeypatch):
+    panel, sets = _build(qtbot, monkeypatch, count=2)
+    panel.resize(500, 400)
+    panel.show()
+    qtbot.waitUntil(lambda: len(panel._pending) == 2)
+    image = QImage(450, 300, QImage.Format.Format_RGB32)
+    image.fill(QColor("blue"))
+    for path, format_name in zip(sets.paths, ("WEBP", "PNG")):
+        raw = QBuffer()
+        raw.open(QIODevice.OpenModeFlag.WriteOnly)
+        assert image.save(raw, format_name)
+        panel._transport.thumbnail_loaded.emit(path, bytes(raw.data()))
+    graded, original = (panel._source_previews[path] for path in sets.paths)
+    assert graded.size() == image.size()
+    assert graded.format() == QImage.Format.Format_RGB888
+    assert original.width() == 224
+    panel.set_graded_thumbnail(sets.paths[0], image)
+    assert panel._graded_previews[sets.paths[0]].size() == image.size()
+
+
 def test_async_aspects_justify_rows_through_zoom_and_layout_changes(qtbot, monkeypatch):
     panel, sets = _build(qtbot, monkeypatch, count=16)
     panel.resize(550, 500)
@@ -210,6 +230,113 @@ def test_grade_card_paints_photo_without_always_visible_background(qtbot, monkey
     assert canvas.pixelColor(10, 80) == backdrop  # Space beside a portrait in a wide cell.
     assert canvas.pixelColor(4, 190) == backdrop  # Card beneath the photo.
     assert canvas.pixelColor(90, 80) == QColor("orange")
+
+
+def test_grade_card_hides_rating_when_stars_do_not_fit(qtbot, monkeypatch) -> None:
+    panel, sets = _build(qtbot, monkeypatch, count=1)
+    sets.ratings[sets.paths[0]] = 5
+    calls = []
+    monkeypatch.setattr("src.app.ui.native_files_gallery.paint_rating_badge",
+                        lambda painter, rect, rating, **style: calls.append((rating, style)))
+    index = panel.view.model().index(0, 0)
+    option = QStyleOptionViewItem()
+    canvas = QImage(180, 200, QImage.Format.Format_RGB32)
+    with QPainter(canvas) as painter:
+        for width, height in ((72, 120), (94, 38)):
+            option.rect = QRect(0, 0, width, height)
+            panel.view.itemDelegate().paint(painter, option, index)
+            assert calls == []
+        option.rect = QRect(0, 0, 160, 120)
+        panel.view.itemDelegate().paint(painter, option, index)
+    assert calls == [(5, {"star_size": 13, "background_alpha": 145})]
+
+
+def test_one_narrow_rated_card_hides_all_ratings(qtbot, monkeypatch) -> None:
+    panel, sets = _build(qtbot, monkeypatch, count=6)
+    panel.resize(660, 400)
+    panel.show()
+    view = panel.view
+    sets.ratings.update({sets.paths[0]: 3, sets.paths[1]: 5})
+    sets.ratings_changed.emit()
+    qtbot.waitUntil(lambda: view.itemDelegate().show_rating_badges)
+    view.setAspectRatio(sets.paths[1], 0.25)
+    qtbot.waitUntil(lambda: not view.itemDelegate().show_rating_badges)
+    assert sets.ratings[sets.paths[0]] == 3
+    view.setAspectRatio(sets.paths[1], 1.5)
+    qtbot.waitUntil(lambda: view.itemDelegate().show_rating_badges)
+
+
+def test_rating_can_move_below_narrow_card_via_context_menu(qtbot, monkeypatch) -> None:
+    panel, sets = _build(qtbot, monkeypatch, count=1)
+    sets.ratings[sets.paths[0]] = 5
+    view = panel.view
+    index = view.model().index(0, 0)
+    panel.resize(330, 260)
+    panel.show()
+    qtbot.waitUntil(lambda: view.visualRect(index).isValid())
+    menu = panel._build_context_menu(view.visualRect(index).center())
+    action = menu.findChild(QAction, "gradeSetRatingAtBottom")
+    assert action.isCheckable()
+    assert not action.isChecked()
+    with qtbot.waitSignal(panel.rating_at_bottom_changed, check_params_cb=lambda enabled: enabled):
+        action.trigger()
+
+    calls = []
+    monkeypatch.setattr("src.app.ui.native_files_gallery._paint_star",
+                        lambda painter, x, y, size, color: calls.append((x, y, size)))
+    option = QStyleOptionViewItem()
+    option.rect = QRect(0, 0, 45, 110)
+    canvas = QImage(60, 120, QImage.Format.Format_RGB32)
+    with QPainter(canvas) as painter:
+        view.itemDelegate().paint(painter, option, index)
+    assert len(calls) == 5
+    assert all(0 < x < 45 and 90 < y < 110 and size < 13 for x, y, size in calls)
+    assert not view.itemDelegate().show_filename
+    assert view.itemDelegate().spacing.caption_height == 16
+
+
+def test_grade_set_selection_can_drag_or_enqueue_multiple_photos(qtbot, monkeypatch, tmp_path: Path) -> None:
+    from src.shared.export.export_panel import BatchExportListWidget
+
+    panel, sets = _build(qtbot, monkeypatch, count=0)
+    paths = tuple(str(tmp_path / f"{index}.jpg") for index in range(3))
+    for path in paths:
+        Path(path).touch()
+    sets.paths = paths
+    sets.changed.emit()
+    panel.resize(550, 350)
+    panel.show()
+    view = panel.view
+    first, second = (view.model().index(row, 0) for row in (0, 1))
+    for index in (first, second):
+        assert index.flags() & Qt.ItemFlag.ItemIsDragEnabled
+        view.selectionModel().select(index, QItemSelectionModel.SelectionFlag.Select)
+    assert view.dragEnabled()
+    mime = view.model().mimeData(view.selectedIndexes())
+    assert [url.toLocalFile() for url in mime.urls()] == list(paths[:2])
+
+    queue = BatchExportListWidget()
+    qtbot.addWidget(queue)
+    queue.set_auto_file(paths[0])
+    enter = QDragEnterEvent(QPoint(8, 8), Qt.DropAction.CopyAction, mime,
+                            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    queue.dragEnterEvent(enter)
+    assert enter.isAccepted()
+    drop = QDropEvent(QPointF(8, 8), Qt.DropAction.CopyAction, mime,
+                      Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    queue.dropEvent(drop)
+    queue.set_auto_file(paths[2])
+    assert queue.get_all_files() == [paths[2], *paths[:2]]
+
+    qtbot.waitUntil(lambda: view.visualRect(first).isValid())
+    panel.export_queue_requested.connect(queue.add_files)
+    queue.clear()
+    menu = panel._build_context_menu(view.visualRect(first).center())
+    enqueue = menu.findChild(QAction, "gradeSetAddToExportQueue")
+    with qtbot.waitSignal(panel.export_queue_requested) as queued:
+        enqueue.trigger()
+    assert queued.args == [list(paths[:2])]
+    assert queue.get_all_files() == list(paths[:2])
 
 
 def test_switching_set_discards_pending_requests_and_only_open_success_marks_active(qtbot, monkeypatch):
