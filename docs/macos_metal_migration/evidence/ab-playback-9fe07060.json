@@ -1,0 +1,2306 @@
+{
+  "schema": "topos_metal_ab_playback/1",
+  "generated_at_utc": "2026-11-23T20:09:13+00:00",
+  "commit": "9fe07060710581e0b9a07198fc845dd1a75a714b",
+  "machine": {
+    "platform": "macOS-15.3.1-x86_64-i386-64bit",
+    "machine": "x86_64",
+    "python": "3.12.13",
+    "hostname": "Mac Pro",
+    "cpu": "Intel(R) Core(TM) i9-9900K CPU @ 3.60GHz",
+    "gpus": [
+      "AMD Radeon RX 6900 XT",
+      "PHL 439P1"
+    ]
+  },
+  "ab_dir": "bench_out/metal-ab.2026-11-23",
+  "repeats": 4,
+  "expected_frames": 400,
+  "display_power_state": null,
+  "display_asleep_allowed": false,
+  "summary": [
+    {
+      "config": "auto",
+      "source": "dnxhr",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        326,
+        328
+      ],
+      "presented_median": 327.0,
+      "presented_min": 326,
+      "presented_max": 328,
+      "dropped_median": 73.0,
+      "wall_median_s": 16.043,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 653
+      },
+      "render_path_counts": {
+        "gpu_composite": 653
+      },
+      "present_status_counts": {
+        "displayed": 651,
+        "slot_released": 1
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 27
+      },
+      "backend_counts": {
+        "opengl": 653
+      },
+      "present_path_counts": {
+        "gl_viewer": 652
+      },
+      "max_cpu_upload_bytes": 2456616960,
+      "max_cpu_download_bytes": 7633920,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 653,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      }
+    },
+    {
+      "config": "auto",
+      "source": "dnxhr",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        306,
+        323
+      ],
+      "presented_median": 314.5,
+      "presented_min": 306,
+      "presented_max": 323,
+      "dropped_median": 85.5,
+      "wall_median_s": 16.305,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 629,
+        "gpu": 3
+      },
+      "render_path_counts": {
+        "gpu_composite": 631,
+        "hold_previous_frame": 1
+      },
+      "present_status_counts": {
+        "displayed": 627,
+        "submitted": 2,
+        "slot_released": 2
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 2,
+        "gpu_renderer_queue_full": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 29
+      },
+      "backend_counts": {
+        "opengl": 630
+      },
+      "present_path_counts": {
+        "gl_viewer": 627
+      },
+      "max_cpu_upload_bytes": 2434940928,
+      "max_cpu_download_bytes": 8179200,
+      "stale_frame_emitted": 2,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 632,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      }
+    },
+    {
+      "config": "auto",
+      "source": "h264",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        387,
+        387
+      ],
+      "presented_median": 387.0,
+      "presented_min": 387,
+      "presented_max": 387,
+      "dropped_median": 13.0,
+      "wall_median_s": 16.098,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 774
+      },
+      "render_path_counts": {
+        "gpu_composite": 774
+      },
+      "present_status_counts": {
+        "displayed": 770
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 15
+      },
+      "backend_counts": {
+        "opengl": 774
+      },
+      "present_path_counts": {
+        "gl_viewer": 770
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 4362240,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      }
+    },
+    {
+      "config": "auto",
+      "source": "h264",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        390,
+        390
+      ],
+      "presented_median": 390.0,
+      "presented_min": 390,
+      "presented_max": 390,
+      "dropped_median": 10.0,
+      "wall_median_s": 16.035,
+      "decode_path_counts": {
+        "gpu": 1,
+        "macos_vt_zero_copy": 778
+      },
+      "render_path_counts": {
+        "hold_previous_frame": 1,
+        "gpu_composite": 778
+      },
+      "present_status_counts": {
+        "displayed": 776
+      },
+      "fallback_reasons": {
+        "gpu_renderer_queue_full": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 22
+      },
+      "backend_counts": {
+        "opengl": 3,
+        "metal": 776
+      },
+      "present_path_counts": {
+        "gl_viewer": 776
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 7088640,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 1,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      }
+    },
+    {
+      "config": "gl",
+      "source": "dnxhr",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        327,
+        334
+      ],
+      "presented_median": 330.5,
+      "presented_min": 327,
+      "presented_max": 334,
+      "dropped_median": 69.5,
+      "wall_median_s": 16.025,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 660,
+        "gpu": 1
+      },
+      "render_path_counts": {
+        "gpu_composite": 661
+      },
+      "present_status_counts": {
+        "displayed": 658,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 23
+      },
+      "backend_counts": {
+        "opengl": 660
+      },
+      "present_path_counts": {
+        "gl_viewer": 658
+      },
+      "max_cpu_upload_bytes": 2485518336,
+      "max_cpu_download_bytes": 6543360,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 661,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      }
+    },
+    {
+      "config": "gl",
+      "source": "dnxhr",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        329,
+        331
+      ],
+      "presented_median": 330.0,
+      "presented_min": 329,
+      "presented_max": 331,
+      "dropped_median": 70.0,
+      "wall_median_s": 16.158,
+      "decode_path_counts": {
+        "gpu": 1,
+        "ffmpeg_planar_gpu_upload": 659
+      },
+      "render_path_counts": {
+        "hold_previous_frame": 1,
+        "gpu_composite": 659
+      },
+      "present_status_counts": {
+        "displayed": 657
+      },
+      "fallback_reasons": {
+        "gpu_renderer_queue_full": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 28
+      },
+      "backend_counts": {
+        "opengl": 660
+      },
+      "present_path_counts": {
+        "gl_viewer": 657
+      },
+      "max_cpu_upload_bytes": 2478292992,
+      "max_cpu_download_bytes": 8179200,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 660,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      }
+    },
+    {
+      "config": "gl",
+      "source": "h264",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        381,
+        393
+      ],
+      "presented_median": 387.0,
+      "presented_min": 381,
+      "presented_max": 393,
+      "dropped_median": 13.0,
+      "wall_median_s": 16.119,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 776
+      },
+      "render_path_counts": {
+        "gpu_composite": 776
+      },
+      "present_status_counts": {
+        "displayed": 771,
+        "slot_released": 1
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 22
+      },
+      "backend_counts": {
+        "opengl": 776
+      },
+      "present_path_counts": {
+        "gl_viewer": 772
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 7088640,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      }
+    },
+    {
+      "config": "gl",
+      "source": "h264",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        385,
+        379
+      ],
+      "presented_median": 382.0,
+      "presented_min": 379,
+      "presented_max": 385,
+      "dropped_median": 18.0,
+      "wall_median_s": 16.003,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 762
+      },
+      "render_path_counts": {
+        "gpu_composite": 762
+      },
+      "present_status_counts": {
+        "displayed": 760
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 25
+      },
+      "backend_counts": {
+        "opengl": 762
+      },
+      "present_path_counts": {
+        "gl_viewer": 760
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 8179200,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      }
+    },
+    {
+      "config": "metal",
+      "source": "dnxhr",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        318,
+        319
+      ],
+      "presented_median": 318.5,
+      "presented_min": 318,
+      "presented_max": 319,
+      "dropped_median": 81.5,
+      "wall_median_s": 16.115,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 636,
+        "gpu": 1
+      },
+      "render_path_counts": {
+        "gpu_composite": 637
+      },
+      "present_status_counts": {
+        "displayed": 633,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 21
+      },
+      "backend_counts": {
+        "opengl": 636
+      },
+      "present_path_counts": {
+        "gl_viewer": 633
+      },
+      "max_cpu_upload_bytes": 2362687488,
+      "max_cpu_download_bytes": 6543360,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 637,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      }
+    },
+    {
+      "config": "metal",
+      "source": "dnxhr",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        317,
+        331
+      ],
+      "presented_median": 324.0,
+      "presented_min": 317,
+      "presented_max": 331,
+      "dropped_median": 76.0,
+      "wall_median_s": 16.107,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 646
+      },
+      "render_path_counts": {
+        "gpu_composite": 646
+      },
+      "present_status_counts": {
+        "displayed": 644
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 26
+      },
+      "backend_counts": {
+        "opengl": 646
+      },
+      "present_path_counts": {
+        "gl_viewer": 644
+      },
+      "max_cpu_upload_bytes": 2471067648,
+      "max_cpu_download_bytes": 7633920,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 646,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      }
+    },
+    {
+      "config": "metal",
+      "source": "h264",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        379,
+        371
+      ],
+      "presented_median": 375.0,
+      "presented_min": 371,
+      "presented_max": 379,
+      "dropped_median": 25.0,
+      "wall_median_s": 16.141,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 750
+      },
+      "render_path_counts": {
+        "gpu_composite": 750
+      },
+      "present_status_counts": {
+        "displayed": 746
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 14
+      },
+      "backend_counts": {
+        "opengl": 4,
+        "metal": 746
+      },
+      "present_path_counts": {
+        "gl_viewer": 746
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 4362240,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      }
+    },
+    {
+      "config": "metal",
+      "source": "h264",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        392,
+        380
+      ],
+      "presented_median": 386.0,
+      "presented_min": 380,
+      "presented_max": 392,
+      "dropped_median": 14.0,
+      "wall_median_s": 15.998,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 771
+      },
+      "render_path_counts": {
+        "gpu_composite": 771
+      },
+      "present_status_counts": {
+        "displayed": 768,
+        "slot_released": 1
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 23
+      },
+      "backend_counts": {
+        "metal": 769,
+        "opengl": 2
+      },
+      "present_path_counts": {
+        "gl_viewer": 769
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 7633920,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      }
+    },
+    {
+      "config": "native",
+      "source": "dnxhr",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        274,
+        338
+      ],
+      "presented_median": 306.0,
+      "presented_min": 274,
+      "presented_max": 338,
+      "dropped_median": 94.0,
+      "wall_median_s": 16.614,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 611
+      },
+      "render_path_counts": {
+        "gpu_composite": 611
+      },
+      "present_status_counts": {
+        "displayed": 610
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 21
+      },
+      "backend_counts": {
+        "opengl": 611
+      },
+      "present_path_counts": {
+        "gl_viewer": 610
+      },
+      "max_cpu_upload_bytes": 2507194368,
+      "max_cpu_download_bytes": 5998080,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 611,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    },
+    {
+      "config": "native",
+      "source": "dnxhr",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        255,
+        360
+      ],
+      "presented_median": 307.5,
+      "presented_min": 255,
+      "presented_max": 360,
+      "dropped_median": 92.5,
+      "wall_median_s": 17.609,
+      "decode_path_counts": {
+        "gpu": 2,
+        "ffmpeg_planar_gpu_upload": 614
+      },
+      "render_path_counts": {
+        "gpu_composite": 616
+      },
+      "present_status_counts": {
+        "displayed": 613,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 24
+      },
+      "backend_counts": {
+        "opengl": 615
+      },
+      "present_path_counts": {
+        "gl_viewer": 613
+      },
+      "max_cpu_upload_bytes": 2709504000,
+      "max_cpu_download_bytes": 8724480,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 615,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    },
+    {
+      "config": "native",
+      "source": "h264",
+      "graded": false,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        389,
+        352
+      ],
+      "presented_median": 370.5,
+      "presented_min": 352,
+      "presented_max": 389,
+      "dropped_median": 29.5,
+      "wall_median_s": 17.092,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 762
+      },
+      "render_path_counts": {
+        "gpu_composite": 762
+      },
+      "present_status_counts": {
+        "slot_released": 755,
+        "displayed": 2,
+        "dropped": 1
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 14
+      },
+      "backend_counts": {
+        "opengl": 4,
+        "metal": 758
+      },
+      "present_path_counts": {
+        "native_metal": 758
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 4362240,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    },
+    {
+      "config": "native",
+      "source": "h264",
+      "graded": true,
+      "rounds": 2,
+      "invalid_rounds": 0,
+      "presented_per_round": [
+        396,
+        398
+      ],
+      "presented_median": 397.0,
+      "presented_min": 396,
+      "presented_max": 398,
+      "dropped_median": 3.0,
+      "wall_median_s": 16.011,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 794
+      },
+      "render_path_counts": {
+        "gpu_composite": 794
+      },
+      "present_status_counts": {
+        "slot_released": 789,
+        "displayed": 2,
+        "dropped": 1
+      },
+      "fallback_reasons": {},
+      "readback_kind_counts": {
+        "background_snapshot": 23
+      },
+      "backend_counts": {
+        "metal": 792,
+        "opengl": 2
+      },
+      "present_path_counts": {
+        "native_metal": 792
+      },
+      "max_cpu_upload_bytes": 0,
+      "max_cpu_download_bytes": 7633920,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      }
+    }
+  ],
+  "runs": [
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.1001931780047,
+      "presented_frames": 381,
+      "last_frame": 398,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 7088640,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 383
+      },
+      "render_path_counts": {
+        "gpu_composite": 383
+      },
+      "present_status_counts": {
+        "displayed": 380,
+        "slot_released": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 13
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 383
+      },
+      "present_path_counts": {
+        "gl_viewer": 381
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 1,
+      "wall_s": 16.00446808199922,
+      "presented_frames": 385,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 7633920,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 384
+      },
+      "render_path_counts": {
+        "gpu_composite": 384
+      },
+      "present_status_counts": {
+        "displayed": 383
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 12
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 384
+      },
+      "present_path_counts": {
+        "gl_viewer": 383
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.056830589994206,
+      "presented_frames": 327,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2420490240,
+      "cpu_download_bytes": 5998080,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 328,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 327,
+        "gpu": 1
+      },
+      "render_path_counts": {
+        "gpu_composite": 328
+      },
+      "present_status_counts": {
+        "displayed": 325,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 11
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 1
+      },
+      "backend_counts": {
+        "opengl": 327
+      },
+      "present_path_counts": {
+        "gl_viewer": 325
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 1,
+      "wall_s": 16.263562909996836,
+      "presented_frames": 329,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2471067648,
+      "cpu_download_bytes": 8179200,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 329,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "gpu": 1,
+        "ffmpeg_planar_gpu_upload": 328
+      },
+      "render_path_counts": {
+        "hold_previous_frame": 1,
+        "gpu_composite": 328
+      },
+      "present_status_counts": {
+        "displayed": 327
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 14
+      },
+      "fallback_reasons": {
+        "gpu_renderer_queue_full": 1
+      },
+      "backend_counts": {
+        "opengl": 329
+      },
+      "present_path_counts": {
+        "gl_viewer": 327
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 2,
+      "wall_s": 16.138395521993516,
+      "presented_frames": 393,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 4907520,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 393
+      },
+      "render_path_counts": {
+        "gpu_composite": 393
+      },
+      "present_status_counts": {
+        "displayed": 391
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 9
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 393
+      },
+      "present_path_counts": {
+        "gl_viewer": 391
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 2,
+      "wall_s": 16.00225996300287,
+      "presented_frames": 379,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 8179200,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 378
+      },
+      "render_path_counts": {
+        "gpu_composite": 378
+      },
+      "present_status_counts": {
+        "displayed": 377
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 13
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 378
+      },
+      "present_path_counts": {
+        "gl_viewer": 377
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 2,
+      "wall_s": 15.992331914996612,
+      "presented_frames": 334,
+      "last_frame": 397,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2485518336,
+      "cpu_download_bytes": 6543360,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 333,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 333
+      },
+      "render_path_counts": {
+        "gpu_composite": 333
+      },
+      "present_status_counts": {
+        "displayed": 333
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 12
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 333
+      },
+      "present_path_counts": {
+        "gl_viewer": 333
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "gl",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "opengl",
+        "TOPOS_EDIT_METAL_PREVIEW": "0"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 2,
+      "wall_s": 16.051825998001732,
+      "presented_frames": 331,
+      "last_frame": 396,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2478292992,
+      "cpu_download_bytes": 8179200,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 331,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 331
+      },
+      "render_path_counts": {
+        "gpu_composite": 331
+      },
+      "present_status_counts": {
+        "displayed": 330
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 14
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 331
+      },
+      "present_path_counts": {
+        "gl_viewer": 330
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.095626933994936,
+      "presented_frames": 387,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 3816960,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 387
+      },
+      "render_path_counts": {
+        "gpu_composite": 387
+      },
+      "present_status_counts": {
+        "displayed": 385
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 7
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 387
+      },
+      "present_path_counts": {
+        "gl_viewer": 385
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 1,
+      "wall_s": 16.037691774996347,
+      "presented_frames": 390,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 7088640,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 1,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "gpu": 1,
+        "macos_vt_zero_copy": 389
+      },
+      "render_path_counts": {
+        "hold_previous_frame": 1,
+        "gpu_composite": 389
+      },
+      "present_status_counts": {
+        "displayed": 388
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 11
+      },
+      "fallback_reasons": {
+        "gpu_renderer_queue_full": 1
+      },
+      "backend_counts": {
+        "opengl": 2,
+        "metal": 388
+      },
+      "present_path_counts": {
+        "gl_viewer": 388
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.10412946699944,
+      "presented_frames": 326,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2427715584,
+      "cpu_download_bytes": 7088640,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 325,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 325
+      },
+      "render_path_counts": {
+        "gpu_composite": 325
+      },
+      "present_status_counts": {
+        "displayed": 324
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 13
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 325
+      },
+      "present_path_counts": {
+        "gl_viewer": 324
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 1,
+      "wall_s": 16.539502152008936,
+      "presented_frames": 306,
+      "last_frame": 396,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2304884736,
+      "cpu_download_bytes": 7633920,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 307,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 306,
+        "gpu": 1
+      },
+      "render_path_counts": {
+        "gpu_composite": 307
+      },
+      "present_status_counts": {
+        "displayed": 305,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 14
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 1
+      },
+      "backend_counts": {
+        "opengl": 306
+      },
+      "present_path_counts": {
+        "gl_viewer": 305
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 2,
+      "wall_s": 16.101111342999502,
+      "presented_frames": 387,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 4362240,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 387
+      },
+      "render_path_counts": {
+        "gpu_composite": 387
+      },
+      "present_status_counts": {
+        "displayed": 385
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 8
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 387
+      },
+      "present_path_counts": {
+        "gl_viewer": 385
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 2,
+      "wall_s": 16.03253928500635,
+      "presented_frames": 390,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 6543360,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 389
+      },
+      "render_path_counts": {
+        "gpu_composite": 389
+      },
+      "present_status_counts": {
+        "displayed": 388
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 11
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "metal": 388,
+        "opengl": 1
+      },
+      "present_path_counts": {
+        "gl_viewer": 388
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 2,
+      "wall_s": 15.982862240998656,
+      "presented_frames": 328,
+      "last_frame": 398,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2456616960,
+      "cpu_download_bytes": 7633920,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 328,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 328
+      },
+      "render_path_counts": {
+        "gpu_composite": 328
+      },
+      "present_status_counts": {
+        "displayed": 327,
+        "slot_released": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 14
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 328
+      },
+      "present_path_counts": {
+        "gl_viewer": 328
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "auto",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "auto"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 2,
+      "wall_s": 16.070698028997867,
+      "presented_frames": 323,
+      "last_frame": 397,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2434940928,
+      "cpu_download_bytes": 8179200,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 325,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "gpu": 2,
+        "ffmpeg_planar_gpu_upload": 323
+      },
+      "render_path_counts": {
+        "hold_previous_frame": 1,
+        "gpu_composite": 324
+      },
+      "present_status_counts": {
+        "displayed": 322,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 15
+      },
+      "fallback_reasons": {
+        "gpu_renderer_queue_full": 1,
+        "paused_playhead_guard_dropped": 1
+      },
+      "backend_counts": {
+        "opengl": 324
+      },
+      "present_path_counts": {
+        "gl_viewer": 322
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.14861608299543,
+      "presented_frames": 379,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 4362240,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 379
+      },
+      "render_path_counts": {
+        "gpu_composite": 379
+      },
+      "present_status_counts": {
+        "displayed": 377
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 8
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 2,
+        "metal": 377
+      },
+      "present_path_counts": {
+        "gl_viewer": 377
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 1,
+      "wall_s": 15.998908659006702,
+      "presented_frames": 392,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 7088640,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 391
+      },
+      "render_path_counts": {
+        "gpu_composite": 391
+      },
+      "present_status_counts": {
+        "displayed": 390
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 11
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "metal": 390,
+        "opengl": 1
+      },
+      "present_path_counts": {
+        "gl_viewer": 390
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.159990867992747,
+      "presented_frames": 318,
+      "last_frame": 396,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2348236800,
+      "cpu_download_bytes": 5452800,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 319,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 318,
+        "gpu": 1
+      },
+      "render_path_counts": {
+        "gpu_composite": 319
+      },
+      "present_status_counts": {
+        "displayed": 316,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 9
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 1
+      },
+      "backend_counts": {
+        "opengl": 318
+      },
+      "present_path_counts": {
+        "gl_viewer": 316
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 1,
+      "wall_s": 16.169990352005698,
+      "presented_frames": 317,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2369912832,
+      "cpu_download_bytes": 7633920,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 316,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 316
+      },
+      "render_path_counts": {
+        "gpu_composite": 316
+      },
+      "present_status_counts": {
+        "displayed": 315
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 13
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 316
+      },
+      "present_path_counts": {
+        "gl_viewer": 315
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 2,
+      "wall_s": 16.133162013997207,
+      "presented_frames": 371,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 3271680,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 371
+      },
+      "render_path_counts": {
+        "gpu_composite": 371
+      },
+      "present_status_counts": {
+        "displayed": 369
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 6
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 2,
+        "metal": 369
+      },
+      "present_path_counts": {
+        "gl_viewer": 369
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 2,
+      "wall_s": 15.996350297995377,
+      "presented_frames": 380,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 7633920,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 380
+      },
+      "render_path_counts": {
+        "gpu_composite": 380
+      },
+      "present_status_counts": {
+        "slot_released": 1,
+        "displayed": 378
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 12
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "metal": 379,
+        "opengl": 1
+      },
+      "present_path_counts": {
+        "gl_viewer": 379
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 2,
+      "wall_s": 16.069870085004368,
+      "presented_frames": 319,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2362687488,
+      "cpu_download_bytes": 6543360,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 318,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 318
+      },
+      "render_path_counts": {
+        "gpu_composite": 318
+      },
+      "present_status_counts": {
+        "displayed": 317
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 12
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 318
+      },
+      "present_path_counts": {
+        "gl_viewer": 317
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "metal",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 2,
+      "wall_s": 16.04320337799436,
+      "presented_frames": 331,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2471067648,
+      "cpu_download_bytes": 7088640,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 330,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 330
+      },
+      "render_path_counts": {
+        "gpu_composite": 330
+      },
+      "present_status_counts": {
+        "displayed": 329
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 13
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 330
+      },
+      "present_path_counts": {
+        "gl_viewer": 329
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 1,
+      "wall_s": 16.149864855993656,
+      "presented_frames": 389,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 4362240,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 391
+      },
+      "render_path_counts": {
+        "gpu_composite": 391
+      },
+      "present_status_counts": {
+        "slot_released": 388,
+        "displayed": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 8
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 2,
+        "metal": 389
+      },
+      "present_path_counts": {
+        "native_metal": 389
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 1,
+      "wall_s": 16.011584634994506,
+      "presented_frames": 396,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 7633920,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 397
+      },
+      "render_path_counts": {
+        "gpu_composite": 397
+      },
+      "present_status_counts": {
+        "slot_released": 394,
+        "displayed": 1,
+        "dropped": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 12
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "metal": 396,
+        "opengl": 1
+      },
+      "present_path_counts": {
+        "native_metal": 396
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 1,
+      "wall_s": 17.174170350001077,
+      "presented_frames": 274,
+      "last_frame": 394,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2051997696,
+      "cpu_download_bytes": 5998080,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 273,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 273
+      },
+      "render_path_counts": {
+        "gpu_composite": 273
+      },
+      "present_status_counts": {
+        "displayed": 273
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 11
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 273
+      },
+      "present_path_counts": {
+        "gl_viewer": 273
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 1,
+      "wall_s": 19.152873344006366,
+      "presented_frames": 255,
+      "last_frame": 394,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 1914716160,
+      "cpu_download_bytes": 5998080,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 254,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "gpu": 1,
+        "ffmpeg_planar_gpu_upload": 254
+      },
+      "render_path_counts": {
+        "gpu_composite": 255
+      },
+      "present_status_counts": {
+        "displayed": 254
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 10
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 255
+      },
+      "present_path_counts": {
+        "gl_viewer": 254
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "h264",
+      "graded": false,
+      "round": 2,
+      "wall_s": 18.03479140700074,
+      "presented_frames": 352,
+      "last_frame": 398,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 3271680,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 371
+      },
+      "render_path_counts": {
+        "gpu_composite": 371
+      },
+      "present_status_counts": {
+        "slot_released": 367,
+        "dropped": 1,
+        "displayed": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 6
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 2,
+        "metal": 369
+      },
+      "present_path_counts": {
+        "native_metal": 369
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "h264",
+      "graded": true,
+      "round": 2,
+      "wall_s": 16.009675895009423,
+      "presented_frames": 398,
+      "last_frame": 399,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 0,
+      "cpu_download_bytes": 7088640,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 0,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "macos_vt_zero_copy": 397
+      },
+      "render_path_counts": {
+        "gpu_composite": 397
+      },
+      "present_status_counts": {
+        "slot_released": 395,
+        "displayed": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 11
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "metal": 396,
+        "opengl": 1
+      },
+      "present_path_counts": {
+        "native_metal": 396
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "dnxhr",
+      "graded": false,
+      "round": 2,
+      "wall_s": 16.053904959000647,
+      "presented_frames": 338,
+      "last_frame": 397,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2507194368,
+      "cpu_download_bytes": 5998080,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 0,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 338,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 338
+      },
+      "render_path_counts": {
+        "gpu_composite": 338
+      },
+      "present_status_counts": {
+        "displayed": 337
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 10
+      },
+      "fallback_reasons": {},
+      "backend_counts": {
+        "opengl": 338
+      },
+      "present_path_counts": {
+        "gl_viewer": 337
+      },
+      "app_exit": "exited"
+    },
+    {
+      "config": "native",
+      "env": {
+        "TOPOS_BACKEND_GRAPHICS": "metal",
+        "TOPOS_EDIT_METAL_VIEWPORT": "1"
+      },
+      "source": "dnxhr",
+      "graded": true,
+      "round": 2,
+      "wall_s": 16.064921851997497,
+      "presented_frames": 360,
+      "last_frame": 397,
+      "timeline_frames": 400,
+      "valid": true,
+      "cpu_upload_bytes": 2709504000,
+      "cpu_download_bytes": 8724480,
+      "surface_map_bytes": 0,
+      "stale_frame_emitted": 1,
+      "texture_slot_reuse_without_ack": 0,
+      "cpu_fallback_frames": 361,
+      "qimage_upload_frames": 0,
+      "gl_tex_image_upload_frames": 0,
+      "ui_thread_sync_decode_frames": 0,
+      "sync_seek_frames": 0,
+      "decode_path_counts": {
+        "ffmpeg_planar_gpu_upload": 360,
+        "gpu": 1
+      },
+      "render_path_counts": {
+        "gpu_composite": 361
+      },
+      "present_status_counts": {
+        "displayed": 359,
+        "submitted": 1,
+        "slot_released": 1
+      },
+      "readback_kind_counts": {
+        "background_snapshot": 14
+      },
+      "fallback_reasons": {
+        "paused_playhead_guard_dropped": 1
+      },
+      "backend_counts": {
+        "opengl": 360
+      },
+      "present_path_counts": {
+        "gl_viewer": 359
+      },
+      "app_exit": "exited"
+    }
+  ]
+}
