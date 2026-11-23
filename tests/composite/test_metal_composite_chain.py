@@ -1,11 +1,13 @@
-"""阶段 5 Metal 合成链测试（5.1 最小 2D 链 / 5.2 部分 / 5.3 Tile 与缓存）。
+"""阶段 5 Metal 合成链测试（5.1 最小 2D 链 / 5.2 部分 / 5.3 Tile 与缓存 /
+5.6 有界异步发布）。
 
 分层：
 
 - 纯逻辑层（无 GPU，任何机器可跑）：ROI 断言、halo 传播、预检回退、
   CPU 参考语义（含计划中的 Alpha 最小语义例）、tile 无缝、缓存键。
 - 真机层（无 Metal 设备自动 skip）：Metal kernel 与 CPU 参考逐像素对拍、
-  分块 vs 整帧、handle 租约/完成语义、字节计量。
+  分块 vs 整帧、handle 租约/完成语义、字节计量、异步发布（完成事件
+  驱动，无 waitUntilCompleted；环满显式回退）。
 
 容差依据：中间纹理为 RGBA16F（10 位尾数，相对误差 ≈ 2^-11 ≈ 4.9e-4），
 值域 [0, 4] 内的绝对舍入上界约 2e-3；GPU 与 CPU 的双线性采样公式一致，
@@ -16,6 +18,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+
+from src.shared.gpu.composite_gpu_frame_handle import CompositeGpuFrameHandle
 
 from src.features.composite.render.metal import roi
 from src.features.composite.render.metal.cpu_reference import render_graph_cpu
@@ -763,3 +767,93 @@ class TestMetalGpuParity:
         assert pool is not None
         assert pool.bytes_allocated <= pool.budget_bytes
         assert pool.retiring_count == 0        # 完成回调已全部回收
+
+
+# ── 阶段 5.6 · 有界异步发布（真机层） ───────────────────────────────────
+
+
+@requires_metal
+class TestAsyncPublication:
+    def setup_method(self):
+        self.renderer = MetalCompositeRenderer()
+
+    def teardown_method(self):
+        self.renderer.cleanup()
+
+    def test_pending_publishes_handle_on_completion_without_wait(self):
+        pending = self.renderer.render_async(checker_transform_graph(),
+                                             timeline_frame=3)
+        assert not isinstance(pending, CompositeGpuFrameHandle)
+        assert pending.frame == 3
+        # 完成事件未到前不发布（try_get 顺带驱动 poll）。
+        early = pending.try_get()
+        if early is not None:                  # 极快完成也必须是合法句柄
+            assert early.available
+            early.release()
+            return
+        handle = pending.wait(timeout_s=10.0)
+        assert handle.available
+        assert handle.backend == "metal"
+        assert handle.fence_ns == 0            # 完成事件已到达（内容完整）
+        assert handle.is_gl_oriented is False
+        pool = self.renderer.pool
+        assert pool is not None
+        assert pool._live.get(handle.texture_id) is not None
+        handle.release()
+        handle.release()                       # 幂等
+        assert pool._live.get(handle.texture_id) is None
+        assert self.renderer.in_flight_frames == 0
+
+    def test_async_pixels_match_sync_render(self):
+        g = checker_transform_graph()
+        pending = self.renderer.render_async(g, timeline_frame=1)
+        assert not isinstance(pending, CompositeGpuFrameHandle)
+        handle = pending.wait(timeout_s=10.0)
+        assert handle.available
+        try:
+            async_pixels = self.renderer.readback(handle)
+        finally:
+            handle.release()
+        sync_pixels = self.renderer.render_readback(g, timeline_frame=1)
+        assert sync_pixels is not None
+        np.testing.assert_allclose(async_pixels, sync_pixels, atol=1e-6, rtol=0)
+
+    def test_backpressure_ring_full_returns_explicit_fallback(self):
+        from src.shared.gpu.metal.submission_scheduler import (
+            MetalSubmissionScheduler,
+        )
+        context = self.renderer._ensure_context()
+        self.renderer._scheduler = MetalSubmissionScheduler(
+            context, max_in_flight=1,
+            completion_timeout_s=MetalCompositeRenderer.COMPLETION_TIMEOUT_S)
+        first = self.renderer.render_async(over_graph(), timeline_frame=0)
+        assert not isinstance(first, CompositeGpuFrameHandle)
+        second = self.renderer.render_async(over_graph(), timeline_frame=1)
+        assert isinstance(second, CompositeGpuFrameHandle)   # 显式回退句柄
+        assert not second.available
+        assert "环已满" in second.fallback_reason
+        assert self.renderer.in_flight_frames == 1           # 只有第一帧在途
+        handle = first.wait(timeout_s=10.0)
+        assert handle.available
+        handle.release()
+
+    def test_preflight_fallback_comes_back_synchronously(self):
+        g = graph([constant("c", 4, 4, (1, 1, 1, 1)),
+                   node("b", "blur", radius=3.0), node("o", "output")],
+                  [conn("c", "b"), conn("b", "o")])
+        outcome = self.renderer.render_async(g)
+        assert isinstance(outcome, CompositeGpuFrameHandle)
+        assert not outcome.available
+        assert "[b] blur" in outcome.fallback_reason
+
+    def test_cleanup_with_in_flight_frame_releases_lease(self, caplog):
+        import logging as _logging
+        pending = self.renderer.render_async(checker_transform_graph(),
+                                             timeline_frame=7)
+        assert not isinstance(pending, CompositeGpuFrameHandle)
+        # 不等待直接清理：排空后已发布但无人消费的句柄必须归还租约——
+        # 池销毁时不得出现「仍在租约中」告警。
+        with caplog.at_level(_logging.WARNING, logger="src.features.composite"
+                             ".render.metal.texture_pool"):
+            self.renderer.cleanup()
+        assert not [r for r in caplog.records if "仍在租约中" in r.message]

@@ -5,9 +5,19 @@
 - 以整张图为单位：**任何一个参与渲染的节点未被迁移，整图回退**到现有
   CPU/GL 路径，绝不跳过未迁移节点继续产出。
 - 每条不支持诊断都带节点 ID 与类型，未迁移类型统一报告
-  ``node.metal_unmigrated``（"未迁移 → 回退"）。
+  ``node.metal_unmigrated``（"未迁移 → 回退"）；两个例外给出更精确的
+  诊断码（阶段 5.4/5.5）：
+  - 时域节点 ``deflicker`` → ``node.metal_history_span``（含因果窗口
+    所需的先前帧数，不静默近似）；
+  - 3D 系节点 → ``node.metal_3d_unmapped``（依赖运行时 ScenePayload
+    的 GL 对象，序列化参数无法无歧义映射）。
 - 参数级限制（如 Transform 的运动模糊、Merge 的 PSD sRGB 混合）同样
   阻断并给出具体原因——不留半成品路径。
+- **关键帧/表达式契约**（阶段 5.4）：Metal 链消费「已按指定时间采样」
+  的参数；携带未解析动画或已启用表达式的节点报告
+  ``node.metal_animated_params`` 并整图回退。调用方把解析后的参数
+  （现有求值器 ``snapshot()`` 的输出形态）喂进来时可传
+  ``params_resolved=True`` 跳过该阻断。
 
 迁移登记（本批次，阶段 5.1 + 5.2 部分）：
 
@@ -39,6 +49,8 @@ from src.features.composite.core.graph_preflight import (
     run_preflight_data,
 )
 
+from .time_contract import deflicker_history_frames
+
 # 已迁移的节点类型（参数级限制见 _node_param_blockers）。
 METAL_COMPOSITE_SUPPORTED_TYPES = frozenset({
     "constant", "transform", "merge", "output", "crop",
@@ -47,6 +59,16 @@ METAL_COMPOSITE_SUPPORTED_TYPES = frozenset({
 
 _CODE_UNMIGRATED = "node.metal_unmigrated"
 _CODE_PARAM = "node.metal_param_unsupported"
+_CODE_HISTORY = "node.metal_history_span"
+_CODE_3D = "node.metal_3d_unmapped"
+_CODE_ANIMATED = "node.metal_animated_params"
+
+# 3D 系节点：依赖运行时 ScenePayload（GL VBO/纹理/灯光状态），序列化图
+# 参数无法无歧义映射到 Metal 链（阶段 5.5 的评估结论，见 metal/mesh3d.py）。
+METAL_3D_NODE_TYPES = frozenset({
+    "scene3d", "camera3d", "geo3d", "model3d", "light3d",
+    "pointcloud3d", "volume3d", "deformer3d",
+})
 
 
 @dataclass(frozen=True)
@@ -111,15 +133,38 @@ def _node_param_blockers(node_type: str, params: dict) -> Optional[str]:
     return None
 
 
+def _node_has_unresolved_animation(node_dict: dict) -> Optional[str]:
+    """未解析的动画/表达式 → 阻断原因；None 表示参数已可直接消费。
+
+    Metal 链不做关键帧采样（阶段 5.4 契约：关键帧由现有求值器按指定
+    时间采样）。序列化图里的 ``keyframe_tracks`` / 已启用 ``expressions``
+    意味着 ``parameters`` 是基值而非当前帧值——直接执行会产出错误像素。
+    """
+    tracks = node_dict.get("keyframe_tracks")
+    if isinstance(tracks, dict):
+        for track in tracks.values():
+            if (isinstance(track, dict) and track.get("keyframes")):
+                return "参数含关键帧动画，需先由现有求值器按指定时间采样"
+    if bool(node_dict.get("expression_enabled", False)):
+        expressions = node_dict.get("expressions")
+        if isinstance(expressions, dict) and expressions:
+            return "参数含已启用表达式，需先由现有求值器解析"
+    return None
+
+
 def evaluate_metal_support(
     graph_data: Optional[dict],
     mode: str = MODE_PREVIEW,
+    params_resolved: bool = False,
 ) -> MetalSupportReport:
     """判定一张序列化合成图能否整体走 Metal 链。
 
     Args:
         graph_data: ``NodeGraph.to_dict()`` 形式的图数据。
         mode: 预检模式（preview/export），透传给结构预检。
+        params_resolved: 调用方是否已把动画/表达式解析进 ``parameters``
+            （现有求值器 snapshot 的输出形态）。False 时携带未解析
+            动画的节点按 ``node.metal_animated_params`` 整图回退。
 
     Notes:
         结构性错误（环、输出未连接等）由 ``run_preflight_data`` 报告并
@@ -143,11 +188,13 @@ def evaluate_metal_support(
     connections = graph_data.get("connections") or []
     node_types: Dict[str, str] = {}
     node_params: Dict[str, dict] = {}
+    node_dicts: Dict[str, dict] = {}
     for nd in nodes:
         nid = str(nd.get("id", ""))
         node_types[nid] = str(nd.get("type", ""))
         params = nd.get("parameters")
         node_params[nid] = params if isinstance(params, dict) else {}
+        node_dicts[nid] = nd if isinstance(nd, dict) else {}
 
     # 参与渲染锥：从有输入连接的 Output 反向可达集合。
     upstream: Dict[str, List[str]] = {}
@@ -172,10 +219,34 @@ def evaluate_metal_support(
 
     for nid, ntype in sorted(contributing.items()):
         if ntype not in METAL_COMPOSITE_SUPPORTED_TYPES:
+            if ntype == "deflicker":
+                # 阶段 5.4：时域节点给出精确历史跨度诊断，不静默近似。
+                history = deflicker_history_frames(
+                    node_params.get(nid, {}).get("window"))
+                report.issues.append(MetalSupportIssue(
+                    node_id=nid, node_type=ntype,
+                    reason=f"时域节点：因果滑动窗口需要先前 {history} 帧"
+                           "历史，Metal 链未实现时域历史 → 整图回退",
+                    code=_CODE_HISTORY))
+                continue
+            if ntype in METAL_3D_NODE_TYPES:
+                report.issues.append(MetalSupportIssue(
+                    node_id=nid, node_type=ntype,
+                    reason="3D 节点依赖运行时 ScenePayload（GL 对象），"
+                           "序列化参数无法无歧义映射；3D/AOV 保持整图回退",
+                    code=_CODE_3D))
+                continue
             report.issues.append(MetalSupportIssue(
                 node_id=nid, node_type=ntype,
                 reason="未迁移 → 回退（该节点类型尚无 Metal 实现）"))
             continue
+        if not params_resolved:
+            animated = _node_has_unresolved_animation(node_dicts.get(nid, {}))
+            if animated is not None:
+                report.issues.append(MetalSupportIssue(
+                    node_id=nid, node_type=ntype, reason=animated,
+                    code=_CODE_ANIMATED))
+                continue
         blocker = _node_param_blockers(ntype, node_params.get(nid, {}))
         if blocker is not None:
             report.issues.append(MetalSupportIssue(

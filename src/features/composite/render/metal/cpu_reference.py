@@ -305,11 +305,12 @@ def cpu_constant(node: PlannedNode, region: Rect) -> np.ndarray:
         first = (cell % 2) == 0
         out[:] = np.where(first[..., None], c1, c2)
     else:
-        uv_x = gx / w
-        uv_y = gy / h
+        # 像素中心采样（与 GL 参考 v_uv 一致；角点采样偏移半像素）。
+        uv_x = (gx + 0.5) / w
+        uv_y = (gy + 0.5) / h
         if mode == 3:
-            dx = gx - params["center_x"] * w
-            dy = gy - params["center_y"] * h
+            dx = gx + 0.5 - params["center_x"] * w
+            dy = gy + 0.5 - params["center_y"] * h
             short_edge = min(w, h)
             t = np.sqrt(dx * dx + dy * dy) / max(
                 params["radial_radius"] * short_edge, 1e-4)

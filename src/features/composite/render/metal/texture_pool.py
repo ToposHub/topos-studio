@@ -12,6 +12,25 @@
 - 槽位按租约键确认：每张活跃纹理持有 ``(pool 代次, 槽号, 提交号)``
   身份（`slot_key`），发布到 ``CompositeGpuFrameHandle`` 的 release
   回调据此归还，重复 release 幂等。
+
+阶段 5.6 的纹理形态盘点（``gpu_resource_pool.py`` 实际使用 → Metal 池）：
+
+===========================  =====================  =======================
+GL 池形态（TextureKey）      用途                    Metal 池状态
+===========================  =====================  =======================
+RGBA16F（f2, 4 comps）       预览/整帧/中间纹理/     已迁移（池默认格式，
+                             tile/视频槽             ``acquire`` 缺省值）
+R32F（1 comp, f4）           深度/deep compositing   已迁移（3D 验证 pass
+                                                     的深度附件；deep 节点
+                                                     本身未迁移 → 回退）
+RGBA32F（f4, 4 comps）       导出分层（export tier） 已迁移格式登记（字节
+                                                     计量 16 B/px）；Metal
+                                                     链内部精度仍是 RGBA16F，
+                                                     尚无消费者请求该形态
+R8/RG8 等窄格式              GL 路径零散使用         **未迁移**：Metal 链无
+                                                     消费者，请求即显式报错
+EXTERNAL（外部纹理登记）     跟踪不拥有             不适用（不分配显存）
+===========================  =====================  =======================
 """
 
 from __future__ import annotations
@@ -20,16 +39,56 @@ import itertools
 import logging
 import threading
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 # RGBA16F 每像素字节数。
 RGBA16F_BYTES_PER_PIXEL = 8
 
+# 已迁移纹理形态的每像素字节数（键为 MTLPixelFormat 常量，懒解析）。
+_FORMAT_BYTES_BY_NAME = {
+    "MTLPixelFormatRGBA16Float": 8,
+    "MTLPixelFormatR32Float": 4,
+    "MTLPixelFormatRGBA32Float": 16,
+}
+
 
 class MetalPoolExhausted(RuntimeError):
     """预算内无法分配且无可驱逐的空闲纹理。"""
+
+
+class MetalPoolUnknownFormat(ValueError):
+    """请求了未迁移/未知的纹理形态（显式诊断，不静默换格式）。"""
+
+
+def _resolve_format_bytes(pixel_format: object) -> int:
+    """按 MTLPixelFormat 常量查每像素字节数；未知格式显式报错。"""
+    if pixel_format is None:
+        return RGBA16F_BYTES_PER_PIXEL
+    with _format_bytes_lock:
+        cache = _format_bytes_cache
+        if pixel_format in cache:
+            return cache[pixel_format]
+        try:
+            import Metal  # pyobjc-framework-Metal
+        except ImportError:  # pragma: no cover - 非 macOS 测试宿主
+            raise MetalPoolUnknownFormat(
+                f"无法解析纹理格式 {pixel_format!r}：pyobjc-framework-Metal "
+                "不可用，且该格式不是池默认形态")
+        for name, bpp in _FORMAT_BYTES_BY_NAME.items():
+            constant = getattr(Metal, name, None)
+            if constant is not None:
+                cache[constant] = bpp
+        if pixel_format in cache:
+            return cache[pixel_format]
+    raise MetalPoolUnknownFormat(
+        f"纹理形态 {pixel_format!r} 未迁移到 Metal 池（已迁移："
+        f"{sorted(_FORMAT_BYTES_BY_NAME)}）；不静默替换格式")
+
+
+_format_bytes_lock = threading.Lock()
+_format_bytes_cache: Dict[object, int] = {}
 
 
 @dataclass
@@ -42,6 +101,8 @@ class PooledTexture:
     bytes_size: int
     slot: int
     generation: int
+    # 该纹理的像素格式（None = 池默认 RGBA16F；复用需同格式）。
+    pixel_format: Optional[object] = None
     # 租约状态：leased（渲染/发布中）→ retiring（等待 GPU 完成）→ free。
     state: str = "leased"
     # 该纹理承载的数据打包区域（绝对画布坐标；由渲染器在使用处赋值）。
@@ -112,20 +173,29 @@ class MetalTexturePool:
         with self._lock:
             return len(self._retiring)
 
-    def texture_bytes(self, width: int, height: int) -> int:
-        return int(width) * int(height) * RGBA16F_BYTES_PER_PIXEL
+    def texture_bytes(self, width: int, height: int,
+                      pixel_format: Optional[object] = None) -> int:
+        fmt = self._pixel_format if pixel_format is None else pixel_format
+        return int(width) * int(height) * _resolve_format_bytes(fmt)
 
     # ── 分配 / 归还 ──
 
-    def acquire(self, width: int, height: int) -> PooledTexture:
-        """取一张 ``width × height`` 的可写纹理（命中复用，未命中创建）。"""
+    def acquire(self, width: int, height: int,
+                pixel_format: Optional[object] = None) -> PooledTexture:
+        """取一张 ``width × height`` 的可写纹理（命中复用，未命中创建）。
+
+        ``pixel_format=None`` 用池默认格式（构造参数，RGBA16F）。复用
+        需要尺寸与格式都相同；不同格式的同尺寸纹理分别记账。
+        """
         w, h = int(width), int(height)
         if w <= 0 or h <= 0:
             raise ValueError(f"非法纹理尺寸 {w}x{h}")
-        need = self.texture_bytes(w, h)
+        fmt = self._pixel_format if pixel_format is None else pixel_format
+        need = self.texture_bytes(w, h, fmt)
         with self._lock:
             for i, entry in enumerate(self._free):
-                if entry.width == w and entry.height == h:
+                if (entry.width == w and entry.height == h
+                        and entry.pixel_format == fmt):
                     self._free.pop(i)
                     entry.state = "leased"
                     entry._returned = False
@@ -137,10 +207,11 @@ class MetalTexturePool:
                     f"已用 {self._bytes_allocated}/{self._budget} B，"
                     f"无可驱逐空闲纹理")
         texture = self._context.create_texture_2d(
-            self._pixel_format, w, h, shader_write=True)
+            fmt, w, h, shader_write=True)
         entry = PooledTexture(
             texture=texture, width=w, height=h, bytes_size=need,
-            slot=next(self._slot_counter), generation=self._generation)
+            slot=next(self._slot_counter), generation=self._generation,
+            pixel_format=fmt)
         with self._lock:
             self._bytes_allocated += need
             self._live[entry.slot] = entry

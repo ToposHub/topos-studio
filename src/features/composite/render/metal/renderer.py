@@ -1,4 +1,4 @@
-"""MetalCompositeRenderer — 合成图的 Metal compute 执行器（阶段 5.1/5.3）。
+"""MetalCompositeRenderer — 合成图的 Metal compute 执行器（阶段 5.1–5.6）。
 
 职责与边界：
 
@@ -8,25 +8,35 @@
   调用方决定，绝不跳过未迁移节点继续产出。
 - 全帧与分块共用同一执行模型：节点按扩张区域（`roi.input_roi` + halo）
   dispatch，Output 节点只写 tile 中心（裁回中心）。
-- 完成与租约语义（阶段 1 契约）：
+- 完成与租约语义（阶段 1 契约 / 阶段 5.6 有界异步发布）：
 
-  1. GPU 完成前不发布：提交后 ``waitUntilCompleted``，然后才构造
-     handle（``fence_ns=0`` 表示生产者已等待，内容完整）。
-  2. 输入各释放一次：所有中间纹理在提交时 ``retire``，经
-     ``MetalSubmissionScheduler`` 的完成回调在资源线程
-     ``finalize_retire``（驱动线程只入队）。
-  3. 槽位按租约键确认：纹理池以 ``(池代次, 槽号)`` 记账，
-     ``handle.release()`` 幂等归还。
+  1. **编码前预留环容量**：``MetalSubmissionScheduler.try_reserve``；
+     环满（back-pressure）时先 ``poll_completions()`` 回收一次再试，
+     仍满则显式回退本帧，不发布半成品。
+  2. **GPU 完成前不发布**：``render_async`` 返回
+     :class:`MetalFramePending`；完成回调（驱动线程只入队）在拥有者线程
+     的 :meth:`poll_completions` 里执行——中间纹理 finalize、tile 缓存
+     写入、**然后**构造 ``CompositeGpuFrameHandle``（``fence_ns=0`` 表示
+     内容完整：完成事件已经到达）。
+  3. 输入各释放一次：所有中间纹理在提交时 ``retire``，完成回调
+     ``finalize_retire``；输出纹理经 handle 租约归还，幂等。
+  4. 等待超时/设备暂停：``pending.wait(timeout)`` 超时显式回退并**放弃**
+     该帧（迟到的完成在回调里直接回收租约，不发布）；调度器的
+     ``pending_timeouts`` 会暂停该设备的新提交，排空后自动恢复。
 
-- 本阶段为同步发布（服务 API 语义要求内容完整）；异步发布留给视口
-  接入（阶段 2/5.6）再评估 fence 方案。
+- 同步入口 :meth:`render` 保留（对拍/诊断/单帧调用方）：内部同样走异步
+  提交，只是 ``wait()`` 驱动 poll 直到完成——不再 ``waitUntilCompleted``。
+- 阶段 5.4：请求携带 ``segment_id``；``TemporalHistoryTracker`` 记录
+  正放/倒放/seek/跨剪切的边界，时域图在重置边界给出含节点 ID/类型与
+  所需历史的拒绝诊断（当前所有时域节点在预检即整图回退）。
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -54,7 +64,12 @@ from .kernels import (
     region_dict,
 )
 from .node_support import MetalSupportReport, evaluate_metal_support
-from .texture_pool import MetalTexturePool, PooledTexture
+from .texture_pool import MetalPoolExhausted, MetalTexturePool, PooledTexture
+from .time_contract import (
+    TemporalHistoryTracker,
+    evaluate_temporal_requirements,
+    temporal_fallback_reason,
+)
 from .tile_cache import MetalTileCache, composite_cache_key, graph_params_digest
 
 logger = logging.getLogger(__name__)
@@ -62,8 +77,100 @@ logger = logging.getLogger(__name__)
 _RECT_ZERO: Rect = (0, 0, 0, 0)
 
 
+class MetalFramePending:
+    """``render_async`` 的在途帧：GPU 完成后才发布 handle。
+
+    生命周期：``SUBMITTED``（GPU 可能仍在执行）→ 完成（``poll`` 里发布
+    handle 或超时被放弃）。发布后 ``wait``/``try_get`` 返回内容完整的
+    ``CompositeGpuFrameHandle``；超时返回显式回退句柄，迟到的完成在
+    回调里直接回收租约（绝不发布半成品/孤儿句柄给第二个消费者）。
+    """
+
+    def __init__(self, renderer: "MetalCompositeRenderer", sequence: int,
+                 frame: int, generation: int, trace_id: str) -> None:
+        self._renderer = renderer
+        self._sequence = int(sequence)
+        self.frame = int(frame)
+        self.generation = int(generation)
+        self.trace_id = str(trace_id)
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._handle: Optional[CompositeGpuFrameHandle] = None
+        self._settled = False
+        self._abandoned = False
+
+    @property
+    def sequence(self) -> int:
+        return self._sequence
+
+    @property
+    def done(self) -> bool:
+        return self._event.is_set()
+
+    def _settle(self, handle: CompositeGpuFrameHandle) -> None:
+        """完成回调（拥有者线程 poll 内）调用：发布或回收。"""
+        with self._lock:
+            if self._settled:
+                # 防御：不应发生（完成回调恰好一次）。
+                handle.release()
+                return
+            if self._abandoned:
+                # 等待方已超时回退：本 handle 无人消费，直接归还租约。
+                self._settled = True
+                self._handle = None
+                abandoned = True
+            else:
+                self._settled = True
+                self._handle = handle
+                abandoned = False
+        if abandoned:
+            handle.release()
+        else:
+            self._event.set()
+
+    def wait(self, timeout_s: float = 10.0) -> CompositeGpuFrameHandle:
+        """等待 GPU 完成并返回已发布的 handle（超时显式回退）。"""
+        deadline = time.monotonic() + max(0.0, float(timeout_s))
+        while not self._event.wait(0.005):
+            self._renderer.poll_completions()
+            if self._event.is_set():
+                break
+            if time.monotonic() >= deadline:
+                with self._lock:
+                    if self._settled and self._handle is not None:
+                        break
+                    self._abandoned = True
+                self._renderer._forget_pending(self)
+                return make_unavailable_handle(
+                    f"等待 Metal GPU 完成超时（>{timeout_s:.1f}s），本帧回退",
+                    generation=self.generation, frame=self.frame,
+                    trace_id=self.trace_id)
+        with self._lock:
+            handle = self._handle
+        self._renderer._forget_pending(self)
+        if handle is None:  # pragma: no cover - _settle 保证与 event 配对
+            return make_unavailable_handle(
+                "Metal 帧完成状态异常", generation=self.generation,
+                frame=self.frame, trace_id=self.trace_id)
+        return handle
+
+    def try_get(self) -> Optional[CompositeGpuFrameHandle]:
+        """非阻塞：完成返回 handle，未完成返回 None（并顺带 poll 一次）。"""
+        self._renderer.poll_completions()
+        if not self._event.is_set():
+            return None
+        with self._lock:
+            handle = self._handle
+        if handle is not None:
+            self._renderer._forget_pending(self)
+        return handle
+
+
 class MetalCompositeRenderer:
     """以 Metal compute 执行已迁移节点组成的合成图。"""
+
+    # 完成事件超时（秒）：超时的提交暂停该设备的新提交（调度器契约）。
+    COMPLETION_TIMEOUT_S = 10.0
 
     def __init__(
         self,
@@ -83,12 +190,21 @@ class MetalCompositeRenderer:
         self._pending: List[PooledTexture] = []
         # 已发布句柄的槽位 → 纹理记账（readback/release 用）。
         self._published: Dict[int, PooledTexture] = {}
+        # 阶段 5.4：历史边界跟踪（正放/倒放/seek/跨剪切/代际）。
+        self._history = TemporalHistoryTracker()
+        self.last_history_reset_reason: str = ""
+        # 提交序号 → 在途帧。
+        self._pending_frames: Dict[int, MetalFramePending] = {}
 
     # ── 属性 ──
 
     @property
     def pool(self) -> Optional[MetalTexturePool]:
         return self._pool
+
+    @property
+    def scheduler(self) -> Optional[MetalSubmissionScheduler]:
+        return self._scheduler
 
     @property
     def cache(self) -> MetalTileCache:
@@ -106,13 +222,25 @@ class MetalCompositeRenderer:
     def last_gpu_time_ms(self) -> Optional[float]:
         return self._last_gpu_ms
 
+    @property
+    def in_flight_frames(self) -> int:
+        """在途（已提交未发布）帧数（环占用诊断）。"""
+        return sum(1 for pending in self._pending_frames.values()
+                   if not pending.done)
+
+    def _forget_pending(self, pending: "MetalFramePending") -> None:
+        """句柄已被消费/放弃：从注册表移除（幂等）。"""
+        self._pending_frames.pop(pending.sequence, None)
+
     # ── 生命周期 ──
 
     def _ensure_context(self) -> MetalComputeContext:
         if self._context is None:
             self._context = MetalComputeContext()
         if self._scheduler is None:
-            self._scheduler = MetalSubmissionScheduler(self._context)
+            self._scheduler = MetalSubmissionScheduler(
+                self._context,
+                completion_timeout_s=self.COMPLETION_TIMEOUT_S)
         if self._pool is None:
             self._pool = MetalTexturePool(self._context)
         return self._context
@@ -121,6 +249,19 @@ class MetalCompositeRenderer:
         """释放资源（关闭/切页）。在途工作先排空再销毁。"""
         if self._scheduler is not None:
             self._scheduler.drain()
+            # drain 已让完成回调落地：发布的 handle 由消费者持有租约；
+            # 无人消费的已发布句柄与未结算的 pending 在此归还/拒绝。
+            for pending in list(self._pending_frames.values()):
+                if pending.done:
+                    handle = pending.try_get()
+                    if handle is not None and handle.available:
+                        handle.release()
+                else:
+                    pending._settle(make_unavailable_handle(
+                        "渲染器已清理，本帧不发布", frame=pending.frame,
+                        generation=pending.generation,
+                        trace_id=pending.trace_id))
+            self._pending_frames.clear()
         if self._pool is not None:
             self._pool.destroy()
         self._cache.clear()
@@ -140,12 +281,55 @@ class MetalCompositeRenderer:
         tile_size: Optional[Tuple[int, int]] = None,
         use_cache: bool = True,
         trace_id: str = "",
+        segment_id: str = "",
+        params_resolved: bool = False,
     ) -> CompositeGpuFrameHandle:
-        """渲染一帧并发布 GPU 句柄（不通过预检时返回显式回退句柄）。"""
-        support = evaluate_metal_support(graph_data)
+        """渲染一帧并发布 GPU 句柄（同步包装：完成事件驱动，无
+        ``waitUntilCompleted``）。不通过预检时返回显式回退句柄。"""
+        outcome = self.render_async(
+            graph_data, timeline_frame=timeline_frame, generation=generation,
+            tile_size=tile_size, use_cache=use_cache, trace_id=trace_id,
+            segment_id=segment_id, params_resolved=params_resolved)
+        if isinstance(outcome, CompositeGpuFrameHandle):
+            return outcome
+        return outcome.wait(timeout_s=self.COMPLETION_TIMEOUT_S)
+
+    def render_async(
+        self,
+        graph_data: dict,
+        timeline_frame: int = 0,
+        generation: int = 0,
+        tile_size: Optional[Tuple[int, int]] = None,
+        use_cache: bool = True,
+        trace_id: str = "",
+        segment_id: str = "",
+        params_resolved: bool = False,
+    ) -> Union[MetalFramePending, CompositeGpuFrameHandle]:
+        """渲染一帧：有界异步提交，GPU 完成后才发布句柄。
+
+        Returns:
+            :class:`MetalFramePending`（完成经 :meth:`poll_completions`
+            发布）；预检/预留不通过时直接返回显式不可用句柄（整图回退
+            由调用方决定）。
+        """
+        support = evaluate_metal_support(graph_data,
+                                         params_resolved=params_resolved)
         self._last_support = support
         if not support.supported:
             reason = support.fallback_summary or "合成图未通过 Metal 预检"
+            logger.info("MetalCompositeRenderer: %s", reason)
+            return make_unavailable_handle(
+                reason, generation=generation, frame=timeline_frame,
+                trace_id=trace_id)
+        # 阶段 5.4：历史边界（时域节点当前在预检即回退；此处为已迁移
+        # 时域节点与后续接线保留可执行的边界逻辑）。
+        decision = self._history.note_request(
+            timeline_frame, generation=generation, segment_id=segment_id)
+        self.last_history_reset_reason = (
+            decision.reason if decision.reset else "")
+        temporal = evaluate_temporal_requirements(graph_data)
+        if temporal and decision.reset:
+            reason = temporal_fallback_reason(temporal, decision)
             logger.info("MetalCompositeRenderer: %s", reason)
             return make_unavailable_handle(
                 reason, generation=generation, frame=timeline_frame,
@@ -165,6 +349,11 @@ class MetalCompositeRenderer:
             return make_unavailable_handle(
                 f"Metal 计划失败: {exc}", generation=generation,
                 frame=timeline_frame, trace_id=trace_id)
+        except MetalPoolExhausted as exc:
+            logger.error("MetalCompositeRenderer 纹理池耗尽: %s", exc)
+            return make_unavailable_handle(
+                f"Metal 纹理池耗尽: {exc}", generation=generation,
+                frame=timeline_frame, trace_id=trace_id)
 
     def render_readback(
         self,
@@ -172,12 +361,22 @@ class MetalCompositeRenderer:
         timeline_frame: int = 0,
         tile_size: Optional[Tuple[int, int]] = None,
         use_cache: bool = False,
+        segment_id: str = "",
+        params_resolved: bool = False,
     ) -> Optional[np.ndarray]:
         """渲染并读回 ``(h, w, 4)`` float32（对拍/导出路径）。"""
-        handle = self.render(graph_data, timeline_frame=timeline_frame,
-                             tile_size=tile_size, use_cache=use_cache)
-        if not handle.available:
-            return None
+        pending = self.render_async(
+            graph_data, timeline_frame=timeline_frame, tile_size=tile_size,
+            use_cache=use_cache, segment_id=segment_id,
+            params_resolved=params_resolved)
+        if isinstance(pending, CompositeGpuFrameHandle):
+            if not pending.available:
+                return None
+            handle = pending
+        else:
+            handle = pending.wait(timeout_s=self.COMPLETION_TIMEOUT_S)
+            if not handle.available:
+                return None
         try:
             return self.readback(handle)
         finally:
@@ -196,13 +395,27 @@ class MetalCompositeRenderer:
             dtype=np.float16, region_width=handle.width)
         return raw.reshape(handle.height, handle.width, 4).astype(np.float32)
 
+    def poll_completions(self) -> Tuple[int, ...]:
+        """拥有者线程：回收完成提交、发布句柄、处理完成超时。"""
+        if self._scheduler is None:
+            return ()
+        timed_out = self._scheduler.pending_timeouts()
+        if timed_out and not self._scheduler.paused:
+            self._scheduler.pause(
+                f"completion_timeout:{list(timed_out)}")
+        completed = self._scheduler.poll()
+        if self._scheduler.paused and self._scheduler.resume_if_idle():
+            logger.info(
+                "MetalCompositeRenderer: GPU 已排空，恢复接受新提交")
+        return completed
+
     # ── 内部：整帧编排 ──
 
     def _render_supported(
         self, graph_data: dict, timeline_frame: int, generation: int,
         tile_size: Optional[Tuple[int, int]], use_cache: bool,
         trace_id: str, started: float,
-    ) -> CompositeGpuFrameHandle:
+    ) -> Union[MetalFramePending, CompositeGpuFrameHandle]:
         context = self._ensure_context()
         plan = gp.build_execution_plan(graph_data, timeline_frame)
         self._last_plan = plan
@@ -217,18 +430,29 @@ class MetalCompositeRenderer:
         output_cs = _output_color_space(out_node)
 
         assert self._pool is not None and self._scheduler is not None
-        output_entry = self._pool.acquire(canvas_w, canvas_h)
-        output_entry.pack = (0, 0, canvas_w, canvas_h)
-        self._pending.append(output_entry)
-        self._published[output_entry.slot] = output_entry
-
-        tiles: List[Rect] = (
-            [(0, 0, canvas_w, canvas_h)] if single_pass
-            else list(roi.iter_tile_rects(canvas_w, canvas_h, *tile_size)))
-        params_digest = graph_params_digest(graph_data)
-        cache_stores: List[Tuple[str, Rect]] = []
+        # 有界调度：编码前预留环容量；环满先回收一次，仍满显式回退。
+        sequence = self._scheduler.try_reserve()
+        if sequence is None:
+            self.poll_completions()
+            sequence = self._scheduler.try_reserve()
+        if sequence is None:
+            return make_unavailable_handle(
+                "Metal 提交环已满（back-pressure），本帧回退",
+                generation=generation, frame=timeline_frame,
+                trace_id=trace_id)
 
         try:
+            output_entry = self._pool.acquire(canvas_w, canvas_h)
+            output_entry.pack = (0, 0, canvas_w, canvas_h)
+            self._pending.append(output_entry)
+            self._published[output_entry.slot] = output_entry
+
+            tiles: List[Rect] = (
+                [(0, 0, canvas_w, canvas_h)] if single_pass
+                else list(roi.iter_tile_rects(canvas_w, canvas_h, *tile_size)))
+            params_digest = graph_params_digest(graph_data)
+            cache_stores: List[Tuple[str, Rect]] = []
+
             for tile in tiles:
                 expanded, _crop = roi.input_roi(
                     tile, halo, canvas_w, canvas_h)
@@ -248,44 +472,81 @@ class MetalCompositeRenderer:
                 self._execute_tile_pass(plan, expanded, tile, output_entry,
                                         is_tile_pass=not single_pass)
                 if use_cache:
-                    # 缓存写入必须在提交并完成之后（read_texture 的 blit
-                    # 独立提交，乱序会读到未写完的纹理）。
                     cache_stores.append((key, tile))
-
-            # 提交：中间纹理（不含输出纹理——它经 handle 租约归还）在
-            # 完成回调里各 finalize 一次（驱动线程只入队，poll 在本线程
-            # 执行释放）。
-            release_callbacks = self._retire_pending(
-                exclude=output_entry)
-            submission = self._scheduler.submit(
-                release_callbacks=release_callbacks)
-            if submission is None:
-                # 环满/暂停：未提交的编码属本帧，整组丢弃后显式回退。
-                self._context.discard_pending()
-                self._force_release_pending()
-                return make_unavailable_handle(
-                    "Metal 提交环已满（back-pressure），本帧回退",
-                    generation=generation, frame=timeline_frame,
-                    trace_id=trace_id)
-            submission.command_buffer.waitUntilCompleted()
-            self._last_gpu_ms = self._context.last_gpu_time_ms
-            self._scheduler.poll()
         except Exception:
-            # 编码失败：丢弃半编码 buffer，已分配纹理立即归还（未提交，
-            # GPU 从未接触）。
+            # 编码失败：丢弃半编码 buffer，取消预留，已分配纹理立即归还
+            # （未提交，GPU 从未接触）。
             self._context.discard_pending()
+            self._scheduler.cancel_reservation(sequence)
             self._force_release_pending()
             raise
 
-        if cache_stores:
-            self._store_tile_caches(cache_stores, output_entry)
+        pending = MetalFramePending(self, sequence, timeline_frame,
+                                    generation, trace_id)
+        release_callbacks = self._retire_pending(exclude=output_entry)
 
+        def on_complete(submission, error) -> None:
+            self._on_frame_completed(
+                pending, submission, error, output_entry, cache_stores,
+                timeline_frame, generation, out_meta, output_cs, trace_id,
+                len(tiles), halo, started)
+
+        submission = self._scheduler.submit_reserved(
+            sequence, release_callbacks=release_callbacks,
+            on_complete=on_complete)
+        if submission is None:
+            # 环预留失效或上下文无已编码工作：整组丢弃并显式回退。
+            self._context.discard_pending()
+            self._force_release_pending()
+            return make_unavailable_handle(
+                "Metal 提交失败（无已编码工作或预留失效），本帧回退",
+                generation=generation, frame=timeline_frame,
+                trace_id=trace_id)
+        self._pending_frames[sequence] = pending
+        return pending
+
+    def _on_frame_completed(
+        self,
+        pending: MetalFramePending,
+        submission,
+        error: Optional[str],
+        output_entry: PooledTexture,
+        cache_stores: List[Tuple[str, Rect]],
+        timeline_frame: int,
+        generation: int,
+        out_meta: FrameMeta,
+        output_cs: str,
+        trace_id: str,
+        tile_count: int,
+        halo: int,
+        started: float,
+    ) -> None:
+        """完成回调（拥有者线程 poll 内）：发布句柄或显式失败。"""
+        assert self._pool is not None
+        self._last_gpu_ms = _measure_gpu_time(submission.command_buffer)
+        if error is not None:
+            # GPU 报告错误：不发布半成品；完成已到达，无在途工作，
+            # 直接归还输出纹理租约。
+            self._release_output(output_entry)
+            pending._settle(make_unavailable_handle(
+                f"Metal command buffer 执行失败: {error}",
+                generation=generation, frame=timeline_frame,
+                trace_id=trace_id))
+            return
+        if cache_stores:
+            try:
+                self._store_tile_caches(cache_stores, output_entry)
+            except MetalComputeError as exc:
+                # 缓存写入（读回）失败只降级为本帧不缓存，帧本身有效。
+                logger.warning(
+                    "MetalCompositeRenderer: tile 缓存写入失败（忽略）: %s",
+                    exc)
         handle = CompositeGpuFrameHandle(
             frame=timeline_frame,
             generation=generation,
             texture_id=output_entry.slot,
-            width=canvas_w,
-            height=canvas_h,
+            width=output_entry.width,
+            height=output_entry.height,
             pixel_format="f2",
             color_space=output_cs,
             range="full",
@@ -293,17 +554,18 @@ class MetalCompositeRenderer:
             # Metal 纹理按图像行序（top-left）读回；GL 消费者需翻转。
             is_gl_oriented=False,
             backend="metal",
-            device_identity=context.device_identity,
-            fence_ns=0,  # 生产者已 waitUntilCompleted（handle 契约的 finish 兜底）
+            device_identity=(self._context.device_identity
+                             if self._context is not None else ""),
+            fence_ns=0,  # 完成事件已到达：内容完整（handle 契约的 finish 兜底）
             release_callback=lambda: self._release_output(output_entry),
             available=True,
             trace_id=trace_id,
         )
         logger.debug(
             "MetalCompositeRenderer: frame=%s tiles=%d halo=%d "
-            "elapsed=%.1fms", timeline_frame, len(tiles), halo,
+            "elapsed=%.1fms", timeline_frame, tile_count, halo,
             (time.monotonic() - started) * 1000.0)
-        return handle
+        pending._settle(handle)
 
     def _retire_pending(self, exclude: Optional[PooledTexture] = None) -> Tuple:
         """把本帧中间纹理置为待回收，返回完成回调（各释放一次）。"""
@@ -329,8 +591,8 @@ class MetalCompositeRenderer:
 
     def _release_output(self, entry: PooledTexture) -> None:
         if self._pool is not None:
-            # 提交时已 waitUntilCompleted：无在途 GPU 工作，直接归还
-            # （finalize 为幂等兜底，正常路径在完成回调里不包含输出纹理）。
+            # 发布仅在完成回调之后：无在途 GPU 工作，直接归还
+            # （finalize 为幂等兜底，正常路径输出纹理不在 retire 队列）。
             self._pool.finalize_retire(entry)
             self._pool.release_direct(entry)
         self._published.pop(entry.slot, None)
@@ -555,6 +817,22 @@ class _finalize_once:
             return
         self._done = True
         self._pool.finalize_retire(self._entry)
+
+
+def _measure_gpu_time(command_buffer) -> Optional[float]:
+    """完成回调里读 Metal 的 GPU 区间（与 context 的测量同式）。"""
+    start_fn = getattr(command_buffer, "gpuStartTime", None)
+    end_fn = getattr(command_buffer, "gpuEndTime", None)
+    if not callable(start_fn) or not callable(end_fn):
+        return None
+    try:
+        start = float(start_fn())
+        end = float(end_fn())
+    except (TypeError, ValueError, RuntimeError):
+        return None
+    if start <= 0.0 or end < start:
+        return None
+    return (end - start) * 1000.0
 
 
 def _output_color_space(out_node: PlannedNode) -> str:

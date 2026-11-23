@@ -30,7 +30,9 @@ from typing import Optional, Tuple
 import numpy as np
 
 # 渲染器实现变化（影响像素）时必须递增，否则命中旧实现的结果。
-METAL_COMPOSITE_RENDERER_VERSION = 1
+# v2（阶段 5.6）：constant gradient/radial 改为像素中心采样（对齐 GL 参考，
+# 修正半像素偏差）。
+METAL_COMPOSITE_RENDERER_VERSION = 2
 
 DEFAULT_CACHE_BUDGET_BYTES = 256 * 1024 * 1024
 
@@ -67,15 +69,26 @@ def composite_cache_key(
 
 
 def graph_params_digest(graph_data: dict) -> str:
-    """全图参数内容哈希（节点参数 + 连接拓扑的稳定序列化）。"""
+    """全图参数内容哈希（节点参数 + 动画/表达式 + 连接拓扑的稳定序列化）。
+
+    阶段 5.4：``keyframe_tracks`` / 已启用 ``expressions`` 一并进摘要——
+    只差动画定义的两张图不得共享缓存键（预检会在未解析时回退；已解析
+    接线后解析结果不同也各自成键）。
+    """
     nodes = graph_data.get("nodes") or []
     connections = graph_data.get("connections") or []
     node_parts = []
     for nd in sorted(nodes, key=lambda n: str(n.get("id", ""))):
         params = nd.get("parameters") or {}
         items = sorted((str(k), repr(v)) for k, v in params.items())
+        tracks = nd.get("keyframe_tracks") or {}
+        track_items = sorted((str(k), repr(v)) for k, v in tracks.items())
+        expressions = nd.get("expressions") or {}
+        expr_items = sorted((str(k), repr(v)) for k, v in expressions.items()) \
+            if bool(nd.get("expression_enabled", False)) else []
         node_parts.append(
-            f"{nd.get('id', '')}|{nd.get('type', '')}|{items}")
+            f"{nd.get('id', '')}|{nd.get('type', '')}|{items}"
+            f"|kf:{track_items}|expr:{expr_items}")
     conn_parts = sorted(
         f"{c.get('src_node_id', '')}.{c.get('src_port_name', '')}->"
         f"{c.get('dst_node_id', '')}.{c.get('dst_port_name', '')}"

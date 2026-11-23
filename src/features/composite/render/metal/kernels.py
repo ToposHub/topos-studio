@@ -278,11 +278,15 @@ kernel void comp_constant(texture2d<float, access::write> out [[texture(0)]],
                  + ((int)px / (int)p.checker_size);
         result = ((cell % 2) + 2) % 2 == 0 ? c1 : c2;
     } else {
-        // 图像 top-down uv（与 GLSL 内翻转后的 uv 一致）。
-        float2 uv = float2(fx / w, fy / h);
+        // 图像 top-down uv（与 GLSL 内翻转后的 uv 一致），**像素中心**
+        // 采样：(px + 0.5) / size——GL 参考的 v_uv 来自像素中心插值，
+        // 角点采样会让 gradient/radial 相对 GL 偏移半个像素（5.6 对拍
+        // 发现，逐像素 diff ≈ 1/w 量级）。
+        float2 uv = (float2(fx, fy) + 0.5) / float2(w, h);
         float t;
         if (p.mode == 3u) {
-            float2 delta = float2(fx - p.center_x * w, fy - p.center_y * h);
+            float2 delta = float2(fx + 0.5 - p.center_x * w,
+                                  fy + 0.5 - p.center_y * h);
             float short_edge = min(w, h);
             t = length(delta) / max(p.radial_radius * short_edge, 0.0001);
         } else {

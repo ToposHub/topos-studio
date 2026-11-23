@@ -375,7 +375,7 @@ CompositeRenderDialog → CompositeRenderExporter.export(settings, context)
 
 ---
 
-## 8.5 Metal 合成链（阶段 5.1 / 5.2 部分 / 5.3，默认关闭）
+## 8.5 Metal 合成链（阶段 5.1–5.6，默认关闭）
 
 `src/features/composite/render/metal/` 是合成域自己的 Metal compute 执行
 链，与既有 CPU/GL 路径共用同一份序列化图数据（`NodeGraph.to_dict()`），
@@ -386,20 +386,30 @@ CompositeRenderDialog → CompositeRenderExporter.export(settings, context)
 ```
 graph_data（序列化合成图）
   → node_support.evaluate_metal_support     纯预检：结构预检（graph_preflight）
-      + 节点能力表；任一参与节点未迁移/参数受限 → 整图回退（不跳节点）
+      + 节点能力表；任一参与节点未迁移/参数受限/未解析动画 → 整图回退
+      （不跳节点）；诊断码区分 node.metal_unmigrated / _param_unsupported
+      / _history_span（时域）/ _3d_unmapped（3D）/ _animated_params（动画）
+  → time_contract（5.4）                     历史与多帧契约：时域节点历史
+      跨度登记、确定性种子、起点/重置边界状态机
   → graph_plan.build_execution_plan          纯计划：参数合并（注册类默认）、
       拓扑序、每节点 canvas/数据窗口/alpha 语义（FrameMeta）
   → roi.propagate_input_halos / input_roi    tile halo 推导（计划参考实现 5A）
   → renderer.MetalCompositeRenderer          真机执行（全帧或分块）：
       · 节点按扩张区域 dispatch，Output 节点只写 tile 中心（裁回中心）
       · 中间纹理 = 区域大小、按绝对画布坐标放置（pack rect）
-      · 一次提交：中间纹理 retire → MetalSubmissionScheduler 完成回调
-        各 finalize 一次；waitUntilCompleted 后才构造 handle（fence_ns=0，
-        内容完整语义），handle.release() 幂等归还输出纹理
-  → texture_pool.MetalTexturePool           按字节计量（RGBA16F 8B/px）、
-      GPU 完成后回收、(池代次, 槽号) 租约键
+      · 有界异步发布（5.6）：编码前 try_reserve 环容量 → submit_reserved
+        注册完成回调 → 拥有者线程 poll_completions 里「中间纹理 finalize
+        → tile 缓存写入 → 构造 handle（fence_ns=0，完成事件已到达）」；
+        不再每帧 waitUntilCompleted；环满/超时显式回退，不发布半成品
+  → texture_pool.MetalTexturePool           按字节计量（RGBA16F 8B/px、
+      R32F 4B/px、RGBA32F 16B/px）、GPU 完成后回收、(池代次, 槽号) 租约键
   → tile_cache.MetalTileCache                内容寻址 tile 缓存，键 =
       渲染器版本|工程修订|帧|节点:端口|尺寸|tile 区域|色彩描述|参数哈希
+      （参数哈希含 keyframe_tracks/已启用表达式，动画差异不成同键）
+  → transfer_policy（5.6）                   设备/代际不匹配的传输策略
+  → export_bridge（5.6）                     多 pass / 图像序列 / 无头输出
+      （AOV pass 无 Metal 产出 → 显式回退 GL）
+  → mesh3d（5.5 第一步）                     最小 3D 验证 pass（不接图链）
 ```
 
 `cpu_reference.py` 是同一计划/参数包的 numpy 参考实现（对拍与无 GPU
@@ -410,7 +420,7 @@ graph_data（序列化合成图）
 
 | 节点 | 状态 | 限制 |
 |---|---|---|
-| constant | 已迁移 | solid/checker/gradient/radial 全模式 |
+| constant | 已迁移 | solid/checker/gradient/radial 全模式（像素中心采样，v2 修正） |
 | transform | 已迁移 | linear/nearest；运动模糊子帧采样回退 |
 | merge | 已迁移 | 32 混合模式、mask 通道/反相、alpha 策略、mix/opacity；psd_srgb 回退 |
 | output | 已迁移 | input/custom 画布、alpha 策略、背景合成、srgb 编码；project 画布回退 |
@@ -418,18 +428,86 @@ graph_data（序列化合成图）
 | premult / unpremult | 已迁移 | — |
 | mask | 仅 rectangle | ellipse/polygon/circle 与圆角未迁移 → 回退 |
 | noop / dot | 直通 | — |
-| 其余全部 | 未迁移 → 整图回退 | 含 Keyer/Matte/模糊/形态学/Glow/Light Wrap/文本/PSD/3D |
+| deflicker | 未迁移 | 时域节点 → `node.metal_history_span`（含因果窗口所需先前帧数） |
+| Scene3D 系 | 未迁移 | → `node.metal_3d_unmapped`（运行时 ScenePayload 无法无歧义映射） |
+| 携带动画/表达式节点 | 回退 | → `node.metal_animated_params`（关键帧由现有求值器采样；`params_resolved=True` 契约） |
+| 其余全部 | 未迁移 → 整图回退 | 含 Keyer/Matte/模糊/形态学/Glow/Light Wrap/文本/PSD |
 
 ### 启用与回退
 
-- 开关：`TOPOS_COMPOSITE_METAL=1`（默认关闭）+ 本机
-  `MetalComputeContext.is_supported()`。`auto`/`opengl` 与未设置时行为
-  与既有 CPU/GL 完全一致；入口是
-  `CompositeGraphRenderService.render_metal()`（`render_cpu`/`render_gpu`
-  不变）。
-- 预检不通过（未迁移节点/结构错误/参数受限）返回**显式不可用**句柄，
-  `fallback_reason` 含节点 ID 与类型；调用方整图回退 CPU/GL。
-- 提交环满（back-pressure）时丢弃本帧编码组并显式回退，不发布半成品。
+- 开关：`TOPOS_COMPOSITE_METAL=1`（默认关闭；`TOPOS_METAL_DISABLE=
+  composite_metal` 可单独关闭）+ 本机 `MetalComputeContext.is_supported()`。
+  `auto`/`opengl` 与未设置时行为与既有 CPU/GL 完全一致；入口是
+  `CompositeGraphRenderService.render_metal()` / `render_metal_async()`
+  （`render_cpu`/`render_gpu` 不变）。
+- 预检不通过（未迁移节点/结构错误/参数受限/未解析动画）返回**显式不可用**
+  句柄，`fallback_reason` 含节点 ID 与类型；调用方整图回退 CPU/GL。
+- 提交环满（back-pressure，编码前预留失败）或完成等待超时时丢弃本帧
+  并显式回退，不发布半成品；超时的提交会暂停该设备的新提交，排空后
+  自动恢复（`MetalSubmissionScheduler` 契约）。
+
+### 5.4 历史与多帧契约（`time_contract.py`）
+
+- **历史跨度**：`evaluate_temporal_requirements` 对参与锥的时域节点登记
+  跨度；只有节点定义可无歧义推导的才给数字（deflicker = window-1 因果
+  尾随窗），其余只登记分类（frame_remap/optical_flow/tracker/seeded）。
+- **确定性种子**：`deterministic_seed(graph_revision, node_id, frame,
+  params_digest)`——相同输入序列 ⇒ 相同种子，与播放顺序、seek、分段
+  导出无关。
+- **重置边界**：`TemporalHistoryTracker` 判定首帧/±1 连续推进（正放与
+  倒放）延续，seek 跳变、方向翻转、跨剪切（segment_id）、代际变化、
+  显式 reset（分段导出前）重置；同帧重试不重置（缓存内容寻址）。
+- **关键帧**：Metal 链消费「已按指定时间采样」的参数；未解析动画的图
+  整图回退（`node.metal_animated_params`），调用方传 `params_resolved=
+  True` 声明已由现有求值器解析。
+- 时域图命中重置边界时给出含节点 ID/类型/所需历史的拒绝诊断
+  （`temporal_fallback_reason`），不静默近似。
+
+### 5.5 3D 与 AOV（第一步：约定验证，不接图链）
+
+`mesh3d.py` 用基本网格 + 固定相机在 Metal compute 上验证与 `render3d/`
+GL 参考一致的约定：复用 `math_utils` 的 perspective/look_at（列向量
+矩阵；`matrix_to_tuple` 列主序 tuple 与 MSL 共享同一布局）、OpenGL 裁剪
+空间 z∈[-1,1] 在边界显式重映射 `d = z_ndc·0.5+0.5`（= GL 深度缓冲值）、
+深度测试 less、透视校正插值、NDC y-up → 图像 top-left 行序。GL 端用
+`_MESH_VERTEX` 同式着色器在独立子进程对拍（颜色 + 覆盖 + 遮挡结局），
+Metal 端与 CPU 参考对拍颜色（RGBA16F）与深度（R32F）。
+
+**未做**（按计划后续批次）：近平面裁剪、top-left 顶点规则、透明排序、
+多相机、粒子、法线/运动向量/深度 AOV、Cryptomatte。**Scene3D 不接入**：
+scene 端口携带运行时 ScenePayload（GL VBO/纹理/灯光），序列化参数无法
+无歧义重建 → `node.metal_3d_unmapped` 整图回退；`export_bridge` 的
+AOV pass 因此对每个请求的 AOV 显式回退 GL（`render_and_readback_passes`）。
+
+### 5.6 输出与资源池
+
+- **有界异步发布**：见上「模块与数据流」。预览（`render_metal_async`）
+  与后台输出（`export_bridge.render_sequence`）共用同一调度器环；
+  `render_metal`（同步语义）内部同样走异步提交 + 完成事件等待。
+- **纹理形态盘点**（`gpu_resource_pool.py` 实际使用 → Metal 池）：
+  RGBA16F（预览/中间/tile/视频槽）已迁移为池默认；R32F（深度）已迁移
+  （3D 验证 pass）；RGBA32F（导出分层）已登记字节计量但无 Metal 消费者
+  （链内部精度仍 RGBA16F）；R8/RG8 等窄格式未迁移（请求即显式报错，
+  不静默换格式）；EXTERNAL 登记不适用（不分配显存）。
+- **设备/代际传输策略**（`transfer_policy.py`，唯一一条）：
+  不可用 → 拒绝并按诊断回退；代际过期 → **直接释放租约不搬运**（优先于
+  设备判定）；后端（GL 消费者）或设备身份不匹配 → 唯一跨设备通路是
+  CPU 读回转运（`renderer.readback`），绝不把外设备纹理名交给消费者；
+  同设备同代际 → 直接消费 GPU 纹理，读完后 `release()`。
+- **导出桥**（`export_bridge.py`）：beauty 走 Metal；AOV 显式回退 GL；
+  序列渲染在段边界重置时域历史，支持协作式取消（在途帧完成即回收）。
+- **服务级一致性**：同一图经 `render_metal` 与 `render_cpu`（GL 无头，
+  子进程渲染）取相同帧对拍，最大差 ≈ 1 ulp f16（atol=2e-3）。
+
+### 待接线入口（阶段 5.6 之后的接线点，本批次未动）
+
+- `CompositeFrameRenderer.render_comp_clip_frame` / `render_comp_clip_gpu`
+  （Edit 时间线 comp clip 帧入口，`src/features/edit/**` 侧调用）。
+- `CompositeRenderOutput.render_video` / `render_image_sequence`
+  （视频/图像序列导出循环）。
+- 独立合成页 `CompositeRenderer`（交互预览线程）与 Composite Viewer。
+- 视口呈现（阶段 2 的原生视口/Metal→GL fence 未接：GL 消费者当前读不
+  了 Metal 纹理，跨后端一律走 transfer_policy 的读回转运）。
 
 ### 与 GL 路径的已知差异（有意/待办）
 
@@ -442,12 +520,26 @@ graph_data（序列化合成图）
 3. **分块限制**：tile pass 假设单画布空间链（crop-reformat 换画布的图
    走全帧单 tile）；中间节点级 GPU 纹理缓存未接（缓存当前在输出 tile
    粒度，命中后重新上传）。
-4. **同步发布**：服务 API 语义要求内容完整，当前提交后
-   `waitUntilCompleted` 再发布（handle 契约的 finish 兜底）；异步发布/
-   Metal→GL fence 留给视口接入（阶段 2/5.6）。
+4. **发布模型**：有界异步（完成事件驱动），同步入口 `render_metal` 同样
+   不再 `waitUntilCompleted`。
+5. **crop-reformat 输出画布**（5.6 对拍发现，待裁决）：Metal 计划里
+   crop reformat=True 将输出画布改为裁剪尺寸；GL 无头路径的 Output
+   （format_mode=input）仍取上游 Merge 画布。两端对同一图给出不同尺寸
+   的输出，需按 crop 节点权威语义裁决后统一（本批次双方均未改动）。
+6. **GL 侧既有 checker 相位问题**（5.6 对拍发现，未修）：GL 路径
+   `ConstantNode` 的 checker 走 numpy→纹理上传**未翻转**（gradient/
+   radial shader 路径显式翻 Y），无头读回后 checker 垂直相位与
+   `_make_checker` 自身不一致；Metal 侧与 `_make_checker` 一致。对拍图
+   因此避开 checker。
+7. **constant gradient/radial 采样中心**（v2 已修）：Metal kernel 与 CPU
+   参考原用 texel 角点采样，与 GL 参考的像素中心差半像素；5.6 对拍发现
+   后改为 `(px+0.5)/size`（渲染器版本 v1→v2）。
 
-测试：`tests/composite/test_metal_composite_chain.py`（无 GPU 机器跑逻辑
-层，真机层自动 skip；容差依据 RGBA16F 舍入 ≈ 2^-11 相对误差）。
+测试：`tests/composite/test_metal_composite_chain.py`（链路，64+ 项）、
+`test_metal_time_contract.py`（5.4）、`test_metal_export_bridge.py`
+（5.6，含服务级对拍与压测）、`test_metal_3d_pass.py`（5.5，含 GL 子进程
+对拍）。无 GPU 机器跑逻辑层，真机层自动 skip；容差依据 RGBA16F 舍入
+（1 ulp @1.0 ≈ 4.9e-4）。
 
 ---
 

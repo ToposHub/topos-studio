@@ -266,6 +266,8 @@ class CompositeGraphRenderService:
         quality: str = "preview",
         tile_size: tuple | None = None,
         trace_id: str | None = None,
+        segment_id: str = "",
+        params_resolved: bool = False,
     ) -> Optional[CompositeGpuFrameHandle]:
         """Render composite graph on the Metal compute chain (stage 5).
 
@@ -276,8 +278,16 @@ class CompositeGraphRenderService:
         blocking node IDs/types — the caller falls back to the existing
         CPU/GL path for the whole graph; nodes are never skipped.
 
+        Internally this is the bounded-async submission (stage 5.6):
+        publication happens on the GPU completion event driven by
+        ``MetalFramePending.wait`` — no per-frame ``waitUntilCompleted``.
+
         ``quality`` only distinguishes preview/export bookkeeping here;
         the Metal chain renders at full internal precision (RGBA16F).
+
+        ``segment_id`` (stage 5.4) marks the playback/export segment;
+        ``params_resolved`` declares that animation/expressions were
+        already sampled into ``parameters`` by the existing evaluator.
 
         Returns:
             A presentable or explicitly-unavailable composite GPU handle;
@@ -325,6 +335,8 @@ class CompositeGraphRenderService:
                 tile_size=tile_size,
                 use_cache=True,
                 trace_id=trace_id or "",
+                segment_id=segment_id,
+                params_resolved=params_resolved,
             )
             elapsed_ms = (_time.monotonic() - t0) * 1000.0
             self._record_telemetry(
@@ -342,6 +354,99 @@ class CompositeGraphRenderService:
             )
             logger.error("CompositeGraphRenderService Metal render failed: %s", e)
             return None
+
+    def render_metal_async(
+        self,
+        graph_data: dict,
+        timeline_frame: int = 0,
+        generation: int = 0,
+        tile_size: tuple | None = None,
+        trace_id: str | None = None,
+        segment_id: str = "",
+        params_resolved: bool = False,
+    ):
+        """Bounded-async Metal render (stage 5.6): returns a pending frame.
+
+        The handle is published only after the GPU completion event
+        (driven by the caller via ``pending.wait()`` / the service's
+        ``poll_metal_completions()``).  Ring-full back-pressure and
+        preflight refusals come back as explicit fallback handles.
+
+        Returns:
+            ``MetalFramePending``, or an explicitly-unavailable
+            ``CompositeGpuFrameHandle``; ``None`` when the chain is
+            disabled as a whole (caller uses render_cpu/render_gpu).
+        """
+        import time as _time
+
+        if not composite_metal_enabled():
+            self._record_telemetry(
+                frame=timeline_frame, path="metal_async", elapsed_ms=0.0,
+                success=False,
+                error=f"{_COMPOSITE_METAL_ENV} not enabled",
+            )
+            return None
+
+        from src.shared.gpu.metal import MetalComputeContext
+        if not MetalComputeContext.is_supported():
+            self._record_telemetry(
+                frame=timeline_frame, path="metal_async", elapsed_ms=0.0,
+                success=False,
+                error="Metal compute 不可用",
+            )
+            return None
+
+        from src.features.composite.render.metal.renderer import (
+            MetalCompositeRenderer,
+        )
+
+        t0 = _time.monotonic()
+        if not isinstance(graph_data, dict) or "nodes" not in graph_data:
+            self._record_telemetry(
+                frame=timeline_frame, path="metal_async", elapsed_ms=0.0,
+                success=False, error="empty or invalid graph_data",
+            )
+            return None
+
+        try:
+            if self._metal_renderer is None:
+                self._metal_renderer = MetalCompositeRenderer()
+            outcome = self._metal_renderer.render_async(
+                graph_data,
+                timeline_frame=timeline_frame,
+                generation=generation,
+                tile_size=tile_size,
+                use_cache=True,
+                trace_id=trace_id or "",
+                segment_id=segment_id,
+                params_resolved=params_resolved,
+            )
+            elapsed_ms = (_time.monotonic() - t0) * 1000.0
+            available = bool(getattr(outcome, "available", None)) \
+                if isinstance(outcome, CompositeGpuFrameHandle) else None
+            if isinstance(outcome, CompositeGpuFrameHandle):
+                self._record_telemetry(
+                    frame=timeline_frame, path="metal_async",
+                    elapsed_ms=elapsed_ms, success=available,
+                    error="" if available
+                    else str(getattr(outcome, "fallback_reason", "")),
+                )
+            return outcome
+        except Exception as e:
+            elapsed_ms = (_time.monotonic() - t0) * 1000.0
+            self._record_telemetry(
+                frame=timeline_frame, path="metal_async", elapsed_ms=elapsed_ms,
+                success=False, error=str(e),
+            )
+            logger.error(
+                "CompositeGraphRenderService Metal async render failed: %s", e)
+            return None
+
+    def poll_metal_completions(self) -> tuple:
+        """Drive Metal completion publication (owner thread, stage 5.6)."""
+        if self._metal_renderer is None:
+            return ()
+        return self._metal_renderer.poll_completions()
 
     def get_telemetry(self) -> list[dict]:
         """Get recent render telemetry entries."""
