@@ -25,7 +25,7 @@
 | [effect-compat-matrix.md](effect-compat-matrix.md) | 6.1 | 效果、`.tglsl` 插件、转场、预设与其它插件类型的兼容矩阵（生成物，不手改） |
 | `evidence/effect-metal-parity-2026-11-23.json` | 6.2 / 6.3 | 21 个已验证插件与内置曝光的 GL↔Metal 真机对拍：度量、门限、编译缓存键、反射绑定、编译器身份 |
 | `evidence/effect-metal-msl/*.metal` | 6.3 | 对拍时生成的 MSL 源（每个效果一份） |
-| `evidence/graphics-ledger-{startup,export-native,export-regular}-2026-11-23.json` | 7.5 | 图形调用台账：启动自检与一次导出（两条路径）创建的图形上下文 |
+| `evidence/graphics-ledger-{startup,export-native,export-regular}-2026-11-24.json` | 7.5 | 图形调用台账：启动自检与一次导出（两条路径）的图形上下文；用修正了重复计数的台账重采 |
 | `evidence/graphics-ledger-session-{gl,auto,metal,native}-2026-11-24.json` | 7.5 | 同上，四种配置各一次真实 GUI 会话（启动 → Edit 页 → 四条时间线各播一遍 → 退出） |
 | `evidence/graphics-ledger-pages-{gl,metal,native}-2026-11-24.json` | 7.5 | 同上，遍历全部页面（Edit → Color → Composite → Deliver → Library）的三种配置 |
 | [evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.md](evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.md) | 2.4 | 播放：迁移前基线与当前提交同机交替对照（`gl` / `metal` 各两轮，16 组总和相差 +0.4%） |
@@ -145,9 +145,20 @@ TOPOS_METAL_DISABLE=native_viewport,edit_metal_composite <应用>
 调用方所在域、原因（模块.函数）、线程、会话；退出时把快照写到 `TOPOS_GRAPHICS_LEDGER_FILE`（未设置则打到
 stderr）。未设置时不安装任何钩子。
 
-**口径**：Qt 为自己的 `QOpenGLWidget` 建的上下文不经过这两个工厂，**不计入**。`counts["opengl"]` 是 moderngl
-上下文的数量，是本次会话 GL 上下文数的下界——节目监视器、Source 监视器这类 `QOpenGLWidget` 即使在
-`counts["opengl"] == 0` 时也各有一个 GL 上下文。`opengl_threads` 是创建 moderngl 上下文的线程。
+**口径**（读数前必须知道的三件事）：
+
+- **接管也算。** `moderngl.create_context()` 不带参数时绑定调用线程上**当前**的 Qt 上下文：各渲染线程都是先把自己的
+  `QOpenGLContext` 设为 current 再调它，示波器控件在 `initializeGL` 里经 `GLContextManager.initialize` 调它。这类记录的
+  `kind` 是 `adopt`——上下文是 Qt 建的，但同样是 Topos 在用的 GL 上下文，照常计数（这也是 Qt 建的上下文在台账里唯一的
+  可见方式）。moderngl 自己建的（`create_standalone_context`，或没有当前上下文时的 `create_context()`）`kind` 是 `new`。
+- **Qt 为自己的 `QOpenGLWidget` 建的上下文不经过这两个工厂，不计入**，除非随后被接管。所以 `counts["opengl"]` 是本次
+  会话 GL 上下文数的下界——节目监视器、Source 监视器这类 `QOpenGLWidget` 即使在 `counts["opengl"] == 0` 时也各有一个
+  GL 上下文。
+- **standalone 只记一次。** moderngl 5.12 的 `create_standalone_context()` 内部就是 `create_context(standalone=True)`，
+  2026-11-23 的台账把每个 standalone 上下文记成了两条（常规导出路径因此显示 2 个，实为 1 个）；已修正，三个快照按
+  2026-11-24 重采。
+
+`opengl_threads` 是调用 GL 工厂的线程。
 
 ```bash
 TOPOS_GRAPHICS_LEDGER=1 TOPOS_GRAPHICS_LEDGER_FILE=/tmp/ledger.json <应用>
@@ -156,50 +167,49 @@ TOPOS_GRAPHICS_LEDGER=1 TOPOS_GRAPHICS_LEDGER_FILE=/tmp/ledger.json <应用>
 `TOPOS_GRAPHICS_FACTORY=deny` 让 GL 上下文工厂在创建任何东西之前抛 `GraphicsFactoryRefused`（仅当台账钩子已
 安装时生效），用来在有正常 GL 的机器上测试调用方的回退；`TOPOS_METAL_DISABLE` 与它互不影响。
 
-2026-11-23 首批度量（`evidence/graphics-ledger-*.json`，本机 Intel + AMD）：
+启动与导出（`evidence/graphics-ledger-{startup,export-native,export-regular}-2026-11-24.json`，本机 Intel + AMD）：
 
 | 工作流 | GL 上下文 | GL 线程 | Metal 上下文 |
 |---|---:|---|---:|
 | 启动自检（`--test-startup`，无 GUI） | 0 | 无 | 0 |
-| 导出 1080p25 LUT + 音频，Metal H.264 快路径（macOS 默认） | **0** | **无** | 3 |
-| 同一时间线，常规导出路径 | 2 | `export-render-pipeline` | 0 |
+| 导出 1080p25 LUT + 音频，Metal H.264 快路径（macOS 默认） | **0** | **无** | 2（导出渲染器 1、`cv_metal_bridge` 1） |
+| 同一时间线，常规导出路径 | 1（standalone） | `export-render-pipeline` | 0 |
 
 导出这条工作流上，7.5「Topos 创建的 GL 上下文和线程为零」已有证据：Metal H.264 快路径一个都不建。
 
 2026-11-24 真实 GUI 会话（显示器清醒，本机 Intel + AMD；`evidence/graphics-ledger-session-*-2026-11-24.json`）。
 每个会话：启动 → Edit 页 → 四条时间线各播一遍 → 退出：
 
-| 配置 | moderngl GL 上下文 | 线程 | Metal 上下文 | 创建处 |
+| 配置 | GL 上下文 | GL 线程 | Metal 上下文 | 记录 |
 |---|---:|---|---:|---|
-| `gl`（`TOPOS_BACKEND_GRAPHICS=opengl`，Metal 预览关） | 1 | `Dummy-1` | 0 | `edit_gpu_preview_renderer.run` |
-| `auto` | 1 | `Dummy-2` | 1 | 同上；Metal 在 `metal_timeline_preview.__init__` |
-| `metal` | 1 | `Dummy-2` | 1 | 同上 |
-| `metal` + 原生视口（`TOPOS_EDIT_METAL_VIEWPORT=1`） | 1 | `Dummy-2` | 1 | 同上 |
+| `gl`（`TOPOS_BACKEND_GRAPHICS=opengl`，Metal 预览关） | 1 | 剪辑预览渲染线程 | 0 | `edit_gpu_preview_renderer.run` 接管 Qt 上下文 |
+| `auto` | 1 | 同上 | 1 | 同上；Metal 在 `metal_timeline_preview.__init__` |
+| `metal` | 1 | 同上 | 1 | 同上 |
+| `metal` + 原生视口（`TOPOS_EDIT_METAL_VIEWPORT=1`） | 1 | 同上 | 1 | 同上 |
 
-预览这条工作流上，四种配置都还留着剪辑预览渲染线程启动时建的那一个 moderngl 上下文，其余是 Qt 自己的
-`QOpenGLWidget` 上下文（不在台账里）。
+预览这条工作流上，四种配置都还留着剪辑预览渲染线程上的那一个 GL 上下文（Qt 建、moderngl 接管）；其余是 Qt
+自己的 `QOpenGLWidget` 上下文（不在台账里）。
 
 2026-11-24 遍历全部页面（启动 → Edit → Color → Composite → Deliver → Library，每页停 6 秒；
 `evidence/graphics-ledger-pages-{gl,metal,native}-2026-11-24.json`。合成页打开的是临时图——普通时间线片段没有绑定
 comp clip）：
 
-| 配置 | moderngl GL 上下文 | Metal 上下文 |
+| 配置 | GL 上下文 | Metal 上下文 |
 |---|---:|---:|
-| `gl` | 6 | 0 |
-| `metal` | 6 | 1 |
-| `metal` + 原生视口 | 6 | 1 |
+| `gl` | 5 | 0 |
+| `metal` | 5 | 1 |
+| `metal` + 原生视口 | 5 | 1 |
 
-六个 moderngl 上下文在三种配置下相同：
+五个 GL 上下文在三种配置下相同：
 
-| 域 | 创建处 | 线程 |
-|---|---|---|
-| `edit` | `edit_gpu_preview_renderer.run` | 剪辑预览渲染线程 |
-| `shared_gpu` | `gl_backend.initialize` | **主线程** |
-| `color` | `async_renderer.run` | 调色异步渲染线程 |
-| `app`（2 个） | `node_thumbnail_evaluator._evaluate_job`：先 standalone，再 `create_context` | `node-thumbnail-evaluator` |
-| `composite` | `composite_renderer.run` | 合成渲染线程 |
+| 域 | 调用处 | 线程 | 来源 |
+|---|---|---|---|
+| `edit` | `edit_gpu_preview_renderer.run` | 剪辑预览渲染线程 | 接管 Qt 上下文 |
+| `shared_gpu` | `gl_backend.initialize`（示波器控件） | **主线程** | 接管 `QOpenGLWidget` 的上下文 |
+| `color` | `async_renderer.run` | 调色异步渲染线程 | 接管 Qt 上下文 |
+| `app` | `node_thumbnail_evaluator._evaluate_job` | `node-thumbnail-evaluator` | moderngl standalone |
+| `composite` | `composite_renderer.run` | 合成渲染线程 | 接管 Qt 上下文 |
 
-Metal 配置与 GL 配置在这一轮里建的 moderngl 上下文**数量相同**：Metal 预览只是把 H.264 帧的渲染挪到 Metal，剪辑预览
-线程仍然要 GL 上下文（DNxHR 与 GL Viewer 路线都用它），调色页、合成页与节点缩略图评测器完全没动。这六处加上主线程上的
-那一处，就是 7.5 余下的清单。
+Metal 配置与 GL 配置在这一轮里的 GL 上下文**数量相同**：Metal 预览只是把 H.264 帧的渲染挪到 Metal，剪辑预览线程仍然要
+GL 上下文（DNxHR 与 GL Viewer 路线都用它），调色页、合成页与节点缩略图评测器完全没动。这五处就是 7.5 余下的清单。
 

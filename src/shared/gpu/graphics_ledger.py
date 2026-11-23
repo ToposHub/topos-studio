@@ -17,6 +17,16 @@ Not counted are the contexts Qt makes for its own widgets (every
 on the GL contexts of a session; a viewer that is a ``QOpenGLWidget`` keeps
 its context even at ``counts["opengl"] == 0``.
 
+Two things the records say about each GL context.  ``kind`` is ``"adopt"``
+when ``moderngl.create_context()`` bound the Qt context that was current on
+the calling thread -- what every render thread here does (it makes a
+``QOpenGLContext`` current on an offscreen surface first) and what
+``GLContextManager.initialize`` does on the GUI thread -- and ``"new"``
+when moderngl made the context itself (``create_standalone_context``, or
+``create_context()`` with nothing current).  An adopted context was made by
+Qt, but it is a GL context all the same and is counted like any other: this
+is the only way a Qt-made context shows up in the ledger at all.
+
 The same hooks are the test injection of the plan ("用测试注入拒绝 GL
 工厂"): with ``TOPOS_GRAPHICS_FACTORY=deny`` a GL factory raises
 :class:`GraphicsFactoryRefused` before creating anything, so a caller's
@@ -79,9 +89,14 @@ class GraphicsFactoryRefused(RuntimeError):
         self.factory = factory
 
 
+#: how a GL context came to the caller
+NEW = "new"            # moderngl made the context
+ADOPT = "adopt"        # create_context() bound the Qt context that was already current
+
+
 @dataclass(frozen=True)
 class GraphicsCall:
-    """One context Topos created."""
+    """One GL or Metal context in use, and how it came to the caller."""
 
     api: str            # "opengl" / "metal"
     domain: str         # the caller's domain
@@ -89,6 +104,7 @@ class GraphicsCall:
     thread: str
     session: str
     factory: str        # which factory was called
+    kind: str = NEW
 
 
 class GraphicsLedger:
@@ -99,9 +115,11 @@ class GraphicsLedger:
         self._calls: List[GraphicsCall] = []
         self.session = ""
 
-    def record(self, api: str, domain: str, reason: str, factory: str) -> GraphicsCall:
+    def record(
+        self, api: str, domain: str, reason: str, factory: str, kind: str = NEW,
+    ) -> GraphicsCall:
         call = GraphicsCall(
-            api=api, domain=domain, reason=reason, factory=factory,
+            api=api, domain=domain, reason=reason, factory=factory, kind=kind,
             thread=threading.current_thread().name, session=self.session)
         with self._lock:
             self._calls.append(call)
@@ -176,19 +194,50 @@ def _caller() -> tuple[str, str]:
     return "<unknown>", "<unknown>"
 
 
-def _before_factory(api: str, factory: str) -> None:
+def _adopts_current_context(args: tuple, kwargs: Dict[str, Any]) -> bool:
+    """Whether this ``create_context()`` call binds the Qt context that is
+    current instead of making one: no argument selects ``standalone`` or
+    ``share``, and a Qt context is current on the calling thread."""
+    if args or kwargs.get("standalone") or kwargs.get("share") or kwargs.get("context"):
+        return False
+    try:
+        from PyQt6.QtGui import QOpenGLContext
+    except ImportError:       # a host without Qt has no context to adopt
+        return False
+    return QOpenGLContext.currentContext() is not None
+
+
+_inside_standalone = threading.local()
+
+
+def _before_factory(
+    api: str, factory: str, args: tuple = (), kwargs: Optional[Dict[str, Any]] = None,
+) -> None:
+    if factory == "moderngl.create_context" and getattr(_inside_standalone, "active", False):
+        # moderngl's create_standalone_context() is create_context(standalone=True):
+        # the same context would be counted twice.
+        return
     module, reason = _caller()
     domain = domain_of_module(module)
     if api == OPENGL and factory_policy() == "deny":
         # Refused before anything is created: the caller sees the same
         # situation as a machine without a usable GL.
         raise GraphicsFactoryRefused(api, domain, reason, factory)
-    _LEDGER.record(api, domain, reason, factory)
+    kind = ADOPT if (api == OPENGL and factory == "moderngl.create_context"
+                     and _adopts_current_context(args, kwargs or {})) else NEW
+    _LEDGER.record(api, domain, reason, factory, kind)
 
 
 def _wrapped(api: str, factory: str, original: Callable[..., Any]) -> Callable[..., Any]:
     def create(*args: Any, **kwargs: Any) -> Any:
-        _before_factory(api, factory)
+        if factory == "moderngl.create_standalone_context":
+            _before_factory(api, factory, args, kwargs)
+            _inside_standalone.active = True
+            try:
+                return original(*args, **kwargs)
+            finally:
+                _inside_standalone.active = False
+        _before_factory(api, factory, args, kwargs)
         return original(*args, **kwargs)
     create.__name__ = getattr(original, "__name__", "create")
     create.__doc__ = getattr(original, "__doc__", None)

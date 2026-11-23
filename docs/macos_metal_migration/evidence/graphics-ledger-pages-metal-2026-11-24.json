@@ -1,12 +1,12 @@
 {
  "session": "pagetour.py",
  "counts": {
-  "opengl": 6,
+  "opengl": 5,
   "metal": 1
  },
  "by_domain": {
   "app": {
-   "opengl": 2,
+   "opengl": 1,
    "metal": 0
   },
   "color": {
@@ -40,7 +40,8 @@
    "reason": "edit_gpu_preview_renderer.run",
    "thread": "Dummy-1",
    "session": "pagetour.py",
-   "factory": "moderngl.create_context"
+   "factory": "moderngl.create_context",
+   "kind": "adopt"
   },
   {
    "api": "metal",
@@ -48,7 +49,8 @@
    "reason": "metal_timeline_preview.__init__",
    "thread": "Dummy-1",
    "session": "pagetour.py",
-   "factory": "MetalComputeContext"
+   "factory": "MetalComputeContext",
+   "kind": "new"
   },
   {
    "api": "opengl",
@@ -56,7 +58,8 @@
    "reason": "gl_backend.initialize",
    "thread": "MainThread",
    "session": "pagetour.py",
-   "factory": "moderngl.create_context"
+   "factory": "moderngl.create_context",
+   "kind": "adopt"
   },
   {
    "api": "opengl",
@@ -64,7 +67,8 @@
    "reason": "async_renderer.run",
    "thread": "Dummy-2",
    "session": "pagetour.py",
-   "factory": "moderngl.create_context"
+   "factory": "moderngl.create_context",
+   "kind": "adopt"
   },
   {
    "api": "opengl",
@@ -72,15 +76,8 @@
    "reason": "node_thumbnail_evaluator._evaluate_job",
    "thread": "node-thumbnail-evaluator",
    "session": "pagetour.py",
-   "factory": "moderngl.create_standalone_context"
-  },
-  {
-   "api": "opengl",
-   "domain": "app",
-   "reason": "node_thumbnail_evaluator._evaluate_job",
-   "thread": "node-thumbnail-evaluator",
-   "session": "pagetour.py",
-   "factory": "moderngl.create_context"
+   "factory": "moderngl.create_standalone_context",
+   "kind": "new"
   },
   {
    "api": "opengl",
@@ -88,7 +85,8 @@
    "reason": "composite_renderer.run",
    "thread": "Dummy-3",
    "session": "pagetour.py",
-   "factory": "moderngl.create_context"
+   "factory": "moderngl.create_context",
+   "kind": "adopt"
   }
  ]
 }

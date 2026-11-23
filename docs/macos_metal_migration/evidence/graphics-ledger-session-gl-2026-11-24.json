@@ -20,7 +20,8 @@
    "reason": "edit_gpu_preview_renderer.run",
    "thread": "Dummy-1",
    "session": "topos_bench.py",
-   "factory": "moderngl.create_context"
+   "factory": "moderngl.create_context",
+   "kind": "adopt"
   }
  ]
 }

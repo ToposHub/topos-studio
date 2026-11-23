@@ -117,9 +117,129 @@ class TestRecording:
         _DummyMetal()
         snapshot = L.graphics_ledger().snapshot()
         assert snapshot["counts"] == {"opengl": 2, "metal": 1}
+        assert [call.kind for call in L.graphics_ledger().calls()] == [L.NEW, L.NEW, L.NEW]
         assert snapshot["by_domain"] == {"tests": {"opengl": 2, "metal": 1}}
         assert snapshot["session"] == "test-session"
         assert len(snapshot["calls"]) == 3
+
+
+class TestAdoption:
+    """``create_context()`` with nothing but the default arguments binds the
+    Qt context that is current on the calling thread.  Qt made that context;
+    it is still a GL context in use, so it is counted like any other."""
+
+    @staticmethod
+    def _current(monkeypatch: pytest.MonkeyPatch, context) -> None:
+        from PyQt6.QtGui import QOpenGLContext
+
+        monkeypatch.setattr(QOpenGLContext, "currentContext", staticmethod(lambda: context))
+
+    @pytest.mark.parametrize("call", [
+        lambda: moderngl.create_context(),
+        lambda: moderngl.create_context(require=330),      # a hint, not a request to make one
+    ])
+    def test_with_a_qt_context_current_it_is_recorded_as_adopted(
+        self, hooked, monkeypatch, call,
+    ) -> None:
+        self._current(monkeypatch, object())
+
+        assert isinstance(call(), _Stub)                   # called straight through all the same
+
+        (recorded,) = L.graphics_ledger().calls()
+        assert (recorded.kind, recorded.factory) == (L.ADOPT, "moderngl.create_context")
+        assert recorded.thread == threading.current_thread().name
+
+    def test_an_adopted_context_is_counted(self, hooked, monkeypatch) -> None:
+        self._current(monkeypatch, object())
+
+        moderngl.create_context()
+        moderngl.create_standalone_context()
+
+        snapshot = L.graphics_ledger().snapshot()
+        assert snapshot["counts"] == {"opengl": 2, "metal": 0}
+        assert snapshot["by_domain"] == {"tests": {"opengl": 2, "metal": 0}}
+        assert snapshot["opengl_threads"] == [threading.current_thread().name]
+        assert [call["kind"] for call in snapshot["calls"]] == [L.ADOPT, L.NEW]
+
+    @pytest.mark.parametrize("call", [
+        lambda: moderngl.create_context(share=True),
+        lambda: moderngl.create_context(standalone=True),
+        lambda: moderngl.create_standalone_context(),
+    ])
+    def test_a_context_asked_for_explicitly_is_made_by_moderngl_even_when_one_is_current(
+        self, hooked, monkeypatch, call,
+    ) -> None:
+        self._current(monkeypatch, object())
+
+        call()
+
+        assert [recorded.kind for recorded in L.graphics_ledger().calls()] == [L.NEW]
+
+    def test_without_a_current_qt_context_the_default_call_makes_one(self, hooked, monkeypatch) -> None:
+        self._current(monkeypatch, None)
+
+        moderngl.create_context()
+
+        assert [recorded.kind for recorded in L.graphics_ledger().calls()] == [L.NEW]
+
+    def test_a_refused_adoption_is_refused_like_any_other_call(self, hooked, monkeypatch) -> None:
+        """The injection stands in for a machine without GL, where no context can be current."""
+        self._current(monkeypatch, object())
+        monkeypatch.setenv(L.FACTORY_ENV, "deny")
+
+        with pytest.raises(L.GraphicsFactoryRefused):
+            moderngl.create_context()
+        assert L.graphics_ledger().calls() == []
+
+
+class TestStandalone:
+    """moderngl's ``create_standalone_context()`` *is* ``create_context(standalone=True)``:
+    both wrappers see one call, and it must be one context in the ledger."""
+
+    @staticmethod
+    def _like_moderngl(monkeypatch: pytest.MonkeyPatch, factory=None) -> None:
+        def create_standalone_context(**kwargs):
+            return moderngl.create_context(standalone=True, **kwargs)
+        if factory is not None:
+            original = create_standalone_context
+
+            def create_standalone_context(**kwargs):
+                return factory(original, **kwargs)
+        monkeypatch.setattr(moderngl, "create_standalone_context", L._wrapped(
+            L.OPENGL, "moderngl.create_standalone_context", create_standalone_context))
+
+    def test_one_standalone_context_is_one_record(self, hooked, monkeypatch) -> None:
+        self._like_moderngl(monkeypatch)
+
+        assert isinstance(moderngl.create_standalone_context(require=330), _Stub)
+
+        (recorded,) = L.graphics_ledger().calls()
+        assert (recorded.factory, recorded.kind) == ("moderngl.create_standalone_context", L.NEW)
+        assert L.graphics_ledger().snapshot()["counts"] == {"opengl": 1, "metal": 0}
+
+    def test_the_next_default_call_is_recorded_again_after_a_standalone_one(
+        self, hooked, monkeypatch,
+    ) -> None:
+        self._like_moderngl(monkeypatch)
+        moderngl.create_standalone_context()
+        moderngl.create_context()
+
+        assert [recorded.factory for recorded in L.graphics_ledger().calls()] == [
+            "moderngl.create_standalone_context", "moderngl.create_context"]
+
+    def test_a_standalone_context_that_fails_leaves_the_next_call_recorded(
+        self, hooked, monkeypatch,
+    ) -> None:
+        def failing(original, **kwargs):
+            raise RuntimeError("no GL here")
+        self._like_moderngl(monkeypatch, failing)
+
+        with pytest.raises(RuntimeError):
+            moderngl.create_standalone_context()
+        moderngl.create_context()
+
+        assert [recorded.factory for recorded in L.graphics_ledger().calls()] == [
+            "moderngl.create_standalone_context", "moderngl.create_context"]
 
 
 class TestDomain:

@@ -20,7 +20,8 @@
    "reason": "edit_gpu_preview_renderer.run",
    "thread": "Dummy-2",
    "session": "topos_bench.py",
-   "factory": "moderngl.create_context"
+   "factory": "moderngl.create_context",
+   "kind": "adopt"
   },
   {
    "api": "metal",
@@ -28,7 +29,8 @@
    "reason": "metal_timeline_preview.__init__",
    "thread": "Dummy-2",
    "session": "topos_bench.py",
-   "factory": "MetalComputeContext"
+   "factory": "MetalComputeContext",
+   "kind": "new"
   }
  ]
 }
