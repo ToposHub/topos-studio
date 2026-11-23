@@ -2484,15 +2484,19 @@ float blend_luma(float3 color) {
 }
 
 float3 blend_clip_color(float3 color) {
+    // W3C ClipColor, the formula of shaders/blend.glsl and blend_modes.py:
+    // both branches move the colour back to the isoluminant point,
+    // C = L + ((C - L) * ...).  Dropping the leading L (the old formula here
+    // and in the CPU twin) pulled it towards black instead, so the four HSL
+    // blend modes exported a different picture from the GL preview.
     float luma = blend_luma(color);
     float minimum = min(color.r, min(color.g, color.b));
     float maximum = max(color.r, max(color.g, color.b));
     float3 low = minimum < 0.0f
-        ? (color - luma) * luma / max(luma - minimum, 1.0e-6f)
+        ? luma + (color - luma) * luma / max(luma - minimum, 1.0e-6f)
         : color;
-    // Keep the same historical formula used by the CPU blend implementation.
     return maximum > 1.0f
-        ? (color - luma) * (1.0f - luma) / max(maximum - luma, 1.0e-6f)
+        ? luma + (color - luma) * (1.0f - luma) / max(maximum - luma, 1.0e-6f)
         : low;
 }
 
