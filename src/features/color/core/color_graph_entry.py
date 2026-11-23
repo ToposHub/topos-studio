@@ -238,18 +238,23 @@ class SharedColorGraphEntry:
         request_id: str | None = None,
         cancel_check: Callable[[str], bool] | None = None,
         size: tuple[int, int] = (0, 0),
+        viewer_target: str = "output",
     ) -> ColorGraphFrameResult:
         """渲染一帧：需求键 → 共享计划 → Metal 纹理执行 → 兼容图回退。
 
         ``source_rgba16f``：(H, W, 4) float16/float32（float32 自动量化
-        到 fp16——Metal 纹理路径的工作位深）。失败终态（两条路径都拒绝）
-        返回 ``published=False`` + 诊断；**不会**以原图顶替失败节点输出。
+        到 fp16——Metal 纹理路径的工作位深）。``viewer_target`` 缺省
+        ``"output"``（整图）；``"viewer:<node_id>"`` 编译该节点的依赖锥
+        （4.6 缩略图/辅助入口用——与 GL 评估器同一 freeze_graph 契约）。
+        失败终态（两条路径都拒绝）返回 ``published=False`` + 诊断；
+        **不会**以原图顶替失败节点输出。
         """
         request_id = request_id or str(uuid.uuid4())
         from src.features.color.core.color_graph_snapshot import freeze_graph
         snapshot = freeze_graph(
             graph, session_id=f"entry-{media_id}", source_frame=int(frame),
-            working_color_context=working_color_context)
+            working_color_context=working_color_context,
+            viewer_target=viewer_target)
         height, width = source_rgba16f.shape[:2]
         plan_size = size if size not in (None, (0, 0)) else (width, height)
         key = color_graph_frame_demand_key(

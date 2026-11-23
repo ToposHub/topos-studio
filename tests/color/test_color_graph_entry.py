@@ -291,3 +291,46 @@ class TestEntryMetal:
         assert not result.published
         assert result.backend == "cancelled"
         assert result.output is None
+
+
+class TestViewerTarget:
+    """``render_frame(viewer_target=...)``: the whole graph by default, or
+    one node's cone (what the thumbnails of plan 4.6 ask for)."""
+
+    @staticmethod
+    def _two_graders():
+        return _graph([_rich_layer(), _rich_layer()])
+
+    def test_the_default_target_is_the_output_and_plans_the_whole_graph(self) -> None:
+        graph = self._two_graders()
+        implicit = freeze_graph(graph, session_id="v")
+        explicit = freeze_graph(graph, session_id="v", viewer_target="output")
+        assert implicit.viewer_target == explicit.viewer_target == "output"
+        whole = plan_color_graph_frame(implicit, size=(16, 16)).plan
+        assert [p.node_id for p in whole.passes] == [
+            p.node_id for p in plan_color_graph_frame(explicit, size=(16, 16)).plan.passes]
+        assert len(whole.passes) >= 2                     # both graders are in it
+
+    def test_a_node_target_plans_only_its_cone(self) -> None:
+        graph = self._two_graders()
+        graders = [n.node_id for n in graph.nodes
+                   if n.node_type == NodeType.CORRECTOR.value]
+        whole = plan_color_graph_frame(
+            freeze_graph(graph, session_id="v"), size=(16, 16)).plan
+        cone = plan_color_graph_frame(
+            freeze_graph(graph, session_id="v", viewer_target=f"viewer:{graders[0]}"),
+            size=(16, 16)).plan
+        whole_ids = [p.node_id for p in whole.passes]
+        cone_ids = [p.node_id for p in cone.passes]
+        assert cone_ids and cone_ids[-1] == graders[0]
+        assert graders[1] not in cone_ids                  # downstream: not in the picture
+        assert set(cone_ids) <= set(whole_ids)             # the same passes, in the same order
+        assert [node_id for node_id in whole_ids if node_id in cone_ids] == cone_ids
+
+    def test_a_node_that_is_not_there_does_not_compile(self) -> None:
+        graph = self._two_graders()
+        outcome = plan_color_graph_frame(
+            freeze_graph(graph, session_id="v", viewer_target="viewer:missing"),
+            size=(16, 16))
+        assert outcome.plan is None and outcome.compile_error is not None
+        assert outcome.diagnostics[0].startswith("compile:")
