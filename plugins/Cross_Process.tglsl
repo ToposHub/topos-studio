@@ -11,8 +11,8 @@
 // @determinism deterministic
 // @export_support all
 // @threading gpu
-// @graphics_backends opengl
-// @compute_backends glsl_fragment
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @preview_cost low
 // @param select preset "Preset" 0 "Classic" "Green Shift" "Warm"
 // @param slider strength "Strength" 0.7 0.0 1.0

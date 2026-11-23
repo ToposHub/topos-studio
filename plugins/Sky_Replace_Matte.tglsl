@@ -10,6 +10,8 @@
 // @determinism deterministic
 // @export_support video
 // @occlusion background_independent
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @param color sky_color_low "Sky Color (Horizon)" 0.35 0.55 0.85
 // @param color sky_color_high "Sky Color (Zenith)" 0.10 0.25 0.60
 // @param slider key_luma "Sky Luminance Key" 0.55 0.0 1.0

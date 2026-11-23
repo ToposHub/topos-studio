@@ -9,6 +9,8 @@
 // @determinism deterministic
 // @export_support opengl
 // @preview_cost low
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @param color shadow_color "Shadow Color" 0.38 0.46 0.60
 // @param slider shadow_strength "Shadow Strength" 0.30 0.0 1.0
 // @param separator

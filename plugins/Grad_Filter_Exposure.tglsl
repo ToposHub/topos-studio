@@ -11,8 +11,8 @@
 // @determinism deterministic
 // @export_support all
 // @threading gpu
-// @graphics_backends opengl
-// @compute_backends glsl_fragment
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @preview_cost low
 // @param slider exposure "Exposure Stops" 1.0 -3.0 3.0
 // @param slider grad_angle "Angle (Degrees)" 0.0 -180.0 180.0

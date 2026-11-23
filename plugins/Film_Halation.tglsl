@@ -2,6 +2,8 @@
 // @name Film Halation
 // @i18n_name Film_Halation
 // @author Topos Team
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @param slider blur_radius "Blur Radius" 2.5 0.0 5.0
 // @param checkbox enable_tint "Enable Red Tint" 1
 // -----------------------------

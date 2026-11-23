@@ -98,6 +98,47 @@ def _plugin_capabilities_from_declaration(
     return ("gpu_preview",)
 
 
+#: 后端声明解析失败的 (plugin_id, 原文, 错误)。声明写错不能静默忽略，也不该
+#: 让整个插件从 Effect 页消失——插件照常按 OpenGL 能力加载，这里留下可查询的诊断。
+_BACKEND_DECLARATION_ERRORS: List[Tuple[str, str, str]] = []
+
+
+def backend_declaration_errors() -> Tuple[Tuple[str, str, str], ...]:
+    """返回本次 catalog 构建中发现的后端声明错误 ``(plugin_id, 原文, 错误)``。"""
+    return tuple(_BACKEND_DECLARATION_ERRORS)
+
+
+def _plugin_backend_declarations(plugin_id: str, plugin: Dict[str, Any]) -> Tuple[
+        Tuple[str, ...], Tuple[str, ...]]:
+    """解析 ``@graphics_backends`` / ``@compute_backends``（P7-07）。
+
+    返回 ``(graphics, compute)``，各自按字母序排列。未声明时 PluginManager 会
+    填入 ``opengl`` / ``glsl_fragment`` 默认值，与显式的 OpenGL-only 声明同义，
+    所以两者都得到单元素元组。声明含未知后端时记 error 日志并登记到
+    :func:`backend_declaration_errors`，该轴返回**空元组**（即未声明 → OpenGL
+    能力）——「明确诊断」而非静默忽略，也不让一行写错的声明使插件整个消失。
+
+    Raises:
+        ValueError: 永不。声明错误在这里被转成诊断。
+    """
+    from src.features.shared.effects.effect_capability import parse_backend_declaration
+
+    capabilities = plugin.get("capabilities") or {}
+    result: List[Tuple[str, ...]] = []
+    for kind, key in (("graphics", "graphics_backends"), ("compute", "compute_backends")):
+        raw = str(capabilities.get(key, "") or "")
+        try:
+            values = parse_backend_declaration(raw, kind=kind)
+        except ValueError as exc:
+            logger.error("DCTL plugin %r 有非法的 @%s 声明 %r：%s；该轴按 OpenGL 能力处理",
+                         plugin_id, key, raw, exc)
+            _BACKEND_DECLARATION_ERRORS.append((plugin_id, raw, str(exc)))
+            result.append(())
+            continue
+        result.append(tuple(sorted(values)))
+    return result[0], result[1]
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Shader source accessors.
 #
@@ -592,6 +633,7 @@ def _build_dctl_plugin_specs() -> List[EffectSpec]:
 
     specs: List[EffectSpec] = []
     _plugins_dir = "<unresolved>"
+    del _BACKEND_DECLARATION_ERRORS[:]
     try:
         import os
         from src.features.color.core.plugin_manager import get_plugin_manager
@@ -645,6 +687,7 @@ def _build_dctl_plugin_specs() -> List[EffectSpec]:
                 compute_content_hash,
                 compute_parameter_schema_hash,
             )
+            graphics_backends, compute_backends = _plugin_backend_declarations(plugin_id, plugin)
             spec = EffectSpec(
                 effect_type=f"plugin:{plugin_id}",
                 name=plugin.get("name", plugin_id),
@@ -684,6 +727,12 @@ def _build_dctl_plugin_specs() -> List[EffectSpec]:
                         .get("occlusion", "")).strip().lower()
                     == "background_independent"
                 ),
+                # 阶段 6（Metal 迁移 6.3 / 6.4）：原始 GLSL 源 + 后端声明。
+                # 声明只是作者的说法；生效后端由 resolve_capability 结合
+                # 宿主转译能力得出（见 tglsl_metal_support）。
+                plugin_source_glsl=str(plugin.get("shader_code", "") or ""),
+                graphics_backends=graphics_backends,
+                compute_backends=compute_backends,
             )
             specs.append(spec)
         except Exception as exc:  # noqa: BLE001

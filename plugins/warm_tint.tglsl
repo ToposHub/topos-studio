@@ -4,6 +4,8 @@
 // @version 1.1
 // @description Adds a gentle warm tint; declares OpenGL export support (W06 deliverable-plugin slice).
 // @export_support opengl
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @param slider strength "Strength" 0.35 0.0 1.0
 // @param separator
 

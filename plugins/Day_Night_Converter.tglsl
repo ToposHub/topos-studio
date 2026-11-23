@@ -9,6 +9,8 @@
 // @determinism deterministic
 // @export_support opengl
 // @preview_cost low
+// @graphics_backends opengl,metal
+// @compute_backends glsl_fragment,metal_compute
 // @param slider night_depth "Night Depth" 0.55 0.0 1.0
 // @param slider temperature_shift "Cool Shift" 0.45 0.0 1.0
 // @param separator
