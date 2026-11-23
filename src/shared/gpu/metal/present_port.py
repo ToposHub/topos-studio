@@ -36,6 +36,8 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.shared.gpu.metal.context import _autoreleasepool
+
 logger = logging.getLogger(__name__)
 
 _UNSET = object()
@@ -249,6 +251,12 @@ class DrawableSink:
         """Run ``callback`` when ``drawable`` reaches the screen (best effort)."""
         raise NotImplementedError
 
+    def discard_ready(self) -> None:
+        """Give back a drawable that was fetched but no frame will use."""
+
+    def close(self) -> None:
+        """Stop handing out drawables; whatever was fetched is given back."""
+
 
 class MetalPresentPass:
     """The render pass that samples one frame texture into one drawable."""
@@ -344,20 +352,63 @@ class MetalPresentPass:
 
 
 class CAMetalLayerSink(DrawableSink):
-    """Drawables of one ``CAMetalLayer``.
+    """Drawables of one ``CAMetalLayer``, fetched off the owner's thread.
 
-    ``nextDrawable`` must not block: a realtime presenter keeps the last
-    picture and tries again instead of waiting up to a second for a drawable.
-    The layer therefore has to be created with
-    ``allowsNextDrawableTimeout = False``.
+    ``nextDrawable`` waits for the display to hand back a drawable when none
+    is free, and ``allowsNextDrawableTimeout = False`` does not change that
+    on every system: measured on macOS 15, the layer still sat for about a
+    second before answering nil.  Asked from the render thread's poll loop,
+    that stalls every frame the viewer shows, so the layer is asked on a
+    helper thread instead: :meth:`next_drawable` hands over a drawable that
+    has arrived and returns ``None`` at once otherwise.  At most one
+    drawable waits and one request is in progress; a drawable nobody takes is
+    given back by :meth:`discard_ready`.
     """
+
+    _FETCH_THREAD = "topos-metal-drawable"
 
     def __init__(self, layer: Any, pixel_format: int) -> None:
         self._layer = layer
         self.pixel_format = int(pixel_format)
+        self._lock = threading.Lock()
+        self._ready: List[Any] = []
+        self._fetching = False
+        self._closed = False
 
     def next_drawable(self) -> Optional[Any]:
-        return self._layer.nextDrawable()
+        with self._lock:
+            if self._ready:
+                return self._ready.pop()
+            if self._closed:
+                return None
+            fetch = not self._fetching
+            self._fetching = self._fetching or fetch
+        if fetch:
+            threading.Thread(target=self._fetch, name=self._FETCH_THREAD, daemon=True).start()
+        return None
+
+    def _fetch(self) -> None:
+        """Ask the layer; may block.  Runs on the helper thread only."""
+        drawable = None
+        try:
+            with _autoreleasepool():
+                drawable = self._layer.nextDrawable()
+        except Exception:  # noqa: BLE001 - a failed fetch is "no drawable"
+            logger.debug("CAMetalLayerSink: nextDrawable failed", exc_info=True)
+        with self._lock:
+            self._fetching = False
+            if drawable is not None and not self._closed:
+                self._ready.append(drawable)
+
+    def discard_ready(self) -> None:
+        with self._lock:
+            self._ready.clear()            # the references go; the layer recycles them
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._ready.clear()
+            self._layer = None
 
     @staticmethod
     def drawable_texture(drawable: Any) -> Any:
@@ -414,6 +465,10 @@ class MetalPresentPort:
         self._stall_timeout_s = float(stall_timeout_s)
         self._in_flight_since: Optional[float] = None
         self._stalled = False
+        # A frame has been waiting for a drawable since this moment; the
+        # layer hands none out while it is off screen or out of drawables.
+        self._waiting_drawable_since: Optional[float] = None
+        self._starved = False
         self._lock = threading.Lock()
         self._pending: Deque[HeldFrame] = deque()
         # Frames pushed out of a full wait queue.  They are released by the
@@ -433,7 +488,7 @@ class MetalPresentPort:
         self.stats: Dict[str, int] = {
             "submitted": 0, "presented": 0, "released": 0, "actually_presented": 0,
             "no_drawable": 0, "stale": 0, "past_deadline": 0, "displaced": 0,
-            "failed": 0, "stalled": 0,
+            "failed": 0, "stalled": 0, "starved": 0,
         }
 
     # ------------------------------------------------------------------
@@ -465,14 +520,16 @@ class MetalPresentPort:
 
     @property
     def stalled(self) -> bool:
-        """A committed present has not completed within the stall timeout.
+        """The port cannot show a frame right now; the owner shows frames
+        another way until it recovers.
 
-        The textures of those frames may still be read by the display, so
-        they are kept; the owner should stop producing frames for this port
-        and show them another way until the completions arrive.
+        Either a committed present has not completed within the stall timeout
+        (its textures may still be read by the display, so they are kept), or
+        a frame has been waiting that long for a drawable the layer does not
+        hand out (``starved``): off screen, or out of drawables.
         """
         with self._lock:
-            return self._stalled
+            return self._stalled or self._starved
 
     def current_request(self) -> PresentRequest:
         with self._lock:
@@ -576,15 +633,37 @@ class MetalPresentPort:
         """Reclaim finished frames, then present what is waiting.  Owner thread."""
         outcomes = self._apply_completions()
         with self._lock:
-            was_stalled = self._stalled
+            was_stalled, was_starved = self._stalled, self._starved
+            now = self._clock()
             self._stalled = (
                 self._in_flight_since is not None
-                and self._clock() - self._in_flight_since > self._stall_timeout_s
+                and now - self._in_flight_since > self._stall_timeout_s
+            )
+            self._starved = (
+                self._waiting_drawable_since is not None
+                and now - self._waiting_drawable_since > self._stall_timeout_s
             )
             if self._stalled and not was_stalled:
                 self.stats["stalled"] += 1
+            if self._starved and not was_starved:
+                self.stats["starved"] += 1
         outcomes.extend(self._release_displaced())
         outcomes.extend(self._present_pending())
+        with self._lock:
+            # A frame that just got its drawable ended the wait this poll.
+            self._starved = (
+                self._waiting_drawable_since is not None
+                and self._clock() - self._waiting_drawable_since > self._stall_timeout_s
+            )
+            waiting = bool(self._pending)
+        if not waiting:
+            # A drawable fetched for a frame that is gone would sit unused.
+            # (Sinks that fetch synchronously have nothing to give back.)
+            discard = getattr(self._sink, "discard_ready", None)
+            if callable(discard):
+                discard()
+            with self._lock:
+                self._waiting_drawable_since = None
         return outcomes
 
     def _release_displaced(self) -> List[PresentOutcome]:
@@ -670,7 +749,11 @@ class MetalPresentPort:
                 self.stats["no_drawable"] += 1
                 with self._lock:
                     self._pending.appendleft(held)
+                    if self._waiting_drawable_since is None:
+                        self._waiting_drawable_since = self._clock()
                 return outcomes
+            with self._lock:
+                self._waiting_drawable_since = None
             with self._lock:
                 if held.is_repeat and self._in_flight_locked() > 0:
                     # Something newer is already on its way: skip the repeat.
@@ -780,4 +863,7 @@ class MetalPresentPort:
             outcome = self._release(held, "shutdown")
             if outcome is not None:
                 outcomes.append(outcome)
+        close = getattr(self._sink, "close", None)
+        if callable(close):
+            close()
         return outcomes
