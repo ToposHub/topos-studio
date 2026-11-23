@@ -122,3 +122,28 @@ TOPOS_METAL_DISABLE=native_viewport,edit_metal_composite <应用>
 
 `tests/shared/gpu/metal/test_feature_switches.py` 为每个能力保留一条「设置开关 → 能力拒绝」的
 可复现回退测试。
+
+## 图形调用台账（阶段 7.5 的度量工具）
+
+`TOPOS_GRAPHICS_LEDGER=1` 启动应用时，记录本次会话创建的每一个图形上下文：API（`opengl` / `metal`）、调用方
+所在域、原因（模块.函数）、线程、会话；退出时把快照写到 `TOPOS_GRAPHICS_LEDGER_FILE`（未设置则打到 stderr）。
+未设置时不安装任何钩子。快照里的 `counts["opengl"]` 是创建的 GL 上下文数，`opengl_threads` 是创建它们的线程。
+
+```bash
+TOPOS_GRAPHICS_LEDGER=1 TOPOS_GRAPHICS_LEDGER_FILE=/tmp/ledger.json <应用>
+```
+
+`TOPOS_GRAPHICS_FACTORY=deny` 让 GL 上下文工厂在创建任何东西之前抛 `GraphicsFactoryRefused`（仅当台账钩子已
+安装时生效），用来在有正常 GL 的机器上测试调用方的回退；`TOPOS_METAL_DISABLE` 与它互不影响。
+
+2026-11-23 首批度量（`evidence/graphics-ledger-*.json`，本机 Intel + AMD）：
+
+| 工作流 | GL 上下文 | GL 线程 | Metal 上下文 |
+|---|---:|---|---:|
+| 启动自检（`--test-startup`，无 GUI） | 0 | 无 | 0 |
+| 导出 1080p25 LUT + 音频，Metal H.264 快路径（macOS 默认） | **0** | **无** | 3 |
+| 同一时间线，常规导出路径 | 2 | `export-render-pipeline` | 0 |
+
+这是 7.5「Topos 创建的 GL 上下文和线程为零」在导出这一条工作流上的证据；启动、预览、调色与合成页的度量待做
+（需要带 GUI 的完整会话）。
+

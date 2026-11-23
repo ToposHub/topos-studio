@@ -1,0 +1,10 @@
+{
+ "session": "main.py",
+ "counts": {
+  "opengl": 0,
+  "metal": 0
+ },
+ "by_domain": {},
+ "opengl_threads": [],
+ "calls": []
+}

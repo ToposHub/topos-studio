@@ -48,6 +48,8 @@ rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins
 | `TOPOS_COMPOSITE_METAL` | `composite_graph_render_service.py` | 空（关） | 真值：合成图走 Metal compute 链（尚无生产调用方） | G-18、G-19 |
 | `TOPOS_COLOR_METAL` | `color/ui/metal_color_viewer.py` | 空（关） | 真值：Color Viewer 的 Metal 呈现端（尚未接线） | G-11、G-14 |
 | `TOPOS_METAL_DISABLE` | `shared/gpu/metal/feature_switches.py` | 空 | 逗号分隔的能力名，单独关掉对应能力，优先于以上各开关 | 全部 |
+| `TOPOS_GRAPHICS_LEDGER` / `_FILE` | `src/main.py`（`start_session_ledger`） | 空（关） | 真值：记录本次会话创建的每个图形上下文，退出时写快照 | 全部（度量） |
+| `TOPOS_GRAPHICS_FACTORY` | `shared/gpu/graphics_ledger.py` | `allow` | `deny`：台账钩子已安装时，GL 上下文工厂创建前即拒绝（测试注入） | 全部（测试） |
 | `TOPOS_EXPORT_GPU_RENDER` | `timeline_export.py:2789` | 生产启用；pytest 下默认 CPU | 强制 GPU / CPU 合成 | G-06 |
 | `TOPOS_EXPORT_METAL_PREFETCH` | `timeline_export.py:2755` | `1` | Metal 导出与 VT 解码重叠预取 | G-07 |
 | `TOPOS_METAL_COMPUTE` | `compute_shader_manager.py:247` | 禁用 | 启用 Composite Metal compute 桥（CPU staging） | G-18 |

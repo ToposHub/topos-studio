@@ -20,7 +20,8 @@ DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的�
 | 8.5 / 8.6 | 🟡 回退开关与启用台账代码完成 | `TOPOS_METAL_DISABLE`；能力矩阵与长时验收留到最后 |
 | 3.1 / 3.2 | ✅ 含音频的 H.264 原生导出与精确时间戳，默认路径，真机两条路径对照一致 | 同容器封装一条 AAC；分数帧率保持自己的 timescale。B 帧（PTS≠DTS）只在混流器层用合成包验证 |
 | 6.1–6.5 | 🟡 转译器、登记表、兼容矩阵与真机对拍完成；无生产调用方 | 21 个 `.tglsl` 插件在本机通过 GL↔Metal 门限并声明 `metal`，3 个噪声类被门限挡住；效果仍一律走 GLSL |
-| 3.3 / 3.4、7.1–7.5、8.1–8.4 | ⏳ 未完成 | 复杂场景/HDR 白名单、DNxHR 遥测、辅助渲染、GL 所有权收拢、能力矩阵其余域、画质与性能验收、安装包。其中 3.3/3.4、7.1、7.2/7.3 已有未测试的初稿，搁置在仓库外 |
+| 7.5 | 🟡 起步 | 图形调用台账与「拒绝 GL 工厂」注入已做；默认的 Metal H.264 导出已量到 GL 上下文为零。上下文创建的集中收拢未开始 |
+| 3.3 / 3.4、7.1–7.4、8.1–8.4 | ⏳ 未完成 | 复杂场景/HDR 白名单、DNxHR 遥测、辅助渲染、能力矩阵的导出域、画质与性能验收、安装包。其中 3.3/3.4、7.1、7.2/7.3 已有未测试的初稿，搁置在仓库外 |
 
 既有失败（与迁移无关，均在基线代码上复现或属本机环境）：
 `tests/edit/test_ef01_aud_part1.py::TestAud15506::test_hotpath_dependencies_imported_at_module_level`；
@@ -573,6 +574,27 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 | 4.6 | `metal_readback_queue.py`（显式 / 播放读回分开计数的异步读回队列）、`metal_node_thumbnail.py`（缩略图服务）与 `color_graph_entry` 的 `viewer_target` 参数 | 未测试、无调用方 |
 | 7.1 | `shared/playback/metal_playback.py`、`metal_render_worker.py`、`metal_yuv_renderer.py` | 首稿；作者已判定 `metal_render_worker.py` 需整体重写（未初始化属性、teardown 顺序会让槽位不归队） |
 | 7.2 / 7.3 | `shared/video/cfa_metal_debayer.py`、`explicit_readback_queue.py` | 未测试 |
+
+## 阶段 7.5 GL 所有权收拢（起步：图形调用台账）
+
+- 7.5 的验收是一个计数：典型工作流里 Topos 创建的 GL 上下文与线程为零。`shared/gpu/graphics_ledger.py` 在
+  `moderngl.create_context` / `create_standalone_context` 与 `MetalComputeContext` 的构造上挂钩（代码里 24 处创建
+  都是这两个模块级工厂），按 API、域、原因、线程、会话记录每一次创建；包装器只是直通。应用总是经 `os._exit`
+  退出，所以快照在硬退出之前写出。`TOPOS_GRAPHICS_LEDGER=1` 时由 `src/main.py` 在任何图形初始化之前安装，未设置
+  时不安装任何钩子。
+- `TOPOS_GRAPHICS_FACTORY=deny` 是计划要求的「测试注入拒绝 GL 工厂」：GL 工厂在创建前抛 `GraphicsFactoryRefused`，
+  用来在有正常 GL 的机器上验证调用方的回退。
+- **收拢本身未做**：18 个文件仍各自直接创建 GL 上下文；把创建与共享上下文设置集中到兼容会话、以及按能力探测
+  选择视口，都还没有开始。
+
+| 项目 | 结果 | 方式 |
+|---|---|---|
+| 台账与拒绝注入 | ✅ 33 项通过 | 桩工厂：直通、逐次记录、线程名、会话改名、按 API 与域计数、拒绝前不创建、Metal 不受 GL 开关影响、硬退出前写出 |
+| 真实启动自检 | ✅ 0 / 0 / 0 | 无 GUI 的 `--test-startup`：不创建任何图形上下文 |
+| 真实导出（1080p25 LUT + 音频） | ✅ Metal 快路径 GL 上下文 0、GL 线程无 | 同一时间线常规路径：GL 上下文 2，线程 `export-render-pipeline`；Metal 快路径：Metal 上下文 3 |
+| 完整 GUI 会话（启动、预览、调色页、合成页、退出） | ⏳ 未测 | 需要显示器清醒的完整会话 |
+
+证据：`evidence/graphics-ledger-{startup,export-native,export-regular}-2026-11-23.json`。
 
 ## 阶段 8.1 能力矩阵（逻辑层：剪辑预览）
 
