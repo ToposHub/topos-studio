@@ -1970,7 +1970,6 @@ class AsyncRenderer(QThread):
           失败——调用方不回退旧循环（复杂图的旧循环渲染过期 layers
           投影=错图），保留上一帧 + 诊断才是安全行为。
         """
-        from src.features.color.core.color_graph_compiler import compile_graph
         from src.features.color.core.color_graph_param_source import (
             graph_node_layer_provider,
         )
@@ -2004,8 +2003,26 @@ class AsyncRenderer(QThread):
         # cache_context/严格位的宿主属性均经 __dict__（裸 __new__ 兼容）
         try:
             executor = self._ensure_graph_executor()
-            plan = compile_graph(snapshot, size=(w, h),
-                                 cache=self._graph_plan_cache)
+            # 4.1 共享图入口：预览与导出经同一「快照 → 资源预检 → 依赖
+            # 锥计划」取 plan（同快照同尺寸 → 同一 pass 序/节点 ID/参数/
+            # 旁路状态）。资源预检问题按 R06 记诊断（不代替执行期
+            # fail-closed——GL 执行器行为不变）。
+            from src.features.color.core.color_graph_entry import (
+                plan_color_graph_frame,
+            )
+            outcome = plan_color_graph_frame(
+                snapshot, size=(w, h), backend="gl",
+                cache=self._graph_plan_cache)
+            for issue in outcome.resource_issues:
+                scope_diagnostics.record(
+                    "execute", "graph_resource_preflight",
+                    revision=params.get('render_request_id'),
+                    detail="{}:{}:{}".format(
+                        issue.code, issue.node_id,
+                        issue.detail)[:160])
+            if outcome.plan is None:
+                raise outcome.compile_error
+            plan = outcome.plan
             # N01：full-res 出口走 f4（与 legacy 全分辨率精度对齐；
             # front/composite/scope 维持 f2）
             graph_dtype = ("f4" if str(params.get('color_output_target')
