@@ -115,18 +115,18 @@ rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins
 |---|---|---|---|---|---|---|---|
 | G-24 | `shared/video/yuv_gpu_upload.py`（75 处）；`video_upload.py`；`video_texture_pool.py`；`external_yuv_renderer.py` | 上传 | 跟随共享 GPU 帧 | 2.6、7.1 | OpenGL 上传 | CPU 上传 | 待迁 |
 | G-25 | `shared/media/macos_vt/iosurface_gl_bridge.py` | 上传（零拷贝） | 原生帧进入视口后**退役** | 1、2 | IOSurface → GL 纹理 | CPU 上传 | 待迁 |
-| G-26 | `shared/playback/gl_video_canvas.py:134/234`；`gl_render_worker.py:88` | 呈现 + 处理 | 共用 GPU 帧描述与视口宿主 | 7.1 | OpenGL | GL 画布 | 待迁 |
+| G-26 | `shared/playback/gl_video_canvas.py:134/234`；`gl_render_worker.py:88` | 呈现 + 处理 | 共用 GPU 帧描述与视口宿主 | 7.1 | OpenGL；Metal 渲染器与判定逻辑已实现并对拍 GL（7.1，第一部分），画布未接线、渲染线程未完成 | GL 画布 | 待迁 |
 | G-27 | `shared/video/video_async_renderer.py:221` | 导出 | 能力探测 | 7.4 | OpenGL 独立上下文 | CPU | 待迁 |
-| G-28 | `shared/video/monitor_gpu_scale.py:67` | 呈现 | 外接监看接完成事件 | 7.3 | OpenGL 独立上下文 | CPU 缩放 | 待迁 |
-| G-29 | `shared/video/cfa_gpu_debayer.py` | 处理 | CFA 解拜耳 | 7.2、4.6 | OpenGL | CPU 解拜耳 | 待迁 |
+| G-28 | `shared/video/monitor_gpu_scale.py:67` | 呈现 | 外接监看接完成事件 | 7.3 | OpenGL 独立上下文；显式读回队列与监看目的计数已实现（7.3，第一部分），监看未接线 | CPU 缩放 | 待迁 |
+| G-29 | `shared/video/cfa_gpu_debayer.py` | 处理 | CFA 解拜耳 | 7.2、4.6 | OpenGL；Metal 解拜耳已实现对拍 CPU 参考（7.2，第一部分），未接线 | CPU 解拜耳 | 待迁 |
 | G-30 | `shared/video/yuv_gpu_self_test.py`；`macos_vt/vt_zero_copy_probe.py:365` | 工具 | 非生产 | — | OpenGL | — | 非生产 |
 
 ### App 与其他渲染模式
 
 | 编号 | 入口 | 阶段 | 预计能力 | 计划编号 | 当前实际后端 | 回退方式 | 状态 |
 |---|---|---|---|---|---|---|---|
-| G-31 | `app/controllers/node_thumbnail_evaluator.py:223` | 处理 | 节点缩略图与画廊走共享帧 | 7.2、4.6 | OpenGL 独立上下文 | CPU 缩略图 | 待迁 |
-| G-32 | `app/controllers/file_controller.py`（监看帧、抓帧读取 viewer 帧） | 呈现 | 有界异步 GPU→CPU 搬运 | 7.3 | 经 viewer GL 帧 | 无帧可抓时跳过 | 待迁 |
+| G-31 | `app/controllers/node_thumbnail_evaluator.py:223` | 处理 | 节点缩略图与画廊走共享帧 | 7.2、4.6 | OpenGL 独立上下文；Metal 缩略图服务与读回队列已实现（4.6 / 7.2，第一部分），未接线 | CPU 缩略图 | 待迁 |
+| G-32 | `app/controllers/file_controller.py`（监看帧、抓帧读取 viewer 帧） | 呈现 | 有界异步 GPU→CPU 搬运 | 7.3 | 经 viewer GL 帧；显式读回队列已实现（7.3，第一部分），截图与抓帧入口未接 | 无帧可抓时跳过 | 待迁 |
 | G-33 | `app/controllers/deliver_controller.py:630` | 导出 | 交付走 GPU 计划 | 7.4 | 仅 CLI / 测试路径建 GL；UI 会话明确拒绝 | 回退 Color 输出 | 待迁 |
 | G-34 | `features/teaching_animation/composite_node.py`（`.glo`）；`render/benchmark.py:501` | 处理 | 进入视频帧合成处接 GPU 帧 | 7.4 | OpenGL | — | 待迁 |
 
