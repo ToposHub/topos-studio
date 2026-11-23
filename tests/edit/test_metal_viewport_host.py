@@ -27,7 +27,7 @@ if sys.platform != "darwin":
 
 import objc
 
-from src.features.edit.ui.metal_viewport_host import MetalViewportHost
+from src.shared.ui.widgets.metal_viewport_host import MetalViewportHost
 from src.shared.gpu.metal.context import MetalComputeContext
 
 _METAL_OK, _METAL_REASON = MetalComputeContext.availability_reason()
@@ -119,7 +119,7 @@ class TestAddedViews:
         already hold its state by then."""
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="src.features.edit.ui.metal_viewport_host"):
+        with caplog.at_level(logging.WARNING, logger="src.shared.ui.widgets.metal_viewport_host"):
             host = MetalViewportHost()
             host.resize(128, 72)
             host.show()
@@ -202,3 +202,12 @@ class TestOverlay:
         host.set_overlay_image(image)
         assert host._overlay_image is image
         host.close()
+
+
+def test_the_old_import_path_still_reaches_the_host() -> None:
+    """The host moved to the shared widgets; the Edit path forwards to it."""
+    from src.features.edit.ui import metal_viewport_host as forwarding
+    from src.shared.ui.widgets import metal_viewport_host as moved
+
+    assert forwarding.MetalViewportHost is moved.MetalViewportHost
+    assert forwarding.METAL_VIEWPORT_PIXEL_FORMAT == moved.METAL_VIEWPORT_PIXEL_FORMAT

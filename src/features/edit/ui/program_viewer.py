@@ -3860,7 +3860,7 @@ class ProgramViewerWidget(QWidget):
         opted_in = getattr(renderer, "native_viewport_opted_in", None)
         if renderer is None or not callable(opted_in) or not opted_in():
             return False
-        from src.features.edit.ui.metal_viewport_host import MetalViewportHost
+        from src.shared.ui.widgets.metal_viewport_host import MetalViewportHost
 
         host = MetalViewportHost(self._viewer_container)
         host.setObjectName("ProgramViewerMetalHost")

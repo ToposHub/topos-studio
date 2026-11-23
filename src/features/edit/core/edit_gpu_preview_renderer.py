@@ -5916,7 +5916,7 @@ void main() {
                     MetalPresentPass,
                     MetalPresentPort,
                 )
-                from src.features.edit.ui.metal_viewport_host import METAL_VIEWPORT_PIXEL_FORMAT
+                from src.shared.ui.widgets.metal_viewport_host import METAL_VIEWPORT_PIXEL_FORMAT
 
                 metal_preview = getattr(self, "_metal_preview", None)
                 if metal_preview is None:

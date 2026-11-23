@@ -191,7 +191,9 @@ class TestRouting:
         assert kwargs["rect"] == normalized_rect(
             viewer._calculate_display_rect_px(), host.drawable_size)
         rect_px = viewer._calculate_display_rect_px()
-        assert abs(rect_px[2] / rect_px[3] - 4 / 3) < 1e-6
+        # The rect is whole pixels: its ratio may be a pixel's width off 4:3
+        # (a real Cocoa window does not always fit an exact multiple).
+        assert abs(rect_px[2] / rect_px[3] - 4 / 3) <= 1.0 / rect_px[3]
 
     def test_old_generation_is_returned_not_shown(self, widget) -> None:
         renderer = _FakeRenderer()

@@ -209,7 +209,7 @@ def test_native_frame_reaches_a_real_layer(qapp) -> None:
     path = _needs_video()
     if qapp.platformName() != "cocoa":
         pytest.skip("a CAMetalLayer needs the cocoa Qt platform")
-    from src.features.edit.ui.metal_viewport_host import MetalViewportHost
+    from src.shared.ui.widgets.metal_viewport_host import MetalViewportHost
 
     host = MetalViewportHost()
     host.resize(640, 360)
