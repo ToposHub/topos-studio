@@ -3314,10 +3314,32 @@ class LayerOpsMixin:
             adapter.cancel()
         self._warper_graph_draft = None
 
-    def on_blur_sharpen_changed(self, params) -> None:
-        """模糊/锐化（effects）参数变化：写引擎 + 播放态防抖渲染。"""
-        if self.engine.get_current_image() is None: return
-        self.engine.set_effects_params(params)
+    def on_blur_sharpen_changed(self, params: dict[str, Any]) -> None:
+        """Update the corrector's spatial effects through the active grade route."""
+        if getattr(self, "_color_stack_hydration_in_progress", False):
+            return
+        if self.engine.get_current_image() is None:
+            return
+        route = self._graph_tool_route()
+        if route is not None:
+            graph_host, node_id = route
+            payload = graph_host.panel_layer_payload(node_id) or {}
+            params = {**(payload.get("effects_params") or {}), **params}
+            if not graph_host.grade_gesture_open():
+                counter = int(getattr(self, "_graph_gesture_counter", 0)) + 1
+                self._graph_gesture_counter = counter
+                self._graph_gesture_tid = f"blur-sharpen-{counter}"
+                graph_host.begin_grade_gesture(self._graph_gesture_tid)
+            if not graph_host.submit_blur_sharpen_change(node_id, params, self._graph_gesture_tid):
+                self.effects_panel.set_params_dict(payload.get("effects_params"))
+                return
+            self._tool_flush_timer().start()
+            if graph_host.align_engine_active_layer(node_id):
+                self.engine.set_effects_params(params)
+        else:
+            layer = self.engine.get_active_layer()
+            if layer is not None:
+                self.engine.set_effects_params({**(layer.effects_params or {}), **params})
         # S5.C: 播放中调色参数变化时更新 cached render params
         self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():

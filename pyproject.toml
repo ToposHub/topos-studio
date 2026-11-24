@@ -134,6 +134,7 @@ exclude = ["src.app.integrations.file_explorer*"]
 ]
 "src.features.color.ui" = [
     "effect_icons/*.svg",
+    "mixer_icons/*.svg",
     "node_badges/*.svg",
 ]
 "src.features.edit.ui" = [

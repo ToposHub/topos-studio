@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 
 from src.features.color.core.keyframe_tracks import DYNAMIC_WEIGHT_MAX, segment_weight
 from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
     color_panel_stylesheet, create_panel_header, header_icon, style_header_button,
 )
 from src.shared.assets.icon_manager import icon_arrow_left, icon_arrow_right
@@ -79,6 +80,7 @@ class _DissolveDialog(QDialog):
     def _slider(self, layout: QVBoxLayout, name: str, initial: float) -> QSlider:
         row = QHBoxLayout()
         label = QLabel(name)
+        label.setStyleSheet(PARAMETER_LABEL_STYLE)
         slider = QSlider(_HORIZONTAL)
         slider.setAccessibleName(name)
         slider.setRange(0, round(DYNAMIC_WEIGHT_MAX * 10))
@@ -158,8 +160,6 @@ class ColorKeyframesPanel(QWidget):
             QScrollBar::handle:hover { background: #757781; }
             QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
             QScrollBar::add-page, QScrollBar::sub-page { background: none; }
-            QSlider::groove:horizontal { height: 3px; background: #151518; }
-            QSlider::handle:horizontal { width: 9px; margin: -3px 0; background: #a6a6ac; border-radius: 4px; }
         """))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -169,9 +169,7 @@ class ColorKeyframesPanel(QWidget):
         toolbar.setContentsMargins(8, 0, 4, 0)
         toolbar.setSpacing(5)
         title = QLabel(tr("title", "Keyframes"))
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         toolbar.addWidget(title)
         if demo:
             hint = QLabel(tr("demo", "Sample"))

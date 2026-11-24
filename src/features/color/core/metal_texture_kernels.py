@@ -36,6 +36,7 @@ from typing import Any, Mapping, Tuple
 
 import numpy as np
 
+from src.features.color.core.mist import MIST_MSL
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
     MSL_CURVES,
@@ -102,6 +103,8 @@ struct TexExtraParams {
     float cs_high_soft_y;
     float cs_high_soft_z;
     float mixer[24];               // 8 通道 × (x, y, z) 平铺
+    float mist_spread;
+    float mist_amount;
 };
 """
 
@@ -165,11 +168,11 @@ kernel void tg_copy(
     out.write(src.read(gid), gid);
 }
 
-// Corrector 单 pass：grading → curves(buffer) → hsl → soft_clip →
+// Corrector 单 pass：mist → grading → curves(buffer) → hsl → soft_clip →
 // curves_soft_clip → mixer → warper → lut3d → blend/matte epilogue。
 // 禁用域的纹理槽仍须绑定有效纹理（占位 identity），由 flag 守卫不读取。
 kernel void tg_corrector(
-    texture2d<float, access::read> src    [[texture(0)]],
+    texture2d<float, access::sample> src  [[texture(0)]],
     texture2d<float, access::read> matte  [[texture(1)]],
     texture2d<float, access::write> out   [[texture(2)]],
     texture2d<float, access::sample> hsl_tex    [[texture(3)]],
@@ -184,6 +187,11 @@ kernel void tg_corrector(
     float4 src4 = src.read(gid);
     float3 color = src4.rgb;
 
+    if (x.mist_amount != 0.0) {
+        float2 size = float2(src.get_width(), src.get_height());
+        float2 uv = (float2(gid) + 0.5) / size;
+        color += mist_delta(src, tg_sampler, uv, color, size, x.mist_spread, x.mist_amount);
+    }
     color = graph_apply_grading(color, g);
     if (g.has_curves == 2u) {
         color = graph_apply_calibrated_curves(color, curves);
@@ -494,6 +502,7 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + MSL_SOFT_CLIP_HELPERS
     + MSL_SOFT_CLIP
     + MSL_CURVES_SOFT_CLIP
+    + MIST_MSL
     + _TEX_SAMPLERS
     + _TEX_EXTRA_PARAMS_MSL
     + _TEX_QUALIFIER_PARAMS_MSL
@@ -539,6 +548,8 @@ TEX_EXTRA_PARAMS_DTYPE = np.dtype([
     ("cs_high_soft_y", "<f4"),
     ("cs_high_soft_z", "<f4"),
     ("mixer", "<f4", (24,)),
+    ("mist_spread", "<f4"),
+    ("mist_amount", "<f4"),
 ])
 
 TEX_QUALIFIER_PARAMS_DTYPE = np.dtype([
@@ -602,6 +613,8 @@ def make_tex_extra_params(
     params["blend_mode"] = int(_as_float(values.get("u_blend_mode"), 0.0))
     params["lut_intensity"] = _as_float(values.get("u_lut_intensity"), 1.0)
     params["warper_space"] = int(_as_float(values.get("u_warper_space"), 0.0))
+    params["mist_spread"] = _as_float(values.get("u_mist_spread"), 0.0)
+    params["mist_amount"] = _as_float(values.get("u_mist_amount"), 0.0)
     for field in _SC_DEFAULTS:
         params[field] = _as_float(values.get(f"u_{field}"),
                                   _SC_DEFAULTS[field])
@@ -626,6 +639,7 @@ def make_tex_extra_params(
     mixer[0, :] = flat
     scalars = [float(v) for v in flat]
     scalars += [float(params[name][0]) for name in params.dtype.names[7:29]]
+    scalars += [float(params[name][0]) for name in ("mist_spread", "mist_amount")]
     if not all(np.isfinite(v) for v in scalars):
         raise ValueError("tg_corrector: 扩展参数含非有限值（fail-closed）")
     return params

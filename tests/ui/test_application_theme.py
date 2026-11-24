@@ -6,6 +6,50 @@ import subprocess
 import sys
 from textwrap import dedent
 
+from PyQt6.QtCore import QPoint, QSize, Qt
+from PyQt6.QtWidgets import QSlider, QStyle, QStyleOptionSlider, QWidget
+
+from src.shared.ui.style_sheet import C, DARK_THEME
+
+
+def test_panel_sliders_paint_a_flat_track_and_round_thumb(qtbot, qapp) -> None:
+    panel = QWidget()
+    qtbot.addWidget(panel)
+    panel.setStyleSheet(DARK_THEME)
+    panel.resize(240, 200)
+    horizontal = QSlider(Qt.Orientation.Horizontal, panel)
+    horizontal.setGeometry(5, 5, 180, 20)
+    vertical = QSlider(Qt.Orientation.Vertical, panel)
+    vertical.setGeometry(200, 5, 20, 180)
+    for slider in (horizontal, vertical):
+        slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        slider.setValue(50)
+    panel.show()
+    qapp.processEvents()
+
+    for slider in (horizontal, vertical):
+        for enabled, track, thumb in (
+            (True, C.SLIDER_TRACK, C.ACCENT_SURFACE),
+            (False, C.SLIDER_TRACK_DISABLED, C.SLIDER_THUMB_DISABLED),
+        ):
+            slider.setEnabled(enabled)
+            option = QStyleOptionSlider()
+            slider.initStyleOption(option)
+            control = QStyle.ComplexControl.CC_Slider
+            groove = slider.style().subControlRect(control, option, QStyle.SubControl.SC_SliderGroove, slider)
+            handle = slider.style().subControlRect(control, option, QStyle.SubControl.SC_SliderHandle, slider)
+            assert handle.size() == QSize(10, 10)
+            if slider is horizontal:
+                assert groove.height() == 4
+                edges = (QPoint(20, groove.top()), QPoint(20, groove.bottom()))
+            else:
+                assert groove.width() == 4
+                edges = (QPoint(groove.left(), 20), QPoint(groove.right(), 20))
+            image = slider.grab().toImage()
+            scale = image.devicePixelRatio()
+            assert all(image.pixelColor(point * scale).name() == track for point in edges)
+            assert image.pixelColor(handle.center() * scale).name() == thumb
+
 
 def test_application_theme_replaces_external_style_and_paints_matching_tabs() -> None:
     script = dedent(

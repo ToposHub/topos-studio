@@ -1,8 +1,6 @@
 """Tracker 主面板（DaVinci 风格窗口布局）。
 
 布局：标题栏 / 自适应传输与通道栏 / 可折叠分析参数 / 曲线图 / 底部交互栏。
-配色：背景 ``#1A1A1A``，分隔线 ``#343434``，文本 ``#D8D8D8``，
-次要文本 ``#8C8C8C``，选中/警告 ``#FF8A00``。
 
 四态状态机（``PanelState``）决定控件启禁用：
 - EMPTY：保留空曲线与时间标尺；
@@ -36,15 +34,19 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.features.color.ui.tracker_graph import TrackerGraph
+from src.features.color.ui.tracker_graph import CURVE_COMPONENTS, TrackerGraph
 from src.features.color.ui.panel_chrome import (
-    HEADER_HEIGHT, color_panel_stylesheet, create_panel_header, style_header_button, style_reset_button,
+    PARAMETER_LABEL_STYLE, PARAMETER_ROW_SPACING,
+    HEADER_HEIGHT, HEADER_ICON_DISABLED, HEADER_ICON_HOVER,
+    PARAMETER_BAR_HEIGHT, color_panel_stylesheet, create_panel_header,
+    style_header_button, style_reset_button,
 )
 from src.features.color.ui.tracker_status import PanelState, TrackerStatusLight
 from src.features.color.ui.tracker_toolbar import TrackerToolBar
 from src.shared.i18n.i18n import tr
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets import ChevronComboBox
+from src.shared.ui.widgets.drag_value import style_numeric_spin_box
 
 _CHECKMARK_ICON_FILE = (
     Path(__file__).resolve().parents[3] / "shared" / "assets" / "icons" / "checkmark.svg"
@@ -57,62 +59,21 @@ _CHECKMARK_ICON_PATH = _CHECKMARK_ICON_FILE.resolve().as_posix()
 PANEL_STYLE = color_panel_stylesheet("""
 TrackerPanel { background-color: __COLOR_PANEL_BASE__; }
 TrackerPanel QWidget#tracker_transport,
+TrackerPanel QWidget#tracker_bottom_bar { background-color: __COLOR_PANEL_BASE__; }
+TrackerPanel QWidget#tracker_actions,
+TrackerPanel QWidget#tracker_channels,
+TrackerPanel QWidget#tracker_modes { background-color: transparent; border: none; }
 TrackerPanel QWidget#tracker_context_toolbar,
-TrackerPanel QWidget#tracker_params,
-TrackerPanel QWidget#tracker_bottom_bar { background-color: __COLOR_PANEL_RAISED__; }
-TrackerPanel QWidget#tracker_channels { background-color: __COLOR_PANEL_RAISED__; }
+TrackerPanel QWidget#tracker_params { background-color: __COLOR_PANEL_RAISED__; }
 TrackerPanel QLabel { color: #D8D8D8; font-size: 11px; background: transparent; }
 TrackerPanel QLabel#tracker_secondary { color: #8C8C8C; font-size: 10px; }
-TrackerPanel QLabel#tracker_title { font-weight: bold; font-size: 12px; }
-TrackerPanel QPushButton {
-    background-color: #25262A; border: 1px solid #36373D; border-radius: 3px;
-    color: #D8D8D8; font-size: 10px; padding: 2px 6px;
-}
-TrackerPanel QPushButton:hover { border-color: #64656C; background-color: #303136; }
-TrackerPanel QPushButton:checked { background-color: #3A3025; border-color: #FF8A00; color: #FFB15C; }
-TrackerPanel QPushButton:disabled { color: #55565C; border-color: #292A2E; }
-TrackerPanel QPushButton#tracker_primary { color: #00D9A6; }
-TrackerPanel QPushButton#tracker_danger:hover { border-color: #FF4D5E; }
-TrackerPanel QPushButton#tracker_params { color: #BEBEC4; padding: 1px 7px; }
-TrackerPanel QPushButton#tracker_transport_button,
-TrackerPanel QPushButton#tracker_primary,
-TrackerPanel QPushButton#tracker_danger,
-TrackerPanel QPushButton#tracker_icon_action,
-TrackerPanel QPushButton#tracker_params,
-TrackerPanel QPushButton#tracker_title_menu {
-    background-color: transparent; border: 1px solid transparent;
-    padding: 0; border-radius: 3px;
-}
-TrackerPanel QPushButton#tracker_transport_button:hover,
-TrackerPanel QPushButton#tracker_primary:hover,
-TrackerPanel QPushButton#tracker_danger:hover,
-TrackerPanel QPushButton#tracker_icon_action:hover,
-TrackerPanel QPushButton#tracker_params:hover,
-TrackerPanel QPushButton#tracker_title_menu:hover {
-    background-color: rgba(255, 255, 255, 18); border-color: #505158;
-}
-TrackerPanel QPushButton#tracker_danger:hover { border-color: #FF4D5E; }
-TrackerPanel QPushButton#tracker_transport_button:disabled,
-TrackerPanel QPushButton#tracker_icon_action:disabled {
-    background-color: transparent; border-color: transparent;
-}
-TrackerPanel QPushButton#tracker_primary:hover { color: #51F0C5; }
-TrackerPanel QPushButton#tracker_segment {
-    background-color: #1A1B1F; border: 1px solid #303136;
-    border-radius: 1px; padding: 0; color: #9A9BA1; font-size: 12px;
-}
-TrackerPanel QPushButton#tracker_segment:hover { background-color: #27282D; }
-TrackerPanel QPushButton#tracker_segment:checked {
-    background-color: #0F1013; border-color: #505158; color: #F0F0F0;
-}
-TrackerPanel QComboBox, TrackerPanel QSpinBox, TrackerPanel QDoubleSpinBox {
-    background-color: #232325; border: 1px solid #151517; border-radius: 6px;
+TrackerPanel QLabel#tracker_title { __COLOR_SECTION_TITLE__ }
+TrackerPanel QComboBox {
+    background-color: __COLOR_PANEL_INSET__; border: 1px solid #151517; border-radius: 6px;
     color: #E0E0E0; font-size: 11px; padding: 2px 8px;
 }
-TrackerPanel QComboBox:hover, TrackerPanel QSpinBox:hover,
-TrackerPanel QDoubleSpinBox:hover { background-color: #2E2E34; }
-TrackerPanel QComboBox:focus, TrackerPanel QSpinBox:focus,
-TrackerPanel QDoubleSpinBox:focus { border-color: #FF8800; background-color: #2E2E34; }
+TrackerPanel QComboBox:hover { background-color: __COLOR_PANEL_RAISED__; }
+TrackerPanel QComboBox:focus { border-color: #FF8800; background-color: __COLOR_PANEL_RAISED__; }
 TrackerPanel QCheckBox {
     color: #CCCCCC; font-size: 12px; spacing: 8px; background: transparent;
 }
@@ -132,22 +93,51 @@ TrackerPanel QCheckBox::indicator:checked:hover {
 }
 TrackerPanel QCheckBox:checked { color: #AAAAAA; }
 TrackerPanel QCheckBox#tracker_channel {
-    font-size: 12px; font-weight: 500;
-    padding: 0;
+    font-size: 11px; font-weight: 500; spacing: 5px; padding: 0;
+    color: __CHANNEL_TEXT_IDLE__;
 }
-TrackerPanel QCheckBox#tracker_channel[channel="tx"] { color: #00E0B0; }
-TrackerPanel QCheckBox#tracker_channel[channel="ty"] { color: #4DA3FF; }
-TrackerPanel QCheckBox#tracker_channel[channel="scale"] { color: #FF38A8; }
-TrackerPanel QCheckBox#tracker_channel[channel="rotation"] { color: #FFD43B; }
-TrackerPanel QCheckBox#tracker_channel[channel="perspective"] { color: #44DDFF; }
-TrackerPanel QCheckBox#tracker_channel:disabled { color: #55565C; }
-TrackerPanel QCheckBox#tracker_channel_tx { color: #00E0B0; }
-TrackerPanel QCheckBox#tracker_channel_ty { color: #4DA3FF; }
-TrackerPanel QCheckBox#tracker_channel_scale { color: #FF38A8; }
-TrackerPanel QCheckBox#tracker_channel_rotation { color: #FFD43B; }
-TrackerPanel QSlider::groove:horizontal { height: 3px; background: #3B3C42; }
-TrackerPanel QSlider::handle:horizontal { width: 10px; margin: -4px 0; background: #FF8A00; border-radius: 5px; }
-""").replace("__CHECKMARK_ICON_URL__", _CHECKMARK_ICON_PATH)
+TrackerPanel QCheckBox#tracker_channel::indicator {
+    width: 11px; height: 11px; border-radius: 2px;
+    border: 1px solid __PANEL_DIVIDER__; background: __COLOR_PANEL_RAISED__;
+}
+TrackerPanel QCheckBox#tracker_channel::indicator:checked {
+    background: __COLOR_PANEL_INSET__;
+    image: url("__CHECKMARK_ICON_URL__");
+}
+TrackerPanel QCheckBox#tracker_channel::indicator:hover,
+TrackerPanel QCheckBox#tracker_channel::indicator:focus {
+    border-color: __BORDER_HOVER__;
+}
+TrackerPanel QCheckBox#tracker_channel:hover { color: __HEADER_ICON_HOVER__; }
+TrackerPanel QCheckBox#tracker_channel:disabled { color: __HEADER_ICON_DISABLED__; }
+TrackerPanel QPushButton#tracker_segment {
+    background: __COLOR_PANEL_INSET__; color: __TEXT_LABEL__;
+    border: 1px solid __PANEL_DIVIDER__; border-radius: 4px;
+    padding: 0 6px; font-size: 11px; font-weight: 500;
+}
+TrackerPanel QPushButton#tracker_segment:checked {
+    background: __COLOR_PANEL_RAISED__; color: __TEXT_PRIMARY__;
+    border-color: __BORDER_HOVER__;
+}
+TrackerPanel QPushButton#tracker_segment:hover:enabled,
+TrackerPanel QPushButton#tracker_segment:focus:enabled { color: __TEXT_PRIMARY__; border-color: __BORDER_MID__; }
+TrackerPanel QPushButton#tracker_segment:pressed:enabled { background: __COLOR_PANEL_INSET__; }
+TrackerPanel QPushButton#tracker_segment:disabled { color: __HEADER_ICON_DISABLED__; }
+""").replace("__CHECKMARK_ICON_URL__", _CHECKMARK_ICON_PATH).replace(
+    "__CHANNEL_TEXT_IDLE__", C.TEXT_DIM
+).replace("__HEADER_ICON_HOVER__", HEADER_ICON_HOVER).replace(
+    "__HEADER_ICON_DISABLED__", HEADER_ICON_DISABLED
+).replace("__PANEL_DIVIDER__", C.PANEL_DIVIDER).replace(
+    "__BORDER_HOVER__", C.BORDER_HOVER
+).replace("__BORDER_MID__", C.BORDER_MID).replace(
+    "__TEXT_PRIMARY__", C.TEXT_PRIMARY
+).replace("__TEXT_LABEL__", C.TEXT_LABEL
+)
+PANEL_STYLE += "".join(
+    f'TrackerPanel QCheckBox#tracker_channel[channel="{key}"]:checked:enabled '
+    f'{{ color: {CURVE_COMPONENTS[key][0].name()}; }}'
+    for key in ("tx", "ty", "scale", "rotation", "perspective")
+)
 
 # 跟踪类型下拉：值 → 显示（3D 不在范围，显示禁用项）
 MODE_ITEMS = [
@@ -169,10 +159,8 @@ EMPTY_HINT = (
     "（若没有 Mask 面板：菜单 Window → 面板 → Masks）"
 )
 
-# DaVinci Tracker action cells use one consistent hit target.  Keep this
-# explicit instead of allowing each glyph's size hint to change the button.
-TRACK_BUTTON_WIDTH = 30
-TRACK_BUTTON_HEIGHT = 30
+TRACK_CONTROL_SIZE = 24
+TRACK_ICON_SIZE = 16
 
 
 def _trf(key: str, default: str, **kwargs: object) -> str:
@@ -339,14 +327,12 @@ class TrackerPanel(QWidget):
         self.shape_name_label = QLabel("", bar)
         self.shape_name_label.hide()
         layout.addStretch(1)
-        action_border = f"QAbstractButton {{ border-left: 1px solid {C.PANEL_DIVIDER}; }}"
         self.title_mode_buttons = {}
         for key, label in (("window", "Window"), ("stabilizer", "Stabilizer"), ("fx", "FX")):
             button = QPushButton(bar)
             button.setObjectName("tracker_icon_action")
             style_header_button(button, width=30, icon=self._title_icon(key))
             button.setFixedHeight(HEADER_HEIGHT)
-            button.setStyleSheet(button.styleSheet() + action_border)
             button.setAccessibleName(label)
             button.setToolTip(label if key in ("window", "stabilizer") else tr(
                 "tracker.mode_unavailable", "{mode} is not available").format(mode=label))
@@ -376,7 +362,6 @@ class TrackerPanel(QWidget):
         self.btn_title_menu.setObjectName("tracker_title_menu")
         style_header_button(self.btn_title_menu, width=38, icon=self._title_icon("menu"))
         self.btn_title_menu.setFixedHeight(HEADER_HEIGHT)
-        self.btn_title_menu.setStyleSheet(self.btn_title_menu.styleSheet() + action_border)
         self.btn_title_menu.setToolTip(tr("tracker.options", "Tracker options"))
         self.btn_title_menu.clicked.connect(self._show_options_menu)
         layout.addWidget(self.btn_title_menu)
@@ -414,6 +399,10 @@ class TrackerPanel(QWidget):
         super().resizeEvent(event)
         if hasattr(self, "_control_channel_grid"):
             self._update_channel_grid()
+        if hasattr(self, "cloud_combo"):
+            compact = self.width() < 400
+            self.cloud_combo.setFixedWidth(112 if compact else 150)
+            self.interactive_box.setText("Interactive" if compact else "Interactive Mode")
 
     @staticmethod
     def _title_icon(kind: str) -> QIcon:
@@ -484,14 +473,17 @@ class TrackerPanel(QWidget):
         area = QWidget(self)
         area.setObjectName("tracker_transport")
         self._control_area = area
+        self._control_layout_mode: tuple[bool, int] | None = None
         self._control_channel_grid = QGridLayout(area)
-        self._control_channel_grid.setContentsMargins(17, 6, 29, 6)
+        self._control_channel_grid.setContentsMargins(8, 5, 8, 5)
         self._control_channel_grid.setHorizontalSpacing(9)
-        self._control_channel_grid.setVerticalSpacing(1)
+        self._control_channel_grid.setVerticalSpacing(2)
+        self._control_channel_grid.setColumnStretch(3, 1)
         self._transport_widget = QWidget(area)
+        self._transport_widget.setObjectName("tracker_actions")
         actions = QHBoxLayout(self._transport_widget)
         actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(0)
+        actions.setSpacing(2)
         self.nav_buttons = {}
         for key in ("first", "prev", "next", "last"):
             button = QPushButton(area)
@@ -508,9 +500,9 @@ class TrackerPanel(QWidget):
         ):
             button = QPushButton(self._transport_widget)
             button.setObjectName("tracker_transport_button")
-            button.setIcon(self._transport_icon(kind))
-            button.setIconSize(QSize(20, 20))
-            button.setFixedSize(TRACK_BUTTON_WIDTH, TRACK_BUTTON_HEIGHT)
+            style_header_button(button, width=TRACK_CONTROL_SIZE, icon=self._transport_icon(kind))
+            button.setFixedHeight(TRACK_CONTROL_SIZE)
+            button.setIconSize(QSize(TRACK_ICON_SIZE, TRACK_ICON_SIZE))
             button.setToolTip(tr("tracker.action_" + kind, label))
             button.setAccessibleName(button.toolTip())
             button.clicked.connect(signal.emit)
@@ -523,21 +515,22 @@ class TrackerPanel(QWidget):
         self.btn_retrack.clicked.connect(self.retrack_failed_requested.emit)
         self.btn_retrack.hide()
         self._channel_widget = QWidget(area)
+        self._channel_widget.setObjectName("tracker_channels")
         self._channel_layout = QGridLayout(self._channel_widget)
         self._channel_layout.setContentsMargins(0, 0, 0, 0)
-        self._channel_layout.setHorizontalSpacing(0)
-        self._channel_layout.setVerticalSpacing(0)
-        self._build_channel_controls(area)
+        self._channel_layout.setHorizontalSpacing(6)
+        self._channel_layout.setVerticalSpacing(self._control_channel_grid.verticalSpacing())
+        self._build_channel_controls(self._channel_widget)
         self._segment_widget = QWidget(area)
+        self._segment_widget.setObjectName("tracker_modes")
         segments = QHBoxLayout(self._segment_widget)
         segments.setContentsMargins(0, 0, 0, 0)
-        segments.setSpacing(0)
+        segments.setSpacing(3)
         for button in self.segment_buttons.values():
             segments.addWidget(button)
         self.progress_label = QLabel("", self)
         self.progress_label.setObjectName("tracker_secondary")
         self.progress_label.setVisible(False)
-        self._control_secondary_widget = self._channel_widget
         self._update_channel_grid()
         return area
 
@@ -548,14 +541,15 @@ class TrackerPanel(QWidget):
             box.setObjectName("tracker_channel")
             box.setProperty("channel", key)
             box.setChecked(True)
-            box.setFixedHeight(24)
+            box.setFixedHeight(TRACK_CONTROL_SIZE)
             box.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             box.toggled.connect(lambda checked, k=key: self._on_channel_changed(k, checked))
             self.channel_boxes[key] = box
         self.channel_3d = QCheckBox("3D", area)
         self.channel_3d.setObjectName("tracker_channel")
         self.channel_3d.setProperty("channel", "perspective")
-        self.channel_3d.setFixedHeight(24)
+        self.channel_3d.setFixedHeight(TRACK_CONTROL_SIZE)
+        self.channel_3d.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.channel_3d.setToolTip(tr("tracker.perspective", "Perspective motion (homography)"))
         self.channel_3d.toggled.connect(self._on_perspective_changed)
         self.segment_group = QButtonGroup(area)
@@ -565,10 +559,14 @@ class TrackerPanel(QWidget):
             button = QPushButton(label, area)
             button.setObjectName("tracker_segment")
             button.setCheckable(True)
-            button.setFixedSize(90, 22)
+            button.setFixedHeight(22)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.clicked.connect(lambda _checked=False, k=key: self._set_graph_mode(k))
             self.segment_group.addButton(button)
             self.segment_buttons[key] = button
+        segment_width = max(50, *(button.sizeHint().width() for button in self.segment_buttons.values()))
+        for button in self.segment_buttons.values():
+            button.setFixedWidth(segment_width)
         self.segment_buttons["clip"].setChecked(True)
 
     def _on_channel_changed(self, key: str, checked: bool) -> None:
@@ -583,35 +581,44 @@ class TrackerPanel(QWidget):
 
     def _update_channel_grid(self) -> None:
         grid = self._control_channel_grid
+        alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        channel_controls = [*self.channel_boxes.values(), self.channel_3d]
+        channel_width = (
+            sum(box.sizeHint().width() for box in channel_controls)
+            + (len(channel_controls) - 1) * self._channel_layout.horizontalSpacing()
+        )
+        margins = grid.contentsMargins()
+        available_width = self.width() - margins.left() - margins.right()
+        single_row_width = (
+            self._transport_widget.sizeHint().width() + channel_width
+            + self._segment_widget.sizeHint().width() + 2 * grid.horizontalSpacing()
+        )
+        wrap = available_width < single_row_width
+        columns = 3 if available_width < channel_width else len(channel_controls)
+        layout_mode = (wrap, columns)
+        if layout_mode == self._control_layout_mode:
+            return
+        self._control_layout_mode = layout_mode
+
         while grid.count():
             grid.takeAt(0)
         while self._channel_layout.count():
             self._channel_layout.takeAt(0)
-        columns = 3 if self.width() < 400 else 5
-        for index, widget in enumerate([*self.channel_boxes.values(), self.channel_3d]):
+        for index, widget in enumerate(channel_controls):
             self._channel_layout.addWidget(widget, index // columns, index % columns)
-        wide = self.width() >= 760
-        grid.setContentsMargins(17 if wide else 8, 6, 29 if wide else 8, 6)
-        for index, minimum in enumerate((67, 63, 76, 78, 40)):
-            self._channel_layout.setColumnMinimumWidth(index, minimum if wide else 0)
-        for button in self.segment_buttons.values():
-            button.setFixedWidth(109 if wide else 46)
-        if wide:
-            grid.addWidget(self._transport_widget, 0, 0)
-            grid.addWidget(self._channel_widget, 0, 1)
-            grid.addWidget(self._segment_widget, 0, 2)
-            grid.setColumnStretch(1, 1)
-            area_height = 44
+        if wrap:
+            grid.addWidget(self._transport_widget, 0, 0, alignment)
+            grid.addWidget(self._segment_widget, 0, 1, alignment)
+            grid.addWidget(self._channel_widget, 1, 0, 1, 2, alignment)
         else:
-            grid.addWidget(self._transport_widget, 0, 0, 1, 2, Qt.AlignmentFlag.AlignLeft)
-            grid.addWidget(self._channel_widget, 1, 0)
-            grid.addWidget(self._segment_widget, 1, 1)
-            grid.setColumnStretch(1, 0)
-            area_height = 94 if columns == 3 else 70
+            grid.addWidget(self._transport_widget, 0, 0, alignment)
+            grid.addWidget(self._channel_widget, 0, 1, alignment)
+            grid.addWidget(self._segment_widget, 0, 2, alignment)
+        channel_rows = (len(channel_controls) + columns - 1) // columns
+        area_height = PARAMETER_BAR_HEIGHT
+        if wrap:
+            area_height += channel_rows * (TRACK_CONTROL_SIZE + grid.verticalSpacing())
         self._control_area.setFixedHeight(area_height)
-        if hasattr(self, "cloud_combo"):
-            self.cloud_combo.setFixedWidth(150 if self.width() >= 400 else 112)
-            self.interactive_box.setText("Interactive Mode" if self.width() >= 400 else "Interactive")
 
     @staticmethod
     def graph_color(key: str) -> str:
@@ -628,15 +635,16 @@ class TrackerPanel(QWidget):
 
     def _build_params_area(self) -> QWidget:
         area = QWidget(self)
+        area.setObjectName("tracker_params")
         grid = QGridLayout(area)
         grid.setContentsMargins(8, 6, 8, 6)
         grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(4)
+        grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         grid.setColumnMinimumWidth(0, 78)
 
         def add_row(row: int, label_text: str, widget: QWidget) -> None:
             label = QLabel(label_text, area)
-            label.setObjectName("tracker_secondary")
+            label.setStyleSheet(PARAMETER_LABEL_STYLE)
             grid.addWidget(label, row, 0)
             grid.addWidget(widget, row, 1)
 
@@ -663,6 +671,7 @@ class TrackerPanel(QWidget):
         self.feature_spin = QSpinBox(area)
         self.feature_spin.setRange(4, 1000)
         self.feature_spin.setValue(64)
+        style_numeric_spin_box(self.feature_spin)
         self.feature_spin.setToolTip(tr("tracker.feature_count_tooltip", "建议特征点数"))
         self.feature_spin.valueChanged.connect(self._emit_params_changed)
         add_row(2, tr("tracker.feature_count", "特征点数"), self.feature_spin)
@@ -672,6 +681,7 @@ class TrackerPanel(QWidget):
         self.search_spin.setSingleStep(0.1)
         self.search_spin.setSuffix(" ×")
         self.search_spin.setValue(2.0)
+        style_numeric_spin_box(self.search_spin)
         self.search_spin.setToolTip(tr("tracker.search_multiplier_tooltip", "搜索范围相对图案区域的倍数"))
         self.search_spin.valueChanged.connect(self._emit_params_changed)
         add_row(3, tr("tracker.search_range", "搜索范围"), self.search_spin)
@@ -744,8 +754,8 @@ class TrackerPanel(QWidget):
         bar.setObjectName("tracker_bottom_bar")
         bar.setFixedHeight(42)
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(21, 0, 29, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 0, 8, 0)
+        layout.setSpacing(4)
 
         self.interactive_box = QCheckBox("Interactive Mode", bar)
         self.interactive_box.setChecked(False)
@@ -758,8 +768,8 @@ class TrackerPanel(QWidget):
         self.overlay_btn = QPushButton("◉", bar)
         self.overlay_btn.setObjectName("tracker_icon_action")
         self.overlay_btn.setCheckable(True)
-        self.overlay_btn.setFixedSize(28, 24)
-        self.overlay_btn.setStyleSheet("font-size: 17px;")
+        style_header_button(self.overlay_btn, width=28)
+        self.overlay_btn.setStyleSheet(self.overlay_btn.styleSheet() + "QPushButton { font-size: 17px; }")
         self.overlay_btn.setAccessibleName(tr("tracker.toggle_overlay", "显示跟踪覆盖层"))
         self.overlay_btn.setToolTip(tr("tracker.toggle_overlay_tooltip", "显示/隐藏画布跟踪覆盖层"))
         self.overlay_btn.toggled.connect(self.overlay_toggled.emit)
@@ -767,8 +777,8 @@ class TrackerPanel(QWidget):
 
         self.btn_delete_manual = QPushButton("⌫", bar)
         self.btn_delete_manual.setObjectName("tracker_danger")
-        self.btn_delete_manual.setFixedSize(28, 24)
-        self.btn_delete_manual.setStyleSheet("font-size: 17px;")
+        style_header_button(self.btn_delete_manual, width=28)
+        self.btn_delete_manual.setStyleSheet(self.btn_delete_manual.styleSheet() + "QPushButton { font-size: 17px; }")
         self.btn_delete_manual.setAccessibleName(tr("tracker.delete_manual", "删除手动修正"))
         self.btn_delete_manual.setToolTip(tr("tracker.delete_manual_tooltip", "删除手动修正"))
         self.btn_delete_manual.clicked.connect(self.delete_manual_requested.emit)
@@ -788,9 +798,8 @@ class TrackerPanel(QWidget):
         ):
             button = QPushButton(bar)
             button.setObjectName("tracker_icon_action")
-            button.setFixedSize(28, 24)
-            button.setIcon(self._point_tool_icon(kind))
-            button.setIconSize(QSize(22, 18))
+            style_header_button(button, width=28, icon=self._point_tool_icon(kind))
+            button.setIconSize(QSize(TRACK_ICON_SIZE, TRACK_ICON_SIZE))
             button.setToolTip(tr("tracker.point_" + kind, tip))
             button.setAccessibleName(button.toolTip())
             button.setCheckable(kind == "insert")
@@ -800,7 +809,7 @@ class TrackerPanel(QWidget):
 
         self.btn_export_corner_pin = QPushButton("⇧", bar)
         self.btn_export_corner_pin.setObjectName("tracker_icon_action")
-        self.btn_export_corner_pin.setFixedSize(28, 24)
+        style_header_button(self.btn_export_corner_pin, width=28)
         self.btn_export_corner_pin.setAccessibleName(tr("tracker.export_corner_pin", "导出 Corner Pin"))
         self.btn_export_corner_pin.setToolTip(
             tr("tracker.export_corner_pin_tooltip", "导出逐帧透视四角 JSON")
@@ -817,9 +826,14 @@ class TrackerPanel(QWidget):
         # Resolve's Cloud Tracker is a local feature-cloud algorithm, not a cloud service.
         self.cloud_combo = ChevronComboBox(bar)
         self.cloud_combo.setObjectName("tracker_algorithm")
-        self.cloud_combo.setStyleSheet(
-            "QComboBox { border:1px solid #111215; border-radius:1px; padding:0 6px; "
-            "background:#222327; color:#B5B6B9; font-size:12px; }")
+        self.cloud_combo.setStyleSheet(f"""
+            QComboBox {{ border: 1px solid {C.PANEL_DIVIDER}; border-radius: 2px;
+                        padding: 0 20px 0 6px; background: {C.COLOR_PANEL_INSET};
+                        color: {C.TEXT_SECONDARY}; font-size: 11px; }}
+            QComboBox:hover:enabled {{ background: {C.COLOR_PANEL_RAISED}; }}
+            QComboBox::drop-down {{ width: 0; border: none; background: transparent; }}
+            QComboBox::down-arrow {{ image: none; border: none; }}
+        """)
         self.cloud_combo.addItem("Cloud Tracker", "region")
         self.cloud_combo.addItem("Point Tracker", "point")
         self.cloud_combo.setFixedSize(150, 22)

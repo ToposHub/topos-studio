@@ -177,15 +177,7 @@ class ColorNodePanel(QWidget):
         self.zoom_slider.setRange(round(ColorNodeView.MIN_ZOOM * 100), round(ColorNodeView.MAX_ZOOM * 100))
         self.zoom_slider.setValue(round(ColorNodeView.ORIGINAL_ZOOM * 100))
         self.zoom_slider.setFixedSize(118, HEADER_CONTROL_HEIGHT)
-        self.zoom_slider.setStyleSheet(f"""
-            QSlider {{ background: transparent; margin: 0 8px 0 0; }}
-            QSlider::groove:horizontal {{ height: 2px; border: none;
-                background: {C.BG_DARK}; border-radius: 0; margin: 0; }}
-            QSlider::sub-page:horizontal, QSlider::add-page:horizontal {{
-                background: {C.BG_DARK}; border: none; height: 2px; border-radius: 0; }}
-            QSlider::handle:horizontal {{ width: 9px; height: 9px;
-                margin: -4px 0; border: none; border-radius: 4px; background: {C.TEXT_SECONDARY}; }}
-        """)
+        self.zoom_slider.setStyleSheet("QSlider { margin-right: 8px; }")
         self.zoom_slider.setToolTip(tr("node_size", "Node Editor Zoom"))
         right_bar.addWidget(self.zoom_slider)
         self.more_button = self._tool("more", tr("node_options", "Node Editor Options"), "NodeOptions")

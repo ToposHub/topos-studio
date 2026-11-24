@@ -165,8 +165,11 @@ class _ColorGradingLayoutMigrationHost(_EditLayoutMigrationHost):
         super().__init__(config)
         self.current_page = "Color"
         self.dock_grading = grading_dock
+        self.all_docks = [grading_dock]
+        self.rect = MagicMock()
         self.dock_viewport = MagicMock()
         self.dock_viewport.isFloating.return_value = False
+        self.dock_viewport.isHidden.return_value = False
         self.dock_viewport.height.return_value = 300
         self.dock_viewport.minimumHeight.return_value = 150
         self._save_all_docked_sizes = MagicMock()
@@ -377,11 +380,13 @@ def test_timeline_layout_migration_replaces_a_corrupted_giant_saved_height(qapp)
 
 
 def test_unbalanced_color_tools_height_resizes_both_vertical_docks_once() -> None:
-    """Color tools should keep a consistent share of the viewport height."""
+    """Restore the default height while retaining the space for the viewport."""
     grading_dock = MagicMock()
     grading_dock.isFloating.return_value = False
+    grading_dock.isHidden.return_value = False
     grading_dock.objectName.return_value = "dockGrading"
     grading_dock.height.return_value = 1000
+    grading_dock.tab_height.return_value = 24
     config = _LayoutConfig({
         "page_layouts": {"Color": "legacy-layout"},
         "dock_dockGrading_docked_size": "713x257",
@@ -392,7 +397,7 @@ def test_unbalanced_color_tools_height_resizes_both_vertical_docks_once() -> Non
 
     host.resizeDocks.assert_called_once_with(
         [host.dock_viewport, grading_dock],
-        [890, 410],
+        [964, 360],
         Qt.Orientation.Vertical,
     )
     assert config.data[_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY] == \

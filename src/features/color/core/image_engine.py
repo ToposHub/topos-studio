@@ -832,7 +832,7 @@ class ImageEngine(QObject, WindowRasterizer):
         self._active_graph_stack_id = str(stack_id or "")
         key = (id(graph), getattr(graph, "graph_revision", 0))
         if key != getattr(self, '_active_graph_key', None):
-            self._warper_preview_graph = None
+            self._tool_preview_graph = None
             self._active_graph_key = key
             self._color_graph_revision = int(
                 getattr(self, '_color_graph_revision', 0)) + 1
@@ -841,7 +841,7 @@ class ImageEngine(QObject, WindowRasterizer):
     def clear_active_color_graph(self) -> None:
         """清除活动图（clip 切换到无图栈：scope/渲染回 legacy layers）。"""
         if getattr(self, '_active_color_graph', None) is not None:
-            self._warper_preview_graph = None
+            self._tool_preview_graph = None
             self._active_color_graph = None
             self._active_graph_stack_id = ""
             self._active_graph_key = None
@@ -869,7 +869,7 @@ class ImageEngine(QObject, WindowRasterizer):
         图本体与帧无关（temporal 缓存未落地），帧号身份由
         ``ScopeSampleIdentity.frame`` 承载——plan 缓存在播放期间保持命中。
         """
-        graph = self.__dict__.get('_warper_preview_graph') or getattr(self, '_active_color_graph', None)
+        graph = self.__dict__.get('_tool_preview_graph') or getattr(self, '_active_color_graph', None)
         if graph is None:
             return None
         cache = getattr(self, '_active_graph_snapshot_cache', None)
@@ -886,10 +886,13 @@ class ImageEngine(QObject, WindowRasterizer):
         return snapshot
 
     def set_warper_preview_graph(self, graph: "ColorGraphData | None") -> None:
-        """Install or clear a render-only Warper draft for the current bound graph."""
-        if self.__dict__.get('_warper_preview_graph') is graph:
+        self.set_tool_preview_graph(graph)
+
+    def set_tool_preview_graph(self, graph: "ColorGraphData | None") -> None:
+        """Install or clear a render-only draft for the current bound graph."""
+        if self.__dict__.get('_tool_preview_graph') is graph:
             return
-        self._warper_preview_graph = graph
+        self._tool_preview_graph = graph
         self._active_graph_snapshot_cache = None
         self._color_graph_revision = self.color_graph_revision + 1
 

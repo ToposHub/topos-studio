@@ -199,10 +199,14 @@ resolution_readbacks` 在命令循环里轮询，fence 就绪后 emit）；PBO �
   `COMMON_DEFINITIONS → GRADING → CURVES → MIXER → LUT3D → WARPER →
   BLEND_MODES → BLUR_SHARPEN（必须在 FILM_GRAIN 之前，声明 u_tex_size）→
   FILM_GRAIN → SOFT_CLIP → QUALIFIER`。
-- **main() 效果顺序**：blur/sharpen → grading → curves → hsl_curve → soft_clip
+- **main() 效果顺序**：blur/sharpen/mist → grading → curves → hsl_curve → soft_clip
   （if u_sc_enabled）→ mixer → warper → 3D LUT → 插件 `process_P{i}` →
   blend_mode → `mix(color, blended, mask * u_opacity)` → film grain → 输出
   `vec4(color, tex_color.a)`。
+- 雾化在现有 `effects_params` 中保存 `mist_enabled`、`mist_radius`（0–1）和
+  `mist_mix`（0–100）。旧工程缺字段时关闭，打开后默认半径 0、Mixer 33。
+  片段级 OpenGL、Metal 纹理预览和 CPU 视频交付使用相同的扩散采样权重。
+  3D LUT 导出会在交付报告中列出雾化，因为采样依赖相邻像素。
 - **插件命名空间改写**（GL emitter 内部实现细节，MSL 禁止依赖）：`process(`
   → `process_P{i}(`，`@param` 裸名 → `u_P{i}_name`；改写后残留的未声明 `u_*`
   标识符**提前拒绝**并写入诊断缓冲（`record_compile_failure`，含

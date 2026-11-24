@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, 
 
 from src.features.color.core.layer import Layer
 from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
+from src.features.color.core.mist import mist_render_params
 from src.features.shared.effects.effect_spec import PluginBinding
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
@@ -252,6 +253,8 @@ _BASE_DECLS = [
     ("u_log_low_range", "float"),
     ("u_log_high_range", "float"),
     ("u_lum_mix", "float"),
+    ("u_mist_spread", "float"),
+    ("u_mist_amount", "float"),
 ]
 
 _GRAIN_DECLS = [
@@ -532,6 +535,7 @@ def composition_uniform_values(
     values["u_blur_radius"] = float(fx.get("blur_radius", 0.0))
     values["u_blur_bokeh"] = float(fx.get("blur_bokeh", 0.0))
     values["u_blur_angle"] = float(fx.get("blur_angle", 0.0))
+    values["u_mist_spread"], values["u_mist_amount"] = mist_render_params(fx)
     values["u_aspect_ratio"] = float(aspect_ratio
                                      if aspect_ratio is not None
                                      else width / height)

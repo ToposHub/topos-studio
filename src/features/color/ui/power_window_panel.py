@@ -10,8 +10,8 @@ import copy
 import math
 from typing import Any
 
-from PyQt6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut, QWheelEvent, QMouseEvent
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QShortcut, QWheelEvent
 from PyQt6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
@@ -21,6 +21,7 @@ from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.drag_value import DragValue
 from src.shared.assets.icon_manager import get_icon
 from src.features.color.ui.panel_chrome import (
+    PARAMETER_ROW_HEIGHT, PARAMETER_ROW_SPACING,
     color_panel_stylesheet, create_panel_header, style_header_button, style_reset_button,
 )
 
@@ -90,16 +91,15 @@ def window_icon(kind: str, *, add: bool = False, muted: bool = False) -> QIcon:
 
 STYLE = color_panel_stylesheet("""
 PowerWindowPanel { background: __COLOR_PANEL_BASE__; }
-PowerWindowPanel QLabel { background: transparent; color: #bebfc1; font-size: 11px; }
-PowerWindowPanel QLabel:disabled { color: #56585a; }
-PowerWindowPanel QLabel#window_heading { color: #eeeeef; font-weight: 600; }
+PowerWindowPanel QLabel { __COLOR_PARAMETER_NAME__ }
+PowerWindowPanel QLabel:disabled { color: __COLOR_PARAMETER_DISABLED__; }
+PowerWindowPanel QLabel#window_heading { __COLOR_SECTION_TITLE__ }
 PowerWindowPanel QWidget#window_parameters { background: __COLOR_PANEL_RAISED__; border-left: 1px solid #0d0d0f; }
-PowerWindowPanel QWidget#window_tools { background: __COLOR_PANEL_RAISED__; border-bottom: 1px solid #0d0d0f; }
+PowerWindowPanel QWidget#window_tools { background: __COLOR_PANEL_BASE__; border-bottom: 1px solid #0d0d0f; }
 PowerWindowPanel QScrollArea { border: 0; background: __COLOR_PANEL_BASE__; }
 PowerWindowPanel QWidget#window_rows { background: __COLOR_PANEL_BASE__; }
 PowerWindowPanel QFrame#window_row { background: __COLOR_PANEL_BASE__; border-bottom: 1px solid #101014; }
-PowerWindowPanel QFrame#window_row[alternate="true"] { background: __COLOR_PANEL_INSET__; }
-PowerWindowPanel QFrame#window_row[selected="true"] { background: __COLOR_PANEL_RAISED__; }
+PowerWindowPanel QFrame#window_row[selected="true"] { background: __COLOR_PANEL_INSET__; }
 PowerWindowPanel QPushButton { color: #97999a; background: transparent; border: 0; padding: 0; font-size: 11px; }
 PowerWindowPanel QPushButton:hover { background: #34363a; }
 PowerWindowPanel QPushButton#window_shape { background: #202024; border: 1px solid #151518; border-radius: 1px; }
@@ -114,21 +114,7 @@ PowerWindowPanel QScrollBar::add-line:vertical, PowerWindowPanel QScrollBar::sub
 
 
 class WindowValue(DragValue):
-    """Use the palette's compact field appearance through enable/disable changes."""
-
-    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.EnabledChange:
-            self._apply_palette_style()
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        super().mouseReleaseEvent(event)
-        if not self.isEditing():
-            self._apply_palette_style()
-
-    def _end_edit(self) -> None:
-        super()._end_edit()
-        self._apply_palette_style()
+    """Emit gesture boundaries for wheel edits in the Window and Stabilizer panels."""
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         step = self._single_step
@@ -144,12 +130,6 @@ class WindowValue(DragValue):
             self.setValue(candidate)
             self.interaction_ended.emit()
         event.accept()
-
-    def _apply_palette_style(self) -> None:
-        color = "#b6b8b9" if self.isEnabled() else "#56585a"
-        self._value_label.setStyleSheet(
-            f"QLabel {{ background:#242629; color:{color}; border:1px solid #17181a; "
-            "border-radius:1px; font-size:11px; font-weight:normal; padding:0; }")
 
 
 class PowerWindowPanel(QWidget):
@@ -208,7 +188,7 @@ class PowerWindowPanel(QWidget):
         left_layout.setSpacing(0)
         tools = QWidget(left)
         tools.setObjectName("window_tools")
-        tools.setFixedHeight(47)
+        tools.setFixedHeight(38)
         tool_layout = QHBoxLayout(tools)
         tool_layout.setContentsMargins(15, 0, 20, 0)
         tool_layout.setSpacing(9)
@@ -217,7 +197,7 @@ class PowerWindowPanel(QWidget):
             button = QPushButton(tools)
             button.setIcon(window_icon(kind, add=True, muted=True))
             button.setIconSize(QSize(24, 24))
-            button.setFixedSize(40, 32)
+            button.setFixedSize(40, 28)
             button.setAccessibleName(WINDOW_NAMES[kind])
             button.setToolTip(I18N.tr(f"window.add_{kind}", f"Add {WINDOW_NAMES[kind]} window"))
             button.clicked.connect(lambda _checked=False, k=kind: self.shape_added.emit(k))
@@ -254,16 +234,15 @@ class PowerWindowPanel(QWidget):
         panel.setObjectName("window_parameters")
         panel.setMinimumWidth(280)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(10, 16, 7, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 8, 7, 8)
+        layout.setSpacing(5)
         heading = QLabel(I18N.tr("window.transform", "Transform"), panel)
         heading.setObjectName("window_heading")
         layout.addWidget(heading)
-        layout.addSpacing(12)
         grid = QGridLayout()
         grid.setContentsMargins(7, 0, 20, 0)
         grid.setHorizontalSpacing(11)
-        grid.setVerticalSpacing(8)
+        grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         definitions = (
             ("size", "Size", 0.01, 1000.0, 50.0),
             ("aspect", "Aspect", 0.01, 1000.0, 50.0),
@@ -280,15 +259,13 @@ class PowerWindowPanel(QWidget):
         line.setStyleSheet("background: #101014; border:0;")
         line.setFixedHeight(1)
         layout.addWidget(line)
-        layout.addSpacing(7)
         heading = QLabel(I18N.tr("window.softness", "Softness"), panel)
         heading.setObjectName("window_heading")
         layout.addWidget(heading)
-        layout.addSpacing(12)
         grid = QGridLayout()
         grid.setContentsMargins(7, 0, 20, 0)
         grid.setHorizontalSpacing(11)
-        grid.setVerticalSpacing(8)
+        grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         for index, (key, label, default) in enumerate((
             ("soft1", "Soft 1", 4.13), ("soft2", "Soft 2", 50.0),
             ("soft3", "Soft 3", 50.0), ("soft4", "Soft 4", 50.0),
@@ -304,10 +281,8 @@ class PowerWindowPanel(QWidget):
         text = QLabel(I18N.tr(f"window.{key}", label), self.parameters if hasattr(self, "parameters") else self)
         text.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         value = WindowValue("", minimum, maximum, default, decimals=2, compact=True)
-        value.setFixedSize(52, 20)
-        value._value_label.setFixedHeight(20)
-        value._apply_palette_style()
-        value._edit.setFixedHeight(20)
+        value.setFixedSize(52, PARAMETER_ROW_HEIGHT)
+        value.setFixedValueWidth(52)
         value.setAccessibleName(label)
         value.valueChanged.connect(lambda _v, k=key: self._edit_control(k))
         value.interaction_started.connect(self.interaction_started.emit)
@@ -348,35 +323,31 @@ class PowerWindowPanel(QWidget):
             if widget is not None:
                 widget.deleteLater()
         self._row_buttons.clear()
-        index = 0
         for kind in WINDOW_TYPES:
             matching = [s for s in flattened if self._kind(s) == kind]
             for shape in matching or [None]:
-                self._add_row(kind, shape, index)
-                index += 1
+                self._add_row(kind, shape)
         for shape in flattened:
             if self._kind(shape) not in WINDOW_TYPES:
-                self._add_row(self._kind(shape), shape, index)
-                index += 1
+                self._add_row(self._kind(shape), shape)
         self.rows_layout.addStretch(1)
         if self._selected_id:
             self.select_shape(self._selected_id)
         else:
             self._refresh_controls()
 
-    def _add_row(self, kind: str, shape: Any | None, index: int) -> None:
+    def _add_row(self, kind: str, shape: Any | None) -> None:
         row = QFrame(self.rows_host)
         row.setObjectName("window_row")
-        row.setProperty("alternate", index % 2 == 1)
         row.setProperty("selected", bool(shape and shape.id == self._selected_id))
-        row.setFixedHeight(54)
+        row.setFixedHeight(38)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(23, 0, 16, 0)
         layout.setSpacing(17)
         button = QPushButton(row)
         button.setObjectName("window_shape")
-        button.setFixedSize(46, 38)
-        button.setIconSize(QSize(30, 30))
+        button.setFixedSize(38, 28)
+        button.setIconSize(QSize(24, 24))
         button.setIcon(window_icon(kind))
         button.setCheckable(True)
         button.setChecked(bool(shape and shape.id == self._selected_id))
@@ -425,6 +396,7 @@ class PowerWindowPanel(QWidget):
             row.setProperty("selected", sid == shape_id)
             row.style().unpolish(row)
             row.style().polish(row)
+            row.update()
         shape = self._shapes.get(shape_id)
         if shape is not None:
             self._geometry = {

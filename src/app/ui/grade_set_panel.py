@@ -354,12 +354,6 @@ class GradeSetPanel(QWidget):
         self.size_slider.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.size_slider.setAccessibleName(size_label)
         self.size_slider.setToolTip(size_label)
-        self.size_slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{ height: 3px; border-radius: 1px; background: {C.BORDER}; }}
-            QSlider::handle:horizontal {{ background: {C.TEXT_SECONDARY}; width: 9px;
-                margin: -3px 0; border-radius: 4px; }}
-            QSlider::handle:horizontal:hover, QSlider::handle:horizontal:focus {{ background: {C.ORANGE}; }}
-        """)
         self.size_slider.valueChanged.connect(self._resize_cards)
         tools.addWidget(self.size_slider)
         self.filter_button = self._menu_button(_tr("filter", "Filter Photos"), "fa5s.filter")

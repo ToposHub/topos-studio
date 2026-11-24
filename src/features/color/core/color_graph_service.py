@@ -1557,6 +1557,7 @@ class ColorGraphService:
         "bake": ("resources", None),
         "window": (None, "mask_shapes"),
         "effects": (None, "plugins"),
+        "blur_sharpen": ("effects", None),
         # CW-B09:warper 域 = legacy 方阵 + 空间变体 + v2 状态整体粘贴
         # (与 GradeClipboard "warper" 类别同键;paste() 内特判三键齐写)
         "warper": (None, "warper_params"),

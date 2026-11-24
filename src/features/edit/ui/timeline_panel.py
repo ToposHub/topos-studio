@@ -858,9 +858,6 @@ class TimelinePanel(QWidget):
                 background: {EDIT_COLORS['bg_toolbar']};
                 border-bottom: 1px solid {EDIT_COLORS['timeline_divider']};
             }}
-            QSlider::groove:horizontal {{ height: 3px; background: {EDIT_COLORS['border']}; }}
-            QSlider::handle:horizontal {{ width: 9px; margin: -3px 0;
-                background: {EDIT_COLORS['text_muted']}; border-radius: 4px; }}
         """)
         old_widgets: list[QWidget] = []
         while tools_bar.count():
@@ -1024,16 +1021,6 @@ class TimelinePanel(QWidget):
                 widget.setFixedSize(28, 28)
                 widget.setIconSize(QSize(18, 18))
         self.zoom_slider.setFixedWidth(EDIT_ZOOM_SLIDER_WIDTH)
-        self.zoom_slider.setStyleSheet(f"""
-            QSlider {{ background: transparent; border: none; padding: 0; margin: 0; }}
-            QSlider::groove:horizontal {{ height: 3px; border: none; margin: 0;
-                background: {EDIT_COLORS['border']}; border-radius: 1px; }}
-            QSlider::sub-page:horizontal, QSlider::add-page:horizontal {{
-                background: transparent; border: none; }}
-            QSlider::handle:horizontal {{ width: 9px; height: 9px; margin: -3px 0;
-                border: none; background: {EDIT_COLORS['text_muted']}; border-radius: 4px; }}
-        """)
-        self._mixer_track_height_slider.setStyleSheet(self.zoom_slider.styleSheet())
         for button in (self.btn_view_options, self.btn_advanced_tools, self.btn_flag,
                        self.btn_marker, self.btn_audio_view):
             button.setFixedWidth(38)

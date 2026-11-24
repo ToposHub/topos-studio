@@ -24,7 +24,10 @@ from PyQt6.QtWidgets import (QWidget,
 
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.i18n.i18n import I18N
-from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow,
+    create_panel_layout, style_reset_button,
+)
 
 
 class TonalSaturationPanel(QWidget):
@@ -82,7 +85,7 @@ class TonalSaturationPanel(QWidget):
 
     @staticmethod
     def _create_slider(label: str, label_width: int) -> ParamSliderRow:
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, -100.0, 100.0, 0.0,
             step=0.5, decimals=1,
             label_width=label_width, slider_auto_hide=False)

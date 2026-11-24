@@ -8,7 +8,10 @@ from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from PyQt6.QtCore import Qt, pyqtSignal
 from src.features.color.core.denoise_engine import RestorationEngine
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
-from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    create_panel_layout, style_reset_button,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,7 @@ class DeblurPanel(QWidget):
 
     def init_ui(self) -> None:
         """初始化 UI 布局"""
+        self.setStyleSheet(f"QGroupBox {{ {SECTION_TITLE_STYLE} }}")
         header_layout, main_layout = create_panel_layout(self, (4, 4, 4), 4)
 
         # === Header: Model Selection + Reset Button ===
@@ -42,7 +46,7 @@ class DeblurPanel(QWidget):
         model_label = QLabel(I18N.tr("deblur.model", "模型:"))
         model_label.setFixedWidth(60)
         model_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        model_label.setStyleSheet("color: #bbbbbb; font-size: 11px;")
+        model_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         
         self.model_combo = ChevronComboBox()
         self.model_combo.setMinimumHeight(18)
@@ -95,7 +99,7 @@ class DeblurPanel(QWidget):
         ai_layout.addWidget(tiling_group)
         
         # Blend Control
-        self.blend_control = ParamSliderRow(
+        self.blend_control = ColorParameterRow(
             I18N.tr("deblur.blend", "混合:"), 0.0, 1.0, 1.0,
             step=0.01, decimals=2)
         ai_layout.addWidget(self.blend_control)
@@ -132,7 +136,7 @@ class DeblurPanel(QWidget):
         lbl = QLabel(label)
         lbl.setFixedWidth(65)
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        lbl.setStyleSheet("color: #bbbbbb; font-size: 11px;")
+        lbl.setStyleSheet(PARAMETER_LABEL_STYLE)
         
         combo = ChevronComboBox()
         combo.addItems(items)

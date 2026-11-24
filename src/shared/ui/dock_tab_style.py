@@ -16,10 +16,12 @@ from src.shared.ui.style_sheet import orange_tab_style
 
 __all__ = [
     "DOCK_TAB_BAR_STYLE",
+    "DOCK_TAB_BAR_HEIGHT",
     "apply_dock_tab_bar_style",
 ]
 
 
+DOCK_TAB_BAR_HEIGHT = 24
 DOCK_TAB_BAR_STYLE = (
     orange_tab_style("QMainWindowTabBar#ToposDockTabBar")
     + orange_tab_style("QTabBar#ToposDockTabBar")
@@ -30,6 +32,7 @@ def apply_dock_tab_bar_style(tab_bar: QTabBar) -> None:
     """Apply the shared dock-tab geometry and style to one internal tab bar."""
 
     tab_bar.setObjectName("ToposDockTabBar")
+    tab_bar.setFixedHeight(DOCK_TAB_BAR_HEIGHT)
     tab_bar.setExpanding(False)
     tab_bar.setDrawBase(False)
     tab_bar.setDocumentMode(False)

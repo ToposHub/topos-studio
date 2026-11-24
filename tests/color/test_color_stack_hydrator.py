@@ -248,6 +248,19 @@ class TestApplyStackToPanels:
 
         panels["mixer_panel"].set_params.assert_called_once_with(stack.mixer_params)
 
+    def test_restores_mist_on_clip_switch_without_node_selection(self) -> None:
+        from src.features.color.core.layer import Layer
+
+        layer = Layer("Mist")
+        layer.effects_params.update(mist_enabled=True, mist_radius=0.2, mist_mix=29.0)
+        stack = _make_sample_stack().with_layers([layer.to_dict(None)])
+        panel = MagicMock()
+        hydrator = ColorStackHydrator()
+        hydrator.apply_stack_to_panels(stack, {"effects_panel": panel})
+        panel.set_params_dict.assert_called_once_with(layer.effects_params, emit=False)
+        hydrator.apply_stack_to_panels(_make_sample_stack(), {"effects_panel": panel})
+        panel.set_params_dict.assert_called_with({}, emit=False)
+
     def test_updates_lut_panel(self) -> None:
         hydrator = ColorStackHydrator()
         stack = _make_sample_stack()

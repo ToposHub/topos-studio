@@ -14,12 +14,13 @@ from src.shared.assets.icon_manager import (
 )
 from src.shared.i18n.i18n import I18N
 from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_ROW_SPACING,
     color_panel_stylesheet, create_panel_header, style_reset_button,
 )
 from src.shared.ui.style_sheet import C
 
 
-class _RangeParameterRow(ParamSliderRow):
+class _RangeParameterRow(ColorParameterRow):
     """Show HSL as percentages while preserving the normalized model API."""
 
     def __init__(self, label: str, default: float, parent: QWidget) -> None:
@@ -84,8 +85,7 @@ class QualifierPanel(QWidget):
         return color_panel_stylesheet("""
             QualifierPanel { background: __COLOR_PANEL_BASE__; }
             QLabel#qualifierTitle {
-                background: transparent; color: #eeeeee;
-                font-size: 12px; font-weight: bold;
+                __COLOR_SECTION_TITLE__
             }
             QWidget#qualifierTools {
                 background: __COLOR_PANEL_RAISED__; border-bottom: 1px solid __PANEL_DIVIDER__;
@@ -94,7 +94,7 @@ class QualifierPanel(QWidget):
             QWidget#qualifierFinesse { background: __COLOR_PANEL_BASE__; }
             QWidget#qualifierFinesse { border-left: 1px solid __PANEL_DIVIDER__; }
             QLabel#qualifierFinesseTitle {
-                color: #eeeeee; font-size: 12px; background: transparent;
+                __COLOR_SECTION_TITLE__
             }
             QPushButton[qualifierTool="true"] {
                 background: transparent; border: 1px solid transparent;
@@ -108,8 +108,7 @@ class QualifierPanel(QWidget):
                 background: #45464b; border-color: #626269; color: #ff8800;
             }
             QLabel#qualifierChannelTitle {
-                color: #eeeeee; font-size: 12px;
-                background: transparent;
+                __COLOR_SECTION_TITLE__
             }
             QFrame#qualifierToolDivider { background: #18181c; border: none; }
         """).replace("__PANEL_DIVIDER__", C.PANEL_DIVIDER)
@@ -244,7 +243,7 @@ class QualifierPanel(QWidget):
         self.refine_group.setFixedWidth(188)
         finesse = QVBoxLayout(self.refine_group)
         finesse.setContentsMargins(16, 10, 16, 10)
-        finesse.setSpacing(4)
+        finesse.setSpacing(PARAMETER_ROW_SPACING)
         title = QLabel(I18N.tr("qualifier.matte_finesse", "Matte Finesse"))
         title.setObjectName("qualifierFinesseTitle")
         finesse.addWidget(title)
@@ -325,7 +324,7 @@ class QualifierPanel(QWidget):
         return section
 
     def _build_matte_row(self, label: str, maximum: float) -> ParamSliderRow:
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, 0.0, maximum, 0.0, step=1.0, decimals=1,
             label_width=98, value_fixed_width=48, slider_auto_hide=False,
             parent=self.refine_group,

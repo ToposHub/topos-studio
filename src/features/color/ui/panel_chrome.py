@@ -4,22 +4,75 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPixmap
-from PyQt6.QtWidgets import QAbstractButton, QHBoxLayout, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QAbstractButton, QHBoxLayout, QLabel, QMainWindow, QToolButton, QVBoxLayout, QWidget,
+    QWIDGETSIZE_MAX,
+)
 
 from src.shared.assets.icon_manager import icon_reset
+from src.shared.ui.dock_tab_style import DOCK_TAB_BAR_HEIGHT
+from src.shared.ui.panel_divider import PanelDockWidget
 from src.shared.ui.style_sheet import C
+from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 
 HEADER_HEIGHT = 30
+PARAMETER_BAR_HEIGHT = 34
+PARAMETER_ROW_HEIGHT = 20
+PARAMETER_ROW_SPACING = 3
+SECTION_TITLE_STYLE = f"color: {C.TEXT_PRIMARY}; font-size: 12px; font-weight: 600; background: transparent;"
+PARAMETER_NAME_STYLE = "color: #aeb0b6; font-size: 11px; font-weight: 400; background: transparent;"
+PARAMETER_DISABLED_COLOR = "#777982"
+PARAMETER_LABEL_STYLE = (
+    f"QLabel {{ {PARAMETER_NAME_STYLE} }} "
+    f"QLabel:disabled {{ color: {PARAMETER_DISABLED_COLOR}; }}"
+)
 HEADER_CONTROL_HEIGHT = 26
 HEADER_ICON_SIZE = 14
 HEADER_ICON_IDLE = "#6e7480"
 HEADER_ICON_HOVER = "#b8bec8"
 HEADER_ICON_ACTIVE = "#f3f4f6"
 HEADER_ICON_DISABLED = "#4e5158"
+COLOR_TOOL_DOCK_DEFAULT_HEIGHT = 360
+COLOR_TOOL_DOCK_MAX_HEIGHT = 380
 
 _RESET_ICON_IDLE = "#9096a0"
 _RESET_CONTROL_SIZE = 16
 _RESET_ICON_SIZE = 11
+
+
+class ColorParameterRow(ParamSliderRow):
+    """Use compact rows and parameter typography in the Color workspace."""
+
+    _LABEL_STYLE = PARAMETER_LABEL_STYLE
+    _VALUE_ROW_HEIGHT = PARAMETER_ROW_HEIGHT
+
+
+class ColorToolDockWidget(PanelDockWidget):
+    """Keep the height cap with the tool through docking and floating."""
+
+    def __init__(self, title: str, host: QMainWindow) -> None:
+        super().__init__(title, host)
+        self._dock_host = host
+        self.setMaximumHeight(COLOR_TOOL_DOCK_MAX_HEIGHT)
+        self.topLevelChanged.connect(self.sync_height_limit)
+        self.dockLocationChanged.connect(self._dock_area_changed)
+
+    def tab_height(self) -> int:
+        # The tab strip is outside the dock widget's own geometry.
+        return DOCK_TAB_BAR_HEIGHT if any(
+            not other.isHidden() for other in self._dock_host.tabifiedDockWidgets(self)
+        ) else 0
+
+    def sync_height_limit(self, is_floating: bool | None = None) -> None:
+        floating = self.isFloating() if is_floating is None else is_floating
+        docked = (not floating and self._dock_host.dockWidgetArea(self)
+                  != Qt.DockWidgetArea.NoDockWidgetArea)
+        height = COLOR_TOOL_DOCK_MAX_HEIGHT - self.tab_height() if docked else QWIDGETSIZE_MAX
+        if self.maximumHeight() != height:
+            self.setMaximumHeight(height)
+
+    def _dock_area_changed(self, _area: Qt.DockWidgetArea) -> None:
+        self.sync_height_limit()
 
 
 class _ResetButtonAppearance(QObject):
@@ -85,7 +138,37 @@ def color_panel_stylesheet(style: str) -> str:
     """Resolve the Color surface roles in QSS with ordinary selector braces."""
     return (style.replace("__COLOR_PANEL_BASE__", C.BG_PANEL)
             .replace("__COLOR_PANEL_INSET__", C.COLOR_PANEL_INSET)
-            .replace("__COLOR_PANEL_RAISED__", C.COLOR_PANEL_RAISED))
+            .replace("__COLOR_PANEL_RAISED__", C.COLOR_PANEL_RAISED)
+            .replace("__COLOR_PARAMETER_NAME__", PARAMETER_NAME_STYLE)
+            .replace("__COLOR_PARAMETER_DISABLED__", PARAMETER_DISABLED_COLOR)
+            .replace("__COLOR_SECTION_TITLE__", SECTION_TITLE_STYLE))
+
+
+def create_parameter_section(
+    title: str, *, spacing: int = PARAMETER_ROW_SPACING,
+) -> tuple[QWidget, QVBoxLayout]:
+    """Build a flat section with a compact title and parameter spacing."""
+    section = QWidget()
+    layout = QVBoxLayout(section)
+    layout.setContentsMargins(10, 5, 10, 5)
+    layout.setSpacing(spacing)
+    heading = QLabel(title, section)
+    heading.setObjectName("colorParameterSectionTitle")
+    heading.setStyleSheet(SECTION_TITLE_STYLE)
+    layout.addWidget(heading)
+    return section, layout
+
+
+def create_panel_divider(orientation: Qt.Orientation) -> QWidget:
+    """Create a one-pixel layout seam between sections."""
+    divider = QWidget()
+    divider.setObjectName("colorParameterDivider")
+    if orientation == Qt.Orientation.Vertical:
+        divider.setFixedWidth(1)
+    else:
+        divider.setFixedHeight(1)
+    divider.setStyleSheet(f"background: {C.PANEL_DIVIDER}; border: none;")
+    return divider
 
 
 class _HeaderIconEngine(QIconEngine):

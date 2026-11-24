@@ -18,7 +18,10 @@ from src.features.color.core.warper_state import (
     WarperGrid, WarperPin, WarperStateV2, make_point_id,
 )
 from src.features.color.ui.warper_tools import MeshTools, StrokeTools, tool_button, tr
-from src.features.color.ui.panel_chrome import create_panel_header, style_header_button, style_reset_button
+from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    create_panel_header, style_header_button, style_reset_button,
+)
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.chroma_warp_canvas import ChromaWarpCanvas
@@ -117,7 +120,7 @@ class WarperPanel(QWidget):
         top.setContentsMargins(8, 0, 3, 0)
         top.setSpacing(2)
         self.title = QLabel()
-        self.title.setStyleSheet(f"color: {C.TEXT_PRIMARY}; font-size: 11px; font-weight: bold;")
+        self.title.setStyleSheet(SECTION_TITLE_STYLE)
         top.addWidget(self.title, 1)
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -222,7 +225,7 @@ class WarperPanel(QWidget):
         axis_layout.setContentsMargins(0, 0, 0, 0)
         axis_layout.setSpacing(4)
         self.axis_label = QLabel(tr("axis_angle", "Axis Angle"))
-        self.axis_label.setStyleSheet(f"color: {C.TEXT_HINT}; font-size: 11px;")
+        self.axis_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         axis_layout.addWidget(self.axis_label)
         self.axis_angle = DragValue("", -180, 180, 0, 2, compact=True)
         self.axis_angle.setFixedWidth(60)

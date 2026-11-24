@@ -2904,43 +2904,6 @@ class PreferencesDialog(QDialog):
                 background-color: {C.ORANGE};
             }}
 
-            /* === Slider in Preferences — 与 DARK_THEME QSlider 全局规范一致 === */
-            QSlider#PrefSlider {{ background: transparent; }}
-            QSlider#PrefSlider::groove:horizontal {{
-                border: 1px solid #3d3d3d;
-                height: 4px;
-                background: {C.BG_DARKEST};
-                margin: 2px 0;
-                border-radius: 2px;
-            }}
-            QSlider#PrefSlider::sub-page:horizontal {{
-                background: transparent;
-                border: none;
-                height: 4px;
-                border-radius: 2px;
-            }}
-            QSlider#PrefSlider::add-page:horizontal {{
-                background: transparent;
-                border: none;
-                height: 4px;
-                border-radius: 2px;
-            }}
-            QSlider#PrefSlider::handle:horizontal {{
-                background: {C.ORANGE};
-                border: 1px solid {C.BG_DARK};
-                width: 10px;
-                height: 10px;
-                margin: -4px 0;
-                border-radius: 5px;
-            }}
-            QSlider#PrefSlider::handle:horizontal:hover {{
-                background: {C.ORANGE_HOVER};
-                border: 1px solid {C.BORDER_DARK};
-            }}
-            QSlider#PrefSlider::handle:horizontal:pressed {{
-                background: {C.ORANGE_PRESS};
-            }}
-
             /* === Plugin List === */
             QListWidget#PrefPluginList {{
                 background-color: #232325;

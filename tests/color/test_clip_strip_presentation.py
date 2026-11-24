@@ -5,9 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
-from PyQt6.QtGui import QColor, QPixmap, QShortcut, QWheelEvent
+from PyQt6.QtGui import QColor, QFont, QPixmap, QShortcut, QWheelEvent
+from PyQt6.QtWidgets import QStyle, QStyleOptionSlider
 
 from src.features.color.ui import timeline_clip_strip as ui
+from src.shared.ui.style_sheet import C, DARK_THEME
 
 
 def entry(index: int = 0) -> ui.ColorClipEntry:
@@ -46,6 +48,30 @@ def test_metadata_does_not_cover_picture(strip):
     assert card._bottom_label.text() == "H.264 High"
     assert card._bottom_label.alignment() & Qt.AlignmentFlag.AlignLeft
     assert not strip._nav_container.isVisible()
+
+
+def test_small_is_the_default_with_tight_metadata_and_scrollbar(strip, qtbot) -> None:
+    card = strip._cards[0]
+    bar = strip._scroll_area.horizontalScrollBar()
+    qtbot.waitUntil(bar.isVisible)
+    assert strip._card_size is ui.CardSize.SMALL
+    assert strip.height() == 110
+    assert (card.width(), card.height()) == (112, 100)
+    assert (card._thumb_widget.width(), card._thumb_widget.height()) == (112, 63)
+    assert card._header.height() == 21
+    assert card._bottom_label.height() == 14
+    footer_bottom = card._bottom_label.mapTo(strip, card._bottom_label.rect().bottomLeft()).y()
+    scrollbar_top = bar.mapTo(strip, bar.rect().topLeft()).y()
+    assert 0 <= scrollbar_top - footer_bottom - 1 <= 2
+
+    header = card._header
+    header.set_info("1000", "00:59:59:23", "A custom video track name")
+    qtbot.waitUntil(lambda: header.timecode_label.width() >= header.timecode_label.sizeHint().width())
+    label = header.timecode_label
+    assert label.text() == "00:59:59:23"
+    assert label.fontMetrics().horizontalAdvance(label.text()) <= label.width()
+    assert label.font().weight() < QFont.Weight.Bold
+    assert label.font().stretch() == 92
 
 
 def test_selected_border_is_on_picture_only(strip):
@@ -88,7 +114,7 @@ def test_picture_is_clipped_to_rounded_border(strip, selected: bool, device_scal
     # A rectangular source must not leak outside any of the rounded corners.
     for x in (0, image.width() - 1):
         for y in (0, image.height() - 1):
-            assert image.pixelColor(x, y).name() == ui._BG_DARK
+            assert image.pixelColor(x, y).name() == ui.C.BG_PANEL
 
     # The outline meets the outer edge; there is no source-colored strip
     # outside an inset border, or a second dark line inside the picture.
@@ -141,6 +167,8 @@ def test_external_selection_scrolls_into_view(strip):
 
 
 def test_thumbnail_size_can_grow_after_shrinking(strip, qtbot):
+    strip._set_card_size(ui.CardSize.MEDIUM)
+    qtbot.waitUntil(lambda: strip._cards[0].height() > 100)
     original_height = strip._cards[0].height()
     strip._set_card_size(ui.CardSize.SMALL)
     qtbot.waitUntil(lambda: strip._cards[0].height() < original_height)
@@ -161,6 +189,31 @@ def test_scrollbar_only_shows_for_overflow(strip, qtbot):
     strip._rebuild_cards()
     qtbot.waitUntil(bar.isVisible)
     assert bar.pageStep() < strip._container.width()
+
+
+def test_scrollbar_renders_only_a_rounded_thumb(strip, qtbot) -> None:
+    strip.setStyleSheet(DARK_THEME)
+    bar = strip._scroll_area.horizontalScrollBar()
+    qtbot.waitUntil(bar.isVisible)
+    bar.setValue(bar.minimum())
+    option = QStyleOptionSlider()
+    bar.initStyleOption(option)
+    thumb = bar.style().subControlRect(
+        QStyle.ComplexControl.CC_ScrollBar, option, QStyle.SubControl.SC_ScrollBarSlider, bar,
+    )
+    image = strip.grab().toImage()
+    scale = image.devicePixelRatio()
+    origin = bar.mapTo(strip, thumb.topLeft())
+    left, top = round(origin.x() * scale), round(origin.y() * scale)
+    right = round((origin.x() + thumb.width()) * scale) - 1
+    bottom = round((origin.y() + thumb.height()) * scale) - 1
+    middle_y = (top + bottom) // 2
+    track = bar.mapTo(strip, QPoint(bar.width() - 8, thumb.center().y()))
+
+    assert image.pixelColor((left + right) // 2, middle_y).name() != C.BG_PANEL
+    assert image.pixelColor(left, top).name() == C.BG_PANEL
+    assert image.pixelColor(right, bottom).name() == C.BG_PANEL
+    assert image.pixelColor(round(track.x() * scale), middle_y).name() == C.BG_PANEL
 
 
 @pytest.mark.parametrize("over_picture", [False, True])

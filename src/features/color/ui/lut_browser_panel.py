@@ -24,6 +24,7 @@ from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.assets.icon_manager import get_icon, icon_folder
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
+from src.shared.ui.widgets.drag_value import style_numeric_spin_box
 from .gallery_icons import gallery_icon
 from .node_resource_mime import resource_mime_data
 from .panel_chrome import create_panel_header, header_icon, style_header_button, style_reset_button
@@ -350,6 +351,7 @@ class ColorLutBrowser(QWidget):
         self.strength_spin.setSingleStep(0.01)
         self.strength_spin.setDecimals(2)
         self.strength_spin.setFixedWidth(58)
+        style_numeric_spin_box(self.strength_spin)
         strength.addWidget(self.strength_spin)
         self.reset_button = self._tool('', tr('reset_strength', 'Reset strength'), 'ResetNodeLutStrength')
         style_reset_button(self.reset_button)

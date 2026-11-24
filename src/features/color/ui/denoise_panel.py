@@ -8,7 +8,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
 from src.shared.i18n.i18n import I18N
 from src.features.color.core.denoise_engine import DenoiseEngine, get_model_tile_config
-from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_LABEL_STYLE, PARAMETER_ROW_SPACING, SECTION_TITLE_STYLE,
+    create_panel_layout, style_reset_button,
+)
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
@@ -20,10 +23,6 @@ from src.shared.video.denoise.params import (
     VideoDenoiseParams,
 )
 
-# --- 达芬奇 Motion Effects 式标题样式 ---
-_PANEL_TITLE_STYLE = (
-    "color: #e8e8e8; font-weight: bold; font-size: 12px; letter-spacing: 0.5px;")
-_SECTION_TITLE_STYLE = "color: #dddddd; font-weight: bold; font-size: 11px;"
 # 行标签统一宽度：需容纳 "Mo. Est. Type" / "Edge Protection"（~80px）
 _LABEL_WIDTH = 88
 # 达芬奇 Motion Effects 每栏约 310px；这里放宽到 470 适配数值框/中英文，
@@ -103,7 +102,7 @@ class DenoisePanel(QWidget):
 
         # === 面板标题行：标题 + 全部重置 ===
         title_label = QLabel(I18N.tr("denoise.title", "降噪"))
-        title_label.setStyleSheet(_PANEL_TITLE_STYLE)
+        title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header_layout.addWidget(title_label)
         header_layout.addStretch()
 
@@ -152,6 +151,7 @@ class DenoisePanel(QWidget):
 
     def _init_image_ui(self) -> None:
         """Expose only the still-image backends that DenoiseEngine implements."""
+        self.setStyleSheet(f"QGroupBox {{ {SECTION_TITLE_STYLE} }}")
         header, layout = create_panel_layout(self, (8, 8, 6), 6)
         self.mode_combo = ChevronComboBox()
         self.mode_combo.addItem(I18N.tr("denoise.classic", "Classic"), "Basic")
@@ -327,13 +327,13 @@ class DenoisePanel(QWidget):
         controls, threshold = QVBoxLayout(), QVBoxLayout()
         for group in (controls, threshold):
             group.setContentsMargins(8, 0, 10, 0)
-            group.setSpacing(6)
+            group.setSpacing(PARAMETER_ROW_SPACING)
         layout.addLayout(controls)
 
         # 节头：时域降噪 [⟲ 历史重置] [↺ 节重置]
         header = QHBoxLayout()
         title = QLabel(I18N.tr("denoise.temporal", "时域降噪"))
-        title.setStyleSheet(_SECTION_TITLE_STYLE)
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self._make_history_reset_btn())
@@ -399,7 +399,7 @@ class DenoisePanel(QWidget):
         temporal_grid = QGridLayout()
         temporal_grid.setContentsMargins(0, 0, 0, 0)
         temporal_grid.setHorizontalSpacing(2)
-        temporal_grid.setVerticalSpacing(6)
+        temporal_grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         temporal_grid.addWidget(self.temporal_link_btn, 0, 0, 2, 1)
         temporal_grid.addWidget(self.temporal_luma, 0, 1)
         temporal_grid.addWidget(self.temporal_chroma, 1, 1)
@@ -422,7 +422,7 @@ class DenoisePanel(QWidget):
         controls, threshold = QVBoxLayout(), QVBoxLayout()
         for group in (controls, threshold):
             group.setContentsMargins(10, 0, 8, 0)
-            group.setSpacing(6)
+            group.setSpacing(PARAMETER_ROW_SPACING)
         layout.addLayout(controls)
 
         # 节头：[⬤ 开关] 空域降噪 [↺ 节重置]
@@ -430,7 +430,7 @@ class DenoisePanel(QWidget):
         self.spatial_toggle = ToggleSwitch(checked=False)
         header.addWidget(self.spatial_toggle)
         title = QLabel(I18N.tr("denoise.spatial", "空域降噪"))
-        title.setStyleSheet(_SECTION_TITLE_STYLE)
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self._make_section_reset_btn(
@@ -480,7 +480,7 @@ class DenoisePanel(QWidget):
         spatial_grid = QGridLayout()
         spatial_grid.setContentsMargins(0, 0, 0, 0)
         spatial_grid.setHorizontalSpacing(2)
-        spatial_grid.setVerticalSpacing(6)
+        spatial_grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         spatial_grid.addWidget(self.spatial_link_btn, 0, 0, 2, 1)
         spatial_grid.addWidget(self.spatial_luma, 0, 1)
         spatial_grid.addWidget(self.spatial_chroma, 1, 1)
@@ -556,7 +556,7 @@ class DenoisePanel(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 2, 0, 0)
         label = QLabel(title)
-        label.setStyleSheet(_SECTION_TITLE_STYLE)
+        label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(label)
         header.addStretch()
         header.addWidget(self._make_section_reset_btn(reset_tooltip, slot))
@@ -573,7 +573,7 @@ class DenoisePanel(QWidget):
                     default_val: float, step: float,
                     decimals: int = 2) -> ParamSliderRow:
         """创建标准参数行（标签 + 滑杆 + 数值框，标签宽对齐两栏）。"""
-        return ParamSliderRow(
+        return ColorParameterRow(
             label, min_val, max_val, default_val,
             step=step, decimals=decimals, label_width=_LABEL_WIDTH)
 
@@ -593,7 +593,7 @@ class DenoisePanel(QWidget):
         lbl = QLabel(label)
         lbl.setFixedWidth(_LABEL_WIDTH)
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        lbl.setStyleSheet("color: #bbbbbb; font-size: 11px;")
+        lbl.setStyleSheet(PARAMETER_LABEL_STYLE)
 
         combo = ChevronComboBox()
         combo.addItems(items)

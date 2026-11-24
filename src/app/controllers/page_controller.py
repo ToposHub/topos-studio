@@ -42,6 +42,7 @@ from typing import Optional, Any, Callable
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from src.app.controllers.dock_layout_controller import COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS
 from src.shared.diagnostics import flash_diag as _flash_diag
 
 logger = logging.getLogger(__name__)
@@ -495,9 +496,7 @@ class PageManagementMixin:
             # small delay lets Timeline report its actual restored height.
             schedule(50, self._migrate_edit_timeline_dock_height)
         if page_name == "Color" and hasattr(self, "_migrate_color_grading_dock_height"):
-            # The Color Wheel dock needs the restored splitter geometry to
-            # settle before the legacy height can be repaired.
-            schedule(50, self._migrate_color_grading_dock_height)
+            schedule(COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS, self._migrate_color_grading_dock_height)
         if page_name == "Color" and hasattr(self, "_migrate_color_remapping_dock_layout"):
             schedule(0, self._migrate_color_remapping_dock_layout)
         if page_name == "Composite" and hasattr(self, "_migrate_composite_scopes_dock_visibility"):
@@ -3414,6 +3413,8 @@ class PageManagementMixin:
             panels["hsl_panel"] = self.hsl_curves_panel
         if hasattr(self, 'mixer_panel') and self.mixer_panel:
             panels["mixer_panel"] = self.mixer_panel
+        if getattr(self, "effects_panel", None):
+            panels["effects_panel"] = self.effects_panel
         # D2：旧 lut_panel 实例已删除（LUT UI = ColorLutBrowser）
         if hasattr(self, 'denoise_panel') and self.denoise_panel:
             panels["denoise_panel"] = self.denoise_panel

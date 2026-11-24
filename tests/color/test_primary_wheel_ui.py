@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtGui import QFont, QMouseEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QSplitter, QWidget
 
@@ -21,6 +21,45 @@ from src.features.color.core.primary_calibration import (
 from src.features.color.ui.color_wheel import (
     ColorWheel, GradingPanel, KnurledJogWheel, offset_display_to_hsb, offset_hsb_to_display,
 )
+from src.shared.ui.style_sheet import DARK_THEME
+
+
+def test_scalar_value_strip_and_text_fit_at_supported_panel_widths(qtbot, qapp) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.setStyleSheet(DARK_THEME)
+    panel.resize(624, 392)
+    panel.show()
+    qapp.processEvents()
+
+    row = panel.lum_mix_slider
+    assert row.isHidden()
+    panel.resize(900, 392)
+    qapp.processEvents()
+    assert row.isVisible()
+    spin = row.spin
+    value = spin._value_label
+    strip = spin._accent_bar
+    assert value.text() == "100.00"
+    assert value.fontMetrics().horizontalAdvance(value.text()) <= value.contentsRect().width()
+    assert value.font().weight() < QFont.Weight.Bold
+    assert strip.geometry().top() == value.geometry().bottom() + 1
+    field = value.geometry().united(strip.geometry())
+    assert abs(spin.y() + field.center().y() - row.label.geometry().center().y()) <= 1
+    assert panel.rect().contains(strip.mapTo(panel, strip.rect().bottomRight()))
+
+    qtbot.mouseDClick(spin, Qt.MouseButton.LeftButton, pos=spin.rect().center())
+    assert spin._edit.isVisible()
+    assert strip.geometry().top() == spin._edit.geometry().bottom() + 1
+    qtbot.keyClick(spin._edit, Qt.Key.Key_Escape)
+
+    panel.resize(624, 392)
+    panel.calibration_btn.click()
+    panel.temp_slider.setValue(-100.0)
+    qapp.processEvents()
+    temperature = panel.temp_slider.spin._value_label
+    assert temperature.text() == "-10000.0"
+    assert temperature.fontMetrics().horizontalAdvance(temperature.text()) <= temperature.contentsRect().width()
 
 
 def test_measured_grade_uses_native_display_values_and_round_trips(qtbot) -> None:
@@ -508,11 +547,13 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
                  + panel.width() - panel._wheel_page.width())
     set_panel_width(threshold - 1)
     assert all(column.isHidden() for _, column in rows.values())
+    assert panel.lum_mix_slider.isHidden()
     set_panel_width(threshold)
     for mode, (row, column) in rows.items():
         panel._mode_buttons[mode].click()
         qapp.processEvents()
         assert column.isVisible()
+        assert panel.lum_mix_slider.isVisible() == (mode != "log")
         layout = row.layout()
         for index in range(layout.count()):
             widget = layout.itemAt(index).widget()
@@ -522,6 +563,7 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
 
     offset._r_drag.setValue(40.0)
     panel.log_offset_wheel._g_drag.setValue(25.0)
+    panel.lum_mix_slider.setValue(75.0)
     panel.flush_pending_changes()
     grade = panel.get_extended_params()
     red_value = offset._r_drag.value()
@@ -531,6 +573,7 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
     panel.grading_extended_changed.connect(updates.append)
     set_panel_width(minimum_width)
     assert all(column.isHidden() for _, column in rows.values())
+    assert panel.lum_mix_slider.isHidden()
     panel._switch_mode("bars")
     set_panel_width(threshold)
     assert panel.color_bars_panel.offset.isVisible()
@@ -538,6 +581,8 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
     qapp.processEvents()
     assert offset.isVisible()
     assert offset._r_drag.value() == red_value
+    assert panel.lum_mix_slider.isVisible()
+    assert panel.lum_mix_slider.value() == 75.0
     assert panel.get_extended_params() == grade
     panel.flush_pending_changes()
     assert updates == []

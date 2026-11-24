@@ -33,7 +33,7 @@ from PyQt6.QtGui import (QPainter, QColor, QConicalGradient, QRadialGradient,
 
 from src.shared.assets.icon_manager import icon_add, icon_delete, icon_circle
 from src.shared.ui.widgets.drag_value import DragValue, drag_speed_per_pixel
-from src.shared.ui.style_sheet import C, PARAM_LABEL_STYLE
+from src.shared.ui.style_sheet import C
 from src.shared.i18n.i18n import I18N
 from src.features.color.core.composition_uniforms import (
     params_to_offset_rgb, offset_chroma_scale, offset_master_scale,
@@ -44,7 +44,8 @@ from src.features.color.core.primary_calibration import (
 )
 from src.features.color.ui.tonal_saturation_panel import TonalSaturationPanel
 from src.features.color.ui.panel_chrome import (
-    create_panel_header, header_button_color, style_header_button, style_reset_button,
+    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    PARAMETER_BAR_HEIGHT, create_panel_header, header_button_color, style_header_button, style_reset_button,
 )
 
 
@@ -122,30 +123,39 @@ class _GradingValue(DragValue):
 
     def __init__(self, minimum: float, maximum: float, default: float,
                  decimals: int = 2, accent: str = "#919195",
-                 drag_span: float | None = None) -> None:
+                 drag_span: float | None = None, *, height: int = 24) -> None:
         super().__init__("", minimum, maximum, default, decimals=decimals, compact=True)
-        self._accent = accent
         self._drag_span = drag_span
         self.setFixedValueWidth(44)
-        self.setFixedHeight(24)
-        # Keep the shared DragValue normal/hover/active/editor styles intact.
-        # Channel identity lives only in a separate, non-interactive color bar.
-        self.layout().setContentsMargins(0, 0, 0, 4)
-        self._edit.setFixedHeight(20)
+        self.setFixedHeight(height)
+
+        layout = self.layout()
+        field = QVBoxLayout()
+        field.setContentsMargins(0, 0, 0, 0)
+        field.setSpacing(0)
+        for widget in (self._value_label, self._edit):
+            layout.removeWidget(widget)
+            field.addWidget(widget)
         self._accent_bar = QWidget(self)
         self._accent_bar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._accent_bar.setFixedHeight(2)
         self._accent_bar.setStyleSheet(f"background: {accent}; border: none;")
+        field.addWidget(self._accent_bar)
+        layout.addLayout(field)
+        layout.setAlignment(field, Qt.AlignmentFlag.AlignVCenter)
+
+    def fit_display_range(self, minimum_width: int) -> None:
+        self._value_label.ensurePolished()
+        metrics = self._value_label.fontMetrics()
+        text_width = max(metrics.horizontalAdvance(self._format_value(value))
+                         for value in (self._min, self._max))
+        # Leave room for the field border, padding, and inline editor cursor.
+        self.setFixedValueWidth(max(minimum_width, text_width + 6))
 
     def _drag_sensitivity(self, modifiers: Qt.KeyboardModifier) -> float:
         if self._drag_span is None:
             return super()._drag_sensitivity(modifiers)
         return drag_speed_per_pixel(self._drag_span, modifiers)
-
-    def resizeEvent(self, event: Any) -> None:
-        super().resizeEvent(event)
-        # 标识条几何对齐 Wheel_UI 设计稿：左右各缩进 1px、贴底 1.5px（取整 2px）。
-        self._accent_bar.setGeometry(1, self.height() - 2,
-                                     self.width() - 2, 2)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -176,6 +186,7 @@ class _GradingValue(DragValue):
 class _PrimaryValueRow(QWidget):
     """Label and value only; display units are independent of stored grade values."""
 
+    _VALUE_WIDTH = 48
     valueChanged = pyqtSignal(float)
     interactionStarted = pyqtSignal()
     interactionEnded = pyqtSignal()
@@ -196,12 +207,15 @@ class _PrimaryValueRow(QWidget):
         layout.setSpacing(4)
         layout.addStretch()
         self.label = QLabel(label)
-        self.label.setStyleSheet(PARAM_LABEL_STYLE)
+        self.label.setStyleSheet(PARAMETER_LABEL_STYLE)
+        self.label.setMinimumWidth(1)
+        self.label.setToolTip(label)
         layout.addWidget(self.label)
         self.spin = _GradingValue(minimum * scale + offset,
                                   maximum * scale + offset,
                                   self._default_value * scale + offset,
                                   decimals, accent)
+        self.spin.setFixedValueWidth(self._VALUE_WIDTH)
         layout.addWidget(self.spin)
         layout.addStretch()
         self.spin.valueChanged.connect(self._on_value_changed)
@@ -224,6 +238,7 @@ class _PrimaryValueRow(QWidget):
         self.spin.setRange(self._bounds[0] * scale + offset, self._bounds[1] * scale + offset)
         self.spin.setDefaultValue(self._default_value * scale + offset)
         self.spin.setDecimals(decimals)
+        self.spin.fit_display_range(self._VALUE_WIDTH)
         self.setValue(value)
         self.spin.blockSignals(blocked)
 
@@ -454,9 +469,7 @@ class _WheelCanvas(QWidget):
     # ── 几何（绘制与命中测试共用） ────────────────────────────────────
 
     def _geometry(self) -> tuple[QPointF, float]:
-        # 半径随面板缩放动态计算，封顶 100px（与 dock 高度上限联动，
-        # 见 dock_layout_controller._COLOR_TOOL_DOCK_MAX_HEIGHT 注释）。
-        # 纵向 padding 6px：保证在 dock 封顶高度下半径仍能达到 100。
+        # 半径随画布的可用空间缩放，封顶 100px。
         radius = max(1.0, min((self.width() - 12.0) / 2.0,
                               (self.height() - 6.0) / 2.0, 100.0))
         return QPointF(self.width() / 2.0, self.height() / 2.0), radius
@@ -712,8 +725,7 @@ class ColorWheel(QWidget):
         header.addWidget(self.zone_icon)
         header.addStretch(1)
         self.title_label = QLabel(title)
-        self.title_label.setStyleSheet(
-            "color: #d4d7dd; font-size: 12px; font-weight: 600;")
+        self.title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(self.title_label)
         header.addStretch(1)
         self.reset_btn = QToolButton(self)
@@ -1303,8 +1315,7 @@ class GradingPanel(QWidget):
             self.keyframe_remove_requested.emit)
 
         self.mode_title = QLabel(I18N.tr("panel.color_wheel", "色轮"))
-        self.mode_title.setStyleSheet(
-            "color: #e5e7eb; font-size: 12px; font-weight: 700;")
+        self.mode_title.setStyleSheet(SECTION_TITLE_STYLE)
 
         self.reset_all_btn = QPushButton()
         self.reset_all_btn.setObjectName("reset_btn")
@@ -1408,6 +1419,7 @@ class GradingPanel(QWidget):
         self.lum_mix_slider = _make_row(
             "grading.lum_mix", "Lum Mix", "lum_mix", 0, 100, 100, decimals=2,
             accent=_ACCENT_RAINBOW)
+        self.lum_mix_slider.hide()
         # Log 顶排孪生行（temp/tint/contrast/pivot 与 Primaries 共享状态）
         self.log_low_range_slider = _make_row(
             "grading.log_low_range", "Low Range", "log_low_range",
@@ -1454,11 +1466,11 @@ class GradingPanel(QWidget):
             bar_layout.setContentsMargins(10, 0, 10, 0)
             bar_layout.setSpacing(2)
             for row in rows:
-                bar_layout.addWidget(row, 1)
+                bar_layout.addWidget(row)
             return bar
 
         self.top_bar_stack = QStackedWidget()
-        self.top_bar_stack.setFixedHeight(34)
+        self.top_bar_stack.setFixedHeight(PARAMETER_BAR_HEIGHT)
         # 页 0：Primaries（色轮 / Color Bars 模式共享）
         self.top_bar_stack.addWidget(_param_bar([
             self.temp_slider, self.tint_slider, self.contrast_slider,
@@ -1471,7 +1483,7 @@ class GradingPanel(QWidget):
         ]))
 
         self.bottom_bar_stack = QStackedWidget()
-        self.bottom_bar_stack.setFixedHeight(34)
+        self.bottom_bar_stack.setFixedHeight(PARAMETER_BAR_HEIGHT)
         # 页 0：Primaries（Lum Mix 补入底排）
         self.bottom_bar_stack.addWidget(_param_bar([
             self.vibrance_slider, self.shadow_slider, self.highlights_slider,
@@ -1616,6 +1628,7 @@ class GradingPanel(QWidget):
             show_offset = self.mode_stack.contentsRect().width() >= self._offset_show_width
             for column in self._offset_columns:
                 column.setVisible(show_offset)
+            self.lum_mix_slider.setVisible(show_offset)
         return super().eventFilter(watched, event)
 
     def _switch_mode(self, mode: str) -> None:

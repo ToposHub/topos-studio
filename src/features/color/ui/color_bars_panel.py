@@ -20,7 +20,10 @@ from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt6.QtGui import (QPainter, QColor, QPen, QPainterPath, QLinearGradient,
                          QMouseEvent, QKeyEvent)
 
-from src.features.color.ui.panel_chrome import style_reset_button
+from src.features.color.ui.panel_chrome import (
+    SECTION_TITLE_STYLE,
+    style_reset_button,
+)
 from src.shared.ui.widgets.drag_value import drag_speed_per_pixel
 from src.shared.i18n.i18n import I18N
 from src.features.color.ui.color_wheel import (
@@ -91,7 +94,8 @@ class _ChannelBar(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = float(self.width()), float(self.height())
-        track = QRectF(2.0, 2.0, w - 4.0, h - 4.0)
+        # Inset the painted bar while retaining the full-width drag target.
+        track = QRectF(0.0, 0.0, w, h).adjusted(3.5, 2.0, -3.5, -2.0)
         radius = track.width() / 2.0
 
         # 1. 圆角内凹纯黑滑槽
@@ -302,7 +306,7 @@ class _BarsColumn(QWidget):
         header.setContentsMargins(4, 0, 4, 0)
         header.addStretch(1)
         label = QLabel(title)
-        label.setStyleSheet("color: #d4d7dd; font-size: 12px; font-weight: 600;")
+        label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(label)
         header.addStretch(1)
         self.reset_btn = QToolButton()
@@ -337,16 +341,13 @@ class _BarsColumn(QWidget):
         num_row.setContentsMargins(0, 0, 0, 0)
         num_row.setSpacing(4)
         self._nums: dict[str, _GradingValue] = {}
-        box_width = 52 if self._math == "add" else 34
         box_span = 30.0 if self._math == "add" else 2.0
         box_height = 24 if self._math == "add" else 22
         for ch in self._channels:
             num = _GradingValue(num_min, num_max, neutral,
-                                accent=_CHANNEL_COLORS[ch], drag_span=box_span)
-            num.setFixedValueWidth(box_width)
-            num.setFixedHeight(box_height)
-            num.layout().setContentsMargins(0, 0, 0, 2)
-            num._edit.setFixedHeight(box_height - 4)
+                                accent=_CHANNEL_COLORS[ch], drag_span=box_span, height=box_height)
+            if self._math == "add":
+                num.setFixedValueWidth(52)
             num.setToolTip(ch)
             self._nums[ch] = num
             num_row.addWidget(num)

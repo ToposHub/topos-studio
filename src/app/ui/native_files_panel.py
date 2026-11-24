@@ -701,9 +701,6 @@ class NativeFilesPanel(QWidget):
             QPushButton:disabled {{ color: {C.TEXT_HINT}; }}
             QPushButton#filesBreadcrumb {{ text-align: left; color: {C.TEXT_SECONDARY}; }}
             QFrame#filesRule {{ background: {C.PANEL_DIVIDER}; border: none; }}
-            QSlider::groove:horizontal {{ height: 3px; border: none; border-radius: 1px; background: {C.BORDER}; }}
-            QSlider::handle:horizontal {{ background: {C.TEXT_SECONDARY}; border: none; width: 9px; margin: -3px 0; border-radius: 4px; }}
-            QSlider::handle:horizontal:hover, QSlider::handle:horizontal:focus {{ background: {C.ORANGE}; }}
         """)
 
     def _build_ui(self) -> None:

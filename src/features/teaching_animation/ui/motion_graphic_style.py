@@ -418,40 +418,6 @@ QToolButton#mgKeyframesToolButton:pressed, QToolButton#mgKeyframesFilterButton:p
 QToolButton#mgKeyframesToolButton:disabled, QToolButton#mgKeyframesFilterButton:disabled {{
     color: {EDIT_COLORS["text_muted"]};
 }}
-/* One shared slider recipe for the whole editor (timeline zoom + library
-   thumbnail zoom) — keeps every horizontal slider reading as one control
-   family. */
-QSlider#mgKeyframesZoomSlider, QSlider#mgLibraryZoom {{
-    background: transparent;
-}}
-QSlider#mgKeyframesZoomSlider::groove:horizontal,
-QSlider#mgLibraryZoom::groove:horizontal {{
-    border: 1px solid {EDIT_COLORS["border"]};
-    height: 4px;
-    background: {EDIT_COLORS["bg_input"]};
-    margin: 2px 0;
-    border-radius: 2px;
-}}
-QSlider#mgKeyframesZoomSlider::sub-page:horizontal,
-QSlider#mgKeyframesZoomSlider::add-page:horizontal,
-QSlider#mgLibraryZoom::sub-page:horizontal,
-QSlider#mgLibraryZoom::add-page:horizontal {{
-    background: transparent;
-    border: none;
-}}
-QSlider#mgKeyframesZoomSlider::handle:horizontal,
-QSlider#mgLibraryZoom::handle:horizontal {{
-    background: {EDIT_COLORS["accent"]};
-    border: 1px solid {EDIT_COLORS["bg_toolbar"]};
-    width: 10px;
-    height: 10px;
-    margin: -4px 0;
-    border-radius: 5px;
-}}
-QSlider#mgKeyframesZoomSlider::handle:horizontal:hover,
-QSlider#mgLibraryZoom::handle:horizontal:hover {{
-    background: {EDIT_COLORS["accent_hover"]};
-}}
 """
 
 

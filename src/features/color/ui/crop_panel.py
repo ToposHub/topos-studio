@@ -18,9 +18,13 @@ from src.shared.ui.shortcut_scope import shortcut_owner_window_active
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QEvent
 from PyQt6.QtGui import QKeySequence, QShortcut
+from src.shared.ui.widgets.drag_value import style_numeric_spin_box
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.assets.icon_manager import icon_cut
-from src.features.color.ui.panel_chrome import create_panel_layout, style_header_button, style_reset_button
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    create_panel_layout, style_header_button, style_reset_button,
+)
 
 
 # =============================================================================
@@ -195,6 +199,7 @@ class CropPanel(QWidget):
     def _setup_aspect_ratio_section(self, layout) -> None:
         """Setup aspect ratio selection section using QGroupBox."""
         group = QGroupBox(I18N.tr("crop.aspect_ratio", "宽高比"))
+        group.setStyleSheet(f"QGroupBox {{ {SECTION_TITLE_STYLE} }}")
         group_layout = QVBoxLayout()
         group_layout.setContentsMargins(4, 10, 4, 4)
         group_layout.setSpacing(2)
@@ -215,22 +220,20 @@ class CropPanel(QWidget):
 
         # Width input
         width_label = QLabel(I18N.tr("crop.width", "宽:"))
-        width_label.setStyleSheet("color: #888; font-size: 10px;")
+        width_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         self.width_spin = QSpinBox()
         self.width_spin.setRange(1, 9999)
         self.width_spin.setValue(1920)
-        self.width_spin.setMinimumHeight(18)
-        # 使用全局 QSS 样式
+        style_numeric_spin_box(self.width_spin)
         self.width_spin.valueChanged.connect(self._on_custom_size_changed)
 
         # Height input
         height_label = QLabel(I18N.tr("crop.height", "高:"))
-        height_label.setStyleSheet("color: #888; font-size: 10px;")
+        height_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         self.height_spin = QSpinBox()
         self.height_spin.setRange(1, 9999)
         self.height_spin.setValue(1080)
-        self.height_spin.setMinimumHeight(18)
-        # 使用全局 QSS 样式
+        style_numeric_spin_box(self.height_spin)
         self.height_spin.valueChanged.connect(self._on_custom_size_changed)
         
         custom_layout.addWidget(width_label)
@@ -264,6 +267,7 @@ class CropPanel(QWidget):
         - Middle-click to reset to 0.0 (via DragValue)
         """
         group = QGroupBox(I18N.tr("crop.rotation", "ROTATION"))
+        group.setStyleSheet(f"QGroupBox {{ {SECTION_TITLE_STYLE} }}")
         group_layout = QVBoxLayout()
         group_layout.setContentsMargins(4, 10, 4, 4)
         group_layout.setSpacing(2)
@@ -272,7 +276,7 @@ class CropPanel(QWidget):
         rot_row_layout = QHBoxLayout()
         rot_row_layout.setSpacing(4)
         
-        self.rot_row = ParamSliderRow(
+        self.rot_row = ColorParameterRow(
             "", -45.0, 45.0, 0.0,
             step=0.1, decimals=1, suffix="°",
             label_width=0, slider_auto_hide=False)

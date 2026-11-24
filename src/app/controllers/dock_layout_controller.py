@@ -13,6 +13,9 @@ from PyQt6.QtWidgets import (QDockWidget, QHBoxLayout, QInputDialog, QLabel,
                              QMenu, QMessageBox, QSizePolicy, QTabWidget,
                              QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget, QApplication)
 
+from src.features.color.ui.panel_chrome import (
+    COLOR_TOOL_DOCK_DEFAULT_HEIGHT, COLOR_TOOL_DOCK_MAX_HEIGHT, ColorToolDockWidget,
+)
 from src.shared.i18n.i18n import I18N
 from src.shared.layout.store import LayoutStore
 from src.shared.layout.profile import LayoutProfile
@@ -55,17 +58,8 @@ _EDIT_TIMELINE_DOCK_MAX_HEIGHT = 480
 _EDIT_TIMELINE_DOCK_OPERABLE_MIN_HEIGHT = 240
 _EDIT_TIMELINE_DOCK_MIGRATION_DELAY_MS = 50
 _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY = "color_grading_dock_layout_version"
-_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION = 2
-_COLOR_TOOLS_DOCK_HEIGHT_RATIO = 0.32
-_COLOR_TOOLS_DOCK_HEIGHT_MIN_RATIO = 0.27
-_COLOR_TOOLS_DOCK_HEIGHT_MAX_RATIO = 0.37
-_COLOR_GRADING_DOCK_MIN_HEIGHT = 160
-# The Color Wheel canvas stops growing at radius 100px. At a 1260px panel
-# width it reaches that radius with a ~403px GradingPanel height; the dock
-# frame/title spacer needs a few more pixels. Extra dock height is blank UI.
-_COLOR_TOOL_DOCK_MAX_HEIGHT = 410
-_COLOR_GRADING_DOCK_MAX_HEIGHT = _COLOR_TOOL_DOCK_MAX_HEIGHT
-_UNRESTRICTED_DOCK_HEIGHT = 16777215  # Qt's QWIDGETSIZE_MAX
+_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION = 3
+COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS = 450
 _COLOR_TOOL_DOCK_NAMES = frozenset({
     "dockDenoise", "dockDeblur", "dockGrading", "dockCurves",
     "dockColorMapping", "dockMixer", "dockBlurSharpen", "dockGrain", "dockMasks",
@@ -223,18 +217,6 @@ class DockLayoutMixin:
         if (x, y) != (geom.x(), geom.y()):
             window.move(x, y)
 
-    def _sync_color_tool_dock_max_height(
-        self, dock: QDockWidget, *, is_floating: bool | None = None
-    ) -> None:
-        """Cap docked Color tools where the wheel reaches its maximum radius."""
-        floating = dock.isFloating() if is_floating is None else is_floating
-        is_bottom = self.dockWidgetArea(dock) == Qt.DockWidgetArea.BottomDockWidgetArea
-        dock.setMaximumHeight(
-            _COLOR_TOOL_DOCK_MAX_HEIGHT
-            if is_bottom and not floating
-            else _UNRESTRICTED_DOCK_HEIGHT
-        )
-
     # ------------------------------------------------------------------
     # setup_docks
     # ------------------------------------------------------------------
@@ -253,11 +235,10 @@ class DockLayoutMixin:
 
         # Helper to create docks
         def create_custom_dock(title, widget, obj_name):
-            dock = PanelDockWidget(title, self)
+            dock_type = ColorToolDockWidget if obj_name in _COLOR_TOOL_DOCK_NAMES else PanelDockWidget
+            dock = dock_type(title, self)
             dock.setObjectName(obj_name)
             dock.setWidget(widget)
-            if obj_name in _COLOR_TOOL_DOCK_NAMES:
-                dock.setMaximumHeight(_COLOR_TOOL_DOCK_MAX_HEIGHT)
             # Ensure dock has all features enabled for proper floating/docking
             dock.setFeatures(
                 QDockWidget.DockWidgetFeature.DockWidgetClosable |
@@ -279,17 +260,6 @@ class DockLayoutMixin:
 
             # More robust triggers for titlebar updates
             dock.dockLocationChanged.connect(self.update_all_dock_titlebars)
-            if obj_name in _COLOR_TOOL_DOCK_NAMES:
-                dock.dockLocationChanged.connect(
-                    lambda _area, d=dock: self._sync_color_tool_dock_max_height(d)
-                )
-            if obj_name in _COLOR_TOOL_DOCK_NAMES:
-                # Remove the docked cap before restoring a saved floating size.
-                dock.topLevelChanged.connect(
-                    lambda is_floating, d=dock: self._sync_color_tool_dock_max_height(
-                        d, is_floating=is_floating
-                    )
-                )
             # When floating changes, immediately handle titlebar for floating docks
             dock.topLevelChanged.connect(lambda is_floating, d=dock: self._on_dock_floating_changed(is_floating, d))
             dock.visibilityChanged.connect(self.update_all_dock_titlebars)
@@ -2820,72 +2790,56 @@ class DockLayoutMixin:
         )
 
     def _migrate_color_grading_dock_height(self) -> None:
-        """Balance the shared Color tools dock height once for this layout.
-
-        Color Wheel, Qualifier, and Scopes share the same bottom dock row. A
-        layout restored from a different display can leave that row too short
-        or too tall, so migrate outlier ratios to a screen-relative height.
-        The ratio applies once; users can then resize the row themselves.
-        """
+        """Apply the default bottom row height once, including its dock tabs."""
+        if self.current_page != "Color":
+            return
         migration_version = self.config_manager.get(
             _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY
         )
         if (
-            isinstance(migration_version, int)
+            not getattr(self, "_color_tool_height_reset_pending", False)
+            and isinstance(migration_version, int)
             and migration_version >= _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION
         ):
             return
 
-        dock = self.dock_grading
+        # The factory layout may have just hidden or regrouped sibling tabs.
+        for candidate in self.all_docks:
+            if isinstance(candidate, ColorToolDockWidget):
+                candidate.sync_height_limit()
+
+        dock = next((
+            candidate for candidate in self.all_docks
+            if candidate.objectName() in _COLOR_TOOL_DOCK_NAMES
+            and not candidate.isHidden() and not candidate.isFloating()
+            and self.dockWidgetArea(candidate) == Qt.DockWidgetArea.BottomDockWidgetArea
+            and self.rect().intersects(candidate.geometry())
+        ), None)
         viewport_dock = self.dock_viewport
         if (
-            self.current_page != "Color"
-            or dock is None
+            dock is None
             or viewport_dock is None
-            or dock.isFloating()
             or viewport_dock.isFloating()
-            or self.dockWidgetArea(dock)
-            != Qt.DockWidgetArea.BottomDockWidgetArea
+            or viewport_dock.isHidden()
             or self.dockWidgetArea(viewport_dock)
             != Qt.DockWidgetArea.TopDockWidgetArea
         ):
             return
 
-        current_height = dock.height()
+        current_height = dock.height() + dock.tab_height()
         available_height = viewport_dock.height() + current_height
-        if available_height <= 0:
+        target_height = min(
+            COLOR_TOOL_DOCK_DEFAULT_HEIGHT,
+            available_height - viewport_dock.minimumHeight(),
+        )
+        if target_height <= 0:
             return
-
-        current_ratio = current_height / available_height
-        if _COLOR_TOOLS_DOCK_HEIGHT_MIN_RATIO <= current_ratio <= \
-                _COLOR_TOOLS_DOCK_HEIGHT_MAX_RATIO:
-            self.config_manager.set(
-                _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY,
-                _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION,
-                auto_save=False,
+        if current_height != target_height:
+            self.resizeDocks(
+                [viewport_dock, dock],
+                [available_height - target_height, target_height],
+                Qt.Orientation.Vertical,
             )
-            self.config_manager.save_config()
-            return
-
-        target_height = round(available_height * _COLOR_TOOLS_DOCK_HEIGHT_RATIO)
-        target_height = max(
-            _COLOR_GRADING_DOCK_MIN_HEIGHT,
-            min(_COLOR_GRADING_DOCK_MAX_HEIGHT, target_height),
-        )
-        # Keep the viewer above its existing minimum when the window is short.
-        max_tools_height = available_height - viewport_dock.minimumHeight()
-        if max_tools_height <= 0:
-            return
-        target_height = min(target_height, max_tools_height)
-        viewport_target_height = max(
-            viewport_dock.minimumHeight(),
-            available_height - target_height,
-        )
-        self.resizeDocks(
-            [viewport_dock, dock],
-            [viewport_target_height, target_height],
-            Qt.Orientation.Vertical,
-        )
 
         color_state = self.saveState()
         self.page_layouts["Color"] = color_state
@@ -2902,16 +2856,16 @@ class DockLayoutMixin:
         )
         self.config_manager.set(
             f"dock_{dock.objectName()}_docked_size",
-            f"{dock.width()}x{target_height}",
+            f"{dock.width()}x{dock.height()}",
             auto_save=False,
         )
+        self._color_tool_height_reset_pending = False
         self._save_current_layout_to_store("Color")
         self.config_manager.save_config()
         QTimer.singleShot(100, self._save_all_docked_sizes)
         logger.info(
-            "Balanced Color tools dock from %dpx to %dpx (%.0f%% to %.0f%%)",
-            current_height, target_height, current_ratio * 100.0,
-            target_height / available_height * 100.0,
+            "Applied Color tools dock height %dpx (previously %dpx)",
+            target_height, current_height,
         )
 
     def _migrate_color_remapping_dock_layout(self, force: bool = False) -> None:
@@ -3255,6 +3209,8 @@ class DockLayoutMixin:
 
                 # Detect floating state
                 is_floating = dock.isFloating()
+                if isinstance(dock, ColorToolDockWidget):
+                    dock.sync_height_limit(is_floating)
 
                 if is_floating:
                     # Floating dock: 必须用一个有真实高度的自定义标题栏，而不能
@@ -3473,7 +3429,8 @@ class DockLayoutMixin:
         self.resizeDocks([resources[0], self.dock_viewport, self.dock_info], [320, 900, 320], horizontal)
         self.resizeDocks([self.dock_info, self.dock_layers], [250, 420], vertical)
         self.resizeDocks([primary[0], secondary[0], analysis[0]], [500, 565, 385], horizontal)
-        self.resizeDocks([self.dock_viewport, primary[0]], [650, 360], vertical)
+        self.resizeDocks([self.dock_viewport, primary[0]],
+                         [650, COLOR_TOOL_DOCK_DEFAULT_HEIGHT], vertical)
         self._enforce_work_mode_dock_visibility()
         self._perform_update_all_titlebars()
 
@@ -3901,6 +3858,8 @@ class DockLayoutMixin:
             # 恢复所有页面的布局状态
             if panel_states:
                 self._apply_all_page_layouts(panel_states)
+                if "Color" in panel_states:
+                    self._color_tool_height_reset_pending = True
             keyframes = getattr(self, "dock_color_keyframes", None)
             if keyframes is not None:
                 keyframes.hide()
@@ -3914,6 +3873,8 @@ class DockLayoutMixin:
                 self._migrate_composite_scopes_dock_visibility()
             if self.current_page == "Color":
                 self._migrate_color_remapping_dock_layout(force=True)
+                self._color_tool_height_reset_pending = True
+                QTimer.singleShot(50, self._migrate_color_grading_dock_height)
             self.status_bar.showMessage(I18N.tr("status.layout_reset", "Layout reset to default."), 3000)
             return
 
@@ -3937,6 +3898,8 @@ class DockLayoutMixin:
             self._migrate_composite_scopes_dock_visibility()
         if self.current_page == "Color":
             self._migrate_color_remapping_dock_layout(force=True)
+            self._color_tool_height_reset_pending = True
+            QTimer.singleShot(50, self._migrate_color_grading_dock_height)
         self.status_bar.showMessage(I18N.tr("status.layout_reset_hardcoded", "Layout reset to hardcoded default."), 3000)
 
     def _reset_workspace_panel_controls(self) -> None:
@@ -4068,8 +4031,9 @@ class DockLayoutMixin:
             )
         elif self.current_page == "Color":
             QTimer.singleShot(0, self._migrate_color_remapping_dock_layout)
+            # Measure the available height after the startup screen clamps.
             QTimer.singleShot(
-                _EDIT_TIMELINE_DOCK_MIGRATION_DELAY_MS,
+                COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS,
                 self._migrate_color_grading_dock_height,
             )
         elif self.current_page == "Composite":
@@ -4600,6 +4564,8 @@ class DockLayoutMixin:
                                 dock_areas[dock_area].append((dock, width))
                         elif dock_area in (Qt.DockWidgetArea.BottomDockWidgetArea, Qt.DockWidgetArea.TopDockWidgetArea):
                             if height > 0:
+                                if isinstance(dock, ColorToolDockWidget):
+                                    height = min(COLOR_TOOL_DOCK_MAX_HEIGHT, height + dock.tab_height())
                                 dock_areas[dock_area].append((dock, height))
                     except (TypeError, ValueError):
                         logger.warning(

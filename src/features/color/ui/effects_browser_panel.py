@@ -23,6 +23,8 @@ from PyQt6.QtWidgets import (
 from src.features.color.ui.gallery_icons import gallery_icon
 from src.features.color.ui.node_resource_mime import resource_mime_data
 from src.features.color.ui.panel_chrome import (
+    SECTION_TITLE_STYLE,
+    ColorParameterRow, PARAMETER_LABEL_STYLE,
     HEADER_HEIGHT as PANEL_HEADER_HEIGHT,
     HEADER_ICON_ACTIVE, HEADER_ICON_HOVER, HEADER_ICON_IDLE,
     header_icon, style_header_button, style_reset_button,
@@ -31,7 +33,6 @@ from src.shared.assets.icon_manager import icon_grid, icon_list
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
 from src.shared.ui.widgets.color_picker_control import ColorPickerControl, qcolor_to_linear_rgba
-from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
 
 
@@ -559,9 +560,7 @@ class ColorEffectsBrowser(QWidget):
         title = QLabel(str(instance.get('name', instance.get('resource_id', 'Effect'))))
         title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         title.setToolTip(title.text())
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(title, 1)
         for text, tooltip, operation in (
             ('', _tr('reset_effect', 'Reset effect'), 'reset_instance'),
@@ -611,7 +610,7 @@ class ColorEffectsBrowser(QWidget):
             high = max(low, _number(metadata.get('max'), 1.0))
             current = min(high, max(low, _number(value, low)))
             integer = kind in ('int', 'integer')
-            row = ParamSliderRow(label, low, high, current, step=1.0 if integer else max(0.01, (high-low)/1000),
+            row = ColorParameterRow(label, low, high, current, step=1.0 if integer else max(0.01, (high-low)/1000),
                                  decimals=0 if integer else 3, label_width=80, value_fixed_width=54)
             # R04：手势相位完整化——start/change/commit（ParamSliderRow 的
             # interactionStarted 即拖动起点；取消拾色/未确认颜色不发射）。
@@ -627,6 +626,7 @@ class ColorEffectsBrowser(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
         caption = QLabel(label)
+        caption.setStyleSheet(PARAMETER_LABEL_STYLE)
         if kind in ('checkbox', 'bool', 'boolean'):
             control = QCheckBox()
             control.setChecked(bool(value))

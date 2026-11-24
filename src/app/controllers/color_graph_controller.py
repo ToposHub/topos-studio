@@ -582,12 +582,17 @@ class GraphProjectBridge:
         project = self._get_project()
         stack_id = self._stack_id()
         stack = project.color_stacks.get(stack_id) if stack_id else None
-        graph = stack.color_graph if stack else None
-        if graph is None:
+        if stack is None or stack.graph_locked:
             return False
+        graph = stack.color_graph
         pending = self._buffer._last_graph
+        if pending is None and graph is None:
+            # begin_transaction captured the migration view of a legacy stack.
+            pending = self._buffer._first_graph
         if pending is not None:
             graph = ColorGraphData.from_dict(pending)
+        if graph is None:
+            return False
         # compound 路径由 apply_intent 统一下行/校验（node_not_found 拒绝）。
         result = cc._graph_service().apply_intent(
             graph, operation, {**arguments, "_compound_path": compound_path})
@@ -1584,6 +1589,7 @@ class ColorGraphAppHost:
     def _bind_and_hydrate(self, stack_id: str, scope: str,
                           scope_owner_id) -> None:
         """绑定栈并水合投影；无图栈用迁移视图（首次命令自动建图）。"""
+        self._clear_effects_preview()
         self._bridge.bind_stack(stack_id)
         self._bound_stack_id = stack_id
         graph = self._stack_projection(stack_id)
@@ -1937,7 +1943,7 @@ class ColorGraphAppHost:
         基底 + params 域覆盖 + 曲线/LUT 投影）。面板回填（qualifier/
         窗口/曲线…）一律读它，而不是裸 legacy_payload——否则图命令写
         入的 params 域（qualifier overlay 等）在面板上不可见。"""
-        graph = self._stack_graph(self._bound_stack_id)
+        graph = self.bound_graph()
         if graph is None:
             return None
         from src.features.color.core.color_graph_param_source import (
@@ -1984,7 +1990,7 @@ class ColorGraphAppHost:
 
     def align_engine_active_layer(self, node_id: str) -> bool:
         """图节点 → 引擎活动层对齐（迁移层 ID 或新节点稳定 ID）。"""
-        graph = self._stack_graph(self._bound_stack_id)
+        graph = self.bound_graph()
         engine = self._engine_provider() if self._engine_provider else None
         if graph is None or engine is None:
             return False
@@ -2091,7 +2097,16 @@ class ColorGraphAppHost:
             node_id, param_name, value, transaction_id)
 
     def end_grade_gesture(self) -> bool:
-        return self._adapter.end_gesture()
+        committed = self._adapter.end_gesture()
+        self._clear_effects_preview()
+        return committed
+
+    def _clear_effects_preview(self) -> None:
+        if getattr(self, "_effects_preview_active", False):
+            self._effects_preview_active = False
+            engine = self._engine_provider() if self._engine_provider else None
+            if engine is not None:
+                engine.set_tool_preview_graph(None)
 
     # ── N03：非 primary 工具域（Qualifier / Window）提交 ──
 
@@ -2103,10 +2118,28 @@ class ColorGraphAppHost:
     def submit_curve_change(self, node_id: str, domains: Mapping[str, Any],
                             transaction_id: str) -> bool:
         """Commit the same curve-domain payload used by grade transfer."""
+        return self._submit_tool_domains(node_id, domains, transaction_id)
+
+    def _submit_tool_domains(self, node_id: str, domains: Mapping[str, Any],
+                             transaction_id: str) -> bool:
         return self._bridge.submit_buffered(
             "paste_selected_domains",
             {"node_ids": (node_id,), "payload": domains, "domains": tuple(domains)},
             transaction_id, compound_path=self._tool_compound_path())
+
+    def submit_blur_sharpen_change(self, node_id: str, params: Mapping[str, Any],
+                                   transaction_id: str) -> bool:
+        """Buffer the built-in spatial effect settings and preview the draft graph."""
+        if not self._submit_tool_domains(node_id, {"blur_sharpen": params}, transaction_id):
+            return False
+        engine = self._engine_provider() if self._engine_provider else None
+        pending = self._bridge._buffer._last_graph
+        if engine is not None and pending is not None:
+            from src.shared.project.color_graph import ColorGraphData
+
+            engine.set_tool_preview_graph(ColorGraphData.from_dict(pending))
+            self._effects_preview_active = True
+        return True
 
     def submit_warper_change(self, node_id: str, payload: Mapping[str, Any],
                              transaction_id: str) -> bool:

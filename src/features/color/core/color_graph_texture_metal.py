@@ -114,7 +114,7 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
     与 ``production_layer_domain_errors`` 同一判据风格，但允许纹理域已
     接线的效果：HSL 曲线 / LUT3D / mixer / warper（legacy HSV 与校准 709）/
     soft_clip / curves_soft_clip / 非 Normal blend / qualifier（无后处理）
-    / 窗口 mask_shapes。仍拒绝：插件、fx/blur（邻域）、mid_detail /
+    / 窗口 mask_shapes / 雾化。仍拒绝：插件、传统 fx/blur、mid_detail /
     sharpness（邻域）、qualifier 后处理（clean/blur/denoise）、warper 多
     空间变体 HSL/HSP、未预构建的 curves_data。
     """
@@ -145,7 +145,7 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
     if layer.get("_plugin_bindings"):
         errors.append("执行器级插件绑定仅 GL 路径支持")
     fx = layer.get("effects_params")
-    if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx):
+    if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx, allow_mist=True):
         errors.append("fx/blur 组非中性（邻域效果未接线）")
     if layer.get("curves_data") and layer.get("curves_lut") is None:
         errors.append("curves_data 未预构建 curves_lut")
@@ -689,7 +689,7 @@ class ColorGraphMetalTextureExecutor:
     def _corrector_pass(self, render_pass: RenderPass, layer: Mapping,
                         input_tex: Any, matte: Any | None,
                         width: int, height: int) -> Any:
-        """tg_corrector：grading → curves → hsl → sc → csc → mixer →
+        """tg_corrector：mist → grading → curves → hsl → sc → csc → mixer →
         warper → lut3d → blend/matte epilogue（GL composition main 同序）。"""
         pool = self._pool
         from src.features.color.core.composition_uniforms import (

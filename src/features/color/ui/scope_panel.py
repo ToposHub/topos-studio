@@ -21,7 +21,7 @@ import logging
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.style_sheet import C
 from src.features.color.ui.panel_chrome import (
-    HEADER_CONTROL_HEIGHT, HEADER_HEIGHT, HEADER_ICON_SIZE,
+    HEADER_CONTROL_HEIGHT, HEADER_HEIGHT, HEADER_ICON_SIZE, SECTION_TITLE_STYLE,
     create_panel_header, header_button_color, style_header_button,
 )
 
@@ -332,7 +332,7 @@ class ScopePanel(QWidget):
             controls.setSpacing(0)
             label = QLabel(_scope_name(scope_mode))
             label.setFont(_scope_header_font())
-            label.setStyleSheet("color: #e4e4e6; background: transparent;")
+            label.setStyleSheet(SECTION_TITLE_STYLE)
             controls.addStretch(1)
             controls.addWidget(label)
             controls.addSpacing(12)
@@ -720,7 +720,7 @@ class ScopePanel(QWidget):
 
         self.scope_title = QLabel(I18N.tr("workspace.scopes", "Scopes"))
         self.scope_title.setObjectName("scopeTitle")
-        self.scope_title.setStyleSheet("color: #e4e4e6; background: transparent; border: none; padding: 0;")
+        self.scope_title.setStyleSheet(SECTION_TITLE_STYLE)
         self.scope_title.setFont(_scope_header_font())
         selector_layout.addWidget(self.scope_title)
         selector_layout.addStretch(1)

@@ -1073,7 +1073,12 @@
     "bokeh": "Bokeh",
     "angle": "Angle",
     "reset_sharpen_tooltip": "Reset All Sharpen Parameters",
-    "reset_blur_tooltip": "Reset All Blur Parameters"
+    "reset_blur_tooltip": "Reset All Blur Parameters",
+    "mist": "Mist",
+    "mist_mix": "Mixer",
+    "mist_mix_tooltip": "Lower Mixer values increase diffusion.",
+    "reset_mist_tooltip": "Reset Mist Parameters",
+    "mist_clip_scope": "Mist is available on clip correctors."
   },
   "warper": {
     "rec709_calibration": "Rec.709 Gamma 2.4 Hue–Saturation calibration",
@@ -1193,6 +1198,7 @@
     "hue": "Hue",
     "saturation": "Saturation",
     "luminance": "Luminance",
+    "reset_mode": "Reset {mode}",
     "red": "Red",
     "orange": "Orange",
     "yellow": "Yellow",
@@ -1921,10 +1927,11 @@
   "film_grain": {
     "enable": "ENABLE EFFECT",
     "basic_settings": "BASIC SETTINGS",
+    "grain_parameters": "Grain Parameters",
     "intensity": "Intensity",
     "size": "Grain Size",
     "monochrome": "Monochrome Grain",
-    "luminance_response": "LUMINANCE RESPONSE",
+    "luminance_response": "Luminance Response",
     "shadows": "Shadows",
     "midtones": "Midtones",
     "highlights": "Highlights",
@@ -3446,6 +3453,7 @@
     "op_lut": "3D LUT",
     "op_warper": "Color Warper",
     "op_effects": "Sharpen/Texture/Halo effects",
+    "op_mist": "Mist",
     "op_qualifier": "Qualifier",
     "op_windows": "Power Window / Mask",
     "op_tracking": "Window Tracking",

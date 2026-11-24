@@ -30,8 +30,6 @@ QScrollArea { border: none; background: #222226; }
 QListWidget { background: #191A1F; border: 1px solid #34363E; border-radius: 3px;
     color: #BFC0CC; font-size: 11px; }
 QListWidget::item:selected { background: #433327; }
-QSlider::groove:horizontal { height: 3px; background: #16171B; border-radius: 1px; }
-QSlider::handle:horizontal { width: 8px; margin: -3px 0; background: #9497A0; border-radius: 4px; }
 """ % (C.BG_PANEL, EDIT_COLORS["text"], EDIT_COLORS["bg_toolbar"],
        EDIT_COLORS["border_subtle"], EDIT_COLORS["text"]) + COMPACT_HORIZONTAL_SCROLLBAR_STYLE
 

@@ -1113,7 +1113,12 @@
     "bokeh": "散景",
     "angle": "角度",
     "reset_sharpen_tooltip": "重置全部锐化参数",
-    "reset_blur_tooltip": "重置全部模糊参数"
+    "reset_blur_tooltip": "重置全部模糊参数",
+    "mist": "雾化",
+    "mist_mix": "Mixer",
+    "mist_mix_tooltip": "Mixer 越低，雾化越强。",
+    "reset_mist_tooltip": "重置雾化参数",
+    "mist_clip_scope": "雾化可用于片段调色节点。"
   },
   "warper": {
     "rec709_calibration": "Rec.709 Gamma 2.4 色相与饱和度校准",
@@ -1233,6 +1238,7 @@
     "hue": "色相",
     "saturation": "饱和度",
     "luminance": "亮度",
+    "reset_mode": "重置{mode}",
     "red": "红色",
     "orange": "橙色",
     "yellow": "黄色",
@@ -1939,6 +1945,7 @@
   "film_grain": {
     "enable": "启用效果",
     "basic_settings": "基本设置",
+    "grain_parameters": "颗粒参数",
     "intensity": "强度",
     "size": "颗粒大小",
     "monochrome": "单色颗粒",
@@ -3509,6 +3516,7 @@
     "op_lut": "3D LUT",
     "op_warper": "色彩扭曲器 (Warper)",
     "op_effects": "锐化/纹理/光晕效果",
+    "op_mist": "雾化",
     "op_qualifier": "限定器 (Qualifier)",
     "op_windows": "Power Window / 蒙版",
     "op_tracking": "窗口跟踪",

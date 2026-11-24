@@ -2,10 +2,16 @@ from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
                              QStackedWidget, QLabel)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
-from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
+from src.features.color.core.mist import (
+    MIST_DEFAULT_MIX, MIST_DEFAULT_RADIUS, MIST_MAX_MIX, mist_params,
+)
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    create_panel_divider, create_panel_layout, style_reset_button,
+)
 from src.shared.ui.style_sheet import C
 
 
@@ -44,6 +50,7 @@ class BlurSharpenPanel(QWidget):
         self._param_timer.timeout.connect(self._emit_pending_params)
         self._pending_params = None
         self._syncing_ui = False
+        self._mist_available = True
 
         self.init_ui()
 
@@ -68,14 +75,14 @@ class BlurSharpenPanel(QWidget):
         header_layout.addWidget(self.enable_cb)
 
         self._title_label = QLabel(I18N.tr("blur_sharpen.sharpen", "锐化"))
-        self._title_label.setStyleSheet("color: #888; font-weight: bold; font-size: 10px; letter-spacing: 1px;")
+        self._title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header_layout.addWidget(self._title_label)
         
         header_layout.addStretch()
         
         # Mode Selection
         mode_label = QLabel(I18N.tr("blur_sharpen.mode", "模式:"))
-        mode_label.setStyleSheet("color: #666; font-size: 9px;")
+        mode_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         self.mode_combo = ChevronComboBox()
         self.mode_combo.addItem(I18N.tr("blur_sharpen.basic", "基础"))
         self.mode_combo.addItem(I18N.tr("blur_sharpen.advanced", "高级"))
@@ -97,7 +104,7 @@ class BlurSharpenPanel(QWidget):
         # Container for all parameter controls
         self.container = QWidget()
         container_layout = QVBoxLayout()
-        container_layout.setContentsMargins(4, 0, 4, 0)
+        container_layout.setContentsMargins(4, 12, 4, 0)
         container_layout.setSpacing(4)
         self.container.setLayout(container_layout)
         main_layout.addWidget(self.container)
@@ -165,14 +172,14 @@ class BlurSharpenPanel(QWidget):
         blur_header_layout.addWidget(self.blur_enable_cb)
 
         self._blur_title_label = QLabel(I18N.tr("blur_sharpen.blur", "模糊"))
-        self._blur_title_label.setStyleSheet("color: #888; font-weight: bold; font-size: 10px; letter-spacing: 1px;")
+        self._blur_title_label.setStyleSheet(SECTION_TITLE_STYLE)
         blur_header_layout.addWidget(self._blur_title_label)
         
         blur_header_layout.addStretch()
         
         # Blur Mode Selection
         blur_mode_label = QLabel(I18N.tr("blur_sharpen.type", "类型:"))
-        blur_mode_label.setStyleSheet("color: #666; font-size: 9px;")
+        blur_mode_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         self.blur_mode_combo = ChevronComboBox()
         self.blur_mode_combo.addItem(I18N.tr("blur_sharpen.texture_soften", "质感模糊"))  # 质感模糊
         self.blur_mode_combo.addItem(I18N.tr("blur_sharpen.optical_blur", "光学虚化"))    # 光学虚化
@@ -255,23 +262,59 @@ class BlurSharpenPanel(QWidget):
         
         blur_container_layout.addWidget(self.blur_stack)
         blur_container_layout.addStretch()
-        
+
+        main_layout.addWidget(create_panel_divider(Qt.Orientation.Horizontal))
+        mist_header = QHBoxLayout()
+        mist_header.setContentsMargins(4, 6, 4, 4)
+        self.mist_enable_cb = ToggleSwitch(checked=False)
+        self.mist_enable_cb.toggled.connect(self.on_mist_enable_toggled)
+        mist_header.addWidget(self.mist_enable_cb)
+        mist_title = QLabel(I18N.tr("blur_sharpen.mist", "雾化"))
+        mist_title.setStyleSheet(SECTION_TITLE_STYLE)
+        mist_header.addWidget(mist_title)
+        mist_header.addStretch()
+        self.mist_reset_btn = QPushButton()
+        style_reset_button(self.mist_reset_btn)
+        self.mist_reset_btn.setToolTip(I18N.tr(
+            "blur_sharpen.reset_mist_tooltip", "Reset Mist Parameters"))
+        self.mist_reset_btn.clicked.connect(self.reset_mist)
+        mist_header.addWidget(self.mist_reset_btn)
+        main_layout.addLayout(mist_header)
+
+        self.mist_container = QWidget()
+        mist_layout = QVBoxLayout(self.mist_container)
+        mist_layout.setContentsMargins(4, 0, 4, 0)
+        mist_layout.setSpacing(4)
+        self.mist_radius_slider = self._create_row(
+            I18N.tr("blur_sharpen.radius", "半径"), 0, 1, MIST_DEFAULT_RADIUS,
+            step=0.01, decimals=2)
+        self.mist_mix_slider = self._create_row(
+            I18N.tr("blur_sharpen.mist_mix", "Mixer"), 0, MIST_MAX_MIX, MIST_DEFAULT_MIX)
+        self.mist_radius_slider.slider.enable_velocity_drag = False
+        self.mist_mix_slider.slider.enable_velocity_drag = False
+        self.mist_mix_slider.setToolTip(I18N.tr(
+            "blur_sharpen.mist_mix_tooltip", "Lower Mixer values increase diffusion."))
+        mist_layout.addWidget(self.mist_radius_slider)
+        mist_layout.addWidget(self.mist_mix_slider)
+        self.mist_container.setEnabled(False)
+        main_layout.addWidget(self.mist_container)
+
         main_layout.addStretch()
 
         # Initial State
-        self.on_enable_toggled(self.enable_cb.isChecked())
-        self.on_blur_enable_toggled(self.blur_enable_cb.isChecked())
+        self.container.setEnabled(False)
+        self.blur_container.setEnabled(False)
 
     def _create_row(self, label, min_val, max_val, default_val, step=1.0,
                     decimals=0, suffix="", label_width=65):
         """Create a ParamSliderRow with panel interaction wiring."""
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, min_val, max_val, default_val,
             step=step, decimals=decimals, suffix=suffix,
             label_width=label_width)
         row.interactionStarted.connect(self.interaction_started.emit)
-        row.interactionEnded.connect(self.interaction_ended.emit)
         row.interactionEnded.connect(self._flush_pending_params)
+        row.interactionEnded.connect(self.interaction_ended.emit)
         row.valueChanged.connect(lambda _: self.on_param_changed())
         return row
 
@@ -314,6 +357,22 @@ class BlurSharpenPanel(QWidget):
         """Handle blur enable checkbox toggle."""
         self.blur_container.setEnabled(enabled)
         self.on_param_changed()
+
+    def on_mist_enable_toggled(self, enabled: bool) -> None:
+        self._flush_pending_params()
+        self.interaction_started.emit()
+        self.mist_container.setEnabled(self._mist_available and enabled)
+        self.effects_changed.emit(self.get_params_dict())
+        self.interaction_ended.emit()
+
+    def set_mist_available(self, available: bool) -> None:
+        """Limit Mist to grading scopes with an end-to-end spatial render path."""
+        self._mist_available = available
+        self.mist_enable_cb.setEnabled(available)
+        self.mist_reset_btn.setEnabled(available)
+        self.mist_container.setEnabled(available and self.mist_enable_cb.isChecked())
+        self.mist_enable_cb.setToolTip("" if available else I18N.tr(
+            "blur_sharpen.mist_clip_scope", "Mist is available on clip correctors."))
 
     def on_blur_mode_changed(self, index) -> None:
         """Handle blur mode selection change."""
@@ -429,12 +488,16 @@ class BlurSharpenPanel(QWidget):
         }
 
         # Merge and return
-        return {**sharpen_params, **blur_params}
+        return {
+            **sharpen_params, **blur_params,
+            'mist_enabled': self.mist_enable_cb.isChecked(),
+            'mist_radius': float(self.mist_radius_slider.value()),
+            'mist_mix': float(self.mist_mix_slider.value()),
+        }
 
     def set_params_dict(self, params, emit=False) -> None:
         """Set parameters from dictionary."""
-        if not params:
-            return
+        params = params or {}
         
         self._syncing_ui = True
         self._param_timer.stop()
@@ -448,10 +511,12 @@ class BlurSharpenPanel(QWidget):
             self.blur_radius_slider, self.blur_bokeh_slider,
             self.blur_angle_slider, self.blur_motion_intensity_slider,
             self.blur_fast_intensity_slider, self.blur_fast_radius_slider,
+            self.mist_radius_slider, self.mist_mix_slider,
         ]
         all_widgets = [
             self.enable_cb, self.mode_combo,
             self.blur_enable_cb, self.blur_mode_combo,
+            self.mist_enable_cb,
         ] + all_rows
         for w in all_widgets:
             w.blockSignals(True)
@@ -491,6 +556,11 @@ class BlurSharpenPanel(QWidget):
 
         self.blur_fast_intensity_slider.setValue(float(params.get('fast_blur_intensity', old_intensity if blur_mode == 3 else 0)))
         self.blur_fast_radius_slider.setValue(float(params.get('fast_blur_radius', old_radius if blur_mode == 3 else 0)))
+
+        mist_enabled, mist_radius, mist_mix = mist_params(params)
+        self.mist_enable_cb.setChecked(mist_enabled)
+        self.mist_radius_slider.setValue(mist_radius)
+        self.mist_mix_slider.setValue(mist_mix)
         
         for w in all_widgets:
             w.blockSignals(False)
@@ -501,6 +571,7 @@ class BlurSharpenPanel(QWidget):
 
         self.container.setEnabled(self.enable_cb.isChecked())
         self.blur_container.setEnabled(self.blur_enable_cb.isChecked())
+        self.mist_container.setEnabled(self._mist_available and mist_enabled)
         
         self._syncing_ui = False
         
@@ -570,6 +641,17 @@ class BlurSharpenPanel(QWidget):
         self._pending_params = None
         # 与 reset_all 对齐（AUD-25106 附注）：两路 reset 的状态通知
         # 语义一致，均通知 reset_clicked。
+        self.reset_clicked.emit()
+
+    def reset_mist(self) -> None:
+        self._flush_pending_params()
+        self.interaction_started.emit()
+        self._syncing_ui = True
+        self.mist_radius_slider.reset()
+        self.mist_mix_slider.reset()
+        self._syncing_ui = False
+        self.effects_changed.emit(self.get_params_dict())
+        self.interaction_ended.emit()
         self.reset_clicked.emit()
 
     def resizeEvent(self, event) -> None:

@@ -118,6 +118,8 @@ _BODY_BASELINE_MINIMAL = [
     "uniform float u_log_low_range;",
     "uniform float u_log_high_range;",
     "uniform float u_lum_mix;",
+    "uniform float u_mist_spread;",
+    "uniform float u_mist_amount;",
 ]
 
 
@@ -138,7 +140,7 @@ def test_optional_and_grain_declarations():
     body = m.declarations("body")
     # 可选 sampler 段在基础段末尾（u_cs_* 四参数 + 扩展参数段）之后、
     # grain 段在其后（插件除外）
-    assert body[body.index("uniform float u_lum_mix;") + 1:] == [
+    assert body[len(_BODY_BASELINE_MINIMAL):] == [
         "uniform sampler2D u_curves_tex;",
         "uniform sampler2D u_hsl_curve_tex;",
         "uniform sampler2D u_warper_tex;",

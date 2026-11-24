@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QDoubleSpinBox, QMenu)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from src.shared.ui.widgets.clickable_slider import ClickableSlider
+from src.shared.ui.widgets.drag_value import style_numeric_spin_box
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from typing import List, Optional
 from src.shared.i18n.i18n import I18N
@@ -95,7 +96,7 @@ class LutGallery(QWidget):
         self.intensity_spin.setSingleStep(0.01)
         self.intensity_spin.setValue(1.0)
         self.intensity_spin.setFixedWidth(55)
-        self.intensity_spin.setMinimumHeight(18)
+        style_numeric_spin_box(self.intensity_spin)
         # 使用全局 SpinBox 样式（由 DARK_THEME 统一管理）
         self.intensity_spin.valueChanged.connect(self._on_intensity_spin_changed)
         controls_layout.addWidget(self.intensity_spin)

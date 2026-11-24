@@ -245,6 +245,10 @@ def generate_analysis(
             "src/features/color/ui/effect_icons",
         ),
         (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "mixer_icons"),
+            "src/features/color/ui/mixer_icons",
+        ),
+        (
             os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "node_badges"),
             "src/features/color/ui/node_badges",
         ),

@@ -7,6 +7,7 @@ from src.shared.i18n.i18n import I18N
 from PyQt6.QtCore import pyqtSignal, Qt, QSize, QTimer
 from src.features.color.core.layer import MaskGroup
 from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, PARAMETER_ROW_HEIGHT, SECTION_TITLE_STYLE,
     color_panel_stylesheet, create_panel_layout, style_reset_button,
 )
 from src.shared.ui.widgets.drag_value import DragValue
@@ -220,9 +221,7 @@ class MaskPanel(QWidget):
                 border: 1px solid #333;
                 border-radius: 6px;
                 margin-top: 8px;
-                font-weight: bold;
-                font-size: 9px;
-                color: #aaa;
+                __COLOR_SECTION_TITLE__
                 padding-top: 8px;
             }
             QGroupBox::title {
@@ -244,8 +243,7 @@ class MaskPanel(QWidget):
                 border: 1px solid #555;
             }
             QLabel {
-                color: #bbbbbb;
-                font-size: 11px;
+                __COLOR_PARAMETER_NAME__
             }
             QTreeWidget {
                 background-color: __COLOR_PANEL_INSET__;
@@ -289,10 +287,7 @@ class MaskPanel(QWidget):
 
         # Header with title and reset button
         self.title_label = QLabel(I18N.tr("mask.title", "遮罩控制"))
-        self.title_label.setStyleSheet("""
-            color: #888; font-weight: bold; font-size: 10px;
-            letter-spacing: 1px;
-        """)
+        self.title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header_layout.addWidget(self.title_label)
 
         header_layout.addStretch()
@@ -599,7 +594,11 @@ class MaskPanel(QWidget):
 
         设置 Maximum 水平尺寸策略，防止数值框在宽面板中拉伸变形。
         """
-        drag = DragValue(label_text, min_v, max_v, def_v, decimals=decimals, suffix=suffix, compact=compact)
+        drag = DragValue(
+            label_text, min_v, max_v, def_v, decimals=decimals, suffix=suffix,
+            compact=compact, label_style=PARAMETER_LABEL_STYLE,
+        )
+        drag.setFixedHeight(PARAMETER_ROW_HEIGHT)
         drag.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         drag.valueChanged.connect(self.on_value_changed)
         # AUD-25500：转发 DragValue 交互边界信号，使拖拽遮罩参数时

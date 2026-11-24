@@ -58,7 +58,8 @@ from src.app.controllers import dock_layout_controller as dlc
 from src.app.controllers.dock_layout_controller import (
     DockLayoutMixin,
     FloatingDockTitleBar,
-    _COLOR_TOOL_DOCK_MAX_HEIGHT,
+    _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY,
+    _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION,
     _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_KEY,
     _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION,
     _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY,
@@ -67,6 +68,8 @@ from src.app.controllers.dock_layout_controller import (
     _EDIT_INFO_DOCK_LAYOUT_MIGRATION_VERSION,
 )
 from src.features.color.ui.color_wheel import GradingPanel
+from src.features.color.ui.panel_chrome import COLOR_TOOL_DOCK_MAX_HEIGHT, ColorToolDockWidget
+from src.shared.ui.dock_tab_style import DOCK_TAB_BAR_HEIGHT
 from src.shared.feature_flags import get_effective_layout_mode
 from src.shared.i18n.i18n import I18N
 from src.shared.layout.profile import LayoutProfile
@@ -239,7 +242,8 @@ class _DockHost(QMainWindow, DockLayoutMixin):
 
         self.all_docks: List[QDockWidget] = []
         for attr, (obj_name, area) in _ALL_DOCK_SPECS.items():
-            dock = QDockWidget(obj_name, self)
+            dock_type = ColorToolDockWidget if obj_name in dlc._COLOR_TOOL_DOCK_NAMES else QDockWidget
+            dock = dock_type(obj_name, self)
             dock.setObjectName(obj_name)
             dock.setWidget(QWidget())
             self.addDockWidget(area, dock)
@@ -342,31 +346,76 @@ def test_color_tool_height_cap_preserves_floating_resize(host: _DockHost, qapp) 
     host.dock_viewport.show()
     dock = host.dock_grading
     dock.show()
-    host._sync_color_tool_dock_max_height(dock, is_floating=False)
     qapp.processEvents()
     host.resizeDocks([dock], [700], Qt.Orientation.Vertical)
     qapp.processEvents()
-    assert dock.maximumHeight() == _COLOR_TOOL_DOCK_MAX_HEIGHT
-    assert dock.height() <= _COLOR_TOOL_DOCK_MAX_HEIGHT
+    assert dock.maximumHeight() == 380
+    assert dock.height() <= 380
 
-    host._sync_color_tool_dock_max_height(dock, is_floating=True)
-    assert dock.maximumHeight() > _COLOR_TOOL_DOCK_MAX_HEIGHT
-    host._sync_color_tool_dock_max_height(dock, is_floating=False)
-    assert dock.maximumHeight() == _COLOR_TOOL_DOCK_MAX_HEIGHT
+    dock.setFloating(True)
+    dock.resize(650, 520)
+    qapp.processEvents()
+    assert dock.height() == 520
+    host.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+    dock.setFloating(False)
+    qapp.processEvents()
+    assert host.dockWidgetArea(dock) == Qt.DockWidgetArea.RightDockWidgetArea
+    assert dock.maximumHeight() == 380
+    assert dock.height() <= 380
 
 
-def test_color_tool_height_cap_reaches_wheel_radius_limit(qapp) -> None:
+def test_color_tool_group_counts_tabs_in_default_and_maximum_height(host: _DockHost, qtbot: QtBot, qapp) -> None:
+    host.setAnimated(False)
+    host.resize(1300, 900)
+    viewport = host.dock_viewport
+    viewport.setMinimumHeight(360)
+    viewport.show()
+    grade, raw = host.dock_grading, host.dock_raw
+    grade.show()
+    raw.show()
+    host.tabifyDockWidget(grade, raw)
+    grade.raise_()
+    host._perform_update_all_titlebars()
+    qapp.processEvents()
+    qtbot.waitUntil(lambda: grade.height() + grade.tab_height() == 380)
+    tabs = next(tab for tab in host.findChildren(QTabBar) if tab.count() == 2)
+    assert tabs.height() == 24
+    assert grade.maximumHeight() + tabs.height() == 380
+    assert raw.maximumHeight() + tabs.height() == 380
+
+    host.config_manager.set(_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY, 2)
+    host._migrate_color_grading_dock_height()
+    qtbot.waitUntil(lambda: grade.height() + tabs.height() == 360)
+    assert host.config_manager.get(_COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY) == (
+        _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION)
+
+    available = viewport.height() + grade.height() + tabs.height()
+    host.resizeDocks([viewport, grade], [available - 380, 380], Qt.Orientation.Vertical)
+    qtbot.waitUntil(lambda: grade.height() + tabs.height() == 380)
+    host._migrate_color_grading_dock_height()
+    assert grade.height() + tabs.height() == 380
+
+    host._color_tool_height_reset_pending = True
+    host._migrate_color_grading_dock_height()
+    qtbot.waitUntil(lambda: grade.height() + tabs.height() == 360)
+
+    raw.hide()
+    host._perform_update_all_titlebars()
+    assert grade.maximumHeight() == 380
+
+
+def test_color_wheel_still_reaches_full_radius_with_extra_height(qapp) -> None:
     panel = GradingPanel()
-    panel.resize(1260, _COLOR_TOOL_DOCK_MAX_HEIGHT - 7)
+    panel.resize(1260, COLOR_TOOL_DOCK_MAX_HEIGHT - DOCK_TAB_BAR_HEIGHT)
     panel.show()
     qapp.processEvents()
     radius_at_cap = panel.lift_wheel._wheel_canvas._geometry()[1]
-    panel.resize(1260, _COLOR_TOOL_DOCK_MAX_HEIGHT + 100)
+    panel.resize(1260, COLOR_TOOL_DOCK_MAX_HEIGHT + 100)
     qapp.processEvents()
     radius_above_cap = panel.lift_wheel._wheel_canvas._geometry()[1]
     panel.close()
     panel.deleteLater()
-    assert radius_at_cap == radius_above_cap == 100.0
+    assert radius_at_cap < radius_above_cap == 100.0
 
 
 def test_created_docks_missing_from_all_docks_are_exactly_the_known_five() -> None:

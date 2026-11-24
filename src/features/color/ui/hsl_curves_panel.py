@@ -11,6 +11,7 @@ Provides 6 professional HSL curve editing modes:
 """
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QHBoxLayout, QLabel, QPushButton
 from PyQt6.QtCore import Qt, pyqtSignal
+from src.features.color.ui.panel_chrome import PARAMETER_LABEL_STYLE
 from src.shared.ui.widgets.hsl_curves_widget import HSLCurvesWidget, CURVE_MODES
 from src.shared.ui.widgets.drag_value import DragValue
 from src.shared.i18n.i18n import I18N
@@ -91,7 +92,7 @@ class HSLCurvesPanel(QWidget):
         self.input_value = DragValue('', 0.0, 360.0, 0.0, decimals=2, compact=True)
         self.output_value = DragValue('', 0.0, 2.0, 1.0, decimals=2, compact=True)
         for label, value in ((self.input_label, self.input_value), (self.output_label, self.output_value)):
-            label.setStyleSheet('color: #96969b; font-size: 11px;')
+            label.setStyleSheet(PARAMETER_LABEL_STYLE)
             footer.addWidget(label)
             footer.addWidget(value)
         self.input_value.valueChanged.connect(lambda v: self.hsl_curves_widget.set_selected_value('x', v))

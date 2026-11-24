@@ -26,6 +26,7 @@ from src.features.color.core.plugin_manager import get_plugin_manager
 from src.features.color.core.composition_uniforms import (
     build_composition_uniform_manifest,
 )
+from src.features.color.core.mist import MIST_GLSL
 from src.features.shared.effects.effect_spec import EffectSpec, PluginBinding, ShaderKind
 
 # 编译诊断：编译失败时上报运行时报错（不含路径/源码）供 AI 助手只读查看。
@@ -447,6 +448,7 @@ class ShaderPipeline:
             WARPER_SPACE_SNIPPET if (has_warper and warper_space and not calibrated_warper) else "",
             BLEND_MODES_SNIPPET,
             BLUR_SHARPEN_SNIPPET,  # Must be before FILM_GRAIN_SNIPPET (declares u_tex_size)
+            MIST_GLSL,
             FILM_GRAIN_SNIPPET,
             SOFT_CLIP_SNIPPET,
             CURVES_SOFT_CLIP_SNIPPET,
@@ -574,6 +576,9 @@ class ShaderPipeline:
         
         # Apply Blur / Sharpen first to allow subsequent grading
         shader_code.append("    vec3 graded = apply_blur_sharpen(color, u_input_tex, v_texcoord, u_fx_mode, u_fx_sharpen, u_fx_texture, u_fx_halo, u_fx_radius, u_fx_iterations, u_tex_size, u_fx_enabled, u_blur_enabled, u_blur_mode, u_blur_intensity, u_blur_detail, u_blur_radius, u_blur_bokeh, u_blur_angle);")
+        shader_code.append(
+            "    if (u_mist_amount != 0.0) { graded += mist_delta(u_input_tex, v_texcoord, "
+            "color, u_tex_size, u_mist_spread, u_mist_amount); }")
 
         primary_input = "graded"
         if has_primary_calibration:

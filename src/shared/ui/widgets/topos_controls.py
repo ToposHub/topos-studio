@@ -85,8 +85,7 @@ class ToposSlider(QSlider):
         """
         设置滑槽的渐变背景。
         
-        注意：使用此方法会覆盖全局 QSS 样式，仅用于特殊需求的滑块
-        （如 mixer_panel.py 中的色相/饱和度滑块）。
+        渐变只覆盖滑槽颜色，手柄和禁用状态使用全局样式。
         
         Args:
             stops: 渐变停止点列表，格式为 [(position, color), ...]
