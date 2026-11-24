@@ -3425,8 +3425,10 @@ class TimelineExporter:
                     frame_data = self._render_frame(frame_idx, config)
 
                     if frame_data is not None:
-                        # 编码帧
-                        self._encode_frame(frame_data)
+                        try:
+                            self._encode_frame(frame_data)
+                        finally:
+                            self._release_rendered_frame(frame_data)
                     else:
                         logger.warning(f"Frame {frame_idx} render returned None")
 
@@ -7135,6 +7137,15 @@ class TimelineExporter:
             return False
         return True
 
+    @staticmethod
+    def _release_rendered_frame(frame: Any) -> None:
+        from src.shared.media.frame import DecodedFrame
+
+        if isinstance(frame, DecodedFrame) and frame.extra:
+            lease = frame.extra.pop("metal_output_buffer_lease", None)
+            if lease is not None:
+                lease.release()
+
     def _render_encode_pipeline(
         self, start_frame: int, end_frame: int, config: TimelineExportConfig
     ) -> None:
@@ -7176,19 +7187,25 @@ class TimelineExporter:
                     "queue_wait", f"{backend}_pipeline_{kind}",
                     wall_ms=seconds * 1000.0)
 
-        def enqueue(item: tuple) -> bool:
+        def enqueue(frame_idx: int, frame: Any) -> bool:
             """有界入队；消费侧退出（stop）→ 返回 False 丢弃剩余帧。"""
             stalled_since = None
-            while not stop.is_set():
-                try:
-                    q.put(item, timeout=0.25)
-                except _queue.Full:
-                    if stalled_since is None:
-                        stalled_since = time.perf_counter()
-                    continue
-                _record_queue_wait("producer_full", stalled_since)
-                return True
-            return False
+            queued = False
+            try:
+                while not stop.is_set():
+                    try:
+                        q.put((frame_idx, frame), timeout=0.25)
+                    except _queue.Full:
+                        if stalled_since is None:
+                            stalled_since = time.perf_counter()
+                        continue
+                    queued = True
+                    _record_queue_wait("producer_full", stalled_since)
+                    return True
+                return False
+            finally:
+                if not queued:
+                    self._release_rendered_frame(frame)
 
         def produce() -> None:
             try:
@@ -7200,9 +7217,9 @@ class TimelineExporter:
                         for fi in range(start_frame, end_frame):
                             if stop.is_set() or self._cancel_requested:
                                 break
-                            if not self._wait_if_paused():
+                            if not self._wait_if_paused(stop=stop):
                                 break
-                            if not enqueue((fi, self._render_frame(fi, config))):
+                            if not enqueue(fi, self._render_frame(fi, config)):
                                 break
                     finally:
                         self._discard_topos_lut_prefetch()
@@ -7228,26 +7245,27 @@ class TimelineExporter:
                     if waiting_since is None:
                         waiting_since = time.perf_counter()
                     continue
-                _record_queue_wait("consumer_empty", waiting_since)
-                waiting_since = None
                 frame_idx, frame_data = item
-                if not self._wait_if_paused():
-                    logger.info("Export cancelled while paused")
-                    stop.set()
-                    break
-                if self._cancel_requested:
-                    logger.info("Export cancelled by user")
-                    stop.set()
-                    break  # 丢弃已预读帧
-                if frame_data is not None:
-                    self._encode_frame(frame_data)
-                else:
-                    logger.warning(f"Frame {frame_idx} render returned None")
+                try:
+                    _record_queue_wait("consumer_empty", waiting_since)
+                    waiting_since = None
+                    if not self._wait_if_paused() or self._cancel_requested:
+                        logger.info("Export cancelled by user")
+                        break
+                    if frame_data is not None:
+                        self._encode_frame(frame_data)
+                    else:
+                        logger.warning(f"Frame {frame_idx} render returned None")
+                finally:
+                    self._release_rendered_frame(frame_data)
                 self._current_frame = frame_idx - start_frame + 1
                 self._notify_progress()
         finally:
             stop.set()
             producer.join()
+            while not q.empty():
+                _, frame_data = q.get_nowait()
+                self._release_rendered_frame(frame_data)
         if producer_error:
             raise producer_error[0]
 
@@ -7260,18 +7278,22 @@ class TimelineExporter:
         started = time.perf_counter()
         self._frame_render_backend = None
         result = self._render_frame_impl(frame_idx, config)
-        pending = getattr(self, "_topos_lut_prefetch", None)
-        if pending is not None and pending[0] <= frame_idx:
-            self._discard_topos_lut_prefetch()
-        recorder = getattr(self, "_export_telemetry", None)
-        if recorder is not None:
-            recorder.record_stage_sample(
-                "render",
-                str(self._frame_render_backend or self._timeline_graphics_backend or "cpu"),
-                wall_ms=(time.perf_counter() - started) * 1000.0,
-                frame_index=frame_idx,
-            )
-        return result
+        try:
+            pending = getattr(self, "_topos_lut_prefetch", None)
+            if pending is not None and pending[0] <= frame_idx:
+                self._discard_topos_lut_prefetch()
+            recorder = getattr(self, "_export_telemetry", None)
+            if recorder is not None:
+                recorder.record_stage_sample(
+                    "render",
+                    str(self._frame_render_backend or self._timeline_graphics_backend or "cpu"),
+                    wall_ms=(time.perf_counter() - started) * 1000.0,
+                    frame_index=frame_idx,
+                )
+            return result
+        except BaseException:
+            self._release_rendered_frame(result)
+            raise
 
     def _render_frame_impl(
         self,
@@ -7372,9 +7394,10 @@ class TimelineExporter:
         self, frame_plan: Any, frame_idx: int, config: TimelineExportConfig,
     ) -> Optional[DecodedFrame]:
         """Grade an identity 10-bit 4:2:2 clip into encoder-native planes."""
-        from src.features.color.core.color_graph_texture import serial_lut_only
+        from src.features.color.core.color_graph_texture import serial_luts_only
         from src.features.edit.core.color_chain import chain_extra_params
         from src.features.edit.core.timeline_metal_export_renderer import TimelineMetalExportRenderer
+        from src.shared.export.topos_encoder import ToposVideoEncoder
         from src.shared.media.frame import DecodedFrame
         from src.shared.media.gpu_frame import GpuDecodedFrame, safe_release_gpu_frame
 
@@ -7387,8 +7410,7 @@ class TimelineExporter:
             return None
         layer, source_frame, _opacity = identity
         graph = self._clip_color_graph(layer)
-        lut = serial_lut_only(graph) if graph is not None else None
-        if lut is None or chain_extra_params(self._project, self._sequence.timeline_id, layer.clip):
+        if graph is None or chain_extra_params(self._project, self._sequence.timeline_id, layer.clip):
             return None
         asset = self._project.get_asset_by_id(layer.asset_id)
         if asset is None or asset.media_type != "video":
@@ -7396,6 +7418,11 @@ class TimelineExporter:
         path = export_source_path(self._project, asset)
         metadata = asset.metadata or {}
         source_codec = metadata.get("codec") or metadata.get("codec_name")
+        max_luts = (TimelineMetalExportRenderer.MAX_YUV422P10_LUTS
+                    if source_codec == "topos" and config.codec == ExportCodec.TOPOS else 1)
+        luts = serial_luts_only(graph, max_luts=max_luts)
+        if luts is None:
+            return None
         if (not path or path != asset.path
                 or source_codec not in ("topos", "dnxhd", "dnxhr")
                 or metadata.get("pixel_format") != "yuv422p10le"
@@ -7414,12 +7441,21 @@ class TimelineExporter:
             )
         ):
             return None
+        renderer = self._gpu_export_renderer
+        if renderer is None:
+            renderer = TimelineMetalExportRenderer(self._gpu_trail)
+            self._gpu_export_renderer = renderer
+        if len(luts) > 1 and not renderer.supports_yuv422p10_lut_chain():
+            return None
         session_key = self._layer_session_key(layer)
         if source_codec == "topos":
             decoded = self._take_topos_lut_prefetch(frame_idx)
             if decoded is None:
+                # TOPOS imports the master IOSurface directly. An unused
+                # proxy decoder would share the native slice worker budget.
                 decoded = self._request_video_metal_frame(
-                    path, source_frame, layer.asset_id, session_key=session_key)
+                    path, source_frame, layer.asset_id, session_key=session_key,
+                    master_only=True)
             if decoded is None:
                 decoded = self._request_video_decoded_frame(
                     path, source_frame, layer.asset_id, session_key=session_key)
@@ -7427,6 +7463,7 @@ class TimelineExporter:
             decoded = self._request_high_depth_decoded_frame(
                 path, source_frame, layer.asset_id, session_key=session_key)
         gpu_source = isinstance(decoded, GpuDecodedFrame)
+        result = None
         try:
             if (decoded is None or decoded.frame_index != source_frame
                     or decoded.pixel_format != "yuv422p10le"
@@ -7447,28 +7484,37 @@ class TimelineExporter:
                 return None
             if gpu_source and source_codec == "topos":
                 self._schedule_topos_lut_prefetch(frame_idx, layer)
-            renderer = self._gpu_export_renderer
-            if renderer is None:
-                renderer = TimelineMetalExportRenderer(self._gpu_trail)
-                self._gpu_export_renderer = renderer
-            reference, strength = lut
-            result = renderer.render_yuv422p10_lut(
-                source, reference, strength, getattr(self._encoder, "allocate_yuv422p10_frame", None))
+            encoder = self._encoder
+            borrow_output = (gpu_source and source_codec == "topos" and config.codec == ExportCodec.TOPOS
+                             and isinstance(encoder, ToposVideoEncoder)
+                             and encoder.consumes_planes_synchronously)
+            result = renderer.render_yuv422p10_luts(
+                source, luts, getattr(encoder, "allocate_yuv422p10_frame", None),
+                borrow_output=borrow_output)
+            recorder = self._export_telemetry
+            if recorder is not None:
+                # The renderer already records these transfers in the legacy trail.
+                if not gpu_source:
+                    recorder.record_stage_sample("cpu_to_gpu_upload", "metal", cpu_upload_bytes=4 * width * height)
+                recorder.record_stage_sample("gpu_to_cpu_download", "metal", cpu_download_bytes=4 * width * height)
+            extra = {}
+            if result.encoder_frame is not None:
+                extra["yuv422p10_frame"] = result.encoder_frame
+            if result.buffer_lease is not None:
+                extra["metal_output_buffer_lease"] = result.buffer_lease
+            return DecodedFrame(
+                frame_index=frame_idx, pts=frame_idx,
+                time_seconds=frame_idx / self._get_sequence_fps(),
+                planes=result.planes, pixel_format="yuv422p10le", width=width, height=height,
+                extra=extra,
+            )
+        except BaseException:
+            if result is not None and result.buffer_lease is not None:
+                result.buffer_lease.release()
+            raise
         finally:
             if gpu_source:
                 safe_release_gpu_frame(decoded)
-        recorder = self._export_telemetry
-        if recorder is not None:
-            # The renderer already records these transfers in the legacy trail.
-            if not gpu_source:
-                recorder.record_stage_sample("cpu_to_gpu_upload", "metal", cpu_upload_bytes=4 * width * height)
-            recorder.record_stage_sample("gpu_to_cpu_download", "metal", cpu_download_bytes=4 * width * height)
-        return DecodedFrame(
-            frame_index=frame_idx, pts=frame_idx,
-            time_seconds=frame_idx / self._get_sequence_fps(),
-            planes=result.planes, pixel_format="yuv422p10le", width=width, height=height,
-            extra={"yuv422p10_frame": result.encoder_frame} if result.encoder_frame is not None else {},
-        )
 
     def _take_topos_lut_prefetch(self, frame_idx: int) -> Optional[Any]:
         pending = getattr(self, "_topos_lut_prefetch", None)
@@ -12891,6 +12937,7 @@ class TimelineExporter:
 
     def _open_export_video_session(
         self, asset_path: str, session_key: str,
+        *, master_only: bool = False,
     ) -> Optional[str]:
         """打开/复用导出专用视频会话（clip 级解码游标 + LRU 上限）。
 
@@ -12909,7 +12956,7 @@ class TimelineExporter:
         from src.shared.video.frame_provider_service import VideoFrameProviderService
 
         options = {"share_by_path": False}
-        if (getattr(self, "_timeline_graphics_backend", "opengl") == "opengl"
+        if ((master_only or getattr(self, "_timeline_graphics_backend", "opengl") == "opengl")
                 and isinstance(self._frame_provider, VideoFrameProviderService)):
             options["master_only"] = True
         try:
@@ -13007,10 +13054,12 @@ class TimelineExporter:
         source_frame: int,
         asset_id: str,
         session_key: str = "",
+        *,
+        master_only: bool = False,
     ) -> Optional[Any]:
         """Request a VideoToolbox MTLTexture frame for Metal timeline export."""
         clip_id = self._open_export_video_session(
-            asset_path, session_key or asset_id,
+            asset_path, session_key or asset_id, master_only=master_only,
         )
         if clip_id is None:
             return None

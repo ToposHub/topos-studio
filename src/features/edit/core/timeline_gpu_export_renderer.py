@@ -48,6 +48,7 @@ from src.features.edit.core.primary_grade_shader import (
     PRIMARY_GRADE_UNIFORMS as _GRADE_UNIFORMS,
     PRIMARY_GRADE_FRAGMENT,
 )
+from src.shared.media.gpu_frame import GpuFrameRelease
 
 logger = logging.getLogger(__name__)
 
@@ -852,11 +853,13 @@ class GpuYuv422P10Output:
 
     The planes use the Topos/FFmpeg ``yuv422p10le`` convention: uint16
     containers carrying nominal 10-bit code values (0..1023), matching the
-    native encoder's planar input contract.
+    native encoder's planar input contract. When buffer_lease is set, the
+    planes are borrowed until the caller releases it.
     """
 
     planes: Tuple[np.ndarray, np.ndarray, np.ndarray]
     encoder_frame: Any = None
+    buffer_lease: Optional[GpuFrameRelease] = None
 
 
 @dataclass(frozen=True)

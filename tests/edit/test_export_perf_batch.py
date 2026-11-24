@@ -74,6 +74,25 @@ class TestLayerSessionKey:
 
 
 class TestOpenExportVideoSession:
+    def test_metal_topos_session_can_open_only_the_master(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.shared.video.frame_provider_service import VideoFrameProviderService
+
+        exporter = _make_exporter()
+        exporter._timeline_graphics_backend = "metal"
+        provider = VideoFrameProviderService.__new__(VideoFrameProviderService)
+        options: list[tuple[bool, bool]] = []
+
+        def open_clip(path: str, *, share_by_path: bool, master_only: bool = False) -> str:
+            options.append((share_by_path, master_only))
+            return path
+
+        monkeypatch.setattr(provider, "open_clip", open_clip)
+        exporter._frame_provider = provider
+
+        assert exporter._open_export_video_session("/topos.mov", "topos", master_only=True) == "/topos.mov"
+        assert exporter._open_export_video_session("/vt.mov", "vt") == "/vt.mov"
+        assert options == [(False, True), (False, False)]
+
     def test_same_key_reuses_single_session(self, monkeypatch):
         monkeypatch.setenv("TOPOS_EXPORT_SESSION_CACHE", "4")
         ex = _make_exporter()

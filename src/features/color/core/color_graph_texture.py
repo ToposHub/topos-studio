@@ -25,10 +25,26 @@ _LUT_CACHE_BYTES = 32 * 1024 * 1024
 
 def serial_lut_only(graph: ColorGraphData) -> tuple[str, float] | None:
     """Recognize a fresh, enabled Corrector whose only operation is a LUT."""
-    if len(graph.nodes) != 3:
+    luts = serial_luts_only(graph, max_luts=1)
+    return luts[0] if luts else None
+
+
+def serial_luts_only(
+    graph: ColorGraphData, *, max_luts: int,
+) -> tuple[tuple[str, float], ...] | None:
+    """Recognize a bounded sequence of LUT-only Correctors in image-edge order."""
+    if not 1 <= len(graph.nodes) - 2 <= max_luts:
         return None
     correctors = serial_correctors(graph)
-    return corrector_lut_only(correctors[0]) if correctors else None
+    if correctors is None:
+        return None
+    luts = []
+    for corrector in correctors:
+        lut = corrector_lut_only(corrector)
+        if lut is None:
+            return None
+        luts.append(lut)
+    return tuple(luts)
 
 
 def serial_correctors(graph: ColorGraphData) -> tuple[ColorNodeData, ...] | None:

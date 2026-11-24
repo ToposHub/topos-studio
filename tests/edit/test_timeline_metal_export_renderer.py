@@ -11,6 +11,7 @@ import pytest
 
 from src.features.edit.core.timeline_metal_export_renderer import (
     TimelineMetalExportRenderer,
+    _MetalLutOutputPool,
     _PARAM_DTYPE,
 )
 from src.shared.export.gpu_encode_surface import (
@@ -19,6 +20,34 @@ from src.shared.export.gpu_encode_surface import (
 )
 from src.shared.export.gpu_trail import ExportGpuTrail
 from src.shared.media.gpu_frame import GpuFramePlane, GpuFrameRelease, GpuPlaneResource
+
+
+def test_lut_output_pool_reuses_only_returned_buffers() -> None:
+    allocations: list[int] = []
+
+    def allocate(size: int) -> SimpleNamespace:
+        allocations.append(size)
+        return SimpleNamespace(length=lambda: size)
+
+    context = SimpleNamespace(create_buffer=allocate)
+    pool = _MetalLutOutputPool()
+    leases = [pool.acquire(context, 1024) for _ in range(5)]
+    assert all(lease is not None for lease in leases)
+    assert pool.acquire(context, 1024) is None
+    slot = leases[0]
+    slot.release()
+    next_lease = pool.acquire(context, 1024)
+    assert next_lease is not None and next_lease.retain_token is slot.retain_token
+    slot.release()
+    assert pool.acquire(context, 1024) is None
+    assert allocations == [1024] * 5
+
+    pool.close()
+    assert next_lease.retain_token.length() == 1024
+    next_lease.release()
+    for lease in leases[1:]:
+        lease.release()
+    assert pool.acquire(context, 1024) is None
 
 
 def test_renderer_records_measured_render_and_readback_evidence():
