@@ -39,6 +39,7 @@
 | `image/ADR-I001…ADR-I021` + `image/topos_image_file_spec_v0.md` + `image/risk_register.md` | 图片格式决策链、文件规范真相源与风险登记表 |
 | `metal_backend_migration_and_cross_platform_gpu_plan.md` | Metal 与跨平台 GPU 后端双轨架构主计划（ADR 0003/0004 的上游） |
 | [Windows 性能优化计划](plans/2026-11-24-windows-resolve-performance-plan.md) | 同机对照 DaVinci Resolve，覆盖剪辑播放、调色、交付及 H.264、DNxHR、TOPOS 422 的验证和优化 |
+| [Windows H.264 与 HEVC Main10 复测](plans/2026-11-25-windows-h264-main10-regression-plan.md) | 验证实际呈现帧、切点、Main10 软件交付和编码子进程异常恢复 |
 | `codec/`、`video/` | 编解码专题：格式计划、门禁协议（`v7_size_gate_protocol.md`、`rd4_01_fixed_sampling_spec.md`、`rd5_01_surface_ownership.md`）、落档报告与版本状态 |
 | `plans/2026-09-28-multi-machine-program/` | 多机并行优化战役总纲与 5 份子计划（01 审查 / 02 测试 / 03 插件 / 04 文档 / 05 基准） |
 | `audit/2026-09-28/` | 计划 01 产出：全库审查问题台账（FINAL_REPORT / ISSUES / INVENTORY，AUD-xxx 编号） |
