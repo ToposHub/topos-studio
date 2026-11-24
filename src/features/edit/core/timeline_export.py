@@ -13098,7 +13098,7 @@ class TimelineExporter:
                             raw_params=getattr(
                                 getattr(layer, 'clip', None), 'raw', None),
                         )
-                        return self._interpret_export_video(frame, orig_path, orig_asset.metadata)
+                        return self._interpret_export_video(frame, orig_path, getattr(orig_asset, "metadata", None))
                     elif orig_type == "image":
                         return self._get_image_frame(orig_path)
                     else:
@@ -13123,7 +13123,7 @@ class TimelineExporter:
                 session_key=self._layer_session_key(layer),
                 raw_params=getattr(getattr(layer, 'clip', None), 'raw', None),
             )
-            return self._interpret_export_video(frame, asset_path, asset.metadata)
+            return self._interpret_export_video(frame, asset_path, getattr(asset, "metadata", None))
         elif asset_type == "image":
             return self._get_image_frame(asset_path)
         elif asset_type == "image_sequence" and (
@@ -13167,7 +13167,7 @@ class TimelineExporter:
             return None
 
     def _interpret_export_video(
-        self, frame: Optional["np.ndarray"], path: str, metadata: dict,
+        self, frame: Optional["np.ndarray"], path: str, metadata: dict | None,
     ) -> Optional["np.ndarray"]:
         aces = getattr(self, "_aces_export", None)
         hdr = getattr(self, "_hdr_export", None)
