@@ -16,11 +16,11 @@ from typing import Any, Optional
 
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QToolButton,
                              QLabel, QSizePolicy)
-from PyQt6.QtCore import Qt, QPointF, QRectF, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt6.QtGui import (QPainter, QColor, QPen, QPainterPath, QLinearGradient,
                          QMouseEvent, QKeyEvent)
 
-from src.shared.assets.icon_manager import icon_reset, IconColors
+from src.features.color.ui.panel_chrome import style_reset_button
 from src.shared.ui.widgets.drag_value import drag_speed_per_pixel
 from src.shared.i18n.i18n import I18N
 from src.features.color.ui.color_wheel import (
@@ -306,14 +306,8 @@ class _BarsColumn(QWidget):
         header.addWidget(label)
         header.addStretch(1)
         self.reset_btn = QToolButton()
-        self.reset_btn.setIcon(icon_reset(IconColors.DEFAULT))
-        self.reset_btn.setIconSize(QSize(13, 13))
-        self.reset_btn.setFixedSize(20, 20)
+        style_reset_button(self.reset_btn)
         self.reset_btn.setToolTip(I18N.tr("grading.reset_wheel", "重置") + " " + title)
-        self.reset_btn.setStyleSheet("""
-            QToolButton { background: transparent; border: none; border-radius: 3px; }
-            QToolButton:hover { background: #414146; }
-        """)
         self.reset_btn.clicked.connect(self.reset)
         header.addWidget(self.reset_btn)
         layout.addLayout(header)

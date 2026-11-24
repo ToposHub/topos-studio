@@ -1,13 +1,13 @@
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QGroupBox)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import PANEL_TITLE_LABEL_STYLE, PARAM_LABEL_STYLE
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QSize
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import os
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.shared.assets.icon_manager import icon_reset
 from src.shared.paths.paths import get_lut_dir
+from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
 
 class RawPanel(QWidget):
     """
@@ -44,13 +44,9 @@ class RawPanel(QWidget):
     def init_ui(self) -> None:
         # 使用全局 QSS，无需本地样式表
 
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
-        self.setLayout(main_layout)
+        header_layout, main_layout = create_panel_layout(self, (4, 4, 4), 4)
 
         # Header with Enable switch
-        header_layout = QHBoxLayout()
         self.enable_cb = ToggleSwitch(checked=False)
         self.enable_cb.toggled.connect(self.on_enable_toggled)
         header_layout.addWidget(self.enable_cb)
@@ -63,14 +59,11 @@ class RawPanel(QWidget):
         
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr(
             "raw.reset_tooltip", "Reset All RAW Parameters"))
         self.reset_btn.clicked.connect(self.reset_all)
         header_layout.addWidget(self.reset_btn)
-        main_layout.addLayout(header_layout)
 
         # Main 3-Column Container
         self.container = QWidget()

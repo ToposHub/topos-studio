@@ -550,6 +550,7 @@ class NativeFilesPanel(QWidget):
         self.proxy.setSourceModel(self.model)
         self.selection = QItemSelectionModel(self.proxy, self)
         self._capabilities: dict[str, dict[str, Any]] = {}
+        self._color_workspace_active = False
         self._build_ui()
         self._prefs = preferences
         self._apply_preferences()
@@ -634,8 +635,14 @@ class NativeFilesPanel(QWidget):
         """)
         return combo
 
-    def _build_ui(self) -> None:
-        self.setObjectName("nativeFiles")
+    def set_color_workspace_active(self, active: bool) -> None:
+        if active == self._color_workspace_active:
+            return
+        self._color_workspace_active = active
+        self._apply_workspace_style()
+
+    def _apply_workspace_style(self) -> None:
+        location_background = C.COLOR_PANEL_INSET if self._color_workspace_active else FILES_LOCATION_BACKGROUND
         self.setStyleSheet(f"""
             QWidget#nativeFiles, QWidget#filesGalleryToolbar {{ background: {C.BG_PANEL}; color: {C.TEXT_PRIMARY}; }}
             QLabel {{ background: transparent; color: {C.TEXT_SECONDARY}; }}
@@ -643,7 +650,7 @@ class NativeFilesPanel(QWidget):
             QLabel#filesSidebarHeading {{ color: {C.TEXT_PRIMARY}; font-size: 11px; font-weight: 600; padding-left: 5px; }}
             QLabel#filesHint {{ color: {C.TEXT_HINT}; font-size: 11px; }}
             QWidget#filesSidebar, QWidget#filesLocationToolbar, QTreeView#filesHomeTree,
-            QWidget#filesInspector, QWidget#filesInspectorBody {{ background: {FILES_LOCATION_BACKGROUND}; }}
+            QWidget#filesInspector, QWidget#filesInspectorBody {{ background: {location_background}; }}
             QScrollArea#filesInspectorScroll {{ background: transparent; border: none; }}
             QWidget#filesInspectorBody QLabel[filesInfoDetail="true"] {{ color: {C.TEXT_DIM}; font-size: 11px; }}
             QWidget#filesInspectorBody QLineEdit {{ font-size: 11px; }}
@@ -698,6 +705,10 @@ class NativeFilesPanel(QWidget):
             QSlider::handle:horizontal {{ background: {C.TEXT_SECONDARY}; border: none; width: 9px; margin: -3px 0; border-radius: 4px; }}
             QSlider::handle:horizontal:hover, QSlider::handle:horizontal:focus {{ background: {C.ORANGE}; }}
         """)
+
+    def _build_ui(self) -> None:
+        self.setObjectName("nativeFiles")
+        self._apply_workspace_style()
         root = QVBoxLayout(self)
         # A visible inspector must not impose its wide layout minimum on the
         # dock: let resizeEvent hide secondary panes as the user narrows it.

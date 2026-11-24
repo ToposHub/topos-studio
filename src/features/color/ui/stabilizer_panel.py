@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from src.features.color.ui.panel_chrome import color_panel_stylesheet
 from src.features.color.ui.power_window_panel import WindowValue
 from src.features.color.ui.tracker_graph import TrackerGraph
 from src.shared.i18n.i18n import tr
@@ -21,9 +22,9 @@ from src.shared.ui.widgets import ChevronComboBox
 
 STABILIZER_DEFAULTS: dict[str, Any] = dict(DEFAULT_PARAMS)
 
-STYLE = """
-StabilizerPanel { background: #202024; }
-StabilizerPanel QWidget#stabilizer_bar { background: #2c2d32; }
+STYLE = color_panel_stylesheet("""
+StabilizerPanel { background: __COLOR_PANEL_BASE__; }
+StabilizerPanel QWidget#stabilizer_bar { background: __COLOR_PANEL_RAISED__; }
 StabilizerPanel QLabel { color: #999b9d; font-size: 11px; background: transparent; }
 StabilizerPanel QLabel:disabled { color: #56585a; }
 StabilizerPanel QLabel#stabilizer_status { font-size: 10px; padding: 0 8px; }
@@ -36,7 +37,7 @@ StabilizerPanel QPushButton#stabilizer_analyze {
 }
 StabilizerPanel QPushButton#stabilizer_analyze:hover { background: #34363a; border-color: #74767b; }
 StabilizerPanel QPushButton#stabilizer_analyze:disabled { color: #55575b; border-color: #393b3f; }
-"""
+""")
 
 
 class StabilizerPanel(QWidget):

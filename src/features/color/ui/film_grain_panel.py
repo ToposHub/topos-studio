@@ -1,10 +1,11 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QCheckBox, QGroupBox, QPushButton)
 from src.shared.i18n.i18n import I18N
-from PyQt6.QtCore import pyqtSignal, QSize, QTimer
+from PyQt6.QtCore import pyqtSignal, QTimer
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.shared.assets.icon_manager import icon_reset
+from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
+from src.shared.ui.style_sheet import C
 
 class FilmGrainPanel(QWidget):
     grain_changed = pyqtSignal(dict)
@@ -25,26 +26,21 @@ class FilmGrainPanel(QWidget):
 
         self.init_ui()
 
-    def get_style_sheet(self):
+    def get_style_sheet(self) -> str:
         """Return panel-specific style sheet.
         
         QGroupBox/QCheckBox/QPushButton use global DARK_THEME styles.
         """
-        return """
-            FilmGrainPanel {
-                background-color: #1a1a1a;
-            }
+        return f"""
+            FilmGrainPanel {{ background-color: {C.BG_PANEL}; }}
         """
 
     def init_ui(self) -> None:
         self.setStyleSheet(self.get_style_sheet())
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        enable_row, layout = create_panel_layout(self, (4, 4, 4), 4)
 
         # Enable toggle and reset button row (above Basic Settings)
-        enable_row = QHBoxLayout()
         self.enable_check = ToggleSwitch(checked=False)
         self.enable_check.toggled.connect(self.emit_params)
 
@@ -53,9 +49,7 @@ class FilmGrainPanel(QWidget):
 
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr("tooltip.reset_film_grain", "重置所有胶片颗粒参数"))
         self.reset_btn.clicked.connect(self.reset_all)
 
@@ -63,7 +57,6 @@ class FilmGrainPanel(QWidget):
         enable_row.addWidget(self._title_label)
         enable_row.addStretch()
         enable_row.addWidget(self.reset_btn)
-        layout.addLayout(enable_row)
 
         layout.addSpacing(4)
 

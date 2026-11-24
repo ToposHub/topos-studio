@@ -8,30 +8,34 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import QPointF, QSize, Qt, QSignalBlocker, pyqtSignal
+from PyQt6.QtCore import QPointF, Qt, QSignalBlocker, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import (
     QButtonGroup, QGridLayout, QHBoxLayout, QLabel, QMenu, QSizePolicy,
     QRadioButton, QSlider, QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.features.color.ui.panel_chrome import (
+    HEADER_CONTROL_HEIGHT, HEADER_HEIGHT, HEADER_ICON_ACTIVE, HEADER_ICON_HOVER, HEADER_ICON_IDLE,
+    create_panel_header, style_header_button,
+)
 from src.shared.ui.style_sheet import C
 
 from .node_editor_state import GraphDraft, NodeEditorState, NodeKind
 from .node_editor_view import ColorNodeView, tr
 
 
-def _tool_icon(kind: str, active: bool = True) -> QIcon:
+def _tool_icon(kind: str) -> QIcon:
     """Draw small original vector controls at the reference's optical size."""
     pixmap = QPixmap(32, 32)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.scale(2.0, 2.0)
-    foreground = C.TEXT_PRIMARY if active else C.TEXT_HINT
-    painter.setPen(QPen(QColor(foreground), 1.0))
+    foreground = QColor(Qt.GlobalColor.white)
+    painter.setPen(QPen(foreground, 1.0))
     if kind == "pointer":
-        painter.setBrush(QColor(foreground))
+        painter.setBrush(foreground)
         painter.drawPolygon(QPolygonF([QPointF(3, 1), QPointF(3, 13), QPointF(6, 10), QPointF(8, 15),
                                       QPointF(10, 14), QPointF(8, 9), QPointF(12, 9)]))
     elif kind == "hand":
@@ -50,11 +54,11 @@ def _tool_icon(kind: str, active: bool = True) -> QIcon:
         path.cubicTo(15, 3, 16, 5, 14, 10)
         path.lineTo(12, 15)
         path.closeSubpath()
-        painter.setBrush(QColor(foreground))
+        painter.setBrush(foreground)
         painter.drawPath(path)
     elif kind == "more":
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(C.TEXT_LABEL))
+        painter.setBrush(foreground)
         for x in (3.0, 8.0, 13.0):
             painter.drawEllipse(QPointF(x, 8.0), 1.25, 1.25)
     painter.end()
@@ -92,16 +96,10 @@ class ColorNodePanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        self.toolbar = QWidget(self)
-        self.toolbar.setObjectName("ColorNodeToolbar")
-        self.toolbar.setFixedHeight(30)
-        self.toolbar.setStyleSheet(f"""
-            QWidget#ColorNodeToolbar {{ background: {C.BG_PANEL};
-                border-top: 1px solid {C.PANEL_DIVIDER}; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
-            QToolButton {{ background: transparent; border: none; border-radius: 0;
-                padding: 0; margin: 0; color: {C.TEXT_PRIMARY}; }}
-            QToolButton:hover {{ background: {C.BG_HOVER}; }}
-            QToolButton:checked {{ background: transparent; }}
+        self.toolbar = create_panel_header(object_name="ColorNodeToolbar")
+        self.toolbar.setStyleSheet(self.toolbar.styleSheet() + f"""
+            QWidget#ColorNodeToolbar {{ border-top: 1px solid {C.PANEL_DIVIDER}; }}
+            QWidget#ColorNodeToolbar > QWidget {{ background: transparent; }}
         """)
         bar = QGridLayout(self.toolbar)
         bar.setContentsMargins(0, 1, 0, 1)
@@ -142,12 +140,13 @@ class ColorNodePanel(QWidget):
         self.scope_group.addButton(self.timeline_radio)
         # Resolve uses two small scope dots, not enable/disable switches.
         for radio in (self.clip_radio, self.timeline_radio):
-            radio.setFixedSize(17, 28)
+            radio.setFixedSize(17, HEADER_CONTROL_HEIGHT)
             radio.setStyleSheet(f"""
                 QRadioButton {{ background: transparent; spacing: 0; }}
                 QRadioButton::indicator {{ width: 8px; height: 8px;
-                    border: none; border-radius: 4px; background: {C.BG_HOVER}; }}
-                QRadioButton::indicator:checked {{ background: {C.TEXT_PRIMARY}; }}
+                    border: none; border-radius: 4px; background: {HEADER_ICON_IDLE}; }}
+                QRadioButton::indicator:hover {{ background: {HEADER_ICON_HOVER}; }}
+                QRadioButton::indicator:checked {{ background: {HEADER_ICON_ACTIVE}; }}
             """)
         self.clip_radio.setObjectName("NodeClipMode")
         self.timeline_radio.setObjectName("NodeTimelineMode")
@@ -160,11 +159,10 @@ class ColorNodePanel(QWidget):
         dot_bar.addWidget(self.timeline_radio)
         self.scope_button = QToolButton(self)
         self.scope_button.setObjectName("NodeScope")
-        self.scope_button.setFixedHeight(28)
+        style_header_button(self.scope_button)
         self.scope_button.setMinimumWidth(56)
-        self.scope_button.setStyleSheet(f"""
+        self.scope_button.setStyleSheet(self.scope_button.styleSheet() + """
             QToolButton {{ padding: 0 14px 0 6px; font-weight: bold; }}
-            QToolButton::menu-indicator {{ image: none; width: 0; }}
         """)
         self.scope_button.setText(tr("clip", "Clip") + " ⌄")
         self.scope_button.setToolTip(tr("grade_scope", "Node Editor Mode"))
@@ -178,7 +176,7 @@ class ColorNodePanel(QWidget):
         self.zoom_slider.setAccessibleName(tr("node_size", "Node Editor Zoom"))
         self.zoom_slider.setRange(round(ColorNodeView.MIN_ZOOM * 100), round(ColorNodeView.MAX_ZOOM * 100))
         self.zoom_slider.setValue(round(ColorNodeView.ORIGINAL_ZOOM * 100))
-        self.zoom_slider.setFixedSize(118, 28)
+        self.zoom_slider.setFixedSize(118, HEADER_CONTROL_HEIGHT)
         self.zoom_slider.setStyleSheet(f"""
             QSlider {{ background: transparent; margin: 0 8px 0 0; }}
             QSlider::groove:horizontal {{ height: 2px; border: none;
@@ -231,15 +229,7 @@ class ColorNodePanel(QWidget):
     def _tool(self, icon: str, tooltip: str, name: str) -> QToolButton:
         button = QToolButton(self)
         button.setObjectName(name)
-        button.setStyleSheet("QToolButton { padding: 0; margin: 0; border: none; background: transparent; }")
-        tool_icon = _tool_icon(icon)
-        if icon in {"pointer", "hand"}:
-            tool_icon = QIcon()
-            for state, active in ((QIcon.State.Off, False), (QIcon.State.On, True)):
-                tool_icon.addPixmap(_tool_icon(icon, active).pixmap(QSize(16, 16)), QIcon.Mode.Normal, state)
-        button.setIcon(tool_icon)
-        button.setIconSize(QSize(16, 16))
-        button.setFixedSize(30, 28)
+        style_header_button(button, width=30, icon=_tool_icon(icon))
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
         return button
@@ -247,7 +237,7 @@ class ColorNodePanel(QWidget):
     def _separator(self, name: str) -> QWidget:
         separator = QWidget(self.toolbar)
         separator.setObjectName(name)
-        separator.setFixedSize(1, 28)
+        separator.setFixedSize(1, HEADER_HEIGHT - 2)
         separator.setStyleSheet(f"background: {C.PANEL_DIVIDER};")
         return separator
 

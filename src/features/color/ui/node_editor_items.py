@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.style_sheet import C
 from .node_tool_indicators import TOOL_LABELS
 
 if TYPE_CHECKING:
@@ -31,8 +32,8 @@ if TYPE_CHECKING:
 
 
 COLORS: dict[str, str] = {
-    "background": "#28282e",
-    "grid": "#222227",
+    "background": C.BG_PANEL,
+    "grid": C.COLOR_PANEL_INSET,
     "card": "#333337",
     "card_bottom": "#252529",
     "border": "#101012",

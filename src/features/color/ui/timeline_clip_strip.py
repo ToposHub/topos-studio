@@ -35,6 +35,7 @@ from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identit
 from src.shared.i18n.i18n import I18N
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.media.metadata import format_codec_label
+from src.shared.ui.style_sheet import C
 from src.features.color.ui.clip_version_ui import (
     ClipVersionCollection, ClipVersionResult, ClipVersionTarget,
     ClipVersionUiController, VersionScope,
@@ -61,9 +62,6 @@ def _emit_color_clip_debug(message: str, *args: object) -> None:
 # ---------------------------------------------------------------------------
 # Dark-theme palette constants (matching the rest of the app)
 # ---------------------------------------------------------------------------
-_BG_DARK = "#242426"
-_BG_CARD = _BG_DARK
-_BG_CARD_HOVER = "#3a3a40"
 _BORDER_SELECTED = "#e65b50"
 _TEXT_PRIMARY = "#cccccc"
 _TEXT_SECONDARY = "#888888"
@@ -589,7 +587,7 @@ class ThumbnailWidget(QWidget):
         outline = QPainterPath()
         outline.addRoundedRect(bounds, radius, radius)
 
-        painter.fillRect(self.rect(), QColor(_BG_DARK))
+        painter.fillRect(self.rect(), QColor(C.BG_PANEL))
         painter.save()
         painter.setClipPath(outline)
         painter.fillRect(self.rect(), QColor("#1a1a1a"))
@@ -806,7 +804,7 @@ class TimelineClipCard(QFrame):
         self._header.index_label.update()
 
     def _apply_style(self) -> None:
-        self.setStyleSheet(f"TimelineClipCard {{ background: {_BG_DARK}; border: none; }}")
+        self.setStyleSheet(f"TimelineClipCard {{ background: {C.BG_PANEL}; border: none; }}")
         self._thumb_widget.setProperty("selected", self._selected)
         self._thumb_widget.update()
         self._update_bottom_label()
@@ -1078,18 +1076,18 @@ class TimelineClipStrip(QWidget):
         )
         self._scroll_area.setStyleSheet(f"""
             QScrollArea {{
-                background: {_BG_DARK};
+                background: {C.BG_PANEL};
                 border: none;
             }}
             QScrollBar:horizontal {{
-                background: #1c1c1e;
+                background: {C.COLOR_PANEL_INSET};
                 height: 9px;
                 border: none;
                 margin: 0 4px 1px 4px;
                 border-radius: 4px;
             }}
             QScrollBar::groove:horizontal {{
-                background: #1c1c1e;
+                background: {C.COLOR_PANEL_INSET};
                 height: 8px;
                 border-radius: 4px;
             }}
@@ -1103,7 +1101,7 @@ class TimelineClipStrip(QWidget):
                 background: #a0a0ab;
             }}
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
-                background: #1c1c1e;
+                background: {C.COLOR_PANEL_INSET};
             }}
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
                 width: 0px;
@@ -1120,7 +1118,7 @@ class TimelineClipStrip(QWidget):
         # Container widget inside scroll area
         self._container = QWidget()
         self._container.installEventFilter(self)
-        self._container.setStyleSheet(f"background: {_BG_DARK};")
+        self._container.setStyleSheet(f"background: {C.BG_PANEL};")
         self._card_layout = QHBoxLayout(self._container)
         self._card_layout.setContentsMargins(4, 4, 4, 4)
         self._card_layout.setSpacing(4)
@@ -1139,7 +1137,7 @@ class TimelineClipStrip(QWidget):
             QLabel {{
                 color: {_TEXT_SECONDARY};
                 font-size: 11px;
-                background: {_BG_DARK};
+                background: {C.BG_PANEL};
                 padding: 20px;
             }}
         """)
@@ -1287,7 +1285,7 @@ class TimelineClipStrip(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
-                background: {_BG_DARK};
+                background: {C.COLOR_PANEL_INSET};
                 border: 1px solid #444;
             }}
             QMenu::item {{
@@ -1295,7 +1293,7 @@ class TimelineClipStrip(QWidget):
                 padding: 6px 20px;
             }}
             QMenu::item:selected {{
-                background: {_BG_CARD_HOVER};
+                background: {C.COLOR_PANEL_RAISED};
             }}
             QMenu::separator {{
                 height: 1px;

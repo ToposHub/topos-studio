@@ -19,35 +19,13 @@ from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QEvent
 from PyQt6.QtGui import QKeySequence, QShortcut
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
-from src.shared.assets.icon_manager import icon_reset
+from src.shared.assets.icon_manager import icon_cut
+from src.features.color.ui.panel_chrome import create_panel_layout, style_header_button, style_reset_button
 
 
 # =============================================================================
 # Local Style Constants (简化版，仅保留必要的本地样式)
 # =============================================================================
-
-# 按钮样式常量
-HEADER_BUTTON_STYLE = """
-    QPushButton {
-        background-color: #27272b;
-        border: 1px solid #3a3a3a;
-        border-radius: 4px;
-        color: #888888;
-        padding: 0 12px;
-        font-weight: bold;
-        font-size: 11px;
-    }
-    QPushButton:hover {
-        background-color: #2e2e33;
-        border: 1px solid #ff8800;
-        color: #eeeeee;
-    }
-    QPushButton:checked {
-        background-color: #ff8800;
-        border: 1px solid #ff8800;
-        color: white;
-    }
-"""
 
 TOOL_BUTTON_STYLE = """
     QPushButton {
@@ -169,12 +147,10 @@ class CropPanel(QWidget):
         """Initialize the UI components."""
         # 使用全局 QSS，无需本地样式表
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        title_row, layout = create_panel_layout(self, (4, 4, 4), 4)
 
         # Header with enable checkbox
-        self._setup_header(layout)
+        self._setup_header(title_row)
 
         # Main content - Using QGroupBox like raw_panel.py
         self.content_widget = QWidget()
@@ -193,33 +169,28 @@ class CropPanel(QWidget):
         layout.addWidget(self.content_widget)
         self.content_widget.setEnabled(False)
 
-    def _setup_header(self, parent_layout) -> None:
+    def _setup_header(self, header_layout: QHBoxLayout) -> None:
         """Setup header with activate and reset buttons."""
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(8)
         
         # Activate button
-        self.activate_btn = QPushButton(I18N.tr("crop.activate", "✂ 裁切"))
+        self.activate_btn = QPushButton(I18N.tr("crop.activate", "裁切"))
         self.activate_btn.setCheckable(True)
         self.activate_btn.setChecked(False)
-        self.activate_btn.setFixedHeight(26)
+        style_header_button(self.activate_btn, icon=icon_cut())
         self.activate_btn.setToolTip(I18N.tr("crop.activate_tooltip", "激活/关闭裁切工具 (快捷键：C)"))
         self.activate_btn.clicked.connect(self._on_activate_clicked)
-        self.activate_btn.setStyleSheet(HEADER_BUTTON_STYLE)
         header_layout.addWidget(self.activate_btn)
         
         header_layout.addStretch()
         
         # Reset all button (使用 icon_manager)
         self.reset_all_btn = QPushButton()
-        self.reset_all_btn.setIcon(icon_reset())
-        self.reset_all_btn.setFixedSize(22, 22)
+        style_reset_button(self.reset_all_btn, global_reset=True)
         self.reset_all_btn.setToolTip(I18N.tr("crop.reset_tooltip", "重置所有裁切参数（裁切框、旋转）(快捷键：Shift+R)"))
         self.reset_all_btn.clicked.connect(self.on_reset_all_clicked)
         header_layout.addWidget(self.reset_all_btn)
         
-        parent_layout.addLayout(header_layout)
 
     def _setup_aspect_ratio_section(self, layout) -> None:
         """Setup aspect ratio selection section using QGroupBox."""
@@ -309,8 +280,7 @@ class CropPanel(QWidget):
         
         # Reset rotation button (使用 icon_manager)
         self.reset_rot_btn = QPushButton()
-        self.reset_rot_btn.setIcon(icon_reset())
-        self.reset_rot_btn.setFixedSize(22, 22)
+        style_reset_button(self.reset_rot_btn)
         self.reset_rot_btn.setToolTip(I18N.tr(
             "crop.reset_rotation_tooltip", "重置旋转角度为 0 (快捷键：R)"))
         self.reset_rot_btn.clicked.connect(self._on_reset_rotation)
@@ -450,7 +420,7 @@ class CropPanel(QWidget):
         self.crop_toggled.emit(checked)
 
         # Update button text
-        self.activate_btn.setText(I18N.tr("crop.activate_active", "✂ 裁切中") if checked else I18N.tr("crop.activate", "✂ 裁切"))
+        self.activate_btn.setText(I18N.tr("crop.activate_active", "裁切中") if checked else I18N.tr("crop.activate", "裁切"))
 
     def _deactivate_without_commit(self) -> None:
         """AUD-25311：取消路径 — 恢复进入裁切前的参数快照并关闭工具。

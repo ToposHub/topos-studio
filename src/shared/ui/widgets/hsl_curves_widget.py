@@ -25,6 +25,7 @@ except ModuleNotFoundError:
 
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
+    C,
     apply_combo_dropdown_style,
     CURVE_BTN_CONTAINER_STYLE,
     HSL_MODE_COMBO_STYLE,
@@ -128,7 +129,7 @@ class HSLCurvesWidget(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setStyleSheet('background-color: #232326;')
+        self.setStyleSheet(f'background-color: {C.COLOR_PANEL_INSET};')
         self._scope = GpuScopeWidget(self, show_value_axis=False)
         self._scope.hide()
         self._has_histogram = False

@@ -2197,8 +2197,8 @@
     "cancel": "取消"
   },
   "crop": {
-    "activate": "✂ 裁切",
-    "activate_active": "✂ 裁切中",
+    "activate": "裁切",
+    "activate_active": "裁切中",
     "activate_tooltip": "激活/关闭裁切工具 (快捷键：C)",
     "reset_tooltip": "重置所有裁切参数（裁切框、旋转）(快捷键：Shift+R)",
     "constrain_tooltip": "开启时裁切框限定在图像范围内；关闭时允许自由拖拽超出画布，实现画布扩展效果",

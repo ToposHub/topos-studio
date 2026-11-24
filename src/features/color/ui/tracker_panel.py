@@ -37,10 +37,13 @@ from PyQt6.QtWidgets import (
 )
 
 from src.features.color.ui.tracker_graph import TrackerGraph
+from src.features.color.ui.panel_chrome import (
+    HEADER_HEIGHT, color_panel_stylesheet, create_panel_header, style_header_button, style_reset_button,
+)
 from src.features.color.ui.tracker_status import PanelState, TrackerStatusLight
 from src.features.color.ui.tracker_toolbar import TrackerToolBar
 from src.shared.i18n.i18n import tr
-from src.shared.assets.icon_manager import icon_reset
+from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets import ChevronComboBox
 
 _CHECKMARK_ICON_FILE = (
@@ -51,19 +54,16 @@ _CHECKMARK_ICON_FILE = (
 # （带引号的 url("file:...") URI 形式会被 QSS 解析成相对路径，不能用。）
 _CHECKMARK_ICON_PATH = _CHECKMARK_ICON_FILE.resolve().as_posix()
 
-PANEL_STYLE = """
-TrackerPanel { background-color: #202024; }
+PANEL_STYLE = color_panel_stylesheet("""
+TrackerPanel { background-color: __COLOR_PANEL_BASE__; }
 TrackerPanel QWidget#tracker_transport,
 TrackerPanel QWidget#tracker_context_toolbar,
 TrackerPanel QWidget#tracker_params,
-TrackerPanel QWidget#tracker_bottom_bar { background-color: #2C2D32; }
-TrackerPanel QWidget#tracker_title_bar { background-color: #202024; }
-TrackerPanel QWidget#tracker_channels { background-color: #2C2D32; }
+TrackerPanel QWidget#tracker_bottom_bar { background-color: __COLOR_PANEL_RAISED__; }
+TrackerPanel QWidget#tracker_channels { background-color: __COLOR_PANEL_RAISED__; }
 TrackerPanel QLabel { color: #D8D8D8; font-size: 11px; background: transparent; }
 TrackerPanel QLabel#tracker_secondary { color: #8C8C8C; font-size: 10px; }
 TrackerPanel QLabel#tracker_title { font-weight: bold; font-size: 12px; }
-TrackerPanel QFrame#tracker_separator,
-TrackerPanel QFrame#tracker_vertical_separator { color: #34353A; background-color: #34353A; }
 TrackerPanel QPushButton {
     background-color: #25262A; border: 1px solid #36373D; border-radius: 3px;
     color: #D8D8D8; font-size: 10px; padding: 2px 6px;
@@ -147,7 +147,7 @@ TrackerPanel QCheckBox#tracker_channel_scale { color: #FF38A8; }
 TrackerPanel QCheckBox#tracker_channel_rotation { color: #FFD43B; }
 TrackerPanel QSlider::groove:horizontal { height: 3px; background: #3B3C42; }
 TrackerPanel QSlider::handle:horizontal { width: 10px; margin: -4px 0; background: #FF8A00; border-radius: 5px; }
-""".replace("__CHECKMARK_ICON_URL__", _CHECKMARK_ICON_PATH)
+""").replace("__CHECKMARK_ICON_URL__", _CHECKMARK_ICON_PATH)
 
 # 跟踪类型下拉：值 → 显示（3D 不在范围，显示禁用项）
 MODE_ITEMS = [
@@ -189,8 +189,8 @@ def _trf(key: str, default: str, **kwargs: object) -> str:
 def _separator() -> QFrame:
     line = QFrame()
     line.setObjectName("tracker_separator")
-    line.setFrameShape(QFrame.Shape.HLine)
     line.setFixedHeight(1)
+    line.setStyleSheet(f"background: {C.PANEL_DIVIDER}; border: none;")
     return line
 
 
@@ -249,7 +249,6 @@ class TrackerPanel(QWidget):
         root.setSpacing(0)
 
         root.addWidget(self._build_title_bar())
-        root.addWidget(_separator())
         self.toolbar = TrackerToolBar(self)
         self.toolbar.setObjectName("tracker_context_toolbar")
         self.toolbar.hide()
@@ -327,9 +326,7 @@ class TrackerPanel(QWidget):
             self.clear_tracking_requested.emit()
 
     def _build_title_bar(self) -> QWidget:
-        bar = QWidget(self)
-        bar.setObjectName("tracker_title_bar")
-        bar.setFixedHeight(30)
+        bar = create_panel_header(object_name="tracker_title_bar")
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(10, 0, 2, 0)
         layout.setSpacing(0)
@@ -342,14 +339,14 @@ class TrackerPanel(QWidget):
         self.shape_name_label = QLabel("", bar)
         self.shape_name_label.hide()
         layout.addStretch(1)
+        action_border = f"QAbstractButton {{ border-left: 1px solid {C.PANEL_DIVIDER}; }}"
         self.title_mode_buttons = {}
         for key, label in (("window", "Window"), ("stabilizer", "Stabilizer"), ("fx", "FX")):
             button = QPushButton(bar)
             button.setObjectName("tracker_icon_action")
-            button.setFixedSize(30, 30)
-            button.setIcon(self._title_icon(key))
-            button.setIconSize(QSize(20, 20))
-            button.setStyleSheet("border:0; border-left:1px solid #101014; border-radius:0;")
+            style_header_button(button, width=30, icon=self._title_icon(key))
+            button.setFixedHeight(HEADER_HEIGHT)
+            button.setStyleSheet(button.styleSheet() + action_border)
             button.setAccessibleName(label)
             button.setToolTip(label if key in ("window", "stabilizer") else tr(
                 "tracker.mode_unavailable", "{mode} is not available").format(mode=label))
@@ -360,12 +357,13 @@ class TrackerPanel(QWidget):
                 button.clicked.connect(lambda _checked=False, mode=key: self.set_palette_mode(mode))
             self.title_mode_buttons[key] = button
             layout.addWidget(button)
+        reset_divider = QFrame(bar)
+        reset_divider.setFixedSize(1, HEADER_HEIGHT)
+        reset_divider.setStyleSheet(f"background: {C.PANEL_DIVIDER}; border: none;")
+        layout.addWidget(reset_divider)
         self.btn_clear = QPushButton(bar)
         self.btn_clear.setObjectName("tracker_icon_action")
-        self.btn_clear.setFixedSize(38, 30)
-        self.btn_clear.setIcon(icon_reset())
-        self.btn_clear.setIconSize(QSize(14, 14))
-        self.btn_clear.setStyleSheet("border:0; border-left:1px solid #101014; border-radius:0;")
+        style_reset_button(self.btn_clear, global_reset=True)
         self.btn_clear.setToolTip(tr("tracker.clear_all_points", "Clear All Tracking Points"))
         self.btn_clear.clicked.connect(self._reset_active_palette)
         layout.addWidget(self.btn_clear)
@@ -376,10 +374,9 @@ class TrackerPanel(QWidget):
         self.btn_params.hide()
         self.btn_title_menu = QPushButton(bar)
         self.btn_title_menu.setObjectName("tracker_title_menu")
-        self.btn_title_menu.setFixedSize(38, 30)
-        self.btn_title_menu.setIcon(self._title_icon("menu"))
-        self.btn_title_menu.setIconSize(QSize(20, 20))
-        self.btn_title_menu.setStyleSheet("border:0; border-left:1px solid #101014; border-radius:0;")
+        style_header_button(self.btn_title_menu, width=38, icon=self._title_icon("menu"))
+        self.btn_title_menu.setFixedHeight(HEADER_HEIGHT)
+        self.btn_title_menu.setStyleSheet(self.btn_title_menu.styleSheet() + action_border)
         self.btn_title_menu.setToolTip(tr("tracker.options", "Tracker options"))
         self.btn_title_menu.clicked.connect(self._show_options_menu)
         layout.addWidget(self.btn_title_menu)
@@ -777,13 +774,9 @@ class TrackerPanel(QWidget):
         self.btn_delete_manual.clicked.connect(self.delete_manual_requested.emit)
         self.btn_delete_manual.hide()
 
-        self.btn_reset_current = QPushButton("↺", bar)
+        self.btn_reset_current = QPushButton(bar)
         self.btn_reset_current.setObjectName("tracker_icon_action")
-        self.btn_reset_current.setText("")
-        self.btn_reset_current.setIcon(icon_reset())
-        self.btn_reset_current.setIconSize(QSize(14, 14))
-        self.btn_reset_current.setFixedSize(28, 24)
-        self.btn_reset_current.setStyleSheet("font-size: 17px;")
+        style_reset_button(self.btn_reset_current)
         self.btn_reset_current.setAccessibleName(tr("tracker.reset_current", "重置当前帧"))
         self.btn_reset_current.setToolTip(tr("tracker.reset_current_tooltip", "重置当前帧"))
         self.btn_reset_current.clicked.connect(self.reset_current_requested.emit)

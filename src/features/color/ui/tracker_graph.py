@@ -18,10 +18,11 @@ from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import QCheckBox, QGridLayout, QHBoxLayout, QSlider, QVBoxLayout, QWidget
 from src.shared.i18n.i18n import tr
+from src.shared.ui.style_sheet import C
 
 SeriesPoint = Tuple[int, float]
 
-GRAPH_BG = QColor(0x20, 0x20, 0x24)
+GRAPH_BG = QColor(C.COLOR_PANEL_INSET)
 GRID_COLOR = QColor(0x2A, 0x2C, 0x33)
 AXIS_TEXT_COLOR = QColor(0x8C, 0x8C, 0x8C)
 PLAYHEAD_COLOR = QColor(0xFF, 0x40, 0x40)

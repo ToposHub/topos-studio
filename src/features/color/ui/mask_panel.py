@@ -6,12 +6,15 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from src.shared.i18n.i18n import I18N
 from PyQt6.QtCore import pyqtSignal, Qt, QSize, QTimer
 from src.features.color.core.layer import MaskGroup
+from src.features.color.ui.panel_chrome import (
+    color_panel_stylesheet, create_panel_layout, style_reset_button,
+)
 from src.shared.ui.widgets.drag_value import DragValue
 from src.shared.assets.icon_manager import (
     icon_delete, icon_visible, icon_hidden, icon_invert,
     icon_operation_add, icon_operation_subtract, icon_operation_intersect,
     icon_circle, icon_rect, icon_pen, icon_gradient, icon_ai, icon_brush,
-    icon_folder, icon_reset, icon_eraser, icon_cut, icon_smart)
+    icon_folder, icon_eraser, icon_cut, icon_smart)
 
 
 class MaskTreeWidget(QTreeWidget):
@@ -209,9 +212,9 @@ class MaskPanel(QWidget):
         self.video_panel.tracker_requested.connect(self.send_to_tracker_requested.emit)
 
     def get_style_sheet(self) -> str:
-        return """
+        return color_panel_stylesheet("""
             MaskPanel {
-                background-color: #1a1a1a;
+                background-color: __COLOR_PANEL_BASE__;
             }
             QGroupBox {
                 border: 1px solid #333;
@@ -228,7 +231,7 @@ class MaskPanel(QWidget):
                 padding: 0 5px;
             }
             QPushButton {
-                background-color: #333;
+                background-color: __COLOR_PANEL_BASE__;
                 border: 1px solid #444;
                 border-radius: 4px;
                 padding: 4px 10px;
@@ -236,26 +239,16 @@ class MaskPanel(QWidget):
                 font-size: 10px;
             }
             QPushButton:hover {
-                background-color: #3d3d3d;
+                background-color: __COLOR_PANEL_RAISED__;
                 color: #eee;
                 border: 1px solid #555;
-            }
-            QPushButton#reset_btn {
-                padding: 0px;
-                border-radius: 8px;
-                background-color: transparent;
-                border: 1px solid #333;
-            }
-            QPushButton#reset_btn:hover {
-                background-color: #333;
-                border: 1px solid #ff8800;
             }
             QLabel {
                 color: #bbbbbb;
                 font-size: 11px;
             }
             QTreeWidget {
-                background-color: #1a1a1a;
+                background-color: __COLOR_PANEL_INSET__;
                 border: 1px solid #333;
                 border-radius: 4px;
                 color: #eee;
@@ -282,7 +275,7 @@ class MaskPanel(QWidget):
                 border-image: none;
                 image: none;
             }
-        """
+        """)
 
     def init_ui(self) -> None:
         self.setStyleSheet(self.get_style_sheet())
@@ -292,12 +285,9 @@ class MaskPanel(QWidget):
         root_layout.setSpacing(0)
         self.image_panel = QWidget(self)
         root_layout.addWidget(self.image_panel)
-        main_layout = QVBoxLayout(self.image_panel)
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
+        header_layout, main_layout = create_panel_layout(self.image_panel, (4, 4, 4), 4)
 
         # Header with title and reset button
-        header_layout = QHBoxLayout()
         self.title_label = QLabel(I18N.tr("mask.title", "遮罩控制"))
         self.title_label.setStyleSheet("""
             color: #888; font-weight: bold; font-size: 10px;
@@ -309,14 +299,11 @@ class MaskPanel(QWidget):
 
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr(
             "mask.reset_tooltip", "Reset All Mask Parameters"))
         self.reset_btn.clicked.connect(self.reset_all)
         header_layout.addWidget(self.reset_btn)
-        main_layout.addLayout(header_layout)
 
         # Main 2-Column Container (3:2 ratio)
         columns_container = QWidget()

@@ -20,8 +20,14 @@ from PyQt6.QtWidgets import (
     QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.features.color.ui.gallery_icons import gallery_icon
 from src.features.color.ui.node_resource_mime import resource_mime_data
-from src.shared.assets.icon_manager import get_icon, icon_grid, icon_list, icon_search
+from src.features.color.ui.panel_chrome import (
+    HEADER_HEIGHT as PANEL_HEADER_HEIGHT,
+    HEADER_ICON_ACTIVE, HEADER_ICON_HOVER, HEADER_ICON_IDLE,
+    header_icon, style_header_button, style_reset_button,
+)
+from src.shared.assets.icon_manager import icon_grid, icon_list
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
 from src.shared.ui.widgets.color_picker_control import ColorPickerControl, qcolor_to_linear_rgba
@@ -59,7 +65,7 @@ def _effect_icon(resource_id: str) -> QIcon:
 class _EffectsTabs(QTabWidget):
     """Draw one continuous header behind the tabs and corner actions."""
 
-    HEADER_HEIGHT = 36
+    HEADER_HEIGHT = PANEL_HEADER_HEIGHT
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -71,7 +77,7 @@ class _EffectsTabs(QTabWidget):
             QTabWidget::pane {{ border: 0; }}
             QTabBar {{ background: transparent; border: 0; }}
             QTabBar::tab {{
-                background: transparent; color: {C.TEXT_LABEL};
+                background: transparent; color: {HEADER_ICON_IDLE};
                 border: 0; border-bottom: 3px solid transparent;
                 border-radius: 0; margin: 0; padding: 0 15px;
                 height: {self.HEADER_HEIGHT - 3}px; font-size: 12px;
@@ -79,9 +85,9 @@ class _EffectsTabs(QTabWidget):
             QTabBar::tab:first, QTabBar::tab:last, QTabBar::tab:only-one {{
                 border-radius: 0;
             }}
-            QTabBar::tab:hover {{ color: {C.TEXT_PRIMARY}; background: {C.BG_ACTIVE}; }}
+            QTabBar::tab:hover {{ color: {HEADER_ICON_HOVER}; background: transparent; }}
             QTabBar::tab:selected {{
-                color: {C.TEXT_PRIMARY}; font-weight: bold;
+                color: {HEADER_ICON_ACTIVE}; font-weight: bold;
                 background: transparent; border-bottom: 3px solid {C.ACCENT_SURFACE};
             }}
             QTabBar::tab:disabled {{ color: {C.TEXT_HINT}; }}
@@ -98,7 +104,7 @@ class _EffectsTabs(QTabWidget):
     def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
         painter = QPainter(self)
-        painter.fillRect(0, 0, self.width(), self.HEADER_HEIGHT - 1, QColor(C.BG_INPUT))
+        painter.fillRect(0, 0, self.width(), self.HEADER_HEIGHT - 1, QColor(C.COLOR_PANEL_HEADER))
         painter.end()
 
 
@@ -148,7 +154,7 @@ class _ResolveEffectDelegate(QStyledItemDelegate):
             available = isinstance(entry, dict) and entry.get('available', True)
             selected = bool(option.state & QStyle.StateFlag.State_Selected)
             painter.setPen(QPen(QColor(C.TEXT_LABEL if selected else C.PANEL_DIVIDER), 1))
-            painter.setBrush(QColor(C.BG_ACTIVE if selected else C.BG_PANEL))
+            painter.setBrush(QColor(C.COLOR_PANEL_RAISED if selected else C.BG_PANEL))
             painter.drawRoundedRect(row, 2, 2)
             well = QRect(row.left(), row.top(), 43, row.height())
             painter.setPen(QColor(C.PANEL_DIVIDER))
@@ -187,30 +193,18 @@ class ColorEffectsBrowser(QWidget):
         corner = QWidget()
         corner.setObjectName('EffectsHeaderActions')
         corner.setStyleSheet(
-            f'#EffectsHeaderActions {{ background: {C.BG_INPUT}; border: 0; }}')
+            f'#EffectsHeaderActions {{ background: {C.COLOR_PANEL_HEADER}; border: 0; }}')
         corner_bar = QHBoxLayout(corner)
         corner_bar.setContentsMargins(0, 0, 0, 0)
         corner_bar.setSpacing(0)
-        self.search_button = self._tool('⌕', _tr('search_effects', 'Search Effects'))
-        self.search_button.setText('')
-        self.search_button.setIcon(icon_search(C.TEXT_LABEL))
+        self.search_button = self._tool('', _tr('search_effects', 'Search Effects'))
+        self.search_button.setIcon(header_icon(gallery_icon('search')))
         self.search_button.setCheckable(True)
-        self.more_button = self._tool('⋯', _tr('effect_options', 'Effect options'))
-        self.more_button.setText('')
-        self.more_button.setIcon(get_icon('fa5s.ellipsis-h', color=C.TEXT_LABEL))
+        self.more_button = self._tool('', _tr('effect_options', 'Effect options'))
+        self.more_button.setIcon(header_icon(gallery_icon('more')))
         corner.setFixedHeight(self.tabs.HEADER_HEIGHT - 1)
         for button in (self.search_button, self.more_button):
-            button.setFixedSize(32, self.tabs.HEADER_HEIGHT - 1)
-            button.setIconSize(QSize(14, 14))
-            button.setStyleSheet(f"""
-                QToolButton {{
-                    background: transparent; border: 0; border-radius: 0;
-                    border-left: 1px solid {C.PANEL_DIVIDER}; padding: 0;
-                }}
-                QToolButton:hover, QToolButton:checked {{ background: {C.BG_ACTIVE}; }}
-                QToolButton:pressed {{ background: {C.BG_BUTTON_PRESS}; }}
-                QToolButton:focus {{ border-bottom: 2px solid {C.ACCENT_SURFACE}; }}
-            """)
+            style_header_button(button, width=32)
         corner_bar.addWidget(self.search_button)
         corner_bar.addWidget(self.more_button)
         self.tabs.setCornerWidget(corner, Qt.Corner.TopRightCorner)
@@ -569,15 +563,18 @@ class ColorEffectsBrowser(QWidget):
         font.setBold(True)
         title.setFont(font)
         header.addWidget(title, 1)
-        for text, tooltip, operation, payload, enabled in (
-            ('↺', _tr('reset_effect', 'Reset effect'), 'reset_instance', {'instance_id': iid}, True),
-            ('×', _tr('remove_effect', 'Remove effect'), 'remove_instance', {'instance_id': iid}, True),
+        for text, tooltip, operation in (
+            ('', _tr('reset_effect', 'Reset effect'), 'reset_instance'),
+            ('×', _tr('remove_effect', 'Remove effect'), 'remove_instance'),
         ):
             button = self._tool(text, tooltip)
-            button.setFixedSize(21, 23)
+            if operation == 'reset_instance':
+                style_reset_button(button)
+            else:
+                button.setFixedSize(21, 23)
             button.setObjectName('effect_' + operation + '_' + iid)
-            button.setEnabled(enabled)
-            button.clicked.connect(lambda _checked=False, op=operation, data=payload: self._intent(op, data))
+            button.clicked.connect(
+                lambda _checked=False, op=operation: self._intent(op, {'instance_id': iid}))
             header.addWidget(button)
         box.addLayout(header)
         parameters = instance.get('parameters')

@@ -62,6 +62,9 @@ class C:
     BG_DARK         = "#1e1e1e"   # 面板标题 / 停靠窗口
     BG_PANEL_HEADER = "#222226"   # 独立面板标题栏
     BG_PANEL        = "#27272b"   # 面板背景（标准）
+    COLOR_PANEL_INSET = "#202024"  # 调色面板深色区
+    COLOR_PANEL_HEADER = COLOR_PANEL_INSET
+    COLOR_PANEL_RAISED = "#2C2D31"  # 调色面板浅色区
     KEYFRAMES_BG    = BG_PANEL
     TIMELINE_TIMECODE_BG = "#202025"
     BG_INPUT        = "#252529"   # 输入框 / 下拉框背景
@@ -1854,25 +1857,20 @@ TAB_STYLE = """
 # ============================================================================
 # 图层列表样式
 # ============================================================================
-LAYER_LIST_STYLE = """
+LAYER_LIST_STYLE = f"""
     /* 图层列表 */
-    QListWidget { 
-        background: #27272b;              /* 列表背景 */
+    QListWidget {{
+        background: {C.BG_PANEL};
         border: none; 
         outline: none; 
-    }
+    }}
     
-    QListWidget::item { 
+    QListWidget::item {{
         border-bottom: 1px solid #2a2a2a;  /* 项目分隔线 */
-    }
+    }}
     
-    QListWidget::item:selected { 
-        background: #444;              /* 选中背景 */
-    }
-    
-    QListWidget::item:hover { 
-        background: #333;              /* 悬停背景 */
-    }
+    QListWidget::item:selected {{ background: {C.COLOR_PANEL_RAISED}; }}
+    QListWidget::item:hover:!selected {{ background: {C.COLOR_PANEL_INSET}; }}
 """
 
 # ============================================================================

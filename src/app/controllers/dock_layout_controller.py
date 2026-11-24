@@ -4208,6 +4208,11 @@ class DockLayoutMixin:
         mode they stay usable. Media Pool is already unavailable in image mode
         (Edit feature disabled at startup).
         """
+        color_active = self.current_page == "Color"
+        for attr in ("files_panel", "library_panel"):
+            set_active = getattr(getattr(self, attr, None), "set_color_workspace_active", None)
+            if callable(set_active):
+                set_active(color_active)
         self._enforce_work_mode_dock_visibility()
         image_workflow = self._current_work_mode() == "image"
         if image_workflow and getattr(self, "dock_export", None) is not None:

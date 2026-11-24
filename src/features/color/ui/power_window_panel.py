@@ -19,7 +19,10 @@ from PyQt6.QtWidgets import (
 
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.drag_value import DragValue
-from src.shared.assets.icon_manager import icon_reset
+from src.shared.assets.icon_manager import get_icon
+from src.features.color.ui.panel_chrome import (
+    color_panel_stylesheet, create_panel_header, style_header_button, style_reset_button,
+)
 
 WINDOW_TYPES = ("rect", "circle", "polygon", "curve", "gradient")
 WINDOW_NAMES = {"rect": "Linear", "circle": "Circle", "polygon": "Polygon", "curve": "Curve", "gradient": "Gradient"}
@@ -85,19 +88,18 @@ def window_icon(kind: str, *, add: bool = False, muted: bool = False) -> QIcon:
     return icon
 
 
-STYLE = """
-PowerWindowPanel { background: #242429; }
-PowerWindowPanel QWidget#window_title { background: #202024; border-bottom: 1px solid #0d0d0f; }
+STYLE = color_panel_stylesheet("""
+PowerWindowPanel { background: __COLOR_PANEL_BASE__; }
 PowerWindowPanel QLabel { background: transparent; color: #bebfc1; font-size: 11px; }
 PowerWindowPanel QLabel:disabled { color: #56585a; }
 PowerWindowPanel QLabel#window_heading { color: #eeeeef; font-weight: 600; }
-PowerWindowPanel QWidget#window_parameters { background: #2b2d31; border-left: 1px solid #0d0d0f; }
-PowerWindowPanel QWidget#window_tools { background: #2b2d31; border-bottom: 1px solid #0d0d0f; }
-PowerWindowPanel QScrollArea { border: 0; background: #242429; }
-PowerWindowPanel QWidget#window_rows { background: #242429; }
-PowerWindowPanel QFrame#window_row { background: #242429; border-bottom: 1px solid #101014; }
-PowerWindowPanel QFrame#window_row[alternate="true"] { background: #202024; }
-PowerWindowPanel QFrame#window_row[selected="true"] { background: #29292e; }
+PowerWindowPanel QWidget#window_parameters { background: __COLOR_PANEL_RAISED__; border-left: 1px solid #0d0d0f; }
+PowerWindowPanel QWidget#window_tools { background: __COLOR_PANEL_RAISED__; border-bottom: 1px solid #0d0d0f; }
+PowerWindowPanel QScrollArea { border: 0; background: __COLOR_PANEL_BASE__; }
+PowerWindowPanel QWidget#window_rows { background: __COLOR_PANEL_BASE__; }
+PowerWindowPanel QFrame#window_row { background: __COLOR_PANEL_BASE__; border-bottom: 1px solid #101014; }
+PowerWindowPanel QFrame#window_row[alternate="true"] { background: __COLOR_PANEL_INSET__; }
+PowerWindowPanel QFrame#window_row[selected="true"] { background: __COLOR_PANEL_RAISED__; }
 PowerWindowPanel QPushButton { color: #97999a; background: transparent; border: 0; padding: 0; font-size: 11px; }
 PowerWindowPanel QPushButton:hover { background: #34363a; }
 PowerWindowPanel QPushButton#window_shape { background: #202024; border: 1px solid #151518; border-radius: 1px; }
@@ -105,10 +107,10 @@ PowerWindowPanel QPushButton#window_shape:checked { border: 1px solid #b84343; }
 PowerWindowPanel QPushButton#window_delete { border: 1px solid #414449; border-radius: 11px; }
 PowerWindowPanel QPushButton:disabled { color: #535559; }
 PowerWindowPanel QPushButton#window_toggle:checked { background: #45464c; }
-PowerWindowPanel QScrollBar:vertical { background: #242429; width: 7px; }
+PowerWindowPanel QScrollBar:vertical { background: __COLOR_PANEL_BASE__; width: 7px; }
 PowerWindowPanel QScrollBar::handle:vertical { background: #626366; min-height: 20px; }
 PowerWindowPanel QScrollBar::add-line:vertical, PowerWindowPanel QScrollBar::sub-line:vertical { height: 0; }
-"""
+""")
 
 
 class WindowValue(DragValue):
@@ -179,9 +181,7 @@ class PowerWindowPanel(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        title = QWidget(self)
-        title.setObjectName("window_title")
-        title.setFixedHeight(31)
+        title = create_panel_header(object_name="window_title")
         title_layout = QHBoxLayout(title)
         title_layout.setContentsMargins(10, 0, 0, 0)
         label = QLabel(I18N.tr("window.palette_title", "Window"), title)
@@ -189,13 +189,13 @@ class PowerWindowPanel(QWidget):
         title_layout.addWidget(label)
         title_layout.addStretch(1)
         self.reset_button = QPushButton(title)
-        self.reset_button.setIcon(icon_reset())
-        self.reset_button.setFixedSize(34, 29)
+        style_reset_button(self.reset_button, global_reset=True)
         self.reset_button.setToolTip(I18N.tr("window.reset_all", "Reset all windows"))
         self.reset_button.clicked.connect(self.reset_requested.emit)
         title_layout.addWidget(self.reset_button)
-        self.menu_button = QPushButton("⋯", title)
-        self.menu_button.setFixedSize(34, 29)
+        self.menu_button = QPushButton(title)
+        style_header_button(self.menu_button, width=34, icon=get_icon("fa5s.ellipsis-h"))
+        self.menu_button.setAccessibleName(I18N.tr("window.options", "Window Options"))
         self.menu_button.clicked.connect(self._show_menu)
         title_layout.addWidget(self.menu_button)
         root.addWidget(title)

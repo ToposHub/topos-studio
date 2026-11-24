@@ -2484,8 +2484,8 @@
     "shortcut_double_click_alt_drag": "Shortcut: Double-click or Alt+Drag handle"
   },
   "crop": {
-    "activate": "✂ Crop",
-    "activate_active": "✂ Cropping",
+    "activate": "Crop",
+    "activate_active": "Cropping",
     "activate_tooltip": "Activate/Deactivate crop tool (Shortcut: C)",
     "reset_tooltip": "Reset all crop parameters (crop box, rotation) (Shortcut: Shift+R)",
     "constrain_tooltip": "When enabled, crop box is constrained within image bounds; when disabled, allows dragging beyond canvas for canvas extension effect",

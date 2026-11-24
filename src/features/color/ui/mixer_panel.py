@@ -1,9 +1,10 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QTabWidget, QScrollArea
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QPushButton, QTabWidget, QScrollArea
 from src.shared.i18n.i18n import I18N
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
+from PyQt6.QtCore import pyqtSignal, QTimer
 from PyQt6.QtGui import QColor
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
-from src.shared.assets.icon_manager import icon_reset
+from src.shared.ui.style_sheet import C
+from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
 
 class MixerPanel(QWidget):
     # Emits dict of parameters
@@ -32,13 +33,13 @@ class MixerPanel(QWidget):
 
     def init_ui(self) -> None:
         layout = QVBoxLayout()
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabBar::tab { padding: 5px 15px; background: #222; color: #888; }
-            QTabBar::tab:selected { background: #333; color: #cc6600; }
+        self.tabs.setStyleSheet(f"""
+            QTabBar::tab {{ padding: 5px 15px; background: {C.COLOR_PANEL_INSET}; color: #888; }}
+            QTabBar::tab:selected {{ background: {C.COLOR_PANEL_RAISED}; color: #cc6600; }}
         """)
 
         self.hue_tab = self.create_mixer_tab(0, I18N.tr("mixer.hue", "色相"))
@@ -53,40 +54,25 @@ class MixerPanel(QWidget):
 
     def create_mixer_tab(self, param_idx, label_prefix):
         tab = QWidget()
+        btn_layout, body = create_panel_layout(tab, (10, 10, 5), 5)
+        body.setContentsMargins(0, 0, 0, 0)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        body.addWidget(scroll)
         
         container = QWidget()
         main_layout = QVBoxLayout(container)
-        main_layout.setContentsMargins(10, 5, 10, 5)
-        main_layout.setSpacing(5)
+        main_layout.setContentsMargins(10, 0, 10, 5)
 
         # Reset button at top-right - Using icon_manager
-        btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         reset_btn = QPushButton()
         reset_btn.setObjectName("reset_btn")
-        reset_btn.setIcon(icon_reset())
-        reset_btn.setIconSize(QSize(12, 12))
-        reset_btn.setFixedSize(16, 16)
-        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.setStyleSheet("""
-            QPushButton#reset_btn {
-                padding: 0px;
-                border-radius: 8px;
-                background-color: transparent;
-                border: 1px solid #333;
-            }
-            QPushButton#reset_btn:hover {
-                background-color: #333;
-                border: 1px solid #ff8800;
-            }
-        """)
+        style_reset_button(reset_btn, global_reset=True)
         reset_btn.setToolTip(f"Reset {label_prefix}")
         reset_btn.clicked.connect(lambda: self.reset_group(param_idx))
         btn_layout.addWidget(reset_btn)
-        main_layout.addLayout(btn_layout)
 
         # Grid for two columns
         grid = QGridLayout()
@@ -103,10 +89,6 @@ class MixerPanel(QWidget):
         main_layout.addLayout(grid)
         main_layout.addStretch()
         scroll.setWidget(container)
-        
-        vbox = QVBoxLayout(tab)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.addWidget(scroll)
         
         return tab
 

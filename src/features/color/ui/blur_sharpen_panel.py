@@ -2,10 +2,11 @@ from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
                              QStackedWidget, QLabel)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
-from PyQt6.QtCore import pyqtSignal, QSize, QTimer
+from PyQt6.QtCore import pyqtSignal, QTimer
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.shared.assets.icon_manager import icon_reset
+from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
+from src.shared.ui.style_sheet import C
 
 
 class BlurSharpenPanel(QWidget):
@@ -46,27 +47,22 @@ class BlurSharpenPanel(QWidget):
 
         self.init_ui()
 
-    def get_style_sheet(self):
+    def get_style_sheet(self) -> str:
         """Return panel-specific style sheet.
         
         QGroupBox/QComboBox/QSpinBox/QPushButton use global DARK_THEME styles.
         """
-        return """
-            BlurSharpenPanel {
-                background-color: #1a1a1a;
-            }
+        return f"""
+            BlurSharpenPanel {{ background-color: {C.BG_PANEL}; }}
         """
 
     def init_ui(self) -> None:
         self.setStyleSheet(self.get_style_sheet())
 
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
-        self.setLayout(main_layout)
+        header_layout, main_layout = create_panel_layout(self, (4, 4, 4), 4)
+        main_layout.setContentsMargins(0, 0, 0, 4)
 
         # Header with Enable switch
-        header_layout = QHBoxLayout()
         self.enable_cb = ToggleSwitch(checked=False)
         self.enable_cb.toggled.connect(self.on_enable_toggled)
         header_layout.addWidget(self.enable_cb)
@@ -92,20 +88,16 @@ class BlurSharpenPanel(QWidget):
         # Reset All Button - 使用 icon_manager
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr(
             "blur_sharpen.reset_sharpen_tooltip", "Reset All Sharpen Parameters"))
         self.reset_btn.clicked.connect(self.reset_all)
         header_layout.addWidget(self.reset_btn)
         
-        main_layout.addLayout(header_layout)
-
         # Container for all parameter controls
         self.container = QWidget()
         container_layout = QVBoxLayout()
-        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setContentsMargins(4, 0, 4, 0)
         container_layout.setSpacing(4)
         self.container.setLayout(container_layout)
         main_layout.addWidget(self.container)
@@ -161,12 +153,12 @@ class BlurSharpenPanel(QWidget):
         # Separator line between Sharpen and Blur
         separator = QWidget()
         separator.setFixedHeight(1)
-        separator.setStyleSheet("background-color: #333;")
+        separator.setStyleSheet(f"background-color: {C.PANEL_DIVIDER}; border: none;")
         main_layout.addWidget(separator)
         
         # Blur Section Header
         blur_header_layout = QHBoxLayout()
-        blur_header_layout.setContentsMargins(0, 8, 0, 4)
+        blur_header_layout.setContentsMargins(4, 8, 4, 4)
         
         self.blur_enable_cb = ToggleSwitch(checked=False)
         self.blur_enable_cb.toggled.connect(self.on_blur_enable_toggled)
@@ -194,9 +186,7 @@ class BlurSharpenPanel(QWidget):
         # Blur Reset Button - 使用 icon_manager
         self.blur_reset_btn = QPushButton()
         self.blur_reset_btn.setObjectName("reset_btn")
-        self.blur_reset_btn.setIcon(icon_reset())
-        self.blur_reset_btn.setIconSize(QSize(12, 12))
-        self.blur_reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.blur_reset_btn)
         self.blur_reset_btn.setToolTip(I18N.tr(
             "blur_sharpen.reset_blur_tooltip", "Reset All Blur Parameters"))
         self.blur_reset_btn.clicked.connect(self.reset_blur)
@@ -207,7 +197,7 @@ class BlurSharpenPanel(QWidget):
         # Blur Parameter Container
         self.blur_container = QWidget()
         blur_container_layout = QVBoxLayout()
-        blur_container_layout.setContentsMargins(0, 0, 0, 0)
+        blur_container_layout.setContentsMargins(4, 0, 4, 0)
         blur_container_layout.setSpacing(4)
         self.blur_container.setLayout(blur_container_layout)
         main_layout.addWidget(self.blur_container)

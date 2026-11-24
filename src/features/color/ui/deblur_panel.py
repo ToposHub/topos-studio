@@ -5,10 +5,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QComboBox, QPushButton, QGroupBox)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtCore import Qt, pyqtSignal
 from src.features.color.core.denoise_engine import RestorationEngine
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
-from src.shared.assets.icon_manager import icon_reset
+from src.features.color.ui.panel_chrome import create_panel_layout, style_reset_button
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +35,9 @@ class DeblurPanel(QWidget):
 
     def init_ui(self) -> None:
         """初始化 UI 布局"""
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
-        self.setLayout(main_layout)
+        header_layout, main_layout = create_panel_layout(self, (4, 4, 4), 4)
 
         # === Header: Model Selection + Reset Button ===
-        header_layout = QHBoxLayout()
         
         model_label = QLabel(I18N.tr("deblur.model", "模型:"))
         model_label.setFixedWidth(60)
@@ -60,15 +56,12 @@ class DeblurPanel(QWidget):
         # Reset Button
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr(
             "deblur.reset_tooltip", "Reset All Deblur Parameters"))
         self.reset_btn.clicked.connect(self.reset_defaults)
         header_layout.addWidget(self.reset_btn)
         
-        main_layout.addLayout(header_layout)
 
         # === AI Params Group ===
         self.ai_group = QGroupBox(I18N.tr("deblur.title", "去模糊"))

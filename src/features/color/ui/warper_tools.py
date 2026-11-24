@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QSlider, QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.features.color.ui.panel_chrome import style_reset_button
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, COMPOSITE_KEYFRAMES_ICON_BTN_STYLE
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
@@ -155,6 +156,8 @@ class MeshTools(QWidget):
                   ("all", "Select / Pin All or Deselect / De-pin All"), ("reset_selection", "Reset Selection / Pins"))
         for i, (name, label) in enumerate(labels):
             button = tool_button("reset" if name == "reset_selection" else name, tr(name, label))
+            if name == "reset_selection":
+                style_reset_button(button)
             button.clicked.connect(lambda checked=False, name=name: self.action_requested.emit(name))
             actions.addWidget(button, i // 4, i % 4); self.action_buttons[name] = button
         layout.addLayout(actions); layout.addSpacing(6)
@@ -209,7 +212,9 @@ class MeshTools(QWidget):
                 smooth.setEnabled(False)
                 smooth.clicked.connect(lambda checked=False, key=name: self.component_edited.emit(key, None, True))
                 buttons.addWidget(smooth); self.component_buttons[name].append(smooth)
-            reset = tool_button("reset", tr(f"reset_{name}", f"Reset {label}")); reset.setEnabled(False)
+            reset = tool_button("reset", tr(f"reset_{name}", f"Reset {label}"))
+            style_reset_button(reset)
+            reset.setEnabled(False)
             reset.clicked.connect(lambda checked=False, key=name: self.component_edited.emit(key, None, False))
             buttons.addWidget(reset); self.component_buttons[name].append(reset)
             col.addLayout(buttons); values.addLayout(col)
@@ -264,7 +269,8 @@ class StrokeTools(QWidget):
         title = QHBoxLayout()
         self.pin_label = QLabel(tr("pin_title", "Pin")); self.pin_label.setEnabled(False)
         title.addWidget(self.pin_label); title.addStretch()
-        reset = tool_button("reset", tr("reset_pin", "Reset Pin")); reset.setFixedWidth(24)
+        reset = tool_button("reset", tr("reset_pin", "Reset Pin"))
+        style_reset_button(reset)
         reset.clicked.connect(lambda: self.action_requested.emit("reset_pin")); title.addWidget(reset)
         layout.addLayout(title)
         self.pin_reset = reset

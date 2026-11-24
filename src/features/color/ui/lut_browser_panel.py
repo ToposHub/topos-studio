@@ -21,10 +21,12 @@ from PyQt6.QtWidgets import (
 )
 
 from src.shared.ui.panel_splitter import PanelSplitter
-from src.shared.assets.icon_manager import icon_folder, icon_grid, icon_list, icon_search
+from src.shared.assets.icon_manager import get_icon, icon_folder
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
+from .gallery_icons import gallery_icon
 from .node_resource_mime import resource_mime_data
+from .panel_chrome import create_panel_header, header_icon, style_header_button, style_reset_button
 
 
 def tr(key: str, fallback: str) -> str:
@@ -34,7 +36,7 @@ def tr(key: str, fallback: str) -> str:
 def _placeholder_icon() -> QIcon:
     """Neutral resource glyph; deliberately does not imply LUT evaluation."""
     pixmap = QPixmap(128, 80)
-    pixmap.fill(QColor(C.BG_INPUT))
+    pixmap.fill(QColor(C.COLOR_PANEL_INSET))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.setPen(QPen(QColor(C.TEXT_HINT), 1.0))
@@ -60,24 +62,6 @@ def _folder_tile_icon() -> QIcon:
     return QIcon(pixmap)
 
 
-def _toolbar_icon(kind: str) -> QIcon:
-    pixmap = QPixmap(24, 24)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setPen(QPen(QColor(C.TEXT_LABEL), 1.4))
-    if kind == 'sidebar':
-        painter.drawRect(4, 5, 16, 14)
-        painter.drawLine(10, 5, 10, 19)
-    else:
-        for y, width in ((7, 9), (11, 7), (15, 5)):
-            painter.drawLine(5, y, 5 + width, y)
-        painter.drawLine(17, 6, 17, 17)
-        painter.drawLine(14, 14, 17, 17)
-        painter.drawLine(20, 14, 17, 17)
-    painter.end()
-    return QIcon(pixmap)
-
-
 class _LutDelegate(QStyledItemDelegate):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -92,7 +76,7 @@ class _LutDelegate(QStyledItemDelegate):
             rect = option.rect
             painter.save()
             if option.state & QStyle.StateFlag.State_Selected:
-                painter.fillRect(rect, QColor(C.BG_ACTIVE))
+                painter.fillRect(rect, QColor(C.COLOR_PANEL_RAISED))
             icon = index.data(Qt.ItemDataRole.DecorationRole)
             width = max(1, min(rect.width() - 18, option.widget.iconSize().width())) if option.widget else 96
             height = round(width * 0.625)
@@ -116,7 +100,7 @@ class _LutDelegate(QStyledItemDelegate):
         rect = option.rect
         painter.save()
         if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(rect, QColor(C.BG_ACTIVE))
+            painter.fillRect(rect, QColor(C.COLOR_PANEL_RAISED))
         painter.setPen(QColor(C.PANEL_DIVIDER))
         painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
         bounds = [0, 0.43, 0.56, 0.78, 1.0]
@@ -198,24 +182,27 @@ class ColorLutBrowser(QWidget):
         button.setStyleSheet(TOOLBAR_FLAT_BTN_STYLE)
         return button
 
+    def _header_tool(self, icon: QIcon, tooltip: str, name: str) -> QToolButton:
+        button = self._tool('', tooltip, name)
+        button.setIcon(header_icon(icon))
+        style_header_button(button, width=26)
+        return button
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        toolbar = QWidget(self)
-        toolbar.setObjectName('LutBrowserToolbar')
-        toolbar.setFixedHeight(29)
+        toolbar = create_panel_header(object_name='LutBrowserToolbar')
         bar = QHBoxLayout(toolbar)
         bar.setContentsMargins(5, 0, 3, 0)
         bar.setSpacing(2)
-        self.folders_button = self._tool('☷', tr('show_folders', 'Show folders'), 'LutFolders')
+        self.folders_button = self._header_tool(
+            gallery_icon('sidebar'), tr('show_folders', 'Show folders'), 'LutFolders')
         self.folders_button.setCheckable(True)
         self.folders_button.setChecked(True)
         bar.addWidget(self.folders_button)
-        self.folders_button.setText('')
-        self.folders_button.setIcon(_toolbar_icon('sidebar'))
-        self.back_button = self._tool('‹', tr('back', 'Back'), 'LutBack')
-        self.forward_button = self._tool('›', tr('forward', 'Forward'), 'LutForward')
+        self.back_button = self._header_tool(get_icon('fa5s.chevron-left'), tr('back', 'Back'), 'LutBack')
+        self.forward_button = self._header_tool(get_icon('fa5s.chevron-right'), tr('forward', 'Forward'), 'LutForward')
         bar.addWidget(self.back_button)
         bar.addWidget(self.forward_button)
         self.path_label = QLabel(tr('luts', 'LUTs'), toolbar)
@@ -229,29 +216,22 @@ class ColorLutBrowser(QWidget):
         self.zoom_slider.setFixedWidth(76)
         self.zoom_slider.setToolTip(tr('thumbnail_size', 'Thumbnail size'))
         self.zoom_slider.setAccessibleName(tr('thumbnail_size', 'Thumbnail size'))
+        self.zoom_slider.setStyleSheet('QSlider { background: transparent; }')
         bar.addWidget(self.zoom_slider)
-        self.sort_button = self._tool('⇅', tr('sort', 'Sort LUTs'), 'LutSort')
-        self.sort_button.setText('')
-        self.sort_button.setIcon(_toolbar_icon('sort'))
+        self.sort_button = self._header_tool(gallery_icon('sort'), tr('sort', 'Sort LUTs'), 'LutSort')
         bar.addWidget(self.sort_button)
-        self.grid_button = self._tool('▦', tr('grid_view', 'Thumbnail view'), 'LutGridView')
-        self.list_button = self._tool('≡', tr('list_view', 'List view'), 'LutListView')
-        self.grid_button.setText('')
-        self.grid_button.setIcon(icon_grid())
-        self.list_button.setText('')
-        self.list_button.setIcon(icon_list())
+        self.grid_button = self._header_tool(gallery_icon('grid'), tr('grid_view', 'Thumbnail view'), 'LutGridView')
+        self.list_button = self._header_tool(gallery_icon('list'), tr('list_view', 'List view'), 'LutListView')
         self.view_group = QButtonGroup(self)
         for button in (self.grid_button, self.list_button):
             button.setCheckable(True)
             self.view_group.addButton(button)
             bar.addWidget(button)
         self.grid_button.setChecked(True)
-        self.search_button = self._tool('⌕', tr('search_luts', 'Search LUTs'), 'LutSearchButton')
-        self.search_button.setText('')
-        self.search_button.setIcon(icon_search())
+        self.search_button = self._header_tool(gallery_icon('search'), tr('search_luts', 'Search LUTs'), 'LutSearchButton')
         self.search_button.setCheckable(True)
         bar.addWidget(self.search_button)
-        self.more_button = self._tool('⋯', tr('lut_options', 'LUT options'), 'LutBrowserOptions')
+        self.more_button = self._header_tool(gallery_icon('more'), tr('lut_options', 'LUT options'), 'LutBrowserOptions')
         bar.addWidget(self.more_button)
         layout.addWidget(toolbar)
 
@@ -279,12 +259,16 @@ class ColorLutBrowser(QWidget):
         self.folder_tree.setMinimumWidth(70)
         self.folder_tree.setIndentation(12)
         self.folder_tree.setUniformRowHeights(True)
-        self.folder_tree.setStyleSheet(f'QTreeWidget {{background:{C.BG_PANEL}; border:0;}}')
+        self.folder_tree.setStyleSheet(
+            f'QTreeWidget {{background:{C.COLOR_PANEL_INSET}; border:0;}}'
+            f'QTreeWidget::item:selected {{background:{C.COLOR_PANEL_RAISED}; color:{C.TEXT_PRIMARY};}}')
         right = QWidget(self.splitter)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
         self.list_header = QWidget(right)
+        self.list_header.setObjectName('LutListHeader')
+        self.list_header.setStyleSheet(f'QWidget#LutListHeader {{background:{C.COLOR_PANEL_INSET};}}')
         header_layout = QHBoxLayout(self.list_header)
         header_layout.setContentsMargins(4, 0, 4, 0)
         header_layout.setSpacing(0)
@@ -292,7 +276,8 @@ class ColorLutBrowser(QWidget):
                                (tr('relative_path', 'Relative Path'), 22),
                                (tr('file_path', 'File Path'), 22)):
             label = QLabel(title, self.list_header)
-            label.setStyleSheet(f'color:{C.TEXT_LABEL};border-right:1px solid {C.PANEL_DIVIDER};')
+            label.setStyleSheet(f'background:transparent;color:{C.TEXT_LABEL};'
+                                f'border-right:1px solid {C.PANEL_DIVIDER};')
             header_layout.addWidget(label, stretch)
         self.list_header.setFixedHeight(22)
         self.list_header.hide()
@@ -312,7 +297,7 @@ class ColorLutBrowser(QWidget):
         self.list_widget.setItemDelegate(self._delegate)
         self.list_widget.setStyleSheet(
             f'QListWidget {{background:{C.BG_PANEL}; border:0;}}'
-            f'QListWidget::item:selected {{background:{C.BG_ACTIVE}; color:{C.TEXT_PRIMARY};}}')
+            f'QListWidget::item:selected {{background:{C.COLOR_PANEL_RAISED}; color:{C.TEXT_PRIMARY};}}')
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setSizes([145, 560])
@@ -366,7 +351,8 @@ class ColorLutBrowser(QWidget):
         self.strength_spin.setDecimals(2)
         self.strength_spin.setFixedWidth(58)
         strength.addWidget(self.strength_spin)
-        self.reset_button = self._tool('↺', tr('reset_strength', 'Reset strength'), 'ResetNodeLutStrength')
+        self.reset_button = self._tool('', tr('reset_strength', 'Reset strength'), 'ResetNodeLutStrength')
+        style_reset_button(self.reset_button)
         self.remove_button = self._tool('×', tr('remove_lut', 'Remove LUT from node'), 'RemoveNodeLut')
         strength.addWidget(self.reset_button)
         strength.addWidget(self.remove_button)

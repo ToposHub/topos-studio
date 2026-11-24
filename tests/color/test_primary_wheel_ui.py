@@ -19,7 +19,7 @@ from src.features.color.core.primary_calibration import (
     PRIMARY_CALIBRATION_VERSION_KEY, calibrated_grade_inputs,
 )
 from src.features.color.ui.color_wheel import (
-    ColorWheel, GradingPanel, offset_display_to_hsb, offset_hsb_to_display,
+    ColorWheel, GradingPanel, KnurledJogWheel, offset_display_to_hsb, offset_hsb_to_display,
 )
 
 
@@ -87,17 +87,29 @@ def test_rendered_ring_pointer_and_rendered_grade_share_six_hue_directions(qapp,
     qapp.processEvents()
     canvas = wheel._wheel_canvas
     pixels = canvas.grab().toImage()
+    pixel_ratio = pixels.devicePixelRatio()
     center, outer_radius = canvas._geometry()
     inner_radius = canvas._inner_radius(outer_radius)
     try:
         for hue in range(0, 360, 60):
             angle = math.radians(hue + rotation)
             direction = QPointF(math.cos(angle), -math.sin(angle))
-            point = center + direction * (inner_radius - 1.5)
-            color = pixels.pixelColor(round(point.x()), round(point.y()))
-            error = abs((color.hsvHueF() * 360.0 - hue + 180.0) % 360.0 - 180.0)
-            assert color.hsvSaturationF() > 0.8
-            assert error < 4.0
+            for radius_fraction, saturation_range in (
+                (0.975, (0.8, 1.0)),  # outer part of the vivid ring
+                (0.94, (0.8, 1.0)),  # inner part of the vivid ring
+                (0.88, (0.3, 0.55)),  # muted disk near the ring
+            ):
+                point = center + direction * (inner_radius * radius_fraction)
+                color = pixels.pixelColor(round(point.x() * pixel_ratio),
+                                          round(point.y() * pixel_ratio))
+                error = abs((color.hsvHueF() * 360.0 - hue + 180.0) % 360.0 - 180.0)
+                assert saturation_range[0] <= color.hsvSaturationF() <= saturation_range[1]
+                assert error < 5.0
+
+            point = center + direction * (inner_radius * 0.2)
+            color = pixels.pixelColor(round(point.x() * pixel_ratio),
+                                      round(point.y() * pixel_ratio))
+            assert color.hsvSaturationF() < 0.15
 
             canvas._update_knob(center + direction * (inner_radius * 0.2))
             assert abs((wheel.hue - hue + 180.0) % 360.0 - 180.0) < 1e-7
@@ -448,6 +460,22 @@ def test_master_dials_align_with_fixed_value_groups_in_all_modes(qtbot, qapp) ->
                     assert origin.x() + dial.width() - 1 == last.mapTo(panel, last.rect().bottomRight()).x()
                     dial_positions.add(origin.y())
         assert len(dial_positions) == 1
+
+
+def test_master_dial_has_dark_ends_and_a_brighter_center(qtbot) -> None:
+    dial = KnurledJogWheel(174)
+    qtbot.addWidget(dial)
+    image = dial.grab().toImage()
+    ratio = image.devicePixelRatio()
+    center_gap = dial.width() / 2.0 + 1.5
+    middle_y = int(dial.height() / 2.0 * ratio)
+    left, center, right = (
+        image.pixelColor(int((center_gap + offset) * ratio), middle_y)
+        for offset in (-54.0, 0.0, 54.0)
+    )
+    assert center.lightness() - max(left.lightness(), right.lightness()) >= 10
+    assert abs(left.lightness() - right.lightness()) <= 2
+    assert image.pixelColor(int(center_gap * ratio), int(2.5 * ratio)) == center
 
 
 def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp) -> None:
