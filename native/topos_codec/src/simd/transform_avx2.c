@@ -597,8 +597,10 @@ void tc_dequant_inverse_8x8_avx2(const tc_quant_ctx* ctx, const int32_t q[64],
     /* pass B（lanes = x0..3）：pe/po → B[u][0..3] / B[u][7..4]（permute 反转）。
      * 非零行内 8 个 v 无条件执行（与旧版「先 dequant 后 inverse」每系数
      * 同做乘加一致，仅把反量化内联为标量 imul、省 Fp 64 元素写读往返）；
-     * 整行零 → B[u] = 0（加零向量恒等）。 */
-    __m256i b[8][2];
+     * 活跃行直接拆成 BHi·2^16 + BLo，pass 3 跳过同一批零行。 */
+    const __m256i m16 = _mm256_set1_epi64x((int64_t)0xFFFF);
+    __m256i bhi[8][2];
+    __m256i blo[8][2];
     for (int u = 0; u < 8; ++u) {
         if ((rowmask & (1u << u)) != 0u) {
             __m256i pe = _mm256_setzero_si256();
@@ -615,25 +617,15 @@ void tc_dequant_inverse_8x8_avx2(const tc_quant_ctx* ctx, const int32_t q[64],
                 if ((v & 1) == 0) { pe = _mm256_add_epi64(pe, pr); }
                 else { po = _mm256_add_epi64(po, pr); }
             }
-            b[u][0] = _mm256_add_epi64(pe, po);
-            b[u][1] = _mm256_permute4x64_epi64(_mm256_sub_epi64(pe, po), _MM_SHUFFLE(0, 1, 2, 3));
-        } else {
-            b[u][0] = _mm256_setzero_si256();
-            b[u][1] = _mm256_setzero_si256();
-        }
-    }
-
-    /* B 16-bit 分解：B = BHi·2^16 + BLo。 */
-    __m256i bhi[8][2];
-    __m256i blo[8][2];
-    {
-        const __m256i m16 = _mm256_set1_epi64x((int64_t)0xFFFF);
-        for (int u = 0; u < 8; ++u) {
+            const __m256i b[2] = {
+                _mm256_add_epi64(pe, po),
+                _mm256_permute4x64_epi64(_mm256_sub_epi64(pe, po), _MM_SHUFFLE(0, 1, 2, 3)),
+            };
             for (int g = 0; g < 2; ++g) {
-                __m256i pair = _mm256_shuffle_epi32(b[u][g], _MM_SHUFFLE(3, 3, 1, 1));
-                bhi[u][g] = _mm256_or_si256(_mm256_srli_epi32(b[u][g], 16),
+                const __m256i pair = _mm256_shuffle_epi32(b[g], _MM_SHUFFLE(3, 3, 1, 1));
+                bhi[u][g] = _mm256_or_si256(_mm256_srli_epi32(b[g], 16),
                                             _mm256_slli_epi32(pair, 16));
-                blo[u][g] = _mm256_and_si256(b[u][g], m16);
+                blo[u][g] = _mm256_and_si256(b[g], m16);
             }
         }
     }
@@ -662,24 +654,17 @@ void tc_dequant_inverse_8x8_avx2(const tc_quant_ctx* ctx, const int32_t q[64],
             __m256i to = _mm256_add_epi64(_mm256_slli_epi64(qo_hi, 16), qo_lo);
             __m256i tp = _mm256_add_epi64(te, to);
             __m256i tm = _mm256_sub_epi64(te, to);
-            TOPOS_ALIGNED32 int64_t op[4];
-            TOPOS_ALIGNED32 int64_t om[4];
-            {
-                __m256i sg = _mm256_cmpgt_epi64(zero, tp);
-                __m256i av = _mm256_sub_epi64(_mm256_xor_si256(tp, sg), sg);
-                __m256i r = _mm256_srli_epi64(_mm256_add_epi64(av, vr), 32);
-                _mm256_store_si256((__m256i*)op, _mm256_sub_epi64(_mm256_xor_si256(r, sg), sg));
-            }
-            {
-                __m256i sg = _mm256_cmpgt_epi64(zero, tm);
-                __m256i av = _mm256_sub_epi64(_mm256_xor_si256(tm, sg), sg);
-                __m256i r = _mm256_srli_epi64(_mm256_add_epi64(av, vr), 32);
-                _mm256_store_si256((__m256i*)om, _mm256_sub_epi64(_mm256_xor_si256(r, sg), sg));
-            }
-            for (int i = 0; i < 4; ++i) {
-                xhat[y * 8 + g * 4 + i] = (int32_t)op[i];
-                xhat[(7 - y) * 8 + g * 4 + i] = (int32_t)om[i];
-            }
+            // Signed round-to-nearest, ties away from zero. The rounded
+            // result is the high dword of (sum + 2^31 - (sum < 0)).
+            const __m256i order = _mm256_setr_epi32(1, 3, 5, 7, 1, 3, 5, 7);
+            const __m256i rp = _mm256_add_epi64(_mm256_add_epi64(tp, vr),
+                                               _mm256_cmpgt_epi64(zero, tp));
+            const __m256i rm = _mm256_add_epi64(_mm256_add_epi64(tm, vr),
+                                               _mm256_cmpgt_epi64(zero, tm));
+            const __m128i op = _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(rp, order));
+            const __m128i om = _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(rm, order));
+            _mm_storeu_si128((__m128i*)(xhat + y * 8 + g * 4), op);
+            _mm_storeu_si128((__m128i*)(xhat + (7 - y) * 8 + g * 4), om);
         }
     }
 }

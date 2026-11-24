@@ -8156,6 +8156,18 @@ typedef struct dec_slice_task {
     uint32_t qcap_gi;     /* A2 差分机：捕获元数据全局序号（稀疏发射用） */
 } dec_slice_task;
 
+/* Larger payloads generally have more entropy symbols to decode. Reorder
+ * dispatch only. Finalization and slice status still use packet order. */
+static int dec_slice_job_largest_first(const void* a, const void* b)
+{
+    const dec_slice_task* left = (const dec_slice_task*)((const tc_job*)a)->ctx;
+    const dec_slice_task* right = (const dec_slice_task*)((const tc_job*)b)->ctx;
+    const uint32_t lbytes = left->sh->slice_payload_size;
+    const uint32_t rbytes = right->sh->slice_payload_size;
+    if (lbytes != rbytes) { return lbytes > rbytes ? -1 : 1; }
+    return (left->si > right->si) - (left->si < right->si);
+}
+
 static void dec_slice_job(void* vctx)
 {
     dec_slice_task* t = (dec_slice_task*)vctx;
@@ -8810,6 +8822,16 @@ static int32_t dec_frames_core_impl(dec_frame_req* reqs, uint32_t nframes)
         built += frame_built;
     }
 
+    if (nframes == 1u && nw > 1u && built >= 2u * nw
+            && reqs[0].scaled == 0u
+            && (reqs[0].coefficient_limit == 0u || reqs[0].coefficient_limit >= 63u)) {
+        const topos_frame_header* fh = &reqs[0].view->fh;
+        if (fh->version_major == 7u && fh->entropy_mode == 7u
+                && fh->pixel_format == 0u && fh->bit_depth == 10u && fh->plane_count == 3u
+                && fh->visible_width >= 3840u && fh->visible_height >= 2160u) {
+            qsort(jobs, built, sizeof(*jobs), dec_slice_job_largest_first);
+        }
+    }
     if (built > 0u) { (void)tc_parallel_for(jobs, built, nw); }
 
     int32_t first = TC_OK;

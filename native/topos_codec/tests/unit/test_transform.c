@@ -233,6 +233,23 @@ int main(void)
         }
     }
 
+    /* A single (3,3) coefficient at the dequant clamp produces exact
+     * half-integer samples at x,y=3 or 4: W[3,3] * 8 * 8 / 128 = 3921.5.
+     * The mirrored sample has the opposite sign and rounds away from zero. */
+    {
+        tc_quant_ctx ctx = {0};
+        int32_t q[64] = {0};
+        int32_t xh[64];
+        const uint32_t coefficient = 3u * 8u + 3u;
+        ctx.Q[coefficient] = 1u;
+        q[coefficient] = TC_TRANSFORM_MAX_ABS_F;
+        tc_simd_dequant_inverse_8x8(&ctx, q, xh, 1u | (1u << 3));
+        MT_CHECK_EQ_I64(xh[3u * 8u + 3u], 3922);
+        MT_CHECK_EQ_I64(xh[3u * 8u + 4u], -3922);
+        MT_CHECK_EQ_I64(xh[4u * 8u + 3u], -3922);
+        MT_CHECK_EQ_I64(xh[4u * 8u + 4u], 3922);
+    }
+
     /* —— M10-2B：稀疏 basis 逆变换 vs 稠密内核差分（随机/极值块 ≥ 50,000） ——
      * 稀疏侧直接给 (p, natural 序号) 对（p = clamp(level·Q[nat])，与解码
      * 扫描侧收集同构）；稠密侧走 q[64] + 行掩码融合内核。覆盖：均匀随机
