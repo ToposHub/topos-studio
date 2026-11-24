@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "../entropy/scan.h"
+#include "../entropy/vlc.h"
 #include "../simd/dispatch.h"
 #include "transform/fastdiv.h"
 #include "transform/transform.h"
@@ -272,6 +273,9 @@ void tc_quant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
 {
     ctx->f_clamp = 0;
     ctx->exact_div = (bit_depth > 12u) ? 1u : 0u;
+#if defined(__x86_64__) || defined(_M_X64)
+    ctx->avx2_fast_div = ctx->exact_div == 0u;
+#endif
     if (ctx->exact_div != 0) {
         /* |F|max ∝ max|x'|（12-bit 冻结域 2^24.4 @ |x'|≤2047 等比外推） */
         const int64_t x = (int64_t)((1u << (bit_depth - 1u)) - 1u);
@@ -304,6 +308,23 @@ void tc_quant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
         /* P-速⑥：自然序孪生（同 magic 拆分，自然索引） */
         ctx->fd_nat_m1[i] = (uint32_t)(magic >> 26);
         ctx->fd_nat_m0[i] = (uint32_t)(magic & (UINT64_C(0x3FFFFFF)));
+#if defined(__x86_64__) || defined(_M_X64)
+        if (q > TC_FASTDIV_D_MAX) {
+            ctx->avx2_fast_div = 0u;
+        } else if (ctx->fd[i].magic == 0u) {
+            ctx->avx2_multiplier[i] = 1u << 26;
+            ctx->avx2_shift[i] = 26u + ctx->fd[i].shift;
+        } else {
+            /* n = max(|F| + Q/2 - dz, 0) < 2^26，即使 F 触发钳位。
+             * k = 26 + ceil(log2 Q)，m = ceil(2^k/Q)。因
+             * n * (m*Q - 2^k) < 2^26 * Q <= 2^k，右移 k 位即为精确商。
+             * 从现有 floor(2^51/Q) 派生 m，避免再做一次除法。 */
+            const uint32_t shift = 26u + tc_vlc_bitlen32(q - 1u);
+            ctx->avx2_multiplier[i] =
+                (uint32_t)(((ctx->fd[i].magic - 1u) >> (51u - shift)) + 1u);
+            ctx->avx2_shift[i] = shift;
+        }
+#endif
     }
 }
 

@@ -11,6 +11,7 @@
  * 5. 畸形域：flags 保留位非零 / lvl 模型 3 → MALFORMED（经 concealment）；
  *    表行清零 → 模型不可建 → concealment；截断包 → 非 OK。 */
 #include "bitstream/packet.h"
+#include "bitstream/slice_codec.h"
 #include "codec/codec.h"
 #include "common/crc32.h"
 #include "common/endian.h"
@@ -265,6 +266,63 @@ static void test_differential(void)
                                    0u, 8u, NULL, NULL, 0u));
 }
 
+static int32_t check_dc_only_mask(void* ctx, uint32_t block_index,
+                                  const int32_t q[64], uint32_t rowmask)
+{
+    uint32_t* seen = (uint32_t*)ctx;
+    /* Each luma block row is flat, then horizontal AC, then flat again. */
+    MT_CHECK_EQ_U64(rowmask, block_index % 3u == 1u ? 1u : 0u);
+    if (rowmask == 0u) {
+        for (uint32_t i = 1u; i < 64u; ++i) { MT_CHECK_EQ_I64(q[i], 0); }
+    }
+    ++*seen;
+    return TC_OK;
+}
+
+static void test_dc_only_mask(void)
+{
+    enum { WIDTH = 22, HEIGHT = 11 };
+    uint16_t y[WIDTH * HEIGHT];
+    uint16_t chroma[(WIDTH / 2) * HEIGHT];
+    for (uint32_t i = 0u; i < WIDTH * HEIGHT; ++i) {
+        const uint32_t x = i % WIDTH;
+        y[i] = (uint16_t)(x < 8u || x >= 16u ? 160u : x * 60u);
+    }
+    for (uint32_t i = 0u; i < (WIDTH / 2) * HEIGHT; ++i) {
+        chroma[i] = 512u;
+    }
+
+    topos_frame_config cfg;
+    base_cfg(&cfg, WIDTH, HEIGHT, 8u);
+    cfg.bit_depth = 10u;
+    topos_frame_input in = {0};
+    in.struct_size = (uint32_t)sizeof(in);
+    in.abi_version = (uint32_t)TOPOS_CODEC_ABI_VERSION;
+    in.planes[0] = y;
+    in.planes[1] = chroma;
+    in.planes[2] = chroma;
+
+    uint8_t* packet = NULL;
+    size_t size = 0u;
+    const int32_t encoded = encode_to_buf(&cfg, &in, &packet, &size);
+    MT_CHECK_EQ_I64(encoded, TC_OK);
+    if (encoded != TC_OK) { return; }
+
+    topos_packet_view view;
+    const int32_t scanned = tc_packet_scan(packet, size, &view);
+    MT_CHECK_EQ_I64(scanned, TC_OK);
+    if (scanned == TC_OK) {
+        uint32_t seen = 0u;
+        for (uint16_t i = 0u; i < view.slice_count && view.slices[i].plane == 0u; ++i) {
+            MT_CHECK_EQ_I64(tc_color_slice_decode_stream(
+                &view.fh, &view.slices[i], view.payloads[i], view.slices[i].slice_payload_size,
+                check_dc_only_mask, &seen, NULL), TC_OK);
+        }
+        MT_CHECK_EQ_U64(seen, 6u);
+    }
+    free(packet);
+}
+
 /* ---------- 3. 确定性 ---------- */
 
 static void test_determinism(void)
@@ -429,6 +487,7 @@ int main(void)
 {
     test_selection_domain();
     test_differential();
+    test_dc_only_mask();
     test_determinism();
     test_size_properties();
     test_malformed_domain();

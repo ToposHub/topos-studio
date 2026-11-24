@@ -423,6 +423,39 @@ static void par_eq_serial(uint32_t unit)
     free(c);
 }
 
+static void test_planes_match_serial_bands(void)
+{
+    const uint32_t stride = 656u;
+    const uint32_t height = 256u;
+    const size_t plane_samples = (size_t)stride * height;
+    const size_t bytes = 3u * plane_samples * sizeof(uint16_t);
+    uint16_t* serial = (uint16_t*)malloc(bytes);
+    uint16_t* parallel = (uint16_t*)malloc(bytes);
+    MT_CHECK(serial != NULL && parallel != NULL);
+    if (serial == NULL || parallel == NULL) { free(serial); free(parallel); return; }
+    tc_deblock_plane_view a[3];
+    tc_deblock_plane_view b[3];
+    for (uint32_t p = 0u; p < 3u; ++p) {
+        const uint32_t width = p == 0u ? 640u : 320u;
+        a[p] = (tc_deblock_plane_view){serial + p * plane_samples, (int32_t)stride, width, height};
+        b[p] = (tc_deblock_plane_view){parallel + p * plane_samples, (int32_t)stride, width, height};
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < stride; ++x) {
+                a[p].pix[y * stride + x] = x >= width ? 1000u :
+                    (uint16_t)(300u + 10u * p + 2u * (((x / 8u) + (y / 8u)) % 2u));
+            }
+        }
+    }
+    memcpy(parallel, serial, bytes);
+    tc_deblock_planes(a, 3u, 65u, TC_QPTBL_REFINED, BD, 1u);
+    tc_deblock_planes(b, 3u, 65u, TC_QPTBL_REFINED, BD, TC_SLICE_MAX_THREADS);
+    MT_CHECK(memcmp(serial, parallel, bytes) == 0);
+    MT_CHECK(b[0].pix[7] != 300u);
+    MT_CHECK_EQ_U64(b[1].pix[320u], 1000u);
+    free(serial);
+    free(parallel);
+}
+
 void test_deblock_main(void)
 {
     /* ---- 表变体：经典表 = 旧访问器；细化表 qp≤63 一致、64..95 更细、
@@ -469,6 +502,7 @@ void test_deblock_main(void)
     test_scaled_domain();
     par_eq_serial(8u);
     par_eq_serial(4u);
+    test_planes_match_serial_bands();
 }
 
 int main(void)

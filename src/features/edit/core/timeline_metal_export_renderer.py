@@ -40,7 +40,7 @@ using namespace metal;
 constexpr sampler lut_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
 constant float3 luma_weights = float3(0.2126, 0.7152, 0.0722);
 
-float3 dnxhr_lut_color(ushort y_code, float2 chroma, texture3d<float> lut, float strength) {
+float3 yuv422p10_lut_color(ushort y_code, float2 chroma, texture3d<float> lut, float strength) {
     const float y = (float(y_code) - 64.0) / 876.0;
     const float2 uv = (rint(chroma) - 512.0) / 896.0;
     const float3 rgb = float3(y + 1.5748 * uv.y,
@@ -48,6 +48,22 @@ float3 dnxhr_lut_color(ushort y_code, float2 chroma, texture3d<float> lut, float
                               y + 1.8556 * uv.x);
     const float3 rgb16 = rint(clamp(rgb, 0.0, 1.0) * 65535.0) / 65535.0;
     return clamp(msl_apply_3dlut(rgb16, lut, lut_sampler, strength), 0.0, 1.0);
+}
+
+inline void write_yuv422p10_lut(
+    device ushort* output, uint2 size, uint index, ushort2 luma,
+    float2 center, float2 left, float2 right, texture3d<float> lut, float strength) {
+    const float3 rgb0 = yuv422p10_lut_color(luma.x, mix(center, left, 0.25), lut, strength);
+    const float3 rgb1 = yuv422p10_lut_color(luma.y, mix(center, right, 0.25), lut, strength);
+    output[index * 2u] = ushort(rint(64.0 + 876.0 * dot(rgb0, luma_weights)));
+    output[index * 2u + 1u] = ushort(rint(64.0 + 876.0 * dot(rgb1, luma_weights)));
+    const float3 average = (rgb0 + rgb1) * 0.5;
+    const float y = dot(average, luma_weights);
+    const float2 uv = float2((average.b - y) / 1.8556, (average.r - y) / 1.5748);
+    const float2 codes = rint(clamp(512.0 + 896.0 * uv, 64.0, 960.0));
+    const uint y_size = size.x * size.y;
+    output[y_size + index] = ushort(codes.x);
+    output[y_size + y_size / 2u + index] = ushort(codes.y);
 }
 
 kernel void timeline_dnxhr_hqx_lut(
@@ -68,17 +84,29 @@ kernel void timeline_dnxhr_hqx_lut(
     const float2 center = float2(source_u[index], source_v[index]);
     const float2 left = float2(source_u[previous], source_v[previous]);
     const float2 right = float2(source_u[next], source_v[next]);
-    const float3 rgb0 = dnxhr_lut_color(source_y[index * 2u], mix(center, left, 0.25), lut, strength);
-    const float3 rgb1 = dnxhr_lut_color(source_y[index * 2u + 1u], mix(center, right, 0.25), lut, strength);
-    output[index * 2u] = ushort(rint(64.0 + 876.0 * dot(rgb0, luma_weights)));
-    output[index * 2u + 1u] = ushort(rint(64.0 + 876.0 * dot(rgb1, luma_weights)));
-    const float3 average = (rgb0 + rgb1) * 0.5;
-    const float y = dot(average, luma_weights);
-    const float2 uv = float2((average.b - y) / 1.8556, (average.r - y) / 1.5748);
-    const float2 codes = rint(clamp(512.0 + 896.0 * uv, 64.0, 960.0));
-    const uint y_size = size.x * size.y;
-    output[y_size + index] = ushort(codes.x);
-    output[y_size + y_size / 2u + index] = ushort(codes.y);
+    const ushort2 luma = ushort2(source_y[index * 2u], source_y[index * 2u + 1u]);
+    write_yuv422p10_lut(output, size, index, luma, center, left, right, lut, strength);
+}
+
+kernel void timeline_yuv422p10_texture_lut(
+    texture2d<ushort, access::read> source_y [[texture(1)]],
+    texture2d<ushort, access::read> source_u [[texture(2)]],
+    texture2d<ushort, access::read> source_v [[texture(3)]],
+    device ushort* output [[buffer(3)]],
+    constant uint2& size [[buffer(4)]],
+    constant float& strength [[buffer(5)]],
+    texture3d<float> lut [[texture(0)]],
+    uint2 p [[thread_position_in_grid]]) {
+    const uint chroma_width = size.x / 2u;
+    if (p.x >= chroma_width || p.y >= size.y) return;
+    const uint2 previous = uint2(max(p.x, 1u) - 1u, p.y);
+    const uint2 next = uint2(min(p.x + 1u, chroma_width - 1u), p.y);
+    const float2 center = float2(source_u.read(p).r, source_v.read(p).r);
+    const float2 left = float2(source_u.read(previous).r, source_v.read(previous).r);
+    const float2 right = float2(source_u.read(next).r, source_v.read(next).r);
+    const ushort2 luma = ushort2(source_y.read(uint2(p.x * 2u, p.y)).r,
+                                 source_y.read(uint2(p.x * 2u + 1u, p.y)).r);
+    write_yuv422p10_lut(output, size, p.y * chroma_width + p.x, luma, center, left, right, lut, strength);
 }
 """
 
@@ -4025,31 +4053,91 @@ class TimelineMetalExportRenderer:
                 reason,
             )
 
-    @_serialize_renderer_call
     def render_dnxhr_hqx_lut(
         self, source: GpuYuvSource, reference: str, strength: float,
         allocate: Optional[Callable[[int, int], Optional[tuple[Any, tuple[np.ndarray, ...]]]]] = None,
     ) -> GpuYuv422P10Output:
-        """Grade a BT.709 10-bit 4:2:2 master into encoder-ready planes."""
-        from src.features.edit.core.timeline_gpu_export_renderer import GpuYuv422P10Output
+        """Compatibility entry for DNxHR's CPU-decoded source planes."""
+        return self.render_yuv422p10_lut(source, reference, strength, allocate)
+
+    @staticmethod
+    def _yuv422p10_lut_textures(
+        source: GpuDecodedFrame, context: MetalComputeContext,
+    ) -> Dict[int, Any]:
+        import Metal
+        import objc
+
+        width, height = source.width, source.height
+        if (source.pixel_format != "yuv422p10le" or source.bit_depth != 10
+                or width <= 0 or height <= 0 or width % 2
+                or source.visible_rect != (0, 0, width, height)
+                or (source.color_range, source.color_matrix,
+                    source.color_primaries, source.color_transfer)
+                != ("limited", "bt709", "bt709", "bt709")):
+            raise ValueError("Expected an uncropped limited-range BT.709 10-bit 4:2:2 Metal frame")
+        planes = {plane.component: plane for plane in source.planes}
+        if len(source.planes) != 3 or set(planes) != {"Y", "U", "V"}:
+            raise ValueError("Expected exactly three Metal Y/U/V planes")
+        textures = {}
+        texture_protocol = objc.protocolNamed("MTLTexture")
+        for index, component in enumerate(("Y", "U", "V"), 1):
+            plane = planes[component]
+            resource = plane.resource
+            plane_width = width if component == "Y" else width // 2
+            shape = (plane_width, height)
+            if (plane.api != "metal" or plane.target != "2d" or resource is None
+                    or resource.api != "metal" or resource.target != "2d"
+                    or resource.resource_format != "r16uint"
+                    or (plane.width, plane.height) != shape
+                    or (resource.width, resource.height) != shape):
+                raise ValueError(f"Invalid R16Uint Metal {component} plane descriptor")
+            texture = plane.resolved_handle()
+            certified = getattr(texture, "conformsToProtocol_", None)
+            if (not callable(certified) or not certified(texture_protocol)
+                    or int(texture.pixelFormat()) != int(Metal.MTLPixelFormatR16Uint)
+                    or int(texture.textureType()) != int(Metal.MTLTextureType2D)
+                    or (int(texture.width()), int(texture.height())) != shape
+                    or texture.device() != context.device):
+                raise ValueError(f"Invalid or foreign-device R16Uint Metal {component} texture")
+            textures[index] = texture
+        return textures
+
+    @_serialize_renderer_call
+    def render_yuv422p10_lut(
+        self, source: GpuYuvSource | GpuDecodedFrame, reference: str, strength: float,
+        allocate: Optional[Callable[[int, int], Optional[tuple[Any, tuple[np.ndarray, ...]]]]] = None,
+    ) -> GpuYuv422P10Output:
+        """Grade a BT.709 10-bit 4:2:2 master into encoder-ready planes.
+
+        Metal plane textures are borrowed through synchronous GPU completion.
+        The caller retains ownership of the source frame and its release.
+        """
+        from src.features.edit.core.timeline_gpu_export_renderer import GpuYuv422P10Output, GpuYuvSource
         from src.shared.color.lut_loader import load_lut, resample_to_unit_domain, resolve_lut_path
 
-        y, u, v = source.planes
-        height, width = y.shape
+        if not math.isfinite(strength):
+            raise ValueError("Expected a finite LUT strength")
+        if isinstance(source, GpuYuvSource):
+            y, u, v = source.planes
+            height, width = y.shape
+            if (source.luma_bits != 10 or source.full_range or source.kr != 0.2126
+                    or source.kb != 0.0722 or (source.chroma_x_div, source.chroma_y_div) != (2, 1)
+                    or width <= 0 or height <= 0 or width % 2
+                    or u.shape != (height, width // 2) or v.shape != u.shape
+                    or any(plane.dtype != np.dtype("<u2") for plane in source.planes)):
+                raise ValueError("Expected limited-range BT.709 10-bit 4:2:2 source planes")
+        elif isinstance(source, GpuDecodedFrame):
+            width, height = source.width, source.height
+        else:
+            raise TypeError("Expected CPU planes or a Metal frame")
         chroma_shape = (height, width // 2)
-        if (source.luma_bits != 10 or source.full_range or source.kr != 0.2126
-                or source.kb != 0.0722 or (source.chroma_x_div, source.chroma_y_div) != (2, 1)
-                or width <= 0 or height <= 0 or width % 2
-                or u.shape != chroma_shape or v.shape != chroma_shape
-                or any(plane.dtype != np.dtype("<u2") for plane in source.planes)
-                or not math.isfinite(strength)):
-            raise ValueError("Expected limited-range BT.709 10-bit 4:2:2 source planes")
         if not self._ensure_ready():
-            raise RuntimeError("Metal DNxHR renderer is unavailable")
+            raise RuntimeError("Metal 4:2:2 LUT renderer is unavailable")
         ctx = self._context
         assert ctx is not None
 
-        kernel_name = "timeline_dnxhr_hqx_lut"
+        textures = self._yuv422p10_lut_textures(source, ctx) if isinstance(source, GpuDecodedFrame) else {}
+        kernel_name = "timeline_yuv422p10_texture_lut" if textures else "timeline_dnxhr_hqx_lut"
         kernel = self._kernels.get(kernel_name)
         if kernel is None:
             kernel = ctx.compile_kernel(kernel_name, _DNXHR_HQX_LUT_MSL)
@@ -4061,19 +4149,17 @@ class TimelineMetalExportRenderer:
         self._frame_cpu_upload_bytes = 0
         size = width * height
         output = self._buffer("dnxhr_hqx_output", 4 * size)
-        ctx.dispatch(
-            kernel,
-            buffers={
-                0: self._upload_array("dnxhr_y", y),
-                1: self._upload_array("dnxhr_u", u),
-                2: self._upload_array("dnxhr_v", v),
-                3: output,
-                4: self._upload_array("dnxhr_size", np.array([width, height], dtype="<u4")),
-                5: self._upload_array("dnxhr_strength", np.array([strength], dtype="<f4")),
-            },
-            textures={0: self._dnxhr_lut[1]},
-            threads=(width // 2, height, 1),
-        )
+        buffers = {
+            3: output,
+            4: self._upload_array("dnxhr_size", np.array([width, height], dtype="<u4")),
+            5: self._upload_array("dnxhr_strength", np.array([strength], dtype="<f4")),
+        }
+        if isinstance(source, GpuYuvSource):
+            buffers.update({0: self._upload_array("dnxhr_y", y),
+                            1: self._upload_array("dnxhr_u", u),
+                            2: self._upload_array("dnxhr_v", v)})
+        textures[0] = self._dnxhr_lut[1]
+        ctx.dispatch(kernel, buffers=buffers, textures=textures, threads=(width // 2, height, 1))
         ctx.finish()
         values = ctx.read_buffer(output, 4 * size).view("<u2")
         allocation = allocate(width, height) if allocate is not None else None

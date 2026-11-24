@@ -103,18 +103,17 @@ int32_t tc_dev_thread_count(void)
 /* ---- R6：常驻有界线程池 ----
  *
  * 取代阶段 10 的 spawn-per-call（encode_sized 最坏 ~96 波 pthread_create/join
- * 每帧）。语义与旧实现一致：
- *  - 静态条带划分 i % nw（worker w 固定执行条带 w；同槽任务绝不并发）；
- *  - 调用线程执行条带 0 后等待其余条带；
+ * 每帧）。
+ *  - 调用线程和 worker 动态领取任务，worker 槽位在每批次内固定；
+ *  - 调用线程领完后，只等已经进入任务循环的 worker；
  *  - 初始化/spawn/OOM/环满失败路径一律顺序执行（正确性优先）。
  *
  * 池化带来的结构性回压：并发调用方共享同一组常驻 worker，总执行线程数
  * = 池内 worker + 活跃调用方（旧实现 = 各调用方各自 spawn 相乘）。
  *
- * 批次生命周期（无 UAF/无泄漏）：tc_pool_batch 按调用堆分配；ring 槽记录
- * worker 越过数与调用方离开标志，两侧都在互斥锁内检查——「全部 worker 越
- * 过 ∧ 调用方已取得结果」成立时由后到者释放。worker 内嵌套 tc_parallel_for
- * （codec 当前无此路径）退化为顺序执行，杜绝 worker 互相等待的死锁。 */
+ * ring 槽保留批次元数据，直到全部 worker 越过且调用方取走结果。
+ * 任务存储由调用方持有，调用方返回后，迟到的 worker 只能越过该批次。
+ * worker 内嵌套 tc_parallel_for 退化为顺序执行，避免 worker 互相等待。 */
 
 #if defined(TOPOS_TPOOL_PTHREAD) || defined(_WIN32)
 
@@ -123,7 +122,8 @@ typedef struct tc_pool_batch {
     uint32_t count;
     uint32_t nw;   /* 本批条带数（调用方占 1 条；worker id ∈ (id_base, id_base+nw)） */
     uint32_t id_base; /* M10-4：本批 worker id 起点（并发批次占不相交区间） */
-    uint32_t done; /* 已完成 worker 条带数（锁保护；达 nw−1 唤醒调用方） */
+    uint32_t active_workers; /* 已进入任务循环且尚未退出的 worker（锁保护） */
+    int caller_waiting; /* 调用方已开始等 active_workers 归零（锁保护） */
     atomic_uint next; /* 动态领取游标（fetch_add；初始化后只增） */
 } tc_pool_batch;
 
@@ -146,7 +146,7 @@ typedef struct tc_pool_state {
     int nthreads;                                /* 常驻 worker 数（id 1..nthreads） */
     tc_pool_ring_ent ring[TC_POOL_RING];
     uint64_t seq;                                /* 已入队批次总数（含已释放） */
-    uint64_t freed;                              /* 已释放批次数（outstanding = seq − freed） */
+    uint64_t freed;                              /* 连续已释放前缀的末端（不含） */
     void* threads[TC_SLICE_MAX_THREADS - 1];
 #if defined(TOPOS_TPOOL_PTHREAD)
     pthread_mutex_t mu;
@@ -228,18 +228,21 @@ static void pool_wake(tc_pool_state* p, int done_cv)
 }
 
 /* 环槽双侧释放检查（调用方与 worker 各执一侧；锁内调用）。
- * M10-1c：释放 = 槽位可复用标记（不再 free）；任何一方在释放后均不再
- * 触碰 b —— caller 在 done==nw−1 后只读一次 b->nw 即标记离开，worker 在
- * done++/passed++ 的同一锁段后不再访问 b。 */
-static void pool_ent_release(tc_pool_ring_ent* ent)
+ * 调用方在任务全部完成后标记离开，worker 越过后不再访问批次。
+ * 槽位元数据一直保留到两侧都结束。 */
+static void pool_ent_release(tc_pool_state* p, tc_pool_ring_ent* ent)
 {
     if (ent->in_use != 0 && ent->passed == ent->need && ent->caller_left != 0) {
         ent->in_use = 0;
-        g_pool.freed++;
+        /* A later caller may finish first. Advance only past consecutive
+         * free slots so seq - freed still bounds ring reuse. */
+        while (p->freed < p->seq && p->ring[p->freed % TC_POOL_RING].in_use == 0) {
+            p->freed++;
+        }
     }
 }
 
-/* worker 主循环：按自身序号消费批次环（id 固定 → 静态条带语义） */
+/* 每个 worker 按自己的游标顺序越过批次环。 */
 typedef struct tc_pool_worker_arg {
     tc_pool_state* p;
     uint64_t seen; /* 已越过批次数（新 worker 从入队时刻的 seq 起步） */
@@ -271,26 +274,24 @@ static void pool_worker_loop(tc_pool_worker_arg* wa)
         if (wa->seen < p->seq) {
             tc_pool_ring_ent* ent = &p->ring[wa->seen % TC_POOL_RING];
             tc_pool_batch* b = &ent->b;
-            pool_unlock(p);
-
             /* M10-4：id_base 错开并发批次——worker 只参与
              * id ∈ (id_base, id_base+nw) 的批次；单批（base=0）同旧版语义。
              * 相对槽位 = id − id_base ∈ [1, nw−1]，保证槽位资源（DC/alpha
              * 行缓冲等，容量按 nw 分配）的正确私有性与互斥性。 */
-            if (wa->id > b->id_base && wa->id - b->id_base < b->nw) {
+            if (wa->id > b->id_base && wa->id - b->id_base < b->nw
+                    && atomic_load_explicit(&b->next, memory_order_relaxed) < b->count) {
+                b->active_workers++;
+                pool_unlock(p);
                 t_pool_worker_rel = (int)(wa->id - b->id_base);
                 batch_run_dynamic(b);
                 t_pool_worker_rel = 0;
-            }
-
-            pool_lock(p);
-            if (wa->id > b->id_base && wa->id - b->id_base < b->nw) {
-                b->done++;
-                if (b->done == b->nw - 1u) { pool_wake(p, 1); }
+                pool_lock(p);
+                b->active_workers--;
+                if (b->active_workers == 0u && b->caller_waiting != 0) { pool_wake(p, 1); }
             }
             wa->seen++;
             ent->passed++;
-            pool_ent_release(ent);
+            pool_ent_release(p, ent);
             continue;
         }
         if (p->shutdown != 0) { break; }
@@ -578,7 +579,8 @@ static uint32_t tc_parallel_for_impl(const tc_job* jobs, uint32_t n,
     b->count = n;
     b->nw = eff_nw;
     b->id_base = id_base;
-    b->done = 0u;
+    b->active_workers = 0u;
+    b->caller_waiting = 0;
     atomic_store_explicit(&b->next, 0u, memory_order_relaxed);
     ent->passed = 0u;
     ent->need = (uint32_t)p->nthreads;
@@ -591,13 +593,19 @@ static uint32_t tc_parallel_for_impl(const tc_job* jobs, uint32_t n,
     /* 调用线程作为 worker 0 参与动态领取，随后等待 worker 条带完成 */
     batch_run_dynamic(b);
     pool_lock(p);
-    while (b->done < b->nw - 1u) { pool_wait(p, 1); }
-    const uint32_t nw_used = b->nw;
+    /* The caller has taken the cursor to the end. With the lock held,
+     * no late worker can begin using jobs. Wait for registered workers
+     * to finish before the caller can release its job storage. */
+    if (b->active_workers != 0u) {
+        b->caller_waiting = 1;
+        do { pool_wait(p, 1); } while (b->active_workers != 0u);
+    }
+    const uint32_t batch_workers = b->nw;
     ent->caller_left = 1;
-    pool_ent_release(ent); /* 调用方后到 → 调用方释放（此后不再触碰 b） */
+    pool_ent_release(p, ent); /* 调用方后到 → 调用方释放（此后不再触碰 b） */
     pool_unlock(p);
     TP_BUMP(pool_batches);
-    return nw_used;
+    return batch_workers;
 }
 
 /* P1-19：worker 内嵌套调用入口统一保存/恢复相对槽位 TLS——嵌套调用

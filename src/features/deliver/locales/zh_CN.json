@@ -23,6 +23,8 @@
       "add_to_queue": "加入视频队列",
       "add_and_start": "加入并开始",
       "alpha": "Alpha 通道",
+      "bypass_reencode": "尽可能绕过重新编码",
+      "bypass_reencode_hint": "纯剪且规格匹配时直接复制 TOPOS 422 压缩视频帧。需要画面处理时正常渲染，时间线音频始终按设置混音。",
       "profile_default": "（默认）",
       "preflight_ok": "可以加入队列",
       "project": "项目",

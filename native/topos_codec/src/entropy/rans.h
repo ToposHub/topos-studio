@@ -58,6 +58,24 @@ typedef struct tc_rans_enc {
     int overflow;
 } tc_rans_enc;
 
+/* Encoder parameters for a symbol whose post-renormalization state is positive
+ * and below x_max. Only used by the rANS2 emission loops. */
+typedef struct tc_rans_enc_symbol {
+    uint32_t x_max;
+    uint32_t reciprocal;
+    uint16_t complement;
+    uint16_t bias;
+    uint8_t shift;
+} tc_rans_enc_symbol;
+
+void tc_rans_enc_symbol_init(tc_rans_enc_symbol* out, uint32_t freq, uint32_t cum);
+
+static inline uint32_t tc_rans_enc_symbol_next(uint32_t x, tc_rans_enc_symbol symbol)
+{
+    const uint32_t q = (uint32_t)(((uint64_t)x * symbol.reciprocal) >> symbol.shift);
+    return x + q * symbol.complement + symbol.bias;
+}
+
 void tc_rans_enc_init(tc_rans_enc* e, uint8_t* buf, size_t cap);
 /* 单符号编码（模型可逐符号切换——三族 + RAW 位共用一个状态流）。
  * 域外符号（≥syms）或 freq 0：返回 TC_ERR_INVALID_ARGUMENT。溢出置

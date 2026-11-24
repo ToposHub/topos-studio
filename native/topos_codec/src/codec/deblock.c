@@ -102,9 +102,13 @@ static inline uint32_t db_absu(int32_t v)
 }
 
 static inline int db_gate(int32_t p1, int32_t p0, int32_t q0, int32_t q1,
-                          int32_t alpha, int32_t beta)
+                          int32_t alpha, int32_t beta, int32_t maxv)
 {
-    return (db_absu(q0 - p0) < (uint32_t)alpha)
+    const uint32_t step = db_absu(q0 - p0);
+    /* The midpoint clamp gives d == 0 for steps of zero or one. Skip
+     * those writes unless the old filter would also clamp a sample. */
+    return (step < (uint32_t)alpha)
+           && (step >= 2u || (p1 | p0 | q0 | q1) > maxv)
            && (db_absu(p1 - p0) < (uint32_t)beta)
            && (db_absu(q1 - q0) < (uint32_t)beta);
 }
@@ -170,7 +174,7 @@ static void deblock_v_pass(uint16_t* pix, int32_t stride, uint32_t w,
         for (uint32_t x0 = unit; x0 + 1u < w; x0 += unit) {
             const int32_t p1 = row[x0 - 2], p0 = row[x0 - 1];
             const int32_t q0 = row[x0], q1 = row[x0 + 1];
-            if (db_gate(p1, p0, q0, q1, alpha, beta)) {
+            if (db_gate(p1, p0, q0, q1, alpha, beta, maxv)) {
                 db_apply(row + x0 - 2, row + x0 - 1, row + x0, row + x0 + 1,
                          db_delta(p1, p0, q0, q1, clip), maxv);
             }
@@ -203,7 +207,7 @@ static void deblock_h_range(uint16_t* pix, int32_t stride, uint32_t w,
         for (uint32_t x = 0u; x < w; ++x) {
             const int32_t p1 = pu2[x], p0 = pu[x];
             const int32_t q0 = qu[x], q1 = qu2[x];
-            if (db_gate(p1, p0, q0, q1, alpha, beta)) {
+            if (db_gate(p1, p0, q0, q1, alpha, beta, maxv)) {
                 db_apply(pu2 + x, pu + x, qu + x, qu2 + x,
                          db_delta(p1, p0, q0, q1, clip), maxv);
             }
@@ -211,131 +215,115 @@ static void deblock_h_range(uint16_t* pix, int32_t stride, uint32_t w,
     }
 }
 
-/* ---- 两趟的并行切分 ----
- * 可并行性来自"访问窗口互不相交"，不是近似：
- *  - 垂直趟：第 y 行只读写本行的 4 抽头窗口 → 按行带切分，任一行带独立；
- *  - 水平趟：边界行 y0=8r 的读写窗口是 {y0−2..y0+1}，相邻边界行相隔 8，
- *    窗口两两不相交 → 按 r 区间切分，任一区间独立。
- * 唯一的跨趟约束是"垂直全部完成后才水平"（水平趟读垂直趟改过的像素），
- * 两次 tc_parallel_for 调用本身即为屏障。故并行输出与串行**逐位一致**
- * （单测 test_deblock 的并行等价用例 + 解码端"任意线程数解码结果逐位
- * 一致"复验）。
- * 线程 ≤1、单元数 ≤1、平面过小或 tpool 退化（worker 内嵌套/环满/OOM）
- * 时自动顺序内联——tpool 契约保证，正确性不受影响。 */
-
-/* 小于该样本数的平面不做并行分发：批次开销高于滤波本身（缩略图/局部
- * 平面常见）。64K 采样 ≈ 128 KB u16，仍远低于任何一档产品平面。 */
+/* A horizontal edge at row r * unit reads and writes four rows
+ * [r * unit - 2, r * unit + 2). Split bands just before that window.
+ * Vertical filtering only touches its own row. Each band can therefore
+ * finish both passes locally, with the same per-pixel ordering as a
+ * whole-plane vertical pass followed by a whole-plane horizontal pass. */
 #define DB_PAR_MIN_SAMPLES (64u * 1024u)
-/* 任务上限：片数取 4×线程数以摊平大小边界行的尾部失衡（动态领取），
- * 上限即上限（栈上数组，避免每次分配）。 */
-#define DB_JOB_MAX 64u
+#define DB_MAX_PLANES 3u
+#define DB_BANDS_PER_WORKER 2u
+#define DB_MAX_BANDS (DB_BANDS_PER_WORKER * TC_SLICE_MAX_THREADS)
 
-typedef struct db_job {
-    uint16_t* pix;
-    int32_t stride;
-    uint32_t w;
-    uint32_t unit;    /* 目标域块界周期（全尺寸 8；1/2 抽样 4） */
-    uint32_t first;   /* 垂直：起始行；水平：起始边界行号 r */
-    uint32_t units;   /* 本片单元数 */
+typedef struct db_band {
+    const tc_deblock_plane_view* plane;
+    uint32_t first_row;
+    uint32_t end_row;
+    uint32_t first_edge;
+    uint32_t end_edge;
+    uint32_t unit;
     int32_t alpha;
     int32_t beta;
     int32_t clip;
     int32_t maxv;
-    int vertical;     /* 1 = 垂直趟，0 = 水平趟 */
-} db_job;
+} db_band;
 
-static void db_job_run(void* ctx)
+static void db_band_run(void* ctx)
 {
-    const db_job* j = (const db_job*)ctx;
-    if (j->vertical != 0) {
-        deblock_v_pass(j->pix + (size_t)j->first * (size_t)j->stride,
-                       j->stride, j->w, j->units, j->unit,
-                       j->alpha, j->beta, j->clip, j->maxv);
-    } else {
-        deblock_h_range(j->pix, j->stride, j->w, j->unit, j->first,
-                        j->first + j->units,
-                        j->alpha, j->beta, j->clip, j->maxv);
-    }
+    const db_band* band = (const db_band*)ctx;
+    const tc_deblock_plane_view* plane = band->plane;
+    deblock_v_pass(plane->pix + (size_t)band->first_row * (size_t)plane->stride,
+                   plane->stride, plane->width,
+                   band->end_row - band->first_row, band->unit,
+                   band->alpha, band->beta, band->clip, band->maxv);
+    deblock_h_range(plane->pix, plane->stride, plane->width, band->unit,
+                    band->first_edge, band->end_edge, band->alpha,
+                    band->beta, band->clip, band->maxv);
 }
 
-/* 把一趟切成 n 片交给常驻池；first_unit 为该趟的单元起始编号
- * （垂直趟 = 0 行，水平趟 = 1 号边界行）。 */
-static void db_run_pass(uint16_t* pix, int32_t stride, uint32_t w,
-                        uint32_t unit, uint32_t units, uint32_t first_unit,
-                        int vertical, int32_t alpha, int32_t beta, int32_t clip,
-                        int32_t maxv, uint32_t threads)
+static void deblock_planes_unit(const tc_deblock_plane_view* planes, uint32_t count,
+                                uint32_t qp, uint32_t table_sel, uint8_t bit_depth,
+                                uint32_t unit, uint32_t max_workers)
 {
-    if (units == 0u) { return; }
-    uint32_t n = threads * 4u;
-    if (n > units) { n = units; }
-    if (n > DB_JOB_MAX) { n = DB_JOB_MAX; }
-    if (n <= 1u) {
-        db_job one;
-        one.pix = pix; one.stride = stride; one.w = w; one.unit = unit;
-        one.first = first_unit; one.units = units;
-        one.alpha = alpha; one.beta = beta; one.clip = clip; one.maxv = maxv;
-        one.vertical = vertical;
-        db_job_run(&one);
+    if (planes == NULL || count == 0u || count > DB_MAX_PLANES || qp > TC_QP_MAX ||
+        bit_depth < 8u || bit_depth > 16u || unit < 4u || unit > 8u) {
         return;
     }
-    tc_job jobs[DB_JOB_MAX];
-    db_job ctx[DB_JOB_MAX];
-    for (uint32_t i = 0u; i < n; ++i) {
-        const uint32_t b = (uint32_t)(((uint64_t)units * i) / n);
-        const uint32_t e = (uint32_t)(((uint64_t)units * (i + 1u)) / n);
-        ctx[i].pix = pix; ctx[i].stride = stride; ctx[i].w = w;
-        ctx[i].unit = unit;
-        ctx[i].first = first_unit + b; ctx[i].units = e - b;
-        ctx[i].alpha = alpha; ctx[i].beta = beta;
-        ctx[i].clip = clip; ctx[i].maxv = maxv;
-        ctx[i].vertical = vertical;
-        jobs[i].fn = db_job_run;
-        jobs[i].ctx = &ctx[i];
-    }
-    (void)tc_parallel_for(jobs, n, threads);
-}
 
-/* 内核：unit = 目标域块界周期。全尺寸交付 unit=8（源 8×8 变换网格）；
- * 1/2 抽样交付 unit=4（源块界在目标域落在 4 的倍数上，见 codec.c 的
- * dec_scaled_deblock_unit）。
- * unit ≥ 4 是并行等价性的前提：水平趟各边界行的读写窗口宽 4（{y0−2..y0+1}），
- * unit < 4 时窗口重叠、切片不再独立。1/4 及更小的抽样（窗口重叠，且块界
- * 周期 2 已近 Nyquist）归后续批次，此处直接跳过。 */
-static void deblock_plane_unit(uint16_t* pix, int32_t stride_pix, uint32_t w,
-                               uint32_t h, uint32_t qp, uint32_t table_sel,
-                               uint8_t bit_depth, uint32_t unit)
-{
-    if (pix == NULL || qp > TC_QP_MAX || unit < 4u || unit > 8u
-            || w < 2u * unit || h < 2u * unit
-            || (w % unit) != 0u || (h % unit) != 0u) {
-        return; /* 非 unit 对齐/非法 qp：不去块（防御；产品平面恒 unit 对齐） */
-    }
-    if (bit_depth < 8u || bit_depth > 16u) { return; }
     DB_TUNE_INIT();
-    const int32_t maxv = (int32_t)((1u << bit_depth) - 1u);
-    /* 强度只与 (qp, table_sel) 有关、全平面恒定——在每条边界上重算（含
-     * 一次整数除法）是滤波耗时的可观部分，提到循环外。 */
     const int32_t alpha = (int32_t)deblock_alpha(table_sel, qp);
     const int32_t beta = alpha / 2 + 2;
     const int32_t clip = alpha >> 1;
-    /* 先垂直后水平，与 H.264 环内滤波同序：遍历序固定 → 输出确定。 */
-    const uint32_t threads = ((uint64_t)w * (uint64_t)h < DB_PAR_MIN_SAMPLES)
-        ? 1u : (uint32_t)tc_dev_thread_count();
-    db_run_pass(pix, stride_pix, w, unit, h, 0u, 1,
-                alpha, beta, clip, maxv, threads);
-    db_run_pass(pix, stride_pix, w, unit, (h / unit) - 1u, 1u, 0,
-                alpha, beta, clip, maxv, threads);
+    const int32_t maxv = (int32_t)((1u << bit_depth) - 1u);
+    uint32_t workers = max_workers != 0u ? max_workers : (uint32_t)tc_dev_thread_count();
+    if (workers > TC_SLICE_MAX_THREADS) { workers = TC_SLICE_MAX_THREADS; }
+
+    tc_job jobs[DB_MAX_PLANES * DB_MAX_BANDS];
+    db_band bands[DB_MAX_PLANES * DB_MAX_BANDS];
+    uint32_t job_count = 0u;
+    for (uint32_t p = 0; p < count; ++p) {
+        const tc_deblock_plane_view* plane = &planes[p];
+        const uint32_t w = plane->width;
+        const uint32_t h = plane->height;
+        if (plane->pix == NULL || plane->stride <= 0 || (uint32_t)plane->stride < w ||
+            w < 2u * unit || h < 2u * unit ||
+            w % unit != 0u || h % unit != 0u) {
+            continue;
+        }
+        const uint32_t edges = h / unit - 1u;
+        uint32_t band_count = workers <= 1u || (uint64_t)w * h < DB_PAR_MIN_SAMPLES
+            ? 1u : workers * DB_BANDS_PER_WORKER;
+        if (band_count > edges) { band_count = edges; }
+        for (uint32_t i = 0; i < band_count; ++i) {
+            const uint32_t first_edge = 1u + (uint32_t)(((uint64_t)edges * i) / band_count);
+            const uint32_t end_edge = 1u + (uint32_t)(((uint64_t)edges * (i + 1u)) / band_count);
+            db_band band = {
+                plane, i == 0u ? 0u : first_edge * unit - 2u,
+                i + 1u == band_count ? h : end_edge * unit - 2u,
+                first_edge, end_edge, unit, alpha, beta, clip, maxv,
+            };
+            if (band_count == 1u) {
+                db_band_run(&band);
+            } else {
+                bands[job_count] = band;
+                jobs[job_count] = (tc_job){db_band_run, &bands[job_count]};
+                job_count++;
+            }
+        }
+    }
+    if (job_count != 0u) {
+        (void)tc_parallel_for(jobs, job_count, workers);
+    }
+}
+
+void tc_deblock_planes(const tc_deblock_plane_view* planes, uint32_t count,
+                       uint32_t qp, uint32_t table_sel, uint8_t bit_depth,
+                       uint32_t max_workers)
+{
+    deblock_planes_unit(planes, count, qp, table_sel, bit_depth, 8u, max_workers);
 }
 
 void tc_deblock_plane(uint16_t* pix, int32_t stride_pix, uint32_t w, uint32_t h,
                       uint32_t qp, uint32_t table_sel, uint8_t bit_depth)
 {
-    deblock_plane_unit(pix, stride_pix, w, h, qp, table_sel, bit_depth, 8u);
+    const tc_deblock_plane_view plane = {pix, stride_pix, w, h};
+    tc_deblock_planes(&plane, 1u, qp, table_sel, bit_depth, 0u);
 }
 
 void tc_deblock_plane_scaled(uint16_t* pix, int32_t stride_pix, uint32_t w,
                              uint32_t h, uint32_t qp, uint32_t table_sel,
                              uint8_t bit_depth, uint32_t unit)
 {
-    deblock_plane_unit(pix, stride_pix, w, h, qp, table_sel, bit_depth, unit);
+    const tc_deblock_plane_view plane = {pix, stride_pix, w, h};
+    deblock_planes_unit(&plane, 1u, qp, table_sel, bit_depth, unit, 0u);
 }

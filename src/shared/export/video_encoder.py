@@ -794,6 +794,7 @@ class FFmpegVideoEncoder:
         # 的 os.remove 还会删掉旧成功输出。
         self._write_path: str = output_path + ".topos-partial"
         self._config: FFmpegEncoderConfig = config
+        self._hqx_reformatter: Optional[Any] = None
         self._container: Optional[Any] = None  # av.container.OutputContainer
         self._stream: Optional[Any] = None  # av.VideoStream
         self._audio_stream: Optional[Any] = None  # av.AudioStream
@@ -1838,7 +1839,7 @@ class FFmpegVideoEncoder:
             self._encode_av_frame(av_frame)
 
     def _has_encoder_plane_buffer(self, frame: "DecodedFrame") -> bool:
-        """Recognize GPU plane storage for the inline submission path."""
+        """Recognize encoder-ready plane storage for inline submission."""
         if frame is None or frame.data is not None or not frame.planes:
             return False
         pixel_format = frame.pixel_format.lower()
@@ -2263,6 +2264,51 @@ class FFmpegVideoEncoder:
         )
         return frame, planes
 
+    def reformat_hqx_yuv420p_frame(
+        self, source: Any,
+    ) -> Optional[tuple[Any, tuple[np.ndarray, ...]]]:
+        """Upsample a limited BT.709 source into independent PyAV HQX storage.
+
+        The timeline render worker alone uses this reformatter. The returned
+        AVFrame owns its planes and can be queued independently of the source.
+        """
+        import av
+        import numpy as np
+
+        if (not isinstance(source, av.VideoFrame) or source.format.name != "yuv420p"
+                or source.width % 2 or source.height % 2
+                or getattr(source, "is_corrupt", True)
+                or getattr(source, "interlaced_frame", True)
+                or tuple(getattr(source, key, None) for key in (
+                    "color_range", "colorspace", "color_primaries", "color_trc",
+                ))
+                != (1, 1, 1, 1)):
+            return None
+        if self._hqx_reformatter is None:
+            from av.video.reformatter import VideoReformatter
+
+            self._hqx_reformatter = VideoReformatter()
+        try:
+            # Each worker needs complete, aligned 4:2:0 row pairs. Keep one
+            # worker for small or custom geometries where swscale can leave
+            # incorrect pixels at slice boundaries.
+            threads = 4 if (
+                source.width % 32 == 0 and source.height % 8 == 0
+                and source.width * source.height >= 1920 * 1080
+            ) else 1
+            converted = self._hqx_reformatter.reformat(
+                source, format="yuv422p10le", threads=threads,
+            )
+            planes = tuple(np.ndarray(
+                (plane.height, plane.width), dtype="<u2", buffer=plane, strides=(plane.line_size, 2),
+            ) for plane in converted.planes)
+        except (TypeError, ValueError):
+            # Older PyAV versions may lack per-conversion threading.
+            return None
+        except av.error.FFmpegError:
+            return None
+        return converted, planes
+
     def _create_planar_av_frame(self, frame: "DecodedFrame", format_name: str) -> Any:
         """
         从 DecodedFrame 的 planes 创建 PyAV VideoFrame（字节级平面填充）。
@@ -2294,7 +2340,8 @@ class FFmpegVideoEncoder:
                     and len(frame.planes) == 3
                     and all(source.dtype == np.dtype("<u2")
                             and source.shape == (plane.height, plane.width)
-                            and source.flags.c_contiguous and source.ctypes.data == plane.buffer_ptr
+                            and source.strides == (plane.line_size, 2)
+                            and source.ctypes.data == plane.buffer_ptr
                             for source, plane in zip(frame.planes, backing.planes))):
                 return backing
 

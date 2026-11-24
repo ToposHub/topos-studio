@@ -1,11 +1,10 @@
 """T-P1-21：GPU 导出分派门控与 shader kernel 性能契约回归。
 
 钉死两类已修复缺陷：
-1. ``output_yuv422p10`` 是 Metal 渲染器独有参数。此前不分后端传入——
+1. ``output_yuv422p10`` 默认只传给 Metal，OpenGL 仅单层平面路径显式启用。
+   此前不分后端传入——
    macOS auto→opengl 下每帧 TypeError→整帧回落 CPU float 管线（grade
-   实测 1.4fps，forced_gpu 与 cpu_render 同速）。现在由
-   ``_gpu_render_output_kwargs`` 单点门控：仅 Metal 携带该参数，且 GL
-   渲染器三个入口签名必须始终不含它（双保险）。
+   实测 1.4fps，forced_gpu 与 cpu_render 同速）。
 2. 效果 GLSL 的静态 kernel 循环（``for (int i = -MAX_KERNEL; ...)`` +
    逐迭代 continue 守卫）在 AMD 上不因 continue 跳过成本——blur radius
    12 时 129 次迭代仅 25 次有效采样、glow/defocus 257 次。已改动态边界；
@@ -15,9 +14,12 @@
 from __future__ import annotations
 
 import inspect
+from concurrent.futures import Future
+from types import SimpleNamespace
 
 from src.features.edit.core.timeline_export import TimelineExporter
 from src.features.shared.effects import get_effect_catalog
+from src.shared.media.gpu_frame import GpuDecodedFrame, GpuFrameRelease
 
 
 class TestGpuOutputKwargsGating:
@@ -55,9 +57,7 @@ class TestGpuOutputKwargsGating:
 
 
 class TestGlRendererSignatureContract:
-    """GL 渲染器入口不得接受 ``output_yuv422p10``（它没有该输出形态）。"""
-
-    def test_gl_entries_reject_yuv422p10_kwarg(self) -> None:
+    def test_only_the_gl_planar_entry_accepts_yuv422p10(self) -> None:
         from src.features.edit.core.timeline_gpu_export_renderer import (
             TimelineGpuExportRenderer,
         )
@@ -66,11 +66,46 @@ class TestGlRendererSignatureContract:
                        "render_layer_stack"):
             params = inspect.signature(
                 getattr(TimelineGpuExportRenderer, method)).parameters
-            assert "output_yuv422p10" not in params, (
-                f"TimelineGpuExportRenderer.{method} 不应声明 "
-                f"output_yuv422p10（GL 无该输出路径；若已实现请同步更新 "
-                f"_gpu_render_output_kwargs 门控）"
-            )
+            assert ("output_yuv422p10" in params) == (method == "render_planar")
+
+
+def test_topos_gpu_planes_require_no_program_matte() -> None:
+    exporter = TimelineExporter.__new__(TimelineExporter)
+    exporter._timeline_graphics_backend = "metal"
+    exporter._encoder = SimpleNamespace(
+        _config=SimpleNamespace(codec="topos", pix_fmt="yuv422p10le"))
+    exporter._export_color_metadata = SimpleNamespace(
+        primaries="bt709", transfer="bt709", matrix="bt709", range="limited")
+    params = {"fill_black": True, "burn_in": False}
+    exporter._sequence = SimpleNamespace(format_settings={
+        "program_guide": {"type": "aspect_ratio", "params": params},
+    })
+    config = SimpleNamespace(burn_subtitles=False)
+
+    assert exporter._gpu_yuv422p10_output_allowed(config, 3840, 2160)
+    params["burn_in"] = True
+    assert not exporter._gpu_yuv422p10_output_allowed(config, 3840, 2160)
+
+
+def test_unused_lut_prefetch_releases_its_frame_once() -> None:
+    exporter = TimelineExporter.__new__(TimelineExporter)
+    released: list[int] = []
+    frame = GpuDecodedFrame(
+        frame_index=1, pts=1, time_seconds=0.04, width=8, height=4,
+        visible_rect=None, pixel_format="yuv422p10le", bit_depth=10,
+        planes=(), zero_copy=False,
+        release=GpuFrameRelease(release_callback=lambda: released.append(1)),
+    )
+    ready: Future[GpuDecodedFrame] = Future()
+    ready.set_result(frame)
+    exporter._topos_lut_prefetch = (1, ready)
+
+    assert exporter._take_topos_lut_prefetch(2) is None
+    exporter._discard_topos_lut_prefetch()
+    exporter._discard_topos_lut_prefetch()
+
+    assert exporter._topos_lut_prefetch is None
+    assert released == [1]
 
 
 class TestEffectShaderKernelContract:

@@ -282,6 +282,26 @@ static void test_lut_equivalence(void)
     }
 }
 
+static void test_encoder_symbol_transition(void)
+{
+    for (uint32_t freq = 1u; freq <= TC_RANS_SCALE_TOTAL; ++freq) {
+        const uint32_t cum = TC_RANS_SCALE_TOTAL - freq;
+        tc_rans_enc_symbol symbol;
+        tc_rans_enc_symbol_init(&symbol, freq, cum);
+        for (uint32_t i = 0u; i < 160u; ++i) {
+            /* Cover both ends, including exact quotient boundaries, and
+             * sample the rest of the positive renormalized state range. */
+            const uint32_t high_bits = rng();
+            const uint32_t random_state = (high_bits << 8u) | (rng() & 255u);
+            const uint32_t x = i < 32u ? i + 1u :
+                (i < 64u ? symbol.x_max - 1u - (i - 32u) :
+                 1u + random_state % (symbol.x_max - 1u));
+            const uint32_t expected = (x / freq) * TC_RANS_SCALE_TOTAL + x % freq + cum;
+            MT_CHECK_EQ_U64(tc_rans_enc_symbol_next(x, symbol), expected);
+        }
+    }
+}
+
 int main(void)
 {
     test_model_build();
@@ -290,5 +310,6 @@ int main(void)
     test_uniform_bit_cost();
     test_mixed_rawbits_roundtrip();
     test_lut_equivalence();
+    test_encoder_symbol_transition();
     return MT_MAIN_RETURN();
 }

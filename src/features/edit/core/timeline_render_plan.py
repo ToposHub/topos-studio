@@ -1585,8 +1585,8 @@ def build_direct_topos_delivery_plan(
     return DirectToposDeliveryPlan(
         asset_path=source_path,
         clip_id=str(getattr(clip, "clip_id", "")),
-        timeline_start=int(clip.timeline_start),
-        source_start=int(clip.source_start),
+        timeline_start=start_frame,
+        source_start=source_offset,
         frames=frames,
         width=source_width,
         height=source_height,

@@ -163,6 +163,10 @@ int main(void)
     MT_CHECK_EQ_I64(tc_rice_unmap_signed(1), -1);
     MT_CHECK_EQ_I64(tc_rice_unmap_signed(2), 1);
     MT_CHECK_EQ_I64(tc_rice_unmap_signed(3), -2);
+    MT_CHECK_EQ_U64(tc_rice_map_signed(INT32_MIN), UINT32_MAX);
+    MT_CHECK_EQ_U64(tc_rice_map_signed(INT32_MAX), UINT32_MAX - 1u);
+    MT_CHECK_EQ_I64(tc_rice_unmap_signed(UINT32_MAX), INT32_MIN);
+    MT_CHECK_EQ_I64(tc_rice_unmap_signed(UINT32_MAX - 1u), INT32_MAX);
     MT_CHECK_EQ_I64(tc_rice_unmap_signed(tc_rice_map_signed(-(1 << 26))), -(1 << 26));
     MT_CHECK_EQ_I64(tc_rice_unmap_signed(tc_rice_map_signed(1 << 26)), 1 << 26);
     for (int i = 0; i < 20000; ++i) {

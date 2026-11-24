@@ -9,6 +9,8 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #if !defined(_WIN32)
+#include <pthread.h>
+#include <sched.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -33,6 +35,7 @@ static void nested_job(void* p)
 
 #if !defined(_WIN32)
 static void test_pool_fork_and_nested_slot(void);
+static void test_pool_retains_oldest_batch(void);
 #endif
 
 int main(void)
@@ -93,6 +96,9 @@ int main(void)
     tc_dev_tpool_stats_get(&st);
     MT_CHECK(st.nested_fallbacks > nested_before);
 
+#if !defined(_WIN32)
+    test_pool_retains_oldest_batch();
+#endif
     MT_MAIN_RETURN();
 }
 
@@ -185,6 +191,61 @@ static void test_pool_fork_and_nested_slot(void)
         waitpid(pid, &status, 0);
         MT_CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
     }
+}
+
+/* The first caller still owns its batch after its workers have moved on.
+ * Later callers must not overwrite its slot when the ring wraps. */
+typedef struct retained_batch {
+    atomic_int caller_started;
+    atomic_int release_caller;
+    atomic_uint completed;
+} retained_batch;
+
+static void hold_caller_job(void* opaque)
+{
+    retained_batch* state = (retained_batch*)opaque;
+    if (tc_pool_worker_slot() == 0u) {
+        atomic_store(&state->caller_started, 1);
+        while (!atomic_load(&state->release_caller)) { sched_yield(); }
+    } else {
+        while (!atomic_load(&state->caller_started)) { sched_yield(); }
+    }
+    atomic_fetch_add(&state->completed, 1u);
+}
+
+static void* submit_retained_batch(void* opaque)
+{
+    tc_job jobs[32];
+    for (uint32_t i = 0; i < 32u; ++i) {
+        jobs[i] = (tc_job){hold_caller_job, opaque};
+    }
+    (void)tc_parallel_for(jobs, 32u, 4u);
+    return NULL;
+}
+
+static void test_pool_retains_oldest_batch(void)
+{
+    retained_batch state = {0};
+    pthread_t caller;
+    const int started = pthread_create(&caller, NULL, submit_retained_batch, &state);
+    MT_CHECK_EQ_I64(started, 0);
+    if (started != 0) { return; }
+    while (!atomic_load(&state.caller_started)) { sched_yield(); }
+
+    atomic_uint completed = 0;
+    tc_job jobs[16];
+    for (uint32_t i = 0; i < 16u; ++i) { jobs[i] = (tc_job){bump_job, &completed}; }
+    tc_tpool_stats before, after;
+    tc_dev_tpool_stats_get(&before);
+    for (uint32_t i = 0; i < 80u; ++i) {
+        (void)tc_parallel_for(jobs, 16u, 4u);
+    }
+    tc_dev_tpool_stats_get(&after);
+    atomic_store(&state.release_caller, 1);
+    MT_CHECK_EQ_I64(pthread_join(caller, NULL), 0);
+    MT_CHECK_EQ_U64(atomic_load(&state.completed), 32u);
+    MT_CHECK_EQ_U64(atomic_load(&completed), 80u * 16u);
+    MT_CHECK(after.ring_full_fallbacks > before.ring_full_fallbacks);
 }
 
 #endif /* !_WIN32 */

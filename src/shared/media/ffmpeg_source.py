@@ -659,6 +659,7 @@ class FFmpegMediaSource:
         preserve_planes: bool = False,
         output_mode: OutputMode = "packed_rgb",
         output_format: str | None = None,
+        *, retain_yuv420p_av_frame: bool = False,
     ) -> None:
         """
         初始化媒体源。
@@ -674,12 +675,15 @@ class FFmpegMediaSource:
             output_format: 可选的强制打包输出格式（当前只允许 ``rgb24`` 或
                            ``rgba``）。用于 CPU-only 消费者要求可靠 8-bit RGB
                            转换时；默认 ``None`` 保持原有高位深输出策略。
+            retain_yuv420p_av_frame: 允许限定的 H.264 导出消费者使用原生平面。
         """
         self._path: str = path
         self._presentation_index: PresentationIndex | None = None
         self._target_size: Optional[Tuple[int, int]] = target_size
         self._preserve_planes: bool = preserve_planes
         self._output_mode: OutputMode = output_mode
+        self._retain_yuv420p_av_frame = bool(retain_yuv420p_av_frame)
+        self._export_yuv420p_chroma_siting: int | None = None
         if output_format not in (None, "rgb24", "rgba"):
             raise ValueError(f"Unsupported forced output format: {output_format!r}")
         self._output_format: str | None = output_format
@@ -789,10 +793,12 @@ class FFmpegMediaSource:
                 and _is_yuv_pixel_format(self._metadata.pixel_format)
             )
 
-    def limit_h264_export_decode_threads(self) -> None:
-        """Reduce the H.264 frame-thread queue while encoding on Intel Macs."""
-        if sys.platform != "darwin" or platform.machine() != "x86_64":
-            return
+    def limit_h264_export_decode_threads(self, thread_count: Optional[int] = None) -> None:
+        """Cap the H.264 decoder before its first read during export."""
+        if thread_count is None:
+            if sys.platform != "darwin" or platform.machine() != "x86_64":
+                return
+            thread_count = 4
         metadata = self._metadata
         stream = self._video_stream
         if (metadata is None or stream is None or metadata.pixel_format != "yuv420p"
@@ -803,7 +809,7 @@ class FFmpegMediaSource:
         if decoder.name == "h264" and not decoder.is_open:
             # Keep smaller explicit budgets. Auto frame threading otherwise
             # uses the full logical core count alongside export rendering.
-            decoder.thread_count = min(4, decoder.thread_count or 4)
+            decoder.thread_count = min(thread_count, decoder.thread_count or thread_count)
 
     def probe(self) -> VideoMetadata:
         """
@@ -1289,6 +1295,12 @@ class FFmpegMediaSource:
             # 探测元数据（如果尚未探测）
             if self._metadata is None:
                 self._metadata = self._extract_metadata_from_stream()
+            if (getattr(self, '_retain_yuv420p_av_frame', False) and self._target_size is None
+                    and self._metadata.codec_name == 'h264'
+                    and self._metadata.pixel_format == 'yuv420p'):
+                self._export_yuv420p_chroma_siting = self._metadata.chroma_siting
+                if self._export_yuv420p_chroma_siting is None:
+                    self._export_yuv420p_chroma_siting = self._probe_yuv420p_chroma_siting()
 
             self._is_open = True
             self._current_frame = 0
@@ -1341,6 +1353,29 @@ class FFmpegMediaSource:
                 f"Failed to open media: {e}",
                 source_path=self._path
             ) from e
+
+    def _probe_yuv420p_chroma_siting(self) -> int | None:
+        """Read the H.264 stream's chroma location when PyAV omits it."""
+        import json
+        import subprocess
+
+        from src.shared.ffmpeg_locator import find_ffprobe
+
+        executable = find_ffprobe()
+        if executable is None:
+            return None
+        try:
+            result = subprocess.run(
+                [executable, '-v', 'error', '-select_streams', 'v:0',
+                 '-show_entries', 'stream=chroma_location', '-of', 'json', '-i', self._path],
+                capture_output=True, text=True, check=True, timeout=2.0,
+            )
+            streams = json.loads(result.stdout)['streams']
+            if len(streams) == 1:
+                return _normalize_chroma_siting(streams[0].get('chroma_location'))
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError, AttributeError):
+            return None
+        return None
 
     def close(self, close_timeout: float = 3.0, *, from_gc: bool = False) -> None:
         """
@@ -2679,6 +2714,20 @@ class FFmpegMediaSource:
             getattr(frame, 'chroma_location', None))
         if frame_chroma_siting is not None:
             extra_metadata['chroma_siting'] = frame_chroma_siting
+        export_chroma_siting = (
+            frame_chroma_siting if frame_chroma_siting is not None
+            else getattr(self, "_export_yuv420p_chroma_siting", None)
+        )
+        if (getattr(self, "_retain_yuv420p_av_frame", False) and not is_proxy
+                and self._metadata.codec_name == 'h264'
+                and pix_fmt == "yuv420p" and original_pix_fmt == pix_fmt
+                and export_chroma_siting == 0
+                and not getattr(frame, 'is_corrupt', True)
+                and not getattr(frame, 'interlaced_frame', True)):
+            # Keep the PyAV owner, including the native stride and padding.
+            # Consumers must not rebuild an AVFrame from the compact NumPy view.
+            extra_metadata['source_yuv420p_frame'] = frame
+            extra_metadata['chroma_siting'] = export_chroma_siting
         if is_proxy:
             extra_metadata['proxy_reformat_success'] = reformat_success
             extra_metadata['proxy_reformat_fallback'] = reformat_fallback

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -13,7 +14,8 @@ from src.features.edit.core.timeline_export import (
     TimelineExporter,
     _topos_timeline_cpu_threads,
 )
-from src.shared.media.ffmpeg_source import _normalize_chroma_siting
+from src.shared.export.video_encoder import FFmpegVideoEncoder
+from src.shared.media.ffmpeg_source import FFmpegMediaSource, _normalize_chroma_siting
 from src.shared.media.frame import DecodedFrame, PlaneInfo
 from src.shared.media.metadata import Rational, VideoMetadata
 
@@ -400,6 +402,133 @@ def _h264_frame(chroma_siting: int | None = None, **overrides: Any) -> Any:
         pixel_format="yuv420p",
         **kwargs,
     )
+
+
+def _h264_hqx_env(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, ...]:
+    av = pytest.importorskip("av")
+    from av.video.reformatter import VideoReformatter
+
+    width, height = 66, 8  # Deliberately exercises libav's padded row layout.
+    raw = av.VideoFrame(width, height, "yuv420p")
+    if not all(hasattr(raw, key) for key in (
+        "is_corrupt", "interlaced_frame", "color_range", "colorspace", "color_primaries", "color_trc",
+    )):
+        pytest.skip("PyAV does not expose the source frame contract for HQX conversion")
+    raw.color_range = raw.colorspace = raw.color_primaries = raw.color_trc = 1
+    try:
+        VideoReformatter().reformat(raw, format="yuv422p10le", threads=1)
+    except TypeError:
+        pytest.skip("PyAV does not support per-conversion threads")
+    for plane, levels in zip(raw.planes, ([16, 235] * 4, [64, 96, 160, 220], [128] * 4)):
+        view = np.ndarray((plane.height, plane.width), dtype=np.uint8, buffer=plane,
+                          strides=(plane.line_size, 1))
+        view[:] = np.asarray(levels, dtype=np.uint8)[:, None]
+
+    source = FFmpegMediaSource("/media/source.mov", preserve_planes=True,
+                              retain_yuv420p_av_frame=True)
+    source._metadata = _h264_frame(width=width, height=height).metadata
+    source._export_yuv420p_chroma_siting = 0
+    source._current_frame = 12
+    decoded = source._convert_frame_planar(raw)
+    exporter, plan, config, _decoded, _requested = _make_env(
+        monkeypatch, codec="dnxhr", pix_fmt="yuv422p10le", frame=decoded,
+    )
+    encoder_config = exporter._encoder._config
+    encoder_config.profile = "hqx"
+    encoder_config.width, encoder_config.height = width, height
+    exporter._encoder = FFmpegVideoEncoder("/output.mov", encoder_config)
+    exporter._sequence.width, exporter._sequence.height = width, height
+    config.resolution = width, height
+    assert decoded.extra["source_yuv420p_frame"] is raw
+    return exporter, plan, config, decoded, raw
+
+
+def test_h264_hqx_reformat_preserves_codes_chroma_phase_and_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exporter, plan, config, source, raw = _h264_hqx_env(monkeypatch)
+    output = exporter._try_render_planar_passthrough(plan, 12, config)
+
+    assert output is not None
+    assert (output.frame_index, output.pts, output.time_seconds) == (2, 2, 2 / 25)
+    assert output.pixel_format == output.metadata.pixel_format == "yuv422p10le"
+    assert output.bit_depth == output.metadata.bit_depth == 10
+    assert output.metadata.chroma_siting == 0
+    assert exporter._frame_render_backend == "cpu"
+    assert [plane.shape for plane in output.planes] == [(8, 66), (8, 33), (8, 33)]
+    assert [plane.strides[0] for plane in output.planes] == [info.stride for info in output.plane_infos]
+    assert output.planes[0][:, 0].tolist() == [64, 940] * 4
+    assert output.planes[1][:, 0].tolist() == [256, 288, 352, 448, 576, 700, 820, 880]
+    assert np.all(output.planes[2] == 512)
+    av_frame = output.extra["yuv422p10_frame"]
+    assert av_frame is not raw
+    assert exporter._encoder._create_planar_av_frame(output, "yuv422p10le") is av_frame
+
+    # Reformatting the next frame cannot invalidate a prior queued frame.
+    np.frombuffer(raw.planes[0], dtype=np.uint8)[:] = 26
+    second = exporter._try_render_planar_passthrough(plan, 12, config)
+    assert second is not None
+    assert second.extra["yuv422p10_frame"] is not av_frame
+    assert np.all(second.planes[0] == 104)
+    assert output.planes[0][:, 0].tolist() == [64, 940] * 4
+
+
+@pytest.mark.parametrize("width,height", [(3840, 2160), (3842, 2162)])
+def test_hqx_conversion_matches_single_worker_at_slice_boundaries(
+    monkeypatch: pytest.MonkeyPatch, width: int, height: int,
+) -> None:
+    av = pytest.importorskip("av")
+    from av.video.reformatter import VideoReformatter
+
+    exporter, *_ = _h264_hqx_env(monkeypatch)
+    source = av.VideoFrame(width, height, "yuv420p")
+    source.color_range = source.colorspace = source.color_primaries = source.color_trc = 1
+    generator = np.random.default_rng(51)
+    for plane in source.planes:
+        plane.update(generator.integers(0, 256, plane.buffer_size, dtype=np.uint8))
+    reference = VideoReformatter().reformat(source, format="yuv422p10le", threads=1)
+
+    converted = exporter._encoder.reformat_hqx_yuv420p_frame(source)
+
+    assert converted is not None
+    for actual, expected in zip(converted[1], reference.planes, strict=True):
+        visible = np.ndarray(
+            actual.shape, dtype="<u2", buffer=expected, strides=(expected.line_size, 2),
+        )
+        np.testing.assert_array_equal(actual, visible)
+
+
+@pytest.mark.parametrize("reject", ["center", "top_left", "unknown_phase", "wrong_frame", "full_range", "no_owner"])
+def test_h264_hqx_unsupported_source_keeps_normal_renderer(
+    monkeypatch: pytest.MonkeyPatch, reject: str,
+) -> None:
+    exporter, plan, config, source, raw = _h264_hqx_env(monkeypatch)
+    if reject == "center":
+        source.extra["chroma_siting"] = 1
+    elif reject == "top_left":
+        source.extra["chroma_siting"] = 2
+    elif reject == "unknown_phase":
+        source.extra.pop("chroma_siting")
+    elif reject == "wrong_frame":
+        source.frame_index -= 1
+    elif reject == "full_range":
+        raw.color_range = 2
+    else:
+        source.extra.pop("source_yuv420p_frame")
+    assert exporter._try_render_planar_passthrough(plan, 12, config) is None
+
+
+@pytest.mark.parametrize("metadata", [
+    {"is_vfr": True}, {"is_hdr": True}, {"rotation": 90}, {"field_order": "tt"},
+])
+def test_h264_hqx_rejects_known_asset_metadata(
+    monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any],
+) -> None:
+    exporter, plan, config, _source, _raw = _h264_hqx_env(monkeypatch)
+    asset = exporter._project.get_asset_by_id("asset-1")
+    asset.metadata = {"codec": "h264", **metadata}
+
+    assert exporter._try_render_planar_passthrough(plan, 12, config) is None
 
 
 def test_h264_yuv420p_passthrough_returns_planar_frame(

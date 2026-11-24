@@ -31,8 +31,8 @@ typedef struct tc_job {
     void* ctx;
 } tc_job;
 
-/* 并行执行 jobs[0..n)（动态领取分发）。
- * 返回实际参与线程数（含调用线程）；n ≤ 1 或 workers ≤ 1 时顺序内联。 */
+/* 并行执行 jobs[0..n)（动态领取分发）。返回本批获得的线程配额（含调用线程）；
+ * 返回时所有任务已完成；n ≤ 1 或 workers ≤ 1 时顺序内联。 */
 uint32_t tc_parallel_for(const tc_job* jobs, uint32_t n, uint32_t max_workers);
 
 /* 当前线程的池内槽位：0 = 调用线程（或无线程平台）；1..nthreads = worker。

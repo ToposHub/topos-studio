@@ -160,18 +160,29 @@ static void test_quant_zz_kernel_differential(void)
 /* ---- 2c. P-速⑥ 自然序量化内核差分（免 gather：q 自然序 + 掩码翻译） ---- */
 static void test_quant_nat_kernel_differential(void)
 {
-    const tc_qmatrix_set* qms[2] = {tc_qmatrix_by_id(0u), tc_qmatrix_by_id(1u)};
+    /* A zero weight clamps Q to 1, while the large weights reach the
+     * scalar fallback at high QP. The low-QP cases also include powers of two. */
+    uint16_t boundary_matrix[64];
+    for (uint32_t i = 0u; i < 64u; ++i) {
+        const uint16_t weights[] = {0u, 16u, 32u, 16384u};
+        boundary_matrix[i] = weights[i % 4u];
+    }
     for (int mode = 0; mode < 2; ++mode) {
         if (mode == 0) { tc_dev_set_simd_mode(TC_SIMD_SCALAR); }
         else { tc_dev_set_simd_mode(TC_SIMD_AUTO); }
         tc_quant_nat_fn fn = tc_simd_resolve_quant_nat(0u);
         MT_CHECK(fn != NULL);
-        for (int mi = 0; mi < 2; ++mi) {
-            const uint16_t* mats[2] = {qms[mi]->luma, qms[mi]->chroma};
-            for (int m = 0; m < 2; ++m) {
-                for (uint32_t qp = 0u; qp < 64u; ++qp) {
+        for (uint32_t mi = 0; mi <= 5u; ++mi) {
+            const tc_qmatrix_set* matrix = tc_qmatrix_by_id(mi);
+            const uint16_t* mats[2] = {matrix != NULL ? matrix->luma : boundary_matrix,
+                                       matrix != NULL ? matrix->chroma : NULL};
+            for (int m = 0; m < 2 && mats[m] != NULL; ++m) {
+                const uint32_t count = TC_QP_MAX + 1u;
+                for (uint32_t step = 0u; step < 2u * count; ++step) {
+                    const uint32_t qp = step % count;
+                    const uint32_t table = step < count ? TC_QPTBL_CLASSIC : TC_QPTBL_REFINED;
                     tc_quant_ctx ctx;
-                    tc_quant_ctx_init(&ctx, mats[m], qp);
+                    tc_quant_ctx_init_bd_tbl(&ctx, mats[m], qp, 12u, table);
                     for (int blk = 0; blk < 16; ++blk) {
                         int32_t F[64], ref_nat[64], got[64];
                         for (int i = 0; i < 64; ++i) {
@@ -180,6 +191,7 @@ static void test_quant_nat_kernel_differential(void)
                             else if (r < 16u) { F[i] = TC_TRANSFORM_MAX_ABS_F; }
                             else if (r < 24u) { F[i] = -TC_TRANSFORM_MAX_ABS_F; }
                             else if (r < 30u) { F[i] = TC_TRANSFORM_MAX_ABS_F + 5; /* 钳位 */ }
+                            else if (r < 36u) { F[i] = INT32_MIN; }
                             else { F[i] = (int32_t)(rng_u64() % 40000000ull) - 20000000; }
                         }
                         tc_quant_block_ctx(&ctx, F, ref_nat);

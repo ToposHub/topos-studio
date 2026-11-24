@@ -1656,7 +1656,7 @@ static void fill_color_band(const topos_frame_header* fh, const uint16_t* coded,
             int has_top = by > 0u ? 1 : 0;
             int32_t pred = tc_dc_predict(has_left, dc_b[bx > 0u ? bx - 1u : 0u],
                                          has_top, dc_a[bx]);
-            uint32_t dcm = tc_rice_map_signed(q[bi * 64u] - pred);
+            uint32_t dcm = tc_rice_map_signed_inline(q[bi * 64u] - pred);
             sum_dc += dcm;
             cnt_dc++;
             dc_b[bx] = q[bi * 64u];
@@ -1668,7 +1668,7 @@ static void fill_color_band(const topos_frame_header* fh, const uint16_t* coded,
             uint32_t prev = 0u;
             while (nz != 0u) {
                 const uint32_t pos = tc_ctz64(nz) + 1u;
-                uint32_t lm = tc_rice_map_signed(q[bi * 64u + pos]);
+                uint32_t lm = tc_rice_map_signed_inline(q[bi * 64u + pos]);
                 const uint32_t run = pos - prev - 1u;
                 sum_run += run;
                 cnt_run++;
@@ -1770,7 +1770,7 @@ static int32_t fill_color_band_tokens(const topos_frame_header* fh, const uint16
             int has_top = by > 0u ? 1 : 0;
             int32_t pred = tc_dc_predict(has_left, dc_b[bx > 0u ? bx - 1u : 0u],
                                          has_top, dc_a[bx]);
-            uint32_t dcm = tc_rice_map_signed(qn[0] - pred);
+            uint32_t dcm = tc_rice_map_signed_inline(qn[0] - pred);
             if (dcm > TC_RICE_M_MAX_DC_BD16) {
                 dcm = TC_RICE_M_MAX_DC_BD16;
                 domain_violation = 1u;
@@ -1790,7 +1790,7 @@ static int32_t fill_color_band_tokens(const topos_frame_header* fh, const uint16
             uint32_t prev = 0u;
             while (nz != 0u) {
                 const uint32_t pos = tc_ctz64(nz) + 1u;
-                uint32_t lm = tc_rice_map_signed(qn[kTcZigzag[pos]]);
+                uint32_t lm = tc_rice_map_signed_inline(qn[kTcZigzag[pos]]);
                 if (lm > TC_RICE_M_MAX_AC_LEVEL_BD16) {
                     lm = TC_RICE_M_MAX_AC_LEVEL_BD16;
                     domain_violation = 1u;
@@ -2195,7 +2195,7 @@ static inline uint32_t rans2_put_chunk_x(uint32_t x, tc_rans_enc* e, uint32_t w,
             *rc = TC_ERR_BUFFER_TOO_SMALL;
             return x;
         }
-        e->buf[e->pos++] = (uint8_t)(x & 0xFFu);
+        e->buf[e->cap - 1u - e->pos++] = (uint8_t)(x & 0xFFu);
         x >>= 8;
     }
     return (x << w) | (c & ((1u << w) - 1u));
@@ -2216,17 +2216,12 @@ static inline uint32_t rans2_put_suffix_x(uint32_t x, tc_rans_enc* e, uint32_t c
     return rans2_put_chunk_x(x, e, b, m, rc);
 }
 
-/* tc_rans_put_fast 的值语义替身（f/cum/fd 由调用方按 ctx 行预取；
- * fd 字段预读于 renorm 存储之前——免 char-store 别名重载，分派与
- * tc_fastdiv_apply 同码）。 */
-static inline uint32_t rans2_put_x(uint32_t x, tc_rans_enc* e, uint32_t f,
-                                   uint32_t cum, tc_fastdiv fd, int32_t* rc)
+/* Renormalization bytes are unchanged. The compact symbol table replaces
+ * the general-purpose division parameters used by the quantizer. */
+static inline uint32_t rans2_put_x(uint32_t x, tc_rans_enc* e,
+                                   tc_rans_enc_symbol symbol, int32_t* rc)
 {
-    const uint64_t magic = fd.magic;
-    const uint32_t fshift = fd.shift;
-    const uint32_t fallback = fd.divisor_fallback;
-    const uint32_t x_max = ((TC_RANS_L >> TC_RANS_SCALE_BITS) << 8) * f;
-    while (x >= x_max) {
+    while (x >= symbol.x_max) {
         if (e->pos >= e->cap) {
             e->overflow = 1;
             tc_set_error(TC_ERR_BUFFER_TOO_SMALL, "rans encode overflow (%zu/%zu)",
@@ -2234,34 +2229,37 @@ static inline uint32_t rans2_put_x(uint32_t x, tc_rans_enc* e, uint32_t f,
             *rc = TC_ERR_BUFFER_TOO_SMALL;
             return x;
         }
-        e->buf[e->pos++] = (uint8_t)(x & 0xFFu);
+        e->buf[e->cap - 1u - e->pos++] = (uint8_t)(x & 0xFFu);
         x >>= 8;
     }
-    uint32_t q;
-#if defined(__SIZEOF_INT128__)
-    if (magic != 0u) {
-        q = (uint32_t)(((unsigned __int128)x * magic) >> 51);
-    } else if (fshift != 0u) {
-        q = x >> fshift;
-    } else {
-        q = fallback <= 1u ? x : x / fallback;
+    return tc_rans_enc_symbol_next(x, symbol);
+}
+
+/* Emission runs backwards. The scratch suffix already has decoder byte
+ * order, so only the final state needs to be written before those bytes. */
+static int32_t rans2_finish(const tc_rans_enc* enc, uint32_t state,
+                            const uint8_t** data, size_t* size)
+{
+    const size_t total = enc->pos + TC_RANS_STATE_BYTES;
+    if (total > enc->cap) {
+        tc_set_error(TC_ERR_BUFFER_TOO_SMALL, "rans flush %zu > %zu", total, enc->cap);
+        return TC_ERR_BUFFER_TOO_SMALL;
     }
-#elif defined(_MSC_VER) && defined(_M_X64)
-    /* 同 fastdiv.h 的 _umul128 路径：product>>51 == hi<<13 | lo>>51 */
-    if (magic != 0u) {
-        uint64_t hi = 0;
-        uint64_t lo = _umul128((uint64_t)x, magic, &hi);
-        q = (uint32_t)((hi << 13) | (lo >> 51));
-    } else if (fshift != 0u) {
-        q = x >> fshift;
-    } else {
-        q = fallback <= 1u ? x : x / fallback;
+    *size = total;
+    if (data != NULL) {
+        uint8_t* start = enc->buf + enc->cap - total;
+        tc_store_be32(start, state);
+        *data = start;
     }
-#else
-    /* 平台兜底：真除数值恒等，同 fastdiv.h 策略 */
-    q = fallback <= 1u ? x : x / fallback;
-#endif
-    return (q << TC_RANS_SCALE_BITS) + (x - q * f) + cum;
+    return TC_OK;
+}
+
+static void rans2_enc_symbols_init(tc_rans_enc_symbol* out, const tc_rans_model* model)
+{
+    for (uint32_t i = 0u; i < model->syms; ++i) {
+        const uint32_t freq = model->freq[i] != 0u ? model->freq[i] : 1u;
+        tc_rans_enc_symbol_init(&out[i], freq, model->cum[i]);
+    }
 }
 
 /* V7-R2 编码核心：joints/hists → per-slice 模型 argmin → flags + 条件表
@@ -2363,28 +2361,15 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
     }
 
     TC_R2E_STAGE(2);
-    /* S4（速度计划 P1）：per-model per-symbol 快除表——与模型同源同寿命
-     * （除数 = freq[sym]；freq 0 槽不可编码，垫 d=1 不达）。每 slice 约
-     * 349 次 init（≈µs 级），换后向环每符号一次 u32 idiv 为 128-bit
-     * mulhi（P0：tc_rans_put 占 band 时间 41%）。 */
-    tc_fastdiv dc_fd[TC_RANS2_DC_CTX][TC_RANS_DC_SYMS];
-    tc_fastdiv lvl_fd[TC_RANS2_PREV_CTX][TC_RANS_LVL_SYMS];
-    tc_fastdiv run_fd[TC_RANS_RUN_SYMS];
+    tc_rans_enc_symbol dc_symbols[TC_RANS2_DC_CTX][TC_RANS_DC_SYMS];
+    tc_rans_enc_symbol lvl_symbols[TC_RANS2_PREV_CTX][TC_RANS_LVL_SYMS];
+    tc_rans_enc_symbol run_symbols[TC_RANS_RUN_SYMS];
     for (uint32_t c = 0u; c < dc_ctx_n; ++c) {
-        for (uint32_t s = 0u; s < TC_RANS_DC_SYMS; ++s) {
-            const uint32_t d = dc_m[c].freq[s] != 0u ? dc_m[c].freq[s] : 1u;
-            tc_fastdiv_init(d, &dc_fd[c][s]);
-        }
+        rans2_enc_symbols_init(dc_symbols[c], &dc_m[c]);
     }
-    for (uint32_t s = 0u; s < TC_RANS_RUN_SYMS; ++s) {
-        const uint32_t d = run_m.freq[s] != 0u ? run_m.freq[s] : 1u;
-        tc_fastdiv_init(d, &run_fd[s]);
-    }
+    rans2_enc_symbols_init(run_symbols, &run_m);
     for (uint32_t c = 0u; c < lvl_ctx_n; ++c) {
-        for (uint32_t s = 0u; s < TC_RANS_LVL_SYMS; ++s) {
-            const uint32_t d = lvl_m[c].freq[s] != 0u ? lvl_m[c].freq[s] : 1u;
-            tc_fastdiv_init(d, &lvl_fd[c][s]);
-        }
+        rans2_enc_symbols_init(lvl_symbols[c], &lvl_m[c]);
     }
 
     /* 后缀位总数与 scratch 上界：与 rans 同式（符号数/后缀位不因上下文变） */
@@ -2421,8 +2406,7 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
     for (size_t b = blocks; b-- > 0u;) {
         const uint32_t np = tok->npair[b];
         pi -= np;
-        x = rans2_put_x(x, &enc, run_m.freq[63u], run_m.cum[63u], run_fd[63u],
-                        &rc);
+        x = rans2_put_x(x, &enc, run_symbols[63u], &rc);
         if (rc != TC_OK) { goto done; }
         if (lvl_model == TC_RANS2_LVL_POS) {
             uint8_t pos_block[63];
@@ -2437,12 +2421,10 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
                 x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t lc = tc_rans2_pos_ctx(pos_block[p]);
-                                                x = rans2_put_x(x, &enc, lvl_m[lc].freq[lsym], lvl_m[lc].cum[lsym],
-                                lvl_fd[lc][lsym], &rc);
+                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_m.freq[r], run_m.cum[r], run_fd[r],
-                                &rc);
+                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
                 if (rc != TC_OK) { goto done; }
             }
         } else if (lvl_model == TC_RANS2_LVL_PREV) {
@@ -2456,12 +2438,10 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
                 const uint32_t lc = tc_rans2_prevlvl_ctx(
                     p != 0u ? tc_vlc_bitlen32(tok->lvl_m[pi + p - 1u]) : 0u,
                     p != 0u);
-                                                x = rans2_put_x(x, &enc, lvl_m[lc].freq[lsym], lvl_m[lc].cum[lsym],
-                                lvl_fd[lc][lsym], &rc);
+                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_m.freq[r], run_m.cum[r], run_fd[r],
-                                &rc);
+                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
                 if (rc != TC_OK) { goto done; }
             }
         } else {
@@ -2470,12 +2450,10 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
                 const uint32_t lsym = tc_vlc_bitlen32(lm);
                 x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
                 if (rc != TC_OK) { goto done; }
-                                x = rans2_put_x(x, &enc, lvl_m[0u].freq[lsym], lvl_m[0u].cum[lsym],
-                                lvl_fd[0u][lsym], &rc);
+                x = rans2_put_x(x, &enc, lvl_symbols[0u][lsym], &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_m.freq[r], run_m.cum[r], run_fd[r],
-                                &rc);
+                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
                 if (rc != TC_OK) { goto done; }
             }
         }
@@ -2486,16 +2464,14 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
         const uint32_t dprev_cat = b != 0u ? tc_vlc_bitlen32(tok->dc_m[b - 1u]) : 0u;
         const uint32_t dctx = dc_model == TC_RANS2_DC_PREV
             ? tc_rans2_dc_ctx(dprev_cat, b != 0u) : 0u;
-                x = rans2_put_x(x, &enc, dc_m[dctx].freq[dsym], dc_m[dctx].cum[dsym],
-                        dc_fd[dctx][dsym], &rc);
+        x = rans2_put_x(x, &enc, dc_symbols[dctx][dsym], &rc);
         if (rc != TC_OK) { goto done; }
     }
     TC_R2E_STAGE(4);
-    enc.x = x;
-    rc = tc_rans_enc_flush(&enc);
-    if (rc > 0) {
-        const size_t rans_bytes = (size_t)rc;
-        rc = TC_OK;
+    const uint8_t* stream = NULL;
+    size_t rans_bytes = 0u;
+    rc = rans2_finish(&enc, x, bw != NULL ? &stream : NULL, &rans_bytes);
+    if (rc == TC_OK) {
         if (bytes_out != NULL) {
             *bytes_out = off + rans_bytes;
         }
@@ -2503,13 +2479,12 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
             /* C5：批量字节追加（同上） */
             rc = tc_bitwriter_put_bytes(bw, prefix, off);
             if (rc == TC_OK) {
-                rc = tc_bitwriter_put_bytes(bw, scratch, rans_bytes);
+                rc = tc_bitwriter_put_bytes(bw, stream, rans_bytes);
             }
         }
     }
 done:
     TC_R2E_STAGE(5);
-    enc.x = x;
     return rc; /* C1：scratch 归槽位池，无每 slice 释放 */
 #undef TC_R2E_STAGE
 }
@@ -2525,10 +2500,9 @@ static int32_t emit_color_tokens_rans2(const enc_band_tok* tok, size_t blocks,
                                      bw, NULL, es, slot);
 }
 
-/* V8 批 0 实验专用：给定（已构建）模型的流发射——与
- * color_tokens_rans2_encode 的后向环/flush 逐位同构，仅模型来源改为
- * 参数（瓦片聚合表模拟；生产路径不调用）。返回流字节数（含 4B 终态），
- * 不含前缀表；suffix_bits 从 token 直导（cat = bitlen，与 hist 同值）。 */
+/* Emit a stream using supplied tile models for V8 or its size estimator.
+ * A requested stream view remains valid until the slot scratch is reused.
+ * The byte count includes the final state and excludes the model table. */
 static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
                                                size_t blocks,
                                                uint32_t lvl_model,
@@ -2537,31 +2511,24 @@ static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
                                                const tc_rans_model* run_m,
                                                const tc_rans_model* lvl_m,
                                                enc_shared* es, uint32_t slot,
+                                               const uint8_t** stream_data,
                                                size_t* stream_out)
 {
     const uint32_t lvl_ctx_n = lvl_model == TC_RANS2_LVL_POS ? TC_RANS2_POS_CTX
                              : (lvl_model == TC_RANS2_LVL_PREV ? TC_RANS2_PREV_CTX
                                                                : 1u);
     const uint32_t dc_ctx_n = dc_model == TC_RANS2_DC_PREV ? TC_RANS2_DC_CTX : 1u;
-    tc_fastdiv dc_fd[TC_RANS2_DC_CTX][TC_RANS_DC_SYMS];
-    tc_fastdiv lvl_fd[TC_RANS2_PREV_CTX][TC_RANS_LVL_SYMS];
-    tc_fastdiv run_fd[TC_RANS_RUN_SYMS];
+    tc_rans_enc_symbol dc_symbols[TC_RANS2_DC_CTX][TC_RANS_DC_SYMS];
+    tc_rans_enc_symbol lvl_symbols[TC_RANS2_PREV_CTX][TC_RANS_LVL_SYMS];
+    tc_rans_enc_symbol run_symbols[TC_RANS_RUN_SYMS];
     for (uint32_t c = 0u; c < dc_ctx_n; ++c) {
-        for (uint32_t s = 0u; s < TC_RANS_DC_SYMS; ++s) {
-            const uint32_t d = dc_m[c].freq[s] != 0u ? dc_m[c].freq[s] : 1u;
-            tc_fastdiv_init(d, &dc_fd[c][s]);
-        }
+        rans2_enc_symbols_init(dc_symbols[c], &dc_m[c]);
     }
-    for (uint32_t s = 0u; s < TC_RANS_RUN_SYMS; ++s) {
-        const uint32_t d = run_m->freq[s] != 0u ? run_m->freq[s] : 1u;
-        tc_fastdiv_init(d, &run_fd[s]);
-    }
+    rans2_enc_symbols_init(run_symbols, run_m);
     for (uint32_t c = 0u; c < lvl_ctx_n; ++c) {
-        for (uint32_t s = 0u; s < TC_RANS_LVL_SYMS; ++s) {
-            const uint32_t d = lvl_m[c].freq[s] != 0u ? lvl_m[c].freq[s] : 1u;
-            tc_fastdiv_init(d, &lvl_fd[c][s]);
-        }
+        rans2_enc_symbols_init(lvl_symbols[c], &lvl_m[c]);
     }
+
     uint64_t suffix_bits = 0u;
     {
         size_t pi = 0u;
@@ -2592,8 +2559,7 @@ static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
     for (size_t b = blocks; b-- > 0u;) {
         const uint32_t np = tok->npair[b];
         pi -= np;
-                x = rans2_put_x(x, &enc, run_m->freq[63u], run_m->cum[63u], run_fd[63u],
-                        &rc);
+        x = rans2_put_x(x, &enc, run_symbols[63u], &rc);
         if (rc != TC_OK) { goto done; }
         if (lvl_model == TC_RANS2_LVL_POS) {
             uint8_t pos_block[63];
@@ -2608,12 +2574,10 @@ static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
                 x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t lc = tc_rans2_pos_ctx(pos_block[p]);
-                                                x = rans2_put_x(x, &enc, lvl_m[lc].freq[lsym], lvl_m[lc].cum[lsym],
-                                lvl_fd[lc][lsym], &rc);
+                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t r = tok->run[pi + p];
-                                x = rans2_put_x(x, &enc, run_m->freq[r], run_m->cum[r], run_fd[r],
-                                &rc);
+                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
                 if (rc != TC_OK) { goto done; }
             }
         } else if (lvl_model == TC_RANS2_LVL_PREV) {
@@ -2625,12 +2589,10 @@ static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
                 const uint32_t lc = tc_rans2_prevlvl_ctx(
                     p != 0u ? tc_vlc_bitlen32(tok->lvl_m[pi + p - 1u]) : 0u,
                     p != 0u);
-                                x = rans2_put_x(x, &enc, lvl_m[lc].freq[lsym], lvl_m[lc].cum[lsym],
-                                lvl_fd[lc][lsym], &rc);
+                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t r = tok->run[pi + p];
-                                x = rans2_put_x(x, &enc, run_m->freq[r], run_m->cum[r], run_fd[r],
-                                &rc);
+                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
                 if (rc != TC_OK) { goto done; }
             }
         } else {
@@ -2639,12 +2601,10 @@ static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
                 const uint32_t lsym = tc_vlc_bitlen32(lm);
                 x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
                 if (rc != TC_OK) { goto done; }
-                x = rans2_put_x(x, &enc, lvl_m[0u].freq[lsym], lvl_m[0u].cum[lsym],
-                                lvl_fd[0u][lsym], &rc);
+                x = rans2_put_x(x, &enc, lvl_symbols[0u][lsym], &rc);
                 if (rc != TC_OK) { goto done; }
                 const uint32_t r = tok->run[pi + p];
-                                x = rans2_put_x(x, &enc, run_m->freq[r], run_m->cum[r], run_fd[r],
-                                &rc);
+                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
                 if (rc != TC_OK) { goto done; }
             }
         }
@@ -2655,16 +2615,10 @@ static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
         const uint32_t dprev_cat = b != 0u ? tc_vlc_bitlen32(tok->dc_m[b - 1u]) : 0u;
         const uint32_t dctx = dc_model == TC_RANS2_DC_PREV
             ? tc_rans2_dc_ctx(dprev_cat, b != 0u) : 0u;
-        x = rans2_put_x(x, &enc, dc_m[dctx].freq[dsym], dc_m[dctx].cum[dsym],
-                        dc_fd[dctx][dsym], &rc);
+        x = rans2_put_x(x, &enc, dc_symbols[dctx][dsym], &rc);
         if (rc != TC_OK) { goto done; }
     }
-    enc.x = x;
-    rc = tc_rans_enc_flush(&enc);
-    if (rc > 0) {
-        *stream_out = (size_t)rc;
-        rc = TC_OK;
-    }
+    rc = rans2_finish(&enc, x, stream_data, stream_out);
 done:
     return rc;
 }
@@ -2792,7 +2746,7 @@ static void tc_rdo_refine(uint64_t* nz_io, int32_t q_nat[64], const int32_t* F,
         const int64_t f = (int64_t)F[nat];
         const int64_t e0 = f - (int64_t)l * Q;
         const double lam = lam_k * (double)Q * (double)Q;
-        const uint32_t r0 = rdo_cat_bits(lvll, tc_rice_map_signed(l));
+        const uint32_t r0 = rdo_cat_bits(lvll, tc_rice_map_signed_inline(l));
         /* 前后存活邻居（run 的当前真实值由存活邻居间距决定） */
         int32_t ia = (int32_t)i - 1;
         while (ia >= 0 && alive[ia] == 0u) { --ia; }
@@ -2809,7 +2763,7 @@ static void tc_rdo_refine(uint64_t* nz_io, int32_t q_nat[64], const int32_t* F,
             const int64_t ec = f - (int64_t)lc * Q;
             const double dd = (double)(ec * ec - e0 * e0);
             const double dr = (double)((int64_t)rdo_cat_bits(
-                lvll, tc_rice_map_signed(lc)) - (int64_t)r0);
+                lvll, tc_rice_map_signed_inline(lc)) - (int64_t)r0);
             const double g = -(dd + lam * dr);
             if (g > best_gain) { best_gain = g; best_l = lc; }
         }
@@ -2888,7 +2842,7 @@ static int32_t fill_color_band_from_f(const topos_frame_header* fh, const int32_
             int has_top = by > 0u ? 1 : 0;
             int32_t pred = tc_dc_predict(has_left, dc_b[bx > 0u ? bx - 1u : 0u],
                                          has_top, dc_a[bx]);
-            uint32_t dcm = tc_rice_map_signed(qn[0] - pred);
+            uint32_t dcm = tc_rice_map_signed_inline(qn[0] - pred);
             if (dcm > TC_RICE_M_MAX_DC_BD16) {
                 dcm = TC_RICE_M_MAX_DC_BD16;
                 domain_violation = 1u;
@@ -2908,7 +2862,7 @@ static int32_t fill_color_band_from_f(const topos_frame_header* fh, const int32_
             uint32_t prev = 0u;
             while (nz != 0u) {
                 const uint32_t pos = tc_ctz64(nz) + 1u;
-                uint32_t lm = tc_rice_map_signed(qn[kTcZigzag[pos]]);
+                uint32_t lm = tc_rice_map_signed_inline(qn[kTcZigzag[pos]]);
                 if (lm > TC_RICE_M_MAX_AC_LEVEL_BD16) {
                     lm = TC_RICE_M_MAX_AC_LEVEL_BD16;
                     domain_violation = 1u;
@@ -2996,7 +2950,7 @@ static void fill_alpha_residuals(const topos_frame_header* fh, const uint16_t* c
             if (res != 0) {
                 sum_run += run;
                 cnt_run++;
-                sum_level += tc_rice_map_signed(res);
+                sum_level += tc_rice_map_signed_inline(res);
                 cnt_level++;
                 run = 0u;
             } else {
@@ -3698,7 +3652,7 @@ int32_t tc_dev_rans2_tile_sim(uint32_t tile_rows, uint32_t seg_blocks,
         size_t stream = 0u;
         rc = rans2_encode_stream_with_models(&tok, blocks, lvl_model, dc_model,
                                              dc_m, &run_m, lvl_m, &es, 0u,
-                                             &stream);
+                                             NULL, &stream);
         if (rc != TC_OK) { goto done; }
         const size_t prefix = 1u + (size_t)dc_ctx_n * TC_RANS_DC_SYMS
                             + TC_RANS_RUN_SYMS
@@ -3786,7 +3740,7 @@ int32_t tc_dev_rans2_tile_sim(uint32_t tile_rows, uint32_t seg_blocks,
         rc = rans2_encode_stream_with_models(&tok, blocks, tm->lvl_model,
                                              tm->dc_model, tm->dc_m,
                                              &tm->run_m, tm->lvl_m, &es, 0u,
-                                             &stream);
+                                             NULL, &stream);
         if (rc != TC_OK) { goto done; }
         out->b_stream += stream;
     }
@@ -3905,7 +3859,7 @@ static int32_t v8_tokenize_segment(const int32_t* qtile, uint32_t qtile_r0,
                                            i != 0u ? seg_dc[i - 1u] : 0,
                                            has_top,
                                            seg_dc[i >= cols ? i - cols : 0u]);
-        uint32_t dcm = tc_rice_map_signed(q[0] - pred);
+        uint32_t dcm = tc_rice_map_signed_inline(q[0] - pred);
         if (dcm > TC_RICE_M_MAX_DC_BD16) {
             dcm = TC_RICE_M_MAX_DC_BD16;
             domain_violation = 1u;
@@ -3917,7 +3871,7 @@ static int32_t v8_tokenize_segment(const int32_t* qtile, uint32_t qtile_r0,
         uint32_t prev = 0u;
         while (nz != 0u) {
             const uint32_t pos = tc_ctz64(nz) + 1u;
-            uint32_t lm = tc_rice_map_signed(q[kTcZigzag[pos]]);
+            uint32_t lm = tc_rice_map_signed_inline(q[kTcZigzag[pos]]);
             if (lm > TC_RICE_M_MAX_AC_LEVEL_BD16) {
                 lm = TC_RICE_M_MAX_AC_LEVEL_BD16;
                 domain_violation = 1u;
@@ -4099,11 +4053,12 @@ static int32_t v8_encode_plane(enc_shared* e, uint32_t plane,
             if (rc != TC_OK) { break; }
             enc_band_tok sview;
             v8_seg_view(seg_tok, nb, &sview);
+            const uint8_t* stream_data = NULL;
             size_t stream_len = 0u;
             rc = rans2_encode_stream_with_models(&sview, nb,
                                                  tm.lvl_model, tm.dc_model,
                                                  tm.dc_m, &tm.run_m, tm.lvl_m,
-                                                 &ves, 0u, &stream_len);
+                                                 &ves, 0u, &stream_data, &stream_len);
             if (rc != TC_OK) { goto done_plane; }
             if (streams_len + stream_len > streams_cap) {
                 size_t ncap = streams_cap != 0u ? streams_cap * 2u : (size_t)1u << 20;
@@ -4117,7 +4072,7 @@ static int32_t v8_encode_plane(enc_shared* e, uint32_t plane,
                 streams = ns;
                 streams_cap = ncap;
             }
-            memcpy(streams + streams_len, ves.slot_scratch[0], stream_len);
+            memcpy(streams + streams_len, stream_data, stream_len);
             uint8_t* de = dir + (size_t)s2 * TC_V8_DIR_ENTRY_BYTES;
             tc_store_be32(de, (uint32_t)streams_len);
             tc_store_be32(de + 4u, (uint32_t)stream_len);
@@ -4462,7 +4417,7 @@ static int32_t v8_decode_segment_q(const uint8_t* stream, size_t len,
                 return TC_ERR_MALFORMED;
             }
             const uint32_t natural = kTcZigzag[idx];
-            blk[natural] = tc_rice_unmap_signed(m);
+            blk[natural] = tc_rice_unmap_signed_inline(m);
             rowmask |= 1u << (natural >> 3);
             prev_cat = cat;
             has_prev = 1;
@@ -8710,6 +8665,8 @@ static int32_t dec_frame_finalize(dec_frame_req* r,
         const uint32_t qtbl = tc_qtbl_of_flags(r->view->fh.flags);
         const uint32_t dqp = (uint32_t)r->view->fh.qp_base;
         const uint32_t unit = r->scaled != 0u ? dec_scaled_deblock_unit(r) : 0u;
+        tc_deblock_plane_view color_planes[3];
+        uint32_t color_count = 0u;
         if (r->scaled == 0u || unit != 0u) {
             for (uint32_t p = 0; p < r->view->fh.plane_count && p < 3u; ++p) {
                 /* 目标几何按 slice 任务侧同一规则推导（dec_slice_task 的
@@ -8732,15 +8689,19 @@ static int32_t dec_frame_finalize(dec_frame_req* r,
                     ? r->strides[p] : (size_t)pw;
                 if (dstride < (size_t)pw) { continue; }
                 if (r->scaled == 0u) {
-                    tc_deblock_plane(r->planes[p], (int32_t)dstride, pw, ph,
-                                     dqp, qtbl,
-                                     (uint8_t)r->view->fh.bit_depth);
+                    color_planes[color_count++] = (tc_deblock_plane_view){
+                        r->planes[p], (int32_t)dstride, pw, ph,
+                    };
                 } else {
                     tc_deblock_plane_scaled(r->planes[p], (int32_t)dstride,
                                             pw, ph, dqp, qtbl,
                                             (uint8_t)r->view->fh.bit_depth, unit);
                 }
             }
+        }
+        if (color_count != 0u) {
+            tc_deblock_planes(color_planes, color_count, dqp, qtbl,
+                              (uint8_t)r->view->fh.bit_depth, r->nw_override);
         }
     }
     (void)r;

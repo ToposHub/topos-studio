@@ -518,7 +518,7 @@ static int32_t tc_color_rans_decode_core(const topos_frame_header* fh,
                     return TC_ERR_MALFORMED;
                 }
                 const uint32_t natural = kTcZigzag[idx];
-                blk[natural] = tc_rice_unmap_signed(m);
+                blk[natural] = tc_rice_unmap_signed_inline(m);
                 rowmask |= 1u << (natural >> 3);
                 pos = (uint32_t)idx + 1u;
             }
@@ -631,12 +631,13 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
     memset(dc->row, 0, (size_t)cols * sizeof(int32_t));
     uint64_t hash = 0;
     const int want_hash = symbol_hash != NULL;
-    int32_t blk[64];
+    int32_t ac_block[64];
+    /* Immediate EOB reuses the zero AC coefficients across blocks. */
+    int32_t dc_block[64] = {0};
     uint32_t prev_dc_cat = 0u;
     int first_block = 1;
     for (uint32_t by = 0u; by < band; ++by) {
         for (uint32_t bx = 0u; bx < cols; ++bx) {
-            memset(blk, 0, sizeof(blk));
             const uint32_t dctx_d = first_block != 0
                 ? 0u : tc_rans2_dc_ctx(prev_dc_cat, 1);
             const tc_rans_model* dmv = dc_model == TC_RANS2_DC_PREV
@@ -657,7 +658,8 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
             const int32_t pred = tc_dc_predict(bx != 0u,
                                                bx != 0u ? dc->row[bx - 1u] : 0,
                                                by != 0u, dc->prev_row[bx]);
-            rc = tc_dc_reconstruct_checked_bd(pred, m, fh->bit_depth, &blk[0]);
+            int32_t dc_value = 0;
+            rc = tc_dc_reconstruct_checked_bd(pred, m, fh->bit_depth, &dc_value);
             if (rc != TC_OK) { goto done; }
             prev_dc_cat = cat;
             first_block = 0;
@@ -666,11 +668,16 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
             uint32_t pos = 1u;
             uint32_t prev_cat = 0u;
             int has_prev = 0;
-            for (;;) {
-                uint32_t run_sym = 0u;
-                rc = tc_rans_get_lut(&dec, run_lut, &run_m, &run_sym);
-                if (rc != TC_OK) { goto done; }
-                if (run_sym == 63u) { break; } /* EOB */
+            uint32_t run_sym = 0u;
+            rc = tc_rans_get_lut(&dec, run_lut, &run_m, &run_sym);
+            if (rc != TC_OK) { goto done; }
+            int32_t* blk = dc_block;
+            if (run_sym != 63u) {
+                blk = ac_block;
+                memset(blk, 0, sizeof(ac_block));
+            }
+            blk[0] = dc_value;
+            while (run_sym != 63u) {
                 const uint64_t idx = (uint64_t)pos + (uint64_t)run_sym;
                 if (idx > 63u) {
                     tc_set_error(TC_ERR_MALFORMED, "rans2 ac index %llu > 63",
@@ -703,11 +710,13 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
                     goto done;
                 }
                 const uint32_t natural = kTcZigzag[idx];
-                blk[natural] = tc_rice_unmap_signed(m);
+                blk[natural] = tc_rice_unmap_signed_inline(m);
                 rowmask |= 1u << (natural >> 3);
                 prev_cat = cat;
                 has_prev = 1;
                 pos = (uint32_t)idx + 1u;
+                rc = tc_rans_get_lut(&dec, run_lut, &run_m, &run_sym);
+                if (rc != TC_OK) { goto done; }
             }
             if (want_hash) {
                 for (uint32_t i = 0u; i < 64u; ++i) {
@@ -716,7 +725,9 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
             }
             dc->row[bx] = blk[0];
             if (sink != NULL) {
-                rc = sink(ctx, by * cols + bx, blk, rowmask);
+                /* Row zero also contains AC coefficients. Only an immediate
+                 * EOB after DC qualifies for the constant-fill inverse. */
+                rc = sink(ctx, by * cols + bx, blk, has_prev ? rowmask : 0u);
                 if (rc != TC_OK) { goto done; }
             }
         }
@@ -892,7 +903,7 @@ int32_t tc_color_rans2_decode_sparse(const topos_frame_header* fh,
                     goto done;
                 }
                 const uint32_t natural = kTcZigzag[idx];
-                em->pairs[em->cnt++] = ((uint64_t)(int64_t)tc_rice_unmap_signed(m) << 6)
+                em->pairs[em->cnt++] = ((uint64_t)(int64_t)tc_rice_unmap_signed_inline(m) << 6)
                                     | (uint64_t)natural;
                 prev_cat = cat;
                 has_prev = 1;

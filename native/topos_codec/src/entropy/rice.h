@@ -27,7 +27,19 @@ enum {
 #define TC_RICE_M_MAX_RUN         63u        /* 颜色 run；63 保留为 EOB */
 #define TC_RICE_M_MAX_ALPHA_LEVEL 0x00020000u /* 2^17：|Alpha 残差| ≤ 65535（含终结 level=0） */
 
-/* 有符号映射（前置：|v| ≤ 2^30，覆盖全部符号域并规避 2·|v| 溢出） */
+/* Signed Rice mapping. The shifts use unsigned arithmetic. */
+static inline uint32_t tc_rice_map_signed_inline(int32_t v)
+{
+    const uint32_t sign = v < 0 ? UINT32_MAX : 0u;
+    return ((uint32_t)v << 1u) ^ sign;
+}
+
+static inline int32_t tc_rice_unmap_signed_inline(uint32_t m)
+{
+    const int32_t half = (int32_t)(m >> 1u);
+    return (m & 1u) != 0u ? -half - 1 : half;
+}
+
 uint32_t tc_rice_map_signed(int32_t v);
 int32_t tc_rice_unmap_signed(uint32_t m);
 
@@ -68,7 +80,7 @@ static inline int32_t tc_dc_reconstruct_checked_bd(int32_t pred, uint32_t m,
 {
     const int64_t lim = (bit_depth > 12u) ? (int64_t)TC_DC_DOMAIN_MAX_BD16
                                            : (int64_t)TC_DC_DOMAIN_MAX;
-    const int64_t v = (int64_t)pred + (int64_t)tc_rice_unmap_signed(m);
+    const int64_t v = (int64_t)pred + (int64_t)tc_rice_unmap_signed_inline(m);
     if (v > lim || v < -lim) {
         return TC_ERR_MALFORMED;
     }

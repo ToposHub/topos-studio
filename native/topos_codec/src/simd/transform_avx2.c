@@ -952,11 +952,19 @@ TOPOS_SIMD_TARGET
 void tc_quant_block_nat_avx2(const tc_quant_ctx* ctx, const int32_t* F,
                              int32_t* q_out, uint64_t* nz_nat)
 {
+    uint64_t nz = 0u;
+    if (ctx->avx2_fast_div == 0u) {
+        tc_quant_block_ctx(ctx, F, q_out);
+        for (int i = 0; i < 64; ++i) {
+            nz |= (uint64_t)(q_out[i] != 0) << i;
+        }
+        *nz_nat = nz;
+        return;
+    }
+
     const __m256i vmax = _mm256_set1_epi32(TC_TRANSFORM_MAX_ABS_F);
     const __m256i zero = _mm256_setzero_si256();
-    const __m256i lomask = _mm256_set1_epi32((int32_t)0xFFFFFFFFu);
-    const __m256i m25 = _mm256_set1_epi64x((int64_t)(UINT64_C(0x1FFFFFF)));
-    uint64_t nz = 0u;
+    const __m256i lomask = _mm256_set1_epi64x(UINT32_MAX);
 
     for (int v = 0; v < 8; ++v) {
         __m256i f = _mm256_loadu_si256((const __m256i*)(F + v * 8));
@@ -968,33 +976,16 @@ void tc_quant_block_nat_avx2(const tc_quant_ctx* ctx, const int32_t* F,
             num, _mm256_loadu_si256((const __m256i*)(ctx->dz + v * 8)));
         const __m256i ne = _mm256_max_epi32(nd, zero);
 
-        const __m256i m1 = _mm256_loadu_si256((const __m256i*)(ctx->fd_nat_m1 + v * 8));
-        const __m256i m0 = _mm256_loadu_si256((const __m256i*)(ctx->fd_nat_m0 + v * 8));
-        const __m256i ne_e = _mm256_and_si256(ne, lomask);
-        const __m256i ne_o = _mm256_srli_epi64(ne, 32);
-        const __m256i m1_e = _mm256_and_si256(m1, lomask);
-        const __m256i m1_o = _mm256_srli_epi64(m1, 32);
-        const __m256i m0_e = _mm256_and_si256(m0, lomask);
-        const __m256i m0_o = _mm256_srli_epi64(m0, 32);
-        const __m256i x_e = _mm256_mul_epu32(ne_e, m1_e);
-        const __m256i x_o = _mm256_mul_epu32(ne_o, m1_o);
-        const __m256i y_e = _mm256_mul_epu32(ne_e, m0_e);
-        const __m256i y_o = _mm256_mul_epu32(ne_o, m0_o);
-
-        const __m256i q_e = _mm256_add_epi64(
-            _mm256_srli_epi64(x_e, 25),
-            _mm256_srli_epi64(
-                _mm256_add_epi64(
-                    _mm256_slli_epi64(_mm256_and_si256(x_e, m25), 26), y_e), 51));
-        const __m256i q_o = _mm256_add_epi64(
-            _mm256_srli_epi64(x_o, 25),
-            _mm256_srli_epi64(
-                _mm256_add_epi64(
-                    _mm256_slli_epi64(_mm256_and_si256(x_o, m25), 26), y_o), 51));
-
-        const __m256i q_e32 = _mm256_shuffle_epi32(q_e, 0x08);
-        const __m256i q_o32 = _mm256_shuffle_epi32(q_o, 0x08);
-        const __m256i q8 = _mm256_unpacklo_epi32(q_e32, q_o32);
+        const __m256i multiplier =
+            _mm256_loadu_si256((const __m256i*)(ctx->avx2_multiplier + v * 8));
+        const __m256i shifts =
+            _mm256_loadu_si256((const __m256i*)(ctx->avx2_shift + v * 8));
+        const __m256i even = _mm256_srlv_epi64(
+            _mm256_mul_epu32(ne, multiplier), _mm256_and_si256(shifts, lomask));
+        const __m256i odd = _mm256_srlv_epi64(
+            _mm256_mul_epu32(_mm256_srli_epi64(ne, 32), _mm256_srli_epi64(multiplier, 32)),
+            _mm256_srli_epi64(shifts, 32));
+        const __m256i q8 = _mm256_or_si256(even, _mm256_slli_epi64(odd, 32));
         const __m256i qz = _mm256_sign_epi32(q8, f);
         _mm256_storeu_si256((__m256i*)(q_out + v * 8), qz);
         const uint32_t zbits = (uint32_t)_mm256_movemask_ps(

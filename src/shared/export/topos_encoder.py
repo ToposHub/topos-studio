@@ -66,7 +66,12 @@ import sys
 import tempfile
 import threading
 import time
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple
+
+if TYPE_CHECKING:
+    import ctypes
+
+    from src.shared.codec.topos_binding import ToposMovieSummary
 
 try:  # POSIX 目录锁；Windows 降级为无锁提交（见 _sequence_commit_lock）
     import fcntl
@@ -484,6 +489,10 @@ def _default_slice_rows(config: Any) -> int:
     return 4 if is_444_family else 8
 
 
+class ToposPacketCopyUnsupported(ValueError):
+    """A valid source or output setting requires rendering or encoding."""
+
+
 class ToposVideoEncoder:
     """Topos Video Codec 编码器（duck-type FFmpegVideoEncoder）。"""
 
@@ -535,6 +544,7 @@ class ToposVideoEncoder:
         self._is_open = False
         self._frame_count = 0
         self._last_pts = 0
+        self._packet_copy = False
         # GOP 分段并行状态（ADR-C050；ctor ip2 块按配置覆盖）
         self._gop_seg = False         # 分段并行开关（仅 ip2 + gop_len>0）
         self._gop_len = 0             # 段长（帧）；0 = 单 GOP 全片
@@ -988,14 +998,22 @@ class ToposVideoEncoder:
         return self._is_open
 
     @property
+    def consumes_planes_synchronously(self) -> bool:
+        """Whether a caller can reuse its plane buffers after encode_frame."""
+        return not (self._pipelined or self._gop_seg)
+
+    @property
     def tier_id(self) -> str:
         return self._tier.tier_id
 
     # —— 生命周期 ——
 
-    def open(self) -> None:
+    def open(self, *, packet_copy_source: Optional[ToposMovieSummary] = None) -> None:
         if self._is_open:
             return
+        if self._packet_copy:
+            self._packet_copy = False
+            self._temp_path = self._output_path + ".topos-tmp"
 
         if not self._tier.available:
             raise RuntimeError(
@@ -1120,9 +1138,17 @@ class ToposVideoEncoder:
             movie_cfg, fc = self._build_configs(self._alpha_stream_depth)
             self._frame_cfg = fc
             self._movie_cfg = movie_cfg
+            if packet_copy_source is not None:
+                self.check_packet_copy_source(packet_copy_source)
+                parent = os.path.dirname(os.path.abspath(self._output_path))
+                os.makedirs(parent, exist_ok=True)
+                fd, self._temp_path = tempfile.mkstemp(
+                    prefix=".topos-copy-", suffix=".topos-tmp", dir=parent)
+                os.close(fd)
+                self._packet_copy = True
             if not self._lazy_mux and self._container_mode == "mov":
                 self._create_mux()
-        except RuntimeError:
+        except (RuntimeError, ToposPacketCopyUnsupported):
             raise
         except Exception as e:
             self._cleanup_temp()
@@ -1295,8 +1321,11 @@ class ToposVideoEncoder:
                     self._gop_ctx = ToposGopContext(self._codec, fc)
             parent = os.path.dirname(os.path.abspath(self._temp_path))
             os.makedirs(parent, exist_ok=True)
+            write_options = {}
+            if self._packet_copy and movie_cfg.visible_width * movie_cfg.visible_height >= 3840 * 2160:
+                write_options["cache_writes"] = False
             self._mux = self._binding['ToposMuxFile'](
-                self._codec, self._temp_path, movie_cfg)
+                self._codec, self._temp_path, movie_cfg, **write_options)
             self._apply_movie_meta()
             if self._raw_meta_payload:
                 # RC1：trwm 原子（RAW as-shot 基线随流走；声明在 tpcD 之后，
@@ -1410,6 +1439,8 @@ class ToposVideoEncoder:
     def encode_frame(self, frame: Any) -> None:
         if not self._is_open:
             raise RuntimeError("Topos encoder not open. Call open() first.")
+        if self._packet_copy:
+            raise RuntimeError("Cannot encode pixels in a TOPOS packet copy session")
 
         try:
             if self._pipelined:
@@ -1424,6 +1455,39 @@ class ToposVideoEncoder:
             logger.error("Topos encoder: encode error at frame %d: %s",
                          self._frame_count, e)
             raise RuntimeError(f"Topos encode error: {e}") from e
+
+    def check_packet_copy_source(self, source: ToposMovieSummary) -> None:
+        """Require a matching opaque, intra-frame 4:2:2 10-bit delivery tier."""
+        cfg = self._movie_cfg
+        if (self._container_mode != "mov"
+                or self.tier_id not in {"lt", "standard", "hq"}
+                or self._gop != "intra" or not self._rans2
+                or any(value is not None for value in (
+                    self._qp_override, self._bitrate_bps,
+                    self._max_video_bytes, self._max_file_bytes))):
+            raise ToposPacketCopyUnsupported("requested TOPOS encoding settings")
+        if ((source.profile, source.pixel_format, source.bit_depth, source.alpha_mode)
+                != (3, 0, 10, 0)
+                or source.bitstream_major != 7
+                or source.tier_id != topos_tier_numeric_id(self.tier_id)
+                or (source.width, source.height) != (cfg.visible_width, cfg.visible_height)
+                or any(getattr(source, field) != getattr(cfg, field) for field in (
+                    "profile", "pixel_format", "bit_depth", "alpha_mode", "alpha_bit_depth",
+                    "alpha_premultiplied", "qmatrix_id", "color_range", "color_primaries",
+                    "color_transfer", "color_matrix", "chroma_siting", "sar_num", "sar_den"))):
+            raise ToposPacketCopyUnsupported("source and output TOPOS stream settings differ")
+
+    def write_source_packet(self, packet: ctypes.Array, size: int) -> None:
+        """Write one V7-R2 intra sample, rebased to the next output timestamp."""
+        if not self._is_open or not self._packet_copy or self._mux is None:
+            raise RuntimeError("TOPOS packet copy session is not open")
+        # TPIC major at 6 and entropy_mode at 45. V7-R3 also uses major 7,
+        # but may depend on a previous frame. V7-R2 entropy mode 7 is intra.
+        if size <= 45 or packet[6] != b"\x07" or packet[45] != b"\x07":
+            raise ToposPacketCopyUnsupported("source sample is not TOPOS V7-R2 intra")
+        self._mux.add_packet_buffer(packet, size, self._last_pts, self._dur)
+        self._last_pts += self._dur
+        self._frame_count += 1
 
     def _encode_prepared(self, planes: list) -> None:
         """编码一帧已转换平面（只允许主调用线程执行，避免并发 mux）。"""
@@ -1663,7 +1727,7 @@ class ToposVideoEncoder:
         self._converted_map = None
         self._convert_cond = None
 
-    def close(self) -> None:
+    def close(self, *, should_cancel: Optional[Callable[[], bool]] = None) -> Optional[bool]:
         """定稿：预算元数据 → finish → 原子替换。0 帧 / 失败 → 删临时文件并抛错。"""
         if not self._is_open:
             return
@@ -1731,6 +1795,10 @@ class ToposVideoEncoder:
                     f"native 资源释放状态未确认）: {e}"
                 ) from e
             self._mux = None   # R1：定稿后不残留已关闭 mux 引用（abort 幂等依赖）
+            if should_cancel is not None and should_cancel():
+                self._cleanup_temp()
+                self._is_open = False
+                return False
             try:
                 os.replace(self._temp_path, self._output_path)
             except OSError as e:
@@ -1751,6 +1819,7 @@ class ToposVideoEncoder:
                 t['bytes_max_frame'], t['frames_recorded'])
         logger.info("Topos encoder: closed, %d frames → %s",
                     self._frame_count, self._output_path)
+        return True if should_cancel is not None else None
 
     def abort(self) -> None:
         """取消路径：丢弃未定稿数据并删除临时文件（无输出残留）。"""
