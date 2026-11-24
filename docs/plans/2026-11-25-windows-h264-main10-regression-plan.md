@@ -13,7 +13,7 @@
 
 1. 在本机桌面会话打开 PowerShell 并进入仓库根目录。记录 Windows build、CPU、GPU/驱动、显示器刷新率、供电模式、PyAV 和 FFmpeg 版本。A/B 保持同一显示器、窗口尺寸、预览设置和供电。跑分时一次只运行一个播放或导出作业。
 2. 素材放到各自 checkout 的 `tests/test_videos`。必备 `4K_H264.mov`。自动 Viewer 脚本还需要 `4K_DNxHR HQX 10bit.mov`，因为会同时构建 DNxHR 对照。只有 H.264 时可在 GUI 手工创建两条 H.264 时间线。可选 `4K_H265.mov` 用于 Main10 输入扩展测试。记录素材和 LUT 的 SHA-256。
-3. 使用相同的 x64 Python 和依赖。已有 Windows 原始基线时优先复用。同机新建对照可运行 `git worktree add --detach ../topos-win-before 07ce9dcf`。两个 checkout 使用各自的配置和输出目录。修复版运行 `git merge-base --is-ancestor 4959f0ca HEAD`，核对退出码为 0。旧版软件测试保持原有崩溃保护开启。
+3. 使用相同的 x64 Python 和依赖。已有 Windows 原始基线时优先复用。同机新建对照可运行 `git -c core.longpaths=true worktree add --detach ../topos-win-before 07ce9dcf`。两个 checkout 使用各自的配置和输出目录。修复版运行 `git merge-base --is-ancestor 4959f0ca HEAD`，核对退出码为 0。旧版软件测试保持原有崩溃保护开启。
 4. Python 依赖和 FFprobe 安装可按已有性能计划第 2 节准备。`$Py` 也可直接指定两个 checkout 共用的 Python 绝对路径。下方脚本从当前源码导入。
 
 在各自 checkout 根目录执行，基线轮把 `$Label` 改为 `before`。
@@ -72,7 +72,7 @@ Move-Item -LiteralPath "$Out/topos_playback.jsonl" -Destination "$Out/playback-s
 if ($LASTEXITCODE -ne 0) { throw 'Viewer benchmark failed' }
 ```
 
-确认每一行 `PLAY` 都从第 0 帧开始，播放状态和 Viewer 可见状态为 True，总长 400 帧。有效样本正常运行约 16 秒并走到第 399 帧。脚本达到 35 秒也会记录结束，因此遇到超时、未加载或 Viewer 不可见须标为无效。单看播放头到 399 无法判断真实呈现。
+确认每一行 `PLAY` 都从第 0 帧开始，播放状态和 Viewer 可见状态为 True，总长 400 帧。有效样本正常运行约 16 秒并走到第 399 帧。脚本达到 35 秒也会记录结束，因此遇到超时、未加载或 Viewer 不可见须标为无效。末帧验收同时检查播放头和 `frame_presented` 记录。
 
 把下面代码保存为本轮目录的 `summarize-playback.py`。切点间隔取跨过 200 帧前后的呈现时间差。
 
@@ -83,20 +83,26 @@ from statistics import median, quantiles
 
 root = Path(__file__).resolve().parent
 groups: dict[bool, list[int]] = {}
-for line in (root / "topos_playback.jsonl").read_text().splitlines():
+failures = 0
+for line in (root / "topos_playback.jsonl").read_text(encoding="utf-8").splitlines():
     row = json.loads(line)
     if row["source"] != "h264":
         continue
     frames = [(t, f) for t, f in row["frames"] if 0 <= f < 400]
     if row["playhead"] != 399 or not frames or row["wall_s"] >= 35:
         print("INVALID", row["graded"], row["repeat"])
+        failures += 1
         continue
     seen = {f for _, f in frames}
+    last_frame_presented = 399 in seen
+    if not last_frame_presented:
+        failures += 1
     gaps = [(b[0] - a[0]) * 1000 for a, b in zip(frames, frames[1:])]
     left = max((t for t, f in frames if f < 200), default=None)
     right = min((t for t, f in frames if f >= 200), default=None)
     print(json.dumps({
         "lut": row["graded"], "trial": row["repeat"], "presented": len(seen),
+        "last_frame_presented": last_frame_presented,
         "missing": sorted(set(range(400)) - seen), "wall_seconds": row["wall_s"],
         "interval_p95_ms": quantiles(gaps, n=20)[18] if len(gaps) > 1 else None,
         "cut_gap_ms": (right - left) * 1000 if left is not None and right is not None else None,
@@ -107,10 +113,13 @@ for line in (root / "topos_playback.jsonl").read_text().splitlines():
     groups.setdefault(row["graded"], []).append(len(seen))
 for graded, counts in groups.items():
     print("median", "LUT" if graded else "original", median(counts), counts)
+if failures or len(groups) != 2:
+    raise SystemExit("Viewer did not pass the sample validity or final-frame check")
 ```
 
 ```powershell
 & $Py "$Out/summarize-playback.py" | Tee-Object "$Out/playback-summary.txt"
+if ($LASTEXITCODE -ne 0) { throw 'Viewer sample or final-frame check failed' }
 ```
 
 **判定**。同机已有流畅 UHD25 基线时，原片三轮中位数目标至少 **392/400**，切点前后正常呈现目标间隔 **≤80 ms**。中位数比旧版少超过 4 帧、修复版两轮以上出现同一段新的连续缺帧，或切点间隔明显变长，均记为疑似回归并复测。基线本身达不到目标时，同时保留两版的实际呈现帧数、缺帧位置、切点间隔和后端。软件回退单列。
@@ -133,11 +142,13 @@ $env:TOPOS_DISABLE_WIN_HW_ENCODE = '1'
 
 硬编证据可查交付 manifest 的 `stage_telemetry.stages` 中 `encode` 的 backend。FFprobe 的 `codec_name=hevc` 只确认格式。PQ 和 HLG 项目时间线使用现有的隔离软件路径，另靠第 5 节验证这些信号的元数据。正常 SDR 素材保留 Rec.709。
 
-将下方 `$File` 指向实际输出。短片把 `$Expected` 改成 24。音频用例同时检查音轨数量、采样率和时长。
+将下方 `$File` 指向实际 SDR 输出。短片把 `$Expected` 改成 24。使用 1080p 时把 `$Width` 和 `$Height` 改成 1920 和 1080。音频用例同时检查音轨数量、采样率和时长。
 
 ```powershell
 $File = Join-Path $Out 'win-main10-400.mp4'
 $Expected = 400
+$Width = 3840
+$Height = 2160
 $Raw = ffprobe -v error -count_frames -show_streams -show_format -of json "$File"
 if ($LASTEXITCODE -ne 0) { throw 'Output probe failed' }
 $Raw | Set-Content "$File.ffprobe.json" -Encoding utf8
@@ -145,7 +156,9 @@ $Probe = $Raw | Out-String | ConvertFrom-Json
 $Video = @($Probe.streams | Where-Object { $_.codec_type -eq 'video' })
 if ($Video.Count -ne 1 -or $Video[0].codec_name -ne 'hevc' -or
     $Video[0].profile -ne 'Main 10' -or $Video[0].pix_fmt -ne 'yuv420p10le' -or
-    $Video[0].width -ne 3840 -or $Video[0].height -ne 2160 -or
+    $Video[0].width -ne $Width -or $Video[0].height -ne $Height -or
+    $Video[0].color_primaries -ne 'bt709' -or $Video[0].color_transfer -ne 'bt709' -or
+    $Video[0].color_space -ne 'bt709' -or
     $Video[0].avg_frame_rate -ne '25/1' -or [int]$Video[0].nb_read_frames -ne $Expected) {
     throw 'Main10 output does not match the test settings'
 }
@@ -157,7 +170,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Full decode failed' }
 
 ## 5. 故障注入与回归
 
-修复版运行现有软件回归前先设置 `TOPOS_DISABLE_WIN_HW_ENCODE=1`。这让普通 SDR 时间线用例走软件路径。仓库里用 `SIGKILL` 和 `SIGBUS` 注入的两项 POSIX 用例在 Windows 会跳过。用下面的 Windows 复测补齐启动和关闭两个阶段。 [Main10 回归用例](../../tests/deliver/test_hdr_video_delivery.py) · [硬编回退用例](../../tests/media/test_ffmpeg_encoder_hevc10_guard.py)
+故障脚本和软件交付测试使用 `TOPOS_DISABLE_WIN_HW_ENCODE=1`，使普通 SDR 时间线路由到软件编码。恢复默认环境后运行硬编路由、回退和播放回归。仓库里用 `SIGKILL` 和 `SIGBUS` 注入的两项 POSIX 用例在 Windows 会跳过。用下面的 Windows 复测补齐启动和关闭两个阶段。 [Main10 回归用例](../../tests/deliver/test_hdr_video_delivery.py) · [硬编回退用例](../../tests/media/test_ffmpeg_encoder_hevc10_guard.py)
 
 把代码保存为 `$Out/test-main10-worker-fault.py`，从仓库根目录运行。脚本只替换自己启动的测试子进程入口。必须保存成文件，Windows 的 spawn 需要重新导入它。启动故障模拟尚未就绪时退出。关闭故障模拟孩子写入暂存并发出 ACK 后异常退出。两种情况均要保住旧文件、清理暂存，随后由**同一个父进程**完成一次真实的软件 Main10 导出。
 
@@ -250,14 +263,21 @@ if __name__ == "__main__":
 
 ```powershell
 $env:TOPOS_DISABLE_WIN_HW_ENCODE = '1'
-& $Py "$Out/test-main10-worker-fault.py" | Tee-Object "$Out/main10-fault.log"
-if ($LASTEXITCODE -ne 0) { throw 'Main10 fault recovery failed' }
+try {
+    & $Py "$Out/test-main10-worker-fault.py" | Tee-Object "$Out/main10-fault.log"
+    if ($LASTEXITCODE -ne 0) { throw 'Main10 fault recovery failed' }
 
-& $Py -m pytest -q -rs tests/deliver/test_hdr_video_delivery.py `
-    tests/media/test_ffmpeg_encoder_hevc10_guard.py tests/video/test_ffmpeg_encoder.py `
-    tests/edit/test_edit_gpu_decode_manager.py tests/edit/test_timeline_preview_renderer.py
+    & $Py -m pytest -q -rs tests/deliver/test_hdr_video_delivery.py |
+        Tee-Object "$Out/main10-software-pytest.log"
+    if ($LASTEXITCODE -ne 0) { throw 'Software delivery regression suite failed' }
+} finally {
+    Remove-Item Env:TOPOS_DISABLE_WIN_HW_ENCODE -ErrorAction SilentlyContinue
+}
+
+& $Py -m pytest -q -rs tests/media/test_ffmpeg_encoder_hevc10_guard.py `
+    tests/video/test_ffmpeg_encoder.py tests/edit/test_edit_gpu_decode_manager.py `
+    tests/edit/test_timeline_preview_renderer.py | Tee-Object "$Out/regression-pytest.log"
 if ($LASTEXITCODE -ne 0) { throw 'Regression suite failed' }
-Remove-Item Env:TOPOS_DISABLE_WIN_HW_ENCODE -ErrorAction SilentlyContinue
 ```
 
 **判定**。短片、400 帧成片和软件回归通过时，软件交付记为通过。故障脚本两个阶段、旧文件、清理和重试均通过时，崩溃隔离记为通过。记录实际硬件覆盖情况。交付预设拒绝、回解错误、帧数不符、主程序退出、旧成片被覆盖或暂存残留均判失败。

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -8,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.features.edit.core import edit_gpu_decode_manager as decode_manager_mod
 from src.features.edit.core.edit_gpu_decode_manager import EditGpuDecodeManager
 
 
@@ -446,10 +446,9 @@ def test_h26x_downscaled_preview_tries_hwaccel_before_ffmpeg(monkeypatch: pytest
             calls.append(kwargs)
             return FakeSource(), FakeStatus()
 
-    import src.features.edit.core.edit_gpu_decode_manager as decode_manager_mod
     import src.shared.media.factory as factory_mod
 
-    monkeypatch.setattr(decode_manager_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(decode_manager_mod, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(factory_mod, "MediaSourceFactory", lambda: FakeFactory())
 
     source, source_type = manager._create_source("/4k-h264.mov", (1280, 720))
@@ -1089,7 +1088,8 @@ def _make_routed_manager(monkeypatch, verdict, codec="hevc", pix_fmt="yuv420p10l
     # 播放 VT 策略在 _playback_vt_policy 有 darwin 平台门（非 macOS 返回
     # 'auto'）。这些用例测的就是 darwin 策略路由，越过平台门使全平台可跑
     # （真实 macOS 行为由 B 线回归覆盖，Windows 不改变该门本身）。
-    monkeypatch.setattr(sys, "platform", "darwin")
+    # 只替换解码模块的 sys 引用，保持标准库和后台线程使用真实平台。
+    monkeypatch.setattr(decode_manager_mod, "sys", SimpleNamespace(platform="darwin"))
     manager = EditGpuDecodeManager()
     manager._get_disk_proxy_info = lambda asset_path: None  # type: ignore[method-assign]
     manager._probe_codec = lambda asset_path: codec  # type: ignore[method-assign]
@@ -1099,8 +1099,10 @@ def _make_routed_manager(monkeypatch, verdict, codec="hevc", pix_fmt="yuv420p10l
     return manager, calls
 
 
-def test_playback_routes_to_ffmpeg_when_vt_is_software_only() -> None:
-    manager, calls = _make_routed_manager(monkeypatch_stub(), False)
+def test_playback_routes_to_ffmpeg_when_vt_is_software_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, calls = _make_routed_manager(monkeypatch, False)
     spec = manager._resolve_preview_decode_source("/10bit.mov", (1920, 1080), for_playback=True)
     assert spec.vt_policy == "prefer_ffmpeg"
     # 4K master + 1080p target → native planar decode + GPU scale
@@ -1108,29 +1110,27 @@ def test_playback_routes_to_ffmpeg_when_vt_is_software_only() -> None:
     assert calls, "policy must consult the hardware probe"
 
 
-def monkeypatch_stub():
-    """Return a real pytest monkeypatch bound to the current test."""
-    import pytest
-    return pytest.MonkeyPatch()
-
-
-def test_playback_routes_hw_or_ffmpeg_when_hardware_exists() -> None:
-    manager, calls = _make_routed_manager(monkeypatch_stub(), True)
+def test_playback_routes_hw_or_ffmpeg_when_hardware_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, calls = _make_routed_manager(monkeypatch, True)
     spec = manager._resolve_preview_decode_source("/10bit.mov", (1920, 1080), for_playback=True)
     assert spec.vt_policy == "hw_or_ffmpeg"
     assert spec.source_kind == "original_native_planar"
     assert calls
 
 
-def test_scrub_resolution_never_consults_playback_policy() -> None:
-    manager, calls = _make_routed_manager(monkeypatch_stub(), False)
+def test_scrub_resolution_never_consults_playback_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, calls = _make_routed_manager(monkeypatch, False)
     spec = manager._resolve_preview_decode_source("/10bit.mov", (1920, 1080), for_playback=False)
     assert spec.vt_policy == "auto"
     assert calls == []
 
 
-def test_playback_8bit_hevc_stays_auto_without_probe() -> None:
-    manager, calls = _make_routed_manager(monkeypatch_stub(), False, pix_fmt="yuv420p")
+def test_playback_8bit_hevc_stays_auto_without_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, calls = _make_routed_manager(monkeypatch, False, pix_fmt="yuv420p")
     spec = manager._resolve_preview_decode_source("/8bit.mov", (1920, 1080), for_playback=True)
     assert spec.vt_policy == "auto"
     assert calls == []
@@ -1187,8 +1187,8 @@ def test_preposition_opens_the_playback_source_at_clip_entry_zero(
     assert warmups == [{"for_playback": True, "warm_interactive_pool": False}]
 
 
-def test_playback_and_scrub_source_keys_differ() -> None:
-    manager, _ = _make_routed_manager(monkeypatch_stub(), False)
+def test_playback_and_scrub_source_keys_differ(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, _ = _make_routed_manager(monkeypatch, False)
     playback_spec = manager._resolve_preview_decode_source("/10bit.mov", (1920, 1080), for_playback=True)
     scrub_spec = manager._resolve_preview_decode_source("/10bit.mov", (1920, 1080), for_playback=False)
     key_playback = manager._make_source_key("s", playback_spec)
@@ -1196,7 +1196,7 @@ def test_playback_and_scrub_source_keys_differ() -> None:
     assert key_playback != key_scrub
 
 
-def test_create_source_prefer_ffmpeg_skips_vt_branches() -> None:
+def test_create_source_prefer_ffmpeg_skips_vt_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = EditGpuDecodeManager()
     manager._probe_codec = lambda asset_path: "hevc"  # type: ignore[method-assign]
 
@@ -1205,9 +1205,9 @@ def test_create_source_prefer_ffmpeg_skips_vt_branches() -> None:
     from src.shared.media.macos_vt import capability as vt_cap
     from src.shared.media import ffmpeg_source as ffmpeg_mod
 
-    monkey = monkeypatch_stub()
-    monkey.setattr(vt_cap, "is_zero_copy_available", lambda codec="": True)
-    monkey.setattr(
+    monkeypatch.setattr(decode_manager_mod, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(vt_cap, "is_zero_copy_available", lambda codec="": True)
+    monkeypatch.setattr(
         vt_source_mod.MacOSVtZeroCopySource, "open",
         lambda self, path, *, require_zero_copy=True, require_hardware=False: opened.append(path) or True,
     )
@@ -1222,20 +1222,19 @@ def test_create_source_prefer_ffmpeg_skips_vt_branches() -> None:
 
         read_frame_planar = lambda self, i: None  # noqa: E731
 
-    monkey.setattr(ffmpeg_mod, "FFmpegMediaSource", _FakeFFmpeg)
+    monkeypatch.setattr(ffmpeg_mod, "FFmpegMediaSource", _FakeFFmpeg)
 
-    try:
-        source, source_type = manager._create_source(
-            "/10bit.mov", None, vt_policy="prefer_ffmpeg",
-        )
-        assert opened == [], "prefer_ffmpeg must not open any VT session"
-        assert source_type == "planar"
-        assert created_instances and created_instances[0][1] == "planar_yuv"
-    finally:
-        monkey.undo()
+    _, source_type = manager._create_source(
+        "/10bit.mov", None, vt_policy="prefer_ffmpeg",
+    )
+    assert opened == [], "prefer_ffmpeg must not open any VT session"
+    assert source_type == "planar"
+    assert created_instances and created_instances[0][1] == "planar_yuv"
 
 
-def test_create_source_hw_or_ffmpeg_requires_hardware_session() -> None:
+def test_create_source_hw_or_ffmpeg_requires_hardware_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     manager = EditGpuDecodeManager()
     manager._probe_codec = lambda asset_path: "hevc"  # type: ignore[method-assign]
 
@@ -1244,18 +1243,15 @@ def test_create_source_hw_or_ffmpeg_requires_hardware_session() -> None:
     from src.shared.media.macos_vt import capability as vt_cap
     from src.shared.media import ffmpeg_source as ffmpeg_mod
 
-    monkey = monkeypatch_stub()
-    # 同 _make_routed_manager：VT 硬件会话门在 darwin 分支（平台门见
-    # _create_source 分支 2），越过平台门使全平台可跑。
-    monkey.setattr(sys, "platform", "darwin")
-    monkey.setattr(vt_cap, "is_zero_copy_available", lambda codec="": True)
+    monkeypatch.setattr(decode_manager_mod, "sys", SimpleNamespace(platform="darwin"))
+    monkeypatch.setattr(vt_cap, "is_zero_copy_available", lambda codec="": True)
 
     def fake_open(self, path, *, require_zero_copy=True, require_hardware=False):
         open_calls.append(require_hardware)
         return not require_hardware  # hardware-required open fails here
 
-    monkey.setattr(vt_source_mod.MacOSVtZeroCopySource, "open", fake_open)
-    monkey.setattr(
+    monkeypatch.setattr(vt_source_mod.MacOSVtZeroCopySource, "open", fake_open)
+    monkeypatch.setattr(
         vt_source_mod.MacOSVtZeroCopySource, "close", lambda self: None,
     )
 
@@ -1268,19 +1264,16 @@ def test_create_source_hw_or_ffmpeg_requires_hardware_session() -> None:
 
         read_frame_planar = lambda self, i: None  # noqa: E731
 
-    monkey.setattr(ffmpeg_mod, "FFmpegMediaSource", _FakeFFmpeg)
+    monkeypatch.setattr(ffmpeg_mod, "FFmpegMediaSource", _FakeFFmpeg)
 
-    try:
-        source, source_type = manager._create_source(
-            "/10bit.mov", None, vt_policy="hw_or_ffmpeg",
-        )
-        assert open_calls == [True], "hw_or_ffmpeg must request a hardware-required session"
-        assert source_type == "planar", "denied hardware session must fall to FFmpeg planar"
-    finally:
-        monkey.undo()
+    _, source_type = manager._create_source(
+        "/10bit.mov", None, vt_policy="hw_or_ffmpeg",
+    )
+    assert open_calls == [True], "hw_or_ffmpeg must request a hardware-required session"
+    assert source_type == "planar", "denied hardware session must fall to FFmpeg planar"
 
 
-def test_warmup_source_pool_gating() -> None:
+def test_warmup_source_pool_gating(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = EditGpuDecodeManager()
     manager._get_disk_proxy_info = lambda asset_path: None  # type: ignore[method-assign]
     manager._probe_codec = lambda asset_path: "h264"  # type: ignore[method-assign]
@@ -1288,27 +1281,23 @@ def test_warmup_source_pool_gating() -> None:
     manager._probe_pix_fmt = lambda asset_path: "yuv420p"  # type: ignore[method-assign]
 
     pool_calls = []
-    monkey = monkeypatch_stub()
-    monkey.setattr(
+    monkeypatch.setattr(
         manager, "_ensure_interactive_source_pool_warmup",
         lambda *a, **k: pool_calls.append(a),
     )
-    try:
-        # Source already cached as VT → fast path decides pool warmup.
-        class _FakeVt:
-            def close(self):
-                pass
+    # Source already cached as VT → fast path decides pool warmup.
+    class _FakeVt:
+        def close(self):
+            pass
 
-        spec = manager._resolve_preview_decode_source("/warm.mov", (1280, 720))
-        key = manager._make_source_key(manager._normalize_stream_key("/warm.mov", None), spec)
-        manager._sources[key] = _FakeVt()
-        manager._source_types[key] = "vt_pixel_buffer"
-        manager._source_cache[key] = (_FakeVt(), "vt_pixel_buffer")
+    spec = manager._resolve_preview_decode_source("/warm.mov", (1280, 720))
+    key = manager._make_source_key(manager._normalize_stream_key("/warm.mov", None), spec)
+    manager._sources[key] = _FakeVt()
+    manager._source_types[key] = "vt_pixel_buffer"
+    manager._source_cache[key] = (_FakeVt(), "vt_pixel_buffer")
 
-        manager.warmup_source("/warm.mov", target_size=(1280, 720), warm_interactive_pool=False)
-        assert pool_calls == [], "playback warmup must not spawn scrub pool sessions"
+    manager.warmup_source("/warm.mov", target_size=(1280, 720), warm_interactive_pool=False)
+    assert pool_calls == [], "playback warmup must not spawn scrub pool sessions"
 
-        manager.warmup_source("/warm.mov", target_size=(1280, 720))
-        assert pool_calls, "scrub warmup keeps the interactive pool"
-    finally:
-        monkey.undo()
+    manager.warmup_source("/warm.mov", target_size=(1280, 720))
+    assert pool_calls, "scrub warmup keeps the interactive pool"
