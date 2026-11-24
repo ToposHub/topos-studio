@@ -1261,3 +1261,26 @@ vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
     return pow(max(warped, 0.0), vec3(2.4 / 1.605)) + min(color, 0.0);
 }
 """
+
+
+RESOLVE_HS709_V2_SNIPPET = """
+vec3 apply_resolve_hs709_v2(vec3 color, sampler2D field) {
+    vec3 code = pow(max(color, 0.0), vec3(1.0 / 2.4));
+    vec3 hsv = rgb2hsv(code);
+    if (hsv.y <= 1e-8) return color;
+
+    // Eight peak samples, each a bilinear hue/saturation tile.
+    const float levels = 8.0;
+    vec2 size = vec2(textureSize(field, 0));
+    float rows = size.y / levels;
+    float plane = clamp((hsv.z - 0.21875) / 0.65625, 0.0, 1.0) * (levels - 1.0);
+    float lower = floor(plane);
+    vec2 uv = (vec2(hsv.x, clamp(hsv.y, 0.0, 1.0))
+            * vec2(size.x - 1.0, rows - 1.0) + 0.5) / size;
+    vec3 first = texture(field, uv + vec2(0.0, lower / levels)).rgb;
+    vec3 second = texture(field, uv + vec2(0.0, min(lower + 1.0, levels - 1.0) / levels)).rgb;
+    vec3 delta = mix(first, second, fract(plane));
+    if (all(equal(delta, vec3(0.0)))) return color;
+    return pow(max(code + hsv.z * delta, 0.0), vec3(2.4)) + min(color, 0.0);
+}
+"""

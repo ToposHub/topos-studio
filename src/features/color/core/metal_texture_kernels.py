@@ -44,10 +44,13 @@ from src.features.color.core.shader_nodes_msl import (
     MSL_HSV_FUNCS,
     MSL_LUT3D,
     MSL_MIXER,
+    MSL_RESOLVE_HS709,
+    MSL_RESOLVE_HS709_V2,
     MSL_SOFT_CLIP,
     MSL_SOFT_CLIP_HELPERS,
     MSL_WARPER,
 )
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
 from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
 
 _MSL_HEADER = """#include <metal_stdlib>
@@ -77,7 +80,7 @@ struct TexExtraParams {
     uint  has_curves_soft_clip;    // 曲线面板柔化裁切位
     int   blend_mode;              // Layer.BLEND_MODES 索引（0=Normal）
     float lut_intensity;           // LUT3D 强度（R05）
-    int   warper_space;            // 0=legacy HSV（v1 唯一接线域）
+    int   warper_space;            // legacy HSV / calibrated 709
     float sc_high;
     float sc_white_point;
     float sc_shoulder_strength;
@@ -218,7 +221,13 @@ kernel void tg_corrector(
             float3(x.mixer[21], x.mixer[22], x.mixer[23]));
     }
     if (x.has_warper != 0u) {
-        color = msl_apply_warper(color, warper_tex, tg_sampler, 0.0);
+        if (x.warper_space == tg_warper_hs709_v2) {
+            color = msl_apply_resolve_hs709_v2(color, warper_tex);
+        } else if (x.warper_space == tg_warper_hs709) {
+            color = msl_apply_resolve_hs709(color, warper_tex);
+        } else {
+            color = msl_apply_warper(color, warper_tex, tg_sampler, 0.0);
+        }
     }
     if (x.has_lut3d != 0u) {
         color = msl_apply_3dlut(color, lut_tex, tg_sampler,
@@ -480,12 +489,16 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + MSL_LUT3D
     + MSL_MIXER
     + MSL_WARPER
+    + MSL_RESOLVE_HS709
+    + MSL_RESOLVE_HS709_V2
     + MSL_SOFT_CLIP_HELPERS
     + MSL_SOFT_CLIP
     + MSL_CURVES_SOFT_CLIP
     + _TEX_SAMPLERS
     + _TEX_EXTRA_PARAMS_MSL
     + _TEX_QUALIFIER_PARAMS_MSL
+    + f"\nconstant int tg_warper_hs709 = {RESOLVE_HS709_SPACE};\n"
+    + f"constant int tg_warper_hs709_v2 = {RESOLVE_HS709_V2_SPACE};\n"
     + _TEX_GRAPH_KERNELS_MSL
 )
 

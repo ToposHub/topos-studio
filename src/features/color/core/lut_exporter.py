@@ -534,7 +534,7 @@ class LutExportWorker(QObject):
         if offsets is not None:
             from src.features.color.core.warper_color import apply_resolve_hs709
 
-            result = apply_resolve_hs709(result, offsets)
+            result = apply_resolve_hs709(result, offsets, layer_data['warper_space'])
 
         # 7. Apply existing 3D LUT (if any)
         lut_path = layer_data.get('active_lut_path')
@@ -1298,12 +1298,12 @@ class LutExporter:
         if hasattr(layer, 'mixer_params') and LutExportWorker._has_active_mixer_params(layer.mixer_params):
             data['mixer_params'] = copy.deepcopy(layer.mixer_params)
 
-        from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+        from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
 
-        if (getattr(layer, 'warper_space', 0) == RESOLVE_HS709_SPACE
-                and layer.warper_params is not None):
+        space = getattr(layer, 'warper_space', 0)
+        if space in RESOLVE_HS709_SPACES and layer.warper_params is not None:
             data['warper_params'] = layer.warper_params.copy()
-            data['warper_space'] = RESOLVE_HS709_SPACE
+            data['warper_space'] = space
 
         # Soft clip
         if hasattr(layer, 'soft_clip_params') and layer.soft_clip_params:

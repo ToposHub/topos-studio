@@ -645,6 +645,37 @@ float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh) {
 """
 
 
+MSL_RESOLVE_HS709_V2 = """
+float3 msl_hs709_response_tile(texture2d<float> field, uint2 base, uint2 next, float2 weight) {
+    float3 a = mix(field.read(base).rgb, field.read(uint2(next.x, base.y)).rgb, weight.x);
+    float3 b = mix(field.read(uint2(base.x, next.y)).rgb, field.read(next).rgb, weight.x);
+    return mix(a, b, weight.y);
+}
+
+float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field) {
+    float3 code = pow(max(color, 0.0), float3(1.0 / 2.4));
+    float3 hsv = msl_rgb2hsv(code);
+    if (hsv.y <= 1e-8) return color;
+
+    const uint levels = 8u;
+    uint rows = field.get_height() / levels;
+    uint2 extent = uint2(field.get_width() - 1u, rows - 1u);
+    float2 cell = float2(hsv.x, clamp(hsv.y, 0.0, 1.0)) * float2(extent);
+    uint2 base = uint2(cell);
+    uint2 next = min(base + 1u, extent);
+    float plane = clamp((hsv.z - 0.21875) / 0.65625, 0.0, 1.0) * float(levels - 1u);
+    uint2 lower = uint2(0u, uint(plane) * rows);
+    uint2 upper = uint2(0u, min(uint(plane) + 1u, levels - 1u) * rows);
+    // Float32 hardware filtering is optional across Metal device families.
+    float3 first = msl_hs709_response_tile(field, base + lower, next + lower, fract(cell));
+    float3 second = msl_hs709_response_tile(field, base + upper, next + upper, fract(cell));
+    float3 delta = mix(first, second, fract(plane));
+    if (all(delta == float3(0.0))) return color;
+    return pow(max(code + hsv.z * delta, 0.0), float3(2.4)) + min(color, 0.0);
+}
+"""
+
+
 # ── BLUR_SHARPEN_SNIPPET 的 MSL 翻译 ─────────────────────────────────────
 
 # 注意：blur_rand 是 sin-hash 抖动（fract(sin(dot(co,vec2(12.9898,78.233)))

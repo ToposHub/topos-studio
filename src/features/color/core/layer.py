@@ -38,7 +38,7 @@ from src.features.color.core.curves_calibration import (
     is_calibrated_curves_lut,
 )
 from src.features.color.core.warper_state import (
-    RESOLVE_HS_ALGORITHM, WarperStateV2, WarperStateError, renderable_projection,
+    RESOLVE_HS_ALGORITHMS, WarperStateV2, WarperStateError, renderable_projection,
 )
 
 from src.features.color.core.curves_soft_clip import (
@@ -956,6 +956,7 @@ class Layer:
         self.warper_state = source_warper_state.copy() if source_warper_state is not None else None
         self.warper_state_unparsed = copy.deepcopy(getattr(source_layer, "warper_state_unparsed", None))
         self.warper_space = int(getattr(source_layer, "warper_space", 0) or 0)
+        self._project_calibrated_warper()
         
         # 复制效果参数
         self.effects_params = copy.deepcopy(source_layer.effects_params)
@@ -1084,13 +1085,13 @@ class Layer:
         if raw_grid_pasted or state_pasted:
             raw_state = patch.get("warper_state") if state_pasted else None
             state = WarperStateV2.from_dict(copy.deepcopy(raw_state)) if raw_state is not None else None
-            if state is not None and state.algorithm_version == RESOLVE_HS_ALGORITHM:
+            if state is not None and state.algorithm_version in RESOLVE_HS_ALGORITHMS:
                 offsets, space = renderable_projection(state)
             elif raw_grid_pasted:
                 raw_grid = patch["warper_params"]
                 offsets = np.array(raw_grid, dtype=np.float32) if raw_grid is not None else None
                 space = int(patch.get("warper_space", 0) or 0)
-            elif self.warper_state is not None and self.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM:
+            elif self.warper_state is not None and self.warper_state.algorithm_version in RESOLVE_HS_ALGORITHMS:
                 offsets, space = None, 0
             else:
                 offsets, space = self.warper_params, self.warper_space
@@ -1423,7 +1424,7 @@ class Layer:
 
     def _project_calibrated_warper(self) -> None:
         state = self.warper_state
-        if state is not None and state.algorithm_version == RESOLVE_HS_ALGORITHM:
+        if state is not None and state.algorithm_version in RESOLVE_HS_ALGORITHMS:
             self.warper_params, self.warper_space = renderable_projection(state)
 
     @classmethod

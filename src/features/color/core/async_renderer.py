@@ -4763,7 +4763,7 @@ class AsyncRenderer(QThread):
             tex_unit += 1
         
         if 'u_warper_tex' in prog:
-            from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+            from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
 
             grid = layer.get('warper_params')
             if grid is not None:
@@ -4771,7 +4771,7 @@ class AsyncRenderer(QThread):
                 # the Layer texture slot. Cache uploads by actual payload.
                 offsets = np.ascontiguousarray(grid, dtype=np.float32)
                 space = int(layer.get('warper_space') or 0)
-                components = 3 if space == RESOLVE_HS709_SPACE else 2
+                components = 3 if space in RESOLVE_HS709_SPACES else 2
                 if offsets.ndim != 3 or offsets.shape[2] != components:
                     raise ValueError("Invalid Color Warper grid shape")
                 rows, columns, _ = offsets.shape
@@ -5037,23 +5037,23 @@ class AsyncRenderer(QThread):
                     path)
         elif tex_type == 'warper':
             from src.features.color.core.warper_color import (
-                RESOLVE_HS709_SPACE, prepare_resolve_hs709_texture,
+                RESOLVE_HS709_SPACES, prepare_resolve_hs709_texture,
             )
 
             w, h = data['size']
             tex_data = data['data']
             space = int(data.get('space', 0) or 0)
-            components = 3 if space == RESOLVE_HS709_SPACE else 2
+            components = 3 if space in RESOLVE_HS709_SPACES else 2
             if w <= 0 or h <= 0 or len(tex_data) != w * h * components * 4:
                 raise ValueError("Invalid Color Warper grid texture")
             slot = self.layer_textures[l_id]
             key = (space, w, h, tex_data)
             if slot.get('warper_key') == key:
                 return
-            if space == RESOLVE_HS709_SPACE:
+            if space in RESOLVE_HS709_SPACES:
                 offsets = np.frombuffer(tex_data, dtype=np.float32).reshape(h, w, components)
-                sampled = prepare_resolve_hs709_texture(offsets)
-                h = sampled.shape[0]
+                sampled = prepare_resolve_hs709_texture(offsets, space)
+                h, w = sampled.shape[:2]
                 tex_data = sampled.tobytes()
             tex = slot.get('warper')
             if not tex or tex.size != (w, h) or tex.components != components:

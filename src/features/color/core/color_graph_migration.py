@@ -224,16 +224,16 @@ def _uses_calibrated_grade(layer: Any) -> bool:
         uses_calibrated_soft_clip,
     )
     from src.features.color.core.primary_calibration import grade_uses_calibration
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
-    from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHM, WarperStateV2
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+    from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHMS, WarperStateV2
 
     get = layer.get if isinstance(layer, Mapping) else lambda key: getattr(layer, key, None)
     clip = get("curves_soft_clip")
     warper = get("warper_state")
-    warper_active = get("warper_space") == RESOLVE_HS709_SPACE and get("warper_params") is not None
-    if (not warper_active and isinstance(warper, Mapping)
-            and warper.get("algorithm_version") == RESOLVE_HS_ALGORITHM):
+    if isinstance(warper, Mapping) and warper.get("algorithm_version") in RESOLVE_HS_ALGORITHMS:
         warper_active = not WarperStateV2.from_dict(warper).is_identity()
+    else:
+        warper_active = get("warper_space") in RESOLVE_HS709_SPACES and get("warper_params") is not None
     return bool(
         grade_uses_calibration(layer)
         or warper_active

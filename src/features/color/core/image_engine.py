@@ -3586,15 +3586,16 @@ class ImageEngine(QObject, WindowRasterizer):
                     # Warper
                     if flags["has_warper"]:
                         from src.features.color.core.warper_color import (
-                            RESOLVE_HS709_SPACE, prepare_resolve_hs709_texture,
+                            RESOLVE_HS709_SPACES, prepare_resolve_hs709_texture,
                         )
 
                         wp = np.ascontiguousarray(layer.warper_params, dtype=np.float32)
-                        if flags["warper_space"] == RESOLVE_HS709_SPACE:
-                            wp = prepare_resolve_hs709_texture(wp)
+                        if flags["warper_space"] in RESOLVE_HS709_SPACES:
+                            wp = prepare_resolve_hs709_texture(wp, flags["warper_space"])
                         wh, ww, components = wp.shape
                         w_tex = ctx.texture((ww, wh), components, data=wp.tobytes(), dtype='f4')
                         texture_garbage.append(w_tex)
+                        w_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
                         w_tex.repeat_x = w_tex.repeat_y = False
                         w_tex.use(tex_unit)
                         prog_comp['u_warper_tex'].value = tex_unit

@@ -14,7 +14,8 @@ from PyQt6.QtWidgets import (
 
 from src.features.color.core.warper_hs_solver import resample_calibrated_grid, smooth_component
 from src.features.color.core.warper_state import (
-    HS_GRID_NAME, RESOLVE_HS_ALGORITHM, WarperGrid, WarperPin, WarperStateV2, make_point_id,
+    HS_GRID_NAME, RESOLVE_HS_ALGORITHMS, RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2,
+    WarperGrid, WarperPin, WarperStateV2, make_point_id,
 )
 from src.features.color.ui.warper_tools import MeshTools, StrokeTools, tool_button, tr
 from src.shared.ui.style_sheet import C, COMPOSITE_KEYFRAMES_ICON_BTN_STYLE
@@ -52,6 +53,7 @@ class WarperPanel(QWidget):
         self.mode = "hue_saturation"
         self._updating = False
         self._legacy_interaction_open = False
+        self._calibration_algorithm: str | None = None
         self._dialog: QDialog | None = None
         self._footer_narrow: bool | None = None
         self._resolutions = {"hue_saturation": (6, 6), "chroma_luma": (6, 6)}
@@ -160,6 +162,9 @@ class WarperPanel(QWidget):
         self.grid_action.toggled.connect(self._display_changed)
         self.density_action.toggled.connect(self._display_changed)
         self.options_menu.addSeparator()
+        self.upgrade_calibration_action = self.options_menu.addAction(
+            tr("rec709_upgrade", "Upgrade 709 Calibration to v2"))
+        self.upgrade_calibration_action.triggered.connect(self._upgrade_calibration)
         self.options_menu.addAction(tr("reset_selection", "Reset Selection / Pins"), lambda: self._mesh_action("reset_selection"))
         self.options_button.setMenu(self.options_menu)
         self.options_button.setStyleSheet(self.options_button.styleSheet() + "QToolButton::menu-indicator { image: none; width: 0px; }")
@@ -367,11 +372,13 @@ class WarperPanel(QWidget):
             self.command_requested.emit({"mode": self.mode, "action": action, "payload": payload,
                                          "state": self.active_canvas().snapshot()})
 
-    def _request_calibrated(self, phase: str, offsets: np.ndarray | None = None) -> None:
+    def _request_calibrated(self, phase: str, offsets: np.ndarray | None = None, *, upgrade: bool = False) -> None:
         if self._updating:
             return
         payload: dict[str, Any] = {"phase": phase}
-        if phase in {"atomic", "update"}:
+        if upgrade:
+            payload["upgrade_to_v2"] = True
+        elif phase in {"atomic", "update"}:
             payload["enabled"] = self.warper.calibrated_hs
             if self.warper.calibrated_hs:
                 if offsets is None:
@@ -401,6 +408,7 @@ class WarperPanel(QWidget):
         self.calibration_btn.setEnabled(available)
         self.calibration_btn.setToolTip(self.calibration_btn.accessibleName() if available else
                                         tr("rec709_hsp_required", "Select HSP to enable Rec.709 calibration"))
+        self.upgrade_calibration_action.setVisible(hs_mode and self._calibration_algorithm == RESOLVE_HS_ALGORITHM)
 
     def _set_calibration(self, enabled: bool) -> None:
         canvas = self.warper
@@ -412,6 +420,7 @@ class WarperPanel(QWidget):
             self.calibration_btn.setToolTip(tr("rec709_reset_first", "Reset Hue–Saturation before switching calibration off"))
             return
         canvas.calibrated_hs = enabled
+        self._calibration_algorithm = RESOLVE_HS_ALGORITHM_V2 if enabled else None
         if enabled and self._spaces[self.mode] != "HSP":
             self._spaces[self.mode] = canvas.color_space = "HSP"
             previous = self.space_combo.blockSignals(True)
@@ -420,6 +429,17 @@ class WarperPanel(QWidget):
         self._sync_calibration_controls()
         self._sync_tools()
         self._request_calibrated("atomic")
+        self._emit_ui()
+
+    def _upgrade_calibration(self) -> None:
+        if self._updating or self.mode != "hue_saturation":
+            return
+        self.warper._end_edit()
+        if self._calibration_algorithm != RESOLVE_HS_ALGORITHM:
+            return
+        self._calibration_algorithm = RESOLVE_HS_ALGORITHM_V2
+        self._sync_calibration_availability()
+        self._request_calibrated("atomic", upgrade=True)
         self._emit_ui()
 
     def _mesh_changed(self, data: np.ndarray) -> None:
@@ -648,7 +668,7 @@ class WarperPanel(QWidget):
 
     def set_warper_state(self, state: WarperStateV2 | None, *, target_id: str | None = None) -> bool:
         """Hydrate the calibrated mesh without emitting grading commands."""
-        if state is None or state.algorithm_version != RESOLVE_HS_ALGORITHM:
+        if state is None or state.algorithm_version not in RESOLVE_HS_ALGORITHMS:
             return False
         grid = state.grids[HS_GRID_NAME]
         same_target = target_id is not None and target_id == getattr(self, "_warper_target_id", None)
@@ -658,6 +678,7 @@ class WarperPanel(QWidget):
         try:
             self.warper.cancel_gesture()
             self.warper.calibrated_hs = True
+            self._calibration_algorithm = state.algorithm_version
             self._spaces["hue_saturation"] = self.warper.color_space = "HSP"
             self._resolutions["hue_saturation"] = (grid.cols, grid.rows)
             if grid.cols != grid.rows:
@@ -692,6 +713,7 @@ class WarperPanel(QWidget):
         self.warper.blockSignals(True)
         try:
             self.warper.calibrated_hs = False
+            self._calibration_algorithm = None
             self._warper_target_id = None
             self.warper.set_grid_size(size)
             if grid_data is not None:

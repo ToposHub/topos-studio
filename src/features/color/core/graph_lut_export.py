@@ -119,7 +119,7 @@ def _has_warper(payload: Mapping[str, Any]) -> bool:
 
 def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | None:
     """可点态表达的 warper → (offsets ndarray, space int);否则 None。"""
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
     from src.features.color.core.warper_state import (
         HS_GRID_NAME,
         WarperStateError,
@@ -132,8 +132,8 @@ def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | No
             space = int(payload.get("warper_space", 0) or 0)
         except (TypeError, ValueError):
             return None
-        if space in (0, 1, 2, RESOLVE_HS709_SPACE):
-            components = 3 if space == RESOLVE_HS709_SPACE else 2
+        if space in (0, 1, 2, *RESOLVE_HS709_SPACES):
+            components = 3 if space in RESOLVE_HS709_SPACES else 2
             if (offsets.ndim == 3 and offsets.shape[2] == components
                     and min(offsets.shape[:2]) >= 2 and np.isfinite(offsets).all()):
                 return offsets, space
@@ -145,7 +145,7 @@ def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | No
             offsets, space = renderable_projection(state)
         except WarperStateError:
             return None
-        if offsets is None and space == RESOLVE_HS709_SPACE:
+        if offsets is None and space in RESOLVE_HS709_SPACES:
             # Enabling 709 or creating pins alone is exportable identity.
             offsets = state.grids[HS_GRID_NAME].offsets
         return (offsets, space) if offsets is not None else None
@@ -192,15 +192,15 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
     warper = _pointwise_warper(layer)
     if warper is not None:
         from src.features.color.core.warper_color import (
-            RESOLVE_HS709_SPACE,
+            RESOLVE_HS709_SPACES,
             apply_warper_in_space,
             apply_warper_legacy_hsv,
         )
         offsets, space = warper
-        if space == RESOLVE_HS709_SPACE:
+        if space in RESOLVE_HS709_SPACES:
             from src.features.color.core.warper_color import apply_resolve_hs709
 
-            out = apply_resolve_hs709(out, offsets).astype(np.float64, copy=False)
+            out = apply_resolve_hs709(out, offsets, space).astype(np.float64, copy=False)
         elif space == 0:
             out = np.stack([apply_warper_legacy_hsv(pixel, offsets) for pixel in out])
         else:

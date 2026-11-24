@@ -169,24 +169,25 @@ def test_graph_paste_warper_domain_round_trip() -> None:
     assert node.legacy_payload["warper_params"] is None
 
 
-def test_calibrated_warper_is_baked_in_graph_and_flat_lut(qapp: Any) -> None:
+@pytest.mark.parametrize("space", [3, 4], ids=["709-v1", "709-v2"])
+def test_calibrated_warper_is_baked_in_graph_and_flat_lut(qapp: Any, space: int) -> None:
     from src.features.color.core.lut_exporter import LutExporter, LutExportWorker
     from src.features.color.core.layer import Layer
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, apply_resolve_hs709
+    from src.features.color.core.warper_color import apply_resolve_hs709
     from src.shared.color.lut_loader import parse_cube
 
     offsets = np.zeros((6, 8, 3), np.float32)
     offsets[:, :, :] = (0.04, 0.07, 0.06)
     layer = Layer("Calibrated Color Warper")
     layer.warper_params = offsets
-    layer.warper_space = RESOLVE_HS709_SPACE
+    layer.warper_space = space
     graph = _graph(layer.to_dict(None))
     color = np.array([0.75, 0.25, 0.125], dtype=np.float32)
-    expected = apply_resolve_hs709(color[None, :], offsets)[0]
+    expected = apply_resolve_hs709(color[None, :], offsets, space)[0]
     assert np.max(np.abs(expected - color)) > 0.01
 
     cube = parse_cube(bake_graph_lut(graph, size=9)).table
-    np.testing.assert_allclose(cube[1, 2, 6], expected, atol=1e-5)
+    np.testing.assert_allclose(cube[1, 2, 6], np.clip(expected, 0.0, 1.0), atol=1e-5)
 
     exporter = LutExporter()
     try:

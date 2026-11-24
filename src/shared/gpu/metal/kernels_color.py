@@ -1126,7 +1126,7 @@ kernel void graph_grading(
         color = graph_apply_curves(color, curves);
     }
 #ifdef TOPOS_GRAPH_WARPER_709
-    color = msl_apply_resolve_hs709(color, warper);
+    color = TOPOS_GRAPH_WARPER_APPLY(color, warper);
 #endif
 
     float k = p.opacity;
@@ -1159,9 +1159,12 @@ _METAL_GRAPH_COMMON_MSL = (
 METAL_GRAPH_OPS_MSL = _METAL_GRAPH_COMMON_MSL + _GRAPH_GRADING_KERNEL_MSL
 
 
-def build_metal_graph_warper_msl(warper_code: str) -> str:
+def build_metal_graph_warper_msl(warper_code: str, *, v2: bool = False) -> str:
     """Compile calibrated Warper with its own texture-binding variant."""
-    return ("#define TOPOS_GRAPH_WARPER_709\n#define graph_grading graph_grading_709\n"
+    suffix = "_v2" if v2 else ""
+    return ("#define TOPOS_GRAPH_WARPER_709\n"
+            f"#define graph_grading graph_grading_709{suffix}\n"
+            f"#define TOPOS_GRAPH_WARPER_APPLY msl_apply_resolve_hs709{suffix}\n"
             + _METAL_GRAPH_COMMON_MSL + warper_code + _GRAPH_GRADING_KERNEL_MSL)
 
 # GraphSizeParams / GraphGradingParams 的 numpy 布局（4 字节字段紧排）

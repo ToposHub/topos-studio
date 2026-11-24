@@ -32,7 +32,7 @@ from typing import Sequence
 from src.features.color.core.composition_uniforms import (
     CompositionUniformManifest,
 )
-from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
     MSL_BLUR_SHARPEN,
@@ -221,7 +221,13 @@ def emit_composition_msl(
     if "mixer" in active_effects:
         parts.append(MSL_MIXER)
     if "warper" in active_effects:
-        if manifest.warper_space == RESOLVE_HS709_SPACE:
+        if manifest.warper_space == RESOLVE_HS709_V2_SPACE:
+            from src.features.color.core.shader_nodes_msl import MSL_RESOLVE_HS709_V2
+
+            parts.append(MSL_RESOLVE_HS709_V2)
+            pipeline_calls = {**_PIPELINE_CALLS,
+                              "warper": "color = msl_apply_resolve_hs709_v2(color, u_warper_tex);"}
+        elif manifest.warper_space == RESOLVE_HS709_SPACE:
             from src.features.color.core.shader_nodes_msl import MSL_RESOLVE_HS709
 
             parts.append(MSL_RESOLVE_HS709)

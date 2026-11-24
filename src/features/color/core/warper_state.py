@@ -36,6 +36,8 @@ __all__ = [
     "WARPER_SCHEMA_VERSION",
     "LEGACY_ALGORITHM",
     "RESOLVE_HS_ALGORITHM",
+    "RESOLVE_HS_ALGORITHM_V2",
+    "RESOLVE_HS_ALGORITHMS",
     "SUPPORTED_MODES",
     "SUPPORTED_COLOR_SPACES",
     "WarperStateError",
@@ -48,6 +50,7 @@ __all__ = [
     "legacy_from_ndarray",
     "legacy_ndarray",
     "renderable_projection",
+    "resolve_hs_render_space",
     "resample_grid",
     "describe_warper_capabilities",
 ]
@@ -61,6 +64,8 @@ LEGACY_ALGORITHM = "legacy_hsv_v1"
 #: 新模型算法版本(随 B03+ 冻结的常数演进时递增)。
 CURRENT_ALGORITHM = "topos_warper_v1"
 RESOLVE_HS_ALGORITHM = "resolve_hs_rec709_v1"
+RESOLVE_HS_ALGORITHM_V2 = "resolve_hs_rec709_v2"
+RESOLVE_HS_ALGORITHMS = (RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2)
 
 SUPPORTED_MODES = ("hue_saturation", "chroma_luma", "chroma_warp")
 SUPPORTED_COLOR_SPACES = ("hsv", "hsl", "hsp")
@@ -517,7 +522,7 @@ class WarperStateV2:
         for name in forbidden:
             if name in self.grids:
                 raise WarperStateError("corrupt_payload", f"模式 {self.mode} 不允许网格 {name}")
-        if self.algorithm_version == RESOLVE_HS_ALGORITHM:
+        if self.algorithm_version in RESOLVE_HS_ALGORITHMS:
             grid = self.grids.get(HS_GRID_NAME)
             if (self.mode != "hue_saturation" or self.color_space != "hsp" or grid is None
                     or grid.semantics != ("dh", "ds", "dl")):
@@ -671,6 +676,17 @@ def legacy_ndarray(state: WarperStateV2 | None) -> np.ndarray | None:
     return np.array(grid.offsets, dtype=np.float32, copy=True)
 
 
+def resolve_hs_render_space(algorithm_version: str | None) -> int | None:
+    """Return the renderer variant for a calibrated HS algorithm."""
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
+
+    if algorithm_version == RESOLVE_HS_ALGORITHM:
+        return RESOLVE_HS709_SPACE
+    if algorithm_version == RESOLVE_HS_ALGORITHM_V2:
+        return RESOLVE_HS709_V2_SPACE
+    return None
+
+
 def renderable_projection(state: WarperStateV2 | None) -> tuple[np.ndarray | None, int]:
     """Project a legacy two-channel or calibrated three-channel HS mesh for rendering."""
     if state is None or state.mode != "hue_saturation":
@@ -680,11 +696,11 @@ def renderable_projection(state: WarperStateV2 | None) -> tuple[np.ndarray | Non
         return None, 0
     # 空间索引与 warper_color.WARPER_SPACE_INDEX(shader u_warper_space
     # 取值)同一事实源,避免两处字典漂移。
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, WARPER_SPACE_INDEX
-    if state.algorithm_version == RESOLVE_HS_ALGORITHM:
-        if not np.any(grid.offsets):
-            return None, RESOLVE_HS709_SPACE
-        return grid.mutable_offsets(), RESOLVE_HS709_SPACE
+    from src.features.color.core.warper_color import WARPER_SPACE_INDEX
+    calibrated_space = resolve_hs_render_space(state.algorithm_version)
+    if calibrated_space is not None:
+        offsets = grid.mutable_offsets() if grid.offsets.any() else None
+        return offsets, calibrated_space
     if grid.components != 2:
         return None, 0
     return np.array(grid.offsets, dtype=np.float32, copy=True), \
@@ -726,7 +742,7 @@ def describe_warper_capabilities(
     if state.algorithm_version == LEGACY_ALGORITHM:
         return WarperCapabilities(True, "ok", supported, "legacy_hsv_glsl", revision)
     offsets, space = renderable_projection(state)
-    if state.algorithm_version == RESOLVE_HS_ALGORITHM:
+    if state.algorithm_version in RESOLVE_HS_ALGORITHMS:
         return WarperCapabilities(True, "bypass" if offsets is None else "ok",
                                   supported, "hs_rec709", revision)
     if offsets is not None:

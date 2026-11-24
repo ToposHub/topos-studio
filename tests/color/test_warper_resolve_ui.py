@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -12,7 +13,10 @@ from pytestqt.qtbot import QtBot
 from src.features.color.adapters.warper_command_adapter import WarperCommandAdapter
 from src.features.color.core.layer import Layer
 from src.features.color.core.warper_commands import WarperCommandService
-from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHM
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
+from src.features.color.core.warper_state import (
+    RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2, WARPER_SCHEMA_VERSION, WarperGrid, WarperPin, WarperStateV2,
+)
 from src.features.color.ui.warper_panel import WarperPanel
 from src.shared.ui.widgets.warper_canvas import CALIBRATED_MAX_RADIUS, CALIBRATED_SAT_SCALE, WarperCanvas
 
@@ -41,7 +45,7 @@ def test_calibrated_rectangular_grid_numeric_edits_and_hydration(panel: WarperPa
     legacy = []
     panel.warper_changed.connect(legacy.append)
     panel.calibration_btn.click()
-    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM_V2
     assert not panel.space_combo.isEnabled()
 
     panel.link_button.click()
@@ -134,6 +138,73 @@ def test_calibration_click_on_blank_mesh_selects_hsp(panel: WarperPanel) -> None
     grid[2, 0] = [0.1, 0.2]
     panel.set_params(grid)
     assert not panel.calibration_btn.isEnabled()
+
+
+def test_calibrated_v1_edit_preserves_version_until_reset_and_toggle(panel: WarperPanel) -> None:
+    grid = WarperGrid.identity("hs", 6, 6, ("dh", "ds", "dl"))
+    offsets = grid.mutable_offsets()
+    offsets[2, 0, 1] = 0.1
+    state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0,
+        grids={"hs": grid.with_offsets(offsets)},
+    )
+    layer = Layer.from_dict({"warper_state": state.to_dict()})
+    adapter = WarperCommandAdapter(WarperCommandService(), lambda: layer)
+    panel.command_requested.connect(adapter.submit)
+    assert panel.set_warper_state(layer.warper_state)
+    click_point(panel.warper, (2, 0))
+    panel.hs_tools.values["luma"].setValue(0.6)
+    assert layer.warper_state.grids["hs"].offsets[2, 0, 2] == pytest.approx(0.1)
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM
+    assert layer.warper_space == RESOLVE_HS709_SPACE
+
+    panel.on_reset()
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM
+    panel.calibration_btn.click()
+    assert layer.warper_state is None
+    panel.calibration_btn.click()
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM_V2
+    assert layer.warper_space == RESOLVE_HS709_V2_SPACE
+
+
+def test_calibrated_v1_upgrade_preserves_exact_mesh_and_can_undo(panel: WarperPanel) -> None:
+    grid = WarperGrid.identity("hs", 6, 8, ("dh", "ds", "dl"))
+    offsets = grid.mutable_offsets()
+    offsets[2, 0] = (-0.0754321, 0.1234567, 0.05000001)
+    grid = replace(grid.with_offsets(offsets), pins=(WarperPin("hs:2:0"),))
+    state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0, grids={"hs": grid},
+    )
+    saved = state.to_dict()
+    layer = Layer.from_dict({"warper_state": saved})
+    history = []
+    service = WarperCommandService(history_push=lambda target: history.append(target.warper_state.to_dict()))
+    adapter = WarperCommandAdapter(service, lambda: layer)
+    panel.command_requested.connect(adapter.submit)
+    assert panel.set_warper_state(layer.warper_state, target_id=layer.id)
+    assert not history
+
+    action = panel.upgrade_calibration_action
+    assert action.isVisible()
+    panel.set_mode("chroma_luma")
+    assert not action.isVisible()
+    panel.set_mode("hue_saturation")
+    assert action.isVisible()
+    action.trigger()
+
+    assert layer.warper_state.to_dict() == {**saved, "algorithm_version": RESOLVE_HS_ALGORITHM_V2}
+    np.testing.assert_array_equal(layer.warper_params, offsets)
+    assert layer.warper_space == RESOLVE_HS709_V2_SPACE
+    assert history == [saved]
+    assert service.revision(layer) == 1
+    assert not action.isVisible()
+
+    layer.apply_grade_patch({"warper_state": history[0]}, categories=("warper",))
+    assert panel.set_warper_state(layer.warper_state, target_id=layer.id)
+    assert layer.warper_space == RESOLVE_HS709_SPACE
+    assert action.isVisible()
 
 
 def test_mode_navigation_retains_mesh_and_never_submits_new_modes(panel: WarperPanel) -> None:

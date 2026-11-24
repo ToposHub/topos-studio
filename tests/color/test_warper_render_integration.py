@@ -200,9 +200,8 @@ def test_v2_variant_renders_fixture_grid_consistently_with_cpu() -> None:
     quad.release(); vao.release()
 
 
-@pytest.fixture
-def calibrated_graph_case() -> tuple:
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+@pytest.fixture(params=[3, 4], ids=["709-v1", "709-v2"])
+def calibrated_graph_case(request: pytest.FixtureRequest) -> tuple:
     from src.shared.project.color_graph import ColorEdgeData, ColorGraphData, ColorNodeData, NodeType
 
     colors = np.array([[
@@ -213,7 +212,7 @@ def calibrated_graph_case() -> tuple:
     offsets[1:5, (0, 4, 7), :] = (0.06, -0.08, 0.09)
     payload = {
         "grading_params": {}, "warper_params": offsets.tolist(),
-        "warper_space": RESOLVE_HS709_SPACE, "opacity": 0.7,
+        "warper_space": request.param, "opacity": 0.7,
     }
     nodes = (
         ColorNodeData(node_id="source", node_type=NodeType.SOURCE.value),

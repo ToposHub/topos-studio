@@ -42,6 +42,7 @@ from src.features.color.core.metal_texture_kernels import (
     make_tex_extra_params,
     make_tex_qualifier_params,
 )
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACES, apply_resolve_hs709
 from src.shared.gpu.metal.context import MetalComputeContext
 from src.shared.project.color_graph import NodeType
 from tests.color.fixtures.color_graph import (
@@ -382,6 +383,11 @@ class TestStructural:
         assert any("多空间" in e for e in texture_layer_domain_errors(
             {"warper_params": np.zeros((4, 4, 2), np.float32),
              "warper_space": 2}))
+        for space in RESOLVE_HS709_SPACES:
+            assert texture_layer_domain_errors({
+                "warper_params": np.zeros((6, 8, 3), np.float32).tolist(),
+                "warper_space": space,
+            }) == []
         assert any("fx/blur" in e for e in texture_layer_domain_errors(
             {"effects_params": {"blur_enabled": True,
                                 "blur_intensity": 5.0}}))
@@ -720,6 +726,34 @@ class TestTextureGraphMixerWarper:
                                   layer.warper_params.astype(np.float64))
         expected = self._epilogue(q, warped.astype(np.float32))
         _assert_dual(got, expected, "warper")
+
+    @pytest.mark.parametrize("space", RESOLVE_HS709_SPACES)
+    def test_calibrated_warper_from_serialized_graph_matches_cpu(
+        self, metal_ctx: MetalComputeContext, space: int,
+    ) -> None:
+        layer = _neutral_layer("Calibrated Warper")
+        layer.warper_space = space
+        layer.warper_params = np.zeros((6, 8, 3), dtype=np.float32)
+        layer.warper_params[1:5, (0, 4, 7)] = (0.06, -0.08, 0.09)
+        layer.opacity = 0.7
+        source = np.array([[
+            (0.75, 0.18, 0.14, 1.0), (0.75, 0.14, 0.18, 0.5),
+            (0.11, 0.67, 0.62, 1.0), (0.23, 0.24, 0.80, 0.8),
+            (0.30, 0.30, 0.30, 0.6), (-0.10, 1.50, 0.45, 1.0),
+        ]], dtype=np.float32)
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        result, _ = _run_graph(metal_ctx, executor, _graph_for([layer]),
+                               source, with_cpu=False)
+        try:
+            assert result.published, result.diagnostic_message
+            quantized = _quantized(source)
+            warped = apply_resolve_hs709(quantized[..., :3], layer.warper_params, space)
+            expected = self._epilogue(quantized, warped, layer.opacity)
+            assert np.max(np.abs(expected - quantized)) > 0.01
+            _assert_dual(executor.read_output_rgba16f(result), expected, f"warper-{space}")
+        finally:
+            executor.release_revision(result.request_id)
+            executor.release_pool()
 
     def test_grading_mixer_warper_multi_instance(self, metal_ctx):
         """多实例组合：两个 Corrector（各带 mixer/warper）串联——后者的

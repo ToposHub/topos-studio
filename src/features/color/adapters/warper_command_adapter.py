@@ -36,7 +36,9 @@ from src.features.color.core.warper_commands import WarperCommandResult, WarperC
 from src.features.color.core.warper_state import (
     CL_GRID_NAMES,
     HS_GRID_NAME,
+    RESOLVE_HS_ALGORITHMS,
     RESOLVE_HS_ALGORITHM,
+    RESOLVE_HS_ALGORITHM_V2,
     WARPER_SCHEMA_VERSION,
     WarperCommandRequest,
     WarperGrid,
@@ -214,9 +216,9 @@ class WarperCommandAdapter:
         offsets = np.asarray(payload["offsets"], dtype=np.float32)
         rows, cols, _ = offsets.shape
         previous = layer.warper_state
-        if previous is None or previous.algorithm_version != RESOLVE_HS_ALGORITHM:
+        if previous is None or previous.algorithm_version not in RESOLVE_HS_ALGORITHMS:
             previous = WarperStateV2(
-                schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+                schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM_V2,
                 mode="hue_saturation", color_space="hsp", axis_angle=0.0,
                 grids={HS_GRID_NAME: WarperGrid.identity(HS_GRID_NAME, rows, cols, ("dh", "ds", "dl"))})
         grid = previous.grids[HS_GRID_NAME]
@@ -253,7 +255,14 @@ class WarperCommandAdapter:
         mode = command.get("mode")
 
         if action == "calibrated_mesh":
-            state = self._calibrated_state(payload_in, layer) if payload_in.get("enabled") else None
+            if payload_in.get("upgrade_to_v2"):
+                previous = layer.warper_state
+                if (payload_in.get("phase") != "atomic" or previous is None
+                        or previous.algorithm_version != RESOLVE_HS_ALGORITHM):
+                    return None, {}
+                state = replace(previous, algorithm_version=RESOLVE_HS_ALGORITHM_V2)
+            else:
+                state = self._calibrated_state(payload_in, layer) if payload_in.get("enabled") else None
             return "replace_state", {"state": state.to_dict() if state is not None else None}
 
         if action == "resolution":

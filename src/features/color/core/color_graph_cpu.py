@@ -592,7 +592,7 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     恢复不一次性取消 fail-closed。
     """
     from src.features.color.core.primary_calibration import grade_uses_calibration
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
 
     errors: list[str] = []
     grading = layer.get("grading_params")
@@ -619,7 +619,7 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     if isinstance(mixer, Mapping) and mixer:
         errors.append("mixer_params 不在基础域")
     if layer.get("warper_params") is not None:
-        if layer.get("warper_space") == RESOLVE_HS709_SPACE:
+        if layer.get("warper_space") in RESOLVE_HS709_SPACES:
             try:
                 calibrated_warper_offsets(layer)
             except (TypeError, ValueError) as exc:
@@ -685,10 +685,10 @@ _LUT3D_CACHE: dict[str, tuple] = {}
 
 def calibrated_warper_offsets(layer: Mapping[str, Any]) -> np.ndarray | None:
     """Return the calibrated HS texture payload, if active."""
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
 
     data = layer.get("warper_params")
-    if data is None or layer.get("warper_space") != RESOLVE_HS709_SPACE:
+    if data is None or layer.get("warper_space") not in RESOLVE_HS709_SPACES:
         return None
     offsets = np.asarray(data, dtype=np.float32)
     if offsets.ndim != 3 or min(offsets.shape[:2]) < 2 or offsets.shape[2] != 3:
@@ -786,15 +786,19 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         graded = apply_curves_soft_clip_image(graded, dict(csc)).astype(_F32)
     warper = calibrated_warper_offsets(layer)
     if warper is not None:
-        from src.features.color.core.warper_color import apply_resolve_hs709
+        from src.features.color.core.warper_color import (
+            apply_resolve_hs709_texture, prepare_resolve_hs709_texture,
+        )
 
+        space = layer["warper_space"]
+        texture = prepare_resolve_hs709_texture(warper, space)
         flat = graded.reshape(-1, 3)
         warped = np.empty_like(flat)
         # Limit interpolation temporaries during 4K+ CPU delivery.
         block_size = 262_144
         for start in range(0, len(flat), block_size):
             block = slice(start, start + block_size)
-            warped[block] = apply_resolve_hs709(flat[block], warper)
+            warped[block] = apply_resolve_hs709_texture(flat[block], texture, space)
         graded = warped.reshape(graded.shape)
     # N14 v1：LUT3D 域（R05 顺序在 curves 之后；GL 同序——trilinear
     # 采样 + blend_node_lut_strength HDR/负值语义同源）

@@ -262,9 +262,9 @@ def _layer_operations(data: Dict[str, Any]) -> set:
     if data.get("active_lut_path") or data.get("lut_path"):
         ops.add("lut")
     if data.get("warper_params") is not None:
-        from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+        from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
 
-        ops.add("warper_709" if data.get("warper_space") == RESOLVE_HS709_SPACE else "warper")
+        ops.add("warper_709" if data.get("warper_space") in RESOLVE_HS709_SPACES else "warper")
     if (data.get("effects_params") or {}).get("enabled"):
         ops.add("effects")
     qp = data.get("qualifier_params") or {}

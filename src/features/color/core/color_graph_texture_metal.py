@@ -54,6 +54,10 @@ from src.features.color.core.metal_texture_kernels import (
     make_tex_extra_params,
     make_tex_qualifier_params,
 )
+from src.features.color.core.warper_color import (
+    RESOLVE_HS709_SPACES,
+    prepare_resolve_hs709_texture,
+)
 from src.shared.gpu.metal.context import MetalComputeContext
 from src.shared.gpu.metal.kernels_color import curves_lut_to_flat_buffer
 
@@ -108,11 +112,11 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
     """纹理执行器的 Corrector 参数域检查（fail-closed）。
 
     与 ``production_layer_domain_errors`` 同一判据风格，但允许纹理域已
-    接线的效果：HSL 曲线 / LUT3D / mixer / warper（legacy HSV 空间）/
+    接线的效果：HSL 曲线 / LUT3D / mixer / warper（legacy HSV 与校准 709）/
     soft_clip / curves_soft_clip / 非 Normal blend / qualifier（无后处理）
     / 窗口 mask_shapes。仍拒绝：插件、fx/blur（邻域）、mid_detail /
     sharpness（邻域）、qualifier 后处理（clean/blur/denoise）、warper 多
-    空间变体（space > 0）、未预构建的 curves_data。
+    空间变体 HSL/HSP、未预构建的 curves_data。
     """
     from src.features.color.core.color_graph_cpu import (
         _CPU_DEAD_GRADING_KEYS,
@@ -153,9 +157,10 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
         if qualifier_postprocess_active(qualifier):
             errors.append("qualifier 后处理（clean/blur/denoise）未接线")
     warper = layer.get("warper_params")
-    if warper is not None and int(
-            layer.get("warper_space") or 0) not in (0,):
-        errors.append("warper 多空间变体（space>0）未接线")
+    if warper is not None:
+        warper_space = int(layer.get("warper_space") or 0)
+        if warper_space not in (0, *RESOLVE_HS709_SPACES):
+            errors.append(f"warper 多空间变体未接线（space={warper_space}）")
     return errors
 
 
@@ -239,7 +244,7 @@ class ColorGraphMetalTextureExecutor:
         self._white_mattes: dict[tuple[int, int], Any] = {}
         self._hsl_textures: dict[str, Any] = {}
         self._hsl_default: Any = None
-        self._warper_textures: dict[str, Any] = {}
+        self._warper_textures: dict[tuple[int, tuple[int, ...], bytes], Any] = {}
         self._warper_zero: Any = None
         self._lut_textures: dict[tuple, Any] = {}
         self._lut_identity: Any = None
@@ -714,6 +719,10 @@ class ColorGraphMetalTextureExecutor:
         csc = layer.get("curves_soft_clip")
         has_csc = isinstance(csc, Mapping) and bool(csc)
         lut_path = layer.get("active_lut_path")
+        warper = layer.get("warper_params")
+        warper_space = int(layer.get("warper_space") or 0)
+        # Graph payloads hold serialized mesh lists, not necessarily ndarrays.
+        values["u_warper_space"] = warper_space
         grading = graph_grading_params_for_layer(
             layer, width, height, has_mask=matte is not None)
         extra = make_tex_extra_params(
@@ -721,10 +730,12 @@ class ColorGraphMetalTextureExecutor:
             has_hsl=hsl_lut is not None,
             has_lut3d=bool(lut_path),
             has_mixer=has_mixer,
-            has_warper=layer.get("warper_params") is not None,
+            has_warper=warper is not None,
             has_soft_clip=has_soft_clip,
             has_curves_soft_clip=has_csc,
         )
+        warper_tex = (self._warper_texture(warper, warper_space)
+                      if warper is not None else self._warper_zero_texture())
         out = pool.acquire(self._rgba16f, width, height)
         matte_tex = (matte if matte is not None
                      else self._white_matte(width, height))
@@ -733,9 +744,7 @@ class ColorGraphMetalTextureExecutor:
             textures={
                 0: input_tex, 1: matte_tex, 2: out,
                 3: self._hsl_texture(hsl_lut),
-                4: (self._warper_texture(layer.get("warper_params"))
-                    if layer.get("warper_params") is not None
-                    else self._warper_zero_texture()),
+                4: warper_tex,
                 5: (self._lut_texture(str(lut_path))
                     if lut_path else self._lut_identity_texture()),
             },
@@ -949,22 +958,26 @@ class ColorGraphMetalTextureExecutor:
             self._warper_zero = self._warper_texture(zeros)
         return self._warper_zero
 
-    def _warper_texture(self, warper_params) -> Any:
-        """(h, w, 2) (delta_hue, delta_sat) 网格 → RG32Float 纹理。"""
+    def _warper_texture(self, warper_params: Any, space: int = 0) -> Any:
+        """Upload legacy RG offsets or a prepared calibration field as RGBA32F."""
         array = np.ascontiguousarray(warper_params, dtype=np.float32)
-        if array.ndim != 3 or array.shape[-1] != 2:
+        calibrated = space in RESOLVE_HS709_SPACES
+        components = 3 if calibrated else 2
+        if (array.ndim != 3 or array.shape[-1] != components
+                or not array.shape[0] or not array.shape[1]):
             raise MetalTextureGraphFailure(
                 "param_shape_unsupported",
-                f"Warper 网格形状非法: {array.shape}（期望 (h, w, 2)）")
-        height, width = array.shape[0], array.shape[1]
-        key = hashlib.sha256(array.tobytes()).hexdigest()
+                f"Warper 网格形状非法: {array.shape}（期望 (h, w, {components})）")
+        key = (space, array.shape, hashlib.sha256(array).digest())
         if key not in self._warper_textures:
-            tex = self.ctx.create_texture_2d(
-                self._metal.MTLPixelFormatRG32Float, width, height,
-                shader_write=False)
-            tex.replaceRegion_mipmapLevel_withBytes_bytesPerRow_(
-                self._metal.MTLRegionMake2D(0, 0, width, height), 0,
-                array.tobytes(), array.strides[0])
+            format_ = self._metal.MTLPixelFormatRG32Float
+            if calibrated:
+                prepared = prepare_resolve_hs709_texture(array, space)
+                array = np.zeros((*prepared.shape[:2], 4), dtype=np.float32)
+                array[..., :3] = prepared
+                format_ = self._metal.MTLPixelFormatRGBA32Float
+            height, width = array.shape[:2]
+            tex = self.ctx.create_texture_from_numpy(array, format_, width, height)
             if len(self._warper_textures) >= 16:
                 self._warper_textures.pop(next(iter(self._warper_textures)))
             self._warper_textures[key] = tex
