@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
@@ -9,8 +10,15 @@ from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QTest
 from pytestqt.qtbot import QtBot
 
+from src.features.color.adapters.warper_command_adapter import WarperCommandAdapter
+from src.features.color.core.layer import Layer
+from src.features.color.core.warper_commands import WarperCommandService
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
+from src.features.color.core.warper_state import (
+    RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2, WARPER_SCHEMA_VERSION, WarperGrid, WarperPin, WarperStateV2,
+)
 from src.features.color.ui.warper_panel import WarperPanel
-from src.shared.ui.widgets.warper_canvas import WarperCanvas
+from src.shared.ui.widgets.warper_canvas import CALIBRATED_MAX_RADIUS, CALIBRATED_SAT_SCALE, WarperCanvas
 
 
 @pytest.fixture
@@ -25,6 +33,178 @@ def panel(qtbot: QtBot) -> WarperPanel:
 def click_point(canvas: WarperCanvas, key: tuple[int, int],
                 modifier: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier) -> None:
     QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, modifier, canvas.point_screen(key).toPoint())
+
+
+def test_calibrated_rectangular_grid_numeric_edits_and_hydration(panel: WarperPanel) -> None:
+    layer = Layer("warper")
+    history = []
+    service = WarperCommandService(history_push=lambda target: history.append(target.id))
+    adapter = WarperCommandAdapter(service, lambda: layer)
+    results = []
+    panel.command_requested.connect(lambda command: results.append(adapter.submit(command)))
+    legacy = []
+    panel.warper_changed.connect(legacy.append)
+    panel.calibration_btn.click()
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM_V2
+    assert not panel.space_combo.isEnabled()
+
+    panel.link_button.click()
+    panel.grid_combo.setCurrentText("8")
+    canvas = panel.warper
+    click_point(canvas, (2, 0))
+    assert canvas.selected_values() == pytest.approx({"hue": 0.0, "sat": 1 / np.sqrt(3), "luma": 0.5})
+
+    panel.hs_tools.values["hue"].setValue(0.075)
+    panel.hs_tools.values["sat"].setValue(0.74)
+    value = panel.hs_tools.values["luma"]
+    value.interaction_started.emit()
+    baseline = service.revision(layer)
+    value.setValue(0.57)
+    value.setValue(0.63)
+    value.interaction_ended.emit()
+    assert service.revision(layer) == baseline + 1 == len(history)
+    grid = layer.warper_state.grids["hs"]
+    assert grid.offsets.shape == (6, 8, 3)
+    assert grid.offsets[2, 0] == pytest.approx([-0.075, 0.74 * np.sqrt(3) / 2 - 0.5, 0.13])
+    panel.hs_tools.component_buttons["hue"][-1].click()
+    assert layer.warper_state.grids["hs"].offsets[2, 0, 0] == pytest.approx(0.0)
+    baseline = service.revision(layer)
+    panel.hs_tools.action_buttons["convert_pin"].click()
+    assert layer.warper_state.grids["hs"].pins[0].point_id == "hs:2:0"
+    assert service.revision(layer) == baseline + 1
+    assert all(result["ok"] for result in results)
+    assert not legacy
+
+    saved = layer.warper_state.copy()
+    count = len(results)
+    panel.set_params(None)
+    assert panel.set_warper_state(saved)
+    assert len(results) == count
+    assert panel.calibration_btn.isChecked()
+    assert panel.warper.pins == {(2, 0)}
+    assert np.allclose(panel.warper.calibrated_offsets(), saved.grids["hs"].offsets, atol=1e-7)
+
+
+def test_calibrated_pointer_preview_can_cancel_without_revision(panel: WarperPanel, qtbot: QtBot) -> None:
+    layer = Layer("warper")
+    service = WarperCommandService()
+    adapter = WarperCommandAdapter(service, lambda: layer)
+    panel.command_requested.connect(adapter.submit)
+    panel.calibration_btn.click()
+    before = layer.warper_state.to_dict()
+    revision = service.revision(layer)
+    canvas = panel.warper
+    start = canvas.point_screen((2, 0)).toPoint()
+    QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+    end = start + QPoint(14, -9)
+    QTest.mouseMove(canvas, end)
+    qtbot.waitUntil(lambda: layer.warper_state.grids["hs"].offsets.any())
+    QTest.keyClick(canvas, Qt.Key.Key_Escape)
+    QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=end)
+    assert layer.warper_state.to_dict() == before
+    assert not canvas.calibrated_offsets().any()
+    assert service.revision(layer) == revision
+
+
+def test_calibrated_pointer_limit_preserves_untouched_outer_points(panel: WarperPanel) -> None:
+    panel.calibration_btn.click()
+    canvas = panel.warper
+    pinned, unselected, dragged = (5, 0), (5, 3), (5, 1)
+    canvas.selected = {pinned, unselected}
+    canvas.edit_component("sat", 1.55 * CALIBRATED_SAT_SCALE)
+    canvas.pins = {pinned}
+    canvas.selected.clear()
+    before = canvas.points.copy()
+    start = canvas.point_screen(dragged).toPoint()
+    center = canvas.grid_rect().center().toPoint()
+    end = start + (start - center)
+    QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(canvas, end)
+    QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=end)
+    assert np.array_equal(canvas.points[pinned], before[pinned])
+    assert np.array_equal(canvas.points[unselected], before[unselected])
+    assert np.linalg.norm(canvas.points[dragged]) == pytest.approx(CALIBRATED_MAX_RADIUS)
+
+
+def test_calibration_click_on_blank_mesh_selects_hsp(panel: WarperPanel) -> None:
+    panel.set_params(None)
+    assert panel.space_combo.currentText() == "HSV"
+    panel.calibration_btn.click()
+    assert panel.calibration_btn.isChecked()
+    assert panel.space_combo.currentText() == "HSP"
+    panel.calibration_btn.click()
+    assert not panel.calibration_btn.isChecked()
+    grid = np.zeros((6, 6, 2), dtype=np.float32)
+    grid[2, 0] = [0.1, 0.2]
+    panel.set_params(grid)
+    assert not panel.calibration_btn.isEnabled()
+
+
+def test_calibrated_v1_edit_preserves_version_until_reset_and_toggle(panel: WarperPanel) -> None:
+    grid = WarperGrid.identity("hs", 6, 6, ("dh", "ds", "dl"))
+    offsets = grid.mutable_offsets()
+    offsets[2, 0, 1] = 0.1
+    state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0,
+        grids={"hs": grid.with_offsets(offsets)},
+    )
+    layer = Layer.from_dict({"warper_state": state.to_dict()})
+    adapter = WarperCommandAdapter(WarperCommandService(), lambda: layer)
+    panel.command_requested.connect(adapter.submit)
+    assert panel.set_warper_state(layer.warper_state)
+    click_point(panel.warper, (2, 0))
+    panel.hs_tools.values["luma"].setValue(0.6)
+    assert layer.warper_state.grids["hs"].offsets[2, 0, 2] == pytest.approx(0.1)
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM
+    assert layer.warper_space == RESOLVE_HS709_SPACE
+
+    panel.on_reset()
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM
+    panel.calibration_btn.click()
+    assert layer.warper_state is None
+    panel.calibration_btn.click()
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM_V2
+    assert layer.warper_space == RESOLVE_HS709_V2_SPACE
+
+
+def test_calibrated_v1_upgrade_preserves_exact_mesh_and_can_undo(panel: WarperPanel) -> None:
+    grid = WarperGrid.identity("hs", 6, 8, ("dh", "ds", "dl"))
+    offsets = grid.mutable_offsets()
+    offsets[2, 0] = (-0.0754321, 0.1234567, 0.05000001)
+    grid = replace(grid.with_offsets(offsets), pins=(WarperPin("hs:2:0"),))
+    state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0, grids={"hs": grid},
+    )
+    saved = state.to_dict()
+    layer = Layer.from_dict({"warper_state": saved})
+    history = []
+    service = WarperCommandService(history_push=lambda target: history.append(target.warper_state.to_dict()))
+    adapter = WarperCommandAdapter(service, lambda: layer)
+    panel.command_requested.connect(adapter.submit)
+    assert panel.set_warper_state(layer.warper_state, target_id=layer.id)
+    assert not history
+
+    action = panel.upgrade_calibration_action
+    assert action.isVisible()
+    panel.set_mode("chroma_luma")
+    assert not action.isVisible()
+    panel.set_mode("hue_saturation")
+    assert action.isVisible()
+    action.trigger()
+
+    assert layer.warper_state.to_dict() == {**saved, "algorithm_version": RESOLVE_HS_ALGORITHM_V2}
+    np.testing.assert_array_equal(layer.warper_params, offsets)
+    assert layer.warper_space == RESOLVE_HS709_V2_SPACE
+    assert history == [saved]
+    assert service.revision(layer) == 1
+    assert not action.isVisible()
+
+    layer.apply_grade_patch({"warper_state": history[0]}, categories=("warper",))
+    assert panel.set_warper_state(layer.warper_state, target_id=layer.id)
+    assert layer.warper_space == RESOLVE_HS709_SPACE
+    assert action.isVisible()
 
 
 def test_mode_navigation_retains_mesh_and_never_submits_new_modes(panel: WarperPanel) -> None:

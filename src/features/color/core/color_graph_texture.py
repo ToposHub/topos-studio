@@ -285,10 +285,18 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
             self._lut_texture(layer["active_lut_path"]).use(4)
             prog["u_lut_tex"].value = 4
         if "u_warper_tex" in prog and layer.get("warper_params") is not None:
+            from src.features.color.core.warper_color import (
+                RESOLVE_HS709_SPACES, prepare_resolve_hs709_texture,
+            )
+
             array = np.ascontiguousarray(layer["warper_params"], dtype="f4")
-            if array.ndim != 3 or array.shape[-1] != 2:
+            space = int(layer.get("warper_space", 0) or 0)
+            components = 3 if space in RESOLVE_HS709_SPACES else 2
+            if array.ndim != 3 or array.shape[-1] != components:
                 raise ValueError("Invalid Color Warper grid")
-            tex = self._texture((array.shape[1], array.shape[0]), 2, array.tobytes())
+            if space in RESOLVE_HS709_SPACES:
+                array = prepare_resolve_hs709_texture(array, space)
+            tex = self._texture((array.shape[1], array.shape[0]), components, array.tobytes())
             tex.use(5)
             prog["u_warper_tex"].value = 5
 

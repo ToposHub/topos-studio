@@ -1303,7 +1303,9 @@ class AsyncRenderer(QThread):
     def _do_remove_layer(self, layer_id):
         """Release all GPU resources associated with a removed layer."""
         if layer_id in self.layer_textures:
-            for tex in self.layer_textures[layer_id].values():
+            for key, tex in self.layer_textures[layer_id].items():
+                if key == "warper_key":
+                    continue
                 try:
                     tex.release()
                 except Exception:
@@ -4760,9 +4762,25 @@ class AsyncRenderer(QThread):
             prog['u_hsl_curve_tex'].value = tex_unit
             tex_unit += 1
         
-        tex = self.layer_textures.get(l_id, {}).get('warper') or self.default_warper_tex
-        tex.use(tex_unit)
         if 'u_warper_tex' in prog:
+            from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+
+            grid = layer.get('warper_params')
+            if grid is not None:
+                # Graph edits, undo and shared nodes can have newer meshes than
+                # the Layer texture slot. Cache uploads by actual payload.
+                offsets = np.ascontiguousarray(grid, dtype=np.float32)
+                space = int(layer.get('warper_space') or 0)
+                components = 3 if space in RESOLVE_HS709_SPACES else 2
+                if offsets.ndim != 3 or offsets.shape[2] != components:
+                    raise ValueError("Invalid Color Warper grid shape")
+                rows, columns, _ = offsets.shape
+                self._do_update_aux_tex({
+                    'layer_id': l_id, 'type': 'warper', 'space': space,
+                    'size': (columns, rows), 'data': offsets.tobytes(),
+                })
+            tex = self.layer_textures.get(l_id, {}).get('warper') or self.default_warper_tex
+            tex.use(tex_unit)
             prog['u_warper_tex'].value = tex_unit
             tex_unit += 1
         if layer.get('active_lut_path'):
@@ -5018,18 +5036,36 @@ class AsyncRenderer(QThread):
                     "3D LUT upload failed for %s; falling back to identity LUT",
                     path)
         elif tex_type == 'warper':
+            from src.features.color.core.warper_color import (
+                RESOLVE_HS709_SPACES, prepare_resolve_hs709_texture,
+            )
+
             w, h = data['size']
             tex_data = data['data']
-            # CW-B08:色彩空间变体随纹理槽位记录,供 uniform/诊断读取
-            self.layer_textures[l_id]['warper_space'] = int(data.get('space', 0) or 0)
-            tex = self.layer_textures[l_id].get('warper')
-            if not tex or tex.size != (w, h):
-                if tex: tex.release()
-                tex = self.ctx.texture((w, h), 2, data=tex_data, dtype='f4')
-                tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
-                tex.repeat_x = tex.repeat_y = False
-                self.layer_textures[l_id]['warper'] = tex
-            else: tex.write(tex_data)
+            space = int(data.get('space', 0) or 0)
+            components = 3 if space in RESOLVE_HS709_SPACES else 2
+            if w <= 0 or h <= 0 or len(tex_data) != w * h * components * 4:
+                raise ValueError("Invalid Color Warper grid texture")
+            slot = self.layer_textures[l_id]
+            key = (space, w, h, tex_data)
+            if slot.get('warper_key') == key:
+                return
+            if space in RESOLVE_HS709_SPACES:
+                offsets = np.frombuffer(tex_data, dtype=np.float32).reshape(h, w, components)
+                sampled = prepare_resolve_hs709_texture(offsets, space)
+                h, w = sampled.shape[:2]
+                tex_data = sampled.tobytes()
+            tex = slot.get('warper')
+            if not tex or tex.size != (w, h) or tex.components != components:
+                updated = self.ctx.texture((w, h), components, data=tex_data, dtype='f4')
+                updated.filter = (moderngl.LINEAR, moderngl.LINEAR)
+                updated.repeat_x = updated.repeat_y = False
+                slot['warper'] = updated
+                if tex:
+                    tex.release()
+            else:
+                tex.write(tex_data)
+            slot['warper_key'] = key
         elif tex_type == 'mask':
             w, h = data['size']
             tex_data = data['data']
@@ -7049,7 +7085,9 @@ class AsyncRenderer(QThread):
 
             # Release layer auxiliary textures (curves, warper, lut3d, mask, hsl_curve)
             for tex_dict in self.layer_textures.values():
-                for tex in tex_dict.values():
+                for key, tex in tex_dict.items():
+                    if key == "warper_key":
+                        continue
                     try: tex.release()
                     except Exception: logger.debug("Failed to release layer texture in cleanup")
             self.layer_textures.clear()

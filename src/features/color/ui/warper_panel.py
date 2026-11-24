@@ -1,10 +1,7 @@
-"""Resolve-shaped Warper UI. Only legacy square HS edits reach the renderer.
-
-New capabilities publish separate presentation signals. Their backend work is
-specified in docs/plans/2026-11-12-color-warper-backend-plan.md.
-"""
+"""Color Warper tools, mesh display, and grading commands."""
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -15,16 +12,22 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.features.color.core.warper_hs_solver import resample_calibrated_grid, smooth_component
+from src.features.color.core.warper_state import (
+    HS_GRID_NAME, RESOLVE_HS_ALGORITHMS, RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2,
+    WarperGrid, WarperPin, WarperStateV2, make_point_id,
+)
 from src.features.color.ui.warper_tools import MeshTools, StrokeTools, tool_button, tr
-from src.shared.ui.style_sheet import C
+from src.shared.ui.style_sheet import C, COMPOSITE_KEYFRAMES_ICON_BTN_STYLE
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.chroma_warp_canvas import ChromaWarpCanvas
 from src.shared.ui.widgets.drag_value import DragValue
-from src.shared.ui.widgets.warper_canvas import WarperCanvas
+from src.shared.ui.widgets.warper_canvas import CALIBRATED_MAX_RADIUS, CALIBRATED_SAT_SCALE, WarperCanvas
 from src.shared.ui.widgets.warper_icons import warper_icon
 
 MODES = ("chroma_warp", "hue_saturation", "chroma_luma")
 MODE_LABELS = {"chroma_warp": "Chroma Warp", "hue_saturation": "Hue - Saturation", "chroma_luma": "Chroma - Luma"}
+HS_RESOLUTIONS = (6, 8, 12, 16, 24)
 
 
 class _PaletteStack(QStackedWidget):
@@ -50,6 +53,7 @@ class WarperPanel(QWidget):
         self.mode = "hue_saturation"
         self._updating = False
         self._legacy_interaction_open = False
+        self._calibration_algorithm: str | None = None
         self._dialog: QDialog | None = None
         self._footer_narrow: bool | None = None
         self._resolutions = {"hue_saturation": (6, 6), "chroma_luma": (6, 6)}
@@ -90,9 +94,10 @@ class WarperPanel(QWidget):
             self.canvas_stack.addWidget(canvas)
             canvas.ui_edited.connect(self._emit_ui)
             canvas.selection_changed.connect(self._selection_changed)
-        self.warper.changed.connect(self._legacy_changed)
+        self.warper.changed.connect(self._mesh_changed)
         self.warper.interaction_started.connect(self._legacy_start)
-        self.warper.interaction_ended.connect(self._legacy_end)
+        self.warper.interaction_ended.connect(self._mesh_interaction_ended)
+        self.warper.interaction_cancelled.connect(lambda: self._request_calibrated("cancel"))
         self.chroma_luma.grid_activated.connect(self._grid_activated)
         left_layout.addWidget(self.canvas_stack, 1)
         self._build_footer(left_layout)
@@ -128,6 +133,15 @@ class WarperPanel(QWidget):
             button.clicked.connect(lambda checked=False, mode=mode: self.set_mode(mode))
             top.addWidget(button)
             self.mode_buttons[mode] = button
+        self.calibration_btn = QToolButton(self)
+        self.calibration_btn.setObjectName("warper_calibration")
+        self.calibration_btn.setText("709")
+        self.calibration_btn.setCheckable(True)
+        self.calibration_btn.setFixedSize(32, 26)
+        self.calibration_btn.setStyleSheet(COMPOSITE_KEYFRAMES_ICON_BTN_STYLE)
+        self.calibration_btn.setAccessibleName(tr("rec709_calibration", "Rec.709 Gamma 2.4 Hue–Saturation calibration"))
+        self.calibration_btn.clicked.connect(self._set_calibration)
+        top.addWidget(self.calibration_btn)
         self.expand_button = tool_button("expand", tr("expand", "Expand"))
         self.expand_button.setFixedWidth(32)
         self.expand_button.clicked.connect(self.toggle_expanded)
@@ -148,6 +162,9 @@ class WarperPanel(QWidget):
         self.grid_action.toggled.connect(self._display_changed)
         self.density_action.toggled.connect(self._display_changed)
         self.options_menu.addSeparator()
+        self.upgrade_calibration_action = self.options_menu.addAction(
+            tr("rec709_upgrade", "Upgrade 709 Calibration to v2"))
+        self.upgrade_calibration_action.triggered.connect(self._upgrade_calibration)
         self.options_menu.addAction(tr("reset_selection", "Reset Selection / Pins"), lambda: self._mesh_action("reset_selection"))
         self.options_button.setMenu(self.options_menu)
         self.options_button.setStyleSheet(self.options_button.styleSheet() + "QToolButton::menu-indicator { image: none; width: 0px; }")
@@ -161,6 +178,13 @@ class WarperPanel(QWidget):
         combo.addItems(items)
         combo.setFixedWidth(width)
         return combo
+
+    @staticmethod
+    def _set_resolution_text(combo: ChevronComboBox, value: int) -> None:
+        text = str(value)
+        if combo.findText(text) < 0:
+            combo.addItem(text)
+        combo.setCurrentText(text)
 
     def _build_footer(self, layout: QVBoxLayout) -> None:
         self.footer = QWidget()
@@ -177,8 +201,9 @@ class WarperPanel(QWidget):
         footer.setSpacing(4)
         self.resolution_h_icon = tool_button("resolution_h", tr("hue_resolution", "Hue Resolution"))
         self.resolution_s_icon = tool_button("resolution_s", tr("sat_resolution", "Saturation Resolution"))
-        self.grid_combo = self._combo(["6", "8", "12", "16", "24"], 59)
-        self.saturation_combo = self._combo(["6", "8", "12", "16", "24"], 59)
+        items = [str(size) for size in HS_RESOLUTIONS]
+        self.grid_combo = self._combo(items, 59)
+        self.saturation_combo = self._combo(items, 59)
         self.grid_combo.currentIndexChanged.connect(self.on_grid_size_changed)
         self.saturation_combo.currentIndexChanged.connect(lambda index: self._resolution_changed(1))
         for icon, combo in ((self.resolution_h_icon, self.grid_combo), (self.resolution_s_icon, self.saturation_combo)):
@@ -282,11 +307,12 @@ class WarperPanel(QWidget):
             self.resolution_s_icon.setIcon(warper_icon("cl_rows" if rectangular else "resolution_s"))
             self.cl_tools.action_buttons["all"].setIcon(warper_icon("all_rect"))
             if mode != "chroma_warp":
-                items = ["4", "6", "8", "12", "16", "24"] if rectangular else ["6", "8", "12", "16", "24"]
+                sizes = (4, *HS_RESOLUTIONS) if rectangular else HS_RESOLUTIONS
+                items = [str(size) for size in sizes]
                 for combo, value in zip((self.grid_combo, self.saturation_combo), self._resolutions[mode]):
                     combo.clear()
                     combo.addItems(items)
-                    combo.setCurrentText(str(value))
+                    self._set_resolution_text(combo, value)
                 self.link_button.setChecked(self._linked[mode])
                 self.space_combo.setCurrentText(self._spaces[mode])
                 for widget, key, fallback in (
@@ -297,6 +323,7 @@ class WarperPanel(QWidget):
                     widget.setAccessibleName(tr(key, fallback))
                 self.grid_combo.setAccessibleName(self.resolution_h_icon.accessibleName())
                 self.saturation_combo.setAccessibleName(self.resolution_s_icon.accessibleName())
+            self._sync_calibration_controls()
             self._sync_tools()
         finally:
             self._updating = False
@@ -339,12 +366,86 @@ class WarperPanel(QWidget):
             self.ui_state_changed.emit(self.ui_state())
 
     def _request(self, action: str, **payload: Any) -> None:
-        if not self._updating:
+        # The layer model stores one warper mode. Other palettes can be viewed
+        # while a calibrated HS grade is active without replacing that grade.
+        if not self._updating and not self.warper.calibrated_hs:
             self.command_requested.emit({"mode": self.mode, "action": action, "payload": payload,
                                          "state": self.active_canvas().snapshot()})
 
-    def _legacy_changed(self, data: np.ndarray) -> None:
-        if not self._updating and self._legacy_supported():
+    def _request_calibrated(self, phase: str, offsets: np.ndarray | None = None, *, upgrade: bool = False) -> None:
+        if self._updating:
+            return
+        payload: dict[str, Any] = {"phase": phase}
+        if upgrade:
+            payload["upgrade_to_v2"] = True
+        elif phase in {"atomic", "update"}:
+            payload["enabled"] = self.warper.calibrated_hs
+            if self.warper.calibrated_hs:
+                if offsets is None:
+                    offsets = self.warper.calibrated_offsets()
+                payload["offsets"] = offsets.tolist()
+                payload["pins"] = [make_point_id(HS_GRID_NAME, *key) for key in sorted(self.warper.pins)]
+        self.command_requested.emit({"mode": "hue_saturation", "action": "calibrated_mesh",
+                                     "payload": payload})
+
+    def _sync_calibration_controls(self) -> None:
+        calibrated = self.warper.calibrated_hs
+        self.calibration_btn.setChecked(calibrated)
+        self._sync_calibration_availability()
+        self.space_combo.setEnabled(self.mode != "hue_saturation" or not calibrated)
+        for key, widget in self.hs_tools.values.items():
+            blocked = widget.blockSignals(True)
+            maximum = CALIBRATED_MAX_RADIUS * CALIBRATED_SAT_SCALE if calibrated and key == "sat" else 1.0
+            widget.setRange(0.0, maximum)
+            widget.setDecimals(2 if calibrated else 3)
+            widget.blockSignals(blocked)
+
+    def _sync_calibration_availability(self) -> None:
+        hs_mode = self.mode == "hue_saturation"
+        available = (hs_mode and (self._spaces[self.mode] == "HSP" or
+                                  (not self.warper.pins and not self.warper.calibrated_offsets().any())))
+        self.calibration_btn.setVisible(hs_mode)
+        self.calibration_btn.setEnabled(available)
+        self.calibration_btn.setToolTip(self.calibration_btn.accessibleName() if available else
+                                        tr("rec709_hsp_required", "Select HSP to enable Rec.709 calibration"))
+        self.upgrade_calibration_action.setVisible(hs_mode and self._calibration_algorithm == RESOLVE_HS_ALGORITHM)
+
+    def _set_calibration(self, enabled: bool) -> None:
+        canvas = self.warper
+        if self._updating or self.mode != "hue_saturation":
+            return
+        canvas.cancel_gesture()
+        if not enabled and (canvas.calibrated_offsets().any() or canvas.pins):
+            self.calibration_btn.setChecked(True)
+            self.calibration_btn.setToolTip(tr("rec709_reset_first", "Reset Hue–Saturation before switching calibration off"))
+            return
+        canvas.calibrated_hs = enabled
+        self._calibration_algorithm = RESOLVE_HS_ALGORITHM_V2 if enabled else None
+        if enabled and self._spaces[self.mode] != "HSP":
+            self._spaces[self.mode] = canvas.color_space = "HSP"
+            previous = self.space_combo.blockSignals(True)
+            self.space_combo.setCurrentText("HSP")
+            self.space_combo.blockSignals(previous)
+        self._sync_calibration_controls()
+        self._sync_tools()
+        self._request_calibrated("atomic")
+        self._emit_ui()
+
+    def _upgrade_calibration(self) -> None:
+        if self._updating or self.mode != "hue_saturation":
+            return
+        self.warper._end_edit()
+        if self._calibration_algorithm != RESOLVE_HS_ALGORITHM:
+            return
+        self._calibration_algorithm = RESOLVE_HS_ALGORITHM_V2
+        self._sync_calibration_availability()
+        self._request_calibrated("atomic", upgrade=True)
+        self._emit_ui()
+
+    def _mesh_changed(self, data: np.ndarray) -> None:
+        if self.warper.calibrated_hs:
+            self._request_calibrated("update", data)
+        elif not self._updating and self._legacy_supported():
             self.warper_changed.emit(data)
 
     def _legacy_supported(self) -> bool:
@@ -356,20 +457,22 @@ class WarperPanel(QWidget):
             self._legacy_interaction_open = True
             self.interaction_started.emit()
 
-    def _legacy_end(self) -> None:
+    def _mesh_interaction_ended(self) -> None:
+        if self.warper.calibrated_hs:
+            self._request_calibrated("commit")
         if self._legacy_interaction_open:
             self._legacy_interaction_open = False
             self.interaction_ended.emit()
 
     def _numeric_start(self, component: str) -> None:
-        if self.mode == "hue_saturation" and component == "luma":
+        if self.mode == "hue_saturation" and component == "luma" and not self.warper.calibrated_hs:
             return
         canvas = self.active_canvas()
         if isinstance(canvas, WarperCanvas):
             canvas.begin_component_drag()
 
     def _numeric_end(self, component: str) -> None:
-        if self.mode == "hue_saturation" and component == "luma":
+        if self.mode == "hue_saturation" and component == "luma" and not self.warper.calibrated_hs:
             return
         canvas = self.active_canvas()
         if isinstance(canvas, WarperCanvas):
@@ -381,23 +484,31 @@ class WarperPanel(QWidget):
     def _resolution_changed(self, axis: int) -> None:
         if self._updating or self.mode == "chroma_warp":
             return
-        source = self.grid_combo if axis == 0 else self.saturation_combo
-        value = int(source.currentText())
+        combos = (self.grid_combo, self.saturation_combo)
+        value = int(combos[axis].currentText())
+        canvas = self.active_canvas()
+        canvas._end_edit()
         self._updating = True
         try:
             if self.link_button.isChecked():
-                (self.saturation_combo if axis == 0 else self.grid_combo).setCurrentText(str(value))
-            sizes = (int(self.grid_combo.currentText()), int(self.saturation_combo.currentText()))
+                self._set_resolution_text(combos[1 - axis], value)
+            sizes = tuple(int(combo.currentText()) for combo in combos)
+            if sizes == self._resolutions[self.mode]:
+                return
             self._resolutions[self.mode] = sizes
-            canvas = self.active_canvas()
-            if isinstance(canvas, WarperCanvas):
+            if canvas.calibrated_hs:
+                self._hydrate_grid(resample_calibrated_grid(self._calibrated_grid(), sizes[1], sizes[0]))
+            else:
                 canvas.set_resolution(*sizes)
         finally:
             self._updating = False
         if self._legacy_supported():
             self.warper_changed.emit(None)
         self._sync_tools()
-        self._request("resolution", columns=sizes[0], rows=sizes[1])
+        if canvas.calibrated_hs:
+            self._request_calibrated("atomic")
+        else:
+            self._request("resolution", columns=sizes[0], rows=sizes[1])
         self._emit_ui()
 
     def _link_changed(self, checked: bool) -> None:
@@ -413,6 +524,7 @@ class WarperPanel(QWidget):
             return
         self._spaces[self.mode] = value
         self.active_canvas().color_space = value
+        self._sync_calibration_controls()
         self._request("color_space", value=value)
         self._emit_ui()
 
@@ -443,6 +555,14 @@ class WarperPanel(QWidget):
             return
         canvas = self.active_canvas()
         if isinstance(canvas, WarperCanvas):
+            if canvas.calibrated_hs and smooth and (canvas.selected - canvas.pins):
+                semantic = {"hue": "dh", "sat": "ds", "luma": "dl"}[component]
+                grid = smooth_component(self._calibrated_grid(), semantic, sorted(canvas.selected))
+                canvas._start_edit()
+                canvas.apply_calibrated_offsets(grid.offsets)
+                canvas._publish_mesh()
+                canvas._end_edit()
+                return
             canvas.edit_component(component, value, smooth)
             self._request("component", component=component, value=value, smooth=smooth)
 
@@ -476,6 +596,8 @@ class WarperPanel(QWidget):
         self._emit_ui()
 
     def _selection_changed(self) -> None:
+        if self.mode == "hue_saturation" and self._spaces[self.mode] != "HSP" and not self._updating:
+            self._sync_calibration_availability()
         self._sync_tools()
         self._emit_ui()
 
@@ -524,8 +646,56 @@ class WarperPanel(QWidget):
             self.warper_changed.emit(None)
             self.reset_clicked.emit()
         self._sync_tools()
-        self._request("reset")
+        if self.mode == "hue_saturation" and self.warper.calibrated_hs:
+            self._request_calibrated("atomic")
+        else:
+            self._request("reset")
         self._emit_ui()
+
+    def _hydrate_grid(self, grid: WarperGrid) -> None:
+        self.warper.grid_size, self.warper.ring_count = grid.cols, grid.rows
+        self.warper.reset_grid()
+        self.warper.apply_calibrated_offsets(grid.offsets)
+        for pin in grid.pins:
+            _, row, col = pin.point_id.rsplit(":", 2)
+            self.warper.pins.add((int(row), int(col)))
+
+    def _calibrated_grid(self) -> WarperGrid:
+        canvas = self.warper
+        grid = WarperGrid.identity(HS_GRID_NAME, canvas.ring_count, canvas.grid_size, ("dh", "ds", "dl"))
+        pins = tuple(WarperPin(make_point_id(HS_GRID_NAME, *key)) for key in sorted(canvas.pins))
+        return replace(grid.with_offsets(canvas.calibrated_offsets()), pins=pins)
+
+    def set_warper_state(self, state: WarperStateV2 | None, *, target_id: str | None = None) -> bool:
+        """Hydrate the calibrated mesh without emitting grading commands."""
+        if state is None or state.algorithm_version not in RESOLVE_HS_ALGORITHMS:
+            return False
+        grid = state.grids[HS_GRID_NAME]
+        same_target = target_id is not None and target_id == getattr(self, "_warper_target_id", None)
+        keep_selection = same_target and (self.warper.ring_count, self.warper.grid_size) == (grid.rows, grid.cols)
+        selected = set(self.warper.selected) if keep_selection else set()
+        self._updating = True
+        try:
+            self.warper.cancel_gesture()
+            self.warper.calibrated_hs = True
+            self._calibration_algorithm = state.algorithm_version
+            self._spaces["hue_saturation"] = self.warper.color_space = "HSP"
+            self._resolutions["hue_saturation"] = (grid.cols, grid.rows)
+            if grid.cols != grid.rows:
+                self._linked["hue_saturation"] = False
+            self._hydrate_grid(grid)
+            self.warper.selected = selected
+            self._warper_target_id = target_id
+            if self.mode == "hue_saturation":
+                self._set_resolution_text(self.grid_combo, grid.cols)
+                self._set_resolution_text(self.saturation_combo, grid.rows)
+                self.space_combo.setCurrentText("HSP")
+                self.link_button.setChecked(self._linked["hue_saturation"])
+            self._sync_calibration_controls()
+            self._sync_tools()
+        finally:
+            self._updating = False
+        return True
 
     def set_params(self, grid_data: np.ndarray | None, emit: bool = False) -> None:
         """Hydrate legacy HS without stale drag samples or recursive edits."""
@@ -534,14 +704,17 @@ class WarperPanel(QWidget):
             if data.ndim != 3 or data.shape[0] != data.shape[1] or data.shape[2] != 2 or not np.isfinite(data).all():
                 raise ValueError("Expected a finite square Hue/Saturation delta grid")
             size = int(data.shape[0])
-            if size not in {6, 8, 12, 16, 24}:
+            if size not in HS_RESOLUTIONS:
                 raise ValueError(f"Unsupported legacy Warper resolution: {size}")
         else:
-            size = self.warper.grid_size
+            size = self.warper.grid_size if self.warper.grid_size in HS_RESOLUTIONS else HS_RESOLUTIONS[0]
         self._updating = True
         self.warper.cancel_gesture()
         self.warper.blockSignals(True)
         try:
+            self.warper.calibrated_hs = False
+            self._calibration_algorithm = None
+            self._warper_target_id = None
             self.warper.set_grid_size(size)
             if grid_data is not None:
                 self.warper.apply_deltas(data)
@@ -553,6 +726,7 @@ class WarperPanel(QWidget):
                 self.saturation_combo.setCurrentText(str(size))
                 self.space_combo.setCurrentText(self._spaces["hue_saturation"])
             self.warper.update()
+            self._sync_calibration_controls()
             self._sync_tools()
         finally:
             self.warper.blockSignals(False)
@@ -564,6 +738,7 @@ class WarperPanel(QWidget):
         # Existing ToolsPanel.reset_all calls this as an application-wide reset,
         # even when a presentation-only mode is currently visible.
         self._updating = True
+        calibrated = self.warper.calibrated_hs
         try:
             for canvas in self.canvases.values():
                 canvas.reset()
@@ -574,9 +749,12 @@ class WarperPanel(QWidget):
             self._sync_tools()
         finally:
             self._updating = False
-        self.warper_changed.emit(None)
-        self.reset_clicked.emit()
-        self._request("reset_all")
+        if calibrated:
+            self._request_calibrated("atomic")
+        else:
+            self.warper_changed.emit(None)
+            self.reset_clicked.emit()
+            self._request("reset_all")
         self._emit_ui()
 
     def toggle_expanded(self) -> None:

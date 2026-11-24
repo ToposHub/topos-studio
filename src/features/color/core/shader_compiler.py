@@ -21,6 +21,7 @@ from src.features.color.core.shader_nodes import (COMMON_DEFINITIONS, GRADING_SN
                                     CURVES_SOFT_CLIP_CALIBRATION_SNIPPET,
                                     BLUR_SHARPEN_SNIPPET,
     WARPER_SPACE_SNIPPET)
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACES, RESOLVE_HS709_V2_SPACE
 from src.features.color.core.plugin_manager import get_plugin_manager
 from src.features.color.core.composition_uniforms import (
     build_composition_uniform_manifest,
@@ -430,6 +431,8 @@ class ShaderPipeline:
             grain_enabled=grain_enabled, has_primary_calibration=has_primary_calibration,
             bindings=bindings)
 
+        calibrated_warper = has_warper and warper_space in RESOLVE_HS709_SPACES
+        response_warper = calibrated_warper and warper_space == RESOLVE_HS709_V2_SPACE
         shader_code = [
             "#version 330",
             *uniform_manifest.declarations("header"),
@@ -441,7 +444,7 @@ class ShaderPipeline:
             MIXER_SNIPPET,
             LUT3D_SNIPPET,
             WARPER_SNIPPET,
-            WARPER_SPACE_SNIPPET if (has_warper and warper_space) else "",
+            WARPER_SPACE_SNIPPET if (has_warper and warper_space and not calibrated_warper) else "",
             BLEND_MODES_SNIPPET,
             BLUR_SHARPEN_SNIPPET,  # Must be before FILM_GRAIN_SNIPPET (declares u_tex_size)
             FILM_GRAIN_SNIPPET,
@@ -449,6 +452,10 @@ class ShaderPipeline:
             CURVES_SOFT_CLIP_SNIPPET,
             QUALIFIER_SNIPPET,
         ]
+        if calibrated_warper:
+            from src.features.color.core.shader_nodes import RESOLVE_HS709_SNIPPET, RESOLVE_HS709_V2_SNIPPET
+
+            shader_code.append(RESOLVE_HS709_V2_SNIPPET if response_warper else RESOLVE_HS709_SNIPPET)
         if has_primary_calibration:
             shader_code.append(_PRIMARY_CALIBRATION_GLSL)
         if has_curves_soft_clip:
@@ -593,7 +600,11 @@ class ShaderPipeline:
                 "    }")
         if has_mixer:
             shader_code.append("    graded = apply_mixer(graded, u_red_p, u_orange_p, u_yellow_p, u_green_p, u_aqua_p, u_blue_p, u_purple_p, u_magenta_p);")
-        if has_warper and warper_space:
+        if response_warper:
+            shader_code.append("    graded = apply_resolve_hs709_v2(graded, u_warper_tex);")
+        elif calibrated_warper:
+            shader_code.append("    graded = apply_resolve_hs709(graded, u_warper_tex);")
+        elif has_warper and warper_space:
             # CW-B08:多空间变体(HSL/HSP);legacy HSV(0)保持原调用逐位不变
             shader_code.append("    graded = apply_warper_v2(graded, u_warper_tex, u_warper_space);")
         elif has_warper: shader_code.append("    graded = apply_warper(graded, u_warper_tex, u_warper_grid_size);")

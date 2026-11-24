@@ -244,3 +244,47 @@ def test_cancel_hook_restores_and_closes() -> None:
     # 取消后 flush 无副作用
     host.adapter.flush()
     assert host.service.revision(host.layer) == 0
+
+
+def test_calibrated_atomic_command_reports_commit_rejection() -> None:
+    layer = Layer("warper")
+    service = WarperCommandService(commit_state=lambda _layer: False)
+    adapter = WarperCommandAdapter(service, lambda: layer)
+    result = adapter.submit({
+        "mode": "hue_saturation", "action": "calibrated_mesh",
+        "payload": {
+            "phase": "atomic", "enabled": True,
+            "offsets": np.zeros((6, 6, 3), dtype=np.float32).tolist(),
+        },
+    })
+    assert not result["ok"] and result["reason"] == "commit_rejected"
+    assert layer.warper_state is None
+    assert service.session_for(layer) is None
+    assert service.revision(layer) == 0
+
+
+@pytest.mark.parametrize("next_action", ["update", "commit", "flush"])
+def test_calibrated_gesture_cancels_on_same_id_layer_replacement(next_action: str) -> None:
+    original = Layer("original")
+    host = Host(original)
+    mesh = np.zeros((6, 6, 3), dtype=np.float32)
+    mesh[2, 0, 0] = 0.05
+    update = {"phase": "update", "enabled": True, "offsets": mesh.tolist()}
+    assert host.submit("calibrated_mesh", update)["ok"]
+    assert original.warper_state is not None
+
+    replacement = Layer("replacement")
+    replacement.id = original.id
+    host.layer = replacement
+    if next_action == "flush":
+        host.adapter.flush()
+    else:
+        payload = update if next_action == "update" else {"phase": "commit"}
+        assert host.submit("calibrated_mesh", payload)["reason"] == "stale_target"
+
+    assert original.warper_state is None
+    assert replacement.warper_state is None
+    assert host.service.session_for(original) is None
+    assert host.service.revision(original) == 0
+    assert host.finished == [False]
+    assert host.discards == 1

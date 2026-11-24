@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -165,3 +167,87 @@ def test_graph_paste_warper_domain_round_trip() -> None:
     assert cleared.ok
     node = {n.node_id: n for n in cleared.graph.nodes}[target_id]
     assert node.legacy_payload["warper_params"] is None
+
+
+@pytest.mark.parametrize("space", [3, 4], ids=["709-v1", "709-v2"])
+def test_calibrated_warper_is_baked_in_graph_and_flat_lut(qapp: Any, space: int) -> None:
+    from src.features.color.core.lut_exporter import LutExporter, LutExportWorker
+    from src.features.color.core.layer import Layer
+    from src.features.color.core.warper_color import apply_resolve_hs709
+    from src.shared.color.lut_loader import parse_cube
+
+    offsets = np.zeros((6, 8, 3), np.float32)
+    offsets[:, :, :] = (0.04, 0.07, 0.06)
+    layer = Layer("Calibrated Color Warper")
+    layer.warper_params = offsets
+    layer.warper_space = space
+    graph = _graph(layer.to_dict(None))
+    color = np.array([0.75, 0.25, 0.125], dtype=np.float32)
+    expected = apply_resolve_hs709(color[None, :], offsets, space)[0]
+    assert np.max(np.abs(expected - color)) > 0.01
+
+    cube = parse_cube(bake_graph_lut(graph, size=9)).table
+    np.testing.assert_allclose(cube[1, 2, 6], np.clip(expected, 0.0, 1.0), atol=1e-5)
+
+    exporter = LutExporter()
+    try:
+        payload = exporter._extract_exportable_params(layer)
+    finally:
+        exporter.cleanup()
+    from_flat_layer = LutExportWorker()._apply_grading_cpu(color.reshape(1, 1, 1, 3), payload)
+    np.testing.assert_allclose(from_flat_layer[0, 0, 0], expected, atol=1e-5)
+
+
+def test_calibrated_warper_survives_stack_migration_and_clipboard() -> None:
+    from src.features.color.core.color_graph_migration import stack_primary_execution_graph
+    from src.features.color.core.color_graph_param_source import node_layer_payload
+    from src.features.color.core.grade_clipboard import GradeClipboard
+    from src.features.color.core.layer import Layer
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+    from src.shared.project.color_stack import ColorStackData
+
+    layer = Layer("Calibrated Color Warper")
+    layer.warper_params = np.full((6, 8, 3), 0.02, np.float32)
+    layer.warper_space = RESOLVE_HS709_SPACE
+    clipboard = GradeClipboard()
+    clipboard.copy_grade([layer], categories=("warper",))
+    patch = clipboard.layer_patches[0]
+    pasted = Layer("Pasted")
+    pasted.apply_grade_patch(patch, categories=("warper",))
+    assert pasted.warper_space == RESOLVE_HS709_SPACE
+    np.testing.assert_array_equal(pasted.warper_params, layer.warper_params)
+
+    stack = ColorStackData.create(asset_id="asset", name="Test").with_layers([pasted.to_dict(None)])
+    graph = stack_primary_execution_graph(stack)
+    assert graph is not None
+    node = next(n for n in graph.nodes if n.node_type == NodeType.CORRECTOR.value)
+    params = node_layer_payload(node)
+    assert params["warper_space"] == RESOLVE_HS709_SPACE
+    np.testing.assert_array_equal(params["warper_params"], layer.warper_params)
+
+
+@pytest.mark.parametrize("active", (False, True))
+def test_calibrated_state_only_graph_rebuilds_runtime_mesh(active: bool) -> None:
+    from src.features.color.core.color_graph_param_source import node_layer_payload
+    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+    from src.features.color.core.warper_state import (
+        HS_GRID_NAME, RESOLVE_HS_ALGORITHM, WARPER_SCHEMA_VERSION, WarperGrid, WarperStateV2,
+    )
+
+    grid = WarperGrid.identity(HS_GRID_NAME, 6, 8, ("dh", "ds", "dl"))
+    if active:
+        offsets = grid.mutable_offsets()
+        offsets[2, 0] = (0.06, -0.12, 0.05)
+        grid = grid.with_offsets(offsets)
+    state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0, grids={HS_GRID_NAME: grid},
+    )
+    graph = _graph({"warper_state": state.to_dict()})
+    assert graph_pointwise_export_errors(graph) == []
+    payload = node_layer_payload(next(node for node in graph.nodes if node.node_id == "c1"))
+    if active:
+        np.testing.assert_allclose(payload["warper_params"], grid.offsets)
+        assert payload["warper_space"] == RESOLVE_HS709_SPACE
+    else:
+        assert payload.get("warper_params") is None

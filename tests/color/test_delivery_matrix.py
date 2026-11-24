@@ -544,6 +544,16 @@ class TestStackLevelVideoDenoiseDetection:
 # ================================================================
 
 class TestConsumerCapabilityMatrix:
+    def test_calibrated_warper_reports_video_support_and_lut_bake(self) -> None:
+        from src.features.color.core.warper_color import RESOLVE_HS709_SPACE
+
+        legacy = _layer(warper_params=[[[0.1, 0.2]]])
+        calibrated = _layer(warper_params=[[[0.1, 0.2, 0.3]]], warper_space=RESOLVE_HS709_SPACE)
+        for target, expected in ((TARGET_VIDEO, DELIVERY_FULL), (TARGET_LUT, DELIVERY_BAKED)):
+            report = build_delivery_matrix_report([legacy, calibrated], target)
+            levels = {row.operation: row.delivery for row in report.rows}
+            assert levels == {"warper": DELIVERY_DROPPED, "warper_709": expected}
+
     def test_matrix_covers_all_delivery_ops(self):
         from src.features.color.core.delivery_matrix import _OPERATIONS
         """能力矩阵 op 集合 ⊇ _OPERATIONS 行集合（除 baked 标记行）——

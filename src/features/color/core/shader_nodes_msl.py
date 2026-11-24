@@ -582,6 +582,99 @@ float3 msl_apply_warper(float3 color, texture2d<float> warper_tex,
 }
 """
 
+MSL_RESOLVE_HS709 = """
+// RESOLVE_HS709_SNIPPET, used in both the fragment and graph compute paths.
+float3 msl_hs709_basis(float hue) {
+    float3 phase = fract(hue + float3(0.0, 2.0 / 3.0, 1.0 / 3.0));
+    return clamp(abs(phase * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+}
+
+float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh) {
+    float3 work = pow(max(color, 0.0), float3(1.605 / 2.4));
+    float3 hsv = msl_rgb2hsv(work);
+    float peak = hsv.z;
+    float chroma = peak - min(work.r, min(work.g, work.b));
+    if (chroma <= 1e-10) return color;
+
+    float hue = hsv.x;
+    float radius = min(0.876 * chroma / pow(max(peak, 1e-10), 1.074), 1.0);
+    float neutral_fade = min(radius * 1.755, 1.0);
+    int2 size = int2(mesh.get_width(), mesh.get_height());
+    float cols = float(size.x);
+    float angular = hue * cols;
+    float angular_base = floor(angular);
+    float saturation = 0.0;
+    float lightness = 0.0;
+    float3 hue_change = float3(0.0);
+    float radial = radius * float(size.y - 1);
+    int row = int(floor(radial));
+    int next_row = min(row + 1, size.y - 1);
+    float blend = fract(radial);
+    for (int side = -1; side <= 2; ++side) {
+        int column = (int(angular_base) + side + size.x) % size.x;
+        float separation = angular - angular_base - float(side);
+        float distance = abs(separation);
+        if (distance >= 1.084) continue;
+        float3 lower = mesh.read(uint2(column, row)).rgb;
+        float3 upper = mesh.read(uint2(column, next_row)).rgb;
+        float3 delta = mix(lower, upper, blend);
+        saturation += delta.y * pow(max(1.0 - distance / 0.819, 0.0), 1.225);
+        lightness += delta.z * pow(max(1.0 - distance / 1.084, 0.0), 1.2);
+
+        float hue_weight = pow(max(1.0 - distance / 1.082, 0.0), 1.38);
+        float center = hue - separation / cols;
+        float anchor = center + separation * 0.047 / cols;
+        float3 basis = msl_hs709_basis(anchor);
+        float3 direction = 0.654 * (msl_hs709_basis(anchor + delta.x) - basis);
+        direction -= 0.294 * (msl_hs709_basis(anchor - delta.x) - basis);
+        direction += (msl_hs709_basis(center) - 0.5) * (abs(delta.x) * 1.154 * (0.7 - radius));
+        direction -= 1.93 * dot(direction, float3(0.091, 0.642, 0.267));
+        hue_change += direction * hue_weight;
+    }
+
+    if (saturation == 0.0 && lightness == 0.0 && all(hue_change == float3(0.0))) return color;
+    float3 direction = msl_hs709_basis(hue);
+    direction -= dot(direction, float3(0.451, 0.379, 0.170));
+    float saturation_gain = saturation > 0.0 ? 2.395 : 4.568;
+    float3 hue_shift = hue_change * pow(peak, 1.031);
+    float3 sat_shift = direction * (saturation * saturation_gain * pow(peak, 1.120));
+    float3 warped = (work + (hue_shift + sat_shift) * neutral_fade);
+    warped *= exp(1.981 * lightness * neutral_fade);
+    return pow(max(warped, 0.0), float3(2.4 / 1.605)) + min(color, 0.0);
+}
+"""
+
+
+MSL_RESOLVE_HS709_V2 = """
+float3 msl_hs709_response_tile(texture2d<float> field, uint2 base, uint2 next, float2 weight) {
+    float3 a = mix(field.read(base).rgb, field.read(uint2(next.x, base.y)).rgb, weight.x);
+    float3 b = mix(field.read(uint2(base.x, next.y)).rgb, field.read(next).rgb, weight.x);
+    return mix(a, b, weight.y);
+}
+
+float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field) {
+    float3 code = pow(max(color, 0.0), float3(1.0 / 2.4));
+    float3 hsv = msl_rgb2hsv(code);
+    if (hsv.y <= 1e-8) return color;
+
+    const uint levels = 8u;
+    uint rows = field.get_height() / levels;
+    uint2 extent = uint2(field.get_width() - 1u, rows - 1u);
+    float2 cell = float2(hsv.x, clamp(hsv.y, 0.0, 1.0)) * float2(extent);
+    uint2 base = uint2(cell);
+    uint2 next = min(base + 1u, extent);
+    float plane = clamp((hsv.z - 0.21875) / 0.65625, 0.0, 1.0) * float(levels - 1u);
+    uint2 lower = uint2(0u, uint(plane) * rows);
+    uint2 upper = uint2(0u, min(uint(plane) + 1u, levels - 1u) * rows);
+    // Float32 hardware filtering is optional across Metal device families.
+    float3 first = msl_hs709_response_tile(field, base + lower, next + lower, fract(cell));
+    float3 second = msl_hs709_response_tile(field, base + upper, next + upper, fract(cell));
+    float3 delta = mix(first, second, fract(plane));
+    if (all(delta == float3(0.0))) return color;
+    return pow(max(code + hsv.z * delta, 0.0), float3(2.4)) + min(color, 0.0);
+}
+"""
+
 
 # ── BLUR_SHARPEN_SNIPPET 的 MSL 翻译 ─────────────────────────────────────
 

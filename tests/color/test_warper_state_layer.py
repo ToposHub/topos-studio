@@ -10,13 +10,21 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from src.features.color.core.color_graph_migration import stack_primary_execution_graph
+from src.features.color.core.color_graph_param_source import node_layer_payload
 from src.features.color.core.layer import Layer
+from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
 from src.features.color.core.warper_state import (
+    RESOLVE_HS_ALGORITHM,
+    RESOLVE_HS_ALGORITHM_V2,
     WARPER_SCHEMA_VERSION,
+    WarperGrid,
     WarperStateError,
     WarperStateV2,
     legacy_from_ndarray,
 )
+from src.shared.project.color_graph import NodeType
+from src.shared.project.color_stack import ColorStackData
 
 
 def _layer_with_v2_state() -> tuple[Layer, WarperStateV2]:
@@ -131,3 +139,61 @@ def test_paste_categories_carry_v2_state(tmp_path) -> None:
     assert target.warper_state is not None
     np.testing.assert_array_equal(
         target.warper_state.grids["hs"].offsets, state.grids["hs"].offsets)
+
+
+def _calibrated_state(algorithm: str) -> WarperStateV2:
+    mesh = WarperGrid.identity("hs", 6, 8, ("dh", "ds", "dl"))
+    offsets = mesh.mutable_offsets()
+    offsets[2, 0, 1] = 0.1
+    return WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=algorithm,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0,
+        grids={"hs": mesh.with_offsets(offsets)},
+    )
+
+
+@pytest.mark.parametrize(("algorithm", "space"), (
+    (RESOLVE_HS_ALGORITHM, RESOLVE_HS709_SPACE),
+    (RESOLVE_HS_ALGORITHM_V2, RESOLVE_HS709_V2_SPACE),
+))
+def test_pasting_raw_legacy_mesh_over_calibration_does_not_resurrect_calibration(
+        algorithm: str, space: int) -> None:
+    state = _calibrated_state(algorithm)
+    layer = Layer.from_dict({"warper_state": state.to_dict()})
+    assert layer.warper_space == space
+    np.testing.assert_array_equal(layer.warper_params, state.grids["hs"].offsets)
+    old_mesh = np.full((6, 6, 2), 0.125, np.float32)
+    layer.apply_grade_patch({"warper_params": old_mesh}, categories=("warper",))
+
+    restored = Layer.from_dict(layer.to_dict(None))
+    assert restored.warper_state is None
+    assert restored.warper_space == 0
+    np.testing.assert_array_equal(restored.warper_params, old_mesh)
+
+
+@pytest.mark.parametrize("cache_space", (None, RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE))
+def test_calibrated_v2_state_rebuilds_projection_on_load_and_graph_execution(cache_space: int | None) -> None:
+    state = _calibrated_state(RESOLVE_HS_ALGORITHM_V2)
+    data = {"id": "calibrated", "warper_state": state.to_dict()}
+    if cache_space is not None:
+        data["warper_params"] = np.zeros_like(state.grids["hs"].offsets).tolist()
+        data["warper_space"] = cache_space
+
+    restored = Layer.from_dict(data)
+    assert restored.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM_V2
+    assert restored.warper_space == RESOLVE_HS709_V2_SPACE
+    np.testing.assert_array_equal(restored.warper_params, state.grids["hs"].offsets)
+    assert restored.to_dict(None)["warper_space"] == RESOLVE_HS709_V2_SPACE
+
+    stack = ColorStackData.create(asset_id="asset", name="Calibrated").with_layers([data])
+    graph = stack_primary_execution_graph(stack)
+    assert graph is not None
+    node = next(n for n in graph.nodes if n.node_type == NodeType.CORRECTOR.value)
+    projected = node_layer_payload(node)
+    assert projected["warper_space"] == RESOLVE_HS709_V2_SPACE
+    np.testing.assert_array_equal(projected["warper_params"], state.grids["hs"].offsets)
+
+    pasted = Layer("Pasted")
+    pasted.apply_grade_patch({"warper_state": state.to_dict()}, categories=("warper",))
+    assert pasted.warper_space == RESOLVE_HS709_V2_SPACE
+    np.testing.assert_array_equal(pasted.warper_params, state.grids["hs"].offsets)

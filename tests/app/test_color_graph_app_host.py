@@ -472,3 +472,34 @@ class TestActiveLayerAlignment:
         assert h.host.align_engine_active_layer(new_id)
         assert h.engine.layers[h.engine.active_layer_index].id == new_id
         assert len(h.engine.layers[h.engine.active_layer_index].mask_shapes) == 1
+
+
+def test_warper_preview_remains_transient_and_commit_is_undoable(harness) -> None:
+    from src.features.color.core.warper_state import (
+        RESOLVE_HS_ALGORITHM, WARPER_SCHEMA_VERSION, WarperGrid, WarperStateV2,
+    )
+
+    h, stack_id, graph = harness
+    h.host.on_clip_stack_loaded(stack_id)
+    node = next(item for item in graph.nodes if item.node_type == "corrector")
+    mesh = WarperGrid.identity("hs", 6, 8, ("dh", "ds", "dl"))
+    offsets = mesh.mutable_offsets()
+    offsets[2, 0, :] = (-0.025, 0.12, 0.06)
+    state = WarperStateV2(
+        schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM,
+        mode="hue_saturation", color_space="hsp", axis_angle=0.0,
+        grids={"hs": mesh.with_offsets(offsets)},
+    )
+    payload = {"warper_state": state.to_dict(), "warper_params": offsets.tolist(), "warper_space": 3}
+
+    before = h.holder["project"]
+    assert h.host.preview_warper_change(node.node_id, payload)
+    draft = h.engine.set_warper_preview_graph.call_args.args[0]
+    draft_node = next(item for item in draft.nodes if item.node_id == node.node_id)
+    assert draft_node.legacy_payload["warper_space"] == 3
+    assert h.holder["project"] is before
+
+    assert h.host.submit_warper_change(node.node_id, payload, "test-warper-mesh")
+    assert h.host.panel_layer_payload(node.node_id)["warper_state"] == state.to_dict()
+    assert h.host.undo()
+    assert h.host.panel_layer_payload(node.node_id).get("warper_state") is None

@@ -102,9 +102,10 @@ class UniformDecl:
 class CompositionUniformManifest:
     """有序 UniformDecl 集合：GL 声明生成 + 类型化上传 + MSL struct 布局。"""
 
-    def __init__(self, decls: Sequence[UniformDecl]) -> None:
+    def __init__(self, decls: Sequence[UniformDecl], *, warper_space: int = 0) -> None:
         """按传入顺序固化声明清单并建立按名索引。"""
         self.decls: Tuple[UniformDecl, ...] = tuple(decls)
+        self.warper_space = warper_space
         self._by_name: Dict[str, UniformDecl] = {d.name: d for d in self.decls}
 
     def decl(self, name: str) -> Optional[UniformDecl]:
@@ -327,7 +328,7 @@ def build_composition_uniform_manifest(
     # Append the Metal field so earlier constant-buffer offsets are stable.
     decls.append(UniformDecl(name="u_cs_calibrated", glsl_type="bool",
                              section="curves_soft_clip"))
-    return CompositionUniformManifest(_layout(decls))
+    return CompositionUniformManifest(_layout(decls), warper_space=warper_space if has_warper else 0)
 
 
 # ── 值提取（唯一实现；layer 兼容 dict 与 Layer 对象）────────────────────
