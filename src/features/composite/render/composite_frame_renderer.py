@@ -139,6 +139,9 @@ class CompositeFrameRenderer:
         caption_input: object | None = None,
         render_pass: str = "beauty",
         trace_id: str | None = None,
+        *,
+        linear_readback: bool = False,
+        straight_alpha: bool = False,
     ) -> Optional[np.ndarray]:
         """Render a single frame from a composite graph.
 
@@ -153,6 +156,9 @@ class CompositeFrameRenderer:
                 available auxiliary AOV such as ``depth``/``object_id``).
             trace_id: P0-4 correlation id; when supplied it is echoed back
                 on the produced trace so Edit/encoder events link up.
+            linear_readback: Return scene-linear values at preview quality
+                when the caller applies its own timeline encoding.
+            straight_alpha: Include straight alpha in a scene-linear BGRA result.
 
         Returns:
             BGR float32 numpy array in [0, 1] range, or None on failure.
@@ -201,7 +207,8 @@ class CompositeFrameRenderer:
             # 1080p on the timeline comp-clip path). Export stays linear.
             result = renderer.render_and_readback(
                 snapshot,
-                readback_output=("srgb_u8" if quality == "preview"
+                readback_output=("linear_bgra_f32" if straight_alpha
+                                 else "srgb_u8" if quality == "preview" and not linear_readback
                                  else "linear_f32"),
                 render_pass=render_pass,
                 trace_id=trace_id)

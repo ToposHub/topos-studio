@@ -643,6 +643,22 @@ class DeliverPage(QWidget):
             project: EditProject 实例
         """
         self._project = project
+        if EDIT_EXPORT_AVAILABLE:
+            from src.shared.color.color_space_descriptor import project_output_space
+            from src.shared.color.project_video_signal import ACES_EXR_CHROMATICITIES
+
+            output = project_output_space(getattr(project, "color_management", None))
+            linear_aces_output = output in ACES_EXR_CHROMATICITIES
+            combo = self._codec_combo
+            exr_index = combo.findData(ExportCodec.EXR_SEQUENCE)
+            if linear_aces_output and exr_index == -1:
+                combo.addItem(I18N.tr("deliver.codec_exr_seq", "OpenEXR Sequence"), ExportCodec.EXR_SEQUENCE)
+                exr_index = combo.count() - 1
+            elif not linear_aces_output and exr_index != -1:
+                combo.removeItem(exr_index)
+            if linear_aces_output:
+                combo.setCurrentIndex(exr_index)
+            combo.setEnabled(not linear_aces_output)
         logger.debug("DeliverPage: project set")
 
     def set_sequence(self, sequence: Any) -> None:
@@ -713,7 +729,7 @@ class DeliverPage(QWidget):
 
         # 获取 Audio
         include_audio = self._audio_check.isChecked()
-        if codec == ExportCodec.GIF:
+        if codec in (ExportCodec.GIF, ExportCodec.EXR_SEQUENCE):
             include_audio = False
 
         # 获取 Output Path
@@ -728,6 +744,7 @@ class DeliverPage(QWidget):
             resolution=resolution,
             fps=fps,
             codec=codec,
+            bit_depth=16 if codec == ExportCodec.EXR_SEQUENCE else 8,
             quality=quality,
             gif_color_count=(self._gif_color_count_spin.value()
                              if codec == ExportCodec.GIF else 256),
@@ -839,11 +856,13 @@ class DeliverPage(QWidget):
     def _on_codec_changed(self, index: int) -> None:
         """Codec 选择变化"""
         codec = self._codec_combo.currentData()
-        is_gif = codec == ExportCodec.GIF or codec == "gif"
+        codec_name = getattr(codec, "value", codec)
+        is_gif = codec_name == "gif"
+        no_audio = is_gif or codec_name == "exr_sequence"
         self._gif_color_count_label.setVisible(is_gif)
         self._gif_color_count_spin.setVisible(is_gif)
-        self._audio_check.setEnabled(not is_gif)
-        if is_gif:
+        self._audio_check.setEnabled(not no_audio)
+        if no_audio:
             self._audio_check.setChecked(False)
         self._update_estimates()
 
@@ -876,11 +895,9 @@ class DeliverPage(QWidget):
         codec = self._codec_combo.currentData()
 
         # 根据编码器选择文件类型
-        if EDIT_EXPORT_AVAILABLE:
-            is_sequence = codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE,
-                                    ExportCodec.TOPOS_IMAGE_SEQUENCE)
-        else:
-            is_sequence = codec in ("png_sequence", "tiff_sequence", "topos_image_sequence")
+        from src.features.deliver.core.video_export_formats import SEQUENCE_CODECS
+
+        is_sequence = getattr(codec, "value", codec) in SEQUENCE_CODECS
 
         if is_sequence:
             # 图像序列输出到目录

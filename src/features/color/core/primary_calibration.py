@@ -31,6 +31,7 @@ PRIMARY_CALIBRATION_PATH = (
 PRIMARY_CALIBRATION_GAMMA = 2.4
 PRIMARY_CALIBRATION_SCHEMA_VERSION = 1
 PRIMARY_CALIBRATION_VERSION_KEY = "primary_calibration_version"
+PRIMARY_CALIBRATION_CURRENT_VERSION = 2
 PRIMARY_CALIBRATION_TEMP_SCALE = 100.0
 
 Control = tuple[str, str]
@@ -234,12 +235,37 @@ def _grading_params(layer: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
 
 
-def grade_uses_calibration(layer: Any) -> bool:
+def primary_calibration_version(layer: Any) -> int:
     """An absent or zero version is an existing Topos grade."""
     version = _grading_params(layer).get(PRIMARY_CALIBRATION_VERSION_KEY, 0)
-    if isinstance(version, bool) or not isinstance(version, Real) or version not in (0, 1):
+    if (isinstance(version, bool) or not isinstance(version, Real)
+            or version not in (0, 1, PRIMARY_CALIBRATION_CURRENT_VERSION)):
         raise ValueError(f"Unsupported primary calibration version: {version!r}")
-    return version == 1
+    return int(version)
+
+
+def grade_uses_calibration(layer: Any) -> bool:
+    return primary_calibration_version(layer) != 0
+
+
+def ungraded_primary_params(params: Mapping[str, Any]) -> bool:
+    """Recognize neutral, unversioned grades without rewriting older values."""
+    from src.features.color.core.layer import DEFAULT_EXTENDED_GRADING_PARAMS
+
+    defaults = DEFAULT_EXTENDED_GRADING_PARAMS
+    if isinstance(params.get(PRIMARY_CALIBRATION_VERSION_KEY), bool):
+        return False
+    for key, value in params.items():
+        if isinstance(value, (tuple, list)):
+            if tuple(value) != defaults.get(key, (0, 0, 0)):
+                return False
+        else:
+            default = defaults.get(key, 0)
+            if not isinstance(value, Real) or not isinstance(default, Real):
+                return False
+            if not math.isclose(value, default, rel_tol=0.0, abs_tol=1e-9):
+                return False
+    return True
 
 
 @lru_cache(maxsize=1)
@@ -257,12 +283,14 @@ _LOG_WHEELS = ("log_shadow", "log_midtone", "log_highlight")
 
 def calibrated_grade_inputs(layer: Any) -> tuple[np.ndarray | None, Mapping[str, Any]] | None:
     """Split a versioned grade into one measured grid and remaining Topos controls."""
-    if not grade_uses_calibration(layer):
+    version = primary_calibration_version(layer)
+    if not version:
         return None
     from src.features.color.core.composition_uniforms import params_to_offset_rgb, params_to_rgb
 
     params = _grading_params(layer)
     residual = dict(params)
+    refined = version == PRIMARY_CALIBRATION_CURRENT_VERSION
     controls: dict[Control, float] = {}
     # Match the default Resolve pivot. Custom pivots and range boundaries retain
     # their existing Topos algorithms because the profile only samples defaults.
@@ -270,7 +298,7 @@ def calibrated_grade_inputs(layer: Any) -> tuple[np.ndarray | None, Mapping[str,
     default_log_ranges = (params.get("log_low_range", 0.333) == 0.333
                           and params.get("log_high_range", 0.550) == 0.550)
     for control, scale in _SCALAR_SCALES.items():
-        if control == "contrast" and not default_pivot:
+        if control == "contrast" and not (refined or default_pivot):
             continue
         amount = float(params.get(control, 0.0))
         controls[control, "value"] = amount * scale
@@ -285,7 +313,7 @@ def calibrated_grade_inputs(layer: Any) -> tuple[np.ndarray | None, Mapping[str,
             controls[control, channel] = factor - master
         residual[control] = (0.0, 0.0, 0.0)
     for control in ("offset", "log_offset", *_LOG_WHEELS):
-        if control in _LOG_WHEELS and not default_log_ranges:
+        if control in _LOG_WHEELS and not (refined or default_log_ranges):
             continue
         factors = params_to_offset_rgb(*params.get(control, (0.0, 0.0, 0.0)))
         is_offset = control in ("offset", "log_offset")
@@ -295,6 +323,27 @@ def calibrated_grade_inputs(layer: Any) -> tuple[np.ndarray | None, Mapping[str,
         for channel, factor in zip("rgb", factors):
             controls[key, channel] = controls.get((key, channel), 0.0) + factor * (100.0 if is_offset else 1.0)
         residual[control] = (0.0, 0.0, 0.0)
+    if refined and any(not math.isfinite(amount) for amount in controls.values()):
+        raise ValueError("Primary calibration controls must be finite")
     active = {key: amount for key, amount in controls.items() if abs(amount) > 1e-7}
-    grid = _built_in_profile().build_grid(active, extrapolation="linear") if active else None
+    if refined:
+        from src.features.color.core.primary_calibration_v2 import refined_grid
+
+        pivot, low, high, lum_mix = (
+            float(params[key]) if params.get(key) is not None else default
+            for key, default in (
+                ("pivot", 0.18), ("log_low_range", 0.333), ("log_high_range", 0.550), ("lum_mix", 100.0),
+            )
+        )
+        if not all(math.isfinite(value) for value in (pivot, low, high, lum_mix)):
+            raise ValueError("Primary calibration boundaries and Lum Mix must be finite")
+        detail = float(params.get("mid_detail") or 0.0)
+        if not math.isfinite(detail) or abs(detail) > float(np.finfo(np.float32).max):
+            raise ValueError("Primary calibration Midtone Detail strength must be finite and fit float32")
+        residual["lum_mix"] = 100.0
+        grid = refined_grid(
+            _built_in_profile(), tuple(sorted(active.items())), pivot + 0.255, low, high, lum_mix,
+        ) if active else None
+    else:
+        grid = _built_in_profile().build_grid(active, extrapolation="linear") if active else None
     return grid, residual

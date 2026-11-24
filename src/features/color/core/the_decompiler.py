@@ -187,7 +187,7 @@ class GradingMath:
     def apply_grading(color: np.ndarray, params: Dict[str, Any]) -> np.ndarray:
         """
         NumPy implementation of apply_grading snippet from shader_nodes.py
-        color: (N, 3) float array
+        color: (N, 3) point samples or (H, W, 3) RGB frame
         params: dict of grading parameters
 
         2026-09-17 性能修订（语义不变）：全程保持输入 dtype（旧实现被
@@ -202,11 +202,20 @@ class GradingMath:
         暗部保护 → 4.5 Offset → 4.6 Log 四轮 → 5/6/6.5/7 → 9/10 →
         11 Lum Mix。
         """
+        frame_shape = color.shape if color.ndim == 3 else None
         layer = {"grading_params": params}
         if grade_uses_calibration(layer):
             from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
 
-            return apply_layer_grading_cpu(color, layer, width=1, height=1)[0]
+            height, width = frame_shape[:2] if frame_shape is not None else (1, 1)
+            return apply_layer_grading_cpu(color, layer, width=width, height=height)[0]
+        mid_detail = float(params.get("mid_detail") or 0.0)
+        if mid_detail != 0.0 and frame_shape is None:
+            from src.features.color.core.color_graph_cpu import UnsupportedNode
+
+            raise UnsupportedNode("Midtone Detail requires an H × W RGB frame")
+        if frame_shape is not None:
+            color = color.reshape(-1, 3)
         # 0. 原始亮度（Lum Mix 用：把结果亮度向调色前回拉）
         luma_weights_in = np.array([0.299, 0.587, 0.114], dtype=color.dtype)
         luma_original = color @ luma_weights_in
@@ -340,6 +349,14 @@ class GradingMath:
             boost = amt * (1.0 - np.clip(sat, 0, 1))
             res = res * (1.0 + boost) + gray * (-boost)
 
+        # 8. Midtone Detail reads the original input of this grade.
+        if mid_detail != 0.0:
+            from src.features.color.core.color_graph_cpu import apply_midtone_detail_cpu
+
+            res = apply_midtone_detail_cpu(
+                res.reshape(frame_shape), color.reshape(frame_shape), mid_detail,
+            ).reshape(-1, 3)
+
         # 9. Hue Shift
         hue_shift = params.get('hue_shift', 0.0)
         if hue_shift != 0.0:
@@ -370,7 +387,7 @@ class GradingMath:
             blend = dt.type((100.0 - lum_mix) / 100.0)
             res *= (dt.type(1.0) + blend * (ratio - dt.type(1.0)))[..., np.newaxis]
 
-        return res
+        return res if frame_shape is None else res.reshape(frame_shape)
 
     @staticmethod
     def apply_soft_clip(color: np.ndarray, params: Dict[str, Any]) -> np.ndarray:

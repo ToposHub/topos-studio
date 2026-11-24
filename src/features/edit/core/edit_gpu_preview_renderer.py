@@ -30,6 +30,11 @@ from PyQt6.QtGui import QOpenGLContext, QOffscreenSurface
 
 from src.features.edit.core.primary_grade_shader import PRIMARY_GRADE_FRAGMENT
 from src.features.edit.core.playback_debug import playback_trace
+from src.shared.color.color_space_descriptor import ColorSpaceDescriptor, LINEAR_SCENE
+from src.shared.color.video_signal_gl import VIDEO_SIGNAL_GLSL, bind_video_signal_transform
+from src.shared.color.aces_video_gl import AcesVideoGLPass, aces_shader_key
+from src.shared.color.project_video_signal import ProjectAcesSettings
+from src.shared.color.color_transform_provider import VideoSignalLuminance
 from src.shared.gpu.present_frame import (
     GpuPresentFrame,
     OutputSlotPool,
@@ -281,6 +286,16 @@ _IDENTITY_MAT3_BYTES = _transform_to_ndc_mat3_bytes(IDENTITY_TRANSFORM_TUPLE)
 # Render Task
 # ================================================================
 
+def _rgba_render_target(ctx: Any, size: tuple[int, int], dtype: str) -> tuple[Any, Any]:
+    texture = ctx.texture(size, components=4, dtype=dtype)
+    try:
+        framebuffer = ctx.framebuffer(color_attachments=[texture])
+    except BaseException:
+        texture.release()
+        raise
+    return framebuffer, texture
+
+
 @dataclass
 class EditRenderTask:
     """Single render task for the GPU preview renderer."""
@@ -324,6 +339,10 @@ class EditRenderTask:
     # worker 已保证：存在任何 GPU 不支持的转场时整帧回退 CPU，不会带着
     # 不完整的任务进来。
     transition_jobs: tuple = ()
+    # Immutable full-range timeline and output descriptors for the final pass.
+    output_transform: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None = None
+    aces: ProjectAcesSettings | None = None
+    luminance: VideoSignalLuminance | None = None
 
     def __post_init__(self) -> None:
         if self.adjustment_layers is None:
@@ -706,6 +725,10 @@ class EditGpuPreviewRenderer(QThread):
         # Render resources
         self._composite_fbo = None
         self._composite_tex = None
+        self._signal_tex = None
+        self._signal_fbo = None
+        self._signal_program = None
+        self._signal_vao = None
         self._metal_preview_mode = "off"
         self._metal_preview = None
         self._init_native_viewport_state()
@@ -2134,6 +2157,10 @@ class EditGpuPreviewRenderer(QThread):
         if w <= 0 or h <= 0:
             self._release_task_sources(task)
             return
+        # Keep the working signal in half float through composition. The
+        # present slot quantizes the converted signal for display.
+        self._working_dtype = "f4" if task.aces is not None or task.luminance is not None else (
+            "f2" if task.output_transform is not None else "f1")
         # P3.2：处理挂起的复合缓存失效（UI 线程 invalidate 置位，GL 线程释放）。
         self._drain_composite_cache_invalidate()
         # AUD-16602：排水退役输出池（尺寸重建后旧纹理延迟释放）。
@@ -2192,7 +2219,7 @@ class EditGpuPreviewRenderer(QThread):
             if not self._ensure_background_composite_fbo(w, h):
                 self._release_task_sources(task)
                 return
-        elif self._try_native_metal_preview(task, w, h):
+        elif task.output_transform is None and self._try_native_metal_preview(task, w, h):
             # Settled on the native path: nothing of this frame goes through
             # a GL slot.  It is published when its GPU work completes.
             return
@@ -2210,7 +2237,7 @@ class EditGpuPreviewRenderer(QThread):
             return
 
         self._task_used_io_surface_source = False
-        if self._try_metal_preview(task, w, h):
+        if task.output_transform is None and self._try_metal_preview(task, w, h):
             self._publish_composited_frame(
                 task, self._composite_tex, w, h,
                 self.__dict__.get("_metal_preview_track_count", 1), metal=True)
@@ -2265,6 +2292,17 @@ class EditGpuPreviewRenderer(QThread):
 
                 self._previous_gpu_frames.append(comp_gpu_handle)
                 self._task_used_io_surface_source = True
+                timeline_space = track_info.get('timeline_signal_space')
+                if timeline_space is not None:
+                    comp_fbo, working = self._ensure_track_fbo(
+                        len(track_textures), *comp_tex.size, dtype=self._working_dtype,
+                    )
+                    self._render_video_signal(
+                        comp_tex, comp_fbo, (LINEAR_SCENE, timeline_space),
+                        premultiplied=bool(comp_gpu_handle.alpha_premultiplied),
+                        luminance=task.luminance,
+                    )
+                    comp_tex = working
                 opacity = track_info.get('opacity', 1.0)
                 track_tex = self._apply_clip_transform(
                     comp_tex, len(track_textures), w, h,
@@ -2384,6 +2422,7 @@ class EditGpuPreviewRenderer(QThread):
                 self._render_yuv_to_track_fbo(
                     wrapped, gpu_frame, track_fbo, track_tex, track_transform)
 
+                track_tex = self._apply_input_signal(track_tex, track_info, len(track_textures))
                 # FX-M06: apply the clip's crop matte after the source is on
                 # the track FBO, before grading/effects. Identity crops skip.
                 track_tex = self._apply_crop(
@@ -2436,6 +2475,7 @@ class EditGpuPreviewRenderer(QThread):
                     track_transform = track_info.get('transform')
                     track_tex = self._apply_clip_transform(
                         track_tex, len(track_textures), w, h, track_transform)
+                    track_tex = self._apply_input_signal(track_tex, track_info, len(track_textures))
                     # FX-M06: crop matte after transform, before grade.
                     track_tex = self._apply_crop(
                         track_tex, len(track_textures), w, h,
@@ -2494,6 +2534,7 @@ class EditGpuPreviewRenderer(QThread):
                 track_fbo, track_tex = self._paint_solid_to_track_fbo(
                     len(track_textures), w, h, solid_rgb, gen_params
                 )
+                track_tex = self._apply_input_signal(track_tex, track_info, len(track_textures))
                 # Apply clip transform (solid path also bypasses YUV vertex shader).
                 track_transform = track_info.get('transform')
                 track_tex = self._apply_clip_transform(
@@ -2621,9 +2662,38 @@ class EditGpuPreviewRenderer(QThread):
                 track_textures, w, h, dip_jobs=dip_jobs,
             )
 
+        def _composite_for_presentation() -> Any:
+            if task.output_transform is None:
+                return _do_composite()
+            target, target_fbo = self._composite_tex, self._composite_fbo
+            self._ensure_signal_target(w, h)
+            self._composite_tex, self._composite_fbo = self._signal_tex, self._signal_fbo
+            try:
+                working = _do_composite()
+            finally:
+                self._composite_tex, self._composite_fbo = target, target_fbo
+            if working is None:
+                return None
+            if task.aces is None:
+                self._render_video_signal(working, target_fbo, task.output_transform,
+                                          luminance=task.luminance)
+            else:
+                aces_pass = self.__dict__.get("_aces_output_pass")
+                key = aces_shader_key(task.aces)
+                if aces_pass is None or self._aces_output_key != key:
+                    replacement = AcesVideoGLPass(self.ctx, task.aces)
+                    if aces_pass is not None:
+                        aces_pass.release()
+                    self._aces_output_pass, self._aces_output_key = replacement, key
+                    aces_pass = replacement
+                target_fbo.use()
+                self.ctx.viewport = (0, 0, *target_fbo.size)
+                aces_pass.draw(working, task.output_transform[0])
+            return target
+
         if _use_gpu_timer:
             with _timer.measure("composite"):
-                final_tex = _do_composite()
+                final_tex = _composite_for_presentation()
             # P0-03: 读回 RING_DEPTH-1 帧前的到期 query（无同步等待）。
             # A0.1：完成结果（含发起帧 tag）暂存，由 TPR 的 GL 完成回调
             # drain 后按发起帧 trace_id 回填——本帧不得直接取用旧值。
@@ -2636,7 +2706,7 @@ class EditGpuPreviewRenderer(QThread):
                     self._completed_gpu_queries = _pending
                 _pending.extend(_completed)
         else:
-            final_tex = _do_composite()
+            final_tex = _composite_for_presentation()
 
         self._publish_composited_frame(task, final_tex, w, h, len(track_textures))
 
@@ -3821,24 +3891,24 @@ class EditGpuPreviewRenderer(QThread):
         这些纹理不来自 output_pool，避免借用其他 present slot 导致内容串扰
         或破坏 Viewer 正在显示的未 ack 纹理。
         """
-        need_rebuild = (
-            not hasattr(self, '_composite_scratch_a')
-            or self._composite_scratch_a is None
-            or self._composite_scratch_a.size != (w, h)
-        )
+        dtype = self.__dict__.get("_working_dtype", "f1")
+        first = self.__dict__.get("_composite_scratch_a")
+        need_rebuild = first is None or first.size != (w, h) or first.dtype != dtype
         if need_rebuild:
+            a_fbo, a = _rgba_render_target(self.ctx, (w, h), dtype)
             try:
-                if hasattr(self, '_composite_scratch_a') and self._composite_scratch_a is not None:
-                    self._composite_scratch_a.release()
-                    self._composite_scratch_a_fbo.release()
-                    self._composite_scratch_b.release()
-                    self._composite_scratch_b_fbo.release()
-            except Exception:
-                pass
-            self._composite_scratch_a = self.ctx.texture((w, h), components=4, dtype='f1')
-            self._composite_scratch_a_fbo = self.ctx.framebuffer(color_attachments=[self._composite_scratch_a])
-            self._composite_scratch_b = self.ctx.texture((w, h), components=4, dtype='f1')
-            self._composite_scratch_b_fbo = self.ctx.framebuffer(color_attachments=[self._composite_scratch_b])
+                b_fbo, b = _rgba_render_target(self.ctx, (w, h), dtype)
+            except BaseException:
+                a_fbo.release()
+                a.release()
+                raise
+            if first is not None:
+                self._composite_scratch_a_fbo.release()
+                self._composite_scratch_b_fbo.release()
+                first.release()
+                self._composite_scratch_b.release()
+            self._composite_scratch_a_fbo, self._composite_scratch_a = a_fbo, a
+            self._composite_scratch_b_fbo, self._composite_scratch_b = b_fbo, b
         return (
             self._composite_scratch_a,
             self._composite_scratch_b,
@@ -3943,44 +4013,43 @@ class EditGpuPreviewRenderer(QThread):
         方向约定与 _composite_scratch 一致（top=bottom 域，非翻转 VAO）。
         兼容纹理仍按需分配，但 pixel-free 生产任务不会写入它。
         """
+        dtype = self.__dict__.get("_working_dtype", "f1")
         if (
             len(self._transition_scratch_texes) == 2
             and self._transition_scratch_texes[0] is not None
             and self._transition_scratch_texes[0].size == (w, h)
+            and self._transition_scratch_texes[0].dtype == dtype
             and self._transition_mask_tex is not None
         ):
             return True
+        new_targets = []
+        mask = None
         try:
-            for tex in self._transition_scratch_texes:
-                if tex is not None:
-                    tex.release()
-            for fbo in self._transition_scratch_fbos:
-                if fbo is not None:
-                    fbo.release()
-            if self._transition_mask_tex is not None:
-                self._transition_mask_tex.release()
-            self._transition_scratch_texes = []
-            self._transition_scratch_fbos = []
             for _ in range(2):
-                tex = self.ctx.texture((w, h), components=4, dtype='f1')
-                fbo = self.ctx.framebuffer(color_attachments=[tex])
-                self._transition_scratch_texes.append(tex)
-                self._transition_scratch_fbos.append(fbo)
-            self._transition_mask_tex = self.ctx.texture(
-                (w, h), components=1, dtype='f4',
-            )
-            self._transition_mask_tex.filter = (
-                self.ctx.NEAREST, self.ctx.NEAREST,
-            )
-            self._transition_mask_tex.repeat_x = False
-            self._transition_mask_tex.repeat_y = False
-            return True
+                new_targets.append(_rgba_render_target(self.ctx, (w, h), dtype))
+            mask = self.ctx.texture((w, h), components=1, dtype='f4')
+            mask.filter = self.ctx.NEAREST, self.ctx.NEAREST
+            mask.repeat_x = False
+            mask.repeat_y = False
         except Exception as error:  # noqa: BLE001
+            for fbo, tex in new_targets:
+                fbo.release()
+                tex.release()
+            if mask is not None:
+                mask.release()
             logger.warning(
                 "EditGpuPreviewRenderer: transition resources unavailable: %s",
                 error,
             )
             return False
+        for resource in (*self._transition_scratch_fbos, *self._transition_scratch_texes,
+                         self._transition_mask_tex):
+            if resource is not None:
+                resource.release()
+        self._transition_scratch_fbos = [fbo for fbo, _ in new_targets]
+        self._transition_scratch_texes = [tex for _, tex in new_targets]
+        self._transition_mask_tex = mask
+        return True
 
     def _preblend_transition_tracks(
         self,
@@ -4547,28 +4616,29 @@ class EditGpuPreviewRenderer(QThread):
             logger.debug(f"composite cache blit failed: {e}")
             return False
 
-    def _ensure_track_fbo(self, index: int, w: int, h: int):
-        """Get or create a track FBO at the given index."""
-
-        while len(self._track_texes) <= index:
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._track_texes.append(tex)
-            self._track_fbos.append(fbo)
-
-        tex = self._track_texes[index]
-        fbo = self._track_fbos[index]
-
-        # Resize if needed
-        if tex.size != (w, h):
-            tex.release()
+    def _ensure_track_target(
+        self, index: int, size: tuple[int, int], textures: list, framebuffers: list,
+        *, dtype: str | None = None,
+    ) -> tuple[Any, Any]:
+        """Reuse a track target while both size and signal precision match."""
+        dtype = dtype or self.__dict__.get("_working_dtype", "f1")
+        while len(textures) <= index:
+            fbo, tex = _rgba_render_target(self.ctx, size, dtype)
+            textures.append(tex)
+            framebuffers.append(fbo)
+        tex = textures[index]
+        fbo = framebuffers[index]
+        if tex.size != size or tex.dtype != dtype:
+            new_fbo, new_tex = _rgba_render_target(self.ctx, size, dtype)
             fbo.release()
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._track_texes[index] = tex
-            self._track_fbos[index] = fbo
-
+            tex.release()
+            textures[index], framebuffers[index] = new_tex, new_fbo
+            return new_fbo, new_tex
         return fbo, tex
+
+    def _ensure_track_fbo(self, index: int, w: int, h: int, *, dtype: str | None = None):
+        """Get or create a source track FBO at the given index."""
+        return self._ensure_track_target(index, (w, h), self._track_texes, self._track_fbos, dtype=dtype)
 
     def _ensure_graded_track_fbo(self, index: int, w: int, h: int):
         """Get a separate target for a per-track ColorStack grade pass.
@@ -4579,22 +4649,9 @@ class EditGpuPreviewRenderer(QThread):
         实施（超界直接跳过 grade）；调整剪辑请改用
         :meth:`_ensure_adjustment_grade_fbo` 的稳定键分配。
         """
-        while len(self._graded_track_texes) <= index:
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._graded_track_texes.append(tex)
-            self._graded_track_fbos.append(fbo)
-
-        tex = self._graded_track_texes[index]
-        fbo = self._graded_track_fbos[index]
-        if tex.size != (w, h):
-            tex.release()
-            fbo.release()
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._graded_track_texes[index] = tex
-            self._graded_track_fbos[index] = fbo
-        return fbo, tex
+        return self._ensure_track_target(
+            index, (w, h), self._graded_track_texes, self._graded_track_fbos,
+        )
 
     def _release_adjustment_grade_entry(self, key: str) -> None:
         """AUD-16603：释放并移除一个调整剪辑 grade scratch 条目。"""
@@ -4633,8 +4690,11 @@ class EditGpuPreviewRenderer(QThread):
         """
         tex = self._adjustment_grade_texes.get(key)
         fbo = self._adjustment_grade_fbos.get(key)
-        if tex is not None and fbo is not None and tex.size == (w, h):
+        dtype = self.__dict__.get("_working_dtype", "f1")
+        if (tex is not None and fbo is not None and tex.size == (w, h)
+                and getattr(tex, "dtype", dtype) == dtype):
             return fbo, tex
+        new_fbo, new_tex = _rgba_render_target(self.ctx, (w, h), dtype)
         if tex is not None:
             # 尺寸变更：该键条目重建。
             self._release_adjustment_grade_entry(key)
@@ -4657,30 +4717,15 @@ class EditGpuPreviewRenderer(QThread):
                 if oldest is None:
                     break
             self._release_adjustment_grade_entry(oldest)
-        tex = self.ctx.texture((w, h), components=4, dtype='f1')
-        fbo = self.ctx.framebuffer(color_attachments=[tex])
-        self._adjustment_grade_texes[key] = tex
-        self._adjustment_grade_fbos[key] = fbo
-        return fbo, tex
+        self._adjustment_grade_texes[key] = new_tex
+        self._adjustment_grade_fbos[key] = new_fbo
+        return new_fbo, new_tex
 
     def _ensure_transform_track_fbo(self, index: int, w: int, h: int):
         """Get a separate target for the per-track clip-transform pass."""
-        while len(self._transform_track_texes) <= index:
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._transform_track_texes.append(tex)
-            self._transform_track_fbos.append(fbo)
-
-        tex = self._transform_track_texes[index]
-        fbo = self._transform_track_fbos[index]
-        if tex.size != (w, h):
-            tex.release()
-            fbo.release()
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._transform_track_texes[index] = tex
-            self._transform_track_fbos[index] = fbo
-        return fbo, tex
+        return self._ensure_track_target(
+            index, (w, h), self._transform_track_texes, self._transform_track_fbos,
+        )
 
     def _apply_clip_transform(self, source_tex, index: int, w: int, h: int,
                               transform_tuple) -> object:
@@ -4724,28 +4769,8 @@ class EditGpuPreviewRenderer(QThread):
         return target_tex
 
     def _ensure_crop_track_fbo(self, index: int, w: int, h: int):
-        """Get a separate target for the per-track crop matte pass (FX-M06).
-
-        Mirrors :meth:`_ensure_transform_track_fbo` / :meth:`_ensure_graded_track_fbo`:
-        one texture+FBO per track slot, rebuilt on size change. The dtype is
-        ``f1`` to match the rest of the track-FBO pipeline (8-bit preview).
-        """
-        while len(self._crop_track_texes) <= index:
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._crop_track_texes.append(tex)
-            self._crop_track_fbos.append(fbo)
-
-        tex = self._crop_track_texes[index]
-        fbo = self._crop_track_fbos[index]
-        if tex.size != (w, h):
-            tex.release()
-            fbo.release()
-            tex = self.ctx.texture((w, h), components=4, dtype='f1')
-            fbo = self.ctx.framebuffer(color_attachments=[tex])
-            self._crop_track_texes[index] = tex
-            self._crop_track_fbos[index] = fbo
-        return fbo, tex
+        """Get a separate target for the per-track crop matte pass (FX-M06)."""
+        return self._ensure_track_target(index, (w, h), self._crop_track_texes, self._crop_track_fbos)
 
     def _apply_crop(self, source_tex, index: int, w: int, h: int,
                     crop_tuple) -> object:
@@ -5070,7 +5095,7 @@ class EditGpuPreviewRenderer(QThread):
                 continue
             current_glo = runner.run(
                 spec, current_glo, params, w, h,
-                dtype="f2" if self._effect_hdr else "f1",
+                dtype="f2" if self._effect_hdr else self.__dict__.get("_working_dtype", "f1"),
             )
             ran_any = True
 
@@ -5364,7 +5389,7 @@ void main() {
                     continue
                 current_glo = runner.run(
                     spec, current_glo, params, w, h,
-                    dtype="f2" if self._effect_hdr else "f1",
+                    dtype="f2" if self._effect_hdr else self.__dict__.get("_working_dtype", "f1"),
                 )
                 changed = True
 
@@ -5459,6 +5484,96 @@ void main() {
             out_color = texture(composite_tex, uv);
         }
     """
+
+    def _ensure_signal_target(self, width: int, height: int) -> None:
+        """Allocate a floating-point composite target before the display pass."""
+        size = (width, height)
+        dtype = self._working_dtype
+        if (self._signal_tex is not None and self._signal_tex.size == size
+                and self._signal_tex.dtype == dtype):
+            return
+        framebuffer, texture = _rgba_render_target(self.ctx, size, dtype)
+        if self._signal_fbo is not None:
+            self._signal_fbo.release()
+            self._signal_tex.release()
+        self._signal_tex, self._signal_fbo = texture, framebuffer
+
+    def _render_video_signal(
+        self, working: Any, target: Any,
+        transform: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor],
+        *, premultiplied: bool = False, reference_gamut_compression: bool = False,
+        luminance: VideoSignalLuminance | None = None,
+    ) -> None:
+        """Convert between full-range signals, writing straight alpha for Edit."""
+        import moderngl
+
+        if self._signal_program is None:
+            program = self.ctx.program(
+                vertex_shader=self._SNAPSHOT_VERTEX_SHADER,
+                fragment_shader="#version 330\n" + VIDEO_SIGNAL_GLSL + """
+                    uniform sampler2D working_tex;
+                    uniform bool unpremultiply;
+                    in vec2 uv;
+                    out vec4 out_color;
+                    void main() {
+                        vec4 color = texture(working_tex, uv);
+                        if (unpremultiply) {
+                            color.rgb = color.a > 0.0 ? color.rgb / color.a : vec3(0.0);
+                        }
+                        out_color = vec4(topos_convert_video_signal(color.rgb), color.a);
+                    }
+                """,
+            )
+            try:
+                vao = self.ctx.vertex_array(program, [])
+            except BaseException:
+                program.release()
+                raise
+            self._signal_vao, self._signal_program = vao, program
+        target.use()
+        self.ctx.viewport = (0, 0, *target.size)
+        working.use(0)
+        self._signal_program["working_tex"].value = 0
+        self._signal_program["unpremultiply"].value = premultiplied
+        bind_video_signal_transform(
+            self._signal_program, *transform, reference_gamut_compression=reference_gamut_compression,
+            luminance=luminance)
+        self._signal_vao.render(mode=moderngl.TRIANGLES, vertices=3)
+
+    def _apply_input_signal(self, texture: Any, track_info: dict, track: int) -> Any:
+        transform = track_info.get("input_signal")
+        if transform is None:
+            return texture
+        # This per-track target must not alias the decoded or transform FBO,
+        # or be overwritten by the next track while the compositor retains it.
+        target, converted = self._ensure_aces_input_fbo(track, texture.size)
+        self._render_video_signal(
+            texture, target, transform,
+            reference_gamut_compression=bool(track_info.get("aces_input_compression")),
+            luminance=track_info.get("input_luminance"),
+        )
+        return converted
+
+    def _ensure_aces_input_fbo(self, track: int, size: tuple[int, int]) -> tuple[Any, Any]:
+        import moderngl
+
+        targets = self.__dict__.setdefault("_aces_input_targets", {})
+        current = targets.get(track)
+        if current is not None and current[1].size == size:
+            return current
+        texture = self.ctx.texture(size, 4, dtype="f4")
+        texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        texture.repeat_x = texture.repeat_y = False
+        try:
+            target = self.ctx.framebuffer(color_attachments=[texture])
+        except BaseException:
+            texture.release()
+            raise
+        if current is not None:
+            current[0].release()
+            current[1].release()
+        targets[track] = (target, texture)
+        return target, texture
 
     def arm_frame_snapshot(self) -> None:
         """UI 线程布防：下一帧合成完成后做一次快照 readback。
@@ -6608,7 +6723,7 @@ void main() {
         # AUD-16605：bg composite / snapshot FBO 与惰性创建的快照 copy
         # program/VAO 此前同样泄漏。
         for attr in ('_bg_composite_tex', '_bg_composite_fbo',
-                     '_snapshot_tex', '_snapshot_fbo'):
+                     '_snapshot_tex', '_snapshot_fbo', '_signal_fbo', '_signal_tex'):
             obj = getattr(self, attr, None)
             if obj is not None:
                 try:
@@ -6634,6 +6749,7 @@ void main() {
             '_transition_program', '_transition_vao',
             '_dip_program', '_dip_vao', '_flip_dip_vao',
             '_snapshot_program', '_snapshot_vao',
+            '_signal_vao', '_signal_program', '_aces_output_pass',
             '_quad_vbo', '_blend_quad_vbo',
         ):
             obj = getattr(self, attr, None)
@@ -6643,6 +6759,10 @@ void main() {
                 except Exception:
                     pass
                 setattr(self, attr, None)
+
+        for target, texture in self.__dict__.pop("_aces_input_targets", {}).values():
+            target.release()
+            texture.release()
 
         # AUD-16605：GL timer query（in-flight query 对象）与 YUV 上传器
         # （PBO/纹理池 + program）自身的 GL 资源一并释放。

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -53,6 +54,10 @@ from src.features.color.core.metal_texture_kernels import (
     METAL_TEX_GRAPH_OPS_MSL,
     make_tex_extra_params,
     make_tex_qualifier_params,
+)
+from src.features.color.core.primary_calibration import (
+    calibrated_grade_inputs,
+    grade_uses_calibration,
 )
 from src.features.color.core.warper_color import (
     RESOLVE_HS709_SPACES,
@@ -114,8 +119,8 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
     与 ``production_layer_domain_errors`` 同一判据风格，但允许纹理域已
     接线的效果：HSL 曲线 / LUT3D / mixer / warper（legacy HSV 与校准 709）/
     soft_clip / curves_soft_clip / 非 Normal blend / qualifier（无后处理）
-    / 窗口 mask_shapes。仍拒绝：插件、fx/blur（邻域）、mid_detail /
-    sharpness（邻域）、qualifier 后处理（clean/blur/denoise）、warper 多
+    / 窗口 mask_shapes / 实测一级调色 / 中间细节。仍拒绝：插件、fx/blur
+    （邻域）、sharpness（邻域）、qualifier 后处理（clean/blur/denoise）、warper 多
     空间变体 HSL/HSP、未预构建的 curves_data。
     """
     from src.features.color.core.color_graph_cpu import (
@@ -123,23 +128,19 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
         CPU_GRADING_BASIC_KEYS,
         _fx_params_neutral,
     )
-    from src.features.color.core.primary_calibration import grade_uses_calibration
-
     errors: list[str] = []
     grading = layer.get("grading_params")
     grading = grading if isinstance(grading, Mapping) else {}
     try:
-        if grade_uses_calibration(layer):
-            errors.append("Resolve primary calibration requires the compatible graph renderer")
+        grade_uses_calibration(layer)
     except ValueError as exc:
         errors.append(str(exc))
     unknown = sorted(set(grading) - CPU_GRADING_BASIC_KEYS
                      - _CPU_DEAD_GRADING_KEYS)
     if unknown:
         errors.append(f"grading 参数未支持: {unknown}")
-    if float(grading.get("mid_detail") or 0.0) != 0.0 or float(
-            grading.get("sharpness") or 0.0) != 0.0:
-        errors.append("mid_detail/sharpness 为邻域采样（未接线）")
+    if float(grading.get("sharpness") or 0.0) != 0.0:
+        errors.append("sharpness 为邻域采样（未接线）")
     if layer.get("plugins"):
         errors.append("插件无 Metal 纹理实现（显式 unsupported）")
     if layer.get("_plugin_bindings"):
@@ -231,6 +232,8 @@ class _TexturePool:
 class ColorGraphMetalTextureExecutor:
     """按 render plan 在 Metal 纹理上执行（无 Qt / 无 GL / 无 NumPy 暂存）。"""
 
+    _PRIMARY_CACHE_SIZE = 4
+
     def __init__(self, ctx: MetalComputeContext) -> None:
         import Metal  # noqa: F401 —— 像素格式常量（macOS only）
 
@@ -248,6 +251,7 @@ class ColorGraphMetalTextureExecutor:
         self._warper_zero: Any = None
         self._lut_textures: dict[tuple, Any] = {}
         self._lut_identity: Any = None
+        self._primary_textures: OrderedDict[int, tuple[np.ndarray, Any]] = OrderedDict()
         self._window_textures: dict[tuple, Any] = {}
         self._published: dict[str, MetalTextureGraphResult] = {}
 
@@ -689,14 +693,17 @@ class ColorGraphMetalTextureExecutor:
     def _corrector_pass(self, render_pass: RenderPass, layer: Mapping,
                         input_tex: Any, matte: Any | None,
                         width: int, height: int) -> Any:
-        """tg_corrector：grading → curves → hsl → sc → csc → mixer →
+        """tg_corrector：primary calibration → grading → curves → hsl → sc → csc → mixer →
         warper → lut3d → blend/matte epilogue（GL composition main 同序）。"""
         pool = self._pool
         from src.features.color.core.composition_uniforms import (
             composition_uniform_values,
         )
+        calibrated = calibrated_grade_inputs(layer)
+        grid, grading_override = calibrated if calibrated is not None else (None, None)
         values = composition_uniform_values(
-            dict(layer), width=width, height=height)
+            dict(layer), width=width, height=height,
+            grading_params_override=grading_override)
         hsl_lut = layer.get("hsl_curve_lut")
         if hsl_lut is None:
             hsl_data = layer.get("hsl_curve_data")
@@ -724,7 +731,8 @@ class ColorGraphMetalTextureExecutor:
         # Graph payloads hold serialized mesh lists, not necessarily ndarrays.
         values["u_warper_space"] = warper_space
         grading = graph_grading_params_for_layer(
-            layer, width, height, has_mask=matte is not None)
+            layer, width, height, has_mask=matte is not None,
+            grading_params_override=grading_override)
         extra = make_tex_extra_params(
             values,
             has_hsl=hsl_lut is not None,
@@ -733,9 +741,11 @@ class ColorGraphMetalTextureExecutor:
             has_warper=warper is not None,
             has_soft_clip=has_soft_clip,
             has_curves_soft_clip=has_csc,
+            has_primary_calibration=grid is not None,
         )
         warper_tex = (self._warper_texture(warper, warper_space)
                       if warper is not None else self._warper_zero_texture())
+        primary_tex = self._primary_texture(grid) if grid is not None else self._lut_identity_texture()
         out = pool.acquire(self._rgba16f, width, height)
         matte_tex = (matte if matte is not None
                      else self._white_matte(width, height))
@@ -747,6 +757,7 @@ class ColorGraphMetalTextureExecutor:
                 4: warper_tex,
                 5: (self._lut_texture(str(lut_path))
                     if lut_path else self._lut_identity_texture()),
+                6: primary_tex,
             },
             buffers={
                 0: self._curves_buffer(layer.get("curves_lut")),
@@ -991,6 +1002,21 @@ class ColorGraphMetalTextureExecutor:
             self._lut_identity = self.ctx.create_rgb_lut_texture(table)
         return self._lut_identity
 
+    def _primary_texture(self, grid: np.ndarray) -> Any:
+        """Upload an immutable response grid once per active grade and context."""
+        key = id(grid)
+        cached = self._primary_textures.get(key)
+        if cached is not None:
+            self._primary_textures.move_to_end(key)
+            return cached[1]
+        texture = self.ctx.create_rgb_lut_texture(grid)
+        # Keep the grid reference alongside the texture so its id cannot be
+        # reused for another grade until the matching texture is evicted.
+        self._primary_textures[key] = grid, texture
+        if len(self._primary_textures) > self._PRIMARY_CACHE_SIZE:
+            self._primary_textures.popitem(last=False)
+        return texture
+
     def _lut_texture(self, reference: str) -> Any:
         """LUT3D 纹理按资源版本缓存（解析路径 + 文件 stat 身份键控）。"""
         from src.shared.color.lut_loader import (
@@ -1105,5 +1131,6 @@ class ColorGraphMetalTextureExecutor:
         self._warper_zero = None
         self._lut_textures.clear()
         self._lut_identity = None
+        self._primary_textures.clear()
         self._window_textures.clear()
         return released

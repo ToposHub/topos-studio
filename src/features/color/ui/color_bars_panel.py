@@ -27,7 +27,7 @@ from src.features.color.ui.color_wheel import (
     offset_hsb_to_display, offset_display_to_hsb,
 )
 from src.features.color.ui.primary_wheel_response import (
-    RGB, brightness_multiplier, master_drag_rate, multiplier_brightness, shift_master, wheel_luma,
+    RGB, brightness_multiplier, channel_drag_rate, master_drag_rate, multiplier_brightness, shift_master, wheel_luma,
 )
 
 _TRACK_FILL = "#0e0f12"
@@ -479,6 +479,9 @@ class _BarsColumn(QWidget):
 
     def set_measured_response(self, enabled: bool) -> None:
         self._measured_response = enabled
+        rate = channel_drag_rate(self._mode, bars=True) if enabled else None
+        for field in self._nums.values():
+            field.set_drag_rate(rate)
         self._refresh_displays()
 
     def set_display_base(self, base: float) -> None:

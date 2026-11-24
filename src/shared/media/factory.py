@@ -698,6 +698,10 @@ class MediaSourceFactory:
 
             import av
             from .metadata import Rational
+            from .color_metadata import (
+                map_color_range, normalize_color_primaries, normalize_color_space,
+                normalize_color_transfer,
+            )
 
             container = av.open(path)
             try:
@@ -751,10 +755,15 @@ class MediaSourceFactory:
 
                         # Codec profile
                         codec_profile = ''
-                        if hasattr(stream, 'codec_context') and stream.codec_context:
-                            ctx = stream.codec_context
-                            if hasattr(ctx, 'profile') and ctx.profile:
-                                codec_profile = str(ctx.profile)
+                        ctx = getattr(stream, "codec_context", None)
+                        if getattr(ctx, "profile", None):
+                            codec_profile = str(ctx.profile)
+                        color_tags = {
+                            "color_primaries": normalize_color_primaries(getattr(ctx, "color_primaries", None)),
+                            "color_transfer": normalize_color_transfer(getattr(ctx, "color_trc", None)),
+                            "color_matrix": normalize_color_space(getattr(ctx, "colorspace", None)),
+                            "color_range": map_color_range(getattr(ctx, "color_range", None)),
+                        }
 
                         return VideoMetadata(
                             width=width,
@@ -765,6 +774,7 @@ class MediaSourceFactory:
                             codec_profile=codec_profile or None,
                             pixel_format=pix_fmt,
                             bit_depth=bit_depth,
+                            **{name: value for name, value in color_tags.items() if value not in (None, "unknown")},
                         )
             finally:
                 container.close()

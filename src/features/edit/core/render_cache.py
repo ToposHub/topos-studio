@@ -220,6 +220,31 @@ def build_render_cache_fingerprint(
         "cache_settings": _fingerprint_value(settings_value),
         "interpretation_override": _fingerprint_value(interpretation_value),
     }
+    from src.shared.color.project_video_signal import (
+        project_aces_settings, video_signal_spaces, video_signal_uses_legacy_space,
+    )
+    from src.shared.color.hdr_video_signal import project_hdr_settings
+
+    color_settings = getattr(project, "color_management", None)
+    signal = video_signal_spaces(color_settings)
+    if signal is not None:
+        payload["timeline_color"] = {
+            "space": signal[0].to_dict(),
+            "legacy": video_signal_uses_legacy_space(color_settings, timeline_only=True),
+        }
+        aces = project_aces_settings(color_settings)
+        if aces is not None:
+            payload["timeline_color"]["aces"] = {
+                "version": aces.version, "input": aces.input,
+                "reference_gamut_compression": aces.reference_gamut_compression,
+            }
+        hdr = project_hdr_settings(color_settings)
+        if hdr is not None:
+            payload["timeline_color"]["hdr"] = {
+                "input": hdr.input,
+                "reference_white": hdr.luminance.reference_white_nits,
+                "hlg_peak": hdr.luminance.hlg_peak_nits,
+            }
     encoded = json.dumps(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")

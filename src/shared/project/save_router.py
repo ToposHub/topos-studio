@@ -638,13 +638,12 @@ class SaveRouter:
                 asset_path=file_path,
                 media_type=media_type,
             )
-            # P0-COLOR-04：色彩管理设定随工程落盘（换机器/交接不丢）
-            from src.shared.color.color_space_descriptor import (
-                collect_color_management_settings,
-            )
+            # Capture the settings of the active image document. Settings
+            # change through the project model, independently of preferences.
+            active_project = self._call_callback("get_current_edit_project")
             project.settings = dict(project.settings or {})
-            project.settings["color_management"] = (
-                collect_color_management_settings())
+            project.settings["color_management"] = dict(getattr(
+                active_project, "color_management", {}))
 
             # 从 ImageEngine 提取调色栈数据
             color_stacks_data = self._extract_color_stacks_from_engine(engine, project)

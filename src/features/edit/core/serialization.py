@@ -343,6 +343,7 @@ class EditProjectSerializer:
                 stack_id: EditProjectSerializer._color_stack_to_dict(stack)
                 for stack_id, stack in project.color_stacks.items()
             },
+            "color_management": copy.deepcopy(project.color_management),
             # P9.2: Compositions
             "compositions": dict(project.compositions),
             # Comp Clips
@@ -650,6 +651,7 @@ class EditProjectSerializer:
 
         # M02（S01）：六张较新表随 JSON 往返（旧 JSON 无键 = 空表）
         new_tables = _io_deserialize_new_tables(data)
+        color_management = data.get("color_management")
 
         return EditProject(
             project_id=data.get("project_id", ""),
@@ -659,6 +661,8 @@ class EditProjectSerializer:
             timelines=timelines,
             compositions=data.get("compositions", {}),
             color_stacks=color_stacks,
+            color_management=copy.deepcopy(color_management)
+            if isinstance(color_management, dict) else {},
             comp_clips=data.get("comp_clips", {}),
             smart_bins=smart_bins,
             render_cache_manifests=data.get("render_cache_manifests", {}),

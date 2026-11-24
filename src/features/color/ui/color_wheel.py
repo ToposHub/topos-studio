@@ -23,6 +23,7 @@ Color Wheel Module - ColorWheel widget and GradingPanel (original visual design)
 
 import colorsys
 import math
+from collections.abc import Callable, Mapping
 from typing import Any, Optional
 from PyQt6.QtWidgets import (QWidget, QToolButton, QPushButton, QHBoxLayout,
                              QVBoxLayout, QStackedWidget, QSizePolicy, QLabel,
@@ -43,11 +44,12 @@ from src.features.color.core.composition_uniforms import (
 )
 from src.features.color.core.layer import DEFAULT_EXTENDED_GRADING_PARAMS
 from src.features.color.core.primary_calibration import (
-    PRIMARY_CALIBRATION_TEMP_SCALE, PRIMARY_CALIBRATION_VERSION_KEY,
+    PRIMARY_CALIBRATION_CURRENT_VERSION, PRIMARY_CALIBRATION_TEMP_SCALE,
+    PRIMARY_CALIBRATION_VERSION_KEY, ungraded_primary_params,
 )
 from src.features.color.ui.primary_wheel_response import (
-    PUCK_DRAG_GAIN, RGB, brightness_multiplier, constrain_chroma, master_drag_rate,
-    multiplier_brightness, shift_master, wheel_chroma, wheel_luma, wheel_position,
+    PUCK_DRAG_GAIN, RGB, brightness_multiplier, channel_drag_rate, constrain_chroma, master_drag_rate,
+    multiplier_brightness, scalar_drag_rate, shift_master, wheel_chroma, wheel_luma, wheel_position,
 )
 from src.features.color.ui.tonal_saturation_panel import TonalSaturationPanel
 
@@ -122,21 +124,37 @@ class _GradingValue(DragValue):
 
     def __init__(self, minimum: float, maximum: float, default: float,
                  decimals: int = 2, accent: str = "#919195",
-                 drag_span: float | None = None) -> None:
+                 drag_span: float | None = None, *, drag_rate: float | None = None) -> None:
         super().__init__("", minimum, maximum, default, decimals=decimals, compact=True)
         self._accent = accent
         self._drag_span = drag_span
+        self._drag_rate = drag_rate
+        self._cancelled_drag = False
         self.setFixedValueWidth(44)
         self.setFixedHeight(24)
         # Keep the shared DragValue normal/hover/active/editor styles intact.
         # Channel identity lives only in a separate, non-interactive color bar.
         self.layout().setContentsMargins(0, 0, 0, 4)
+        self._value_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._edit.setFixedHeight(20)
         self._accent_bar = QWidget(self)
         self._accent_bar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self._accent_bar.setStyleSheet(f"background: {accent}; border: none;")
 
+    @staticmethod
+    def _precision(modifiers: Qt.KeyboardModifier) -> float:
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            return 10.0
+        if modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
+            return 0.1
+        return 1.0
+
+    def set_drag_rate(self, rate: float | None) -> None:
+        self._drag_rate = rate
+
     def _drag_sensitivity(self, modifiers: Qt.KeyboardModifier) -> float:
+        if self._drag_rate is not None:
+            return self._drag_rate * self._precision(modifiers)
         if self._drag_span is None:
             return super()._drag_sensitivity(modifiers)
         return drag_speed_per_pixel(self._drag_span, modifiers)
@@ -148,6 +166,8 @@ class _GradingValue(DragValue):
                                      self.width() - 2, 2)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._cancelled_drag = False
         if event.button() == Qt.MouseButton.MiddleButton:
             if self.value() != self.defaultValue():
                 self.interaction_started.emit()
@@ -157,12 +177,34 @@ class _GradingValue(DragValue):
             return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        super().mouseMoveEvent(event)
+        if self._drag_rate is not None and self._drag_engaged:
+            # Only the next movement uses a newly pressed modifier. An overshoot
+            # at a limit does not have to be dragged back before values change.
+            self._drag_start_x = event.position().x()
+            self._drag_start_value = self.value()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._cancelled_drag:
+                self._cancelled_drag = False
+                self.interaction_ended.emit()
+                event.accept()
+                return
+            if self._dragging:
+                self.mouseMoveEvent(event)
+        super().mouseReleaseEvent(event)
+
+    def cancel_drag(self) -> None:
+        """Keep the gesture boundary while discarding the old pointer baseline."""
+        if self._dragging:
+            self._cancelled_drag = self._drag_engaged
+            self._dragging = self._drag_engaged = False
+            self._value_label.setStyleSheet(self._normal_value_style)
+
     def wheelEvent(self, event: Any) -> None:
-        step = self._single_step
-        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            step *= 10.0
-        elif event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
-            step *= 0.1
+        step = self._single_step * self._precision(event.modifiers())
         delta = event.angleDelta().y()
         target = self.value() + (step if delta > 0 else -step if delta < 0 else 0.0)
         target = max(self._min, min(self._max, target))
@@ -181,12 +223,13 @@ class _PrimaryValueRow(QWidget):
     interactionEnded = pyqtSignal()
 
     def __init__(self, label: str, minimum: float, maximum: float,
-                 *, scale: float = 1.0, offset: float = 0.0,
+                 *, drag_rate: float, scale: float = 1.0, offset: float = 0.0,
                  decimals: int = 2, accent: str = "#919195",
                  default: float | None = None) -> None:
         super().__init__()
         self._scale = scale
         self._offset = offset
+        self._drag_rate = drag_rate
         self._bounds = minimum, maximum
         # 引擎值域内的默认值（None 时回退旧行为 offset；用于 pivot /
         # lum_mix 等非零默认参数）。
@@ -201,7 +244,8 @@ class _PrimaryValueRow(QWidget):
         self.spin = _GradingValue(minimum * scale + offset,
                                   maximum * scale + offset,
                                   self._default_value * scale + offset,
-                                  decimals, accent)
+                                  decimals, accent, drag_rate=drag_rate * scale)
+        self.spin.setAccessibleName(label)
         layout.addWidget(self.spin)
         layout.addStretch()
         self.spin.valueChanged.connect(self._on_value_changed)
@@ -217,13 +261,17 @@ class _PrimaryValueRow(QWidget):
     def setValue(self, value: float) -> None:
         self.spin.setValue(value * self._scale + self._offset)
 
-    def set_display_units(self, scale: float, offset: float, decimals: int) -> None:
+    def set_display_units(self, scale: float, offset: float, decimals: int, *,
+                          display_bounds: tuple[float, float] | None = None) -> None:
         value = self.value()
         blocked = self.spin.blockSignals(True)
         self._scale, self._offset = scale, offset
-        self.spin.setRange(self._bounds[0] * scale + offset, self._bounds[1] * scale + offset)
+        minimum, maximum = display_bounds or (
+            self._bounds[0] * scale + offset, self._bounds[1] * scale + offset)
+        self.spin.setRange(minimum, maximum)
         self.spin.setDefaultValue(self._default_value * scale + offset)
         self.spin.setDecimals(decimals)
+        self.spin.set_drag_rate(self._drag_rate * scale)
         self.setValue(value)
         self.spin.blockSignals(blocked)
 
@@ -982,6 +1030,10 @@ class ColorWheel(QWidget):
 
     def set_measured_response(self, enabled: bool) -> None:
         self._measured_response = enabled
+        rate = channel_drag_rate(self.mode) if enabled else None
+        for field in (self._bright_drag, self._r_drag, self._g_drag, self._b_drag):
+            if field is not None:
+                field.set_drag_rate(rate)
         self._update_knob_position()
         self._update_rgb_values()
         self._wheel_canvas.update()
@@ -1269,8 +1321,14 @@ class GradingPanel(QWidget):
     # 与 layer_controller._GRADING_EXTENDED_KEYS 一致）
     _EXTENDED_KEYS = tuple(DEFAULT_EXTENDED_GRADING_PARAMS.keys())
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, *,
+                 use_measured_primaries: Callable[[], bool] | None = None) -> None:
         super().__init__(parent)
+        self._use_measured_primaries = use_measured_primaries
+        self._calibration_version = 0
+        self._display_calibration_version = 0
+        self._ungraded = True
+        self._stored_log_offset = (0.0, 0.0, 0.0)
 
         # 节流定时器：限制信号发射频率为 60FPS (16ms)
         self._grading_update_timer = QTimer(self)
@@ -1294,6 +1352,7 @@ class GradingPanel(QWidget):
         self._exposure_value: float = 0.0
 
         self._init_ui()
+        self.refresh_primary_calibration()
 
     def _init_ui(self) -> None:
         from src.features.color.ui.color_bars_panel import ColorBarsPanel
@@ -1363,15 +1422,6 @@ class GradingPanel(QWidget):
         header_layout.addSpacing(6)
         header_layout.addWidget(self.mode_title)
         header_layout.addStretch(1)
-        self.calibration_btn = QToolButton()
-        self.calibration_btn.setText("709")
-        self.calibration_btn.setCheckable(True)
-        calibration_label = I18N.tr(
-            "grading.rec709_calibration", "Rec.709 Gamma 2.4 primary grading calibration")
-        self.calibration_btn.setToolTip(calibration_label)
-        self.calibration_btn.setAccessibleName(calibration_label)
-        self.calibration_btn.clicked.connect(self._on_calibration_clicked)
-        header_layout.addWidget(self.calibration_btn)
         self._mode_buttons: dict[str, ModeTabButton] = {}
         for m_key, m_tip in (
             ("wheels", I18N.tr("panel.color_wheel", "色轮")),
@@ -1710,7 +1760,7 @@ class GradingPanel(QWidget):
         """
         row = _PrimaryValueRow(label, min_val, max_val, scale=scale,
                                offset=offset, decimals=decimals, accent=accent,
-                               default=default_val)
+                               default=default_val, drag_rate=scalar_drag_rate(key))
         self._scalar_rows.setdefault(key, []).append(row)
         row.valueChanged.connect(
             lambda value, r=row, k=key, is_base=base:
@@ -1724,26 +1774,21 @@ class GradingPanel(QWidget):
         """参数行变化：同步孪生行后走对应节流路径。"""
         if self._syncing_ui:
             return
-        self._sync_scalar_rows(source, value)
-        if is_base:
-            self._grading_update_timer.start()
-        else:
-            self._extended_update_timer.start()
+        self._sync_scalar_rows(key, source, value)
+        timer = self._grading_update_timer if is_base else self._extended_update_timer
+        if not timer.isActive():
+            timer.start()
 
-    def _sync_scalar_rows(self, source: _PrimaryValueRow, value: float) -> None:
+    def _sync_scalar_rows(self, key: str, source: _PrimaryValueRow, value: float) -> None:
         """同一参数的孪生行（Primaries/Log 参数条）静默跟随。"""
-        for rows in self._scalar_rows.values():
-            if source not in rows:
+        for row in self._scalar_rows[key]:
+            if row is source:
                 continue
-            for row in rows:
-                if row is source:
-                    continue
-                row.blockSignals(True)
-                try:
-                    row.setValue(value)
-                finally:
-                    row.blockSignals(False)
-            return
+            blocked = row.blockSignals(True)
+            try:
+                row.setValue(value)
+            finally:
+                row.blockSignals(blocked)
 
     # ==================== 信号发射 ====================
 
@@ -1792,7 +1837,7 @@ class GradingPanel(QWidget):
     def get_extended_params(self) -> dict[str, Any]:
         """当前扩展参数快照（与 grading_extended_changed payload 一致）。"""
         return {
-            PRIMARY_CALIBRATION_VERSION_KEY: int(self.calibration_btn.isChecked()),
+            PRIMARY_CALIBRATION_VERSION_KEY: self._calibration_version,
             "offset": (self.offset_wheel.hue, self.offset_wheel.sat,
                        self.offset_wheel.brightness),
             "pivot": self.pivot_slider.value(),
@@ -1804,7 +1849,7 @@ class GradingPanel(QWidget):
             "log_highlight": (self.log_highlight_wheel.hue,
                               self.log_highlight_wheel.sat,
                               self.log_highlight_wheel.brightness),
-            "log_offset": ((0.0, 0.0, 0.0) if self.calibration_btn.isChecked() else
+            "log_offset": (self._stored_log_offset if self._uses_measured_primaries else
                            (self.log_offset_wheel.hue, self.log_offset_wheel.sat,
                             self.log_offset_wheel.brightness)),
             "log_low_range": self.log_low_range_slider.value(),
@@ -1825,7 +1870,7 @@ class GradingPanel(QWidget):
             self._on_param_changed()
 
     def _on_offset_changed(self, source: ColorWheel) -> None:
-        if self.calibration_btn.isChecked():
+        if self._uses_measured_primaries:
             other = self.offset_wheel if source is self.log_offset_wheel else self.log_offset_wheel
             blocked = other.blockSignals(True)
             other.set_hsv(source.hue, source.sat, source.brightness)
@@ -1837,7 +1882,8 @@ class GradingPanel(QWidget):
         for row in self._scalar_rows["temp"]:
             row.set_display_units(PRIMARY_CALIBRATION_TEMP_SCALE if enabled else 1.0, 0.0, 1 if enabled else 2)
         for row in self._scalar_rows["pivot"]:
-            row.set_display_units(1.0, 0.255 if enabled else 0.0, 3)
+            row.set_display_units(1.0, 0.255 if enabled else 0.0, 3, display_bounds=(
+                (0.0, 1.0) if self._display_calibration_version == PRIMARY_CALIBRATION_CURRENT_VERSION else None))
         for wheel in (self.log_shadow_wheel, self.log_midtone_wheel, self.log_highlight_wheel):
             wheel.set_additive_display_units(0.01 if enabled else 1.0, 0.0)
         for wheel in (self.offset_wheel, self.log_offset_wheel):
@@ -1850,19 +1896,35 @@ class GradingPanel(QWidget):
         for column in self.color_bars_panel.columns():
             column.set_measured_response(enabled)
 
-    def _on_calibration_clicked(self, enabled: bool) -> None:
-        self.interaction_started.emit()
-        self._configure_calibration_units(enabled)
-        if enabled:
-            bias = [sum(channel) for channel in zip(*(
-                offset_hsb_to_display(w.hue, w.sat, w.brightness)
-                for w in (self.offset_wheel, self.log_offset_wheel)))]
-            self.offset_wheel.set_hsv(*offset_display_to_hsb(*bias))
-            self._on_offset_changed(self.offset_wheel)
-        else:
-            self.log_offset_wheel.set_hsv(0.0, 0.0, 0.0)
-            self._emit_grading_extended()
-        self.interaction_ended.emit()
+    @property
+    def _uses_measured_primaries(self) -> bool:
+        return self._display_calibration_version in (1, PRIMARY_CALIBRATION_CURRENT_VERSION)
+
+    @property
+    def pending_primary_calibration_version(self) -> int:
+        """The profile displayed for a neutral node until a grade is written."""
+        return self._display_calibration_version if self._calibration_version == 0 else 0
+
+    def refresh_primary_calibration(self) -> None:
+        """Refresh display units when the active video timeline space changes."""
+        version = self._calibration_version
+        if (version == 0 and self._ungraded and self._use_measured_primaries is not None
+                and self._use_measured_primaries()):
+            version = PRIMARY_CALIBRATION_CURRENT_VERSION
+        if version != self._display_calibration_version:
+            self._display_calibration_version = version
+            self._configure_calibration_units(self._uses_measured_primaries)
+
+    def load_extended_params(self, params: Mapping[str, Any], *, animated: bool = False) -> None:
+        """Project a complete grade onto the tools without committing changes."""
+        self._ungraded = not animated and ungraded_primary_params(params)
+        self.set_extended_params({key: params.get(key, default) for key, default
+                                  in DEFAULT_EXTENDED_GRADING_PARAMS.items()})
+
+    def confirm_primary_calibration(self, version: int) -> None:
+        """Keep the units of the profile persisted by the first grade edit."""
+        self._calibration_version = version
+        self.refresh_primary_calibration()
 
     def flush_pending_changes(self) -> None:
         """Bring engine listeners up to date before saving full layer payloads."""
@@ -1942,7 +2004,9 @@ class GradingPanel(QWidget):
                 column.blockSignals(False)
 
         if emit:
-            if wheel.math == "add":
+            if wheel is self.offset_wheel or wheel is self.log_offset_wheel:
+                self._on_offset_changed(wheel)
+            elif wheel.math == "add":
                 self._emit_grading_extended()
             else:
                 self._emit_grading_changed()
@@ -1961,13 +2025,6 @@ class GradingPanel(QWidget):
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(True)
         self.color_bars_panel.blockSignals(True)
-        for s in [
-            self.temp_slider, self.tint_slider,
-            self.contrast_slider, self.shadow_slider, self.highlights_slider,
-            self.sat_slider, self.vibrance_slider, self.mid_detail_slider,
-            self.hue_slider,
-        ]:
-            s.blockSignals(True)
 
         self.lift_wheel.set_hsv(*lift)
         self.gamma_wheel.set_hsv(*gamma)
@@ -1988,7 +2045,11 @@ class GradingPanel(QWidget):
             ("mid_detail", mid_det), ("hue_shift", hue),
         ]:
             for row in self._scalar_rows.get(key, []):
-                row.setValue(v)
+                blocked = row.blockSignals(True)
+                try:
+                    row.setValue(v)
+                finally:
+                    row.blockSignals(blocked)
 
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(False)
@@ -2005,10 +2066,11 @@ class GradingPanel(QWidget):
         self._syncing_ui = True
         self._extended_update_timer.stop()
         if PRIMARY_CALIBRATION_VERSION_KEY in params:
-            enabled = params[PRIMARY_CALIBRATION_VERSION_KEY] == 1
-            if enabled != self.calibration_btn.isChecked():
-                self.calibration_btn.setChecked(enabled)
-                self._configure_calibration_units(enabled)
+            self.confirm_primary_calibration(params[PRIMARY_CALIBRATION_VERSION_KEY])
+        if "log_offset" in params:
+            value = params["log_offset"]
+            if isinstance(value, (tuple, list)) and len(value) == 3:
+                self._stored_log_offset = tuple(value)
 
         wheels = [
             (self.offset_wheel, self.color_bars_panel.offset, "offset"),
@@ -2018,7 +2080,7 @@ class GradingPanel(QWidget):
             (self.log_offset_wheel, None, "log_offset"),
         ]
         for wheel, column, key in wheels:
-            if key == "log_offset" and self.calibration_btn.isChecked():
+            if key == "log_offset" and self._uses_measured_primaries:
                 key = "offset"
             if key not in params:
                 continue
@@ -2054,6 +2116,7 @@ class GradingPanel(QWidget):
 
     def reset_all(self) -> None:
         self._syncing_ui = True
+        self._stored_log_offset = (0.0, 0.0, 0.0)
         self._grading_update_timer.stop()
         self._extended_update_timer.stop()
 
@@ -2131,6 +2194,9 @@ class GradingPanel(QWidget):
     def current_stack_id(self, stack_id: str | None) -> None:
         """设置当前关联的调色栈 ID。"""
         self._current_stack_id = stack_id
+        for rows in self._scalar_rows.values():
+            for row in rows:
+                row.spin.cancel_drag()
 
     def set_save_callback(self, callback: Any) -> None:
         """

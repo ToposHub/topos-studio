@@ -28,6 +28,16 @@ from PyQt6.QtWidgets import (
 )
 # Import VideoControlBar from Color page for consistent video playback UI
 from src.features.color.ui.canvas import VideoControlBar
+from src.shared.color.color_space_descriptor import LINEAR_SCENE, ColorSpaceDescriptor
+from src.shared.color.desktop_video_color import DISPLAY_COLOR_GLSL, sdr_display_preset
+from src.shared.color.color_transform_provider import VideoSignalLuminance
+from src.shared.ui.widgets.video_display_color import VideoDisplayColor
+from src.shared.color.video_signal_gl import (
+    VIDEO_SIGNAL_GLSL, can_render_video_signal_gl, video_signal_luminance_uniform,
+    video_signal_uniform_values,
+)
+from src.shared.color.aces_video_gl import aces_scene_uniforms, aces_shader_key, aces_shader_source
+from src.shared.color.project_video_signal import ProjectAcesSettings
 from src.shared.i18n.i18n import I18N
 from src.shared.assets.icon_manager import (
     IconColors,
@@ -112,8 +122,8 @@ from OpenGL.GL import (
     glGenTextures, glDeleteTextures, glTexImage2D, glTexParameteri,
     glBindFramebuffer, glGetTexLevelParameteriv, glGenFramebuffers,
     glDeleteFramebuffers, glFramebufferTexture2D, glBlitFramebuffer, glIsTexture,
-    glUniform1f, glUniform4f, glUniformMatrix4fv, glReadPixels, glLineWidth,
-    glGetError, glGetIntegerv, glTexImage3D,
+    glUniform1f, glUniform4f, glUniformMatrix3fv, glUniformMatrix4fv, glReadPixels, glLineWidth,
+    glGetError, glGetIntegerv, glTexImage3D, glPixelStorei,
 )
 
 # PyOpenGL wrapper for easier usage (matches original _gl.xxx pattern)
@@ -147,6 +157,7 @@ class _GLWrapper:
     glUniform1i = glUniform1i
     glUniform2f = glUniform2f
     glUniform3f = glUniform3f
+    glUniformMatrix3fv = glUniformMatrix3fv
     glUniformMatrix4fv = glUniformMatrix4fv
     glViewport = glViewport
     glEnable = glEnable
@@ -154,6 +165,7 @@ class _GLWrapper:
     glBlendFunc = glBlendFunc
     glScissor = glScissor
     glGetIntegerv = glGetIntegerv
+    glPixelStorei = glPixelStorei
     glClearColor = glClearColor
     glClear = glClear
     glActiveTexture = glActiveTexture
@@ -586,22 +598,29 @@ class CompositeViewerBar(ViewportToolBarBase):
         # Reads initial state from the viewer (which owns _display_srgb) and
         # talks back via the display_srgb_changed signal.
         display_menu = menu.addMenu("Display Transform")
-        initial_srgb = getattr(self._viewer, '_display_srgb', True)
-        self._display_srgb_action = display_menu.addAction(
-            I18N.tr("viewport.display_srgb", "sRGB (Standard)"))
-        self._display_srgb_action.setCheckable(True)
-        self._display_srgb_action.setChecked(initial_srgb)
-        self._display_srgb_action.triggered.connect(
-            lambda checked: self.display_srgb_changed.emit(True))
-        self._display_linear_action = display_menu.addAction(
-            I18N.tr("viewport.display_linear", "Linear (Raw)"))
-        self._display_linear_action.setCheckable(True)
-        self._display_linear_action.setChecked(not initial_srgb)
-        self._display_linear_action.triggered.connect(
-            lambda checked: self.display_srgb_changed.emit(False))
-        # Keep the two checkable actions in sync (mutually exclusive).
-        self._display_srgb_action.toggled.connect(
-            lambda checked: self._display_linear_action.setChecked(not checked))
+        display_group = QActionGroup(display_menu)
+        display_group.setExclusive(True)
+        project_action = display_menu.addAction(I18N.tr(
+            "viewport.display_project_output", "Project Output"))
+        srgb_action = display_menu.addAction(I18N.tr("viewport.display_srgb", "sRGB (Standard)"))
+        linear_action = display_menu.addAction(I18N.tr("viewport.display_linear", "Linear (Raw)"))
+        for action in (project_action, srgb_action, linear_action):
+            action.setCheckable(True)
+            display_group.addAction(action)
+        project_action.triggered.connect(viewer.use_project_output_signal)
+        srgb_action.triggered.connect(lambda checked: self.display_srgb_changed.emit(True))
+        linear_action.triggered.connect(lambda checked: self.display_srgb_changed.emit(False))
+
+        def sync_display_menu() -> None:
+            project_action.setVisible(viewer._project_output_descriptor is not None)
+            if viewer._project_output_uniforms is not None:
+                project_action.setChecked(True)
+            elif viewer._display_srgb:
+                srgb_action.setChecked(True)
+            else:
+                linear_action.setChecked(True)
+
+        display_menu.aboutToShow.connect(sync_display_menu)
         menu.addSeparator()
 
         # B2-1: preview resolution tiers. Maps onto the page's proxy_scale
@@ -1115,7 +1134,15 @@ class CompositeViewer(QOpenGLWidget):
         # working space via the active colour provider; anything that fails
         # keeps the builtin GLSL ODT in charge.
         self._display_space_descriptor = None
+        self._project_output_descriptor: ColorSpaceDescriptor | None = None
+        self._display_color = VideoDisplayColor(self, self.update)
+        self._use_display_icc = False
+        self._monitor_icc_applied = False
+        self._project_output_uniforms: tuple[int, int, tuple[float, ...]] | None = None
+        self._project_aces: ProjectAcesSettings | None = None
         self._odt_lut_tex_id = 0
+        self._aces_program_key = None
+        self._aces_tables = []
         self._odt_lut_key = None        # descriptor key of the baked LUT
         self._odt_lut_failed_key = None  # avoid re-attempting a failing bake
 
@@ -1578,14 +1605,16 @@ class CompositeViewer(QOpenGLWidget):
 
             h, w = arr.shape[:2]
             rgb = arr[:, :, :3]
-            # Renderer readback returns BGR float32 in 0..1.
+            # The fallback receives scene-linear values. Preserve shadows
+            # and highlights until the same viewer transform as the GPU path.
             if np.issubdtype(rgb.dtype, np.floating):
-                rgb = (np.clip(rgb, 0.0, 1.0) * 255.0).astype(np.uint8)
+                pixel_type = GL_FLOAT
+                rgb = rgb.astype(np.float32, copy=False)
             else:
+                pixel_type = GL_UNSIGNED_BYTE
                 rgb = np.clip(rgb, 0, 255).astype(np.uint8)
-            # CPU top-left -> GL bottom-left: flip once at upload boundary,
-            # then BGR -> RGB for OpenGL texture format
-            rgb = np.ascontiguousarray(np.flipud(rgb[:, :, [2, 1, 0]]))
+            # CPU top-left -> GL bottom-left and BGR -> RGB.
+            rgb = np.ascontiguousarray(np.flipud(rgb[:, :, ::-1]))
 
             self.makeCurrent()
             self._delete_owned_display_texture(assume_current=True)
@@ -1598,12 +1627,17 @@ class CompositeViewer(QOpenGLWidget):
             _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
             _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
             _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-            _gl.glTexImage2D(
-                GL_TEXTURE_2D, 0, GL_RGB, w, h, 0,
-                GL_RGB, GL_UNSIGNED_BYTE, rgb.ctypes.data_as(ctypes.c_void_p)
-            )
-            _gl.glBindTexture(GL_TEXTURE_2D, 0)
-            self.doneCurrent()
+            alignment = int(_gl.glGetIntegerv(GL_UNPACK_ALIGNMENT))
+            try:
+                _gl.glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+                _gl.glTexImage2D(
+                    GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0,
+                    GL_RGB, pixel_type, rgb.ctypes.data_as(ctypes.c_void_p),
+                )
+            finally:
+                _gl.glPixelStorei(GL_UNPACK_ALIGNMENT, alignment)
+                _gl.glBindTexture(GL_TEXTURE_2D, 0)
+                self.doneCurrent()
 
             self._current_tex_id = self._owned_display_tex_id
             self._tex_width = width if width > 0 else w
@@ -2981,6 +3015,8 @@ class CompositeViewer(QOpenGLWidget):
         context, so there is nothing to delete explicitly.
         """
         self._odt_lut_tex_id = 0
+        self._aces_program_key = None
+        self._aces_tables = []
         self._odt_lut_key = None
         self._odt_lut_failed_key = None
         self._current_tex_id = None
@@ -3044,6 +3080,9 @@ class CompositeViewer(QOpenGLWidget):
             # working-space switch.
             frag_src = b"""
                 #version 330
+                // PROJECT_VIDEO_SIGNAL_GLSL
+                // PROJECT_ACES_GLSL
+                // MONITOR_COLOR_GLSL
                 uniform sampler2D u_texture;
                 uniform int u_channel_mode;
                 uniform float u_exposure;
@@ -3051,7 +3090,7 @@ class CompositeViewer(QOpenGLWidget):
                 uniform float u_viewer_lift;    // CP-055: lift (raises blacks)
                 uniform float u_viewer_offset;  // CP-055: additive offset
                 uniform float u_viewer_gamma;
-                uniform int u_display_transfer;  // 0=none(linear), 1=sRGB, 2=Rec.709, 3=PQ, 4=HLG
+                uniform int u_display_transfer;  // 0=linear, 1=sRGB, 2=BT.709, 3=PQ, 4=HLG, 5=Gamma 2.4
                 uniform int u_display_primaries; // 0=BT.709, 1=BT.2020, 2=DCI-P3 (gamut of the display target)
                 uniform int u_tonemap;           // 0=off, 1=Reinhard, 2=ACES (HDR->SDR preview)
                 uniform float u_target_peak;     // SDR display peak nits for tonemap (default 100)
@@ -3060,6 +3099,7 @@ class CompositeViewer(QOpenGLWidget):
                 // baked from the active OCIO processor (working space ->
                 // display space), so preview matches OCIO-managed export.
                 uniform int u_odt_lut_active;    // 0=builtin GLSL ODT, 1=LUT
+                uniform bool u_project_output_signal;
                 uniform sampler3D u_odt_lut;
                 uniform float u_odt_lut_size;    // LUT resolution (e.g. 32)
                 // View tools (ported from Color page viewport menu bar).
@@ -3165,12 +3205,14 @@ class CompositeViewer(QOpenGLWidget):
                     if (u_viewer_offset != 0.0) {
                         rgb += vec3(u_viewer_offset);
                     }
-                    if (u_tonemap == 1) {
+                    if (!u_project_output_signal && u_tonemap == 1) {
                         rgb = tonemap_reinhard(rgb, u_target_peak);
-                    } else if (u_tonemap == 2) {
+                    } else if (!u_project_output_signal && u_tonemap == 2) {
                         rgb = tonemap_aces(rgb, u_target_peak);
                     }
-                    if (u_odt_lut_active == 1) {
+                    if (u_project_output_signal) {
+                        rgb = topos_project_output(rgb);
+                    } else if (u_odt_lut_active == 1) {
                         // OCIO path: one trilinear lookup replaces the
                         // primaries + transfer encode. Texel-centre mapping
                         // (same convention as the lut3d node). Values outside
@@ -3191,6 +3233,8 @@ class CompositeViewer(QOpenGLWidget):
                             rgb = linear_to_pq_vec3(rgb);
                         } else if (u_display_transfer == 4) {
                             rgb = linear_to_hlg_vec3(rgb);
+                        } else if (u_display_transfer == 5) {
+                            rgb = pow(max(rgb, vec3(0.0)), vec3(1.0 / 2.4));
                         }
                     }
                     if (u_viewer_gamma != 1.0) {
@@ -3246,7 +3290,7 @@ class CompositeViewer(QOpenGLWidget):
                         vec2 cell = floor(v_uv * vec2(32.0, 18.0));
                         float checker = mod(cell.x + cell.y, 2.0);
                         vec3 bg = mix(vec3(0.5), vec3(0.3), checker);
-                        vec3 out_rgb = mix(bg, process_display(rgb), color.a);
+                        vec3 out_rgb = mix(bg, topos_monitor_color(process_display(rgb)), color.a);
                         fragColor = vec4(out_rgb, 1.0);
                         return;
                     }
@@ -3257,7 +3301,7 @@ class CompositeViewer(QOpenGLWidget):
                     float ch;
                     switch (u_channel_mode) {
                         case 0:  // RGBA (normal display)
-                            fragColor = vec4(rgb, color.a);
+                            fragColor = vec4(topos_monitor_color(rgb), color.a);
                             break;
                         case 1:  // Red only
                             fragColor = vec4(rgb.r, 0.0, 0.0, 1.0);
@@ -3277,14 +3321,20 @@ class CompositeViewer(QOpenGLWidget):
                             fragColor = vec4(ch, ch, ch, 1.0);
                             break;
                         case 6:  // Alpha overlay (premultiplied display)
-                            fragColor = vec4(rgb * color.a, 1.0);
+                            fragColor = vec4(topos_monitor_color(rgb) * color.a, 1.0);
                             break;
                         default:
-                            fragColor = vec4(rgb, color.a);
+                            fragColor = vec4(topos_monitor_color(rgb), color.a);
                     }
                 }
             """
-            self._prog = self._compile_program(vert_src, frag_src)
+            frag_src = frag_src.replace(
+                b"// PROJECT_VIDEO_SIGNAL_GLSL", VIDEO_SIGNAL_GLSL.encode("ascii")
+            ).replace(b"// MONITOR_COLOR_GLSL", DISPLAY_COLOR_GLSL.encode("ascii"))
+            self._display_shader_source = (vert_src, frag_src)
+            self._prog = self._compile_program(
+                vert_src, frag_src.replace(b"// PROJECT_ACES_GLSL",
+                    b"#define topos_project_output topos_convert_video_signal"))
             if not self._prog:
                 self._init_error = "Failed to compile display shader"
                 logger.error(f"{self._init_error}, aborting GL init")
@@ -3395,6 +3445,9 @@ class CompositeViewer(QOpenGLWidget):
         _vr, _vg, _vb = self._viewport_clear_color_rgb()
         _gl.glClearColor(_vr, _vg, _vb, 1.0)
         _gl.glClear(GL_COLOR_BUFFER_BIT)
+
+        if not self._ensure_project_aces_program():
+            return
 
         if self._current_tex_id is None or self._current_tex_id <= 0:
             self._update_inspector_from_framebuffer(vp_w, vp_h)
@@ -3510,10 +3563,14 @@ class CompositeViewer(QOpenGLWidget):
         # C6-2: OCIO ODT 3D LUT (single-image 2D path). Bake is cached per
         # display-space descriptor; when unavailable the builtin GLSL ODT
         # above stays in charge (u_odt_lut_active = 0).
+        project_output_active = self._bind_project_output_signal()
+        self._monitor_icc_applied = self._display_color.bind_gl(
+            _gl, self._prog, enabled=project_output_active,
+        )
         odt_active_loc = _gl.glGetUniformLocation(self._prog, b"u_odt_lut_active")
         odt_ready = False
         if odt_active_loc >= 0:
-            if not self.is_quad_view():
+            if not project_output_active and not self.is_quad_view():
                 try:
                     odt_ready = self._ensure_odt_lut()
                 except Exception:
@@ -3748,6 +3805,7 @@ class CompositeViewer(QOpenGLWidget):
         self._end_auto_proxy_interaction()
         # C6-2: release the baked OCIO ODT LUT.
         self._delete_odt_lut_texture()
+        self._release_aces_tables()
         self._delete_owned_display_texture()
         self._delete_owned_aov_textures()
         self._delete_owned_secondary_texture()
@@ -5154,6 +5212,8 @@ class CompositeViewer(QOpenGLWidget):
         _gl.glUseProgram(self._prog)
         _gl.glEnable(GL_BLEND)
         _gl.glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        project_output_active = self._bind_project_output_signal()
+        self._display_color.bind_gl(_gl, self._prog, enabled=project_output_active)
         # The quad path uses the same fragment shader but bypasses the normal
         # paintGL display-uniform setup. Keep its 3D sampler away from TU0 too.
         odt_active_loc = _gl.glGetUniformLocation(
@@ -9233,6 +9293,10 @@ class CompositeViewer(QOpenGLWidget):
         Back-compat alias for set_display_transfer(1 if enabled else 0).
         New code should call set_display_transfer to choose sRGB vs Rec.709.
         """
+        self._project_output_uniforms = None
+        self._display_space_descriptor = None
+        self._display_primaries = 0
+        self._tonemap = 0
         self.set_display_transfer(1 if enabled else 0)
 
     def set_display_transfer(self, transfer: int) -> None:
@@ -9245,10 +9309,115 @@ class CompositeViewer(QOpenGLWidget):
                 4 = HLG (broadcast HDR target — linear→HLG OETF). Driven by
                 the color.preview.* preferences + smart default.
         """
-        self._display_transfer = max(0, min(4, int(transfer)))
+        self._display_transfer = max(0, min(5, int(transfer)))
         # Keep the legacy bool alias in sync (used by the toolbar toggle).
         self._display_srgb = self._display_transfer != 0
         self.update()
+
+    def set_display_icc_enabled(self, enabled: bool) -> None:
+        self._use_display_icc = enabled
+        self._display_color.configure(sdr_display_preset(self._project_output_descriptor), enabled)
+
+    def set_project_output_signal(
+        self, descriptor: ColorSpaceDescriptor | None, *, aces: ProjectAcesSettings | None = None,
+        luminance: VideoSignalLuminance | None = None,
+    ) -> bool:
+        """Use the full-range delivery signal for the timeline Composite viewer."""
+        if descriptor is not None and not can_render_video_signal_gl(LINEAR_SCENE, descriptor):
+            descriptor = None
+        self._project_output_descriptor = descriptor
+        self._project_aces = aces if descriptor is not None else None
+        self._project_signal_luminance = luminance
+        self.set_display_icc_enabled(self._use_display_icc)
+        self.use_project_output_signal()
+        return self._project_output_uniforms is not None
+
+    def use_project_output_signal(self) -> None:
+        """Return the viewer from a manual inspection transform to project output."""
+        descriptor = self._project_output_descriptor
+        self._project_output_uniforms = None
+        if descriptor is not None:
+            self._project_output_uniforms = (
+                aces_scene_uniforms(LINEAR_SCENE) if self._project_aces is not None
+                else video_signal_uniform_values(LINEAR_SCENE, descriptor))
+        self.update()
+
+    def _release_aces_tables(self) -> None:
+        for _, identifier in getattr(self, "_aces_tables", ()):
+            name = ctypes.c_uint(identifier)
+            _gl.glDeleteTextures(1, ctypes.byref(name))
+        self._aces_tables = []
+
+    def _ensure_project_aces_program(self) -> bool:
+        aces = self._project_aces if self._project_output_uniforms is not None else None
+        key = aces_shader_key(aces) if aces is not None else None
+        if key == self._aces_program_key:
+            return True
+
+        vert, fragment = self._display_shader_source
+        if key is None:
+            source, tables = "#define topos_project_output topos_convert_video_signal", ()
+        else:
+            source, tables = aces_shader_source(*key)
+            source += "\n#define topos_project_output topos_render_aces"
+        program = self._compile_program(
+            vert, fragment.replace(b"// PROJECT_ACES_GLSL", source.encode("ascii")))
+        if not program:
+            return False
+
+        new_tables = []
+        _gl.glActiveTexture(GL_TEXTURE0)
+        try:
+            for table in tables:
+                identifier = ctypes.c_uint()
+                _gl.glGenTextures(1, ctypes.byref(identifier))
+                new_tables.append((table.sampler.encode("ascii"), identifier.value))
+                _gl.glBindTexture(GL_TEXTURE_2D, identifier.value)
+                single = table.channels == 1
+                data = np.frombuffer(table.values, dtype=np.float32)
+                _gl.glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F if single else GL_RGB32F,
+                                 *table.size, 0, GL_RED if single else GL_RGB, GL_FLOAT, data)
+                for name in (GL_TEXTURE_WRAP_S, GL_TEXTURE_WRAP_T):
+                    _gl.glTexParameteri(GL_TEXTURE_2D, name, GL_CLAMP_TO_EDGE)
+                for name in (GL_TEXTURE_MIN_FILTER, GL_TEXTURE_MAG_FILTER):
+                    _gl.glTexParameteri(GL_TEXTURE_2D, name, GL_NEAREST)
+        except BaseException:
+            for _, identifier in new_tables:
+                _gl.glDeleteTextures(1, ctypes.byref(ctypes.c_uint(identifier)))
+            _gl.glDeleteProgram(program)
+            raise
+        finally:
+            _gl.glBindTexture(GL_TEXTURE_2D, 0)
+
+        self._release_aces_tables()
+        _gl.glDeleteProgram(self._prog)
+        self._prog = program
+        self._pos_loc = _gl.glGetAttribLocation(program, b"in_vert")
+        self._uv_loc = _gl.glGetAttribLocation(program, b"in_uv")
+        self._aces_program_key = key
+        self._aces_tables = new_tables
+        return True
+
+    def _bind_project_output_signal(self) -> bool:
+        uniforms = self._project_output_uniforms
+        loc = _gl.glGetUniformLocation(self._prog, b"u_project_output_signal")
+        _gl.glUniform1i(loc, int(uniforms is not None))
+        if uniforms is None:
+            return False
+        source, destination, matrix = uniforms
+        _gl.glUniform1i(_gl.glGetUniformLocation(self._prog, b"topos_video_src_transfer"), source)
+        _gl.glUniform1i(_gl.glGetUniformLocation(self._prog, b"topos_video_dst_transfer"), destination)
+        _gl.glUniformMatrix3fv(_gl.glGetUniformLocation(self._prog, b"topos_video_gamut"),
+                               1, GL_FALSE, (ctypes.c_float * 9)(*matrix))
+        _gl.glUniform3f(_gl.glGetUniformLocation(self._prog, b"topos_video_luminance"),
+                        *video_signal_luminance_uniform(getattr(self, "_project_signal_luminance", None)))
+        for unit, (sampler, identifier) in enumerate(self._aces_tables, start=6):
+            _gl.glActiveTexture(GL_TEXTURE0 + unit)
+            _gl.glBindTexture(GL_TEXTURE_2D, identifier)
+            _gl.glUniform1i(_gl.glGetUniformLocation(self._prog, sampler), unit)
+        if self._aces_tables:
+            _gl.glActiveTexture(GL_TEXTURE0)
+        return True
 
     def set_display_space(self, descriptor, tonemap: int = 0,
                           target_peak: float = 100.0) -> None:
@@ -9267,6 +9436,7 @@ class CompositeViewer(QOpenGLWidget):
         _TRANSFER_MODE = {
             ColorTransfer.LINEAR: 0, ColorTransfer.SRGB: 1,
             ColorTransfer.BT709: 2, ColorTransfer.PQ: 3, ColorTransfer.HLG: 4,
+            ColorTransfer.GAMMA24: 5,
         }
         _PRIMARIES_MODE = {
             ColorPrimaries.BT709: 0, ColorPrimaries.BT2020: 1,
@@ -9342,6 +9512,10 @@ class CompositeViewer(QOpenGLWidget):
         # working values exceed the [0,1] LUT domain — keep builtin math.
         try:
             from src.shared.color.types import ColorTransfer
+            if desc.transfer == ColorTransfer.GAMMA24:
+                # A uniform linear-light LUT undersamples the toe of this
+                # power curve. The analytical shader preserves dark detail.
+                return False
             if (self._tonemap == 0
                     and desc.transfer in (ColorTransfer.PQ, ColorTransfer.HLG)):
                 self._odt_lut_failed_key = key
@@ -9796,11 +9970,17 @@ class CompositeViewer(QOpenGLWidget):
         g = pixel[1] / 255.0
         b = pixel[2] / 255.0
         a = pixel[3] / 255.0
-        # Legacy path reads display-space (post-ODT) values; tag accordingly.
+        # The frame-buffer fallback reads the actual viewer output signal.
+        if self._monitor_icc_applied:
+            display_space = I18N.tr("viewport.display_monitor_rgb", "Monitor RGB")
+        elif self._project_output_uniforms is not None:
+            display_space = str(self._project_output_descriptor)
+        else:
+            display_space = "srgb" if self._display_srgb else "linear"
         self._inspector_bar.update_pixel_info(
             self._pixel_img_x, self._pixel_img_y,
             r, g, b, a, valid=True,
-            space="srgb" if self._display_srgb else "linear"
+            space=display_space,
         )
 
     def _read_linear_pixel_from_texture(self, u: float, v: float,

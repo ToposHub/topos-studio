@@ -1358,7 +1358,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self._node_thumbnail_timer.timeout.connect(
             self._refresh_node_cache_hits)
         self._node_thumbnail_timer.start()
-        self.grading_panel = GradingPanel()
+        self.grading_panel = GradingPanel(use_measured_primaries=self._use_measured_video_primaries)
         from src.shared.feature_flags import uses_image_layer_workflow
         image_workflow = uses_image_layer_workflow(self.config_manager)
         self.grade_set_model = None

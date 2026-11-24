@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.features.color.core.primary_calibration import PrimaryCalibration
+from src.features.color.core.primary_calibration import PrimaryCalibration, calibrated_grade_inputs
 from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
 from src.shared.color.lut_loader import LoadedLut, sample_lut_trilinear
 
@@ -115,3 +115,31 @@ def test_lum_mix_preserves_input_luma_after_measured_gain() -> None:
     luma = np.array([0.299, 0.587, 0.114], dtype=np.float32)
     assert (boosted @ luma > src @ luma).all()
     np.testing.assert_allclose(restored @ luma, src @ luma, atol=1e-6)
+
+
+@pytest.mark.parametrize(("params", "codes", "tolerance"), [
+    ({"hue_shift": -86.4}, [[41598, 45142, 65535], [26342, 36838, 51601], [52531, 14053, 0]], 2),
+    ({"contrast": 11.0, "pivot": 0.245},
+     [[12907, 60470, 46608], [17810, 43132, 26879], [46476, 6847, 50637]], 70),
+])
+def test_refined_primary_matches_independent_resolve_patches(
+    params: dict[str, float], codes: list[list[int]], tolerance: int,
+) -> None:
+    src = np.asarray([[13312, 58367, 44031], [19456, 41983, 27648], [46079, 9216, 50175]],
+                     dtype=np.float32) / 65535.0
+    grade = {"grading_params": {"primary_calibration_version": 2, **params}}
+    result, _ = apply_layer_grading_cpu(src**2.4, grade, width=3, height=1)
+    np.testing.assert_allclose(result**(1.0 / 2.4) * 65535.0, codes, rtol=0.0, atol=tolerance)
+    grid, _ = calibrated_grade_inputs(grade)
+    assert grid is not None and not grid.flags.writeable
+    assert calibrated_grade_inputs(grade)[0] is grid
+
+
+@pytest.mark.parametrize("params", [
+    {"temp": 1e308}, {"hue_shift": float("nan")}, {"mid_detail": float("inf")},
+    {"contrast": 15.0, "pivot": float("inf")},
+])
+def test_refined_primary_rejects_invalid_lattice_inputs(params: dict[str, float]) -> None:
+    grade = {"grading_params": {"primary_calibration_version": 2, **params}}
+    with pytest.raises(ValueError, match="Primary calibration"):
+        calibrated_grade_inputs(grade)

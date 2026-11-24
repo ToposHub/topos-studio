@@ -132,14 +132,17 @@ class KeyframeAutoRecorder:
         ``{path: [批处理条目]}``——flush 侧每路径一次 apply_intent
         （``_compound_path`` 下行），同一手势事务仍是一个历史条目。
         """
-        if not self._gesture_open:
-            return {}
+        groups = self.pending_edit_groups()
+        self._discard_gesture()
+        return groups
+
+    def pending_edit_groups(self) -> Dict[Tuple[str, ...], list]:
+        """Return the edits a preview would render without consuming the gesture."""
         groups: Dict[Tuple[str, ...], list] = {}
         frame = self._gesture_frame
+        if not self._gesture_open or frame is None:
+            return groups
         for (path, node_id, param), value in self._pending.items():
-            if frame is None:
-                logger.debug("auto-record dropped: no effective frame")
-                continue
             groups.setdefault(path, []).append({
                 "action": "set", "node_id": node_id, "param": param,
                 "frame": int(frame), "value": value,
@@ -147,7 +150,6 @@ class KeyframeAutoRecorder:
                 "interpolation": "linear",
                 **self._key_overrides.get((path, node_id, param), {}),
             })
-        self._discard_gesture()
         return groups
 
     def _discard_gesture(self) -> None:

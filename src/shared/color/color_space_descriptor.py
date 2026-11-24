@@ -29,6 +29,7 @@ maps to OCIO space names (for the OCIO provider).
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, Dict, Optional
 
@@ -73,6 +74,19 @@ class ColorSpaceDescriptor:
         )
 
     # ── OCIO mapping ─────────────────────────────────────────────────
+
+    def exact_ocio_name(self) -> str | None:
+        """Return the configured name only for a matching gamut and curve.
+
+        The legacy name lookup can substitute another gamut or transfer.
+        Managed callers must also probe the processor in their loaded config.
+        """
+        combo = (self.primaries.value, self.transfer.value)
+        if combo in {("bt709", "gamma22"), ("smpte431", "smpte2084")}:
+            return None
+        if self.primaries == ColorPrimaries.BT709 and self.is_linear:
+            return OCIO_LINEAR_NAME
+        return _OCIO_NAME_MAP.get(combo)
 
     def to_ocio_name(self) -> str:
         """Map to an OCIO color space name in the bundled config.
@@ -238,6 +252,7 @@ _OCIO_NAME_MAP: Dict[tuple, str] = {
     # BT.709 gamut
     ("bt709", "iec61966_2_1"): "srgb",          # sRGB stills
     ("bt709", "bt709"): "rec709",                # Rec.709 SDR video
+    ("bt709", "gamma24"): "rec709_g24",           # Pure display Gamma 2.4
     ("bt709", "gamma22"): "srgb",                # approx; treated as sRGB
     # ACEScg (AP1 scene-linear; to_ocio_name short-circuits for LINEAR but
     # from_ocio_name needs the reverse entry).
@@ -354,8 +369,121 @@ def descriptor_for_source_kind(is_video: bool) -> ColorSpaceDescriptor:
 
 _PROJECT_COLOR_OVERRIDES: dict = {}
 
+TIMELINE_SPACE_KEY = "color.timeline_space"
+OUTPUT_SPACE_KEY = "color.output_space"
+IMAGE_SPACE_KEY = "color.image_space"
+LEGACY_SPACE = "legacy"
+PROJECT_COLOR_SPACE_DEFAULTS = {
+    TIMELINE_SPACE_KEY: "rec709-g24",
+    OUTPUT_SPACE_KEY: "rec709-g24",
+    IMAGE_SPACE_KEY: "srgb",
+}
+COLOR_SPACE_PRESETS = {
+    "rec709-g24": ColorSpaceDescriptor(ColorPrimaries.BT709, ColorTransfer.GAMMA24),
+    "rec709-bt709": ColorSpaceDescriptor(ColorPrimaries.BT709, ColorTransfer.BT709),
+    "srgb": SRGB_IMAGE,
+    "display-p3": DISPLAY_P3_SRGB,
+    "p3-d65-g24": ColorSpaceDescriptor(ColorPrimaries.P3_DISPLAY, ColorTransfer.GAMMA24),
+    "dci-p3-g26": ColorSpaceDescriptor(ColorPrimaries.P3_DCI, ColorTransfer.GAMMA26),
+    "rec2020-g24": ColorSpaceDescriptor(ColorPrimaries.BT2020, ColorTransfer.GAMMA24),
+    "rec2020-bt2020": ColorSpaceDescriptor(ColorPrimaries.BT2020, ColorTransfer.BT2020_10),
+    "rec2100-pq": replace(HDR10_VIDEO, range=ColorRange.FULL),
+    "rec2100-hlg": replace(HLG_VIDEO, range=ColorRange.FULL),
+    "davinci-wide-gamut-intermediate": ColorSpaceDescriptor(
+        primaries=ColorPrimaries.DAVINCI_WIDE_GAMUT,
+        transfer=ColorTransfer.DAVINCI_INTERMEDIATE, range=ColorRange.FULL,
+    ),
+    "aces2065-1": ColorSpaceDescriptor(ColorPrimaries.AP0, ColorTransfer.LINEAR),
+    "acescg": ACESCG_SCENE,
+    "acescc": ColorSpaceDescriptor(ColorPrimaries.AP1, ColorTransfer.ACESCC),
+    "acescct": ColorSpaceDescriptor(ColorPrimaries.AP1, ColorTransfer.ACESCCT),
+}
+
+_LEGACY_SPACE_ROWS = {
+    TIMELINE_SPACE_KEY: "preview.timeline",
+    OUTPUT_SPACE_KEY: "output.timeline",
+    IMAGE_SPACE_KEY: "output.image",
+}
+_LEGACY_TYPES = {"primaries": ColorPrimaries, "transfer": ColorTransfer, "range": ColorRange}
+
+
+def migrate_color_space_preferences(settings: Mapping[str, Any]) -> dict[str, str]:
+    """Promote the old factory defaults and retain customized settings."""
+    choices = {}
+    for key, default in PROJECT_COLOR_SPACE_DEFAULTS.items():
+        if key in settings:
+            continue
+        customized = any(
+            settings.get(legacy_key) != factory
+            and _enum_from_value(_LEGACY_TYPES[legacy_key.rsplit("_", 1)[1]],
+                                 settings.get(legacy_key), None) is not None
+            for legacy_key, factory in _legacy_color_space_defaults(key).items()
+        )
+        choices[key] = LEGACY_SPACE if customized else default
+    return choices
+
+
+def _legacy_color_space_defaults(key: str) -> dict[str, str]:
+    row = _LEGACY_SPACE_ROWS[key]
+    is_image = row.endswith(".image")
+    return {
+        f"color.{row}_primaries": "bt709",
+        f"color.{row}_transfer": "iec61966_2_1" if is_image else "bt709",
+        f"color.{row}_range": "full" if is_image else "limited",
+    }
+
+
+def _space_selection(
+    key: str, settings: Mapping[str, Any] | None, config_manager: Any = None,
+) -> str:
+    settings = settings or {}
+    value = settings.get(key)
+    if isinstance(value, str) and (value in COLOR_SPACE_PRESETS or value == LEGACY_SPACE):
+        return value
+    if any(legacy_key in settings for legacy_key in _legacy_color_space_defaults(key)):
+        return LEGACY_SPACE
+    if config_manager is not None:
+        value = config_manager.get(key)
+        if isinstance(value, str) and (value in COLOR_SPACE_PRESETS or value == LEGACY_SPACE):
+            return value
+        legacy_values = {legacy_key: config_manager.get(legacy_key, factory)
+                         for legacy_key, factory in _legacy_color_space_defaults(key).items()}
+        return migrate_color_space_preferences(legacy_values)[key]
+    return PROJECT_COLOR_SPACE_DEFAULTS[key]
+
+
+def project_timeline_space(
+    settings: Mapping[str, Any] | None, config_manager: Any = None,
+) -> str:
+    """Return the selected video timeline space ID for a project."""
+    return _space_selection(TIMELINE_SPACE_KEY, settings, config_manager)
+
+
+def project_output_space(
+    settings: Mapping[str, Any] | None, config_manager: Any = None,
+) -> str:
+    """Return the selected video output space ID for a project."""
+    return _space_selection(OUTPUT_SPACE_KEY, settings, config_manager)
+
+
+def project_image_space(
+    settings: Mapping[str, Any] | None, config_manager: Any = None,
+) -> str:
+    """Return the selected still image output space ID for a project."""
+    return _space_selection(IMAGE_SPACE_KEY, settings, config_manager)
+
 #: 随工程持久化的 color.* 键（与 DEFAULT_CONFIG / 偏好页一致）
 COLOR_MANAGEMENT_SETTING_KEYS: tuple = (
+    *PROJECT_COLOR_SPACE_DEFAULTS,
+    "color.aces.version",
+    "color.aces.input",
+    "color.aces.reference_gamut_compression",
+    "color.hdr.input",
+    "color.hdr.reference_white",
+    "color.hdr.hlg_peak",
+    "color.hdr.monitor",
+    "color.hdr.master_peak",
+    "color.hdr.master_gamut",
     "color.preview.timeline_primaries",
     "color.preview.timeline_transfer",
     "color.preview.timeline_range",
@@ -375,7 +503,7 @@ COLOR_MANAGEMENT_SETTING_KEYS: tuple = (
 )
 
 
-def set_project_color_overrides(overrides) -> None:
+def set_project_color_overrides(overrides: Mapping[str, Any] | None) -> None:
     """注入工程级 color.* 设定（空/None 等价于清空）。"""
     global _PROJECT_COLOR_OVERRIDES
     _PROJECT_COLOR_OVERRIDES = (
@@ -392,6 +520,16 @@ def clear_project_color_overrides() -> None:
 
 def get_project_color_overrides() -> dict:
     return dict(_PROJECT_COLOR_OVERRIDES)
+
+
+def color_settings_from_config(config_manager: Any = None) -> dict[str, Any]:
+    """Capture application color defaults when creating a project."""
+    values = collect_color_management_settings() if config_manager is None else {
+        key: value for key in COLOR_MANAGEMENT_SETTING_KEYS
+        if (value := config_manager.get(key)) is not None
+    }
+    values.update(migrate_color_space_preferences(values))
+    return values
 
 
 def collect_color_management_settings() -> dict:
@@ -470,15 +608,32 @@ def descriptor_from_config(config_manager, scope: str, kind: str,
     Returns:
         A ColorSpaceDescriptor resolved from preferences.
     """
+    overrides = _PROJECT_COLOR_OVERRIDES
+
     def _cfg(key, default=None):
-        if key in _PROJECT_COLOR_OVERRIDES:
-            return _PROJECT_COLOR_OVERRIDES[key]
+        if key in overrides:
+            return overrides[key]
         if config_manager is None:
             return default
         try:
             return config_manager.get(key, default)
         except Exception:
             return default
+
+    choice_key = {
+        ("preview", "timeline"): TIMELINE_SPACE_KEY,
+        ("output", "timeline"): OUTPUT_SPACE_KEY,
+        ("output", "image"): IMAGE_SPACE_KEY,
+    }.get((scope, kind))
+    if choice_key and (choice_key in overrides or _cfg(choice_key) is not None):
+        choice = _space_selection(choice_key, overrides, config_manager)
+        if choice != LEGACY_SPACE:
+            # Timeline viewer transports a full-range RGB texture. File
+            # encoders handle their native range independently.
+            color_range = (ColorRange.LIMITED if kind == "timeline" and scope == "output"
+                           and choice not in ("aces2065-1", "acescg")
+                           else ColorRange.FULL)
+            return descriptor_for_space_preset(choice, color_range)
 
     primaries = _cfg(f"color.{scope}.{kind}_primaries")
     transfer = _cfg(f"color.{scope}.{kind}_transfer")
@@ -497,6 +652,16 @@ def descriptor_from_config(config_manager, scope: str, kind: str,
         transfer=_enum_from_value(ColorTransfer, transfer, ColorTransfer.LINEAR),
         range=_enum_from_value(ColorRange, rng, ColorRange.FULL if kind == "image" else ColorRange.LIMITED),
     )
+
+
+def descriptor_for_space_preset(
+    selection: str, color_range: ColorRange = ColorRange.FULL,
+) -> ColorSpaceDescriptor:
+    """Resolve a compact preset ID to its exact primaries and transfer."""
+    preset = COLOR_SPACE_PRESETS.get(selection)
+    if preset is None:
+        raise ValueError(f"Unknown color space preset: {selection!r}")
+    return replace(preset, range=color_range)
 
 
 def available_primaries() -> list:

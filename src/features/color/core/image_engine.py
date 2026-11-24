@@ -47,7 +47,7 @@ import os
 import logging
 import threading
 from contextlib import AbstractContextManager, nullcontext
-from typing import TYPE_CHECKING, Optional, List, Dict, Any
+from typing import TYPE_CHECKING, Optional, List, Dict, Any, Mapping
 from PyQt6.QtGui import QOpenGLContext
 from PyQt6.QtCore import (
     QObject, pyqtSignal, pyqtSlot, Qt, QThread, QEventLoop, QTimer,
@@ -65,8 +65,14 @@ from src.features.color.core.curves_soft_clip import (
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 
 if TYPE_CHECKING:
+    from src.shared.color.color_space_descriptor import ColorSpaceDescriptor
+    from src.shared.color.hdr_video_signal import ProjectHdrSettings
+    from src.shared.color.project_video_signal import ProjectAcesSettings
     from src.shared.project.color_graph import ColorGraphData
-from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX, PASSTHROUGH_FRAGMENT, SPLIT_VIEW_FRAGMENT, ROTATION_PREVIEW_VERTEX, ROTATION_PREVIEW_FRAGMENT
+from src.features.color.shaders.shaders import (
+    DESKTOP_PASSTHROUGH_FRAGMENT, PASSTHROUGH_VERTEX, PASSTHROUGH_FRAGMENT, SPLIT_VIEW_FRAGMENT,
+    ROTATION_PREVIEW_VERTEX, ROTATION_PREVIEW_FRAGMENT,
+)
 from src.features.color.core.shader_compiler import ShaderPipeline
 from src.features.color.core.async_renderer import AsyncRenderer, RenderCommand
 from src.features.color.core.color_output import ColorOutput
@@ -830,9 +836,9 @@ class ImageEngine(QObject, WindowRasterizer):
         """
         self._active_color_graph = graph
         self._active_graph_stack_id = str(stack_id or "")
-        key = (id(graph), getattr(graph, "graph_revision", 0))
+        key = (id(graph), getattr(graph, "graph_revision", 0), self._active_graph_stack_id)
         if key != getattr(self, '_active_graph_key', None):
-            self._warper_preview_graph = None
+            self._color_graph_preview = None
             self._active_graph_key = key
             self._color_graph_revision = int(
                 getattr(self, '_color_graph_revision', 0)) + 1
@@ -840,8 +846,9 @@ class ImageEngine(QObject, WindowRasterizer):
 
     def clear_active_color_graph(self) -> None:
         """清除活动图（clip 切换到无图栈：scope/渲染回 legacy layers）。"""
-        if getattr(self, '_active_color_graph', None) is not None:
-            self._warper_preview_graph = None
+        if (getattr(self, '_active_color_graph', None) is not None or
+                self.__dict__.get('_color_graph_preview') is not None):
+            self._color_graph_preview = None
             self._active_color_graph = None
             self._active_graph_stack_id = ""
             self._active_graph_key = None
@@ -869,7 +876,8 @@ class ImageEngine(QObject, WindowRasterizer):
         图本体与帧无关（temporal 缓存未落地），帧号身份由
         ``ScopeSampleIdentity.frame`` 承载——plan 缓存在播放期间保持命中。
         """
-        graph = self.__dict__.get('_warper_preview_graph') or getattr(self, '_active_color_graph', None)
+        preview = self.__dict__.get('_color_graph_preview')
+        graph, patch = preview if preview is not None else (self.active_color_graph, None)
         if graph is None:
             return None
         cache = getattr(self, '_active_graph_snapshot_cache', None)
@@ -881,17 +889,44 @@ class ImageEngine(QObject, WindowRasterizer):
             session_id=self.active_color_graph_stack_id,
             source_frame=0,
             source_content_revision=self.color_graph_revision,
+            preview_grade=patch,
         )
         self._active_graph_snapshot_cache = snapshot
         return snapshot
 
-    def set_warper_preview_graph(self, graph: "ColorGraphData | None") -> None:
-        """Install or clear a render-only Warper draft for the current bound graph."""
-        if self.__dict__.get('_warper_preview_graph') is graph:
+    def set_color_graph_preview(
+        self, graph: "ColorGraphData | None", *,
+        preview_grade: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
+        """Publish a render-only draft without replacing the committed graph."""
+        if graph is None and self.__dict__.get('_color_graph_preview') is None:
             return
-        self._warper_preview_graph = graph
+        self._color_graph_preview = (
+            (graph, {node_id: dict(patch) for node_id, patch in (preview_grade or {}).items()})
+            if graph is not None else None)
         self._active_graph_snapshot_cache = None
         self._color_graph_revision = self.color_graph_revision + 1
+
+    def set_project_viewer_signal(
+        self, spaces: "tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None",
+        *,
+        aces: "ProjectAcesSettings | None" = None,
+        input_space: "ColorSpaceDescriptor | None" = None,
+        hdr: "ProjectHdrSettings | None" = None,
+    ) -> bool:
+        """Capture the active timeline clip's immutable signal descriptors."""
+        if (spaces, aces, input_space, hdr) == (
+            self.__dict__.get('_project_viewer_signal'),
+            self.__dict__.get('_project_viewer_aces'),
+            self.__dict__.get('_project_input_space'),
+            self.__dict__.get('_project_viewer_hdr'),
+        ):
+            return False
+        self._project_viewer_signal = spaces
+        self._project_viewer_aces = aces
+        self._project_input_space = input_space
+        self._project_viewer_hdr = hdr
+        return True
 
     def _attach_color_graph_params(self, render_params: dict,
                                    *, execute: bool = False) -> None:
@@ -902,6 +937,19 @@ class ImageEngine(QObject, WindowRasterizer):
         scope lane（S04）自行置位；生产默认保持 legacy 循环，
         ``TOPOS_COLOR_GRAPH_RENDER`` 开启后 front/color output 切图执行。
         """
+        spaces = self.__dict__.get('_project_viewer_signal')
+        aces = self.__dict__.get('_project_viewer_aces')
+        hdr = self.__dict__.get('_project_viewer_hdr')
+        if spaces is not None and (spaces[0] != spaces[1] or aces is not None or hdr is not None):
+            render_params['project_viewer_signal'] = spaces
+            if aces is not None:
+                render_params['project_viewer_aces'] = aces
+            if hdr is not None:
+                render_params['project_viewer_hdr'] = hdr
+            if aces is not None or hdr is not None:
+                source = self.__dict__.get('_project_input_space')
+                if source is not None:
+                    render_params['project_input_signal'] = (source, spaces[0])
         snapshot = self.active_color_graph_snapshot()
         if snapshot is not None:
             render_params['color_graph_snapshot'] = snapshot
@@ -927,7 +975,7 @@ class ImageEngine(QObject, WindowRasterizer):
                         working_color_context=(
                             snapshot.working_color_context),
                     ))
-            if execute:
+            if execute or self.__dict__.get('_color_graph_preview') is not None:
                 render_params['color_graph_execute'] = True
 
     @property
@@ -3992,7 +4040,8 @@ class ImageEngine(QObject, WindowRasterizer):
             )
             return True
 
-    def _draw_background_tex_id(self, tex_id, viewport_size, src_rect=None, rotation_angle=0.0, letterbox=False, presentation_size=None):
+    def _draw_background_tex_id(self, tex_id, viewport_size, src_rect=None, rotation_angle=0.0,
+                                letterbox=False, presentation_size=None, *, desktop_display=None):
         """Draw background texture with optional rotation for crop preview.
 
         Args:
@@ -4028,12 +4077,14 @@ class ImageEngine(QObject, WindowRasterizer):
                 rotation_angle,
                 letterbox,
                 presentation_size,
+                **({"desktop_display": desktop_display} if desktop_display is not None else {}),
             )
             return True
         finally:
             mutex.unlock()
 
-    def _do_draw_background_tex_id(self, tex_id, viewport_size, src_rect=None, rotation_angle=0.0, letterbox=False, presentation_size=None) -> None:
+    def _do_draw_background_tex_id(self, tex_id, viewport_size, src_rect=None, rotation_angle=0.0,
+                                   letterbox=False, presentation_size=None, *, desktop_display=None) -> None:
         """Blit a GL texture to the current context's default framebuffer.
 
         调用方必须已持有共享 GL mutex（见 _draw_background_tex_id）。
@@ -4118,17 +4169,27 @@ class ImageEngine(QObject, WindowRasterizer):
             vertices = np.array([-1.0, 1.0, 0.0, 1.0, -1.0, -1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 0.0], dtype='f4')
             self.quad_vbo.write(vertices)
 
+        # Scope/thumbnail draws reach this same helper without a desktop
+        # presenter, so explicitly disable the device conversion for them.
+        from src.shared.color.video_signal_gl import bind_video_signal_transform
+
         if self.split_view_active and self.renderer:
             original_tex_id = self.renderer.get_original_texture_id(self.current_lod)
             if original_tex_id is not None:
+                aces = self.__dict__.get("_project_viewer_aces") if desktop_display is not None else None
+                input_space = self.__dict__.get("_project_input_space")
+                program, vao = self.split_prog, self.split_vao
+                if aces is not None and input_space is not None:
+                    program, vao, tables = self._aces_split_resources(aces)
+                    tables.bind(program, first_unit=6)
                 gl.glActiveTexture(0x84C0); gl.glBindTexture(0x0DE1, tex_id)
                 gl.glActiveTexture(0x84C1); gl.glBindTexture(0x0DE1, original_tex_id)
-                self.split_prog['u_tex_current'].value = 0
-                self.split_prog['u_tex_original'].value = 1
-                self.split_prog['u_split_pos'].value = self.split_position
+                program['u_tex_current'].value = 0
+                program['u_tex_original'].value = 1
+                program['u_split_pos'].value = self.split_position
                 # F4.3: 对比模式（0=split wipe / 1=difference）
                 try:
-                    self.split_prog['u_compare_mode'].value = (
+                    program['u_compare_mode'].value = (
                         1 if getattr(self, "compare_mode", "split")
                         == "difference" else 0)
                 except KeyError:
@@ -4138,9 +4199,34 @@ class ImageEngine(QObject, WindowRasterizer):
                     vx, vy, vw, vh = self.visible_rect
                     if vw <= 1.0 or vh <= 1.0: vx, vy, vw, vh = 0.0, 0.0, float(w), float(h)
                     uv_rect = (vx / w, (vy + vh) / h, vw / w, -vh / h)
-                    self.split_prog['u_uv_rect'].value = uv_rect
-                else: self.split_prog['u_uv_rect'].value = (0.0, 1.0, 1.0, -1.0)
-                self.split_vao.render(moderngl.TRIANGLE_STRIP)
+                    program['u_uv_rect'].value = uv_rect
+                else: program['u_uv_rect'].value = (0.0, 1.0, 1.0, -1.0)
+                program["topos_monitor_icc_enabled"].value = False
+                signal = self.__dict__.get("_project_viewer_signal")
+                use_signal = desktop_display is not None and signal is not None and signal[0] != signal[1]
+                hdr = self.__dict__.get("_project_viewer_hdr") if desktop_display is not None else None
+                use_signal = use_signal or (hdr is not None and signal is not None and input_space is not None)
+                program["topos_split_convert_original"].value = use_signal
+                if use_signal:
+                    if aces is not None and input_space is not None:
+                        from src.shared.color.color_space_descriptor import ACESCG_SCENE
+
+                        bind_video_signal_transform(
+                            program, input_space, ACESCG_SCENE,
+                            reference_gamut_compression=aces.reference_gamut_compression,
+                        )
+                        program["u_aces_cc_floor"].value = signal[0].transfer.value == "acescc"
+                    elif hdr is not None and input_space is not None:
+                        from src.shared.color.hdr_video_signal import hdr_monitor_space
+
+                        bind_video_signal_transform(
+                            program, input_space, hdr_monitor_space(signal[1], hdr), luminance=hdr.luminance,
+                        )
+                    else:
+                        bind_video_signal_transform(program, *signal)
+                if desktop_display is not None:
+                    desktop_display.bind_moderngl(program, True)
+                vao.render(moderngl.TRIANGLE_STRIP)
                 gl.glActiveTexture(0x84C1); gl.glBindTexture(0x0DE1, 0)
                 gl.glActiveTexture(0x84C0); gl.glBindTexture(0x0DE1, 0)
                 return
@@ -4159,11 +4245,19 @@ class ImageEngine(QObject, WindowRasterizer):
             viewport_aspect = float(vp_w) / float(vp_h) if vp_h > 0 else 1.0
             
             self.rotation_prog['u_viewport_aspect'].value = float(viewport_aspect)
+            self.rotation_prog["topos_monitor_icc_enabled"].value = False
+            if desktop_display is not None:
+                desktop_display.bind_moderngl(self.rotation_prog, True)
             self.rotation_vao.render(moderngl.TRIANGLE_STRIP)
         else:
-            self.passthrough_prog['u_texture'].value = 0
-            self.quad_vao.render(moderngl.TRIANGLE_STRIP)
-        
+            if desktop_display is not None:
+                self.desktop_prog["u_texture"].value = 0
+                desktop_display.bind_moderngl(self.desktop_prog, True)
+                self.desktop_vao.render(moderngl.TRIANGLE_STRIP)
+            else:
+                self.passthrough_prog["u_texture"].value = 0
+                self.quad_vao.render(moderngl.TRIANGLE_STRIP)
+
         gl.glBindTexture(0x0DE1, 0)
 
     def render_scope_view(self, max_dim: int = 512) -> Optional[np.ndarray]:
@@ -4343,6 +4437,48 @@ class ImageEngine(QObject, WindowRasterizer):
         """
         return self.render_cached_image(target_size)
 
+    def _aces_split_resources(self, aces: "ProjectAcesSettings") -> tuple[Any, Any, Any]:
+        from src.shared.color.aces_video_gl import AcesShaderTextures, aces_shader_key, aces_shader_source
+        from src.shared.color.desktop_video_color import DISPLAY_COLOR_TEXTURE_UNIT
+
+        key = aces_shader_key(aces)
+        cached = self.__dict__.get("_aces_split")
+        if cached is not None and cached[0] == key:
+            return cached[1:]
+        source, tables = aces_shader_source(*key)
+        fragment = SPLIT_VIEW_FRAGMENT.replace(
+            "uniform bool topos_split_convert_original;",
+            source + "\nuniform bool u_aces_cc_floor;\nuniform bool topos_split_convert_original;",
+        ).replace(
+            "original.rgb = topos_convert_video_signal(original.rgb);",
+            """vec3 scene = topos_convert_video_signal(original.rgb);
+               if (u_aces_cc_floor) scene = max(scene, 0.0);
+               original.rgb = topos_aces_ocio(vec4(scene, 1.0)).rgb;""",
+        )
+        ctx = self.gl_manager.ctx
+        program = ctx.program(vertex_shader=PASSTHROUGH_VERTEX, fragment_shader=fragment)
+        vao = None
+        try:
+            program["topos_monitor_icc_lut"].value = DISPLAY_COLOR_TEXTURE_UNIT
+            vao = ctx.vertex_array(program, [(self.quad_vbo, "2f 2f", "in_vert", "in_texcoord")])
+            textures = AcesShaderTextures(ctx, tables)
+        except BaseException:
+            if vao is not None:
+                vao.release()
+            program.release()
+            raise
+        if cached is not None:
+            self.release_aces_split_resources()
+        self._aces_split = (key, program, vao, textures)
+        return program, vao, textures
+
+    def release_aces_split_resources(self) -> None:
+        """Release the split-view ODT with the viewport context current."""
+        cached = self.__dict__.pop("_aces_split", None)
+        if cached is not None:
+            for resource in reversed(cached[1:]):
+                resource.release()
+
     def _init_gl_resources(self) -> None:
         """Create the UI-thread GL resources (idempotent).
 
@@ -4352,13 +4488,27 @@ class ImageEngine(QObject, WindowRasterizer):
         """
         if self.passthrough_prog: return
         self.pipeline = ShaderPipeline(self.gl_manager.ctx)
-        self.passthrough_prog = self.gl_manager.ctx.program(vertex_shader=PASSTHROUGH_VERTEX, fragment_shader=PASSTHROUGH_FRAGMENT)
-        self.split_prog = self.gl_manager.ctx.program(vertex_shader=PASSTHROUGH_VERTEX, fragment_shader=SPLIT_VIEW_FRAGMENT)
-        # Rotation preview shader for crop tool - uses vertex-space rotation with viewport aspect ratio correction
-        self.rotation_prog = self.gl_manager.ctx.program(vertex_shader=ROTATION_PREVIEW_VERTEX, fragment_shader=ROTATION_PREVIEW_FRAGMENT)
-        vertices = np.array([-1.0, 1.0, 0.0, 1.0, -1.0, -1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 0.0], dtype='f4')
-        self.quad_vbo = self.gl_manager.ctx.buffer(vertices)
-        self.quad_vao = self.gl_manager.ctx.vertex_array(self.passthrough_prog, [(self.quad_vbo, '2f 2f', 'in_vert', 'in_texcoord')])
+        from src.shared.color.desktop_video_color import DISPLAY_COLOR_TEXTURE_UNIT
+
+        ctx = self.gl_manager.ctx
+        self.passthrough_prog = ctx.program(
+            vertex_shader=PASSTHROUGH_VERTEX, fragment_shader=PASSTHROUGH_FRAGMENT)
+        self.desktop_prog = ctx.program(
+            vertex_shader=PASSTHROUGH_VERTEX, fragment_shader=DESKTOP_PASSTHROUGH_FRAGMENT)
+        self.split_prog = ctx.program(
+            vertex_shader=PASSTHROUGH_VERTEX, fragment_shader=SPLIT_VIEW_FRAGMENT)
+        self.rotation_prog = ctx.program(
+            vertex_shader=ROTATION_PREVIEW_VERTEX, fragment_shader=ROTATION_PREVIEW_FRAGMENT)
+        for program in (self.desktop_prog, self.split_prog, self.rotation_prog):
+            program["topos_monitor_icc_lut"].value = DISPLAY_COLOR_TEXTURE_UNIT
+
+        vertices = np.array([
+            -1.0, 1.0, 0.0, 1.0, -1.0, -1.0, 0.0, 0.0,
+             1.0, 1.0, 1.0, 1.0,  1.0, -1.0, 1.0, 0.0,
+        ], dtype="f4")
+        self.quad_vbo = ctx.buffer(vertices)
+        self.quad_vao = ctx.vertex_array(self.passthrough_prog, [(self.quad_vbo, '2f 2f', 'in_vert', 'in_texcoord')])
+        self.desktop_vao = ctx.vertex_array(self.desktop_prog, [(self.quad_vbo, '2f 2f', 'in_vert', 'in_texcoord')])
         self.split_vao = self.gl_manager.ctx.vertex_array(self.split_prog, [(self.quad_vbo, '2f 2f', 'in_vert', 'in_texcoord')])
         self.rotation_vao = self.gl_manager.ctx.vertex_array(self.rotation_prog, [(self.quad_vbo, '2f 2f', 'in_vert', 'in_texcoord')])
         

@@ -96,5 +96,6 @@ class TestCloseWiring:
         host._has_unsaved_changes.return_value = False
         host._current_edit_project_filepath = None
         host.edit_project_io = None
+        host.grade_set_panel = None
         assert EditControllerMixin._close_current_project(host) is True
         assert get_project_color_overrides() == {}

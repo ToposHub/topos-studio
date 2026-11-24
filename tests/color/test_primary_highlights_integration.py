@@ -64,6 +64,40 @@ def test_highlights_reach_preview_and_save_once_at_gesture_end(qapp, image_engin
         panel.deleteLater()
 
 
+@pytest.mark.parametrize("control", ["temp", "log_shadow"])
+def test_first_legacy_video_primary_edit_saves_profile_at_gesture_end(qtbot, image_engine, control: str) -> None:
+    from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
+
+    panel = GradingPanel(use_measured_primaries=lambda: True)
+    qtbot.addWidget(panel)
+    image_engine.img_full_original = np.full((2, 2, 3), 0.5, np.float32)
+    host = _Host(image_engine, panel)
+    layer = image_engine.get_active_layer()
+    panel.load_extended_params(layer.grading_params)
+    panel.current_stack_id = "clip-a"
+    panel.grading_changed.connect(host.on_grading_changed)
+    panel.grading_extended_changed.connect(host.on_grading_extended_changed)
+    host.on_grading_extended_changed(panel.get_extended_params())
+    assert layer.grading_params[PRIMARY_CALIBRATION_VERSION_KEY] == 0
+    host._setup_grading_save_callback("clip-a")
+
+    if control == "temp":
+        panel.temp_slider.spin.setValue(500.0)
+    else:
+        panel.log_shadow_wheel._r_drag.setValue(0.10)
+    panel.flush_pending_changes()
+    assert layer.grading_params[PRIMARY_CALIBRATION_VERSION_KEY] == 2
+    assert panel.pending_primary_calibration_version == 0
+    host._on_grading_changed_for_color_stack.assert_not_called()
+
+    panel.interaction_ended.emit()
+    host._on_grading_changed_for_color_stack.assert_called_once()
+    stack_id, saved = host._on_grading_changed_for_color_stack.call_args.args
+    assert stack_id == "clip-a"
+    assert saved[PRIMARY_CALIBRATION_VERSION_KEY] == 2
+    assert saved[control] == layer.grading_params[control]
+
+
 def test_highlights_survive_serialization_and_clip_switch(qapp, image_engine) -> None:
     panel = GradingPanel()
     hydrator = ColorStackHydrator()

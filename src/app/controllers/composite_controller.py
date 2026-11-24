@@ -1042,27 +1042,6 @@ class CompositeControllerMixin:
         return available
 
     def _on_composite_render_output(self, node_id: str) -> None:
-        # M19.2：三页统一工程色彩上下文——Composite 渲染输出前确保
-        # 工程级 color.* 覆盖层已注入（与 Edit 加载路径同一入口），使
-        # descriptor_from_config 三页读出同一工作/显示配置。
-        try:
-            from src.shared.color.color_space_descriptor import (
-                apply_project_color_context,
-            )
-            project = getattr(self, "current_edit_project", None) \
-                or getattr(self, "_current_edit_project", None)
-            settings = (getattr(project, "render_cache_settings", None)
-                        or {})
-            # 工程色彩管理载荷在 EditProjectIO 加载时经 converter 注入
-            # 进程层；此处幂等重放（空载荷=清空回全局默认）
-            color_mgmt = None
-            getter = getattr(self, "get_project_color_management", None)
-            if callable(getter):
-                color_mgmt = getter()
-            apply_project_color_context(color_mgmt or {})
-        except Exception:  # noqa: BLE001 — 注入失败回全局默认（已有日志路径）
-            pass
-
         """Handle the Output node "Render Output" button.
 
         Detects the composite mode (image/video), opens the dedicated render

@@ -219,6 +219,11 @@ class TestShaderContents:
 
     def test_viewport_shader_compiles_as_glsl(self):
         """Compile the viewport display shader in a real GL 3.3 context."""
+        from src.shared.color.color_space_descriptor import LINEAR_SCENE, descriptor_for_space_preset
+        from src.shared.color.color_transform_provider import BuiltinColorProvider
+        from src.shared.color.desktop_video_color import DISPLAY_COLOR_GLSL, DISPLAY_COLOR_TEXTURE_UNIT
+        from src.shared.color.video_signal_gl import VIDEO_SIGNAL_GLSL, bind_video_signal_transform
+
         try:
             import moderngl
             ctx = moderngl.create_standalone_context()
@@ -227,6 +232,9 @@ class TestShaderContents:
         with open("src/features/composite/ui/composite_viewport.py", "rb") as f:
             src = f.read()
         frag = re.search(rb'frag_src = b"""(.*?)"""', src, re.DOTALL).group(1).decode()
+        frag = (frag.replace("// PROJECT_VIDEO_SIGNAL_GLSL", VIDEO_SIGNAL_GLSL)
+                .replace("// PROJECT_ACES_GLSL", "#define topos_project_output topos_convert_video_signal")
+                .replace("// MONITOR_COLOR_GLSL", DISPLAY_COLOR_GLSL))
         vert = """
 #version 330
 out vec2 v_uv;
@@ -237,13 +245,35 @@ void main() {
 }
 """
         prog = ctx.program(vertex_shader=vert, fragment_shader=frag)
-        uniforms = set(prog)
-        for u in ("u_display_transfer", "u_display_primaries",
-                  "u_tonemap", "u_target_peak"):
-            assert u in uniforms, f"shader missing uniform {u}"
-        prog.release()
-        ctx.release()
-
+        image = np.asarray([[[0.2, 0.45, 0.05, 1.0], [1.02, -0.01, 0.4, 1.0]]], dtype=np.float32)
+        source = ctx.texture((2, 1), 4, image.tobytes(), dtype="f4")
+        target = ctx.texture((2, 1), 4, dtype="f4")
+        fbo = ctx.framebuffer([target])
+        vao = ctx.vertex_array(prog, [])
+        try:
+            uniforms = set(prog)
+            for u in ("u_display_transfer", "u_display_primaries", "u_tonemap", "u_target_peak"):
+                assert u in uniforms, f"shader missing uniform {u}"
+            prog["u_project_output_signal"].value = True
+            prog["u_viewer_gain"].value = 1.0
+            prog["u_viewer_gamma"].value = 1.0
+            prog["u_odt_lut"].value = 2
+            prog["topos_monitor_icc_lut"].value = DISPLAY_COLOR_TEXTURE_UNIT
+            space = descriptor_for_space_preset("dci-p3-g26")
+            bind_video_signal_transform(prog, LINEAR_SCENE, space)
+            source.use(0)
+            fbo.use()
+            vao.render(vertices=3)
+            actual = np.frombuffer(target.read(), dtype=np.float32).reshape(image.shape)
+            expected = BuiltinColorProvider().transform_signal(image, LINEAR_SCENE, space)
+            np.testing.assert_allclose(actual, expected, rtol=0, atol=3e-6)
+        finally:
+            vao.release()
+            fbo.release()
+            target.release()
+            source.release()
+            prog.release()
+            ctx.release()
     def test_cs_transform_shader_compiles_as_glsl(self):
         """Compile the cs_transform shader in a real GL 3.3 context."""
         try:
@@ -251,8 +281,9 @@ void main() {
             ctx = moderngl.create_standalone_context()
         except Exception as e:
             pytest.skip(f"Cannot create standalone GL context: {e}")
-        src = open("src/features/composite/core/shaders.py").read()
-        frag = re.search(r'_CS_TRANSFORM_FRAGMENT = """(.*?)"""', src, re.S).group(1)
+        from src.features.composite.core.shaders import _CS_TRANSFORM_FRAGMENT
+
+        frag = _CS_TRANSFORM_FRAGMENT
         vert = """
 #version 330
 out vec2 v_uv;

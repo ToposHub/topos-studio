@@ -8,9 +8,8 @@
 
 三条交付路径的能力现状（与实现一一对应，勿凭感觉改）：
 - still（Color 页静态图导出）：GPU 全分辨率管线，全部 ``full``；
-- video（时间线视频导出）：CPU numpy 管线只应用平铺 ``grading_params``
-  中的逐像素项（``timeline_export._apply_color_grade``），其余全部
-  ``dropped``；纹理类（mid_detail/sharpness）虽在参数里但 CPU 实现不消费；
+- video（时间线视频导出）：CPU 管线应用支持的调色图和调色栈参数，
+  包括整帧中间细节；锐化仍属于此路径不支持的纹理参数；
 - lut（.cube/.3dl 导出）：``LutExporter.EXPORTABLE_OPERATIONS`` 烘焙，
   空间/纹理类 ``dropped``（见 ``NON_EXPORTABLE_OPERATIONS``）。
 
@@ -64,8 +63,12 @@ _OPERATIONS: Dict[str, Dict[str, str]] = {
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_BAKED,
     },
     "texture": {
-        "label_key": "delivery.op_texture", "label": "中间细节 / 锐化",
+        "label_key": "raw.sharpness", "label": "锐化",
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_DROPPED, TARGET_LUT: DELIVERY_DROPPED,
+    },
+    "mid_detail": {
+        "label_key": "grading.mid_det", "label": "中间细节",
+        TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_DROPPED,
     },
     "curves": {
         "label_key": "delivery.op_curves", "label": "RGB 曲线",
@@ -245,10 +248,10 @@ def _layer_operations(data: Dict[str, Any]) -> set:
            for name, default in _SCALAR_DEFAULTS.items()
            if name not in _TEXTURE_KEYS):
         ops.add("primary")
-    if any(_changed(gp.get(name, default), default)
-           for name, default in _SCALAR_DEFAULTS.items()
-           if name in _TEXTURE_KEYS):
+    if _changed(gp.get("sharpness", 0.0), 0.0):
         ops.add("texture")
+    if _changed(gp.get("mid_detail", 0.0), 0.0):
+        ops.add("mid_detail")
     for key, op in (("curves_data", "curves"), ("curves_lut", "curves"),
                     ("hsl_curve_data", "hsl_curves"), ("hsl_curve_lut", "hsl_curves")):
         if data.get(key):
@@ -720,6 +723,8 @@ CONSUMER_CAPABILITY_MATRIX: Dict[str, Dict[str, str]] = {
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL},
     "texture":        {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED},
+    "mid_detail":     {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,
+                       "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL},
     "curves":         {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED,
                        "lut_export": CAP_BAKED},

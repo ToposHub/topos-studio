@@ -33,11 +33,12 @@ from __future__ import annotations
 
 import copy as copy_mod
 import logging
+import math
 import os
 import time
 import weakref
 
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 # G06：抓帧会话契约（请求／阶段复核／取消令牌）
 from src.features.color.core.gallery_capture_service import (
@@ -64,7 +65,10 @@ from src.features.color.core.layer import (
 )
 from src.features.color.core.curves_calibration import curves_calibration_enabled
 from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
-from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
+from src.features.color.core.primary_calibration import (
+    PRIMARY_CALIBRATION_CURRENT_VERSION, PRIMARY_CALIBRATION_VERSION_KEY,
+    ungraded_primary_params,
+)
 
 
 def _scope_diag():
@@ -194,12 +198,7 @@ class LayerOpsMixin:
         # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix）必须
         # 随层回填：缺失键补默认值。否则切层/撤销/切节点后扩展控件残留
         # 上一目标的值，下一次交互会把陈旧整包写进新层（跨目标污染）。
-        from src.features.color.core.layer import default_extended_grading_params
-        defaults = default_extended_grading_params()
-        self.grading_panel.set_extended_params(
-            {key: p.get(key, default) for key, default in defaults.items()},
-            emit=False,
-        )
+        self.grading_panel.load_extended_params(p, animated=bool(layer.grade_keyframes))
         tonal_panel = getattr(self.grading_panel, 'tonal_saturation_panel', None)
         if tonal_panel is not None:
             tonal_panel.set_params(
@@ -2760,6 +2759,53 @@ class LayerOpsMixin:
     # 是 layer.DEFAULT_EXTENDED_GRADING_PARAMS 的键序，此处直接派生。
     _GRADING_EXTENDED_KEYS = tuple(DEFAULT_EXTENDED_GRADING_PARAMS.keys())
 
+    def _use_measured_video_primaries(self) -> bool:
+        """Choose the calibration from the grading domain of the active video project."""
+        from src.features.color.core.color_node_color_space import node_color_is_identity
+        from src.shared.color.color_space_descriptor import TIMELINE_SPACE_KEY, project_timeline_space
+
+        if not self._is_video_work_mode():
+            return False
+        project = getattr(self, "_current_edit_project", None)
+        if project is None:
+            return project_timeline_space(None, getattr(self, "config_manager", None)) == "rec709-g24"
+        if project.color_management.get(TIMELINE_SPACE_KEY) != "rec709-g24":
+            return False
+        stack_id = getattr(getattr(self, "grading_panel", None), "current_stack_id", None)
+        stack = project.color_stacks.get(stack_id)
+        if stack is not None and stack.source_kind in ("media_pool_asset", "standalone_image"):
+            return False
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is not None and graph_host.bound_stack_id == stack_id:
+            handle = graph_host.panel_host.active_handle
+            if handle is not None:
+                color = handle.params.get("color")
+                return handle.node_type == "corrector" and (
+                    not isinstance(color, Mapping) or node_color_is_identity(
+                        color.get("color_space"), color.get("gamma")))
+        return True
+
+    def _pending_primary_calibration(self, current: dict[str, Any]) -> int:
+        panel = getattr(self, "grading_panel", None)
+        version = getattr(panel, "pending_primary_calibration_version", 0)
+        if version == PRIMARY_CALIBRATION_CURRENT_VERSION and ungraded_primary_params(current):
+            return version
+        return 0
+
+    def _begin_legacy_primary_grade(self, patch: dict[str, Any]) -> None:
+        """Persist the displayed profile before the first real legacy-engine edit."""
+        panel = getattr(self, "grading_panel", None)
+        if getattr(panel, "pending_primary_calibration_version", 0) != PRIMARY_CALIBRATION_CURRENT_VERSION:
+            return
+        layer = self.engine.get_active_layer()
+        if layer is None or layer.grade_keyframes:
+            return
+        current = layer.grading_params
+        version = self._pending_primary_calibration(current)
+        if version and not ungraded_primary_params({**current, **patch}):
+            self.engine.update_grading_params({PRIMARY_CALIBRATION_VERSION_KEY: version})
+            panel.confirm_primary_calibration(version)
+
     @staticmethod
     def _grade_value_equal(graph_value, panel_value) -> bool:
         """图侧（常存 list）与面板（常发 tuple）的等值比较。
@@ -2770,6 +2816,8 @@ class LayerOpsMixin:
         if isinstance(graph_value, (list, tuple)) \
                 and isinstance(panel_value, (list, tuple)):
             return tuple(graph_value) == tuple(panel_value)
+        if isinstance(graph_value, (float, int)) and isinstance(panel_value, (float, int)):
+            return math.isclose(graph_value, panel_value, rel_tol=0.0, abs_tol=1e-9)
         return graph_value == panel_value
 
     def on_grading_changed(self, *args) -> None:
@@ -2783,7 +2831,8 @@ class LayerOpsMixin:
             *args: lift/gamma/gain/exposure/temp/tint/contrast/shadow/
                 saturation/vibrance/mid_detail/hue_shift/highlights 依次取值。
         """
-        if self.engine.get_current_image() is None: return
+        if getattr(self, "_color_stack_hydration_in_progress", False):
+            return
         # B06.2 图编辑上下文（节点面板选中 Corrector，或 B16.5 flag 下
         # 图链接栈）：grade 手势经图事务（一次手势一个 command），legacy
         # 引擎通道同值预览。无法定位目标节点（如复杂图 stale 层）时回
@@ -2792,6 +2841,9 @@ class LayerOpsMixin:
         if graph_host is not None and graph_host.graph_edit_context_active():
             if self._route_grading_to_graph(graph_host, args):
                 return
+        if self.engine.get_current_image() is None:
+            return
+        self._begin_legacy_primary_grade(dict(zip(self._GRADING_SIGNAL_KEYS, args)))
         self.engine.grade_image(*args)
         # P1-COLOR-03: 关键帧模式下 / 参数已动画时，把修改记录为当前帧关键帧
         self._maybe_record_grade_keyframes(args)
@@ -2826,15 +2878,27 @@ class LayerOpsMixin:
             self._graph_gesture_tid = f"grading-{counter}"
             graph_host.begin_grade_gesture(self._graph_gesture_tid)
         current = graph_host.panel_grade_params() or {}
+        accepted = False
         for name, value in zip(self._GRADING_SIGNAL_KEYS, args):
-            if self._grade_value_equal(current.get(name), value):
+            default = (0.0, 0.0, 0.0) if isinstance(value, (tuple, list)) else 0.0
+            if self._grade_value_equal(current.get(name, default), value):
                 continue
             patch_value = (value if isinstance(value, (tuple, list))
                            else float(value))
-            graph_host.submit_grade_change(
-                node_id, name, patch_value, self._graph_gesture_tid)
-        graph_host.align_engine_active_layer(node_id)
-        self.engine.grade_image(*args)
+            accepted = graph_host.submit_grade_change(
+                node_id, name, patch_value, self._graph_gesture_tid) or accepted
+        if not accepted:
+            return True
+        version = self._pending_primary_calibration(current)
+        if version and not graph_host.submit_grade_change(
+                node_id, PRIMARY_CALIBRATION_VERSION_KEY, version, self._graph_gesture_tid):
+            graph_host.cancel_grade_gesture()
+            return True
+        graph_host.preview_grade_gesture()
+        if graph_host.align_engine_active_layer(node_id):
+            self.engine.grade_image(*args)
+            if version:
+                self.engine.update_grading_params({PRIMARY_CALIBRATION_VERSION_KEY: version})
         self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():
             self._debounce_grading_render()
@@ -2848,16 +2912,19 @@ class LayerOpsMixin:
         与 ``on_grading_changed`` 相同的路由策略：图编辑上下文优先走
         图事务（同值 legacy 通道预览），否则引擎合并补丁 + 关键帧录制。
         """
-        if self.engine.get_current_image() is None:
+        if getattr(self, "_color_stack_hydration_in_progress", False):
             return
         patch = {key: params[key] for key in self._GRADING_EXTENDED_KEYS
-                 if key in params}
+                 if key in params and key != PRIMARY_CALIBRATION_VERSION_KEY}
         if not patch:
             return
         graph_host = getattr(self, 'color_graph_host', None)
         if graph_host is not None and graph_host.graph_edit_context_active():
             if self._route_grading_extended_to_graph(graph_host, patch):
                 return
+        if self.engine.get_current_image() is None:
+            return
+        self._begin_legacy_primary_grade(patch)
         self.engine.update_grading_params(patch)
         self._maybe_record_grade_keyframes_extended(patch)
         self._invalidate_video_render_params_if_playing()
@@ -2877,15 +2944,26 @@ class LayerOpsMixin:
             self._graph_gesture_tid = f"grading-{counter}"
             graph_host.begin_grade_gesture(self._graph_gesture_tid)
         current = graph_host.panel_grade_params() or {}
+        accepted = False
         for name, value in patch.items():
-            if self._grade_value_equal(current.get(name), value):
+            if self._grade_value_equal(current.get(name, DEFAULT_EXTENDED_GRADING_PARAMS[name]), value):
                 continue
             patch_value = (value if isinstance(value, (tuple, list))
                            else float(value))
-            graph_host.submit_grade_change(
-                node_id, name, patch_value, self._graph_gesture_tid)
-        graph_host.align_engine_active_layer(node_id)
-        self.engine.update_grading_params(patch)
+            accepted = graph_host.submit_grade_change(
+                node_id, name, patch_value, self._graph_gesture_tid) or accepted
+        if not accepted:
+            return True
+        version = self._pending_primary_calibration(current)
+        if version and not graph_host.submit_grade_change(
+                node_id, PRIMARY_CALIBRATION_VERSION_KEY, version, self._graph_gesture_tid):
+            graph_host.cancel_grade_gesture()
+            return True
+        graph_host.preview_grade_gesture()
+        if graph_host.align_engine_active_layer(node_id):
+            if version:
+                patch = {**patch, PRIMARY_CALIBRATION_VERSION_KEY: version}
+            self.engine.update_grading_params(patch)
         self._invalidate_video_render_params_if_playing()
         if self._is_video_playing():
             self._debounce_grading_render()
@@ -3218,7 +3296,7 @@ class LayerOpsMixin:
         def _gesture_finished(layer: Layer, committed: bool) -> None:
             nonlocal graph_gesture
             if graph_gesture is not None:
-                self.engine.set_warper_preview_graph(None)
+                self.engine.set_color_graph_preview(None)
                 self._invalidate_video_render_params_if_playing()
                 if not committed:
                     self.request_render()

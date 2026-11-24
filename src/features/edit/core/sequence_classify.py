@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
@@ -118,4 +119,26 @@ def _missing_in_range(numbers: List[int]) -> List[int]:
             if n not in present]
 
 
-__all__ = ["StillSequenceGroup", "classify_import_batch"]
+def still_sequence_frame_path(anchor: str, metadata: Mapping[str, object], source_frame: int) -> str:
+    """Resolve a source-frame offset without slipping past missing files."""
+    sequence = metadata.get("sequence")
+    if not isinstance(sequence, Mapping):
+        raise ValueError("Image sequence metadata is missing")
+    frames = sequence.get("frames")
+    start, end = sequence.get("first_number"), sequence.get("last_number")
+    holes = sequence.get("missing_numbers", ())
+    if (not isinstance(frames, (list, tuple)) or not isinstance(start, int)
+            or not isinstance(end, int) or not isinstance(holes, (list, tuple))):
+        raise ValueError("Invalid image sequence metadata")
+    number = start + source_frame
+    if source_frame < 0 or number > end or number in holes:
+        raise OSError(f"Image sequence frame {number} is unavailable: {anchor}")
+    index = source_frame - sum(isinstance(hole, int) and hole < number for hole in holes)
+    if index < 0 or index >= len(frames) or not isinstance(frames[index], str):
+        raise OSError(f"Image sequence frame {number} is unavailable: {anchor}")
+    # The first frame is the project's existing relink anchor. All members
+    # were grouped in the same folder at import.
+    return os.path.join(os.path.dirname(anchor), os.path.basename(frames[index]))
+
+
+__all__ = ["StillSequenceGroup", "classify_import_batch", "still_sequence_frame_path"]

@@ -1040,6 +1040,8 @@ class FileOpsMixin:
         if managed_photo and not self._confirm_project_replacement_for_image(path):
             return
 
+        if create_standalone_session and getattr(self, "_color_project_viewer_active", False):
+            self._apply_color_project_viewer_signal(False)
         # 加载图像时，卸载当前视频（如果有）
         self.unload_video()
         if create_standalone_session and hasattr(self.canvas, "set_display_scene_size_override"):
@@ -1069,13 +1071,36 @@ class FileOpsMixin:
         use_decoded = decoded_photo is not None and decoded_photo.matches(path)
         previews = getattr(self, "_grade_set_previews", None) if managed_photo else None
         source_revision = None
+        aces = None
+        hdr = None
         if previews is not None:
             source_revision = decoded_photo.revision if use_decoded else previews.file_revision(path)
         if use_decoded:
             full, high, low = decoded_photo.pixels
             image_options = {"camera_white_balance": decoded_photo.camera_white_balance, "render": False}
         else:
-            full, high, low = FileIO.load_image(path)
+            from src.shared.color.hdr_video_signal import project_hdr_settings
+            from src.shared.color.project_video_signal import project_aces_settings, read_aces_exr, read_video_still_bgr
+
+            project = getattr(self, "_current_edit_project", None)
+            settings = getattr(project, "color_management", None) if not create_standalone_session else None
+            aces, hdr = project_aces_settings(settings), project_hdr_settings(settings)
+            if (aces is not None or hdr is not None) and str(path).lower().endswith(".exr") and os.path.isfile(path):
+                try:
+                    pixels = read_aces_exr(str(path), aces)[0] if aces is not None else read_video_still_bgr(str(path))
+                except (OSError, ValueError, RuntimeError) as exc:
+                    from PyQt6.QtWidgets import QMessageBox
+
+                    QMessageBox.warning(self, "ACES" if aces is not None else "HDR", str(exc))
+                    return
+                full = pixels[..., :3]
+                high = (FileIO._resize_to_fit(full, FileIO.HIGH_RES_SIZE)
+                        if max(full.shape[:2]) > FileIO.HIGH_RES_SIZE else full)
+                low = (FileIO._resize_to_fit(full, FileIO.LOW_RES_SIZE)
+                       if max(full.shape[:2]) > FileIO.LOW_RES_SIZE else full)
+            else:
+                full, high, low = (FileIO.load_image(path, use_preview_cache=False)
+                                   if aces is not None or hdr is not None else FileIO.load_image(path))
             image_options = {}
 
         # Offline Media Handling: Check if we can enter offline mode
@@ -1247,6 +1272,8 @@ class FileOpsMixin:
 
         # Whole-frame video motion must never carry into still-image tools.
         self.engine.set_video_stabilization_state({})
+        if not create_standalone_session and (aces is not None or hdr is not None):
+            self._apply_color_project_viewer_signal(True)
         # Load original image first (sets img_source_full = original)
         self.engine.set_image(full, high, low, path=path, **image_options)
 
@@ -2121,6 +2148,14 @@ class FileOpsMixin:
         """
         previous_project = self._current_edit_project
         self._current_edit_project = project
+        current_color = getattr(project, "color_management", {})
+        color_spaces_changed = getattr(previous_project, "color_management", {}) != current_color
+        if color_spaces_changed:
+            from src.shared.color.color_context_lifecycle import on_project_switched
+            on_project_switched(current_color, video=self._is_video_work_mode())
+            grading_panel = getattr(self, "grading_panel", None)
+            if grading_panel is not None:
+                grading_panel.refresh_primary_calibration()
         self.timeline_panel.set_project(project)
         self.edit_project_dirty = True
 
@@ -2166,6 +2201,23 @@ class FileOpsMixin:
 
         self._publish_project_change_to_renderer(
             previous_project, project, sequence_changed=bool(sequence_updates))
+        if color_spaces_changed:
+            self._apply_program_display_color()
+            color_timeline_preview = getattr(self, "_color_timeline_preview_renderer", None)
+            if color_timeline_preview is not None:
+                color_timeline_preview.set_project(project)
+            self._request_current_timeline_preview_frame()
+            provider = getattr(self, "_timeline_clip_frame_provider", None)
+            if provider is not None:
+                provider.set_project(project)
+                page = getattr(self, "composite_page", None)
+                context = getattr(page, "_runtime_context", None)
+                if context is not None:
+                    page.set_timeline_clip_context(runtime_context=context, gpu_provider=provider)
+            self._apply_composite_preview_color_space()
+            if getattr(self, "_color_project_viewer_active", False):
+                if self._apply_color_project_viewer_signal(True) and self.current_page == "Color":
+                    self.engine.render_pipeline(render_reason="grading")
 
         version_host = getattr(self, "_clip_version_request_host", None)
         if version_host is not None:
@@ -2738,6 +2790,8 @@ class FileOpsMixin:
                 preview_viewport_size = self._monitor_render_viewport_size(
                     (viewer.width(), viewer.height())
                 )
+
+        self._apply_program_display_color()
 
         # Create renderer using factory function
         try:
@@ -3543,6 +3597,10 @@ class FileOpsMixin:
                 # Play.  Wait for the first actual playback frame instead of
                 # flashing the old retained texture on the monitor.
                 self._discard_color_monitor_pending_readback()
+                return
+            engine_state = getattr(getattr(self, "engine", None), "__dict__", {})
+            if engine_state.get("_project_viewer_hdr") is not None:
+                self._request_color_monitor_output(controller, reason="hdr_playback")
                 return
             self._submit_color_monitor_pbo_readback(
                 tex_id,
@@ -4681,6 +4739,16 @@ class FileOpsMixin:
     # Auto-create / Ensure / New Edit Project
     # ------------------------------------------------------------------
 
+    def _initialize_project_color_spaces(self, project: EditProject) -> EditProject:
+        """Freeze the current color defaults in a newly created video project."""
+        from src.shared.color.color_context_lifecycle import on_project_switched
+        from src.shared.color.color_space_descriptor import color_settings_from_config
+
+        defaults = color_settings_from_config(getattr(self, "config_manager", None) or {})
+        project = project.with_color_management(defaults)
+        on_project_switched(project.color_management)
+        return project
+
     def _auto_create_edit_project(self, name: str = "Untitled Project") -> None:
         """
         Create an edit project without user interaction.
@@ -4730,7 +4798,6 @@ class FileOpsMixin:
         )
 
         # Update state
-        self._current_edit_project = project
         self._current_edit_project_filepath = None
         self._current_timeline_sequences = {}
         # M19.2b：新建空文档无作者色彩设定——清空上一工程的进程级
@@ -4746,6 +4813,8 @@ class FileOpsMixin:
                 "color_context_lifecycle unavailable; color overrides "
                 "left as-is on auto-create",
             )
+        project = self._initialize_project_color_spaces(project)
+        self._current_edit_project = project
 
         # Update UI
         self.media_pool_panel.set_project(project)
@@ -4924,6 +4993,8 @@ class FileOpsMixin:
             )
             return
 
+        from src.shared.color.color_context_lifecycle import on_project_loaded
+        on_project_loaded(getattr(project, "color_management", None))
         self._current_edit_project = project
         self._current_edit_project_filepath = filepath
         self._current_timeline_sequences = timeline_sequences or {}
@@ -5065,6 +5136,8 @@ class FileOpsMixin:
         self._report_package_compatibility()
 
         # Update state
+        from src.shared.color.color_context_lifecycle import on_project_loaded
+        on_project_loaded(getattr(project, "color_management", None), video=True)
         self._current_edit_project = project
         self._current_edit_project_filepath = original_filepath
         self.edit_project_io.set_current_filepath(original_filepath)
@@ -5321,6 +5394,7 @@ class FileOpsMixin:
                 width=width,
                 height=height,
             )
+            project = self._initialize_project_color_spaces(project)
 
             # 设置 EditProject 为当前项目
             self._current_edit_project = project
@@ -5452,6 +5526,7 @@ class FileOpsMixin:
                 name=project_name,
                 media_path=video_path,
             )
+            project = self._initialize_project_color_spaces(project)
 
             # 2. 设置当前项目状态（与 _create_and_open_quick_project 一致）
             self._current_edit_project = project
@@ -6336,6 +6411,7 @@ class FileOpsMixin:
             "clip": clip,
             "effective_source_start": effective_source_start,
         }
+        self._apply_color_project_viewer_signal(True)
         # CV-B03：切 clip 按既有规则复位 Loop（默认跨 clip 连续播放，
         # 循环仅在用户显式请求时开启；不与 Composite 共享默认值）。此前
         # 复位只存在于已停用的 preview 激活路径，活路径换 clip 会带着上
@@ -6361,6 +6437,7 @@ class FileOpsMixin:
 
     def _clear_color_timeline_clip_playback_context(self) -> None:
         self._color_timeline_clip_playback_context = None
+        self._apply_color_project_viewer_signal(False)
         # Reset the same-source cross-clip wrap tracking so a fresh clip entry
         # does not mistake a stale previous frame for a wrap.
         self._last_color_source_frame = None
@@ -6392,6 +6469,79 @@ class FileOpsMixin:
         except Exception:
             logger.debug("color viewer capability refresh after clip context "
                          "clear failed", exc_info=True)
+
+    def _apply_program_display_color(self) -> None:
+        from src.shared.color.desktop_video_color import USE_DISPLAY_ICC, sdr_display_preset
+        from src.shared.color.hdr_video_signal import hdr_monitor_space, project_hdr_settings
+        from src.shared.color.project_video_signal import (
+            aces_monitor_space, project_aces_settings, video_signal_spaces,
+        )
+
+        viewer = getattr(self, "program_viewer_widget", None)
+        configure = getattr(viewer, "set_video_display", None)
+        if callable(configure):
+            project = getattr(self, "_current_edit_project", None)
+            settings = getattr(project, "color_management", None)
+            spaces = video_signal_spaces(settings)
+            monitor = aces_monitor_space() if project_aces_settings(settings) is not None else (
+                hdr_monitor_space(spaces[1], project_hdr_settings(settings)) if spaces is not None else None)
+            preset = sdr_display_preset(monitor)
+            config = getattr(self, "config_manager", None)
+            configure(preset, config is not None and config.get(USE_DISPLAY_ICC, False) is True)
+
+    def _apply_color_project_viewer_signal(self, active: bool) -> bool:
+        """Publish a project signal to Color's paused, playback and scope recipes."""
+        from src.shared.color.desktop_video_color import USE_DISPLAY_ICC, sdr_display_preset
+        from src.shared.color.hdr_video_signal import hdr_input_descriptor, hdr_monitor_space, project_hdr_settings
+        from src.shared.color.project_video_signal import (
+            aces_input_descriptor, aces_monitor_space, project_aces_settings, video_signal_spaces,
+        )
+        from src.shared.color.video_signal_gl import can_render_video_signal_gl
+
+        self._color_project_viewer_active = active
+        engine = getattr(self, "engine", None)
+        setter = getattr(engine, "set_project_viewer_signal", None)
+        if not callable(setter):
+            return False
+        project = getattr(self, "_current_edit_project", None)
+        settings = getattr(project, "color_management", None) if active else None
+        spaces = video_signal_spaces(settings)
+        aces = project_aces_settings(settings)
+        hdr = project_hdr_settings(settings)
+        input_space = None
+        if aces is not None or hdr is not None:
+            context = getattr(self, "_color_timeline_clip_playback_context", None) or {}
+            clip = context.get("clip")
+            asset = project.get_asset_by_id(clip.asset_id) if clip is not None else None
+            path = str(getattr(asset, "path", None) or getattr(self, "current_file_path", "") or "")
+            media_type = getattr(asset, "media_type", "image")
+            if aces is not None:
+                input_space = aces_input_descriptor(aces, path, media_type=media_type)
+                spaces = (spaces[0], aces_monitor_space())
+            else:
+                input_space = hdr_input_descriptor(
+                    hdr, spaces[0], media_type=media_type, metadata=getattr(asset, "metadata", None),
+                    path=path if media_type != "video" else "",
+                )
+        if spaces is not None and not can_render_video_signal_gl(*spaces):
+            spaces = None
+        if aces is not None:
+            changed = setter(spaces, aces=aces, input_space=input_space)
+        elif hdr is not None:
+            changed = setter(spaces, hdr=hdr, input_space=input_space)
+        else:
+            changed = setter(spaces)
+        configure = getattr(getattr(self, "canvas", None), "set_video_display", None)
+        if callable(configure):
+            preset = sdr_display_preset(hdr_monitor_space(spaces[1], hdr)) if spaces is not None else None
+            config = getattr(self, "config_manager", None)
+            configure(preset, config is not None and config.get(USE_DISPLAY_ICC, False) is True)
+        if changed:
+            invalidate = getattr(getattr(self, "video_controller", None),
+                                 "invalidate_cached_render_params", None)
+            if callable(invalidate):
+                invalidate()
+        return changed
 
     def _active_color_timeline_clip_playback_context(self) -> dict | None:
         if getattr(self, "current_page", None) != "Color":

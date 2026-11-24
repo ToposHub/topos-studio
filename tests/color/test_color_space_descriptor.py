@@ -315,24 +315,66 @@ class TestProjectColorOverrides:
         values = csd.collect_color_management_settings()
         assert values == {"color.preview.timeline_transfer": "pq"}
 
-    def test_load_side_conversion_applies_overrides(self):
-        """convert_topos_project_to_edit_project 注入工程设定到覆盖层。"""
+    def test_conversion_round_trip_defers_overrides_to_project_activation(self):
+        """Reading and resaving a project leave the active color context alone."""
         from src.shared.project.topos_project import ToposProject
+        from src.shared.color.color_context_lifecycle import on_project_loaded
         from src.features.edit.core.edit_project_io import (
+            convert_edit_project_to_topos_project,
             convert_topos_project_to_edit_project,
         )
         import dataclasses
         base = ToposProject.create(name="t")
+        settings = {
+            "color.preview.timeline_primaries": "smpte432",
+            "color.preview.timeline_transfer": "iec61966_2_1",
+            "future_extension": {"profile": "profile-id"},
+        }
         topos = dataclasses.replace(base, settings={
-            "color_management": {
-                "color.preview.timeline_primaries": "smpte432",
-                "color.preview.timeline_transfer": "iec61966_2_1",
-            }
+            "color_management": settings,
         })
-        convert_topos_project_to_edit_project(topos, None)
-        d = self._csd.descriptor_from_config({}, "preview", "timeline", True)
+        active = {"color.timeline_space": "rec709-g24"}
+        on_project_loaded(active)
+        project = convert_topos_project_to_edit_project(topos, None)
+        assert self._csd.get_project_color_overrides() == active
+        assert convert_edit_project_to_topos_project(project).settings["color_management"] == settings
+
+        on_project_loaded(project.color_management)
+        cfg = {"color.timeline_space": "rec709-g24"}
+        d = self._csd.descriptor_from_config(cfg, "preview", "timeline", True)
         assert d.primaries is ColorPrimaries.P3_DISPLAY
-        # 无该键的工程 → 清空覆盖层
-        topos2 = ToposProject.create(name="t2")  # settings 默认空 dict
-        convert_topos_project_to_edit_project(topos2, None)
+        topos2 = ToposProject.create(name="t2")
+        other = convert_topos_project_to_edit_project(topos2, None)
+        assert self._csd.get_project_color_overrides() == settings
+        on_project_loaded(other.color_management)
         assert self._csd.get_project_color_overrides() == {}
+        assert self._csd.descriptor_from_config(cfg, "preview", "timeline", True).transfer \
+            is ColorTransfer.GAMMA24
+
+    def test_project_defaults_snapshot_remains_stable_when_preferences_change(self):
+        cfg = {"color.timeline_space": "rec709-g24", "color.output_space": "rec709-bt709"}
+        settings = self._csd.color_settings_from_config(cfg)
+        cfg["color.timeline_space"] = "srgb"
+        assert self._csd.project_timeline_space(settings, cfg) == "rec709-g24"
+        assert self._csd.project_output_space(settings, cfg) == "rec709-bt709"
+        assert self._csd.project_image_space(settings, cfg) == "srgb"
+
+    def test_legacy_preference_migration_preserves_custom_color_space(self, tmp_path):
+        import json
+        from src.shared.config.config_manager import ConfigManager
+
+        cfg_path = tmp_path / "config.json"
+        cfg_path.write_text(json.dumps({
+            "color.preview.timeline_primaries": "bt709",
+            "color.preview.timeline_transfer": "bt709",
+            "color.output.timeline_primaries": "bt2020",
+            "color.output.timeline_transfer": "smpte2084",
+            "color.output.image_primaries": "smpte432",
+            "color.output.image_transfer": "iec61966_2_1",
+        }))
+        cfg = ConfigManager(config_path=str(cfg_path))
+        assert cfg.get("color.timeline_space") == "rec709-g24"
+        assert cfg.get("color.output_space") == "legacy"
+        assert descriptor_from_config(cfg, "output", "timeline", True).transfer is ColorTransfer.PQ
+        assert descriptor_from_config(cfg, "output", "image", False).primaries is ColorPrimaries.P3_DISPLAY
+        assert json.loads(cfg_path.read_text())["color.output.timeline_primaries"] == "bt2020"

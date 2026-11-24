@@ -252,21 +252,15 @@ LUT Exporter 的 CPU 实现必须与 GLSL shader 保持数值一致。
 
 ---
 
-## 6. 未来扩展
+## 6. 视频工程的显示信号
 
-### 6.1 ACES 支持
+### 6.1 ACES
 
-当前 HDR 处理基于"scene-referred"线性空间。未来支持 ACES 需：
-- 输入转换：IDT (Input Device Transform)
-- 工作空间：ACEScg 或 ACEScct
-- 输出转换：ODT (Output Device Transform)
+ACES 1.3 和 2.0 有独立的工程输入变换、工作空间与 Rec.709 输出变换。线性 EXR 交付支持 AP0 和 AP1。 [ACES 边界](architecture/color-rendering.md#9-视频工程的-aces-边界)
 
-### 6.2 HDR Display Output
+### 6.2 Rec.2100 PQ／HLG
 
-当前显示输出假设 SDR monitor (gamma 2.2/2.4)。未来支持 HDR display 需：
-- ST.2084 PQ curve
-- Rec.2100 HLG curve
-- HDR10 metadata
+视频工程提供 ST 2084 PQ 和 BT.2100 HLG，浮点转换按工程参考白、HLG 显示峰值及系统伽马计算。桌面可显示码值或 Rec.709 参考，交付使用 10 位视频电平，PQ HEVC 支持 ST 2086 母版显示信息。校准参考监视器和原生 EDR 需要独立的设备路径和测量。 [HDR 信号边界](architecture/color-rendering.md#10-视频工程的-hdr-信号)
 
 ---
 

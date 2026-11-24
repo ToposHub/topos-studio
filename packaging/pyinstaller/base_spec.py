@@ -255,6 +255,11 @@ def generate_analysis(
         ),
         (
             os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
+                         "primary_calibration_rec709_g24_v2.npz"),
+            "src/features/color/core/data",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
                          "warper_response_rec709_g24_v2.npz"),
             "src/features/color/core/data",
         ),

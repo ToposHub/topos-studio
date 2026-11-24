@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Mapping, Optional
 
 import numpy as np
 
@@ -413,13 +413,15 @@ class ColorStackHydrator:
         self,
         stack: ColorStackData,
         panels: dict[str, Any],
+        *,
+        grading_payload: Mapping[str, Any] | None = None,
     ) -> None:
         """Push all parameters from *stack* into the corresponding UI panels.
 
         *panels* is a plain dict whose values are the panel widget instances.
         Missing or incompatible panels are skipped with a debug log.
         """
-        self._apply_grading_to_panel(stack, panels.get("grading_panel"))
+        self._apply_grading_to_panel(stack, panels.get("grading_panel"), grading_payload)
         self._apply_curves_to_panel(stack, panels.get("curves_panel"))
         self._apply_curves_palette_to_panel(stack, panels.get("curves_palette"))
         self._apply_hsl_to_panel(stack, panels.get("hsl_panel"))
@@ -631,14 +633,22 @@ class ColorStackHydrator:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _apply_grading_to_panel(stack: ColorStackData, panel: Any) -> None:
+    def _apply_grading_to_panel(stack: ColorStackData, panel: Any,
+                                payload: Mapping[str, Any] | None) -> None:
         if panel is None:
             return
         if not hasattr(panel, "set_params"):
             logger.debug("grading_panel missing or incompatible API, skipping")
             return
 
-        params = stack.grading_params
+        if payload is None:
+            if stack.color_graph is not None and can_project_to_legacy_layers(stack.color_graph):
+                layers = project_legacy_layers(stack.color_graph)
+                payload = layers[0] if layers else None
+            elif stack.color_graph is None and stack.layers:
+                index = stack.active_layer_index
+                payload = stack.layers[index if 0 <= index < len(stack.layers) else 0]
+        params = payload.get("grading_params", stack.grading_params) if payload else stack.grading_params
         lift = params.get("lift", (0, 0, 0))
         gamma = params.get("gamma", (0, 0, 0))
         gain = params.get("gain", (0, 0, 0))
@@ -662,7 +672,10 @@ class ColorStackHydrator:
         # 一级校色扩展参数（Offset 轮 / pivot / Log 四轮 / Lum Mix）：
         # 独立窄路径回填，面板缺失该 API（旧面板/测试桩）时静默跳过。
         # 默认值兜底单一权威 = DEFAULT_EXTENDED_GRADING_PARAMS。
-        if hasattr(panel, "set_extended_params"):
+        panel.current_stack_id = stack.stack_id
+        if hasattr(type(panel), "load_extended_params"):
+            panel.load_extended_params(params, animated=bool(payload and payload.get("grade_keyframes")))
+        elif hasattr(panel, "set_extended_params"):
             from src.features.color.core.layer import (
                 default_extended_grading_params,
             )
@@ -671,7 +684,6 @@ class ColorStackHydrator:
                 for key, default in default_extended_grading_params().items()
             }
             panel.set_extended_params(extended, emit=False)
-        panel.current_stack_id = stack.stack_id
 
     @staticmethod
     def _apply_curves_to_panel(stack: ColorStackData, panel: Any) -> None:

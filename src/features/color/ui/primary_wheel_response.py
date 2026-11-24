@@ -1,4 +1,4 @@
-"""Mouse response measured in Resolve Studio's Rec.709 primary controls."""
+"""Pointer response for the primary grading controls."""
 
 import math
 
@@ -18,6 +18,36 @@ _MASTER_RATE = {
     "log_shadow": 0.16 / 120.0,
     "log_midtone": 0.16 / 120.0,
     "log_highlight": 0.16 / 120.0,
+}
+
+# The Y/RGB number cells use a different gain from the master dials.
+_CHANNEL_DRAG_AMOUNTS = {
+    "lift": 0.10,
+    "gamma": 0.05,
+    "gain": 0.26,
+    "offset": 9.60,
+    "log_offset": 9.60,
+    "log_shadow": 0.22,
+    "log_midtone": 0.05,
+    "log_highlight": 0.22,
+}
+
+# Resolve Studio 20.2.1.6 changes these amounts over a 120 logical pixel
+# drag, converted from displayed to stored Topos units.
+_SCALAR_DRAG_AMOUNTS = {
+    "temp": 12.0,
+    "tint": 60.0,
+    "contrast": 24.0,
+    "pivot": 0.24,
+    "mid_detail": 60.0,
+    "vibrance": 60.0,
+    "shadow": 60.0,
+    "highlights": 60.0,
+    "saturation": 48.0,
+    "hue_shift": 86.4,
+    "lum_mix": 24.0,
+    "log_low_range": 0.24,
+    "log_high_range": 0.24,
 }
 
 # At roughly 0.12 wheel radii, Resolve's Offset reads +8.15 blue for a
@@ -46,6 +76,17 @@ def master_drag_rate(mode: str, *, bars: bool = False) -> float:
     if bars and mode == "offset":
         return 0.08 / 60.0
     return _MASTER_RATE[mode]
+
+
+def channel_drag_rate(mode: str, *, bars: bool = False) -> float:
+    """Return the calibrated number cell speed in display units per pixel."""
+    amount = 7.20 if bars and mode == "offset" else _CHANNEL_DRAG_AMOUNTS[mode]
+    return amount / 120.0
+
+
+def scalar_drag_rate(key: str) -> float:
+    """Return the unmodified drag rate in stored parameter units per pixel."""
+    return _SCALAR_DRAG_AMOUNTS[key] / 120.0
 
 
 def wheel_luma(rgb: RGB) -> float:

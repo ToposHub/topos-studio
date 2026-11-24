@@ -6,8 +6,7 @@ Covers the Major-grade fixes in edit-core playback / effect / IO domains:
 - AUD-16701  broad ``except (ValueError, Exception)`` narrowed to ValueError
 - AUD-16711  backup rotation must match exact file names, not stem prefix
 - AUD-16712  save aborts when backup creation fails
-- AUD-16713  color-management collect failures are logged, not silent
-- AUD-16714  color-management override injection failures are logged
+- AUD-16713/16714  color-management settings use the project model on load and save
 - AUD-16800  AnimatableParam.add_keyframe is copy-on-write
 - AUD-16804  catalog fallback must not NameError on deleted symbols
 - AUD-16812  generator asset removal preserves project revision
@@ -244,65 +243,40 @@ class TestSaveAbortsOnBackupFailure:
         assert saved_flag["called"] is True
 
 
-# ───────────────────── AUD-16713/16714: color-mgmt error logging ────────────
+# ───────────────────── AUD-16713/16714: color management persistence ──
 
 
-class TestColorManagementErrorLogging:
-    def _descriptor_module(self):
-        import src.shared.color.color_space_descriptor as descriptor
-
-        return descriptor
-
-    def test_collect_runtime_error_logs(self, monkeypatch, caplog):
-        descriptor = self._descriptor_module()
+class TestColorManagementPersistence:
+    def test_save_uses_project_settings(self, monkeypatch, tmp_path):
+        from src.features.edit.core.edit_project_io import EditProjectIO
+        from src.features.edit.core.project import EditProject
+        from src.features.edit.core.serialization import EditProjectSerializer
+        from src.shared.color import color_space_descriptor
 
         def _boom():
-            raise RuntimeError("collector crashed")
+            raise AssertionError("Saving a project consulted application preferences")
 
-        monkeypatch.setattr(
-            descriptor, "collect_color_management_settings", _boom
-        )
-        from src.features.edit.core.edit_project_io import (
-            _collect_color_management_settings,
-        )
+        monkeypatch.setattr(color_space_descriptor, "collect_color_management_settings", _boom)
+        settings = {"color.timeline_space": "rec709-g24", "future_extension": {"name": "opaque"}}
+        project = EditProject.create().with_color_management(settings)
+        settings["color.timeline_space"] = "srgb"
+        settings["future_extension"]["name"] = "modified"
 
-        with caplog.at_level("ERROR"):
-            result = _collect_color_management_settings()
-        assert result == {}
-        assert any(
-            "color management" in rec.message.lower() for rec in caplog.records
-        ), "failure must be logged, not silent"
+        path = tmp_path / "project.topos"
+        io = EditProjectIO()
+        assert io.save_project(path, project, force_project_mode="edit_project")
+        restored, *_ = io.load_project(path)
+        expected = {"color.timeline_space": "rec709-g24", "future_extension": {"name": "opaque"}}
+        assert restored.color_management == expected
+        restored_json = EditProjectSerializer.from_json(EditProjectSerializer.to_json(project))
+        assert restored_json.color_management == expected
 
-    def test_injection_runtime_error_logged_not_sworn_silent(
-        self, monkeypatch, caplog
-    ):
-        descriptor = self._descriptor_module()
-
-        def _boom(overrides):
-            raise RuntimeError("injector crashed")
-
-        monkeypatch.setattr(descriptor, "set_project_color_overrides", _boom)
-        from src.features.edit.core.edit_project_io import (
-            convert_topos_project_to_edit_project,
-        )
+    def test_malformed_color_management_uses_inherited_settings(self):
+        from src.features.edit.core.edit_project_io import convert_topos_project_to_edit_project
         from src.shared.project.topos_project import ToposProject
 
-        project = ToposProject(project_id="pid", name="p")
-        with caplog.at_level("ERROR"):
-            # Must not raise — load must survive, but loudly.
-            convert_topos_project_to_edit_project(project)
-        assert any("inject" in rec.message.lower() for rec in caplog.records)
-
-    def test_collect_import_missing_is_quiet(self, monkeypatch, caplog):
-        monkeypatch.setitem(sys.modules, "src.shared.color.color_space_descriptor", None)
-        from src.features.edit.core.edit_project_io import (
-            _collect_color_management_settings,
-        )
-
-        with caplog.at_level("ERROR"):
-            result = _collect_color_management_settings()
-        assert result == {}
-        assert not caplog.records, "missing module is a legal degrade, no error log"
+        project = ToposProject(project_id="pid", name="p", settings={"color_management": [1]})
+        assert convert_topos_project_to_edit_project(project).color_management == {}
 
 
 # ───────────────────────── AUD-16800: COW add_keyframe ──────────────────────
