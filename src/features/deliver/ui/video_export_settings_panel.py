@@ -1231,6 +1231,17 @@ class VideoExportSettingsPanel(QWidget):
         self._alpha_budget_policy_label = self._label("Alpha Policy")
         form.addRow(self._alpha_budget_policy_label, self._alpha_budget_policy_combo)
 
+        self._bypass_reencode_check = QCheckBox(I18N.tr(
+            "deliver.video.bypass_reencode", "Bypass re-encode when possible"))
+        self._bypass_reencode_check.setObjectName("DeliverBypassReencode")
+        self._bypass_reencode_check.setToolTip(I18N.tr(
+            "deliver.video.bypass_reencode_hint",
+            "Copy compressed video frames for pure cuts of matching Topos 422 "
+            "media. Exports that require image processing are rendered normally. "
+            "Timeline audio is mixed as usual."))
+        self._bypass_reencode_check.setVisible(False)
+        form.addRow(self._bypass_reencode_check)
+
         advanced_form = form
         subtitles = QWidget()
         subtitles.setObjectName("DeliverSubtitleBody")
@@ -1529,10 +1540,11 @@ class VideoExportSettingsPanel(QWidget):
             else:
                 w.valueChanged.connect(self._on_draft_changed)  # type: ignore[attr-defined]
         # QCheckBox uses toggled, not valueChanged
-        self._alpha_check.toggled.connect(self._on_draft_changed)
-        self._image_overwrite_check.toggled.connect(self._on_draft_changed)
         self._alpha_check.toggled.connect(
             lambda _checked: self._refresh_pix_fmt_choices())
+        self._alpha_check.toggled.connect(self._on_draft_changed)
+        self._bypass_reencode_check.toggled.connect(self._on_draft_changed)
+        self._image_overwrite_check.toggled.connect(self._on_draft_changed)
         self._file_suffix_edit.textChanged.connect(self._on_draft_changed)
         self._source_frame_count_check.toggled.connect(self._on_draft_changed)
         self._frame_handles_spin.valueChanged.connect(self._on_draft_changed)
@@ -1826,6 +1838,7 @@ class VideoExportSettingsPanel(QWidget):
             self._select_combo_by_data(self._color_space_combo, vc.color_space)
             self._select_combo_by_data(self._bit_depth_combo, vc.bit_depth)
             self._alpha_check.setChecked(vc.alpha)
+            self._bypass_reencode_check.setChecked(vc.bypass_reencode)
             # R7：Topos pix_fmt / Alpha 预算策略回填（_on_codec_changed 已按
             # 档位重建域；域外持久化值回落档位默认）
             self._refresh_pix_fmt_choices()
@@ -2465,6 +2478,8 @@ class VideoExportSettingsPanel(QWidget):
     def _on_draft_changed(self, *_args: Any) -> None:
         if self._building_ui:
             return
+        self._bypass_reencode_check.setVisible(
+            len(self._selected_preset_ids) <= 1 and self._supports_bypass_reencode())
         self._update_frame_rate_hint()
         self._update_file_size_estimate()
         self._apply_draft_to_preview()
@@ -2599,6 +2614,7 @@ class VideoExportSettingsPanel(QWidget):
             self._image_overwrite_check.setChecked(
                 bool(getattr(vc, "image_sequence_overwrite", False)))
             self._alpha_check.setChecked(vc.alpha)
+            self._bypass_reencode_check.setChecked(vc.bypass_reencode)
 
             ac = preset.audio_config
             self._audio_check.setChecked(ac.include_audio)
@@ -2648,6 +2664,14 @@ class VideoExportSettingsPanel(QWidget):
         else:
             self._quality_value_spin.setValue(ui_value)
 
+    def _supports_bypass_reencode(self) -> bool:
+        return (
+            self._container_combo.currentData() == "mov"
+            and _topos_tier_for_codec(self._codec_combo.currentData()) in {"lt", "standard", "hq"}
+            and self._pix_fmt_combo.currentData() == "yuv422p10le"
+            and not self._alpha_check.isChecked()
+        )
+
     def _read_video_config_from_draft(self) -> VideoConfig:
         resolution = self._read_resolution_from_draft()
         fps = self._read_fps_from_draft()
@@ -2678,6 +2702,8 @@ class VideoExportSettingsPanel(QWidget):
             image_sequence_start_index=self._image_start_spin.value(),
             image_sequence_overwrite=self._image_overwrite_check.isChecked(),
             alpha=self._alpha_check.isChecked(),
+            bypass_reencode=(self._supports_bypass_reencode()
+                             and self._bypass_reencode_check.isChecked()),
             gif_color_count=self._gif_color_count_spin.value(),
             # R7：Topos 专属控件——pix_fmt 覆盖与 Alpha 预算策略；
             # HEVC 复用 pix_fmt 选择器承载 8/10-bit 交付档
@@ -2862,6 +2888,8 @@ class VideoExportSettingsPanel(QWidget):
             job.video_config.pixel_format = draft_vc.pixel_format
         if draft_vc.alpha_budget_policy != preset.video_config.alpha_budget_policy:
             job.video_config.alpha_budget_policy = draft_vc.alpha_budget_policy
+        if draft_vc.bypass_reencode != preset.video_config.bypass_reencode:
+            job.video_config.bypass_reencode = draft_vc.bypass_reencode
         # Audio: always take the draft (audio is shared across presets)
         job.audio_config = self._read_audio_config_from_draft()
         job.subtitle_config = self._read_subtitle_config_from_draft()

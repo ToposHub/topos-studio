@@ -32,9 +32,9 @@
  * - 钳位：结果钳到 [0, 2^bit_depth−1]（v1 无钳位，p0=1023 时 +d 可写出
  *   1023 以上越界样本）。
  * - 并行：整帧解码此前唯一的串行段（4K 1→16 线程只快 2.45×，滤波本身占
- *   4K 20 ms/帧）。两趟按"访问窗口不相交"切片走常驻 tpool —— 垂直趟按行带、
- *   水平趟按边界行区间；两次分发之间即"垂直完成 → 水平开始"的屏障；切片
- *   之间零重叠访问 ⇒ **任意线程数输出逐位一致**（tpool 退化档自动顺序内联）。
+ *   4K 20 ms/帧）。沿水平边缘的四行窗口切分行带。各带先做自己的垂直趟，
+ *   再做水平趟，Y/U/V 的行带一起提交给常驻线程池。相邻行带互不重叠，
+ *   任意线程数输出逐位一致（tpool 退化档自动顺序内联）。
  * - 缩放交付（v2.1 新增；预览/代理路径此前**完全不过滤**）：解码器的缩放
  *   交付是"每格取首样本"的整数抽样，源 8×8 块界在目标域落到 8/d 的倍数
  *   上（d = 源/目标抽样比）；DC 台阶幅度不随抽样改变，故同一套 alpha/beta
@@ -50,6 +50,19 @@
 #define TOPOS_INTERNAL_DEBLOCK_H
 
 #include <stdint.h>
+
+typedef struct tc_deblock_plane_view {
+    uint16_t* pix;
+    int32_t stride;
+    uint32_t width;
+    uint32_t height;
+} tc_deblock_plane_view;
+
+/* Filter up to three disjoint full-resolution color planes in one batch.
+ * Each stride is expressed in samples and covers the plane width. */
+void tc_deblock_planes(const tc_deblock_plane_view* planes, uint32_t count,
+                       uint32_t qp, uint32_t table_sel, uint8_t bit_depth,
+                       uint32_t max_workers);
 
 /* 对单平面就地去块。pix 为行主序 uint16 采样；stride_pix 为行距（采样数）；
  * w/h 为平面几何（8 的倍数，非对齐防御性跳过）；qp 取帧级有效 qp；

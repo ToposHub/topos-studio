@@ -433,6 +433,26 @@ class TestVideoExportSettingsPanel:
         # just verify the signal path works (may be empty if blocked).
         assert isinstance(captured, list)
 
+    def test_topos_packet_copy_option_survives_queue_and_editing(self, qapp):
+        panel = VideoExportSettingsPanel()
+        panel.set_project(object(), project_id="p1", project_name="Proj")
+        panel.set_timelines([("t1", "Main")])
+        original = VideoExportJob(
+            timeline_id="t1", timeline_name="Main", output_path="/tmp/topos.mov",
+            video_config=VideoConfig(codec="topos", container="mov", bypass_reencode=True),
+        )
+        queued = VideoExportJob.from_legacy_job(original.to_legacy_job())
+        assert queued.to_timeline_export_config().bypass_reencode
+        panel.load_job(queued)
+        assert not panel._bypass_reencode_check.isHidden()
+        assert panel._bypass_reencode_check.isChecked()
+        jobs, _ = panel.build_jobs(preflight=False)
+        assert jobs[0].to_timeline_export_config().bypass_reencode
+        panel._bypass_reencode_check.setChecked(False)
+        jobs, _ = panel.build_jobs(preflight=False)
+        assert not jobs[0].to_timeline_export_config().bypass_reencode
+        assert not VideoConfig.from_dict({"codec": "topos"}).bypass_reencode
+
 
 # ── Controller integration ──
 

@@ -60,6 +60,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from enum import Enum
 from fractions import Fraction
@@ -103,8 +104,10 @@ if TYPE_CHECKING:
     from src.features.color.core.color_graph_metal import MetalDeliveryCorrector
     import numpy as np
     from src.shared.media.frame import DecodedFrame
+    from src.shared.codec.topos_binding import ToposMovieSummary
     from src.shared.export.video_encoder import FFmpegVideoEncoder, FFmpegEncoderConfig
     from src.shared.export.video_encoder import ColorMetadataConfig
+    from src.shared.export.topos_encoder import ToposVideoEncoder
     from src.shared.video.frame_provider_service import VideoFrameProviderService
     from src.features.edit.core.timeline_v2 import TimelineSequence
     from src.features.edit.core.timeline_render_plan import DirectToposDeliveryPlan
@@ -248,6 +251,18 @@ def _topos_timeline_cpu_threads(
     decode_threads = min(8, max(4, available // 3))
     encode_threads = min(16, max(1, available - decode_threads))
     return encode_threads, decode_threads
+
+
+def _create_topos_video_encoder(
+    output_path: str, config: "FFmpegEncoderConfig", slice_threads: Optional[int],
+    sequence: Optional["TimelineSequence"],
+) -> "ToposVideoEncoder":
+    from src.shared.export.topos_encoder import ToposVideoEncoder
+
+    settings = getattr(sequence, "format_settings", {}) or {}
+    return ToposVideoEncoder(
+        output_path, config, slice_threads=slice_threads,
+        start_timecode=str(settings.get("start_timecode", "") or ""))
 
 
 def apply_program_guide_matte_bgr(
@@ -562,6 +577,7 @@ class TimelineExportConfig:
     # 回放把交付物关联回发起它的 AI 计划与导出 job。
     ai_plan_id: Optional[str] = None
     ai_job_id: Optional[str] = None
+    bypass_reencode: bool = False
 
     def validate(self) -> List[str]:
         """
@@ -2046,13 +2062,14 @@ class _PassthroughFormatSpec:
             该位深（limited-range 锚点恰好整除：64→16、940→235、960→240，
             舍入为 round-half-up），交付 dtype/pix_fmt/plane_infos 随之
             改写为目标域。仅 ``scalar_delivery`` 同为 True 的规格允许。
+        av_hqx_reformat: 将已验证的 H.264 平面直接转换成 HQX 编码帧。
     """
 
     __slots__ = (
         "codec", "target_pix_fmt", "source_pix_fmt", "source_bit_depth",
         "chroma_subsampling", "requires_high_precision",
         "untagged_siting_codecs", "scalar_delivery",
-        "downconvert_source_bit_depth",
+        "downconvert_source_bit_depth", "av_hqx_reformat",
     )
 
     def __init__(
@@ -2067,6 +2084,7 @@ class _PassthroughFormatSpec:
         untagged_siting_codecs: tuple = (),
         scalar_delivery: bool = False,
         downconvert_source_bit_depth: int = 0,
+        av_hqx_reformat: bool = False,
     ) -> None:
         self.codec = codec
         self.target_pix_fmt = target_pix_fmt
@@ -2077,6 +2095,7 @@ class _PassthroughFormatSpec:
         self.untagged_siting_codecs = tuple(untagged_siting_codecs)
         self.scalar_delivery = bool(scalar_delivery)
         self.downconvert_source_bit_depth = int(downconvert_source_bit_depth)
+        self.av_hqx_reformat = bool(av_hqx_reformat)
 
 
 #: 平面直通白名单。TOPOS yuv422p10le 是既有已验证路径；h264/hevc
@@ -2193,6 +2212,15 @@ _PASSTHROUGH_FORMAT_SPECS = (
         source_bit_depth=10,
         chroma_subsampling="422",
         requires_high_precision=True,
+    ),
+    _PassthroughFormatSpec(
+        codec="dnxhr",
+        target_pix_fmt="yuv422p10le",
+        source_pix_fmt="yuv420p",
+        source_bit_depth=8,
+        chroma_subsampling="420",
+        requires_high_precision=True,
+        av_hqx_reformat=True,
     ),
     # ── 10-bit 4:2:0 源（4K_H265/手机 HDR/HEVC 中间片常见）──
     # h264 8-bit 420 交付：>>2 降位，色度几何不变（420→420 无重采样）。
@@ -2849,6 +2877,7 @@ class TimelineExporter:
         # decode worker before releasing its per-clip source sessions.
         self._export_read_ahead: Optional[ThreadPoolExecutor] = None
         self._export_read_ahead_pending: Optional[Future[Any]] = None
+        self._topos_lut_prefetch: Optional[tuple[int, Future[Any]]] = None
         self._export_read_ahead_end = 0
         self._metal_prefetch_enabled = str(
             os.getenv("TOPOS_EXPORT_METAL_PREFETCH", "1") or "1"
@@ -2869,6 +2898,7 @@ class TimelineExporter:
         # P0-GPU-1: 导出 GPU 合成渲染器（headless context，惰性创建；
         # 单层直通场景走 GPU，不适用/失败原样回落 CPU 链）
         self._gpu_export_renderer: Optional[Any] = None
+        self._gpu_graph_export_renderer: Optional[Any] = None
         self._gpu_trail: Optional[ExportGpuTrail] = None
         # T-P0-20：统一阶段 telemetry（每次 export_timeline 重建）。
         self._export_telemetry: Optional[ExportTelemetryRecorder] = None
@@ -3200,6 +3230,7 @@ class TimelineExporter:
         self._current_frame = 0
         self._dnxhr_metal_fell_back = False
         self._dnxhr_metal_frames = 0
+        self._topos_metal_lut_frames = 0
 
         # 计算帧范围
         start_frame, end_frame = self._calculate_frame_range(config)
@@ -3258,10 +3289,21 @@ class TimelineExporter:
             # T-P1-10：TOPOS identity 直通快路径——严格 eligibility 判定，
             # 任一不满足立刻走普通 render path 并记录原因。
             if str(getattr(encoder_config, "codec", "")).lower() == "topos":
+                outcome = self._try_copy_topos_422(
+                    config, encoder_config, start_frame, end_frame)
+                if outcome is not None:
+                    return outcome
                 direct_plan, direct_reason = build_direct_topos_delivery_plan(
                     self._sequence, self._project, config, encoder_config,
                     start_frame, end_frame,
                 )
+                if direct_plan is not None and self._delivery_guide_burns_in():
+                    direct_plan, direct_reason = None, "program_guide_burn_in"
+                if direct_plan is not None and direct_plan.source_color_layout == "yuv422":
+                    frame = self._render_plan.get_frame_plan(start_frame)
+                    identity = self._identity_delivery_layer(frame, start_frame, config)
+                    if identity is None or self._clip_stabilization_state(identity[0]):
+                        direct_plan, direct_reason = None, "video_processing_required"
                 if direct_plan is not None:
                     outcome = self._export_direct_topos(
                         direct_plan, config, encoder_config)
@@ -3469,6 +3511,12 @@ class TimelineExporter:
                 delivery_path = (
                     "metal_dnxhr_hqx_partial" if self._dnxhr_metal_fell_back
                     else "metal_dnxhr_hqx_422_planar"
+                )
+                self._export_telemetry.set_delivery_path(delivery_path)
+            elif self._topos_metal_lut_frames:
+                delivery_path = (
+                    "metal_topos_422_lut" if self._topos_metal_lut_frames == self._total_frames
+                    else "metal_topos_422_lut_partial"
                 )
                 self._export_telemetry.set_delivery_path(delivery_path)
 
@@ -4071,11 +4119,13 @@ class TimelineExporter:
         self._pause_requested = False
         self._resume_event.set()
 
-    def _wait_if_paused(self) -> bool:
+    def _wait_if_paused(self, *, stop: Optional[threading.Event] = None) -> bool:
         """Wait while paused and return whether rendering may continue."""
         while self._pause_requested and not self._cancel_requested:
+            if stop is not None and stop.is_set():
+                return False
             self._resume_event.wait(timeout=0.25)
-        return not self._cancel_requested
+        return not self._cancel_requested and (stop is None or not stop.is_set())
 
     @property
     def last_loudness_report(self) -> Optional[Any]:
@@ -4174,8 +4224,10 @@ class TimelineExporter:
 
         return (0, duration)
 
-    def _direct_audio_prepare(self, encoder: Any, plan: Any,
-                              config: TimelineExportConfig) -> bool:
+    def _direct_audio_prepare(
+        self, encoder: Any, start_frame: int, end_frame: int,
+        config: TimelineExportConfig, *, strict: bool = False,
+    ) -> bool:
         """直通路径音频准备（v1.1）：展开音轨 → 判定 → 声明音频流 +
         启动并行母带渲染线程（与普通路径同机制、同取消语义）。
 
@@ -4191,7 +4243,7 @@ class TimelineExporter:
         self._audio_render_sequence = _expand(
             self._sequence, self._sequence_resolver, self._project,
             strict=True,
-            frame_range=(plan.timeline_start, plan.timeline_start + plan.frames),
+            frame_range=(start_frame, end_frame),
         )
         has_audio = (
             config.include_audio
@@ -4214,6 +4266,8 @@ class TimelineExporter:
                 bitrate=config.audio_bitrate,
             )
         except Exception as e:
+            if strict:
+                raise
             logger.warning(
                 "Direct TOPOS delivery: audio stream unavailable, "
                 "continuing video-only: %s", e)
@@ -4222,22 +4276,22 @@ class TimelineExporter:
         self._audio_stem_tracks = []
         self._audio_stem_pcms = []
         if config.audio_stems:
-            self._audio_stem_tracks = self._declare_audio_stems(config, encoder)
+            self._audio_stem_tracks = self._declare_audio_stems(config, encoder, strict=strict)
         self._audio_master_pcm = None
         self._audio_render_error = None
         self._audio_render_thread = threading.Thread(
             target=self._audio_export_worker,
-            args=(plan.timeline_start, plan.timeline_start + plan.frames,
-                  config, encoder),
+            args=(start_frame, end_frame, config, encoder),
             name="topos-direct-export-audio",
             daemon=True,
         )
         self._audio_render_thread.start()
         return True
 
-    def _direct_audio_finish(self, encoder: Any, plan: Any,
-                             config: TimelineExportConfig,
-                             has_audio: bool) -> None:
+    def _direct_audio_finish(
+        self, encoder: Any, config: TimelineExportConfig, has_audio: bool,
+        *, strict: bool = False,
+    ) -> None:
         """直通路径音频收尾：汇合渲染线程并串行喂入编码器（帧循环后）。
 
         渲染异常向上抛（导出失败，与普通路径同语义）；写入失败降级警告
@@ -4259,8 +4313,10 @@ class TimelineExporter:
             encoder.write_audio_samples(self._quantize_audio_delivery(audio_pcm, config), config.audio_sample_rate)
             logger.info("Direct TOPOS delivery: audio written")
             # v1.6 M-B8：主混音落轨 0 后，各角色母带串行写追加轨
-            self._write_stem_tracks(config, encoder)
+            self._write_stem_tracks(config, encoder, strict=strict)
         except Exception as e:
+            if strict:
+                raise
             logger.warning(
                 "Direct TOPOS delivery: failed to write audio: %s", e)
 
@@ -5641,8 +5697,10 @@ class TimelineExporter:
             results.append(pcm)
         return results
 
-    def _declare_audio_stems(self, config: TimelineExportConfig,
-                             encoder: Any = None) -> "list":
+    def _declare_audio_stems(
+        self, config: TimelineExportConfig, encoder: Any = None,
+        *, strict: bool = False,
+    ) -> list:
         """声明 stems 追加轨（v1.6）。编码器不支持/声明失败时整体降级
         单轨（返回空列表并记录警告）——部分轨丢失属静默交付缺陷，
         all-or-nothing。返回 [(AudioStemExportTrack, 轨索引)]。
@@ -5687,12 +5745,16 @@ class TimelineExporter:
                 )
                 declared.append((stem, int(idx)))
         except Exception as e:
+            if strict:
+                raise
             logger.warning("stems 追加轨声明失败，已降级单音轨导出: %s", e)
             return []
         return declared
 
-    def _write_stem_tracks(self, config: TimelineExportConfig,
-                           encoder: Any = None) -> None:
+    def _write_stem_tracks(
+        self, config: TimelineExportConfig, encoder: Any = None,
+        *, strict: bool = False,
+    ) -> None:
         """把各角色母带 PCM 串行写入容器追加轨（主混音写入之后调用）。
 
         单轨写入失败降级警告——视频与主混音交付不受损（与音频写入
@@ -5712,6 +5774,8 @@ class TimelineExporter:
                 logger.info("Stem 轨已写入：'%s' → 容器追加轨 %d",
                             stem.name or stem.stem_group, idx)
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning(
                     "Stem 轨 '%s' 写入失败（其余轨交付不受损）: %s",
                     stem.name or stem.stem_group, e)
@@ -6133,21 +6197,12 @@ class TimelineExporter:
             from src.shared.export.gif_encoder import GifVideoEncoder
             return GifVideoEncoder(output_path, config)
         if str(config.codec).lower() == 'topos':
-            from src.shared.export.topos_encoder import ToposVideoEncoder
             # TOPOS timeline also runs the high-depth source decoder on the
             # render producer. Reserve part of a large CPU budget for that
             # FFmpeg pool; smaller hosts keep the existing full encoder cap.
             encoder_threads, _decode_threads = _topos_timeline_cpu_threads()
-            # v1.5 tmcd：序列起始时码透传（有则写、无则不写——零字节变化；
-            # 帧率不在标称白名单或分量非法时编码器侧降级为不写）
-            seq = getattr(self, '_sequence', None)
-            start_tc = str(
-                (getattr(seq, 'format_settings', {}) or {})
-                .get('start_timecode', '') or '') if seq is not None else ''
-            return ToposVideoEncoder(
-                output_path, config,
-                slice_threads=encoder_threads,
-                start_timecode=start_tc)
+            return _create_topos_video_encoder(
+                output_path, config, encoder_threads, getattr(self, "_sequence", None))
 
         from src.shared.export.video_encoder import FFmpegVideoEncoder
 
@@ -6320,7 +6375,6 @@ class TimelineExporter:
         TOPOS_EXPORT_DIRECT_PIPELINE=1/0 强制覆盖）；取消走
         encoder.abort()：不留目标文件或 ``.topos-tmp`` 残留。
         """
-        from src.shared.export.topos_encoder import ToposVideoEncoder
         from src.shared.media.topos_source import ToposMediaSource
 
         # M4-R2：RAW→RAW 直通与 planar 直通分面标记（基准报告的 trail 列
@@ -6351,14 +6405,29 @@ class TimelineExporter:
             getattr(plan, "target_height", 0))
         requires_conversion = bool(
             getattr(plan, "requires_planar_conversion", False))
+        decoder_resize = bool(getattr(plan, "decoder_resize", False))
         split_decode_workers = (
             decode_threads
             if (source_pixels >= 3840 * 2160
                 and not requires_conversion
-                and not (bool(getattr(plan, "decoder_resize", False))
-                         and target_pixels < 3840 * 2160))
+                and not (decoder_resize and target_pixels < 3840 * 2160))
             else None
         )
+        read_ahead = None
+        queue_depth = 3
+        if (sys.platform == "darwin" and os.uname().machine == "x86_64"
+                and (os.cpu_count() or 0) >= 16 and target_pixels >= 3840 * 2160
+                and not requires_conversion and not decoder_resize
+                and plan.source_pixel_format == encoder_config.pix_fmt == "yuv422p10le"
+                and encoder_config.profile in {"standard", "hq"}):
+            encoder_threads, split_decode_workers = 16, 8
+            queue_depth = 2
+            if "TOPOS_READAHEAD" not in os.environ:
+                read_ahead = 0
+                if encoder_config.profile == "standard":
+                    # Single-frame decode can use idle workers in the shared
+                    # slice pool. The eight-worker cap delays UHD Standard.
+                    split_decode_workers = 16
         logger.info(
             "Direct TOPOS delivery engaged: %s frames from %s "
             "(delivery_path=%s)",
@@ -6367,20 +6436,17 @@ class TimelineExporter:
 
         self._is_exporting = True
         source: Optional[ToposMediaSource] = None
-        encoder = ToposVideoEncoder(
-            config.output_path, encoder_config,
-            slice_threads=encoder_threads)
+        encoder = _create_topos_video_encoder(
+            config.output_path, encoder_config, encoder_threads, self._sequence)
         try:
             encoder.open()
 
             # v1.1 音频轨（plan M-A6）：include_audio 不再拦截直通——
             # 与普通路径同构：声明音频流 + 并行渲染母带 + 帧循环后喂入。
-            # v1.1 音频轨（plan M-A6）：include_audio 不再拦截直通——
-            # 与普通路径同构：声明音频流 + 并行渲染母带 + 帧循环后喂入。
             direct_has_audio = self._direct_audio_prepare(
-                encoder, plan, config)
+                encoder, plan.timeline_start, plan.timeline_start + plan.frames, config)
             decode_target_size = None
-            if bool(getattr(plan, "decoder_resize", False)):
+            if decoder_resize:
                 decode_target_size = (
                     int(getattr(plan, "target_width", 0)),
                     int(getattr(plan, "target_height", 0)),
@@ -6394,6 +6460,7 @@ class TimelineExporter:
                 target_size=decode_target_size,
                 decode_workers=split_decode_workers,
                 decode_role="export",
+                read_ahead=read_ahead,
                 drop_alpha=drop_source_alpha,
             )
             source.open()
@@ -6431,13 +6498,13 @@ class TimelineExporter:
                     and plan.frames > 1)
             if use_pipeline:
                 logger.info(
-                    "Direct TOPOS decode-encode pipeline engaged (depth=3)")
+                    "Direct TOPOS decode-encode pipeline engaged (depth=%d)", queue_depth)
                 cancelled = self._direct_topos_pipeline_loop(
-                    plan, source, encoder, recorder)
+                    plan, source, encoder, recorder, queue_depth=queue_depth)
             else:
                 cancelled = self._direct_topos_serial_loop(
                     plan, source, encoder, recorder)
-            if cancelled:
+            if cancelled or self._cancel_requested:
                 # 统一取消收尾：源与编码器都不留运行态（原串行路径
                 # pause-cancel 分支未关源，属遗漏——此处一并补齐）。
                 self._join_audio_render_thread()
@@ -6456,10 +6523,12 @@ class TimelineExporter:
             source.close()
             source = None
             # v1.1：音频母带写入（并行渲染已在帧循环期间完成/取消）
-            self._direct_audio_finish(encoder, plan, config,
-                                      direct_has_audio)
+            self._direct_audio_finish(encoder, config, direct_has_audio)
             mux_started = time.perf_counter()
-            encoder.close()
+            if encoder.close(should_cancel=lambda: self._cancel_requested) is False:
+                self._cleanup_clips()
+                return dataclasses.replace(
+                    ExportOutcome.user_cancelled(), delivery_path=delivery_path)
             if recorder is not None:
                 recorder.record_stage_sample(
                     "mux", "container_writer",
@@ -6542,7 +6611,8 @@ class TimelineExporter:
         # large chroma planes on every iteration.  An empty holder is kept for
         # the first frame; old DLLs and the NumPy fallback leave it untouched.
         conversion_buffers: Optional[list] = (
-            [] if getattr(plan, "requires_planar_conversion", False) else None
+            [] if (getattr(plan, "requires_planar_conversion", False)
+                   and encoder.consumes_planes_synchronously) else None
         )
         if plan.frames > 0:
             # Direct delivery is a contiguous source range.  Position once,
@@ -6593,6 +6663,8 @@ class TimelineExporter:
         source: Any,
         encoder: Any,
         recorder: Any,
+        *,
+        queue_depth: int = 3,
     ) -> bool:
         """解码（生产者线程）∥ 编码（导出线程）流水线（直通交付）。
 
@@ -6616,19 +6688,19 @@ class TimelineExporter:
         """
         import queue as _queue
 
-        q: "_queue.Queue" = _queue.Queue(maxsize=3)
+        q: "_queue.Queue" = _queue.Queue(maxsize=queue_depth)
         stop = threading.Event()
         producer_done = threading.Event()
         producer_error: list = []
         prepare_in_producer = bool(
             getattr(plan, "requires_planar_conversion", False))
         conversion_buffer_q: Optional["_queue.Queue"] = None
-        if prepare_in_producer:
+        if prepare_in_producer and encoder.consumes_planes_synchronously:
             # The FIFO has the same capacity as the frame queue.  A holder is
             # returned only after encode_frame has synchronously consumed its
             # converted planes, so no queued frame can be overwritten.
-            conversion_buffer_q = _queue.Queue(maxsize=3)
-            for _ in range(3):
+            conversion_buffer_q = _queue.Queue(maxsize=queue_depth)
+            for _ in range(queue_depth):
                 conversion_buffer_q.put([])
 
         def enqueue(item: tuple) -> bool:
@@ -6648,7 +6720,7 @@ class TimelineExporter:
                 for i in range(plan.frames):
                     if stop.is_set() or self._cancel_requested:
                         break
-                    if not self._wait_if_paused():
+                    if not self._wait_if_paused(stop=stop):
                         break
                     conversion_buffers = None
                     if conversion_buffer_q is not None:
@@ -6669,6 +6741,7 @@ class TimelineExporter:
                         if decoded is None or not planes or len(planes) < 3:
                             raise RuntimeError(
                                 f"direct TOPOS source read failed at frame {i}")
+                        del planes
                         prepare_ms = 0.0
                         if prepare_in_producer:
                             started = time.perf_counter()
@@ -6684,6 +6757,7 @@ class TimelineExporter:
                             break
                         # Ownership transfers to the queue item and returns
                         # from the consumer after synchronous encoding.
+                        del decoded
                         conversion_buffers = None
                     except Exception:
                         if conversion_buffers is not None:
@@ -6718,6 +6792,7 @@ class TimelineExporter:
                     cancelled = True
                     break
                 i, decoded, decode_ms, prepare_ms, conversion_buffers = item
+                del item
                 try:
                     if recorder is not None:
                         recorder.record_stage_sample(
@@ -6739,6 +6814,7 @@ class TimelineExporter:
                     self._current_frame = i + 1
                     self._notify_progress()
                 finally:
+                    del decoded
                     if conversion_buffers is not None:
                         conversion_buffer_q.put(conversion_buffers)
         finally:
@@ -7120,13 +7196,16 @@ class TimelineExporter:
                     self._export_read_ahead = prefetch
                     self._export_read_ahead_end = end_frame
                     self._export_read_ahead_pending = None
-                    for fi in range(start_frame, end_frame):
-                        if stop.is_set() or self._cancel_requested:
-                            break
-                        if not self._wait_if_paused():
-                            break
-                        if not enqueue((fi, self._render_frame(fi, config))):
-                            break
+                    try:
+                        for fi in range(start_frame, end_frame):
+                            if stop.is_set() or self._cancel_requested:
+                                break
+                            if not self._wait_if_paused():
+                                break
+                            if not enqueue((fi, self._render_frame(fi, config))):
+                                break
+                    finally:
+                        self._discard_topos_lut_prefetch()
             except Exception as e:  # noqa: BLE001 —— 消费侧重抛，串行同语义
                 producer_error.append(e)
             finally:
@@ -7179,12 +7258,16 @@ class TimelineExporter:
     ) -> Optional[Any]:
         """渲染单帧（T-P0-20：render 阶段 wall 计时后委托实现）。"""
         started = time.perf_counter()
+        self._frame_render_backend = None
         result = self._render_frame_impl(frame_idx, config)
+        pending = getattr(self, "_topos_lut_prefetch", None)
+        if pending is not None and pending[0] <= frame_idx:
+            self._discard_topos_lut_prefetch()
         recorder = getattr(self, "_export_telemetry", None)
         if recorder is not None:
             recorder.record_stage_sample(
                 "render",
-                str(self._timeline_graphics_backend or "cpu"),
+                str(self._frame_render_backend or self._timeline_graphics_backend or "cpu"),
                 wall_ms=(time.perf_counter() - started) * 1000.0,
                 frame_index=frame_idx,
             )
@@ -7253,8 +7336,21 @@ class TimelineExporter:
             self._release_gpu_export_renderer()
             self._dnxhr_metal_fell_back = True
             self._timeline_graphics_backend = "opengl"
+        elif (getattr(config, "codec", None) == ExportCodec.TOPOS
+              and getattr(self, "_timeline_graphics_backend", None) == "metal"
+              and not self._gpu_render_disabled):
+            try:
+                native_frame = self._render_metal_422_lut(frame_plan, frame_idx, config)
+            except Exception as error:
+                logger.warning("Metal TOPOS LUT rendering failed, using the compositor: %s", error)
+                self._record_gpu_fallback(f"metal_topos_lut_render_failed:{type(error).__name__}")
+            else:
+                if native_frame is not None:
+                    self._topos_metal_lut_frames += 1
+                    return native_frame
 
         # 合成层
+        self._discard_topos_lut_prefetch()
         composite = self._composite_layers(
             frame_plan.layers, frame_plan.transitions, config, frame_idx)
 
@@ -7270,11 +7366,17 @@ class TimelineExporter:
     def _render_metal_dnxhr_hqx(
         self, frame_plan: Any, frame_idx: int, config: TimelineExportConfig,
     ) -> Optional[DecodedFrame]:
-        """Render a proven single-LUT case through the normal DNxHR encoder."""
+        return self._render_metal_422_lut(frame_plan, frame_idx, config)
+
+    def _render_metal_422_lut(
+        self, frame_plan: Any, frame_idx: int, config: TimelineExportConfig,
+    ) -> Optional[DecodedFrame]:
+        """Grade an identity 10-bit 4:2:2 clip into encoder-native planes."""
         from src.features.color.core.color_graph_texture import serial_lut_only
         from src.features.edit.core.color_chain import chain_extra_params
         from src.features.edit.core.timeline_metal_export_renderer import TimelineMetalExportRenderer
         from src.shared.media.frame import DecodedFrame
+        from src.shared.media.gpu_frame import GpuDecodedFrame, safe_release_gpu_frame
 
         width, height = self._get_output_resolution(config)
         if (not self._gpu_yuv422p10_output_allowed(config, width, height, frame_idx)
@@ -7293,36 +7395,73 @@ class TimelineExporter:
             return None
         path = export_source_path(self._project, asset)
         metadata = asset.metadata or {}
+        source_codec = metadata.get("codec") or metadata.get("codec_name")
         if (not path or path != asset.path
-                or (metadata.get("codec") or metadata.get("codec_name")) not in ("dnxhd", "dnxhr")
+                or source_codec not in ("topos", "dnxhd", "dnxhr")
                 or metadata.get("pixel_format") != "yuv422p10le"
                 or metadata.get("is_vfr") or metadata.get("is_hdr") or metadata.get("rotation")
                 or metadata.get("field_order") not in (None, "unknown", "progressive")):
             return None
-        decoded = self._request_high_depth_decoded_frame(
-            path, source_frame, layer.asset_id, session_key=self._layer_session_key(layer))
-        if (decoded is None or decoded.frame_index != source_frame
-                or decoded.pixel_format != "yuv422p10le"
-                or (decoded.width, decoded.height) != (width, height)):
+        asset_sar = metadata.get("sample_aspect_ratio")
+        if asset_sar is not None and asset_sar not in ("1:1", {"num": 1, "den": 1}):
+            if self._rational_pair(asset_sar) != (1, 1):
+                return None
+        if source_codec == "topos" and any(
+            metadata.get(key) != expected
+            for key, expected in (
+                ("color_range", "limited"), ("color_matrix", "bt709"),
+                ("color_transfer", "bt709"), ("color_primaries", "bt709"),
+            )
+        ):
             return None
-        color = decoded.metadata
-        if (color is None or color.color_range != "limited" or color.color_matrix != "bt709"
-                or color.color_transfer != "bt709" or color.color_primaries != "bt709"):
-            return None
-        source = self._gpu_planar_source_from_decoded(decoded)
-        if source is None:
-            return None
-        renderer = self._gpu_export_renderer
-        if renderer is None:
-            renderer = TimelineMetalExportRenderer(self._gpu_trail)
-            self._gpu_export_renderer = renderer
-        reference, strength = lut
-        result = renderer.render_dnxhr_hqx_lut(
-            source, reference, strength, getattr(self._encoder, "allocate_yuv422p10_frame", None))
+        session_key = self._layer_session_key(layer)
+        if source_codec == "topos":
+            decoded = self._take_topos_lut_prefetch(frame_idx)
+            if decoded is None:
+                decoded = self._request_video_metal_frame(
+                    path, source_frame, layer.asset_id, session_key=session_key)
+            if decoded is None:
+                decoded = self._request_video_decoded_frame(
+                    path, source_frame, layer.asset_id, session_key=session_key)
+        else:
+            decoded = self._request_high_depth_decoded_frame(
+                path, source_frame, layer.asset_id, session_key=session_key)
+        gpu_source = isinstance(decoded, GpuDecodedFrame)
+        try:
+            if (decoded is None or decoded.frame_index != source_frame
+                    or decoded.pixel_format != "yuv422p10le"
+                    or (decoded.width, decoded.height) != (width, height)):
+                return None
+            color = decoded if gpu_source else decoded.metadata
+            if (color is None or color.color_range != "limited" or color.color_matrix != "bt709"
+                    or color.color_transfer != "bt709" or color.color_primaries != "bt709"):
+                return None
+            decoded_sar = getattr(color, "sample_aspect_ratio", None)
+            if decoded_sar is not None and self._rational_pair(decoded_sar) != (1, 1):
+                return None
+            if not gpu_source and (decoded.is_proxy or color.has_alpha or color.rotation
+                                   or color.field_order not in (None, "", "progressive")):
+                return None
+            source = decoded if gpu_source else self._gpu_planar_source_from_decoded(decoded)
+            if source is None:
+                return None
+            if gpu_source and source_codec == "topos":
+                self._schedule_topos_lut_prefetch(frame_idx, layer)
+            renderer = self._gpu_export_renderer
+            if renderer is None:
+                renderer = TimelineMetalExportRenderer(self._gpu_trail)
+                self._gpu_export_renderer = renderer
+            reference, strength = lut
+            result = renderer.render_yuv422p10_lut(
+                source, reference, strength, getattr(self._encoder, "allocate_yuv422p10_frame", None))
+        finally:
+            if gpu_source:
+                safe_release_gpu_frame(decoded)
         recorder = self._export_telemetry
         if recorder is not None:
             # The renderer already records these transfers in the legacy trail.
-            recorder.record_stage_sample("cpu_to_gpu_upload", "metal", cpu_upload_bytes=4 * width * height)
+            if not gpu_source:
+                recorder.record_stage_sample("cpu_to_gpu_upload", "metal", cpu_upload_bytes=4 * width * height)
             recorder.record_stage_sample("gpu_to_cpu_download", "metal", cpu_download_bytes=4 * width * height)
         return DecodedFrame(
             frame_index=frame_idx, pts=frame_idx,
@@ -7330,6 +7469,60 @@ class TimelineExporter:
             planes=result.planes, pixel_format="yuv422p10le", width=width, height=height,
             extra={"yuv422p10_frame": result.encoder_frame} if result.encoder_frame is not None else {},
         )
+
+    def _take_topos_lut_prefetch(self, frame_idx: int) -> Optional[Any]:
+        pending = getattr(self, "_topos_lut_prefetch", None)
+        if pending is None or pending[0] != frame_idx:
+            return None
+        self._topos_lut_prefetch = None
+        try:
+            return pending[1].result()
+        except Exception as error:
+            logger.debug("TOPOS Metal decode read-ahead failed: %s", error)
+            return None
+
+    def _discard_topos_lut_prefetch(self) -> None:
+        pending = getattr(self, "_topos_lut_prefetch", None)
+        if pending is None:
+            return
+        if pending[1].cancel():
+            self._topos_lut_prefetch = None
+        else:
+            from src.shared.media.gpu_frame import safe_release_gpu_frame
+
+            safe_release_gpu_frame(self._take_topos_lut_prefetch(pending[0]))
+
+    def _schedule_topos_lut_prefetch(self, frame_idx: int, layer: "ClipLayerInfo") -> None:
+        """Overlap one sequential TOPOS decode with the current Metal dispatch."""
+        worker = self._export_read_ahead
+        next_idx = frame_idx + 1
+        if (worker is None or not self._metal_prefetch_enabled
+                or self._topos_lut_prefetch is not None
+                or next_idx >= self._export_read_ahead_end or self._render_plan is None):
+            return
+        plan = self._render_plan.get_frame_plan(next_idx)
+        if len(plan.layers) != 1 or plan.transitions:
+            return
+        following = plan.layers[0]
+        if following.clip_id != layer.clip_id or following.source_frame != layer.source_frame + 1:
+            return
+        clip_id = self._open_clips.get(self._layer_session_key(layer))
+        if clip_id is None:
+            return
+        provider = self._frame_provider
+
+        def decode() -> Any:
+            from src.shared.media.gpu_frame import GpuDecodedFrame
+
+            start = time.perf_counter()
+            decoded = provider.request_metal_frame(clip_id, following.source_frame, quality="master")
+            self._record_gpu_stage(
+                "decode", decoded.source_kind if isinstance(decoded, GpuDecodedFrame) else "cpu_fallback",
+                wall_ms=(time.perf_counter() - start) * 1000.0,
+            )
+            return decoded
+
+        self._topos_lut_prefetch = next_idx, worker.submit(decode)
 
     @staticmethod
     def _rational_pair(value: Any) -> Optional[Tuple[int, int]]:
@@ -7463,6 +7656,153 @@ class TimelineExporter:
             )
         self._write_success_manifest_async(config)
         return ExportOutcome(success=True, delivery_path=path)
+
+    def _topos_packet_copy_spans(
+        self, config: TimelineExportConfig, start_frame: int, end_frame: int,
+    ) -> Optional[list[tuple[str, int, int]]]:
+        """Collect contiguous source ranges in timeline order."""
+        if self._render_plan is None or self._project is None or start_frame >= end_frame:
+            return None
+        sources: dict[str, str] = {}
+        spans: list[tuple[str, int, int]] = []
+        for frame_idx in range(start_frame, end_frame):
+            if self._cancel_requested:
+                return None
+            plan = self._render_plan.get_frame_plan(frame_idx)
+            identity = self._identity_delivery_layer(plan, frame_idx, config)
+            if identity is None:
+                return None
+            layer, source_frame, _ = identity
+            if layer.asset_id not in sources:
+                asset = self._project.get_asset_by_id(layer.asset_id)
+                if asset is None or asset.media_type != "video":
+                    return None
+                source = export_source_path(self._project, asset)
+                if (source != asset.path
+                        or os.path.splitext(source)[1].lower() != ".mov"):
+                    return None
+                if os.path.realpath(source) == os.path.realpath(config.output_path):
+                    raise ValueError("TOPOS delivery cannot overwrite timeline source media")
+                sources[layer.asset_id] = source
+            source = sources[layer.asset_id]
+            if spans and spans[-1][0] == source and source_frame == spans[-1][1] + spans[-1][2]:
+                path, first, count = spans[-1]
+                spans[-1] = path, first, count + 1
+            else:
+                spans.append((source, source_frame, 1))
+        return spans
+
+    def _try_copy_topos_422(
+        self, config: TimelineExportConfig, encoder_config: "FFmpegEncoderConfig",
+        start_frame: int, end_frame: int,
+    ) -> Optional[ExportOutcome]:
+        """Remux matching TOPOS frames using the normal delivery audio and MOV writer."""
+        from src.shared.codec.topos_binding import ToposCodec, ToposCodecError, ToposMovieFile
+        from src.shared.export.topos_encoder import ToposPacketCopyUnsupported
+
+        rate = self._rational_pair(encoder_config.fps)
+        if (not config.bypass_reencode
+                or encoder_config.crf is not None
+                or encoder_config.profile not in {"lt", "standard", "hq"}
+                or encoder_config.pix_fmt != "yuv422p10le"
+                or encoder_config.has_alpha
+                or os.path.splitext(config.output_path)[1].lower() != ".mov"
+                or (encoder_config.width, encoder_config.height) != self._get_sequence_resolution()
+                or rate is None or rate != self._rational_pair(self._sequence.fps)
+                or self._delivery_guide_burns_in()
+                or getattr(self._gpu_encode_surface_provider, "handles_timeline_video", False)):
+            return None
+        spans = self._topos_packet_copy_spans(config, start_frame, end_frame)
+        if self._cancel_requested:
+            return ExportOutcome.user_cancelled()
+        if not spans:
+            return None
+
+        encoder = _create_topos_video_encoder(
+            config.output_path, encoder_config, None, self._sequence)
+        codec = ToposCodec()
+        started = time.perf_counter()
+        last_sample: dict[str, int] = {}
+        for path, first, count in spans:
+            if first < 0:
+                return None
+            last_sample[path] = max(last_sample.get(path, 0), first + count)
+
+        def open_source(path: str, stack: ExitStack) -> tuple[ToposMovieFile, "ToposMovieSummary"]:
+            try:
+                movie = stack.enter_context(ToposMovieFile(codec, path))
+                info = movie.info()
+            except (OSError, ToposCodecError) as error:
+                raise ToposPacketCopyUnsupported("source is not a readable TOPOS MOV") from error
+            if last_sample[path] > info.sample_count:
+                raise ToposPacketCopyUnsupported("source sample range exceeds the clip")
+            return movie, info
+
+        try:
+            with ExitStack() as source:
+                active_path = spans[0][0]
+                movie, info = open_source(active_path, source)
+                encoder.open(packet_copy_source=info)
+                # Validate every source before writing video or mixing audio.
+                # Keep at most two open movie readers even for a long edit.
+                for path in last_sample:
+                    if self._cancel_requested:
+                        return ExportOutcome.user_cancelled()
+                    if path != active_path:
+                        with ExitStack() as probe:
+                            _, candidate = open_source(path, probe)
+                            encoder.check_packet_copy_source(candidate)
+                audio = self._direct_audio_prepare(
+                    encoder, start_frame, end_frame, config, strict=True)
+                for path, first, count in spans:
+                    if path != active_path:
+                        source.close()
+                        movie, info = open_source(path, source)
+                        encoder.check_packet_copy_source(info)
+                        active_path = path
+                    ticks_per_frame = info.timescale * rate[1]
+                    for index, (packet, size) in enumerate(
+                        movie.iter_packet_buffers(first, count), start=first,
+                    ):
+                        if self._cancel_requested or not self._wait_if_paused():
+                            return ExportOutcome.user_cancelled()
+                        pts, duration = movie.pts(index)
+                        if (duration * rate[0] != ticks_per_frame
+                                or pts * rate[0] != index * ticks_per_frame
+                                or not movie.is_sync(index)):
+                            raise ToposPacketCopyUnsupported("source samples require timing or GOP reconstruction")
+                        encoder.write_source_packet(packet, size)
+                        self._current_frame = encoder.frame_count
+                        self._notify_progress()
+            if self._cancel_requested:
+                return ExportOutcome.user_cancelled()
+            self._direct_audio_finish(encoder, config, audio, strict=True)
+            if encoder.frame_count != end_frame - start_frame:
+                raise RuntimeError("TOPOS packet copy produced an unexpected frame count")
+            if not encoder.close(should_cancel=lambda: self._cancel_requested):
+                return ExportOutcome.user_cancelled()
+        except ToposPacketCopyUnsupported as error:
+            if self._cancel_requested:
+                return ExportOutcome.user_cancelled()
+            logger.info("TOPOS packet copy ineligible: %s", error)
+            self._current_frame = 0
+            return None
+        finally:
+            if encoder.is_open:
+                self._join_audio_render_thread()
+                self._audio_master_pcm = None
+                self._audio_render_error = None
+                self._audio_stem_pcms = []
+                encoder.abort()
+                self._cleanup_clips()
+
+        delivery_path = "topos_packet_copy"
+        self._export_telemetry.set_delivery_path(delivery_path)
+        self._export_telemetry.record_stage_sample(
+            "mux", delivery_path, wall_ms=(time.perf_counter() - started) * 1000.0)
+        self._cleanup_clips()
+        self._write_success_manifest_async(config)
+        return ExportOutcome(success=True, delivery_path=delivery_path)
 
     def _identity_delivery_layer(
         self,
@@ -8237,6 +8577,19 @@ class TimelineExporter:
             # 帧级精选出的规格不支持标量交付时，放弃此前按候选集乐观
             # 判定的 resize 通道（当前白名单内该组合不存在，纯防御）。
             return None
+        if spec.av_hqx_reformat and (
+                getattr(encoder_config, "profile", None) != "hqx"
+                or source_path != getattr(asset, "path", None)
+                or getattr(metadata, "codec_name", None) != "h264"
+                or getattr(decoded, "frame_index", None) != expected_source_frame
+                or opacity != 1.0
+                or (isinstance(asset_metadata, dict)
+                    and (asset_metadata.get("is_vfr")
+                         or asset_metadata.get("is_hdr")
+                         or asset_metadata.get("rotation")
+                         or asset_metadata.get("field_order") not in
+                         (None, "", "unknown", "progressive")))):
+            return None
 
         # The passthrough copies chroma samples without resampling, so the
         # source and container must describe the same sample location.
@@ -8265,6 +8618,9 @@ class TimelineExporter:
         try:
             source_siting = int(source_siting)
         except (TypeError, ValueError, OverflowError):
+            return None
+        if spec.av_hqx_reformat and source_siting != 0:
+            # The 4:2:0 input also needs the verified vertical sample position.
             return None
         siting_matches = source_siting == output_siting
         if (not siting_matches
@@ -8303,6 +8659,11 @@ class TimelineExporter:
             if (not value or not target
                     or str(value).lower() != str(target).lower()):
                 return None
+        if spec.av_hqx_reformat and (
+                self._rational_pair(sample_aspect_ratio) != (1, 1)
+                or any(str(value).lower() != ("limited" if key == "range" else "bt709")
+                       for key, value in source_color.items())):
+            return None
 
         source_width, source_height = (
             (sequence_width, sequence_height)
@@ -8343,6 +8704,7 @@ class TimelineExporter:
         output_metadata = metadata
         output_plane_infos = plane_infos
         output_pixel_format = pixel_format
+        output_extra = getattr(decoded, "extra", None)
         # 10-bit 源 → 8-bit 档：YUV 域右移降位（round-half-up）。limited
         # range 锚点精确整除（Y 64→16、940→235；UV 64→16、960→240，因
         # (940-64)/(235-16)=(960-64)/(240-16)=4），全程不引入 RGB 往返。
@@ -8361,7 +8723,32 @@ class TimelineExporter:
         chroma_reshape_needed = (
             _chroma_domain_of(spec.target_pix_fmt)
             != _chroma_domain_of(pixel_format))
-        if (resize_delivery or opacity < 1.0 - 1e-6
+        if spec.av_hqx_reformat:
+            from src.shared.media.frame import PlaneInfo
+
+            reformat = getattr(encoder, "reformat_hqx_yuv420p_frame", None)
+            source_frame = frame_extra.get("source_yuv420p_frame")
+            if (not callable(reformat)
+                    or (getattr(source_frame, "width", None), getattr(source_frame, "height", None))
+                    != (source_width, source_height)):
+                return None
+            converted = reformat(source_frame)
+            if converted is None:
+                return None
+            av_frame, planes = converted
+            output_plane_infos = tuple(
+                PlaneInfo.create(
+                    index, plane.shape[1], plane.shape[0], ("Y", "U", "V")[index],
+                    plane.dtype, 10, stride=plane.strides[0],
+                ) for index, plane in enumerate(planes)
+            )
+            output_metadata = replace(
+                metadata, pixel_format=spec.target_pix_fmt, bit_depth=10,
+                chroma_siting=output_siting,
+            )
+            output_extra = {"yuv422p10_frame": av_frame}
+            self._frame_render_backend = "cpu"
+        elif (resize_delivery or opacity < 1.0 - 1e-6
                 or downconvert_depth or chroma_reshape_needed):
             # Match the established RGB scaler's half-pixel bilinear phase,
             # but keep the data in the encoder's limited-range YUV domain.
@@ -8468,7 +8855,7 @@ class TimelineExporter:
             metadata=output_metadata,
             plane_infos=output_plane_infos,
             is_proxy=False,
-            extra=getattr(decoded, "extra", None),
+            extra=output_extra,
         )
 
     def _apply_program_guide_matte(self, frame_bgr_u8: "np.ndarray") -> "np.ndarray":
@@ -9311,14 +9698,14 @@ class TimelineExporter:
     def _release_gpu_export_renderer(self) -> None:
         """释放 GPU 合成渲染器（幂等；须在创建线程调用——串行=导出线程，
         流水线=render 生产者线程，两处 finally 均满足该契约）。"""
-        renderer = self._gpu_export_renderer
-        if renderer is None:
-            return
-        try:
-            renderer.release()
-        except Exception:
-            pass
-        self._gpu_export_renderer = None
+        for slot in ("_gpu_export_renderer", "_gpu_graph_export_renderer"):
+            renderer = getattr(self, slot, None)
+            if renderer is not None:
+                try:
+                    renderer.release()
+                except Exception:
+                    pass
+                setattr(self, slot, None)
 
     def _decoded_frame_is_high_depth(self, decoded_frame: Any) -> bool:
         """镜像 _get_video_frame 的高位深判定（格式名或 data itemsize）。"""
@@ -9415,16 +9802,11 @@ class TimelineExporter:
         if (str(getattr(encoder_config, "pix_fmt", "")).lower() != "yuv422p10le"
                 or codec not in ("topos", "dnxhr")):
             return False
-        if codec == "dnxhr":
-            if (getattr(self, "_timeline_graphics_backend", "opengl") not in ("opengl", "metal")
-                    or getattr(self, "_nested_render_stack", None)):
-                # A nested sequence returns pixels to the parent compositor.
-                return False
-            guide = (getattr(self._sequence, "format_settings", {}) or {}).get("program_guide")
-            if isinstance(guide, dict) and guide.get("type") == "aspect_ratio":
-                params = guide.get("params", {})
-                if isinstance(params, dict) and params.get("fill_black") and params.get("burn_in"):
-                    return False
+        if (getattr(self, "_timeline_graphics_backend", "opengl") not in ("opengl", "metal")
+                or getattr(self, "_nested_render_stack", None)
+                or self._delivery_guide_burns_in()):
+            # A nested sequence or program matte needs composited pixels.
+            return False
         color = getattr(self, "_export_color_metadata", None)
         if color is None or any(
             str(getattr(color, name, "")).lower() != expected
@@ -9603,11 +9985,19 @@ class TimelineExporter:
         if self._gpu_render_disabled:
             return None
         graphics_backend = getattr(self, "_timeline_graphics_backend", "opengl")
-        if graphics_backend == "metal" and any(self._clip_color_graph(layer) is not None for layer in sorted_layers):
-            self._record_gpu_fallback("color_graph_cpu_compositor")
-            return None
-        for layer in sorted_layers:
-            graph = self._clip_color_graph(layer)
+        layer_graphs = [(layer, self._clip_color_graph(layer)) for layer in sorted_layers]
+        graph_fallback = graphics_backend == "metal" and any(
+            graph is not None for _, graph in layer_graphs)
+        renderer_slot = "_gpu_export_renderer"
+        if graph_fallback:
+            self._frame_render_backend = "cpu"
+            if getattr(self, "_gpu_encode_surface_provider", None) is not None:
+                # A native encoder surface must be populated by Metal.
+                self._record_gpu_fallback("color_graph_cpu_compositor")
+                return None
+            graphics_backend = "opengl"
+            renderer_slot = "_gpu_graph_export_renderer"
+        for layer, graph in layer_graphs:
             if graph is not None:
                 from src.features.color.core.color_graph_texture import graph_texture_fallback_reason
                 reason = graph_texture_fallback_reason(graph, int(getattr(layer, "source_frame", 0)))
@@ -9640,7 +10030,7 @@ class TimelineExporter:
         if not sorted_layers:
             return None
         metal_gpu_frames: Dict[int, Any] = {}
-        renderer = getattr(self, "_gpu_export_renderer", None)
+        renderer = getattr(self, renderer_slot, None)
         if renderer is not None and bool(getattr(renderer, "failed", False)):
             # A failed headless context is permanent for this export. Avoid
             # fetching/copying every source frame for a GPU attempt that will
@@ -10092,7 +10482,6 @@ class TimelineExporter:
                     float(c) for c in trans.blend_color)
                 dip_factor = max(0.0, min(1.0, factor))
 
-            renderer = self._gpu_export_renderer
             if renderer is None:
                 if graphics_backend == "metal":
                     from src.features.edit.core.timeline_metal_export_renderer import (
@@ -10109,7 +10498,7 @@ class TimelineExporter:
                         TimelineGpuExportRenderer,
                     )
                     renderer = TimelineGpuExportRenderer()
-                self._gpu_export_renderer = renderer
+                setattr(self, renderer_slot, renderer)
             if renderer.failed:
                 return None
 
@@ -10169,7 +10558,7 @@ class TimelineExporter:
                         and isinstance(grade_uniforms, dict)
                         and grade_uniforms.get("color_graph") is not None
                         and str(getattr(getattr(self._encoder, "_config", None),
-                                        "codec", "")).lower() == "dnxhr"):
+                                        "codec", "")).lower() in ("dnxhr", "topos")):
                     kwargs["output_yuv422p10"] = True
                     allocate = getattr(self._encoder, "allocate_yuv422p10_frame", None)
                     if callable(allocate):
@@ -10265,6 +10654,9 @@ class TimelineExporter:
                     render_layers, width, height, **kwargs)
                 if stack_output_surface is not None and result is not stack_output_surface:
                     stack_output_surface.release()
+            if graph_fallback and result is not None:
+                self._record_gpu_fallback("color_graph_opengl_compositor")
+                self._frame_render_backend = "opengl"
             if isinstance(result, GpuYuv420Output):
                 from src.shared.media.frame import DecodedFrame
 
@@ -10305,7 +10697,7 @@ class TimelineExporter:
                         renderer.release()
                     except Exception:
                         pass
-                    self._gpu_export_renderer = None
+                    setattr(self, renderer_slot, None)
             return result
         except Exception as error:
             logger.warning(
@@ -12480,6 +12872,7 @@ class TimelineExporter:
             return None
 
         config = self._active_export_config or TimelineExportConfig()
+        parent_render_backend = getattr(self, "_frame_render_backend", None)
         self._nested_render_stack.add(child_tid)
         try:
             return self._composite_layers(
@@ -12487,6 +12880,7 @@ class TimelineExporter:
             )
         finally:
             self._nested_render_stack.discard(child_tid)
+            self._frame_render_backend = parent_render_backend
 
     def _export_session_cap(self) -> int:
         """导出视频解码会话的 LRU 上限（防多 clip 时间线内存失控）。"""
@@ -12864,14 +13258,24 @@ class TimelineExporter:
                     _is_intra_codec,
                 )
 
-                source = FFmpegMediaSource(
-                    asset_path, preserve_planes=True, output_mode="planar_yuv",
-                )
-                source.open()
                 encoder_config = getattr(
                     getattr(self, "_encoder", None), "_config", None)
-                if (str(getattr(encoder_config, "codec", "")).lower()
-                        == "topos"):
+                encoder_codec = str(getattr(encoder_config, "codec", "")).lower()
+                hqx_planar = (
+                    encoder_codec == "dnxhr"
+                    and getattr(encoder_config, "profile", None) == "hqx"
+                    and getattr(encoder_config, "pix_fmt", None) == "yuv422p10le"
+                )
+                source = FFmpegMediaSource(
+                    asset_path, preserve_planes=True, output_mode="planar_yuv",
+                    **({"retain_yuv420p_av_frame": True} if hqx_planar else {}),
+                )
+                source.open()
+                if hqx_planar:
+                    _encode_threads, decode_threads = _topos_timeline_cpu_threads()
+                    if decode_threads is not None:
+                        source.limit_h264_export_decode_threads(decode_threads)
+                elif encoder_codec == "topos":
                     _encode_threads, decode_threads = \
                         _topos_timeline_cpu_threads()
                     stream = getattr(source, "_video_stream", None)

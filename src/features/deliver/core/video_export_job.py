@@ -174,6 +174,7 @@ class VideoConfig:
     #: Extra encoder hints that don't deserve first-class fields yet
     #: (e.g. ``{"gop_size": 60}``). Preserved across round-trips.
     extra: Dict[str, Any] = field(default_factory=dict)
+    bypass_reencode: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -193,6 +194,7 @@ class VideoConfig:
             "image_sequence_overwrite": self.image_sequence_overwrite,
             "alpha": self.alpha,
             "alpha_budget_policy": self.alpha_budget_policy,
+            "bypass_reencode": self.bypass_reencode,
             "extra": dict(self.extra),
         }
         return d
@@ -221,6 +223,7 @@ class VideoConfig:
                 data.get("image_sequence_overwrite", False)),
             alpha=bool(data.get("alpha", False)),
             alpha_budget_policy=str(data.get("alpha_budget_policy", "record")),
+            bypass_reencode=data.get("bypass_reencode") is True,
             extra=dict(data.get("extra", {})),
         )
 
@@ -794,6 +797,7 @@ class VideoExportJob:
                 quality_mode=str(config.get("quality_mode", "auto")),
                 quality_value=config.get("quality"),
                 gif_color_count=int(config.get("gif_color_count", 256)),
+                bypass_reencode=config.get("bypass_reencode") is True,
             ),
             range_type=str(config.get("range_type", RangeType.ENTIRE)),
             start_frame=int(config.get("start_frame", 0)),
@@ -855,6 +859,7 @@ class VideoExportJob:
             # R7：Alpha 预算超限策略 UI 授权开关（ADR-C014 C-114）
             alpha_budget_policy=str(self.video_config.alpha_budget_policy
                                     or "record"),
+            bypass_reencode=self.video_config.bypass_reencode,
             include_audio=self.audio_config.include_audio,
             audio_codec=self.audio_config.codec,
             audio_bitrate=self.audio_config.bitrate,

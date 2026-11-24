@@ -13,7 +13,7 @@ import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 _LOG = logging.getLogger(__name__)
 
@@ -2307,6 +2307,21 @@ class ToposMovieFile:
             raise ToposCodecError(f"tc_movie_packet_pts 失败 [{status}]")
         return int(pts.value), int(dur.value)
 
+    def iter_packet_buffers(
+        self, start: int, count: int,
+    ) -> Iterator[tuple[ctypes.Array, int]]:
+        """Read selected samples sequentially. Consume each buffer before advancing."""
+        if not getattr(self._codec, "_has_movie_packet_batch", False):
+            for index in range(start, start + count):
+                yield self.packet_into(index)
+            return
+        stop = start + count
+        for index in range(start, stop, 4):
+            arena, offsets, sizes = self.packets_into_batch(index, min(4, stop - index))
+            address = ctypes.addressof(arena)
+            for offset, size in zip(offsets, sizes):
+                yield (ctypes.c_char * size).from_address(address + offset), size
+
     def is_sync(self, index: int) -> bool:
         sync = ctypes.c_uint8(0)
         status = int(self._codec._lib.tc_movie_packet_sync(
@@ -2591,7 +2606,10 @@ class ToposMovieFile:
 class ToposMuxFile:
     """文件型 mux（write+seek_write 回调；finish 后自动关闭）。"""
 
-    def __init__(self, codec: "ToposCodec", path: str, config: _CMovieConfig) -> None:
+    def __init__(
+        self, codec: "ToposCodec", path: str, config: _CMovieConfig,
+        *, cache_writes: bool = True,
+    ) -> None:
         self._codec = codec
         self._fd = _open_binary(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                                 0o644)
@@ -2614,6 +2632,15 @@ class ToposMuxFile:
         if status != TC_OK:
             os.close(self._fd)
             raise ToposCodecError(f"tc_mux_create 失败 [{status}]: {codec.last_error()}")
+        if not cache_writes and sys.platform == "darwin":
+            import fcntl
+
+            no_cache = getattr(fcntl, "F_NOCACHE", None)
+            if no_cache is not None:
+                try:
+                    fcntl.fcntl(self._fd, no_cache, 1)
+                except OSError as error:
+                    _LOG.debug("TOPOS mux will use cached writes: %s", error)
         # v1.6 追加轨索引基准：movie config reserved 槽位已声明主混音
         #（轨 0）时，首条 add_audio_track 落在 C 侧轨 1——返回值契约
         #（"返回后即可对该轨 index"，topos_codec.h）要求计数从 1 起
@@ -2621,7 +2648,8 @@ class ToposMuxFile:
 
     def _write_cb(self, _ctx: int, data: int, length: int) -> int:
         try:
-            chunk = ctypes.string_at(data, length)
+            # The native mux owns this buffer until the synchronous callback returns.
+            chunk = (ctypes.c_ubyte * length).from_address(data)
             # AUD-32203：顺序写同样持实例锁——与 _seek_write_cb 的加锁
             # 对称（此前注释声称"与顺序写共用实例锁互斥"但本侧从未
             # acquire；Windows 的 lseek→write→恢复指针模拟期间，无锁的
@@ -2642,8 +2670,16 @@ class ToposMuxFile:
             return -14
 
     def add_packet(self, packet: bytes, pts: int, dur: int = 1) -> None:
+        self.add_packet_buffer(packet, len(packet), pts, dur)
+
+    def add_packet_buffer(
+        self, packet: bytes | ctypes.Array, size: int, pts: int, dur: int = 1,
+    ) -> None:
+        """Synchronously validate and write a packet from a caller-owned buffer."""
+        if not 0 <= size <= len(packet):
+            raise ValueError("Invalid TOPOS packet buffer length")
         status = int(self._codec._lib.tc_mux_add_packet(
-            self._mux, packet, len(packet), pts, dur))
+            self._mux, packet, size, pts, dur))
         if status != TC_OK:
             raise ToposCodecError(
                 f"tc_mux_add_packet 失败 [{status}]: {self._codec.last_error()}"

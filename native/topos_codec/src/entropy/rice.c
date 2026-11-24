@@ -2,18 +2,12 @@
 
 uint32_t tc_rice_map_signed(int32_t v)
 {
-    /* int64 中转：杜绝 INT32_MIN 取负等 UB（域内 |v| ≤ 2^30，2·|v| < 2^32） */
-    int64_t s = (int64_t)v;
-    if (s >= 0) { return (uint32_t)((uint64_t)s << 1); }
-    uint64_t mag = (uint64_t)(-s);
-    return (uint32_t)((mag << 1) - 1u);
+    return tc_rice_map_signed_inline(v);
 }
 
 int32_t tc_rice_unmap_signed(uint32_t m)
 {
-    uint64_t u = (uint64_t)m;
-    if ((u & 1u) == 0u) { return (int32_t)(u / 2u); }
-    return -(int32_t)((u + 1u) / 2u);
+    return tc_rice_unmap_signed_inline(m);
 }
 
 int32_t tc_rice_encode(tc_bitwriter* bw, uint32_t k, uint32_t m)

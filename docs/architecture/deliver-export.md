@@ -287,6 +287,14 @@ OpenGL 直接上传 FFmpeg 的 RGB8 帧，并可在当前帧渲染期间预取�
 
 ### 3.3 Topos 直通交付（T-P1-10 快路径）
 
+交付页的「高级设置 → 尽可能绕过重新编码」可直接复用 TOPOS 422
+Standard、LT 或 HQ 的 10-bit V7-R2 帧内压缩包。该选项随作业保存，默认关闭。
+纯剪选区可拼接多个匹配的源片段。选区的每一帧须与时间线的实际渲染计划、
+原分辨率、帧率、色彩标签和输出档位相符。调色、转场、字幕烧录及其他
+画面变化沿用渲染与编码流程。视频包重新生成连续时间戳，时间线音频照常
+混音。MOV 使用同目录暂存文件，成功后原子发布。遥测标记
+`delivery_path=topos_packet_copy`。
+
 单一 TOPOS clip → TOPOS 输出时，`build_direct_topos_delivery_plan` 严格
 eligibility 判定通过后走 `_export_direct_topos`：`ToposMediaSource` 的
 planar 帧直接喂 `ToposVideoEncoder`，绕过 render plan/provider/BGR48/resize；
@@ -296,6 +304,13 @@ RAW→RAW（`topos_cfa*` 源）透传源 TRWM as-shot 元数据。帧循环按�
 DIRECT_PIPELINE=1/0` 强制覆盖。telemetry 标记 `delivery_path=topos_direct_
 planar_cpu_encode`（诚实标注 CPU 编码面）。取消统一 `encoder.abort()`，
 不留目标文件或 `.topos-tmp` 残留。
+
+至少 16 个逻辑线程的 Intel Mac 在 4K 同规格 TOPOS 422 10-bit 重编码时，
+默认逐帧解码并使用两帧交接队列。UHD V7-R2 全分辨率解码优先派发压缩载荷
+较大的切片，切片状态按码流顺序返回。AVX2 逆变换只拆分有效频率行，
+并以向量整数舍入写出重建样本。原生解码按行带合批执行 Y/U/V 去块滤波。
+队列在编码消费完成后释放平面引用。延迟消费平面的编码模式使用各帧自有的
+转换平面，取消标志在 MOV 原子发布前再检查一次。
 
 同一支逐帧对齐的 DNxHR HQX 10-bit MOV 素材可以按剪辑区间直接复用压缩包。
 条件包括原分辨率、原帧率、限幅 BT.709、无音轨交付及无像素改动。每个包的

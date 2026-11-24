@@ -63,7 +63,8 @@ typedef struct tc_quant_ctx {
      * 门禁，见 codec.c 调用方）。f_clamp 同 color_store（|F|max ∝ max|x'|）。 */
     int64_t f_clamp;
     uint8_t exact_div;
-    uint8_t reserved_q[7];
+    uint8_t avx2_fast_div;
+    uint8_t reserved_q[6];
     tc_fastdiv fd[64];
     /* M10-6.3B：zigzag 序孪生表（gather 型 SIMD 量化内核用）——半加/死区按
      * 扫描位置重排；快速除法拆成恒 magic 形式的 (m1<<26)|m0 两个 u32 乘数
@@ -76,6 +77,10 @@ typedef struct tc_quant_ctx {
     /* P-速⑥：自然序孪生（免 gather 量化内核用）——与 fd 同索引，magic 同拆 */
     uint32_t fd_nat_m1[64];
     uint32_t fd_nat_m0[64];
+#if defined(__x86_64__) || defined(_M_X64)
+    uint32_t avx2_multiplier[64];
+    uint32_t avx2_shift[64];
+#endif
 } tc_quant_ctx;
 
 void tc_quant_ctx_init(tc_quant_ctx* ctx, const uint16_t qm[64], uint32_t qp);

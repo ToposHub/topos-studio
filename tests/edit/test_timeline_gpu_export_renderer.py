@@ -978,6 +978,58 @@ def test_fused_lut_delivery_matches_the_color_graph(
         renderer.release()
 
 
+@pytest.mark.gpu_renderer
+@pytest.mark.real_media
+@pytest.mark.skipif(sys.platform != "darwin", reason="requires Metal and IOSurface")
+def test_topos_iosurface_lut_matches_the_cpu_plane_kernel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from src.features.edit.core.timeline_metal_export_renderer import TimelineMetalExportRenderer
+    from src.shared.media.topos_source import ToposMediaSource
+
+    media = PROJECT_ROOT / "test_videos" / "4K_topos_422.mov"
+    if not media.is_file() or not TimelineMetalExportRenderer.is_supported():
+        pytest.skip("TOPOS 422 fixture or Metal is unavailable")
+    path = tmp_path / "swap.cube"
+    path.write_text("LUT_3D_SIZE 2\n" + "".join(
+        f"{b} {g} {r}\n" for b in range(2) for g in range(2) for r in range(2)
+    ))
+    monkeypatch.setattr("src.shared.color.lut_loader.resolve_lut_path", lambda _ref: str(path))
+
+    renderer = TimelineMetalExportRenderer()
+    try:
+        with ToposMediaSource(str(media)) as decoder:
+            cpu_frame = decoder.read_frame(0)
+            source = TimelineExporter.__new__(TimelineExporter)._gpu_planar_source_from_decoded(cpu_frame)
+            assert source is not None
+            native_frame = decoder.read_frame_metal(0)
+            if native_frame is None:
+                pytest.skip("Native TOPOS IOSurface decode is unavailable")
+            try:
+                expected = renderer.render_yuv422p10_lut(source, "swap", 0.8)
+                actual = renderer.render_yuv422p10_lut(native_frame, "swap", 0.8)
+                # Native and CPU planes share one math path. The held output
+                # must survive the next render's reuse of its Metal buffer.
+                renderer.render_yuv422p10_lut(native_frame, "swap", 0.0)
+                for planes in zip(actual.planes, expected.planes, strict=True):
+                    np.testing.assert_allclose(*planes, rtol=0, atol=1)
+                assert renderer._frame_cpu_upload_bytes == 12
+                with pytest.raises(ValueError, match="limited-range"):
+                    renderer.render_yuv422p10_lut(replace(native_frame, color_range="full"), "swap", 0.8)
+                wrong_format = replace(native_frame.planes[0].resource, resource_format="r16unorm")
+                malformed = replace(native_frame, planes=(
+                    replace(native_frame.planes[0], resource=wrong_format), *native_frame.planes[1:]))
+                with pytest.raises(ValueError, match="plane descriptor"):
+                    renderer.render_yuv422p10_lut(malformed, "swap", 0.8)
+                assert not native_frame.release.is_released
+            finally:
+                native_frame.release.release()
+    finally:
+        renderer.release()
+
+
 @pytest.mark.skipif(not _gl_available(), reason="headless GL 不可用")
 @pytest.mark.parametrize("height", [5, 6])
 def test_yuv422p10_output_preserves_luma_levels_and_chroma_rows(height: int) -> None:

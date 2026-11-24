@@ -23,6 +23,8 @@
       "add_to_queue": "Add to Video Queue",
       "add_and_start": "Add & Start",
       "alpha": "Alpha channel",
+      "bypass_reencode": "Bypass re-encode when possible",
+      "bypass_reencode_hint": "Copy compressed video frames for pure cuts of matching Topos 422 media. Exports that require image processing are rendered normally. Timeline audio is mixed as usual.",
       "profile_default": "(default)",
       "preflight_ok": "Ready to add",
       "project": "Project",

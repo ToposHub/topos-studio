@@ -1,11 +1,34 @@
 /* rANS 核心实现——设计约束与数值域见 rans.h（ADR-C034）。 */
 #include "rans.h"
+#include "vlc.h"
 
 #include "../common/error.h"
 #include "../transform/fastdiv.h"
 #include "../../include/topos_codec.h"
 
 #include <string.h>
+
+void tc_rans_enc_symbol_init(tc_rans_enc_symbol* out, uint32_t freq, uint32_t cum)
+{
+    out->x_max = ((TC_RANS_L >> TC_RANS_SCALE_BITS) << 8) * freq;
+    out->complement = (uint16_t)(TC_RANS_SCALE_TOTAL - freq);
+    if (freq == 1u) {
+        /* For positive x, this reciprocal returns x - 1. Fold the missing
+         * multiple of the complement into the bias. */
+        out->reciprocal = UINT32_MAX;
+        out->shift = 32u;
+        out->bias = (uint16_t)(cum + TC_RANS_SCALE_TOTAL - 1u);
+        return;
+    }
+
+    /* Let D = 2^shift and M = ceil(D/freq). After renormalization,
+     * x < 2^19*freq and freq <= 2^12. Thus x*(M*freq-D) < D, so
+     * floor(x*M/D) is exactly x/freq. M fits in 32 bits. */
+    out->shift = (uint8_t)(31u + tc_vlc_bitlen32(freq - 1u));
+    const uint64_t scale = UINT64_C(1) << out->shift;
+    out->reciprocal = (uint32_t)((scale + freq - 1u) / freq);
+    out->bias = (uint16_t)cum;
+}
 
 int32_t tc_rans_model_build(tc_rans_model* m, const uint32_t* count, uint32_t syms)
 {

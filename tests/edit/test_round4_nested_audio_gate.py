@@ -194,7 +194,7 @@ def test_audio_only_entry_points_never_swallow_nested_failure(tmp_path, monkeypa
         if entry == "master":
             exporter._render_audio_master(0, 24, config)
         elif entry == "direct":
-            exporter._direct_audio_prepare(Mock(), SimpleNamespace(timeline_start=0, frames=24), config)
+            exporter._direct_audio_prepare(Mock(), 0, 24, config)
         elif entry == "stem_pcm":
             render_stem_pcm(parent, StemSpec(StemType.MASTER, "Master"),
                             sequence_resolver={"child": child}.get, asset_lookup=project.assets.get)
