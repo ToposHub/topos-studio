@@ -746,6 +746,60 @@ def test_pipeline_releases_gpu_renderer_on_producer_thread():
     )
 
 
+@pytest.mark.parametrize("exit_mode", ["complete", "cancel", "encode_error", "render_error"])
+def test_pipeline_releases_rendered_output_leases(exit_mode: str) -> None:
+    import threading
+
+    exporter = _make_exporter()
+    exporter._cancel_requested = False
+    exporter._pause_requested = False
+    exporter._resume_event = threading.Event()
+    exporter._current_frame = 0
+    exporter._total_frames = 8
+    exporter._progress_callback = None
+    last_slot_rendered = threading.Event()
+    leases: list[GpuFrameRelease] = []
+    releases: list[int] = []
+    encoded: list[int] = []
+
+    def render(index: int, _config: Any) -> DecodedFrame:
+        if exit_mode == "render_error" and index == 3:
+            raise ValueError("render_error")
+        lease = GpuFrameRelease(release_callback=lambda: releases.append(index))
+        leases.append(lease)
+        if index == 4:
+            last_slot_rendered.set()
+        return DecodedFrame(
+            frame_index=index, pts=index, time_seconds=index / 25.0,
+            extra={"metal_output_buffer_lease": lease},
+        )
+
+    def encode(frame: DecodedFrame) -> None:
+        index = frame.frame_index
+        assert not leases[index].is_released
+        encoded.append(index)
+        if index == 0 and exit_mode in {"cancel", "encode_error"}:
+            # A consuming frame, three queued frames and one ready to enqueue.
+            assert last_slot_rendered.wait(timeout=5.0)
+            if exit_mode == "cancel":
+                exporter._cancel_requested = True
+            else:
+                exporter._pause_requested = True
+                raise ValueError("encode_error")
+
+    exporter._render_frame = render
+    exporter._encode_frame = encode
+    if exit_mode.endswith("_error"):
+        with pytest.raises(ValueError, match=exit_mode):
+            exporter._render_encode_pipeline(0, 8, SimpleNamespace())
+    else:
+        exporter._render_encode_pipeline(0, 8, SimpleNamespace())
+    expected = list(range(8 if exit_mode == "complete" else 3 if exit_mode == "render_error" else 1))
+    assert encoded == expected
+    assert sorted(releases) == list(range(len(leases)))
+    assert all(lease.is_released for lease in leases)
+
+
 def test_packed_export_read_ahead_stops_at_cut() -> None:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -979,10 +1033,121 @@ def test_fused_lut_delivery_matches_the_color_graph(
 
 
 @pytest.mark.gpu_renderer
+@pytest.mark.parametrize("steep", [False, True], ids=["extended-range", "steep-lut"])
+@pytest.mark.parametrize("lut_count", [2, 3])
+@pytest.mark.skipif(not _gl_available(), reason="headless GL 不可用")
+def test_metal_yuv422p10_lut_chain_matches_the_ordered_color_graph(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, steep: bool, lut_count: int,
+) -> None:
+    from dataclasses import replace
+
+    from src.features.color.core.color_graph_service import ColorGraphData, ColorGraphService
+    from src.features.color.core.color_graph_texture import serial_luts_only
+    from src.features.edit.core.timeline_gpu_export_renderer import GpuYuvSource, TimelineGpuExportRenderer
+    from src.features.edit.core.timeline_metal_export_renderer import TimelineMetalExportRenderer
+
+    if not TimelineMetalExportRenderer.is_supported():
+        pytest.skip("Metal is unavailable")
+    # Non-commuting LUTs with different grids and an extended-range intermediate.
+    references = tuple(f"topos-res://lut_{index:032x}" for index in range(lut_count))
+    paths = {ref: tmp_path / f"grade_{index}.cube" for index, ref in enumerate(references)}
+    if steep:
+        # FP16 rounds 0.4999 to 0.5. The second LUT amplifies that change
+        # into several 10-bit code values around its steep interval.
+        paths[references[0]].write_text("LUT_3D_SIZE 2\n" + "0.4999 0.4999 0.4999\n" * 8)
+        row = "0 0 0\n" * 16 + "1 1 1\n" * 17
+        paths[references[1]].write_text("LUT_3D_SIZE 33\n" + row * (33 * 33))
+        strengths = (1.0, 1.0)
+    else:
+        paths[references[0]].write_text("LUT_3D_SIZE 2\n" + "".join(
+            f"{1.42 * b - .18} {.01 + .96 * r} {1.31 * g - .12}\n"
+            for b in range(2) for g in range(2) for r in range(2)
+        ))
+        paths[references[1]].write_text("LUT_3D_SIZE 3\n" + "".join(
+            f"{.11 + .39 * g} {.14 + .36 * b} {.04 + .43 * r}\n"
+            for b in range(3) for g in range(3) for r in range(3)
+        ))
+        strengths = (0.85, 0.6)
+    if lut_count == 3:
+        paths[references[2]].write_text("LUT_3D_SIZE 5\n" + "".join(
+            f"{0.03 + 0.72 * (r / 4.0)**2} {0.09 + 0.80 * (b / 4.0)**2} {0.15 + 0.64 * (g / 4.0)**2}\n"
+            for b in range(5) for g in range(5) for r in range(5)
+        ))
+        strengths += (0.55,)
+    def resolve(reference: str) -> str:
+        return str(paths.get(reference, reference))
+
+    monkeypatch.setattr("src.features.color.core.color_graph_texture.resolve_lut_path", resolve)
+    monkeypatch.setattr("src.shared.color.lut_loader.resolve_lut_path", resolve)
+
+    service = ColorGraphService(lut_reference_validator=lambda ref: ref in paths)
+    graph = ColorGraphData.create_serial()
+    previous = graph.source_node_id
+    luts = tuple(zip(references, strengths, strict=True))
+    for reference, strength in luts:
+        inserted = service.apply_intent(graph, "insert_corrector", {"active_node_id": previous})
+        assert inserted.ok
+        node = next(node for node in inserted.graph.nodes if node not in graph.nodes)
+        result = service.apply_intent(inserted.graph, "set_node_lut", {
+            "node_id": node.node_id, "lut_ref": reference, "strength": strength,
+        })
+        assert result.ok
+        graph, previous = result.graph, node.node_id
+    graph = replace(graph, nodes=graph.nodes[::-1])
+    assert serial_luts_only(graph, max_luts=3) == luts
+    assert serial_luts_only(graph, max_luts=lut_count - 1) is None
+    disabled = replace(graph, nodes=tuple(
+        replace(node, enabled=False) if node.node_id == previous else node for node in graph.nodes))
+    assert serial_luts_only(disabled, max_luts=3) is None
+    if lut_count == 3:
+        fourth = service.apply_intent(graph, "insert_corrector", {"active_node_id": previous})
+        assert fourth.ok
+        node = next(node for node in fourth.graph.nodes if node not in graph.nodes)
+        extended = service.apply_intent(fourth.graph, "set_node_lut", {
+            "node_id": node.node_id, "lut_ref": references[0], "strength": 0.4,
+        })
+        assert extended.ok
+        assert serial_luts_only(extended.graph, max_luts=4) == (*luts, (references[0], 0.4))
+        assert serial_luts_only(extended.graph, max_luts=3) is None
+
+    width, height = 64, 14
+    rng = np.random.default_rng(83)
+    y = rng.integers(64, 941, (height, width), dtype=np.uint16)
+    u, v = rng.integers(64, 961, (2, height, width // 2), dtype=np.uint16)
+    y[0, :] = np.rint(np.linspace(64, 940, width)).astype(np.uint16)
+    u[0, :] = v[0, :] = 512
+    source = GpuYuvSource(
+        planes=(y, u, v), kr=0.2126, kb=0.0722, luma_bits=10,
+        full_range=False, chroma_x_div=2, chroma_y_div=1,
+    )
+    gl, metal = TimelineGpuExportRenderer(), TimelineMetalExportRenderer()
+    try:
+        if not metal.supports_yuv422p10_lut_chain():
+            pytest.skip("Metal float32 texture filtering is unavailable")
+        expected = gl.render_planar(source, {"color_graph": graph, "source_frame": 0},
+                                    width, height, 1.0, output_u16=True, output_yuv422p10=True)
+        assert expected is not None
+        # Single and dual renders of the same reference must use their own texture precision.
+        metal.render_yuv422p10_lut(source, *luts[0])
+        actual = metal.render_yuv422p10_luts(source, luts)
+        reordered = metal.render_yuv422p10_luts(source, (*luts[:-2], luts[-1], luts[-2]))
+        assert not np.array_equal(actual.planes[0], reordered.planes[0])
+        if lut_count == 3:
+            pair_only = metal.render_yuv422p10_luts(source, luts[:2])
+            assert np.max(np.abs(actual.planes[0].astype(np.int32) - pair_only.planes[0])) > 8
+        for actual_plane, expected_plane in zip(actual.planes, expected.planes, strict=True):
+            np.testing.assert_allclose(actual_plane, expected_plane, rtol=0, atol=1)
+    finally:
+        metal.release()
+        gl.release()
+
+
+@pytest.mark.gpu_renderer
 @pytest.mark.real_media
+@pytest.mark.parametrize("strengths", [(0.8,), (0.8, 0.35), (0.8, 0.35, 0.5)])
 @pytest.mark.skipif(sys.platform != "darwin", reason="requires Metal and IOSurface")
 def test_topos_iosurface_lut_matches_the_cpu_plane_kernel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, strengths: tuple[float, ...],
 ) -> None:
     from dataclasses import replace
 
@@ -1000,6 +1165,8 @@ def test_topos_iosurface_lut_matches_the_cpu_plane_kernel(
 
     renderer = TimelineMetalExportRenderer()
     try:
+        if len(strengths) > 1 and not renderer.supports_yuv422p10_lut_chain():
+            pytest.skip("Metal float32 texture filtering is unavailable")
         with ToposMediaSource(str(media)) as decoder:
             cpu_frame = decoder.read_frame(0)
             source = TimelineExporter.__new__(TimelineExporter)._gpu_planar_source_from_decoded(cpu_frame)
@@ -1008,8 +1175,10 @@ def test_topos_iosurface_lut_matches_the_cpu_plane_kernel(
             if native_frame is None:
                 pytest.skip("Native TOPOS IOSurface decode is unavailable")
             try:
-                expected = renderer.render_yuv422p10_lut(source, "swap", 0.8)
-                actual = renderer.render_yuv422p10_lut(native_frame, "swap", 0.8)
+                luts = tuple(("swap", strength) for strength in strengths)
+                expected = renderer.render_yuv422p10_luts(source, luts)
+                actual = renderer.render_yuv422p10_luts(native_frame, luts)
+                assert renderer._frame_cpu_upload_bytes == 8 + 4 * len(luts)
                 # Native and CPU planes share one math path. The held output
                 # must survive the next render's reuse of its Metal buffer.
                 renderer.render_yuv422p10_lut(native_frame, "swap", 0.0)
@@ -1024,6 +1193,18 @@ def test_topos_iosurface_lut_matches_the_cpu_plane_kernel(
                 with pytest.raises(ValueError, match="plane descriptor"):
                     renderer.render_yuv422p10_lut(malformed, "swap", 0.8)
                 assert not native_frame.release.is_released
+                borrowed = renderer.render_yuv422p10_luts(native_frame, luts, borrow_output=True)
+                assert borrowed.buffer_lease is not None
+                try:
+                    following = renderer.render_yuv422p10_luts(
+                        native_frame, (("swap", 0.0),), borrow_output=True)
+                    assert following.buffer_lease is not None
+                    following.buffer_lease.release()
+                    renderer.release()
+                    for actual_plane, borrowed_plane in zip(actual.planes, borrowed.planes, strict=True):
+                        np.testing.assert_array_equal(actual_plane, borrowed_plane)
+                finally:
+                    borrowed.buffer_lease.release()
             finally:
                 native_frame.release.release()
     finally:

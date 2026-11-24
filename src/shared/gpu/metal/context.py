@@ -403,20 +403,28 @@ class MetalComputeContext:
             )
         return tex
 
-    def create_rgb_lut_texture(self, table: np.ndarray) -> Any:
+    def supports_float32_texture_filtering(self) -> bool:
+        probe = getattr(self._device, "supports32BitFloatFiltering", None)
+        return callable(probe) and bool(probe())
+
+    def create_rgb_lut_texture(self, table: np.ndarray, *, full_precision: bool = False) -> Any:
         """Upload a cubic RGB LUT as a linearly filterable Metal texture."""
         size = table.shape[0]
         if table.shape != (size, size, size, 3) or size < 2:
             raise ValueError("3D LUT must contain an RGB cube")
-        if not np.isfinite(table).all() or np.max(np.abs(table)) > np.finfo(np.float16).max:
+        if full_precision and not self.supports_float32_texture_filtering():
+            raise MetalComputeError("Metal device cannot filter float32 LUT textures")
+        dtype = np.float32 if full_precision else np.float16
+        if not np.isfinite(table).all() or np.max(np.abs(table)) > np.finfo(dtype).max:
             raise ValueError("3D LUT values exceed the filterable Metal texture range")
-        rgba = np.ones((size, size, size, 4), dtype=np.float16)
+        rgba = np.ones((size, size, size, 4), dtype=dtype)
         rgba[..., :3] = table
         metal = self._metal
         with _autoreleasepool():
             desc = metal.MTLTextureDescriptor.alloc().init()
             desc.setTextureType_(metal.MTLTextureType3D)
-            desc.setPixelFormat_(metal.MTLPixelFormatRGBA16Float)
+            desc.setPixelFormat_(metal.MTLPixelFormatRGBA32Float if full_precision
+                                 else metal.MTLPixelFormatRGBA16Float)
             desc.setWidth_(size)
             desc.setHeight_(size)
             desc.setDepth_(size)

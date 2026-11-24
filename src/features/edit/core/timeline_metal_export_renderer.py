@@ -20,10 +20,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 import numpy as np
 
 from src.features.color.core.shader_nodes_msl import MSL_LUT3D
-from src.shared.gpu.metal import MetalComputeContext, MetalKernel
+from src.shared.gpu.metal import MetalComputeContext, MetalComputeError, MetalKernel
 from src.shared.export.gpu_encode_surface import GpuEncodeSurface
 from src.shared.export.gpu_trail import ExportGpuTrail
-from src.shared.media.gpu_frame import GpuDecodedFrame
+from src.shared.media.gpu_frame import GpuDecodedFrame, GpuFrameRelease
 
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_gpu_export_renderer import (
@@ -32,29 +32,38 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_YUV422P10_LUT_TEXTURE_SLOTS = (0, 4, 5)  # IOSurface input planes occupy 1–3.
+_YUV422P10_LUT_KERNEL_SUFFIXES = ("", "_pair", "_triple")
 
-_DNXHR_HQX_LUT_MSL = """
+_YUV422P10_LUT_MSL = """
 #include <metal_stdlib>
 using namespace metal;
 """ + MSL_LUT3D + """
+/* LUT_HELPERS */
 constexpr sampler lut_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
 constant float3 luma_weights = float3(0.2126, 0.7152, 0.0722);
 
-float3 yuv422p10_lut_color(ushort y_code, float2 chroma, texture3d<float> lut, float strength) {
+float3 yuv422p10_lut_color(ushort y_code, float2 chroma, texture3d<float> lut,
+                         constant float* strengths /* LUT_PARAMETERS */) {
     const float y = (float(y_code) - 64.0) / 876.0;
     const float2 uv = (rint(chroma) - 512.0) / 896.0;
     const float3 rgb = float3(y + 1.5748 * uv.y,
                               y - 0.18732427 * uv.x - 0.46812427 * uv.y,
                               y + 1.8556 * uv.x);
     const float3 rgb16 = rint(clamp(rgb, 0.0, 1.0) * 65535.0) / 65535.0;
-    return clamp(msl_apply_3dlut(rgb16, lut, lut_sampler, strength), 0.0, 1.0);
+    float3 graded = msl_apply_3dlut(rgb16, lut, lut_sampler, strengths[0]);
+    /* LUT_CHAIN */
+    return clamp(graded, 0.0, 1.0);
 }
 
 inline void write_yuv422p10_lut(
     device ushort* output, uint2 size, uint index, ushort2 luma,
-    float2 center, float2 left, float2 right, texture3d<float> lut, float strength) {
-    const float3 rgb0 = yuv422p10_lut_color(luma.x, mix(center, left, 0.25), lut, strength);
-    const float3 rgb1 = yuv422p10_lut_color(luma.y, mix(center, right, 0.25), lut, strength);
+    float2 center, float2 left, float2 right, texture3d<float> lut,
+    constant float* strengths /* LUT_PARAMETERS */) {
+    const float3 rgb0 = yuv422p10_lut_color(luma.x, mix(center, left, 0.25),
+                                         lut, strengths /* LUT_ARGUMENTS */);
+    const float3 rgb1 = yuv422p10_lut_color(luma.y, mix(center, right, 0.25),
+                                         lut, strengths /* LUT_ARGUMENTS */);
     output[index * 2u] = ushort(rint(64.0 + 876.0 * dot(rgb0, luma_weights)));
     output[index * 2u + 1u] = ushort(rint(64.0 + 876.0 * dot(rgb1, luma_weights)));
     const float3 average = (rgb0 + rgb1) * 0.5;
@@ -66,14 +75,15 @@ inline void write_yuv422p10_lut(
     output[y_size + y_size / 2u + index] = ushort(codes.y);
 }
 
-kernel void timeline_dnxhr_hqx_lut(
+kernel void timeline_dnxhr_hqx_lut/* LUT_VARIANT */(
     device const ushort* source_y [[buffer(0)]],
     device const ushort* source_u [[buffer(1)]],
     device const ushort* source_v [[buffer(2)]],
     device ushort* output [[buffer(3)]],
     constant uint2& size [[buffer(4)]],
-    constant float& strength [[buffer(5)]],
+    constant float* strengths [[buffer(5)]],
     texture3d<float> lut [[texture(0)]],
+    /* LUT_TEXTURES */
     uint2 p [[thread_position_in_grid]]) {
     const uint chroma_width = size.x / 2u;
     if (p.x >= chroma_width || p.y >= size.y) return;
@@ -85,17 +95,19 @@ kernel void timeline_dnxhr_hqx_lut(
     const float2 left = float2(source_u[previous], source_v[previous]);
     const float2 right = float2(source_u[next], source_v[next]);
     const ushort2 luma = ushort2(source_y[index * 2u], source_y[index * 2u + 1u]);
-    write_yuv422p10_lut(output, size, index, luma, center, left, right, lut, strength);
+    write_yuv422p10_lut(output, size, index, luma, center, left, right,
+                       lut, strengths /* LUT_ARGUMENTS */);
 }
 
-kernel void timeline_yuv422p10_texture_lut(
+kernel void timeline_yuv422p10_texture_lut/* LUT_VARIANT */(
     texture2d<ushort, access::read> source_y [[texture(1)]],
     texture2d<ushort, access::read> source_u [[texture(2)]],
     texture2d<ushort, access::read> source_v [[texture(3)]],
     device ushort* output [[buffer(3)]],
     constant uint2& size [[buffer(4)]],
-    constant float& strength [[buffer(5)]],
+    constant float* strengths [[buffer(5)]],
     texture3d<float> lut [[texture(0)]],
+    /* LUT_TEXTURES */
     uint2 p [[thread_position_in_grid]]) {
     const uint chroma_width = size.x / 2u;
     if (p.x >= chroma_width || p.y >= size.y) return;
@@ -106,9 +118,37 @@ kernel void timeline_yuv422p10_texture_lut(
     const float2 right = float2(source_u.read(next).r, source_v.read(next).r);
     const ushort2 luma = ushort2(source_y.read(uint2(p.x * 2u, p.y)).r,
                                  source_y.read(uint2(p.x * 2u + 1u, p.y)).r);
-    write_yuv422p10_lut(output, size, p.y * chroma_width + p.x, luma, center, left, right, lut, strength);
+    write_yuv422p10_lut(output, size, p.y * chroma_width + p.x, luma, center, left, right,
+                       lut, strengths /* LUT_ARGUMENTS */);
 }
 """
+
+
+def _yuv422p10_lut_shader(lut_count: int) -> str:
+    source = _YUV422P10_LUT_MSL.replace(
+        "/* LUT_VARIANT */", _YUV422P10_LUT_KERNEL_SUFFIXES[lut_count - 1])
+    if lut_count == 1:
+        return source
+
+    from src.shared.gpu.metal.kernels_color import METAL_NEGATIVE_LUMA_MSL
+
+    names = tuple(f"lut_{index}" for index in range(1, lut_count))
+    # Every subsequent neutral Corrector still protects negative luma.
+    # Keep signed RGB until the existing final YUV conversion.
+    operations = [
+        f"graded = msl_apply_3dlut(graph_protect_negative_luma(graded), "
+        f"{name}, lut_sampler, strengths[{index}]);"
+        for index, name in enumerate(names, 1)
+    ]
+    return (source
+            .replace("/* LUT_HELPERS */", METAL_NEGATIVE_LUMA_MSL)
+            .replace("/* LUT_PARAMETERS */", "".join(f", texture3d<float> {name}" for name in names))
+            .replace("/* LUT_ARGUMENTS */", "".join(f", {name}" for name in names))
+            .replace("/* LUT_TEXTURES */", "\n    ".join(
+                f"texture3d<float> {name} [[texture({slot})]],"
+                for name, slot in zip(names, _YUV422P10_LUT_TEXTURE_SLOTS[1:lut_count], strict=True)
+            ))
+            .replace("/* LUT_CHAIN */", "\n    ".join(operations)))
 
 
 # Compile separately from the stack compositor. A single dispatch processes a
@@ -3560,8 +3600,54 @@ class _MetalBufferImage:
     height: int
 
 
+class _MetalLutOutputPool:
+    """Shared output buffers returned by the synchronous CPU encoder."""
+
+    # Three queued frames, one being encoded, and one being rendered.
+    _CAPACITY = 5
+
+    def __init__(self) -> None:
+        self._available: list[Any] = []
+        self._allocated = 0
+        self._closed = False
+        self._lock = threading.Lock()
+
+    def acquire(self, context: MetalComputeContext, size: int) -> Optional[GpuFrameRelease]:
+        with self._lock:
+            if self._closed:
+                return None
+            if self._available:
+                if self._available[-1].length() < size:
+                    self._available[-1] = context.create_buffer(size)
+                buffer = self._available.pop()
+            elif self._allocated < self._CAPACITY:
+                buffer = context.create_buffer(size)
+                self._allocated += 1
+            else:
+                return None
+        return GpuFrameRelease(
+            retain_token=buffer, owner_backend="metal",
+            release_callback=lambda: self._return_buffer(buffer),
+        )
+
+    def _return_buffer(self, buffer: Any) -> None:
+        # The encoder thread only returns a reference. Allocation and GPU
+        # access stay on the render thread.
+        with self._lock:
+            if not self._closed:
+                self._available.append(buffer)
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            self._available.clear()
+        # Buffers still held by the queue or encoder remain owned by their leases.
+
+
 class TimelineMetalExportRenderer:
     """Metal source conversion, primary grade, scaling, stack blend and export."""
+
+    MAX_YUV422P10_LUTS = len(_YUV422P10_LUT_TEXTURE_SLOTS)
 
     def __init__(self, gpu_trail: Optional[ExportGpuTrail] = None, *,
                  context: Optional[MetalComputeContext] = None) -> None:
@@ -3580,7 +3666,8 @@ class TimelineMetalExportRenderer:
         # 入口重置）。render_layer_stack 等未显式传 cpu_upload_bytes 的
         # 完成记录用它，full-GPU 证据不再把 stack 路径记成 0 字节搬运。
         self._frame_cpu_upload_bytes = 0
-        self._dnxhr_lut: Optional[tuple[str, Any]] = None
+        self._yuv422p10_lut_cache: dict[tuple[str, bool], Any] = {}
+        self._lut_output_pool = _MetalLutOutputPool()
 
     def set_gpu_trail(self, gpu_trail: Optional[ExportGpuTrail]) -> None:
         """Attach the export evidence sink before rendering begins."""
@@ -4060,6 +4147,14 @@ class TimelineMetalExportRenderer:
         """Compatibility entry for DNxHR's CPU-decoded source planes."""
         return self.render_yuv422p10_lut(source, reference, strength, allocate)
 
+    @_serialize_renderer_call
+    def supports_yuv422p10_lut_chain(self) -> bool:
+        """Check filtering precision before the exporter borrows source surfaces."""
+        if not self._ensure_ready():
+            return False
+        assert self._context is not None
+        return self._context.supports_float32_texture_filtering()
+
     @staticmethod
     def _yuv422p10_lut_textures(
         source: GpuDecodedFrame, context: MetalComputeContext,
@@ -4102,21 +4197,33 @@ class TimelineMetalExportRenderer:
             textures[index] = texture
         return textures
 
-    @_serialize_renderer_call
     def render_yuv422p10_lut(
         self, source: GpuYuvSource | GpuDecodedFrame, reference: str, strength: float,
         allocate: Optional[Callable[[int, int], Optional[tuple[Any, tuple[np.ndarray, ...]]]]] = None,
     ) -> GpuYuv422P10Output:
-        """Grade a BT.709 10-bit 4:2:2 master into encoder-ready planes.
+        return self.render_yuv422p10_luts(source, ((reference, strength),), allocate)
+
+    @_serialize_renderer_call
+    def render_yuv422p10_luts(
+        self, source: GpuYuvSource | GpuDecodedFrame, luts: tuple[tuple[str, float], ...],
+        allocate: Optional[Callable[[int, int], Optional[tuple[Any, tuple[np.ndarray, ...]]]]] = None,
+        *, borrow_output: bool = False,
+    ) -> GpuYuv422P10Output:
+        """Grade a BT.709 10-bit 4:2:2 master through up to three serial LUTs.
 
         Metal plane textures are borrowed through synchronous GPU completion.
         The caller retains ownership of the source frame and its release.
+        A synchronous consumer may request a separate output buffer for the
+        lifetime of the returned lease. Busy pools use the usual owned copy.
         """
         from src.features.edit.core.timeline_gpu_export_renderer import GpuYuv422P10Output, GpuYuvSource
-        from src.shared.color.lut_loader import load_lut, resample_to_unit_domain, resolve_lut_path
+        from src.shared.color.lut_loader import load_lut, resample_to_unit_domain
 
-        if not math.isfinite(strength):
-            raise ValueError("Expected a finite LUT strength")
+        lut_count = len(luts)
+        if not 1 <= lut_count <= self.MAX_YUV422P10_LUTS or any(
+            not math.isfinite(strength) for _, strength in luts
+        ):
+            raise ValueError("Expected one to three LUTs with finite strengths")
         if isinstance(source, GpuYuvSource):
             y, u, v = source.planes
             height, width = y.shape
@@ -4138,49 +4245,70 @@ class TimelineMetalExportRenderer:
 
         textures = self._yuv422p10_lut_textures(source, ctx) if isinstance(source, GpuDecodedFrame) else {}
         kernel_name = "timeline_yuv422p10_texture_lut" if textures else "timeline_dnxhr_hqx_lut"
+        full_precision = lut_count > 1
+        kernel_name += _YUV422P10_LUT_KERNEL_SUFFIXES[lut_count - 1]
         kernel = self._kernels.get(kernel_name)
         if kernel is None:
-            kernel = ctx.compile_kernel(kernel_name, _DNXHR_HQX_LUT_MSL)
+            kernel = ctx.compile_kernel(kernel_name, _yuv422p10_lut_shader(lut_count))
             self._kernels[kernel_name] = kernel
-        if self._dnxhr_lut is None or self._dnxhr_lut[0] != reference:
-            lut = resample_to_unit_domain(load_lut(resolve_lut_path(reference)))
-            self._dnxhr_lut = reference, ctx.create_rgb_lut_texture(lut.table)
+        active_luts: dict[tuple[str, bool], Any] = {}
+        for index, (reference, _) in zip(_YUV422P10_LUT_TEXTURE_SLOTS[:lut_count], luts, strict=True):
+            key = (reference, full_precision)
+            if key not in active_luts:
+                texture = self._yuv422p10_lut_cache.get(key)
+                if texture is None:
+                    lut = resample_to_unit_domain(load_lut(reference))
+                    texture = ctx.create_rgb_lut_texture(lut.table, full_precision=full_precision)
+                active_luts[key] = texture
+            textures[index] = active_luts[key]
+        self._yuv422p10_lut_cache = active_luts
 
         self._frame_cpu_upload_bytes = 0
         size = width * height
-        output = self._buffer("dnxhr_hqx_output", 4 * size)
         buffers = {
-            3: output,
             4: self._upload_array("dnxhr_size", np.array([width, height], dtype="<u4")),
-            5: self._upload_array("dnxhr_strength", np.array([strength], dtype="<f4")),
+            5: self._upload_array("dnxhr_strength", np.array([strength for _, strength in luts], dtype="<f4")),
         }
         if isinstance(source, GpuYuvSource):
             buffers.update({0: self._upload_array("dnxhr_y", y),
                             1: self._upload_array("dnxhr_u", u),
                             2: self._upload_array("dnxhr_v", v)})
-        textures[0] = self._dnxhr_lut[1]
-        ctx.dispatch(kernel, buffers=buffers, textures=textures, threads=(width // 2, height, 1))
-        ctx.finish()
-        values = ctx.read_buffer(output, 4 * size).view("<u2")
-        allocation = allocate(width, height) if allocate is not None else None
-        if allocation is None:
-            # Render and encode may run in parallel. An output frame must own
-            # its data when the next dispatch reuses the Metal buffer.
-            values = values.copy()
-        planes = (
-            values[:size].reshape(height, width),
-            values[size:size + size // 2].reshape(chroma_shape),
-            values[size + size // 2:].reshape(chroma_shape),
-        )
-        encoder_frame = None
-        if allocation is not None:
-            encoder_frame, target_planes = allocation
-            for target, plane in zip(target_planes, planes, strict=True):
-                np.copyto(target, plane)
-            planes = target_planes
-        self._record_render_completion(ctx, 4 * size, yuv_output=True)
-        self.frames_rendered += 1
-        return GpuYuv422P10Output(planes, encoder_frame)
+        lease = None
+        if borrow_output and allocate is None:
+            try:
+                lease = self._lut_output_pool.acquire(ctx, 4 * size)
+            except MetalComputeError:
+                self._lut_output_pool.close()
+                logger.debug("Metal LUT output pool allocation failed; copying output", exc_info=True)
+        try:
+            output = lease.retain_token if lease is not None else self._buffer("dnxhr_hqx_output", 4 * size)
+            buffers[3] = output
+            ctx.dispatch(kernel, buffers=buffers, textures=textures, threads=(width // 2, height, 1))
+            ctx.finish()
+            values = ctx.read_buffer(output, 4 * size).view("<u2")
+            allocation = allocate(width, height) if allocate is not None else None
+            if allocation is None and lease is None:
+                values = values.copy()
+            planes = (
+                values[:size].reshape(height, width),
+                values[size:size + size // 2].reshape(chroma_shape),
+                values[size + size // 2:].reshape(chroma_shape),
+            )
+            encoder_frame = None
+            if allocation is not None:
+                encoder_frame, target_planes = allocation
+                for target, plane in zip(target_planes, planes, strict=True):
+                    np.copyto(target, plane)
+                planes = target_planes
+            self._record_render_completion(ctx, 4 * size, yuv_output=True)
+            self.frames_rendered += 1
+            return GpuYuv422P10Output(planes, encoder_frame, buffer_lease=lease)
+        except BaseException:
+            if lease is not None:
+                # A failed Metal submission must never put its slot back into circulation.
+                self._lut_output_pool.close()
+                lease.release()
+            raise
 
     @_serialize_renderer_call
     def render_planar(
@@ -6061,6 +6189,7 @@ class TimelineMetalExportRenderer:
                 logger.debug("Metal timeline context finish during release failed", exc_info=True)
         self._kernels.clear()
         self._buffers.clear()
-        self._dnxhr_lut = None
+        self._yuv422p10_lut_cache.clear()
+        self._lut_output_pool.close()
         self._context = None
         self._released = True
