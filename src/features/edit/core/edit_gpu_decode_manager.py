@@ -290,8 +290,9 @@ class EditGpuDecodeManager:
             - frame_type: 'vt_pixel_buffer' | 'vt_planar' | 'gpu' | 'planar' | 'cpu' | ''
         """
         normalized_target_size = self._normalize_target_size(target_size)
+        for_playback = self._playback_active
         source_spec = self._resolve_preview_decode_source(
-            asset_path, normalized_target_size, for_playback=True,
+            asset_path, normalized_target_size, for_playback=for_playback,
         )
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
@@ -321,7 +322,8 @@ class EditGpuDecodeManager:
                         time.perf_counter_ns() - int(start * 1e9))
             finally:
                 self._release_source(source_key)
-            self._kick_playback_prefetch(source, source_key, frame_index, result)
+            if for_playback:
+                self._kick_playback_prefetch(source, source_key, frame_index, result)
             return result
 
         self._metrics.record_cache("display", hit=False)
@@ -362,7 +364,8 @@ class EditGpuDecodeManager:
                     time.perf_counter_ns() - int(start * 1e9))
         finally:
             self._release_source(source_key)
-        self._kick_playback_prefetch(source, source_key, frame_index, result)
+        if for_playback:
+            self._kick_playback_prefetch(source, source_key, frame_index, result)
         return result
 
     def _kick_playback_prefetch(
@@ -1302,6 +1305,7 @@ class EditGpuDecodeManager:
         target_size: Optional[Tuple[int, int]] = None,
         stream_key: Optional[str] = None,
         *,
+        for_playback: bool = True,
         is_stale: Optional[Callable[[], bool]] = None,
         deadline_at: Optional[float] = None,
     ) -> bool:
@@ -1324,10 +1328,12 @@ class EditGpuDecodeManager:
         Returns True when the stream is positioned for a sequential read of
         ``frame_index`` (already was, or preposition decode succeeded).
         """
-        if frame_index <= 0:
+        if frame_index < 0 or (is_stale is not None and is_stale()):
             return False
         normalized_target_size = self._normalize_target_size(target_size)
-        source_spec = self._resolve_preview_decode_source(asset_path, normalized_target_size)
+        source_spec = self._resolve_preview_decode_source(
+            asset_path, normalized_target_size, for_playback=for_playback,
+        )
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
@@ -1339,6 +1345,16 @@ class EditGpuDecodeManager:
             self._preposition_inflight[source_key] = inflight
         leased = False
         try:
+            if is_stale is not None and is_stale():
+                return False
+            if source_spec.vt_policy == "hw_or_ffmpeg":
+                # Claim the same warmup slot that the display request uses.
+                # A parallel open could consume the last hardware decoder and
+                # leave a software source cached for the rest of the clip.
+                self.warmup_source(
+                    asset_path, normalized_target_size, decode_stream_key,
+                    for_playback=for_playback, warm_interactive_pool=False,
+                )
             source = self._get_or_create_source(
                 asset_path,
                 normalized_target_size,
@@ -1350,7 +1366,7 @@ class EditGpuDecodeManager:
             leased = True
             with self._lock:
                 source_type = self._source_types.get(source_key, 'cpu')
-            target = int(frame_index) - 1
+            target = max(0, int(frame_index) - 1)
 
             current_frame = getattr(source, "current_frame", None)
             if isinstance(current_frame, int) and current_frame >= target:
@@ -1365,6 +1381,8 @@ class EditGpuDecodeManager:
                 )
                 return False
             try:
+                if is_stale is not None and is_stale():
+                    return False
                 # Re-check under the lock: a display decode that owned the
                 # stream before us may already have advanced the cursor.
                 current_frame = getattr(source, "current_frame", None)
@@ -2014,8 +2032,8 @@ class EditGpuDecodeManager:
         """Playback-only decoder routing.
 
         Returns one of:
-        - 'auto': unchanged VT zero-copy preference (8-bit camera codecs,
-          ProRes, scrub-shaped requests).
+        - 'auto': unchanged VT zero-copy preference for formats without
+          a strict hardware policy.
         - 'prefer_ffmpeg': the hardware probe says VideoToolbox has NO
           hardware decoder for this codec/bit-depth — sequential playback
           belongs on the frame-threaded FFmpeg planar path.
@@ -2041,8 +2059,18 @@ class EditGpuDecodeManager:
                 return 'auto'
             from src.shared.media.ffmpeg_source import _infer_bit_depth
             if _infer_bit_depth(pix_fmt) <= 8:
-                # 8-bit H.264/H.265 hardware decode is effectively always
-                # granted; skip probing and keep the auto session policy.
+                # Even a normally supported stream can receive a software
+                # VT session when the hardware decoder is busy. Require
+                # hardware for the standard H.264 playback path without
+                # opening an additional probe session.
+                if codec in {"h264", "avc", "avc1", "h264_mpeg", "libx264"} and pix_fmt in {
+                    "yuv420p", "yuvj420p", "nv12",
+                }:
+                    self._trace_playback_route_once(
+                        asset_path, codec, pix_fmt, 'hw_or_ffmpeg',
+                        reason='hw_session_strict',
+                    )
+                    return 'hw_or_ffmpeg'
                 return 'auto'
             from src.shared.media.macos_vt.hardware_capability import (
                 playback_should_prefer_ffmpeg,

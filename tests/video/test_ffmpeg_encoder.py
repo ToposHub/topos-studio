@@ -980,11 +980,12 @@ class TestColorMetadata:
         mock_container.add_stream.return_value = mock_stream
         mock_av.open.return_value = mock_container
 
-        encoder = FFmpegVideoEncoder(temp_output_path, config)
+        encoder = FFmpegVideoEncoder(temp_output_path, config, isolated_hdr_main10=True)
         encoder.open()
 
-        # color_primaries 应设置为 bt2020 (值 9)
-        # color_trc 应设置为 smpte2084 (值 16)
+        assert mock_stream.color_primaries == 9
+        assert mock_stream.color_trc == 16
+        assert mock_stream.colorspace == 9
 
     @patch.dict('sys.modules', {'av': MagicMock()})
     def test_set_hlg_metadata(
@@ -1008,8 +1009,11 @@ class TestColorMetadata:
         mock_container.add_stream.return_value = mock_stream
         mock_av.open.return_value = mock_container
 
-        encoder = FFmpegVideoEncoder(temp_output_path, config)
+        encoder = FFmpegVideoEncoder(temp_output_path, config, isolated_hdr_main10=True)
         encoder.open()
+        assert mock_stream.color_primaries == 9
+        assert mock_stream.color_trc == 18
+        assert mock_stream.colorspace == 9
 
 
 # =============================================================================

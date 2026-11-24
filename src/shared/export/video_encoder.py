@@ -40,6 +40,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
+    from .hdr_hevc_encoder import HdrHevcEncoder
     from ..media.frame import DecodedFrame
     from ..media.metadata import Rational, VideoMetadata
 
@@ -789,6 +790,9 @@ class FFmpegVideoEncoder:
         output_path: str,
         config: FFmpegEncoderConfig,
         *, isolated_hdr_main10: bool = False,
+        centered_main10_chroma: bool = False,
+        should_cancel: Callable[[], bool] | None = None,
+        total_frames: int | None = None,
     ) -> None:
         """
         初始化编码器。
@@ -805,6 +809,10 @@ class FFmpegVideoEncoder:
         self._write_path: str = output_path + ".topos-partial"
         self._config: FFmpegEncoderConfig = config
         self._isolated_hdr_main10 = isolated_hdr_main10
+        self._centered_main10_chroma = centered_main10_chroma
+        self._main10_encoder: HdrHevcEncoder | None = None
+        self._should_cancel = should_cancel
+        self._total_frames = total_frames
         self._hqx_reformatter: Optional[Any] = None
         self._container: Optional[Any] = None  # av.container.OutputContainer
         self._stream: Optional[Any] = None  # av.VideoStream
@@ -886,6 +894,8 @@ class FFmpegVideoEncoder:
     @property
     def is_open(self) -> bool:
         """是否已打开"""
+        if self._main10_encoder is not None:
+            return self._main10_encoder.is_open
         return self._is_open
 
     @property
@@ -912,7 +922,7 @@ class FFmpegVideoEncoder:
             RuntimeError: PyAV 不可用
             IOError: 创建文件失败
         """
-        if self._is_open:
+        if self.is_open:
             return
 
         try:
@@ -933,13 +943,6 @@ class FFmpegVideoEncoder:
                 # Keep the explicit primaries and matrix in the container
                 # when the transfer has no H.273 code, e.g. Gamma 2.4.
                 muxer_options["movflags"] = "+write_colr"
-            self._container = av.open(
-                self._write_path,
-                mode='w',
-                format=container_format if container_format else None,
-                container_options=muxer_options,
-            )
-
             # 创建视频流
             encoder_name = self._config.get_encoder_name(
                 force_cpu=self._cpu_rebuild
@@ -995,6 +998,32 @@ class FFmpegVideoEncoder:
                     "videotoolbox" if encoder_name.endswith("_videotoolbox")
                     else "nvenc")
                 self._hw_encoder_name = encoder_name
+
+            # libx265 Main 10 can crash on flush after PyAV decoding in the
+            # same process. Decide only after hardware selection, including
+            # the CPU rebuild when the real hardware session fails to open.
+            pixel_format = self._encode_pix_fmt.lower()
+            if (encoder_name == "libx265"
+                    and (pixel_format.endswith("10le") or pixel_format.startswith("p010"))
+                    and not self._isolated_hdr_main10):
+                from .hdr_hevc_encoder import HdrHevcEncoder
+
+                isolated = HdrHevcEncoder(
+                    self._output_path, self._config, should_cancel=self._should_cancel,
+                    total_frames=self._total_frames, centered_chroma=False,
+                )
+                isolated.open()
+                self._main10_encoder = isolated
+                self._is_open = isolated.is_open
+                self._frame_count = 0
+                return
+
+            self._container = av.open(
+                self._write_path,
+                mode='w',
+                format=container_format if container_format else None,
+                container_options=muxer_options,
+            )
             # PyAV 的 add_stream(rate=...) 需要有理数（Fraction 或类似 numerator/denominator），
             # 不能传 float（旧版可接受，PyAV 17.x 会抛 AttributeError）。
             # 用 Fraction 构造，保留 fps 精度（如 24000/1001 → 23.976）。
@@ -1013,46 +1042,6 @@ class FFmpegVideoEncoder:
                 encoder_name,
                 rate=fps_fraction,
             )
-
-            # N06/C19 防线：软件 libx265 10-bit 在本构建（PyAV 17.0.1/
-            # ffmpeg 8.0.1 / libx265 4.1 十比特）有确定性段错误——进程内
-            # 有过任何 PyAV 媒体探测/解码后，flush 必崩（x265 十比特运动
-            # 估计读污染参考帧；pools=none/frame-threads=1/bframes=0/
-            # ultrafast 均不能绕过；x264 10-bit、hevc 8-bit、硬件 VT/AMF/
-            # NVENC 不受影响——上游缺陷）。段错误击穿整个进程且不可恢复，
-            # 显式失败优于崩溃：默认拒绝并清理半成品；设
-            # TOPOS_ALLOW_KNOWN_X265_10BIT_CRASH=1 可强行尝试（上游修复
-            # 验证口径）。上游升级后移除本防线。
-            if (
-                self._config.codec.lower() == "hevc"
-                and not encoder_name.endswith(("_videotoolbox", "_amf", "_nvenc"))
-                and (
-                    self._encode_pix_fmt.endswith("10le")
-                    or self._encode_pix_fmt.startswith("p010")
-                )
-                and not self._isolated_hdr_main10
-                and os.environ.get("TOPOS_ALLOW_KNOWN_X265_10BIT_CRASH") != "1"
-            ):
-                reason = (
-                    "FFmpegVideoEncoder: HEVC 10-bit 软件编码（libx265）在"
-                    "当前 PyAV/ffmpeg 构建下有确定性崩溃（flush 段错误，"
-                    "上游缺陷）——已拒绝导出以免整个进程崩溃丢失工作。"
-                    "请改用 HEVC 8-bit、H.264，或硬件 VideoToolbox 路径；"
-                    "升级 PyAV/ffmpeg 后可移除此限制。"
-                )
-                logger.error(reason)
-                try:
-                    self._stream = None
-                    self._container.close()
-                except Exception:  # noqa: BLE001 — 清理失败不掩盖拒绝原因
-                    pass
-                self._container = None
-                try:
-                    if os.path.exists(self._write_path):
-                        os.remove(self._write_path)
-                except OSError:
-                    pass
-                raise RuntimeError(reason)
 
             # 配置基本参数
             self._stream.width = self._config.width
@@ -1088,6 +1077,11 @@ class FFmpegVideoEncoder:
                         broken_container.close()
                     except Exception:  # noqa: BLE001
                         pass
+                    if self._config.codec.lower() == "hevc":
+                        try:
+                            os.unlink(self._write_path)
+                        except FileNotFoundError:
+                            pass
                     self.open()
                     return
                 logger.info(
@@ -1558,7 +1552,7 @@ class FFmpegVideoEncoder:
         }
 
         try:
-            if self._isolated_hdr_main10:
+            if self._isolated_hdr_main10 and self._infer_container_format() in ("mp4", "mov"):
                 self._stream.codec_context.codec_tag = "hvc1"
             # 设置 color primaries
             if color.primaries in color_primaries_map:
@@ -1624,8 +1618,9 @@ class FFmpegVideoEncoder:
 
             if codec == "hevc":
                 if self._isolated_hdr_main10:
-                    # The RGB-to-YUV path averages a centered 2×2 chroma block.
-                    opts["chromaloc"] = "1"
+                    if self._centered_main10_chroma:
+                        # HDR timeline conversion averages a centered 2×2 chroma block.
+                        opts["chromaloc"] = "1"
                     if self._config.gop_size == 1:
                         # Single-frame and two-frame exports must not flush
                         # with a delayed timestamp from x265's B-frame queue.
@@ -1690,6 +1685,10 @@ class FFmpegVideoEncoder:
         Raises:
             RuntimeError: 编码器未打开或编码/转换失败
         """
+        if self._main10_encoder is not None:
+            self._main10_encoder.encode_frame(frame)
+            self._frame_count = self._main10_encoder.frame_count
+            return
         if not self._is_open:
             raise RuntimeError("Encoder not open. Call open() first.")
 
@@ -2457,6 +2456,11 @@ class FFmpegVideoEncoder:
             channels: 声道数
             bitrate: 比特率 (kbps)，仅用于压缩编码器
         """
+        if self._main10_encoder is not None:
+            self._main10_encoder.add_audio_stream(
+                codec=codec, sample_rate=sample_rate, channels=channels, bitrate=bitrate,
+            )
+            return
         if not self._is_open or self._container is None:
             raise RuntimeError("Encoder not open. Call open() first.")
 
@@ -2524,6 +2528,9 @@ class FFmpegVideoEncoder:
             RuntimeError: 编码器未打开或无音频流
             ValueError: samples.dtype 不满足 float32 契约（AUD-33509）
         """
+        if self._main10_encoder is not None:
+            self._main10_encoder.write_audio_samples(samples, sample_rate)
+            return
         if not self._is_open:
             raise RuntimeError("Encoder not open.")
         if self._audio_stream is None:
@@ -2606,6 +2613,16 @@ class FFmpegVideoEncoder:
                 （与 open() 失败路径对齐），编码器回到未打开状态，
                 资源不依赖 PyAV dealloc 兜底。
         """
+        if self._main10_encoder is not None:
+            isolated, self._main10_encoder = self._main10_encoder, None
+            try:
+                published = isolated.close(
+                    should_cancel=should_cancel,
+                    expected_frames=expected_frames if expected_frames is not None else self._total_frames,
+                )
+                return published if should_cancel is not None else None
+            finally:
+                self._is_open = False
         if not self._is_open:
             return
 
@@ -2741,6 +2758,17 @@ class FFmpegVideoEncoder:
             self._audio_stream = None
             self._audio_layout_name = None
             self._is_open = False
+
+    def abort(self) -> None:
+        """Discard a pending export without publishing its partial file."""
+        if self._main10_encoder is not None:
+            isolated, self._main10_encoder = self._main10_encoder, None
+            try:
+                isolated.abort()
+            finally:
+                self._is_open = False
+            return
+        self.close(should_cancel=lambda: True)
 
     def get_progress(self) -> float:
         """

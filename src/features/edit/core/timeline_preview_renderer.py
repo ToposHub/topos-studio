@@ -69,6 +69,7 @@ import math
 import numpy as np
 import queue
 import os
+import sys
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -6824,6 +6825,7 @@ class TimelinePreviewRenderer(QObject):
             thread_name_prefix="TimelineProxyPrebuffer",
         )
         self._prebuffer_lock = threading.Lock()
+        self._prebuffer_stopping = False
         self._prebuffer_active_key: tuple[int, int, int] | None = None
         self._prebuffer_completed_keys: set[tuple[int, int, int]] = set()
         # The prefetch window is intentionally bounded. The effective depth
@@ -6843,7 +6845,9 @@ class TimelinePreviewRenderer(QObject):
         # to their entry frame so boundary frames decode sequentially.
         self._preposition_scan_interval_frames: int = 4
         self._preposition_scan_counter: int = 0
-        self._preposition_scheduled_keys: set[tuple[int, str, str, int, bool]] = set()
+        self._preposition_scheduled_keys: set[
+            tuple[int, str, str, int, bool, tuple[int, int], bool]
+        ] = set()
 
         # Scrub preview mode. A drag uses a separate 720p decode target and a
         # coalescing single-flight queue. New positions replace only pending
@@ -7998,6 +8002,7 @@ class TimelinePreviewRenderer(QObject):
 
     def shutdown(self) -> None:
         """关闭渲染器"""
+        self._prebuffer_stopping = True
         self._clear_offline_media_diagnostics()
         # P1-01: engine 与 renderer 同生命周期——不主动 shutdown 会留下
         # 采样/信号连接（泄漏审计 P6-03：关闭工程后归零）。
@@ -10838,6 +10843,8 @@ class TimelinePreviewRenderer(QObject):
         step: int,
         generation_id: int,
         anchor_plan: Any | None = None,
+        *,
+        cut_lookahead_frames: int | None = None,
     ) -> Dict[tuple[str, str, str], List[int]]:
         """
         Build source-frame prefetch jobs for the upcoming playback window.
@@ -10852,8 +10859,13 @@ class TimelinePreviewRenderer(QObject):
         duration = self._playback_prebuffer_duration()
         jobs: Dict[tuple[str, str, str], List[int]] = {}
         lookahead = self._adaptive_playback_prefetch_depth()
+        anchor_jobs: set[tuple[str, str, str]] = set()
 
-        for offset in range(0, lookahead + 1):
+        for offset in range(max(lookahead, cut_lookahead_frames or 0) + 1):
+            if offset > lookahead and len(jobs) > len(anchor_jobs):
+                # The regular window already found a cut, or the extended
+                # window found its first one. Don't open later clip sessions.
+                break
             timeline_frame = int(anchor_frame) + step * offset
             if timeline_frame < 0:
                 break
@@ -10892,10 +10904,11 @@ class TimelinePreviewRenderer(QObject):
                     or ""
                 )
                 source_frame = int(getattr(layer, "source_frame", 0) or 0)
-                jobs.setdefault(
-                    (asset_path, str(asset_id), decode_stream_key),
-                    [],
-                ).append(source_frame)
+                job_key = (asset_path, str(asset_id), decode_stream_key)
+                if offset <= lookahead or job_key not in anchor_jobs:
+                    jobs.setdefault(job_key, []).append(source_frame)
+            if offset == 0:
+                anchor_jobs = set(jobs)
 
         return jobs
 
@@ -10922,10 +10935,8 @@ class TimelinePreviewRenderer(QObject):
         the same stream, and the wait is productive because the background
         decode-forward is exactly the work the display read needs.
         """
-        # Throttle window scans: one scan every few presented frames keeps
-        # the 16-frame lookahead covered without recomputing frame plans on
-        # every single presented frame.  The first call of a session scans
-        # immediately.
+        # Scan every few frames instead of recomputing the window at every
+        # presentation. The first call of a session scans immediately.
         self._preposition_scan_counter += 1
         if (self._preposition_scan_counter - 1) % self._preposition_scan_interval_frames:
             return
@@ -10943,7 +10954,7 @@ class TimelinePreviewRenderer(QObject):
             return
         if allow_idle and self._scrub_active:
             return
-        if self._worker is None:
+        if self._worker is None or self._prebuffer_stopping:
             return
 
         step = self._playback_prebuffer_step()
@@ -11013,18 +11024,27 @@ class TimelinePreviewRenderer(QObject):
     ) -> None:
         """Background task that prepositions upcoming clip decode streams."""
         try:
-            if generation_id != self._generation_id or self._worker is None:
+            def _stale() -> bool:
+                return (self._prebuffer_stopping or generation_id != self._generation_id
+                        or self._worker is None)
+
+            if _stale():
                 self._prebuffer_stats["dropped"] += 1
                 return
             gpu_dm = getattr(self._worker, '_gpu_decode_manager', None)
             if gpu_dm is None or not hasattr(gpu_dm, 'preposition_stream_frame'):
                 return
 
+            for_playback = self._is_controller_playing()
             jobs = self._collect_playback_prebuffer_jobs(
                 frame,
                 step,
                 generation_id,
                 anchor_plan=plan,
+                # Leave time to create a VT session and reach the next long-GOP
+                # clip's entry. This discovers more cuts without buffering more
+                # decoded frames. The active display stream is excluded below.
+                cut_lookahead_frames=12 if sys.platform == "darwin" and for_playback else None,
             )
             if not jobs:
                 return
@@ -11033,44 +11053,47 @@ class TimelinePreviewRenderer(QObject):
             # prepositioning them would fight the live cursor for nothing.
             active_streams = self._active_playback_stream_keys(frame, plan)
 
-            def _stale() -> bool:
-                return generation_id != self._generation_id or self._worker is None
-
+            target_size = self._auto2k_decode_target_size()
             prepositioned = 0
             for (asset_path, asset_id, decode_stream_key), source_frames in jobs.items():
-                if generation_id != self._generation_id or self._worker is None:
+                if _stale():
                     return
                 if not source_frames:
                     continue
                 if (asset_path, decode_stream_key) in active_streams:
                     continue
-                # Forward playback enters a clip at its lowest upcoming source
-                # frame; backward playback at the highest one.
-                entry = min(source_frames) if step >= 0 else max(source_frames)
+                # Jobs are collected in timeline playback order, including
+                # reverse or retimed clips where source frames need not ascend.
+                entry = source_frames[0]
                 schedule_key = (
                     generation_id,
                     asset_path,
                     decode_stream_key,
                     int(entry),
                     step >= 0,
+                    target_size,
+                    for_playback,
                 )
                 with self._prebuffer_lock:
                     if schedule_key in self._preposition_scheduled_keys:
                         continue
-                    self._preposition_scheduled_keys.add(schedule_key)
-                    if len(self._preposition_scheduled_keys) > 512:
-                        self._preposition_scheduled_keys = set(
-                            list(self._preposition_scheduled_keys)[-256:]
-                        )
                 try:
                     if gpu_dm.preposition_stream_frame(
                         asset_path,
                         int(entry),
-                        target_size=self._auto2k_decode_target_size(),
+                        target_size=target_size,
                         stream_key=decode_stream_key,
+                        for_playback=for_playback,
                         is_stale=_stale,
                     ):
                         prepositioned += 1
+                        with self._prebuffer_lock:
+                            if not _stale():
+                                self._preposition_scheduled_keys.add(schedule_key)
+                                if len(self._preposition_scheduled_keys) > 512:
+                                    self._preposition_scheduled_keys = set(
+                                        list(self._preposition_scheduled_keys)[-256:]
+                                    )
                 except Exception as e:
                     logger.debug(
                         f"TimelinePreviewRenderer: playback stream preposition "

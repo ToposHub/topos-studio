@@ -3560,7 +3560,7 @@ class TimelineExporter:
                         from src.shared.export.hdr_hevc_encoder import HdrHevcEncoder
 
                         if (isinstance(self._encoder, HdrHevcEncoder)
-                                or (config.codec in (ExportCodec.DNXHR_HQX, ExportCodec.H264)
+                                or (config.codec in (ExportCodec.DNXHR_HQX, ExportCodec.H264, ExportCodec.HEVC)
                                     and isinstance(self._encoder, FFmpegVideoEncoder))):
                             published = self._encoder.close(
                                 should_cancel=lambda: self._cancel_requested,
@@ -6436,6 +6436,11 @@ class TimelineExporter:
 
         from src.shared.export.video_encoder import FFmpegVideoEncoder
 
+        if str(config.codec).lower() == "hevc":
+            return FFmpegVideoEncoder(
+                output_path, config, should_cancel=lambda: self._cancel_requested,
+                total_frames=self._total_frames,
+            )
         return FFmpegVideoEncoder(output_path, config)
 
     def _maybe_create_default_native_gpu_bridge(

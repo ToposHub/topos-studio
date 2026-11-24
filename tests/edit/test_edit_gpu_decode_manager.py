@@ -1129,11 +1129,62 @@ def test_scrub_resolution_never_consults_playback_policy() -> None:
     assert calls == []
 
 
-def test_playback_8bit_h26x_stays_auto_without_probe() -> None:
+def test_playback_8bit_hevc_stays_auto_without_probe() -> None:
     manager, calls = _make_routed_manager(monkeypatch_stub(), False, pix_fmt="yuv420p")
     spec = manager._resolve_preview_decode_source("/8bit.mov", (1920, 1080), for_playback=True)
     assert spec.vt_policy == "auto"
     assert calls == []
+
+
+def test_playback_8bit_h264_uses_a_hardware_required_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, calls = _make_routed_manager(
+        monkeypatch, True, codec="h264", pix_fmt="yuv420p",
+    )
+    path = "/8bit.mp4"
+    playback = manager._resolve_preview_decode_source(path, (1792, 1008), for_playback=True)
+    scrub = manager._resolve_preview_decode_source(path, (1792, 1008))
+    assert playback.vt_policy == "hw_or_ffmpeg"
+    assert scrub.vt_policy == "auto"
+    assert calls == []
+
+
+def test_paused_h264_display_reuses_non_playback_source_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, _ = _make_routed_manager(monkeypatch, True, codec="h264", pix_fmt="yuv420p")
+    policies: list[str] = []
+
+    def get_source(*args: object, source_spec: SimpleNamespace) -> None:
+        policies.append(source_spec.vt_policy)
+
+    monkeypatch.setattr(manager, "_get_or_create_source", get_source)
+    manager.get_frame("/8bit.mp4", 0, (1792, 1008))
+    manager.set_playback_active(True)
+    manager.get_frame("/8bit.mp4", 1, (1792, 1008))
+    assert policies == ["auto", "hw_or_ffmpeg"]
+
+
+def test_preposition_opens_the_playback_source_at_clip_entry_zero(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, _ = _make_routed_manager(monkeypatch, True, codec="h264", pix_fmt="yuv420p")
+    opened = []
+    warmups: list[dict[str, object]] = []
+
+    def get_source(*args: object, source_spec: object) -> SimpleNamespace:
+        opened.append(source_spec)
+        return SimpleNamespace(current_frame=0)
+
+    monkeypatch.setattr(manager, "_get_or_create_source", get_source)
+    monkeypatch.setattr(manager, "warmup_source", lambda *args, **kwargs: warmups.append(kwargs))
+    size = (1792, 1008)
+    assert manager.preposition_stream_frame("/8bit.mp4", 0, size, stream_key="next-clip")
+    assert opened == [manager._resolve_preview_decode_source(
+        "/8bit.mp4", size, for_playback=True,
+    )]
+    assert warmups == [{"for_playback": True, "warm_interactive_pool": False}]
 
 
 def test_playback_and_scrub_source_keys_differ() -> None:

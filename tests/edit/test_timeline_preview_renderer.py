@@ -3918,6 +3918,13 @@ class TestTimelinePreviewRenderer:
             ("/path/to/upper.mov", "asset-002", "clip-upper"): [25, 26, 27],
         }
 
+        # A decoder needs advance notice of the cut even though the normal
+        # frame buffer stays at two frames.
+        jobs = renderer._collect_playback_prebuffer_jobs(
+            40, 1, renderer._generation_id, cut_lookahead_frames=12,
+        )
+        assert jobs[("/path/to/upper.mov", "asset-002", "clip-upper")] == [0]
+
         renderer.shutdown()
 
     def test_playback_does_not_start_a_parallel_prebuffer_decoder(
@@ -4010,7 +4017,7 @@ class TestTimelinePreviewRenderer:
         renderer._worker._gpu_decode_manager = gpu_manager
         renderer._collect_playback_prebuffer_jobs = Mock(return_value={
             ("/media/a.mp4", "asset-a", "clip-active"): [10, 11, 12],
-            ("/media/a.mp4", "asset-a", "clip-next"): [36, 37, 38],
+            ("/media/a.mp4", "asset-a", "clip-next"): [36, 35, 34],
         })
         renderer._active_playback_stream_keys = Mock(
             return_value={("/media/a.mp4", "clip-active")}
