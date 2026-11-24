@@ -94,7 +94,8 @@ class ColorMetalPreview:
                 self.fallback("graph_plan: " + ", ".join(outcome.diagnostics))
                 return False
 
-            provider = graph_node_layer_provider(snapshot.graph, frame=source_frame)
+            provider = graph_node_layer_provider(
+                snapshot.graph, frame=source_frame, preview_grade=snapshot.preview_grade)
             # GL maps full-image windows to the current ROI, while the Metal
             # executor rasterizes normalized windows in its target texture.
             for render_pass in outcome.plan.passes:

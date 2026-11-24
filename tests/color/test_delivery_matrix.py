@@ -66,7 +66,9 @@ def test_detect_primary_and_texture_split():
     assert detect_operations([layer]) == {"primary", "texture"}
     # 只有纹理参数：不算 primary
     layer = _layer(grading_params={"mid_detail": 5.0})
-    assert detect_operations([layer]) == {"texture"}
+    assert detect_operations([layer]) == {"mid_detail"}
+    assert build_delivery_matrix_report([layer], TARGET_VIDEO).rows[0].delivery == DELIVERY_FULL
+    assert build_delivery_matrix_report([layer], TARGET_LUT).rows[0].delivery == DELIVERY_DROPPED
     # 默认值不算
     layer = _layer(grading_params={"lift": (0.0, 0.0, 0.0), "contrast": 0.0})
     assert detect_operations([layer]) == set()

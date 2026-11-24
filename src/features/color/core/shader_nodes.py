@@ -1,4 +1,7 @@
 # GLSL Code Snippets for Pipeline Fusion
+from src.features.color.core.midtone_detail_calibration import (
+    DETAIL_SHADER_GAIN, detail_shader_taps,
+)
 
 COMMON_DEFINITIONS = """
 // Convert RGB to HSV
@@ -22,6 +25,29 @@ vec3 hsv2rgb(vec3 c) {
 
 GRADING_SNIPPET = """
 uniform vec2 u_tex_size;
+
+vec3 apply_calibrated_detail(vec3 color, vec3 source_color, float amount) {
+    const vec3 taps[6] = vec3[6](""" + detail_shader_taps("vec3") + """);
+    const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+    vec2 size = vec2(textureSize(u_input_tex, 0));
+    vec2 scale = (size.x / 1920.0) / size;
+    vec2 margin = 0.5 / size;
+    vec3 mean = vec3(0.0);
+    float second = 0.0;
+    for (int i = 0; i < 6; ++i) {
+        vec2 offset = taps[i].xy;
+        for (int j = 0; j < 4; ++j) {
+            vec3 pixel = texture(u_input_tex, clamp(v_texcoord + scale * offset, margin, 1.0 - margin)).rgb;
+            mean += pixel * taps[i].z;
+            second += dot(pixel * pixel, luma) * taps[i].z;
+            offset = vec2(-offset.y, offset.x);
+        }
+    }
+    float center_luma = dot(source_color, luma);
+    float blur_luma = dot(mean, luma);
+    float variance = second - dot(mean * mean, luma);
+""" + DETAIL_SHADER_GAIN + """
+}
 
 vec3 apply_grading(vec3 color, vec3 source_color, vec3 lift, vec3 gamma, vec3 gain, float exposure, float temp, float tint, float contrast, float saturation, float vibrance, float shadow, float highlights, float mid_detail, float sharpness, float hue_shift, float lift_saturation, float gamma_saturation, float gain_saturation, float pivot, vec3 offset, vec3 log_shadow, vec3 log_midtone, vec3 log_highlight, vec3 log_offset, float log_low_range, float log_high_range, float lum_mix) {
     // 0. 原始亮度（Lum Mix 用：把结果亮度向调色前回拉）
@@ -73,8 +99,10 @@ vec3 apply_grading(vec3 color, vec3 source_color, vec3 lift, vec3 gamma, vec3 ga
     // === 安全修复：防止 Lift/Gamma 导致暗部颜色溢出 ===
     // 1. 暗部负值软性保护：对极端负值进行压缩，防止色块
     float luma_post_grading = dot(color, vec3(0.299, 0.587, 0.114));
-    // 如果暗部（luma < 0）且某个通道极端负值，进行保护
-    if (luma_post_grading < 0.0) {
+    // Protect shadows pushed by the wheels. Neutral wheels must pass signed
+    // scene values through unchanged, including negative ACEScct values.
+    bool wheels_adjusted = lift != vec3(1.0) || gamma != vec3(1.0) || gain != vec3(1.0);
+    if (wheels_adjusted && luma_post_grading < 0.0) {
         for(int i=0; i<3; i++) {
             float x = color[i];
             // 暗部负值软性压缩（保留 -0.5 范围）
@@ -195,8 +223,12 @@ vec3 apply_grading(vec3 color, vec3 source_color, vec3 lift, vec3 gamma, vec3 ga
         
         // Mid Detail (Clarity)
         if (mid_detail != 0.0) {
-            float mid_mask = smoothstep(0.0, 0.5, lum) * (1.0 - smoothstep(0.5, 1.0, lum)) * 4.0;
-            color += (color - avg_mid) * (mid_detail / 100.0) * mid_mask;
+            if (u_mid_detail_calibrated != 0.0) {
+                color = apply_calibrated_detail(color, source_color, mid_detail);
+            } else {
+                float mid_mask = smoothstep(0.0, 0.5, lum) * (1.0 - smoothstep(0.5, 1.0, lum)) * 4.0;
+                color += (color - avg_mid) * (mid_detail / 100.0) * mid_mask;
+            }
         }
 
         // Sharpness (Edge Enhancement)

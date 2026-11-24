@@ -126,7 +126,7 @@ def test_visible_offset_dial_publishes_grade_before_ending_gesture(qtbot) -> Non
     qtbot.mouseRelease(dial, Qt.MouseButton.LeftButton, pos=QPoint(70, 7))
 
     assert events == ["start", "change", "end"]
-    assert panel.offset_wheel.brightness == pytest.approx(0.04)
+    assert panel.offset_wheel.brightness == pytest.approx(0.08 * 40.0 / 60.0)
 
 
 def test_bars_drag_is_relative_and_fine(qtbot):

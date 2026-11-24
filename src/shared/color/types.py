@@ -51,9 +51,10 @@ class ColorPrimaries(Enum):
     FILM = 'film'
     XYZ = 'smpte428'
     EBU3213 = 'ebu3213'
-    # ACES AP1 primaries (ACEScg working space). Not an FFmpeg-recognised
-    # value — internal tag for the colour pipeline (IDT/ODT/provider).
+    # ACES primaries are internal tags without FFmpeg equivalents.
+    AP0 = 'ap0'
     AP1 = 'ap1'
+    DAVINCI_WIDE_GAMUT = 'davinci-wide-gamut'
     UNKNOWN = 'unknown'
 
 
@@ -86,12 +87,28 @@ class ColorTransfer(Enum):
     SMPTE170M = 'smpte170m'
     SMPTE240M = 'smpte240m'
     GAMMA22 = 'gamma22'
+    GAMMA24 = 'gamma24'         # Pure power law, distinct from the BT.709 OETF
+    GAMMA26 = 'gamma26'
     GAMMA28 = 'gamma28'
     BT2020_10 = 'bt2020_10'
     BT2020_12 = 'bt2020_12'
     ST2084 = 'st2084'            # Alias for PQ
+    ACESCC = 'acescc'
+    ACESCCT = 'acescct'
+    DAVINCI_INTERMEDIATE = 'davinci-intermediate'
     TRAW_LOG0 = 'topos-traw-log0'  # TRAW PWL-log12（codec transfer id 20，v1.6）
     UNKNOWN = 'unknown'
+
+
+def delivery_transfer_tag(transfer: ColorTransfer, *, native_topos: bool = False) -> str:
+    """Return H.273 signaling for samples already encoded with the given curve."""
+    if transfer == ColorTransfer.GAMMA24:
+        # Preserve the established TOPOS fallback for Gamma 2.4.
+        return "bt709" if native_topos else "unknown"
+    if transfer in (ColorTransfer.GAMMA26, ColorTransfer.ACESCC, ColorTransfer.ACESCCT,
+                    ColorTransfer.DAVINCI_INTERMEDIATE):
+        return "unknown"
+    return transfer.value
 
 
 class ColorMatrix(Enum):
@@ -256,6 +273,8 @@ def get_color_primaries_name(primaries: ColorPrimaries) -> str:
         ColorPrimaries.SMPTE240M: 'SMPTE 240M',
         ColorPrimaries.P3_DCI: 'DCI-P3',
         ColorPrimaries.P3_DISPLAY: 'Display P3',
+        ColorPrimaries.AP0: 'ACES AP0',
+        ColorPrimaries.AP1: 'ACES AP1',
         ColorPrimaries.BT470M: 'BT.470 System M',
         ColorPrimaries.BT470BG: 'BT.470 System B,G',
         ColorPrimaries.FILM: 'Generic Film',
@@ -277,10 +296,14 @@ def get_color_transfer_name(transfer: ColorTransfer) -> str:
         ColorTransfer.SMPTE170M: 'BT.601',
         ColorTransfer.SMPTE240M: 'SMPTE 240M',
         ColorTransfer.GAMMA22: 'Gamma 2.2',
+        ColorTransfer.GAMMA24: 'Gamma 2.4',
+        ColorTransfer.GAMMA26: 'Gamma 2.6',
         ColorTransfer.GAMMA28: 'Gamma 2.8',
         ColorTransfer.BT2020_10: 'BT.2020 10-bit',
         ColorTransfer.BT2020_12: 'BT.2020 12-bit',
         ColorTransfer.ST2084: 'ST.2084 (PQ)',
+        ColorTransfer.ACESCC: 'ACEScc',
+        ColorTransfer.ACESCCT: 'ACEScct',
         ColorTransfer.UNKNOWN: 'Unknown',
     }
     return names.get(transfer, 'Unknown')

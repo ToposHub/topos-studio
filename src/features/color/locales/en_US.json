@@ -1,7 +1,4 @@
 {
-  "grading": {
-    "rec709_calibration": "Use measured Rec.709 Gamma 2.4 primary grading"
-  },
   "color_keyframes": {
     "title": "Keyframes",
     "demo": "Sample",

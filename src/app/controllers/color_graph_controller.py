@@ -1323,6 +1323,10 @@ class LegacyGradingAdapter:
         self._recorder = None
         self._frame_provider = None
         self._transaction_id = ""
+        self._base_graph: ColorGraphData | None = None
+        self._base_stack = None
+        self.preview_graph: ColorGraphData | None = None
+        self.preview_grade: dict[str, dict[str, Any]] = {}
 
     def params_for_panel(self) -> dict[str, Any]:
         handle = self._host.active_handle
@@ -1330,6 +1334,8 @@ class LegacyGradingAdapter:
 
     def begin_gesture(self, transaction_id: str) -> None:
         self._bridge.begin_transaction(transaction_id)
+        self._base_stack = self._bridge._current_stack(self._bridge._get_project())
+        self._base_graph = self._base_stack.color_graph if self._base_stack is not None else None
         self._gesture_open = True
         self._transaction_id = transaction_id
 
@@ -1342,13 +1348,17 @@ class LegacyGradingAdapter:
         project = self._bridge._get_project()
         stack_id = self._bridge._stack_id()
         stack = project.color_stacks.get(stack_id) if stack_id else None
-        graph = stack.color_graph if stack else None
-        if graph is None:
+        if stack is None or stack.graph_locked or self.preview_conflicts_with(stack):
             return False
+        graph = stack.color_graph
         pending = self._bridge._buffer._last_graph
+        if pending is None and graph is None:
+            pending = self._bridge._buffer._first_graph
         if pending is not None:
             from src.shared.project.color_graph import ColorGraphData
             graph = ColorGraphData.from_dict(pending)
+        if graph is None:
+            return False
         path = tuple(node_id for _, node_id in
                      getattr(self._host._panel, "_parents", ()))
         child_graph = graph
@@ -1374,6 +1384,9 @@ class LegacyGradingAdapter:
             return False
         self._bridge.add_to_transaction(result, transaction_id,
                                         "set_node_option")
+        self.preview_graph = result.graph
+        self.preview_grade.setdefault(node_id, {})[param_name] = (
+            tuple(value) if isinstance(value, list) else value)
         # KF-04：自动录制路由——手势内的真实改动交录制器收集（auto 开启
         # 且参数已登记时），flush 时与 base 参数进同一事务（一个历史条目）。
         # R6.1：身份含 compound 路径（成员批命令须带 _compound_path 下行）
@@ -1387,9 +1400,49 @@ class LegacyGradingAdapter:
     def end_gesture(self) -> bool:
         if not self._gesture_open:
             return False
-        self._gesture_open = False
+        if self.preview_conflicts_with(
+                self._bridge._current_stack(self._bridge._get_project())):
+            self.cancel_gesture()
+            return False
+        self._clear_gesture()
         self._flush_recorder_edits()
         return self._bridge.flush_transaction()
+
+    def preview_conflicts_with(self, stack: Any) -> bool:
+        graph = stack.color_graph if stack is not None else None
+        return self.preview_graph is not None and (
+            graph != self._base_graph or (graph is None and stack is not self._base_stack))
+
+    def _clear_gesture(self) -> None:
+        self._gesture_open = False
+        self._base_graph = None
+        self._base_stack = None
+        self.preview_graph = None
+        self.preview_grade.clear()
+
+    def cancel_gesture(self) -> None:
+        self._clear_gesture()
+        self._bridge.cancel_transaction()
+        if self._recorder is not None:
+            self._recorder.cancel_pending()
+
+    def rendering_preview(self) -> tuple[ColorGraphData | None, dict[str, dict[str, Any]]]:
+        """Evaluate the same provisional keyframe edits that release will commit."""
+        graph = self.preview_graph
+        patches = {node: dict(values) for node, values in self.preview_grade.items()}
+        if graph is None or self._recorder is None:
+            return graph, patches
+        from src.features.color.core.color_graph_service import ColorGraphService
+
+        service = ColorGraphService()
+        for path, edits in self._recorder.pending_edit_groups().items():
+            result = service.apply_intent(
+                graph, "batch_edit_keyframes", {"edits": edits, "_compound_path": path})
+            if result.ok:
+                graph = result.graph
+                for edit in edits:
+                    patches.get(edit["node_id"], {}).pop(edit["param"], None)
+        return graph, patches
 
     def _flush_recorder_edits(self, transaction_id: str | None = None) -> None:
         """KF-04：手势收尾——自动录制的关键帧写入并入当前事务缓冲。"""
@@ -1576,6 +1629,7 @@ class ColorGraphAppHost:
                              scope: str = "clip",
                              scope_owner_id: str | None = None) -> None:
         stack_id = str(stack_id or "")
+        self.end_grade_gesture()
         self._clip_stack_id = stack_id
         owner = (scope_owner_id or stack_id or None)
         try:
@@ -1589,7 +1643,6 @@ class ColorGraphAppHost:
     def _bind_and_hydrate(self, stack_id: str, scope: str,
                           scope_owner_id) -> None:
         """绑定栈并水合投影；无图栈用迁移视图（首次命令自动建图）。"""
-        self._clear_effects_preview()
         self._bridge.bind_stack(stack_id)
         self._bound_stack_id = stack_id
         graph = self._stack_projection(stack_id)
@@ -1719,6 +1772,7 @@ class ColorGraphAppHost:
 
     def _on_scope_menu(self, scope: str) -> None:
         """面板 scope 菜单 → 真实 owner 解析与重绑（不新造 group）。"""
+        self.end_grade_gesture()
         if scope == "clip":
             # 回 clip：重绑 clip 栈（否则浏览组栈后，clip scope 的编辑
             # 会误提交组 grade）
@@ -1781,6 +1835,12 @@ class ColorGraphAppHost:
             return
         self._publishing = True
         try:
+            stack = getattr(project, "color_stacks", {}).get(self._bound_stack_id)
+            if self._adapter.preview_conflicts_with(stack):
+                self._adapter.cancel_gesture()
+                engine = self._engine_provider() if self._engine_provider else None
+                if engine is not None:
+                    engine.set_color_graph_preview(None)
             if self._raw_set_project is not None:
                 self._raw_set_project(project)
             self._set_hydration_guard(True)
@@ -1807,7 +1867,11 @@ class ColorGraphAppHost:
         if self._panels_provider is not None:
             panels = self._panels_provider()
             if panels:
-                hydrator.apply_stack_to_panels(stack, panels)
+                handle = self._host.active_handle
+                payload = self.panel_layer_payload(handle.node_id) if handle is not None else None
+                if handle is not None:
+                    self.align_engine_active_layer(handle.node_id)
+                hydrator.apply_stack_to_panels(stack, panels, grading_payload=payload)
         if self._request_render is not None:
             try:
                 self._request_render()
@@ -1920,7 +1984,8 @@ class ColorGraphAppHost:
         frame = self._adapter._frame_provider() if self._adapter._frame_provider else None
         payload = graph_node_layer_provider(graph, frame=frame)(node_id)
         if payload:
-            return dict(payload.get("grading_params") or {})
+            return {**(payload.get("grading_params") or {}),
+                    **self._adapter.preview_grade.get(node_id, {})}
         return dict(handle.grade_params()) if handle is not None else None
 
     def _node_payload(self, node_id: str):
@@ -2096,17 +2161,38 @@ class ColorGraphAppHost:
         return self._adapter.submit_param_change(
             node_id, param_name, value, transaction_id)
 
-    def end_grade_gesture(self) -> bool:
-        committed = self._adapter.end_gesture()
-        self._clear_effects_preview()
-        return committed
+    def preview_grade_gesture(self) -> None:
+        """Render accepted grade values from the current gesture's graph."""
+        engine = self._engine_provider() if self._engine_provider else None
+        if engine is not None:
+            graph, patches = self._adapter.rendering_preview()
+            if graph is not None:
+                engine.set_color_graph_preview(graph, preview_grade=patches)
 
-    def _clear_effects_preview(self) -> None:
-        if getattr(self, "_effects_preview_active", False):
-            self._effects_preview_active = False
-            engine = self._engine_provider() if self._engine_provider else None
-            if engine is not None:
-                engine.set_tool_preview_graph(None)
+    def cancel_grade_gesture(self) -> None:
+        """Discard a rejected grade and restore the committed panel projection."""
+        self._adapter.cancel_gesture()
+        engine = self._engine_provider() if self._engine_provider else None
+        if engine is not None:
+            engine.set_color_graph_preview(None)
+        self._set_hydration_guard(True)
+        try:
+            self._sync_engine_from_bound_stack(self._get_project())
+        finally:
+            self._set_hydration_guard(False)
+
+    def end_grade_gesture(self) -> bool:
+        had_preview = self._adapter.preview_graph is not None
+        try:
+            committed = self._adapter.end_gesture()
+        finally:
+            if had_preview:
+                engine = self._engine_provider() if self._engine_provider else None
+                if engine is not None:
+                    engine.set_color_graph_preview(None)
+        if had_preview and not committed:
+            self._sync_engine_from_bound_stack(self._get_project())
+        return committed
 
     # ── N03：非 primary 工具域（Qualifier / Window）提交 ──
 
@@ -2130,15 +2216,17 @@ class ColorGraphAppHost:
     def submit_blur_sharpen_change(self, node_id: str, params: Mapping[str, Any],
                                    transaction_id: str) -> bool:
         """Buffer the built-in spatial effect settings and preview the draft graph."""
+        stack = self._bridge._current_stack(self._get_project())
+        if self._adapter.preview_conflicts_with(stack):
+            return False
         if not self._submit_tool_domains(node_id, {"blur_sharpen": params}, transaction_id):
             return False
-        engine = self._engine_provider() if self._engine_provider else None
         pending = self._bridge._buffer._last_graph
-        if engine is not None and pending is not None:
+        if pending is not None:
             from src.shared.project.color_graph import ColorGraphData
 
-            engine.set_tool_preview_graph(ColorGraphData.from_dict(pending))
-            self._effects_preview_active = True
+            self._adapter.preview_graph = ColorGraphData.from_dict(pending)
+            self.preview_grade_gesture()
         return True
 
     def submit_warper_change(self, node_id: str, payload: Mapping[str, Any],
@@ -2167,7 +2255,7 @@ class ColorGraphAppHost:
             "_compound_path": self._tool_compound_path(),
         })
         if result.ok:
-            engine.set_warper_preview_graph(result.graph)
+            engine.set_color_graph_preview(result.graph)
         return result.ok
 
     def submit_qualifier_change(self, node_id: str,

@@ -5,10 +5,10 @@ import math
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QPointF, Qt
+from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtGui import QFont, QMouseEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QSplitter, QWidget
+from PyQt6.QtWidgets import QSplitter, QToolButton, QWidget
 
 from src.features.color.core.composition_uniforms import (
     composition_uniform_values, params_to_rgb, params_to_offset_rgb,
@@ -16,7 +16,7 @@ from src.features.color.core.composition_uniforms import (
 from src.features.color.core.the_decompiler import GradingMath
 from src.features.color.core.layer import Layer
 from src.features.color.core.primary_calibration import (
-    PRIMARY_CALIBRATION_VERSION_KEY, calibrated_grade_inputs,
+    PRIMARY_CALIBRATION_CURRENT_VERSION, PRIMARY_CALIBRATION_VERSION_KEY, calibrated_grade_inputs,
 )
 from src.features.color.ui.color_wheel import (
     ColorWheel, GradingPanel, KnurledJogWheel, offset_display_to_hsb, offset_hsb_to_display,
@@ -54,7 +54,7 @@ def test_scalar_value_strip_and_text_fit_at_supported_panel_widths(qtbot, qapp) 
     qtbot.keyClick(spin._edit, Qt.Key.Key_Escape)
 
     panel.resize(624, 392)
-    panel.calibration_btn.click()
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: PRIMARY_CALIBRATION_CURRENT_VERSION})
     panel.temp_slider.setValue(-100.0)
     qapp.processEvents()
     temperature = panel.temp_slider.spin._value_label
@@ -65,10 +65,13 @@ def test_scalar_value_strip_and_text_fit_at_supported_panel_widths(qtbot, qapp) 
 def test_measured_grade_uses_native_display_values_and_round_trips(qtbot) -> None:
     panel = GradingPanel()
     qtbot.addWidget(panel)
-    panel.calibration_btn.click()
-    assert panel.get_current_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 1
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: PRIMARY_CALIBRATION_CURRENT_VERSION})
+    assert panel.get_current_params()[PRIMARY_CALIBRATION_VERSION_KEY] == PRIMARY_CALIBRATION_CURRENT_VERSION
     assert panel.pivot_slider.spin.value() == pytest.approx(0.435)
     assert panel.log_offset_wheel._r_drag.value() == pytest.approx(25.0)
+    panel.pivot_slider.spin.setValue(0.20)
+    assert panel.pivot_slider.spin.value() == pytest.approx(0.20)
+    assert panel._scalar_rows["pivot"][1].spin.value() == pytest.approx(0.20)
 
     panel.temp_slider.spin.setValue(500.0)
     panel.color_bars_panel.offset._nums["R"].setValue(26.0)
@@ -86,16 +89,50 @@ def test_measured_grade_uses_native_display_values_and_round_trips(qtbot) -> Non
     layer = Layer("Calibrated")
     layer.grading_params.update(panel.get_current_params())
     reloaded = Layer.from_dict(layer.to_dict())
-    assert reloaded.grading_params[PRIMARY_CALIBRATION_VERSION_KEY] == 1
+    assert reloaded.grading_params[PRIMARY_CALIBRATION_VERSION_KEY] == PRIMARY_CALIBRATION_CURRENT_VERSION
     assert reloaded.grading_params["log_offset"] == (0.0, 0.0, 0.0)
     grid, remaining = calibrated_grade_inputs(reloaded)
     assert grid is not None and abs(grid).max() > 0.0
     assert remaining["temp"] == 0.0
     assert remaining["log_shadow"] == (0.0, 0.0, 0.0)
 
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1, "pivot": 0.18})
+    assert panel.get_current_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 1
+    assert panel.pivot_slider.spin.value() == pytest.approx(0.435)
     panel.set_extended_params(Layer("Legacy").grading_params)
-    assert not panel.calibration_btn.isChecked()
     assert panel.log_offset_wheel._r_drag.value() == pytest.approx(0.0)
+
+
+def test_video_primary_profile_follows_context_only_before_a_grade_is_authored(qtbot) -> None:
+    use_measured = True
+    panel = GradingPanel(use_measured_primaries=lambda: use_measured)
+    qtbot.addWidget(panel)
+    neutral = Layer("Neutral").grading_params
+    assert not any(button.text() == "709" for button in panel.findChildren(QToolButton))
+    assert panel.pending_primary_calibration_version == PRIMARY_CALIBRATION_CURRENT_VERSION
+    assert panel.get_current_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 0
+    assert panel.pivot_slider.spin.value() == pytest.approx(0.435)
+
+    panel.load_extended_params({**neutral, "temp": 5.0})
+    assert panel.pending_primary_calibration_version == 0
+    assert panel.pivot_slider.spin.value() == pytest.approx(0.18)
+    panel.load_extended_params(neutral, animated=True)
+    assert panel.pending_primary_calibration_version == 0
+
+    panel.load_extended_params(neutral)
+    assert panel.pending_primary_calibration_version == PRIMARY_CALIBRATION_CURRENT_VERSION
+    use_measured = False
+    panel.refresh_primary_calibration()
+    assert panel.pivot_slider.spin.value() == pytest.approx(0.18)
+    assert panel.pending_primary_calibration_version == 0
+
+    log_offset = (30.0, 0.2, 0.0)
+    panel.load_extended_params({**neutral, PRIMARY_CALIBRATION_VERSION_KEY: 1,
+                                "log_offset": log_offset})
+    assert panel.pivot_slider.spin.value() == pytest.approx(0.435)
+    assert panel.get_extended_params()["log_offset"] == log_offset
+    assert panel.get_extended_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 1
+    assert panel.pending_primary_calibration_version == 0
 
 
 def test_immediate_version_save_flushes_throttled_wheel_and_slider_before_snapshot(qtbot):
@@ -168,6 +205,22 @@ def _event(kind, point, button=Qt.MouseButton.LeftButton):
     return QMouseEvent(kind, point, point, button, button, Qt.KeyboardModifier.NoModifier)
 
 
+def test_hydration_discards_the_previous_scalar_drag_baseline(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    scalar = panel.temp_slider.spin
+    press = QPointF(18.0, 8.0)
+    scalar.mousePressEvent(_event(QMouseEvent.Type.MouseButtonPress, press))
+    scalar.mouseMoveEvent(_event(QMouseEvent.Type.MouseMove, press + QPointF(24.0, 0.0)))
+    assert panel.temp_slider.value() > 0.0
+    panel.set_params(*(((0.0, 0.0, 0.0),) * 3 + (0.0,) * 9))
+    panel.current_stack_id = "replacement"
+    with qtbot.waitSignal(panel.interaction_ended):
+        scalar.mouseReleaseEvent(_event(
+            QMouseEvent.Type.MouseButtonRelease, press + QPointF(48.0, 0.0)))
+    assert panel.temp_slider.value() == 0.0
+
+
 def test_trackerball_is_relative_and_flushes_before_gesture_end(qapp):
     wheel = ColorWheel()
     wheel.resize(230, 270)
@@ -187,7 +240,7 @@ def test_trackerball_is_relative_and_flushes_before_gesture_end(qapp):
         canvas.mousePressEvent(_event(QMouseEvent.Type.MouseButtonPress, press))
         assert wheel.knob_pos == before  # clicking never jumps the correction
         canvas.mouseMoveEvent(_event(QMouseEvent.Type.MouseMove, press + QPointF(12, -8)))
-        expected = before + QPointF(12 / inner_radius, -8 / inner_radius)
+        expected = before + QPointF(1.2 / inner_radius, -0.8 / inner_radius)
         assert wheel.knob_pos.x() == pytest.approx(expected.x())
         assert wheel.knob_pos.y() == pytest.approx(expected.y())
         canvas.mouseReleaseEvent(_event(QMouseEvent.Type.MouseButtonRelease, press + QPointF(12, -8)))
@@ -387,6 +440,7 @@ def test_pivot_replaces_exposure_and_exposure_passes_through(qapp):
 
 def test_primary_display_units_and_inline_commit_preserve_engine_values(qapp):
     panel = GradingPanel()
+    panel.resize(1260, 400)
     changes = []
     events = []
     panel.grading_changed.connect(lambda *args: (changes.append(args), events.append("change")))
@@ -398,9 +452,13 @@ def test_primary_display_units_and_inline_commit_preserve_engine_values(qapp):
         assert panel.contrast_slider.spin.value() == 1.0
         assert panel.sat_slider.spin.value() == 50.0
         assert panel.hue_slider.spin.value() == 50.0
-        panel.sat_slider.spin._begin_edit()
+        spin = panel.sat_slider.spin
+        cell = spin._value_label
+        start = cell.mapTo(panel, cell.rect().center())
+        QTest.mouseDClick(panel.windowHandle(), Qt.MouseButton.LeftButton, pos=start)
+        assert spin.isEditing()
         panel.sat_slider.spin._edit.setText("65.00")
-        panel.sat_slider.spin._commit_edit()
+        QTest.keyClick(spin._edit, Qt.Key.Key_Return)
         assert panel.get_current_params()["saturation"] == 30.0
         assert changes[-1][8] == 30.0
         assert len(changes[-1]) == 13
@@ -419,6 +477,137 @@ def test_primary_display_units_and_inline_commit_preserve_engine_values(qapp):
     finally:
         panel.close()
         panel.deleteLater()
+
+
+@pytest.mark.parametrize(("attribute", "mode", "dx", "expected"), [
+    ("temp_slider", "wheels", 120, 1200.0),
+    ("tint_slider", "wheels", 120, 60.0),
+    ("contrast_slider", "wheels", 120, 1.24),
+    ("pivot_slider", "wheels", 120, 0.675),
+    ("mid_detail_slider", "wheels", 120, 60.0),
+    ("vibrance_slider", "wheels", 120, 60.0),
+    ("shadow_slider", "wheels", 120, 60.0),
+    ("highlights_slider", "wheels", 120, 60.0),
+    ("sat_slider", "wheels", 120, 74.0),
+    ("hue_slider", "wheels", 120, 74.0),
+    ("lum_mix_slider", "wheels", -120, 76.0),
+    ("log_low_range_slider", "log", 120, 0.573),
+    ("log_high_range_slider", "log", 120, 0.790),
+])
+def test_primary_scalar_drag_uses_display_units_at_the_actual_value_cell(
+    qtbot, attribute: str, mode: str, dx: int, expected: float,
+) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_params(*(((0.0, 0.0, 0.0),) * 3 + (0.0,) * 9))
+    panel.resize(1260, 400)
+    panel.show()
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: PRIMARY_CALIBRATION_CURRENT_VERSION})
+    panel._switch_mode(mode)
+    qtbot.waitUntil(panel.isVisible)
+    spin = getattr(panel, attribute).spin
+    cell = spin._value_label
+    start = cell.mapTo(panel, cell.rect().center())
+    assert panel.childAt(start) is spin
+    window = panel.windowHandle()
+    events = []
+    panel.interaction_started.connect(lambda: events.append("start"))
+    panel.grading_changed.connect(lambda *_: events.append("change"))
+    panel.grading_extended_changed.connect(lambda _: events.append("change"))
+    panel.interaction_ended.connect(lambda: events.append("end"))
+
+    QTest.mousePress(window, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseRelease(window, Qt.MouseButton.LeftButton, pos=start + QPoint(dx, 0))
+
+    assert spin.value() == pytest.approx(expected)
+    assert events == ["start", "change", "end"]
+
+
+@pytest.mark.parametrize(("mode", "wheel", "channel", "expected"), [
+    ("wheels", "lift", "Y", 0.10),
+    ("wheels", "gamma", "R", 0.05),
+    ("wheels", "gain", "R", 1.26),
+    ("wheels", "offset", "R", 34.60),
+    ("bars", "offset", "R", 32.20),
+    ("log", "log_shadow", "R", 0.22),
+    ("log", "log_midtone", "R", 0.05),
+    ("log", "log_highlight", "R", 0.22),
+])
+def test_calibrated_channel_number_drag_matches_resolve_readback(
+    qtbot, mode: str, wheel: str, channel: str, expected: float,
+) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.resize(1260, 450)
+    panel.show()
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: PRIMARY_CALIBRATION_CURRENT_VERSION})
+    panel._switch_mode(mode)
+    if mode == "bars":
+        spin = getattr(panel.color_bars_panel, wheel)._nums[channel]
+    else:
+        field = "_bright_drag" if channel == "Y" else "_r_drag"
+        spin = getattr(getattr(panel, wheel + "_wheel"), field)
+    cell = spin._value_label
+    pos = cell.mapTo(panel, cell.rect().center())
+    assert panel.childAt(pos) is spin
+    QTest.mousePress(panel.windowHandle(), Qt.MouseButton.LeftButton, pos=pos)
+    QTest.mouseRelease(panel.windowHandle(), Qt.MouseButton.LeftButton, pos=pos + QPoint(120, 0))
+    assert spin.value() == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("attribute", "signal", "timer_name", "target"), [
+    ("sat_slider", "grading_changed", "_grading_update_timer", 74.0),
+    ("pivot_slider", "grading_extended_changed", "_extended_update_timer", 0.42),
+])
+def test_scalar_continuous_drag_coalesces_without_postponing_preview(
+    qtbot, monkeypatch, attribute: str, signal: str, timer_name: str, target: float,
+) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.resize(1260, 400)
+    panel.show()
+    timer = getattr(panel, timer_name)
+    timer.setInterval(100)
+    real_start = timer.start
+    starts = []
+    spin = getattr(panel, attribute).spin
+
+    def start_timer() -> None:
+        starts.append(True)
+        real_start()
+
+    monkeypatch.setattr(timer, "start", start_timer)
+    changes = []
+    getattr(panel, signal).connect(lambda *_: changes.append(spin.value()))
+    window = panel.windowHandle()
+    start = spin._value_label.mapTo(panel, spin._value_label.rect().center())
+
+    QTest.mousePress(window, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(window, start + QPoint(30, 0))
+    QTest.mouseMove(window, start + QPoint(60, 0))
+    assert starts == [True]
+    qtbot.waitUntil(lambda: bool(changes))
+    assert len(changes) == 1
+    QTest.mouseRelease(window, Qt.MouseButton.LeftButton, pos=start + QPoint(120, 0))
+    assert changes[-1] == pytest.approx(target)
+    assert len(changes) == 2
+
+
+def test_scalar_fine_modifier_affects_only_the_remaining_drag(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.resize(1260, 400)
+    panel.show()
+    spin = panel.sat_slider.spin
+    window = panel.windowHandle()
+    start = spin._value_label.mapTo(panel, spin._value_label.rect().center())
+
+    QTest.mousePress(window, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(window, start + QPoint(40, 0))
+    assert spin.value() == pytest.approx(58.0)
+    QTest.mouseRelease(window, Qt.MouseButton.LeftButton,
+                       Qt.KeyboardModifier.MetaModifier, start + QPoint(120, 0))
+    assert spin.value() == pytest.approx(59.6)
 
 
 def test_narrow_panel_keeps_all_channel_fields_inside_their_wheel(qapp):
@@ -588,8 +777,8 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
     assert updates == []
 
 
-@pytest.mark.parametrize("mode", ["lift", "gamma", "gain"])
-def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str) -> None:
+@pytest.mark.parametrize("mode,delta_y", [("lift", 0.08), ("gamma", 0.04), ("gain", 0.16)])
+def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str, delta_y: float) -> None:
     panel = GradingPanel()
     panel.resize(1260, 405)
     panel.show()
@@ -605,11 +794,10 @@ def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str
         press = QPointF(20.0, 7.0)
         dial.mousePressEvent(_event(QMouseEvent.Type.MouseButtonPress, press))
         assert wheel.brightness == 0.0  # no absolute jump on a trough press
-        dial.mouseMoveEvent(_event(QMouseEvent.Type.MouseMove, press + QPointF(40.0, 0.0)))
-        dial.mouseReleaseEvent(_event(QMouseEvent.Type.MouseButtonRelease, press + QPointF(50.0, 0.0)))
-        assert wheel.brightness == pytest.approx(0.05)
+        dial.mouseMoveEvent(_event(QMouseEvent.Type.MouseMove, press + QPointF(100.0, 0.0)))
+        dial.mouseReleaseEvent(_event(QMouseEvent.Type.MouseButtonRelease, press + QPointF(120.0, 0.0)))
         assert (wheel.hue, wheel.sat) == (215.0, 0.17)
-        expected_master = 2.0 ** (wheel.brightness ** 2 * 6.0) - (mode != "gain")
+        expected_master = delta_y + (mode == "gain")
         assert wheel._bright_drag.value() == pytest.approx(expected_master)
         assert events == ["start", "change", "end"]
         assert not wheel._update_timer.isActive()
@@ -624,6 +812,87 @@ def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str
     finally:
         panel.close()
         panel.deleteLater()
+
+
+@pytest.mark.parametrize("mode,point,expected,tolerance", [
+    ("lift", (0.120, 0.0), (0.0, -0.01, 0.08), 0.006),
+    ("lift", (-0.120, 0.0), (0.0, 0.01, -0.08), 0.006),
+    ("gamma", (0.085, -0.085), (0.02, -0.01, 0.03), 0.006),
+    ("gain", (0.0, -0.122), (1.22, 0.93, 1.0), 0.006),
+    ("gain", (0.0, 0.122), (0.78, 1.07, 1.0), 0.006),
+    ("offset", (0.085, -0.085), (29.82, 22.96, 30.68), 0.17),
+    ("log_shadow", (0.085, 0.085), (-0.11, 0.02, 0.13), 0.008),
+    ("log_midtone", (0.085, 0.085), (-0.02, 0.0, 0.03), 0.008),
+    ("log_highlight", (0.085, 0.085), (-0.11, 0.02, 0.13), 0.008),
+])
+def test_calibrated_wheel_tracks_resolve_direction_and_round_trips(
+    qtbot, mode: str, point: tuple[float, float], expected: tuple[float, ...], tolerance: float,
+) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1})
+    wheel = getattr(panel, mode + "_wheel")
+    wheel._edit_knob(QPointF(*point))
+    wheel.flush_pending_changes()
+    values = tuple(field.value() for field in (wheel._r_drag, wheel._g_drag, wheel._b_drag))
+    assert values == pytest.approx(expected, abs=tolerance)
+    if wheel._bright_drag is not None:
+        assert wheel._bright_drag.value() == pytest.approx(float(mode == "gain"))
+    values = wheel.hue, wheel.sat, wheel.brightness
+    wheel.set_hsv(*values)
+    assert (wheel.knob_pos.x(), wheel.knob_pos.y()) == pytest.approx(point, abs=1e-12)
+    wheel.set_rotation_degrees(210.0)
+    assert (wheel.knob_pos.x(), wheel.knob_pos.y()) == pytest.approx((point[1], -point[0]))
+    assert (wheel.hue, wheel.sat, wheel.brightness) == values
+
+
+def test_calibrated_master_moves_channels_together_in_wheels_bars_and_log(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1})
+    wheel = panel.lift_wheel
+    wheel._edit_knob(QPointF(0.12, -0.09))
+    panel.flush_pending_changes()
+    color = QPointF(wheel.knob_pos)
+    initial = wheel._wheel_rgb()
+
+    wheel._on_jog_delta(120.0)
+    panel.flush_pending_changes()
+    assert wheel._wheel_rgb() == pytest.approx(tuple(value + 0.08 for value in initial))
+    assert (wheel.knob_pos.x(), wheel.knob_pos.y()) == pytest.approx((color.x(), color.y()))
+    panel.color_bars_panel.lift._on_dial_delta(-120.0)
+    panel.flush_pending_changes()
+    assert wheel._wheel_rgb() == pytest.approx(initial)
+    assert panel.color_bars_panel.lift._nums["Y"].value() == pytest.approx(0.0)
+
+    panel.log_midtone_wheel._on_jog_delta(-120.0)
+    panel.offset_wheel._on_jog_delta(60.0)
+    panel.flush_pending_changes()
+    assert panel.log_midtone_wheel._r_drag.value() == pytest.approx(-0.16)
+    assert panel.log_offset_wheel._r_drag.value() == pytest.approx(27.0)
+    panel.color_bars_panel.offset._on_dial_delta(60.0)
+    panel.flush_pending_changes()
+    assert panel.offset_wheel._r_drag.value() == pytest.approx(35.0)
+
+
+def test_calibrated_drag_respects_existing_chroma_and_master_limits(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1})
+
+    offset = panel.offset_wheel
+    offset.set_hsv(0.0, 0.0, 1.0)
+    offset._edit_knob(QPointF(0.12, 0.0))
+    assert offset._master_value() == pytest.approx(1.0)
+    assert not offset._update_timer.isActive()
+
+    gain = panel.gain_wheel
+    gain.set_hsv(0.0, 1.0, 0.5)
+    master = gain._master_value()
+    gain._on_jog_delta(-120.0)
+    assert gain._master_value() == pytest.approx(master - 0.16)
+    assert min(gain._wheel_rgb()) >= 0.0
+    assert gain.hue == pytest.approx(0.0)
 
 
 def test_master_dial_sync_from_numbers_backend_and_reset_is_silent(qapp) -> None:

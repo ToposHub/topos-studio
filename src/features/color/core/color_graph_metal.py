@@ -74,6 +74,7 @@ METAL_CAPABILITY_CATALOG: Mapping[str, str] = {
 
 def graph_grading_params_for_layer(
     layer: Mapping[str, Any], width: int, height: int, *, has_mask: bool = False,
+    grading_params_override: Mapping[str, Any] | None = None,
 ) -> np.ndarray:
     """Pack primary-grading uniforms for a layer with a supported parameter domain."""
     from src.features.color.core.composition_uniforms import (
@@ -81,9 +82,12 @@ def graph_grading_params_for_layer(
     )
     from src.features.color.core.primary_calibration import grade_uses_calibration
 
-    if grade_uses_calibration(layer):
+    if grade_uses_calibration(layer) and grading_params_override is None:
         raise ValueError("Measured primary grading needs a calibration grid")
-    values = composition_uniform_values(dict(layer), width=width, height=height)
+    values = composition_uniform_values(
+        dict(layer), width=width, height=height,
+        grading_params_override=grading_params_override,
+    )
     curves = layer.get("curves_lut")
     return make_graph_grading_params(
         exposure=float(values["u_exposure"]),

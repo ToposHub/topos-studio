@@ -1959,10 +1959,11 @@ class EditControllerMixin:
         # entry and refresh the Edit preview when the gesture ends.
         # Disconnect only our own previous connections (not others' connections).
         if hasattr(self, '_grading_panel_changed_slot') and self._grading_panel_changed_slot:
-            try:
-                self.grading_panel.grading_changed.disconnect(self._grading_panel_changed_slot)
-            except (RuntimeError, TypeError):
-                pass
+            for signal in (self.grading_panel.grading_changed, self.grading_panel.grading_extended_changed):
+                try:
+                    signal.disconnect(self._grading_panel_changed_slot)
+                except (RuntimeError, TypeError):
+                    pass
         if hasattr(self, '_grading_panel_interaction_ended_slot') and self._grading_panel_interaction_ended_slot:
             try:
                 self.grading_panel.interaction_ended.disconnect(self._grading_panel_interaction_ended_slot)
@@ -1974,14 +1975,12 @@ class EditControllerMixin:
             except (RuntimeError, TypeError):
                 pass
 
-        # Create a bound method with the current stack_id so we can disconnect later
-        def _make_slot(sid: str):
-            def slot(lift, gamma, gain, exp, temp, tint, contrast, shadow, sat, vibrance, mid_det, hue, highlights=0.0) -> None:
-                self._on_grading_panel_changed(sid)
-            return slot
+        def remember_grade(*_values: Any) -> None:
+            self._on_grading_panel_changed(stack_id)
 
-        self._grading_panel_changed_slot = _make_slot(stack_id)
-        self.grading_panel.grading_changed.connect(self._grading_panel_changed_slot)
+        self._grading_panel_changed_slot = remember_grade
+        self.grading_panel.grading_changed.connect(remember_grade)
+        self.grading_panel.grading_extended_changed.connect(remember_grade)
         self._grading_panel_interaction_ended_slot = (
             lambda sid=stack_id: self._commit_pending_grading_color_stack(sid)
         )

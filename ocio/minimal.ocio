@@ -130,6 +130,17 @@ colorspaces:
       children:
         - !<ExponentWithLinearTransform> {gamma: [2.2222244, 2.2222244, 2.2222244, 2.2222244], offset: [0.099, 0.099, 0.099, 0.099]}
 
+  # Rec.709 primaries with a pure display Gamma 2.4.
+  - !<ColorSpace>
+    name: rec709_g24
+    family: ""
+    equalitygroup: ""
+    bitdepth: 32f
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1.0], style: mirror}
+
   # ── HDR / wide-gamut spaces (stage 2) ──
   # BT.2020 + PQ (HDR10). to_reference decodes PQ codes → linear (nits) via
   # the CURVE - ST-2084_to_LINEAR builtin, then gamut-converts BT.2020 → the

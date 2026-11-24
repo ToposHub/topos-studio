@@ -120,6 +120,15 @@ class MenuToolbarMixin:
         project_manager_action.setVisible(self._is_video_work_mode())
         file_menu.addAction(project_manager_action)
 
+        color_settings_action = QAction(
+            I18N.tr("preferences.color_management.project_color_spaces", "Project Color Spaces…"), self,
+        )
+        color_settings_action.triggered.connect(self._show_project_color_spaces)
+        color_settings_action.setVisible(self._is_video_work_mode())
+        file_menu.addAction(color_settings_action)
+        file_menu.aboutToShow.connect(lambda: color_settings_action.setEnabled(
+            self._current_edit_project is not None))
+
         # Recent Projects is available in both Image and Video work modes.
         self.recent_projects_menu = file_menu.addMenu(
             I18N.tr("menu.recent_projects", "Recent Projects")
@@ -995,6 +1004,14 @@ class MenuToolbarMixin:
         self._start_backup_timer()
         self.log_manager.reconfigure()
         self.color_manager.reconfigure(self.config_manager)
+        self._apply_program_display_color()
+        self._apply_color_project_viewer_signal(getattr(self, "_color_project_viewer_active", False))
+        from src.shared.color.desktop_video_color import USE_DISPLAY_ICC
+
+        composite = getattr(self, "composite_viewer", None)
+        configure_display = getattr(composite, "set_display_icc_enabled", None)
+        if callable(configure_display):
+            configure_display(self.config_manager.get(USE_DISPLAY_ICC, False) is True)
         global_mode = self.config_manager.get("global_shortcuts") or False
         self.shortcut_manager.set_global_mode(global_mode)
         save_interval = self.config_manager.get("auto_save_interval") or 5
@@ -1174,6 +1191,50 @@ class MenuToolbarMixin:
         """Return whether the video project manager belongs in this UI."""
         from src.shared.feature_flags import get_workspace_work_mode
         return get_workspace_work_mode(getattr(self, "config_manager", None)) == "video"
+
+    def _show_project_color_spaces(self) -> None:
+        """Edit and publish the video project's persisted color spaces."""
+        from PyQt6.QtWidgets import QDialogButtonBox, QVBoxLayout
+        from src.features.color.preferences import ColorSpaceControls
+        from src.features.edit.core.commands.project_color_spaces import (
+            SetProjectColorSpacesCommand,
+        )
+        from src.shared.color.color_space_descriptor import (
+            LEGACY_SPACE, OUTPUT_SPACE_KEY, TIMELINE_SPACE_KEY,
+        )
+
+        original = self._current_edit_project
+        if original is None or not self._is_video_work_mode():
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle(I18N.tr(
+            "preferences.color_management.project_color_spaces", "Project Color Spaces"))
+        layout = QVBoxLayout(dialog)
+        controls = ColorSpaceControls(dialog)
+        shown = {
+            TIMELINE_SPACE_KEY: LEGACY_SPACE, OUTPUT_SPACE_KEY: LEGACY_SPACE,
+            **original.color_management,
+        }
+        controls.load(shown)
+        layout.addWidget(controls)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        project = self._current_edit_project
+        if (project is None or project.project_id != original.project_id
+                or not controls.changes()):
+            return
+        pool = self.media_pool_panel
+        command = SetProjectColorSpacesCommand(dialog.windowTitle(), tuple(controls.settings().items()))
+        updated = pool.get_command_stack().execute(command, project)
+        pool.set_project(updated, check_offline=False)
+        pool.project_changed.emit(updated)
 
     def _show_project_manager(self, startup: bool = False) -> None:
         """Show the video-mode Project Manager.

@@ -133,6 +133,74 @@ class TestColorProcessingPreferencePage:
         assert page._widgets["ai_tile_size"].currentData() == 512
         assert page._widgets["ai_gpu_device"].currentData() == "auto"
 
+    def test_video_color_space_preferences_keep_existing_custom_choices(self, page):
+        from src.features.color.preferences import ColorSpaceControls
+        from src.shared.ui.widgets import ChevronComboBox
+
+        settings = {
+            "color.preview.timeline_transfer": "smpte2084",
+            "color.output.timeline_transfer": "bt709",
+            "color.image_space": "display-p3",
+        }
+        page.load(settings)
+        widget = page._widget_ref.findChild(ColorSpaceControls)
+        assert widget.settings() == {
+            "color.timeline_space": "legacy",
+            "color.output_space": "rec709-g24",
+        }
+        assert widget.changes() == {}
+        output = widget.findChild(ChevronComboBox, "color.output_space")
+        output.setCurrentIndex(output.findData("rec709-bt709"))
+        assert widget.changes() == {"color.output_space": "rec709-bt709"}
+
+        cfg = FakeConfigManager(settings)
+        page.apply(cfg)
+        assert cfg.get("color.timeline_space") == "legacy"
+        assert cfg.get("color.preview.timeline_transfer") == "smpte2084"
+        assert cfg.get("color.output_space") == "rec709-bt709"
+        assert cfg.get("color.image_space") == "display-p3"
+
+    def test_split_gamut_gamma_preserves_saved_video_selection(self, qapp):
+        from PyQt6.QtWidgets import QCheckBox
+
+        from src.features.color.preferences import ColorSpaceControls
+        from src.shared.color.color_space_descriptor import OUTPUT_SPACE_KEY, TIMELINE_SPACE_KEY
+        from src.shared.color.types import ColorTransfer
+        from src.shared.ui.widgets import ChevronComboBox
+
+        widget = ColorSpaceControls()
+        selected = {TIMELINE_SPACE_KEY: "rec709-g24", OUTPUT_SPACE_KEY: "display-p3"}
+        widget.load(selected)
+        combine = widget.findChild(QCheckBox, "color.combine_gamut_gamma")
+        assert combine.isChecked()
+        combine.setChecked(False)
+        assert widget.settings() == selected
+        gamma = widget.findChild(ChevronComboBox, OUTPUT_SPACE_KEY + ".transfer")
+        gamma.setCurrentIndex(gamma.findData(ColorTransfer.GAMMA24))
+        expected = {TIMELINE_SPACE_KEY: "rec709-g24", OUTPUT_SPACE_KEY: "p3-d65-g24"}
+        assert widget.settings() == expected
+        combine.setChecked(True)
+        assert widget.settings() == expected
+        assert widget.changes() == {OUTPUT_SPACE_KEY: "p3-d65-g24"}
+
+    def test_image_preferences_leave_video_color_space_defaults_untouched(self, qapp, monkeypatch):
+        from PyQt6.QtWidgets import QWidget
+        from src.features.color.preferences import ColorProcessingPreferencePage, ColorSpaceControls
+
+        monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
+        parent = QWidget()
+        cfg = FakeConfigManager({"work_mode": "image", "color.timeline_space": "srgb"})
+        parent._config_manager = cfg
+        page = ColorProcessingPreferencePage()
+        widget = page.create_widget(parent)
+        assert widget.findChild(ColorSpaceControls) is None
+
+        page.load(cfg)
+        page.restore_defaults(self.COLOR_DEFAULTS)
+        page.apply(cfg)
+        assert cfg.get("color.timeline_space") == "srgb"
+        assert cfg.get("color.output_space") is None
+
     def test_apply_settings(self, page):
         page.load(self.COLOR_DEFAULTS)
         # Modify some widgets

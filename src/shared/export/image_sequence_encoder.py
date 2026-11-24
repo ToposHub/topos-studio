@@ -29,10 +29,17 @@ import re
 import shutil
 from typing import Any, Dict, List, Optional
 
+from src.shared.color.project_video_signal import ACES_EXR_CHROMATICITIES
+
 logger = logging.getLogger(__name__)
 
 _SAN_BASE_RE = re.compile(r'[\\/:*?"<>|]+')
 _STAGE_SUFFIX = ".topos_stage"
+_SEQUENCE_FORMATS = {
+    "png_sequence": ("png", ".png"),
+    "tiff_sequence": ("tiff", ".tif"),
+    "exr_sequence": ("exr", ".exr"),
+}
 
 
 def _sanitize_base(name: str) -> str:
@@ -41,7 +48,7 @@ def _sanitize_base(name: str) -> str:
 
 
 class StandardImageSequenceEncoder:
-    """PNG/TIFF 标准图像序列编码器（encoder 契约与 FFmpegVideoEncoder 兼容）。
+    """PNG/TIFF/EXR 序列编码器（encoder 契约与 FFmpegVideoEncoder 兼容）。
 
     契约方法：``open()`` / ``encode_frame(DecodedFrame)`` /
     ``write_audio_samples(...)``（no-op 警告）/ ``close()`` / ``abort()``。
@@ -50,13 +57,15 @@ class StandardImageSequenceEncoder:
     # R19：图像序列不承载音频——主导出据此设置 audio_omitted。
     supports_audio = False
 
-    def __init__(self, output_path: str, config: Any) -> None:
+    def __init__(
+        self, output_path: str, config: Any, *, icc_profile: bytes | None = None,
+        exr_space: str | None = None,
+    ) -> None:
         self._config = config
         codec = str(getattr(config, "codec", "png_sequence")).lower()
-        if codec not in ("png_sequence", "tiff_sequence"):
+        if codec not in _SEQUENCE_FORMATS:
             raise ValueError(f"not an image-sequence codec: {codec}")
-        self._codec_name = "png" if codec == "png_sequence" else "tiff"
-        self._ext = ".png" if codec == "png_sequence" else ".tif"
+        self._codec_name, self._ext = _SEQUENCE_FORMATS[codec]
 
         # R16：目录目标语义。output_path 指向已存在目录 → 帧写进该目录
         # 内部（基名取 custom_name 或 sequence）；指向文件式基路径
@@ -85,7 +94,21 @@ class StandardImageSequenceEncoder:
         self._start_index = int(fallback_start or 0)
         self._overwrite = bool(
             getattr(config, "image_sequence_overwrite", False))
-        self._bit_depth = int(getattr(config, "bit_depth", 8) or 8)
+        configured_depth = getattr(config, "bit_depth", None)
+        if configured_depth is None:
+            configured_depth = 16 if (
+                self._codec_name == "exr" or getattr(config, "pix_fmt", "") == "rgb48le"
+            ) else 8
+        self._bit_depth = int(configured_depth)
+        if icc_profile is not None and (self._codec_name != "tiff" or self._bit_depth != 16):
+            raise ValueError("ICC-managed video delivery requires a 16-bit RGB TIFF sequence")
+        self._icc_profile = icc_profile
+        self._exr_space = exr_space or getattr(config, "exr_space", None)
+        if self._codec_name == "exr":
+            if self._exr_space not in ACES_EXR_CHROMATICITIES:
+                raise ValueError("OpenEXR sequence delivery requires a linear ACES output space")
+            if self._bit_depth not in (16, 32):
+                raise ValueError("OpenEXR sequence delivery requires 16-bit half or 32-bit float")
 
         self._opened = False
         self._staging: Optional[str] = None
@@ -202,17 +225,82 @@ class StandardImageSequenceEncoder:
             raise RuntimeError("image sequence encoder was aborted")
 
         import numpy as np
-        import av
-
         data = getattr(decoded_frame, "data", None)
         if data is None:
             raise TypeError("image sequence requires packed frame data")
         if data.ndim != 3:
             raise ValueError(f"expected HxWxC frame, got shape {data.shape}")
-        height, width, channels = data.shape
+        channels = data.shape[-1]
         if channels not in (3, 4):
             raise ValueError(f"expected 3/4 channels, got {channels}")
 
+        frame_index = self._start_index + self._frame_count
+        filename = f"{self._base}_{frame_index:0{self._digits}d}{self._ext}"
+        assert self._staging is not None
+        path = os.path.join(self._staging, filename)
+        if self._codec_name == "exr":
+            self._write_exr_frame(path, data)
+        elif self._icc_profile is not None:
+            self._write_profiled_tiff(path, data)
+        else:
+            self._write_unprofiled_frame(path, data)
+        self._written.append(path)
+        self._frame_count += 1
+
+    def _write_profiled_tiff(self, path: str, data: Any) -> None:
+        """Write unchanged 16-bit RGB(A) samples with their ICC profile."""
+        import numpy as np
+        from PyQt6.QtGui import QColorSpace, QImage
+
+        if data.dtype != np.uint16:
+            raise TypeError(f"ICC TIFF requires uint16 samples, got {data.dtype}")
+        height, width, channels = data.shape
+        rgba = np.empty((height, width, 4), dtype=np.uint16)
+        rgba[..., :3] = data[..., 2::-1]
+        rgba[..., 3] = data[..., 3] if channels == 4 else 65535
+        image_format = QImage.Format.Format_RGBA64 if channels == 4 else QImage.Format.Format_RGBX64
+        image = QImage(rgba.data, width, height, rgba.strides[0], image_format)
+        space = QColorSpace.fromIccProfile(self._icc_profile)
+        if not space.isValid():
+            raise ValueError("Invalid TIFF delivery ICC profile")
+        image.setColorSpace(space)
+        if not image.save(path, "TIFF"):
+            raise OSError(f"Could not write ICC TIFF frame {path}")
+
+    def _write_exr_frame(self, path: str, data: Any) -> None:
+        """Write linear BGR(A) with ACES chromaticities and associated alpha."""
+        import numpy as np
+        import OpenEXR
+
+        if data.dtype.kind != "f":
+            raise TypeError(f"OpenEXR requires floating-point samples, got {data.dtype}")
+        dtype = np.float16 if self._bit_depth == 16 else np.float32
+        rgb = data[..., :3][..., ::-1]
+        alpha = None
+        if bool(getattr(self._config, "has_alpha", data.shape[-1] == 4)):
+            alpha = data[..., 3] if data.shape[-1] == 4 else np.ones(data.shape[:2], data.dtype)
+            if not getattr(self._config, "alpha_premultiplied", False):
+                rgb = rgb * alpha[..., None]
+        if self._bit_depth == 16 and np.any(np.abs(rgb) > np.finfo(np.float16).max):
+            raise ValueError("OpenEXR half-float RGB overflow. Choose 32-bit float output.")
+        channels = {name: np.ascontiguousarray(rgb[..., i], dtype=dtype)
+                    for i, name in enumerate("RGB")}
+        if alpha is not None:
+            channels["A"] = np.ascontiguousarray(alpha, dtype=dtype)
+        header = {
+            "type": OpenEXR.scanlineimage,
+            # PIZ preserves float samples and avoids the platform-dependent
+            # native ZIP encoder path used by some OpenEXR wheels.
+            "compression": OpenEXR.PIZ_COMPRESSION,
+            "chromaticities": ACES_EXR_CHROMATICITIES[self._exr_space],
+        }
+        OpenEXR.File(header, channels).write(path)
+
+    def _write_unprofiled_frame(self, path: str, data: Any) -> None:
+        import av
+        import numpy as np
+
+        height, width, channels = data.shape
         # BGR → RGB（源渲染帧约定为 BGR 字节序）
         if channels == 4:
             rgb = data[:, :, [2, 1, 0, 3]]
@@ -241,15 +329,9 @@ class StandardImageSequenceEncoder:
         packets = list(ctx.encode(frame))
         if not packets:
             raise RuntimeError(f"{self._codec_name} encode produced no packet")
-        frame_index = self._start_index + self._frame_count
-        filename = f"{self._base}_{frame_index:0{self._digits}d}{self._ext}"
-        assert self._staging is not None
-        path = os.path.join(self._staging, filename)
         with open(path, "wb") as fh:
             for packet in packets:
                 fh.write(bytes(packet))
-        self._written.append(path)
-        self._frame_count += 1
 
     def _get_codec_context(self, pix_fmt: str, width: int, height: int):
         """按像素格式惰性创建/复用编码上下文（无损默认参数）。"""
@@ -277,8 +359,7 @@ class StandardImageSequenceEncoder:
         import numpy as np  # noqa: F401 — 签名兼容
 
         logger.warning(
-            "image sequence export ignores audio (PNG/TIFF sequences carry "
-            "no audio track)")
+            "image sequence export ignores audio (sequence has no audio track)")
 
 
 def image_sequence_stats(output_path: str) -> Optional[dict]:
@@ -288,7 +369,7 @@ def image_sequence_stats(output_path: str) -> Optional[dict]:
         os.path.dirname(target) or ".")
     if not os.path.isdir(directory):
         return None
-    exts = (".png", ".tif", ".tiff")
+    exts = (".png", ".tif", ".tiff", ".exr")
     files = sorted(
         f for f in os.listdir(directory)
         if f.lower().endswith(exts) and "_" in f

@@ -424,6 +424,12 @@ class FFmpegEncoderConfig:
     # M3-H2：源 ICC profile 原始字节（仅 Topos 图片序列导出消费——
     # 随流写入 ICCP chunk + iccp_ref=1 权威位；None = 不携带）
     icc_profile: Optional[bytes] = None
+    # Standard image-sequence encoding options.
+    exr_space: Optional[str] = None
+    bit_depth: Optional[int] = None
+    image_sequence_digits: Optional[int] = None
+    image_sequence_start_index: Optional[int] = None
+    image_sequence_overwrite: bool = False
 
     def __post_init__(self) -> None:
         """验证配置并自动推断参数"""
@@ -630,12 +636,15 @@ class FFmpegEncoderConfig:
         else:
             return False
         if mode == "auto":
-            transfer = (
-                getattr(self.color_metadata, "transfer", None)
-                if self.color_metadata is not None
-                else None
+            color = self.color_metadata
+            transfer = getattr(color, "transfer", None)
+            # Pure Gamma 2.4 SDR has the standard Rec.709 gamut/matrix
+            # and carries the unspecified H.273 transfer code.
+            rec709_unspecified = (
+                transfer == "unknown"
+                and color.primaries == "bt709" and color.matrix == "bt709"
             )
-            if transfer not in (None, "", "bt709", "unspecified"):
+            if transfer not in (None, "", "bt709", "unspecified") and not rec709_unspecified:
                 return False
         if not available:
             if mode != "auto":
@@ -779,6 +788,7 @@ class FFmpegVideoEncoder:
         self,
         output_path: str,
         config: FFmpegEncoderConfig,
+        *, isolated_hdr_main10: bool = False,
     ) -> None:
         """
         初始化编码器。
@@ -794,6 +804,7 @@ class FFmpegVideoEncoder:
         # 的 os.remove 还会删掉旧成功输出。
         self._write_path: str = output_path + ".topos-partial"
         self._config: FFmpegEncoderConfig = config
+        self._isolated_hdr_main10 = isolated_hdr_main10
         self._hqx_reformatter: Optional[Any] = None
         self._container: Optional[Any] = None  # av.container.OutputContainer
         self._stream: Optional[Any] = None  # av.VideoStream
@@ -914,10 +925,19 @@ class FFmpegVideoEncoder:
             container_format = self._infer_container_format()
 
             # 创建输出容器
+            color = self._config.color_metadata
+            muxer_options = {}
+            if (container_format in ("mov", "mp4") and color is not None
+                    and color.transfer == "unknown"
+                    and color.primaries != "unknown" and color.matrix != "unknown"):
+                # Keep the explicit primaries and matrix in the container
+                # when the transfer has no H.273 code, e.g. Gamma 2.4.
+                muxer_options["movflags"] = "+write_colr"
             self._container = av.open(
                 self._write_path,
                 mode='w',
                 format=container_format if container_format else None,
+                container_options=muxer_options,
             )
 
             # 创建视频流
@@ -947,11 +967,8 @@ class FFmpegVideoEncoder:
                         "使用 %s 硬件编码: %s（输入 %s；速度优先）",
                         vendor_label, encoder_name, hw_input,
                     )
-                    transfer = (
-                        getattr(self._config.color_metadata, "transfer", None)
-                        if self._config.color_metadata is not None else None
-                    )
-                    if transfer not in (None, "", "bt709", "unspecified"):
+                    if color and (color.transfer in ("smpte2084", "arib-std-b67")
+                                  or color.mastering_display or color.max_cll or color.max_fall):
                         logger.warning(
                             "%s 不承载 HDR 静态元数据（ST2086/MaxCLL 走 "
                             "x265-params 仅 CPU 路径支持）：显式 %s 模式下"
@@ -1014,6 +1031,7 @@ class FFmpegVideoEncoder:
                     self._encode_pix_fmt.endswith("10le")
                     or self._encode_pix_fmt.startswith("p010")
                 )
+                and not self._isolated_hdr_main10
                 and os.environ.get("TOPOS_ALLOW_KNOWN_X265_10BIT_CRASH") != "1"
             ):
                 reason = (
@@ -1377,6 +1395,10 @@ class FFmpegVideoEncoder:
             #
             # 注意：pix_fmt 已在 FFmpegEncoderConfig 中根据 profile 设置
             # 这里仅记录配置信息
+            color = self._config.color_metadata
+            if (color and color.transfer in ("smpte2084", "arib-std-b67")
+                    and self._config.profile in ("standard", "hq")):
+                self._merge_stream_options({"profile": "2" if self._config.profile == "standard" else "3"})
             logger.debug(
                 f"ProRes configured: pix_fmt={self._config.pix_fmt}, "
                 f"profile={self._config.profile}"
@@ -1522,6 +1544,8 @@ class FFmpegVideoEncoder:
         }
 
         try:
+            if self._isolated_hdr_main10:
+                self._stream.codec_context.codec_tag = "hvc1"
             # 设置 color primaries
             if color.primaries in color_primaries_map:
                 self._stream.color_primaries = color_primaries_map[color.primaries]
@@ -1573,18 +1597,25 @@ class FFmpegVideoEncoder:
             # format expected by x265. max/min luminance in 0.0001 cd/m^2.
             if color.mastering_display is not None and len(color.mastering_display) == 8:
                 gx, gy, bx, by, rx, ry, wpx, wpy = color.mastering_display
-                # 1000-nit peak, 0.05-nit black (typical HDR10 LCD master).
                 md = (f"G({gx*50000:.0f},{gy*50000:.0f})"
                       f"B({bx*50000:.0f},{by*50000:.0f})"
                       f"R({rx*50000:.0f},{ry*50000:.0f})"
                       f"WP({wpx*50000:.0f},{wpy*50000:.0f})"
-                      f"L(10000000,50)")
+                      f"L({color.mastering_peak_nits*10000:.0f},"
+                      f"{color.mastering_black_nits*10000:.0f})")
                 opts["master-display"] = md
 
             if color.max_cll is not None:
                 opts["max-cll"] = f"{int(color.max_cll)},{int(color.max_fall or 0)}"
 
             if codec == "hevc":
+                if self._isolated_hdr_main10:
+                    # The RGB-to-YUV path averages a centered 2×2 chroma block.
+                    opts["chromaloc"] = "1"
+                    if self._config.gop_size == 1:
+                        # Single-frame and two-frame exports must not flush
+                        # with a delayed timestamp from x265's B-frame queue.
+                        opts["bframes"] = "0"
                 # x265 carries ST 2086 / MaxCLL signaling most reliably via the
                 # 'x265-params' string (":key=value:key=value" joined). Setting
                 # them as independent codec options is NOT honoured by libx265
@@ -2128,7 +2159,8 @@ class FFmpegVideoEncoder:
 
         # 输出位深由目标格式决定（yuv420p10le → 10-bit 值域 0..1023），
         # 与输入容器位深（rgb48le 是 16-bit 容器）无关。
-        m = re.search(r'p(\d+)(?:le|be)?\Z', target_format.lower())
+        fmt = target_format.lower()
+        m = re.search(r'p0?(\d+)(?:le|be)?\Z', fmt)
         out_depth = int(m.group(1)) if m else 8
         scale = float(1 << out_depth) - 1.0
         # Limited 跨度按 2^(n-8) 精确位移（不是 scale/255≈4.012）：
@@ -2150,12 +2182,11 @@ class FFmpegVideoEncoder:
         v_p = np.clip(np.rint(v_q), 0, scale).astype(dtype)
 
         # 色度子采样（box 2x2 平均，与 swscale 的 area 行为一致）
-        fmt = target_format.lower()
         # p010/p016 是 4:2:0 半平面家族（名称不含 '420'，需前缀识别）
         if '420' in fmt or fmt.startswith('p0'):
             div = (2, 2)
         elif '422' in fmt:
-            div = (2, 1)
+            div = (1, 2)
         else:
             div = (1, 1)
 
@@ -2163,10 +2194,11 @@ class FFmpegVideoEncoder:
             if dv == (1, 1):
                 return plane
             ph, pw = plane.shape
-            ch, cw = ph // dv[0], pw // dv[1]
-            cropped = plane[:ch * dv[0], :cw * dv[1]]
+            pad_h, pad_w = -ph % dv[0], -pw % dv[1]
+            padded = np.pad(plane, ((0, pad_h), (0, pad_w)), mode="edge") if pad_h or pad_w else plane
+            ch, cw = padded.shape[0] // dv[0], padded.shape[1] // dv[1]
             return np.rint(
-                cropped.reshape(ch, dv[0], cw, dv[1]).mean(axis=(1, 3))
+                padded.reshape(ch, dv[0], cw, dv[1]).mean(axis=(1, 3))
             ).astype(plane.dtype)
 
         u_s = _subsample(u_p, div)
@@ -2205,6 +2237,7 @@ class FFmpegVideoEncoder:
         try:
             from av.video.reformatter import ColorPrimaries, ColorRange, ColorTrc
             frame.color_primaries = ColorPrimaries.BT2020
+            frame.colorspace = 9  # AVCOL_SPC_BT2020_NCL
             frame.color_trc = {
                 'smpte2084': ColorTrc.SMPTE2084,
                 'arib-std-b67': ColorTrc.ARIB_STD_B67,

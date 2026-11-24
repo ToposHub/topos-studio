@@ -889,12 +889,9 @@ static inline float3 graph_protect_negative_luma(float3 color) {
 """
 
 _GRAPH_APPLY_GRADING_MSL = METAL_NEGATIVE_LUMA_MSL + """
-// —— GRADING_SNIPPET.apply_grading 逐条翻译（点态基础域；mid_detail/
-//    sharpness 邻域位不在此 kernel——执行器 fail-closed 拒绝）——
-static inline float3 graph_apply_grading(float3 color, constant GraphGradingParams& p) {
-    // 0. 原始亮度（Lum Mix 用）
-    float luma_original = dot(color, float3(0.299, 0.587, 0.114));
-
+// The native texture executor inserts its neighborhood stage between these
+// two pointwise sections, at the same position as in GLSL.
+static inline float3 graph_grading_before_detail(float3 color, constant GraphGradingParams& p) {
     // 1. Exposure
     float exposure = p.exposure;
     float exp_stops = (exposure / 100.0) * (exposure / 100.0) * 6.0;
@@ -1009,6 +1006,12 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
         color = mix(color, float3(gray), -boost);
     }
 
+    return color;
+}
+
+static inline float3 graph_grading_after_detail(
+    float3 color, float3 source_color, constant GraphGradingParams& p)
+{
     // 9. Hue Shift（符号防护）
     if (p.hue_shift != 0.0) {
         float3 sign_c = sign(color);
@@ -1025,6 +1028,7 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
 
     // 11. Lum Mix（原亮度保留，0..100；与 GLSL 同式）
     if (p.lum_mix < 100.0) {
+        float luma_original = dot(source_color, float3(0.299, 0.587, 0.114));
         float graded_lum = dot(color, float3(0.299, 0.587, 0.114));
         if (graded_lum > 1e-5 && luma_original > 1e-5) {
             color *= mix(1.0, luma_original / graded_lum,
@@ -1032,6 +1036,10 @@ static inline float3 graph_apply_grading(float3 color, constant GraphGradingPara
         }
     }
     return color;
+}
+
+static inline float3 graph_apply_grading(float3 color, constant GraphGradingParams& p) {
+    return graph_grading_after_detail(graph_grading_before_detail(color, p), color, p);
 }
 """
 

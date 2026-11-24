@@ -46,6 +46,7 @@ from src.features.deliver.core.video_export_job import (
 )
 from src.features.deliver.core.video_export_formats import (
     CODEC_CONTAINER_TABLE,
+    SEQUENCE_CODECS,
     codec_container_error,
 )
 
@@ -327,9 +328,74 @@ def _check_color_delivery_preflight(
     issues — each lossy operation becomes a stable-code WARNING so the
     settings panel can show it before the job is enqueued.
     """
-    if ctx.project is None or ctx.sequence is None:
+    from src.shared.color.color_space_descriptor import project_output_space
+    from src.shared.color.hdr_video_signal import (
+        HDR_OUTPUT_SPACES, hdr_delivery_is_supported, project_hdr_settings,
+    )
+    from src.shared.color.video_delivery_profiles import WIDE_GAMUT_TIFF_OUTPUTS
+    from src.shared.color.project_video_signal import ACES_LINEAR_SPACES, project_aces_settings
+    from src.shared.i18n.i18n import I18N
+
+    settings = getattr(ctx.project, "color_management", None)
+    output = project_output_space(settings)
+    codec = job.video_config.codec
+    linear_aces_output = (job.source_kind == SourceKind.TIMELINE
+                          and output in ACES_LINEAR_SPACES)
+    if linear_aces_output != (codec == "exr_sequence") or (
+        linear_aces_output and job.video_config.bit_depth not in (16, 32)
+    ):
+        result.add_blocking(
+            "color.delivery.exr_linear_required",
+            I18N.tr("deliver.video.exr_linear_required",
+                    "Linear ACES delivery requires an OpenEXR sequence in 16-bit half or 32-bit float."),
+            field="color_delivery",
+        )
+    if codec == "exr_sequence":
+        try:
+            from OpenEXR import File  # noqa: F401
+        except (ImportError, OSError):
+            result.add_blocking(
+                "color.delivery.exr_unavailable",
+                I18N.tr("deliver.video.exr_unavailable", "The OpenEXR encoder is unavailable."),
+                field="color_delivery",
+            )
+    if ctx.project is None or job.source_kind != SourceKind.TIMELINE:
         return
-    if job.source_kind != SourceKind.TIMELINE:
+    try:
+        aces = project_aces_settings(settings)
+    except ValueError as error:
+        result.add_blocking("color.delivery.aces_settings", str(error), field="color_delivery")
+        return
+    try:
+        project_hdr_settings(settings)
+    except ValueError as error:
+        result.add_blocking("color.delivery.hdr_settings", str(error), field="color_delivery")
+        return
+    if output in HDR_OUTPUT_SPACES:
+        video = job.video_config
+        pixel_format = (video.pixel_format or "yuv420p10le") if codec == "hevc" else ""
+        if not hdr_delivery_is_supported(codec, video.container, pixel_format) or video.alpha:
+            result.add_blocking(
+                "color.delivery.hdr_codec",
+                I18N.tr("deliver.video.hdr_codec",
+                        "Choose HEVC Main 10 MP4/MOV or ProRes 422/HQ MOV without alpha for HDR."),
+                field="color_delivery",
+            )
+    if aces is not None and codec == "topos_raw":
+        result.add_blocking(
+            "color.delivery.aces_raw",
+            I18N.tr("deliver.video.aces_raw", "Select an SDR codec for ACES Rec.709 delivery."),
+            field="color_delivery",
+        )
+    if (output in WIDE_GAMUT_TIFF_OUTPUTS and codec != "topos_raw"
+            and (codec != "tiff_sequence" or job.video_config.bit_depth != 16)):
+        result.add_blocking(
+            "color.delivery.wide_gamut_tiff",
+            I18N.tr("preferences.color_management.wide_tiff_delivery",
+                    "Use a 16-bit RGB TIFF sequence with an ICC profile for this output."),
+            field="color_delivery",
+        )
+    if ctx.sequence is None:
         return
     try:
         from src.features.color.core.delivery_matrix import (
@@ -389,6 +455,34 @@ def _check_color_transform_provider(
     测试像素探测同一转换的 typed 结果，非 ok → 稳定码 WARNING
     （与 lossy color 确认门同面板呈现）。
     """
+    if job.source_kind == SourceKind.TIMELINE and ctx.project is not None:
+        from src.shared.color.project_video_signal import project_aces_settings, video_signal_spaces
+
+        settings = getattr(ctx.project, "color_management", None)
+        try:
+            aces = project_aces_settings(settings)
+            if aces is not None:
+                if job.video_config.codec != "exr_sequence":
+                    import numpy as np
+                    from src.shared.color.color_transform_provider import apply_aces_output_transform
+
+                    spaces = video_signal_spaces(settings)
+                    if spaces is None:
+                        raise ValueError("The ACES timeline has no working color space")
+                    apply_aces_output_transform(
+                        np.full((1, 1, 3), 0.5, dtype=np.float32), spaces[0],
+                        aces_version=aces.version, target=aces.target,
+                        reference_gamut_compression=aces.reference_gamut_compression,
+                    )
+                return
+        except ValueError as exc:
+            from src.shared.i18n.i18n import I18N
+
+            message = I18N.tr("deliver.video.aces_transform_unavailable",
+                              "The project ACES output transform is unavailable. {detail}")
+            result.add_blocking("color.delivery.aces_transform_unavailable",
+                                message.format(detail=str(exc)), field="color_delivery")
+            return
     try:
         import numpy as np
         from src.shared.color.color_space_descriptor import (
@@ -518,8 +612,14 @@ def _check_structural(job: VideoExportJob, ctx: PreflightContext, result: Prefli
                 field="audio.include_audio",
             )
 
+    if job.audio_config.include_audio and codec == "exr_sequence":
+        result.add_warning(
+            "exr.audio_unsupported",
+            "OpenEXR sequences have no audio track. Audio will be omitted.",
+            field="audio.include_audio",
+        )
     # Audio codec compatibility (warning — we suggest a fix rather than block)
-    if job.audio_config.include_audio and codec != "gif":
+    elif job.audio_config.include_audio and codec != "gif":
         audio_ok, suggestion = _check_audio_codec(job.audio_config.codec, container)
         if not audio_ok:
             result.add_warning(
@@ -569,9 +669,7 @@ def _check_output_path(job: VideoExportJob, ctx: PreflightContext, result: Prefl
 
     # For a single video file the parent directory must exist & be writable.
     codec = job.video_config.codec
-    is_sequence = codec in (
-        "png_sequence", "tiff_sequence", "topos_image_sequence",
-    )
+    is_sequence = codec in SEQUENCE_CODECS
     target_dir = job.output_path if (is_sequence and os.path.isdir(job.output_path)) else (
         os.path.dirname(job.output_path) or "."
     )

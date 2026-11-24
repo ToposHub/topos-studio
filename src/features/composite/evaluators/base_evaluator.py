@@ -14,7 +14,10 @@ import hashlib
 import copy
 import numpy as np
 import moderngl
-from typing import Any, Dict, Optional, Tuple, Set
+from typing import Any, Dict, Optional, Tuple, Set, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.shared.color.color_transform_provider import VideoSignalLuminance
 
 logger = logging.getLogger(__name__)
 
@@ -3031,8 +3034,11 @@ class BaseEvaluatorMixin:
 
         return input_a, input_b
 
-    def _convert_to_linear(self, tex: TextureResult, transfer: str = "srgb",
-                           primaries: str = "bt709") -> TextureResult:
+    def _convert_to_linear(
+        self, tex: TextureResult, transfer: str = "srgb", primaries: str = "bt709",
+        *, project_source: "ColorSpaceDescriptor | None" = None, reference_gamut_compression: bool = False,
+        luminance: "VideoSignalLuminance | None" = None,
+    ) -> TextureResult:
         """Convert an encoded texture to linear via the cs_transform shader.
 
         Args:
@@ -3054,7 +3060,8 @@ class BaseEvaluatorMixin:
             return tex
 
         w, h = tex.width, tex.height
-        out_tex = self._resource_pool.acquire_texture(w, h)
+        out_tex = (self._resource_pool.acquire_texture(w, h, dtype="f4") if project_source is not None
+                   else self._resource_pool.acquire_texture(w, h))
         out_fbo = self.fb_manager.get_fbo(out_tex)
         out_fbo.use()
         self.ctx.viewport = (0, 0, w, h)
@@ -3063,6 +3070,16 @@ class BaseEvaluatorMixin:
         self._bind_external_texture(tex.texture_id)
         prog['u_texture'].value = 0
         prog['u_direction'].value = 0  # 0 = decode (encoded → linear)
+        prog["u_project_signal"].value = project_source is not None
+        if project_source is not None:
+            from src.shared.color.color_space_descriptor import LINEAR_SCENE
+            from src.shared.color.video_signal_gl import bind_video_signal_transform
+
+            bind_video_signal_transform(
+                prog, project_source, LINEAR_SCENE,
+                reference_gamut_compression=reference_gamut_compression,
+                luminance=luminance,
+            )
         try:
             prog['u_input_premultiplied'].value = bool(tex.alpha_premultiplied)
         except (KeyError, AttributeError):
@@ -3075,7 +3092,9 @@ class BaseEvaluatorMixin:
             "hlg": 4, "arib-std-b67": 4,
             # RC7：TRAW PWL-log12（_CS_TRANSFORM_FRAGMENT u_transfer=5）
             "traw-log0": 5, "topos-traw-log0": 5,
-        }        # u_primaries uniform IDs: 0=BT.709 (no-op), 1=BT.2020, 2=DCI-P3,
+            "gamma24": 6,
+        }
+        # u_primaries uniform IDs: 0=BT.709 (no-op), 1=BT.2020, 2=DCI-P3,
         # 3=AP1/ACEScg (matches _CS_TRANSFORM_FRAGMENT).
         _PRIMARIES_ID = {
             "bt709": 0, "bt601": 0, "smpte170m": 0,
@@ -3147,6 +3166,10 @@ class BaseEvaluatorMixin:
         if not outputs:
             return outputs
 
+        context = getattr(self, "_eval_ctx", None)
+        provider = getattr(context, "timeline_clip_gpu_provider", None)
+        recipe = getattr(provider, "project_hdr_recipe", None)
+        hdr = recipe() if callable(recipe) else None
         new_outputs = outputs
         for port_name, value in outputs.items():
             if not isinstance(value, TextureResult):
@@ -3154,11 +3177,33 @@ class BaseEvaluatorMixin:
             if not value.is_valid:
                 continue
             cs = value.color_space
+            meta = getattr(value, "frame_metadata", None)
+            project_source = _metadata_get(meta, "project_hdr_source") or _metadata_get(meta, "project_aces_source")
+            luminance = _metadata_get(meta, "project_hdr_luminance")
+            if (project_source is None and hdr is not None
+                    and cs in ("pq", "smpte2084", "hlg", "arib-std-b67")):
+                from dataclasses import replace
+                from src.shared.color.color_space_descriptor import LINEAR_SCENE
+                from src.shared.color.hdr_video_signal import hdr_input_descriptor
+
+                project_source = hdr_input_descriptor(
+                    replace(hdr, input="auto"), LINEAR_SCENE, media_type="video",
+                    metadata={"color_transfer": cs, "color_primaries": _metadata_get(meta, "color_primaries")},
+                )
+                luminance = hdr.luminance
+            if project_source is not None:
+                if new_outputs is outputs:
+                    new_outputs = dict(outputs)
+                new_outputs[port_name] = self._convert_to_linear(
+                    value, project_source=project_source,
+                    reference_gamut_compression=bool(_metadata_get(meta, "project_aces_compression")),
+                    luminance=luminance,
+                )
+                continue
             if cs == ColorSpace.SRGB:
                 transfer = "srgb"
-            elif cs == "bt709":
-                # Rec.709 video: decode with the BT.709 inverse OETF.
-                transfer = "bt709"
+            elif cs in ("bt709", "gamma24"):
+                transfer = cs
             elif cs in ("aces_cg", "acescg"):
                 # ACEScg: already scene-linear in AP1 primaries — no transfer
                 # decode; the gamut matrix (AP1→BT.709 working space) is the

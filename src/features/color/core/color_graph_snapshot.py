@@ -15,6 +15,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Iterable, Mapping
 
 from src.shared.project.color_graph import ColorGraphData, NodeType
@@ -39,6 +40,7 @@ class ColorGraphSnapshot:
     # graph_revision 只覆盖图内编辑；插件文件在磁盘上热更（同 revision）时
     # 由本指纹驱动 plan/纹理缓存失效。
     resource_fingerprint: str = ""
+    preview_grade: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def color_context_cache_key(self) -> str:
         """Return a stable, hashable key for the JSON color context."""
@@ -142,6 +144,7 @@ def freeze_graph(
     roi=None,
     output_size: tuple[int, int] = (0, 0),
     request_id: str | None = None,
+    preview_grade: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> ColorGraphSnapshot:
     """提交瞬间的深复制冻结（B08.1 唯一入口）。"""
     frozen_graph = graph.deepcopy()
@@ -161,4 +164,11 @@ def freeze_graph(
         quality=quality,
         roi=roi,
         output_size=tuple(output_size),
+        preview_grade=MappingProxyType({
+            node_id: MappingProxyType({
+                key: tuple(value) if isinstance(value, list) else value
+                for key, value in patch.items()
+            })
+            for node_id, patch in (preview_grade or {}).items()
+        }),
     )

@@ -71,6 +71,8 @@ from src.shared.assets.icon_manager import (
 )
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
 from src.shared.gpu.metal.present_port import normalized_rect
+from src.shared.color.desktop_video_color import DISPLAY_COLOR_GLSL, set_metal_video_color
+from src.shared.ui.widgets.video_display_color import VideoDisplayColor
 from src.features.edit.ui.edit_style import EDIT_COLORS
 from src.shared.ui.style_sheet import UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
 from src.features.edit.core.playback_debug import playback_trace
@@ -867,6 +869,7 @@ class ProgramViewer(QOpenGLWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ProgramViewer")
+        self._display_color = VideoDisplayColor(self, self.update)
 
         # Texture state
         self._current_tex_id: Optional[int] = None
@@ -1006,13 +1009,15 @@ class ProgramViewer(QOpenGLWidget):
                 """,
                 """
                 #version 330
+                // MONITOR_COLOR_GLSL
                 uniform sampler2D u_texture;
                 in vec2 v_texcoord;
                 out vec4 f_color;
                 void main() {
-                    f_color = texture(u_texture, v_texcoord);
+                    vec4 pixel = texture(u_texture, v_texcoord);
+                    f_color = vec4(topos_monitor_color(pixel.rgb), pixel.a);
                 }
-                """
+                """.replace("// MONITOR_COLOR_GLSL", DISPLAY_COLOR_GLSL),
             )
             # Create quad VBO (full-screen quad for texture display)
             self._create_quad_vbo()
@@ -1635,6 +1640,7 @@ class ProgramViewer(QOpenGLWidget):
         # Set uniform (AUD-20405: location 缓存，不再每帧 glGetUniformLocation)
         tex_loc = self._tex_uniform_location()
         _gl.glUniform1i(tex_loc, 0)
+        self._display_color.bind_gl(_gl, self._prog, enabled=not self._show_source_ghost)
 
         # Draw
         _gl.glBindVertexArray(self._vao)
@@ -3418,6 +3424,7 @@ class ProgramViewerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("ProgramViewerWidget")
+        self._video_display = (None, False)
 
         # Native Metal viewport (plan 2.1 / 2.2 / 2.3): absent unless the
         # session opts in and the renderer accepts the layer.
@@ -3866,6 +3873,18 @@ class ProgramViewerWidget(QWidget):
 
     # ==================== Native Metal viewport (plan 2.1 / 2.2 / 2.3) ====================
 
+    def set_video_display(self, preset: str | None, managed: bool) -> None:
+        """Update the desktop viewer policy independently of its preview frame."""
+        display = (preset, managed)
+        if self._video_display == display:
+            return
+        self._video_display = display
+        self._viewer._display_color.configure(*display)
+        host = self._metal_host
+        if host is not None:
+            set_metal_video_color(host.layer, *display)
+        self._viewer.update()
+
     def set_native_viewport_candidate(self, renderer: Optional[QObject]) -> None:
         self._native_candidate = renderer
         self._native_pending_attach = None
@@ -3917,6 +3936,8 @@ class ProgramViewerWidget(QWidget):
         self._viewer._overlay_dirty_hook = self._schedule_native_refresh
         self._viewer._native_covered_hook = self._native_layer_is_showing
         host.hide()
+        if self._video_display[0] is not None:
+            set_metal_video_color(host.layer, *self._video_display)
         renderer.native_viewport_failed.connect(self._on_native_viewport_failed)
         renderer.native_frame_presented.connect(self._on_native_frame_presented)
         renderer.attach_native_viewport(host.layer, host.publisher)

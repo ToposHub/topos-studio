@@ -279,7 +279,8 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             snapshot: Immutable graph snapshot containing nodes, connections,
                       and ColorOutput texture state.
             readback_output: "linear_f32" (export default, scene-linear
-                      float32) or "srgb_u8" (preview: sRGB uint8 produced
+                      BGR float32), "linear_bgra_f32" (scene-linear straight
+                      BGRA float32) or "srgb_u8" (preview: sRGB uint8 produced
                       entirely on the GPU; oversized previews choose a
                       full-frame or GPU-stitched tile path via
                       _decide_preview_render_strategy — see P0-1).
@@ -319,7 +320,7 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
         trace = CompositeFrameTrace(
             frame=int(getattr(snapshot, "frame_number", 0) or 0),
             generation=int(getattr(snapshot, "generation", 0) or 0),
-            quality="export" if self._readback_output == "linear_f32"
+            quality="export" if self._readback_output != "srgb_u8"
             else "preview",
             producer="readback",
             readback_format=self._readback_output,
@@ -353,7 +354,6 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
                 return self._finish_trace(self._render_preview_large_frame(
                     snapshot, output_w, output_h, plan), trace, t0)
             # Tile readback path is linear-only (per-tile CPU stitch).
-            self._readback_output = "linear_f32"
             return self._finish_trace(self._render_tiled_with_plan(
                 snapshot, output_w, output_h, plan), trace, t0)
         result = self._render_full_frame(snapshot, render_pass=render_pass)
@@ -1227,7 +1227,8 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             self._sync_render_nodes(snapshot)
 
             # 4. Allocate CPU output buffer
-            output_array = np.zeros((output_h, output_w, 3), dtype=np.float32)
+            channels = 4 if getattr(self, "_readback_output", None) == "linear_bgra_f32" else 3
+            output_array = np.zeros((output_h, output_w, channels), dtype=np.float32)
 
             # 5. Evaluate each tile
             for tile in tiles:
@@ -1495,8 +1496,9 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             x0, y0 = max(0, x0), max(0, y0)
             x1, y1 = min(w, x1), min(h, y1)
 
-            cropped = arr[y0:y1, x0:x1, :3].copy()
-            return cv2.cvtColor(cropped, cv2.COLOR_RGB2BGR)
+            return self._pack_linear_readback(
+                arr[y0:y1, x0:x1], bool(getattr(result, "alpha_premultiplied", False)),
+            )
 
         except Exception as e:
             logger.error(f"Tile readback error: {e}")
@@ -1536,6 +1538,18 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
                      img_col_start:img_col_end, :] = tile_data
 
     # ── Full-Frame Readback ──
+
+    def _pack_linear_readback(self, rgba: np.ndarray, premultiplied: bool) -> np.ndarray:
+        """Return the requested BGR layout with straight alpha for timeline composition."""
+        if getattr(self, "_readback_output", "linear_f32") != "linear_bgra_f32":
+            return cv2.cvtColor(np.ascontiguousarray(rgba[..., :3]), cv2.COLOR_RGB2BGR)
+        bgra = np.ascontiguousarray(rgba[..., [2, 1, 0, 3]])
+        if premultiplied:
+            alpha = bgra[..., 3:4]
+            valid = alpha > 1e-6
+            np.divide(bgra[..., :3], alpha, out=bgra[..., :3], where=valid)
+            bgra[..., :3] *= valid
+        return bgra
 
     def _acquire_readback_target(self, w: int, h: int, dtype: str):
         """Acquire a pooled readback texture + its cached FBO (P2-10).
@@ -1630,11 +1644,9 @@ class CompositeExportRenderer(GraphEvaluatorMixin):
             raw = readback_fbo.read(components=4, dtype='f4')
             arr = np.frombuffer(raw, dtype=np.float32).reshape(h, w, 4)
 
-            # Flip vertically (OpenGL bottom-left origin → image top-left)
-            # Strip alpha, convert RGB → BGR
-            bgr = cv2.cvtColor(np.flipud(arr[:, :, :3]).copy(), cv2.COLOR_RGB2BGR)
-
-            return bgr
+            return self._pack_linear_readback(
+                np.flipud(arr), bool(getattr(result, "alpha_premultiplied", False)),
+            )
 
         except Exception as e:
             logger.error(f"Readback error: {e}")

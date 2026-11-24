@@ -62,6 +62,10 @@
 5. 修复问题 → 再次 Review → 测试验证
 ```
 
+### 达芬奇调色对照测试
+
+当任务要求对齐 DaVinci Resolve 的调色手感或颜色输出时，参照项目的[调色对照测试指南](docs/validation/resolve_comparison_workflow.md)，分别复测相同手势和相同参数下的输出。
+
 ---
 
 ## 🔍 Explore Agent 使用指南

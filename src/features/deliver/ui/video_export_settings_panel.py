@@ -94,6 +94,9 @@ from src.features.deliver.core.video_export_presets import (
     expand_filename_template,
     _container_extension,
 )
+from src.shared.color.color_space_descriptor import project_output_space
+from src.shared.color.hdr_video_signal import HDR_OUTPUT_SPACES, hdr_delivery_is_supported
+from src.shared.color.project_video_signal import ACES_EXR_CHROMATICITIES
 from src.shared.i18n.i18n import I18N
 from src.shared.export.export_panel import ExportSectionWidget
 from src.shared.assets.icon_manager import make_link_button
@@ -154,6 +157,7 @@ _CODEC_CATALOGUE: List[dict] = [
     # 才在导出期报错。
     {"codec": "png_sequence", "label": "PNG Sequence", "container": "", "crf": False, "alpha": True, "profiles": []},
     {"codec": "tiff_sequence", "label": "TIFF Sequence", "container": "", "crf": False, "alpha": True, "profiles": []},
+    {"codec": "exr_sequence", "label": "OpenEXR Sequence", "container": "", "crf": False, "alpha": True, "profiles": []},
     # M2-F8：profiles 占位非空 → 显示档位下拉；内容由 _topos_image_tier_choices()
     # 从单一注册表填充（图片整数/浮点档；RAW 随 M3-R3 点亮）。
     {"codec": "topos_image_sequence", "label": "Topos Image Sequence", "container": "", "crf": False, "alpha": True, "profiles": ["@image_tiers"]},
@@ -1588,6 +1592,7 @@ class VideoExportSettingsPanel(QWidget):
         # AUD-12404: a job being edited belongs to the previous project's
         # queue — never carry the editing id across a project switch.
         self._editing_job_id = None
+        self._refresh_codec_options_for_container()
         self._refresh_preflight()
 
     def set_timelines(self, timelines: List[Tuple[str, str]]) -> None:
@@ -1819,7 +1824,7 @@ class VideoExportSettingsPanel(QWidget):
             # R17：图像序列作业字段回填（位深/帧号/首帧号/覆盖授权）。
             self._select_combo_by_data(
                 self._image_bit_depth_combo,
-                16 if int(getattr(vc, "bit_depth", 8) or 8) >= 16 else 8)
+                self._normalize_image_bit_depth(vc))
             self._image_digits_spin.setValue(
                 max(1, min(10, int(
                     getattr(vc, "image_sequence_digits", 6) or 6))))
@@ -2036,9 +2041,10 @@ class VideoExportSettingsPanel(QWidget):
                 for name in choices:
                     combo.addItem(_pix_fmt_display_name(name), name)
             else:
-                combo.addItem(I18N.tr(
-                    "deliver.video.hevc_pix_fmt_8bit",
-                    "YUV 4:2:0 8-bit"), "yuv420p")
+                if not getattr(self, "_uses_hdr_output", False):
+                    combo.addItem(I18N.tr(
+                        "deliver.video.hevc_pix_fmt_8bit",
+                        "YUV 4:2:0 8-bit"), "yuv420p")
                 combo.addItem(I18N.tr(
                     "deliver.video.hevc_pix_fmt_10bit",
                     "YUV 4:2:0 10-bit"), "yuv420p10le")
@@ -2125,7 +2131,8 @@ class VideoExportSettingsPanel(QWidget):
         self._gif_color_count_spin.setVisible(is_gif)
         # R19：图像序列同样不承载音频——与 GIF 同语义禁用（编码器
         # supports_audio=False，导出结果会标注 audio_omitted）。
-        is_image_seq = codec in ("png_sequence", "tiff_sequence")
+        is_image_seq = codec in ("png_sequence", "tiff_sequence", "exr_sequence")
+        self._refresh_image_bit_depth_options(codec == "exr_sequence")
         was_image_seq = getattr(self, "_is_image_seq_export", False)
         if is_image_seq and not was_image_seq:
             self._audio_before_image_seq = self._audio_check.isChecked()
@@ -2399,9 +2406,36 @@ class VideoExportSettingsPanel(QWidget):
 
     def _refresh_codec_options_for_container(self, preferred_codec: Optional[str] = None) -> None:
         """Filter encoder choices to codecs legal for the selected format."""
+        output = project_output_space(getattr(self._project, "color_management", None))
+        linear_aces_output = output in ACES_EXR_CHROMATICITIES
+        self._uses_hdr_output = output in HDR_OUTPUT_SPACES
+        previous_linear_output = getattr(self, "_uses_linear_aces_output", False)
+        if linear_aces_output:
+            if not previous_linear_output:
+                self._container_before_aces = self._container_combo.currentData()
+            with QSignalBlocker(self._container_combo):
+                self._select_combo_by_data(self._container_combo, "")
+        elif previous_linear_output:
+            with QSignalBlocker(self._container_combo):
+                self._select_combo_by_data(self._container_combo, getattr(self, "_container_before_aces", "mp4"))
+        self._container_combo.setEnabled(not linear_aces_output)
+        self._uses_linear_aces_output = linear_aces_output
+        for index in range(self._container_combo.count()):
+            entry = self._container_combo.model().item(index)
+            if entry is not None:
+                entry.setEnabled(not self._uses_hdr_output or self._container_combo.itemData(index) in ("mp4", "mov"))
+        if self._uses_hdr_output and self._container_combo.currentData() not in ("mp4", "mov"):
+            with QSignalBlocker(self._container_combo):
+                self._select_combo_by_data(self._container_combo, "mp4")
         container = self._container_combo.currentData() or ""
         current_codec = preferred_codec or self._codec_combo.currentData()
         allowed = set(allowed_codecs_for_container(container))
+        if linear_aces_output:
+            allowed = {"exr_sequence"}
+        else:
+            allowed.discard("exr_sequence")
+        if self._uses_hdr_output:
+            allowed = {codec for codec in allowed if hdr_delivery_is_supported(codec, container, "yuv420p10le" if codec == "hevc" else "")}
         entries = [entry for entry in _CODEC_CATALOGUE if entry["codec"] in allowed]
         if not entries:
             # Sequence codecs are directory outputs and therefore have no
@@ -2415,12 +2449,50 @@ class VideoExportSettingsPanel(QWidget):
             self._codec_combo.blockSignals(True)
             self._codec_combo.clear()
             for entry in entries:
-                self._codec_combo.addItem(entry["label"], entry["codec"])
+                label = entry["label"]
+                if entry["codec"] == "exr_sequence":
+                    label = I18N.tr("deliver.codec_exr_seq", label)
+                self._codec_combo.addItem(label, entry["codec"])
             self._codec_combo.setCurrentIndex(self._codec_combo.findData(selected_codec))
         finally:
             self._codec_combo.blockSignals(False)
             self._syncing_format_options = False
         self._on_codec_changed(self._codec_combo.currentIndex())
+
+    def _refresh_image_bit_depth_options(self, float_output: bool) -> None:
+        """Show the precision supported by the selected sequence writer."""
+        was_float = getattr(self, "_is_float_image_sequence", False)
+        if float_output == was_float:
+            return
+        combo = self._image_bit_depth_combo
+        previous = combo.currentData()
+        if was_float:
+            self._exr_sequence_bit_depth = previous
+        else:
+            self._integer_sequence_bit_depth = previous
+        with QSignalBlocker(combo):
+            combo.clear()
+            if float_output:
+                combo.addItem(I18N.tr("export.exr_half", "Half (16-bit)"), 16)
+                combo.addItem(I18N.tr("export.exr_full", "Full (32-bit)"), 32)
+                self._select_combo_by_data(combo, getattr(self, "_exr_sequence_bit_depth", 16))
+                combo.setToolTip(I18N.tr(
+                    "deliver.video.image_exr_bit_depth_hint",
+                    "Store scene-linear pixels as 16-bit half or 32-bit float."))
+            else:
+                combo.addItem("8-bit", 8)
+                combo.addItem("16-bit", 16)
+                self._select_combo_by_data(combo, getattr(self, "_integer_sequence_bit_depth", 8))
+                combo.setToolTip(I18N.tr(
+                    "deliver.video.image_bit_depth_hint",
+                    "16-bit uses the high-precision render pipeline (real 16-bit output)."))
+        self._is_float_image_sequence = float_output
+
+    @staticmethod
+    def _normalize_image_bit_depth(video_config: VideoConfig) -> int:
+        if video_config.codec == "exr_sequence":
+            return 32 if video_config.bit_depth == 32 else 16
+        return 16 if video_config.bit_depth >= 16 else 8
 
     def _on_audio_toggled(self, checked: bool) -> None:
         for w in (self._audio_codec_combo, self._audio_sample_combo, self._audio_bitrate_combo):
@@ -2605,7 +2677,7 @@ class VideoExportSettingsPanel(QWidget):
             # R17：图像序列作业字段回填（预设/队列重开）。
             self._select_combo_by_data(
                 self._image_bit_depth_combo,
-                16 if int(getattr(vc, "bit_depth", 8) or 8) >= 16 else 8)
+                self._normalize_image_bit_depth(vc))
             self._image_digits_spin.setValue(
                 max(1, min(10, int(
                     getattr(vc, "image_sequence_digits", 6) or 6))))
@@ -2683,6 +2755,11 @@ class VideoExportSettingsPanel(QWidget):
             quality_value = int(self._crf_combo.currentData() or self.DEFAULT_CRF)
         codec = self._codec_combo.currentData() or "h264"
         is_topos = _topos_tier_for_codec(codec) is not None
+        pixel_format = "yuv420p"
+        if codec == "exr_sequence":
+            pixel_format = "gbrpf32le"
+        elif is_topos or codec == "hevc":
+            pixel_format = str(self._pix_fmt_combo.currentData() or "")
         container_data = self._container_combo.currentData()
         return VideoConfig(
             container="mp4" if container_data is None else str(container_data),
@@ -2695,7 +2772,7 @@ class VideoExportSettingsPanel(QWidget):
             color_space=self._color_space_combo.currentData() or "rec709",
             bit_depth=(
                 (self._image_bit_depth_combo.currentData() or 8)
-                if codec in ("png_sequence", "tiff_sequence")
+                if codec in ("png_sequence", "tiff_sequence", "exr_sequence")
                 else (self._bit_depth_combo.currentData() or 8)),
             # R17：图像序列作业字段（codec 为 PNG/TIFF 时位深取图像行）。
             image_sequence_digits=self._image_digits_spin.value(),
@@ -2707,9 +2784,7 @@ class VideoExportSettingsPanel(QWidget):
             gif_color_count=self._gif_color_count_spin.value(),
             # R7：Topos 专属控件——pix_fmt 覆盖与 Alpha 预算策略；
             # HEVC 复用 pix_fmt 选择器承载 8/10-bit 交付档
-            pixel_format=(str(self._pix_fmt_combo.currentData() or "")
-                          if (is_topos or str(codec) == "hevc")
-                          else "yuv420p"),
+            pixel_format=pixel_format,
             alpha_budget_policy=(
                 str(self._alpha_budget_policy_combo.currentData() or "record")
                 if is_topos else "record"),

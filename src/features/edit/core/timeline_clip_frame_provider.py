@@ -23,12 +23,14 @@ from __future__ import annotations
 import logging
 import threading
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from collections.abc import Mapping
 from typing import Any, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from src.shared.color.hdr_video_signal import ProjectHdrSettings
     from src.features.color.core.color_output import ColorOutput
     from src.features.color.core.image_engine import ImageEngine
 
@@ -224,6 +226,11 @@ class TimelineClipFrameProvider:
     def set_project(self, project: Any) -> None:
         """设置当前项目"""
         self._project = project
+
+    def project_hdr_recipe(self) -> ProjectHdrSettings | None:
+        from src.shared.color.hdr_video_signal import project_hdr_settings
+
+        return project_hdr_settings(getattr(self._project, "color_management", None))
 
     def set_engine(self, engine: Any) -> None:
         """设置 ImageEngine 引用，用于访问 ColorOutput。"""
@@ -732,7 +739,32 @@ class TimelineClipFrameProvider:
         # ── 2. Source raw decoded frame ─────────────────────────────
         source_tex = self._try_source_frame_texture(runtime_context)
         if source_tex is not None:
-            return source_tex
+            from src.shared.color.hdr_video_signal import hdr_input_descriptor, project_hdr_settings
+            from src.shared.color.project_video_signal import (
+                aces_input_descriptor, project_aces_settings, video_signal_spaces,
+            )
+
+            settings = getattr(self._project, "color_management", None)
+            aces = project_aces_settings(settings)
+            hdr = project_hdr_settings(settings)
+            if aces is not None or hdr is not None:
+                from src.shared.media.format_registry import is_image
+
+                path = self._resolve_asset_path(runtime_context) or ""
+                meta = dict(source_tex.frame_metadata or {})
+                media_type = "image" if is_image(path) else "video"
+                if aces is not None:
+                    source = meta.get("project_aces_source") or aces_input_descriptor(
+                        aces, path, media_type=media_type)
+                    meta.update(project_aces_source=source,
+                                project_aces_compression=aces.reference_gamut_compression)
+                else:
+                    source = hdr_input_descriptor(
+                        hdr, video_signal_spaces(settings)[0], media_type=media_type, metadata=meta, path=path,
+                    )
+                    meta.update(project_hdr_source=source, project_hdr_luminance=hdr.luminance)
+                return replace(source_tex, color_space="linear", frame_metadata=meta)
+            return self._interpret_timeline_sdr(source_tex)
 
         # Missing timeline media should not be presented as a valid frame in
         # user-facing Composite preview. Returning the debug placeholder here
@@ -746,6 +778,32 @@ class TimelineClipFrameProvider:
             f"frame={getattr(runtime_context, 'source_frame', 0)}"
         )
         return None
+
+    def _interpret_timeline_sdr(self, source: _TexResult) -> _TexResult:
+        """Tag decoded SDR RGB for Composite's linear input transform."""
+        from src.shared.color.project_video_signal import video_signal_spaces
+        from src.shared.color.types import ColorTransfer
+
+        # Keep dedicated RAW, linear and HDR handling. Decoder matrix and
+        # level metadata still drive the preceding YUV→RGB conversion.
+        if source.color_space not in ("bt709", "srgb", "gamma24"):
+            return source
+        spaces = video_signal_spaces(getattr(self._project, "color_management", None))
+        if spaces is None:
+            return source
+        timeline = spaces[0]
+        tags = {
+            ColorTransfer.GAMMA24: "gamma24",
+            ColorTransfer.BT709: "bt709",
+            ColorTransfer.SRGB: "srgb",
+        }
+        tag = tags.get(timeline.transfer)
+        if tag is None:
+            return source
+        meta = source.frame_metadata
+        meta = dict(meta) if isinstance(meta, Mapping) else {}
+        meta.update(color_transfer=tag, color_primaries=timeline.primaries.value)
+        return replace(source, color_space=tag, frame_metadata=meta)
 
     # ------------------------------------------------------------------
     # Phase 4: after_clip_effects — run the clip's video-filter chain
@@ -894,6 +952,20 @@ class TimelineClipFrameProvider:
             f"tex_id={texture_id}, {color_output.width}x{color_output.height}"
         )
 
+        from src.shared.color.project_video_signal import project_aces_settings, video_signal_spaces
+        from src.shared.color.hdr_video_signal import project_hdr_settings
+
+        settings = getattr(self._project, "color_management", None)
+        aces = project_aces_settings(settings)
+        hdr = project_hdr_settings(settings)
+        signal_metadata = (
+            {"project_aces_source": video_signal_spaces(settings)[0]} if aces is not None else None
+        )
+        if hdr is not None:
+            signal_metadata = {
+                "project_hdr_source": video_signal_spaces(settings)[0],
+                "project_hdr_luminance": hdr.luminance,
+            }
         return _TexResult(
             texture_id=texture_id,
             width=color_output.width,
@@ -905,8 +977,9 @@ class TimelineClipFrameProvider:
             # Rec.709/PQ/HLG transfer. So "srgb" is correct HERE — this is NOT
             # the raw source video (that path is _try_source_frame_texture,
             # which reads metadata and tags Rec.709/PQ/HLG appropriately).
-            color_space="srgb",
+            color_space="linear" if signal_metadata is not None else "srgb",
             alpha_premultiplied=False,
+            frame_metadata=signal_metadata,
         )
 
     # ------------------------------------------------------------------
@@ -943,6 +1016,16 @@ class TimelineClipFrameProvider:
                 f"graph={getattr(runtime_context, 'graph_id', None) or 'N/A'}"
             )
             return None
+
+        from src.shared.color.hdr_video_signal import project_hdr_settings
+        from src.shared.color.project_video_signal import project_aces_settings
+        from src.shared.media.format_registry import is_image
+
+        settings = getattr(self._project, "color_management", None)
+        aces = project_aces_settings(settings)
+        hdr = project_hdr_settings(settings)
+        if (aces is not None or hdr is not None) and is_image(asset_path):
+            return self._load_managed_still_texture(asset_path, aces)
 
         # Check source texture cache before decoding
         cache_key = (asset_path, source_frame)
@@ -1102,6 +1185,28 @@ class TimelineClipFrameProvider:
             matrix_tag=source_matrix_tag, range_tag=source_range_tag,
             cs_tag=source_cs_tag, source_meta=source_frame_meta,
         )
+
+    def _load_managed_still_texture(self, path: str, aces: Any) -> _TexResult | None:
+        from src.shared.color.project_video_signal import read_aces_still, read_video_still_bgr
+        from src.shared.media.frame import DecodedFrame
+
+        # Input interpretation is part of the cache identity. A project
+        # setting change can reuse a decoded still only under the same IDT.
+        cache_key = (path, aces.input if aces is not None else "hdr")
+        cached = self._source_texture_cache.get(cache_key)
+        if cached is not None and cached.is_valid:
+            self._touch_source_cache_key(cache_key)
+            return cached
+        pixels, source = (read_aces_still(path, aces) if aces is not None
+                          else (read_video_still_bgr(path), None))
+        result = self._upload_decoded_frame(DecodedFrame(
+            frame_index=0, pts=None, time_seconds=0.0, data=pixels, pixel_format="bgr",
+        ), cs_tag="linear")
+        if result is not None:
+            if source is not None:
+                result.frame_metadata = {**(result.frame_metadata or {}), "project_aces_source": source}
+            self._cache_source_texture(*cache_key, result)
+        return result
 
     def _finish_source_frame_upload(
         self,
@@ -1498,6 +1603,14 @@ class TimelineClipFrameProvider:
             path = getattr(asset, "path", "")
             metadata = getattr(asset, "metadata", {}) or {}
 
+        if media_type == "image_sequence" and path:
+            from src.features.edit.core.sequence_classify import still_sequence_frame_path
+            from src.shared.color.hdr_video_signal import project_hdr_settings
+            from src.shared.color.project_video_signal import project_aces_settings
+
+            settings = getattr(self._project, "color_management", None)
+            if project_aces_settings(settings) is not None or project_hdr_settings(settings) is not None:
+                return still_sequence_frame_path(path, metadata, int(getattr(runtime_context, "source_frame", 0)))
         is_comp_clip = media_type == "comp_clip" or str(path).startswith("topos://comp_clip/")
         if not is_comp_clip:
             return path or None

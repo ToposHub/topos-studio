@@ -3,6 +3,10 @@ import os
 import logging
 import argparse
 from pathlib import Path
+from multiprocessing import freeze_support
+
+# Frozen encoder workers must run before Qt or any decoder imports.
+freeze_support()
 
 
 def _isolate_macos_native_extension_symbols() -> None:

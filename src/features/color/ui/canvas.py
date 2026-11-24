@@ -12,6 +12,7 @@ from PyQt6.QtGui import (
     QDragEnterEvent, QDragMoveEvent, QDropEvent,
 )
 from typing import Any, List, Tuple, Optional
+from src.shared.ui.widgets.video_display_color import VideoDisplayColor
 from src.features.color.ui.gl_viewport import GLCanvasViewport
 from src.features.color.ui.tracker_overlay import TrackerOverlay, OverlayState
 from src.features.color.core.layer import MaskGroup
@@ -4067,6 +4068,9 @@ class Canvas(QGraphicsView):
         
         self.gl_viewport = GLCanvasViewport()
         self.setViewport(self.gl_viewport)
+        self._display_color = VideoDisplayColor(self.gl_viewport, self._refresh_display_color)
+        self._video_display: tuple[str | None, bool] = (None, False)
+        self._timeline_monitor_image: QImage | None = None
         self._color_metal_host = None
         self._color_metal_ready = False
         self.gl_viewport.gl_initialized.connect(self._schedule_color_metal_viewer)
@@ -4323,6 +4327,22 @@ class Canvas(QGraphicsView):
             self.engine.render_pipeline()
         self.viewport().update()
 
+    def set_video_display(self, preset: str | None, managed: bool) -> None:
+        display = (preset, managed)
+        if display == self._video_display:
+            return
+        self._video_display = display
+        self._display_color.configure(*display)
+        if self._color_metal_host is not None:
+            self._color_metal_host.set_video_display(*display)
+        self._refresh_display_color()
+
+    def _refresh_display_color(self) -> None:
+        if self._timeline_preview_active and self._timeline_monitor_image is not None:
+            self._display_color.display_image(self._timeline_monitor_image, self._paint_timeline_preview_image)
+        self.scene.invalidate(QRectF(), QGraphicsScene.SceneLayer.BackgroundLayer)
+        self.viewport().update()
+
     def set_timeline_preview_image(self, image: QImage) -> None:
         """Present a completed Edit timeline preview without re-decoding it.
 
@@ -4335,6 +4355,12 @@ class Canvas(QGraphicsView):
             return
         self._timeline_preview_active = True
         self._sync_color_metal_host()
+        self._timeline_monitor_image = image
+        self._display_color.display_image(image, self._paint_timeline_preview_image)
+
+    def _paint_timeline_preview_image(self, image: QImage) -> None:
+        if not self._timeline_preview_active:
+            return
         pixmap = QPixmap.fromImage(image)
         width, height = pixmap.width(), pixmap.height()
         if width <= 0 or height <= 0:
@@ -4372,6 +4398,8 @@ class Canvas(QGraphicsView):
         background, so it must never be composited with that renderer's last
         front texture.
         """
+        self._timeline_monitor_image = None
+        self._display_color.cancel_images()
         self._timeline_preview_active = True
         self._sync_color_metal_host()
         self._timeline_preview_needs_fit = True
@@ -4381,6 +4409,8 @@ class Canvas(QGraphicsView):
     def end_timeline_preview(self) -> None:
         """Return the canvas to the normal Color OpenGL presentation path."""
         self._timeline_preview_active = False
+        self._timeline_monitor_image = None
+        self._display_color.cancel_images()
         self._timeline_preview_needs_fit = False
         self.pixmap_item.setVisible(False)
         self.viewport().update()
@@ -6659,6 +6689,7 @@ class Canvas(QGraphicsView):
             if not host.attach():
                 host.deleteLater()
                 return
+            host.set_video_display(*self._video_display)
             host.configure_display(False)
         except Exception:
             logger.warning("Color Metal viewport attach failed", exc_info=True)
@@ -6806,6 +6837,7 @@ class Canvas(QGraphicsView):
                         tex_id,
                         (vw, vh),
                         rotation_angle=self._crop_preview_angle,
+                        desktop_display=self._display_color,
                     )
                     if did_draw:
                         if self._still_present_retry.isActive():

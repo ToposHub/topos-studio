@@ -17,7 +17,7 @@ clip），按 Metal **纹理**（``texture2d<float, access::read/write>``）
   绑定，sampler 一律用 ``constexpr sampler``（linear + clamp_to_edge，
   与 GL 生产纹理的 LINEAR/CLAMP_TO_EDGE 同语义）。
 - **语义权威**：corrector 段序 = GL composition main
-  （shader_compiler.py:479-522）——grading → curves → hsl_curve →
+  （shader_compiler.py）——measured primary → grading → curves → hsl_curve →
   soft_clip → curves_soft_clip → mixer → warper → lut3d，尾部
   ``mix(src, apply_blend_mode(src, graded), matte*opacity)``。
 - **qualifier**：keyer.glsl 的逐条翻译；hue 域经 ``fract(h+0.5)`` 预移
@@ -36,6 +36,7 @@ from typing import Any, Mapping, Tuple
 
 import numpy as np
 
+from src.features.color.core.midtone_detail_calibration import DETAIL_SHADER_GAIN, detail_shader_taps
 from src.features.color.core.mist import MIST_MSL
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
@@ -103,6 +104,9 @@ struct TexExtraParams {
     float cs_high_soft_y;
     float cs_high_soft_z;
     float mixer[24];               // 8 通道 × (x, y, z) 平铺
+    uint  has_primary_calibration;
+    float mid_detail;
+    uint  mid_detail_calibrated;
     float mist_spread;
     float mist_amount;
 };
@@ -168,7 +172,61 @@ kernel void tg_copy(
     out.write(src.read(gid), gid);
 }
 
-// Corrector 单 pass：mist → grading → curves(buffer) → hsl → soft_clip →
+static inline float3 tg_apply_primary_calibration(
+    float3 color, texture3d<float, access::sample> response_tex)
+{
+    float3 sdr = clamp(color, 0.0, 1.0);
+    float3 encoded = pow(sdr, float3(1.0 / 2.4));
+    float grid_size = float(response_tex.get_width());
+    float3 uv = (encoded * (grid_size - 1.0) + 0.5) / grid_size;
+    float3 delta = response_tex.sample(tg_sampler, uv).rgb;
+    float3 graded = pow(clamp(encoded + delta, 0.0, 1.0), float3(2.4));
+    return graded + (color - sdr);
+}
+
+static inline float3 tg_apply_mid_detail(
+    float3 color, texture2d<float, access::sample> src, uint2 gid, float amount)
+{
+    float2 size = float2(src.get_width(), src.get_height());
+    float2 uv = (float2(gid) + 0.5) / size;
+    float radius = 3.0 * (size.x / 2048.0);
+    float2 dx = float2(radius / size.x, 0.0);
+    float2 dy = float2(0.0, radius / size.y);
+    float3 average = (src.sample(tg_sampler, uv + dx).rgb
+                    + src.sample(tg_sampler, uv - dx).rgb
+                    + src.sample(tg_sampler, uv + dy).rgb
+                    + src.sample(tg_sampler, uv - dy).rgb) * 0.25;
+    float lum = dot(color, float3(0.299, 0.587, 0.114));
+    float weight = smoothstep(0.0, 0.5, lum) * (1.0 - smoothstep(0.5, 1.0, lum)) * 4.0;
+    return color + (color - average) * (amount / 100.0) * weight;
+}
+
+static inline float3 tg_apply_calibrated_detail(
+    float3 color, float3 source_color, texture2d<float, access::sample> src, uint2 gid, float amount)
+{
+    const float3 taps[6] = {""" + detail_shader_taps("float3") + """};
+    const float3 luma = float3(0.2126, 0.7152, 0.0722);
+    float2 size = float2(src.get_width(), src.get_height());
+    float2 uv = (float2(gid) + 0.5) / size;
+    float2 scale = (size.x / 1920.0) / size;
+    float3 mean = float3(0.0);
+    float second = 0.0;
+    for (int i = 0; i < 6; ++i) {
+        float2 offset = taps[i].xy;
+        for (int j = 0; j < 4; ++j) {
+            float3 pixel = src.sample(tg_sampler, uv + scale * offset).rgb;
+            mean += pixel * taps[i].z;
+            second += dot(pixel * pixel, luma) * taps[i].z;
+            offset = float2(-offset.y, offset.x);
+        }
+    }
+    float center_luma = dot(source_color, luma);
+    float blur_luma = dot(mean, luma);
+    float variance = second - dot(mean * mean, luma);
+""" + DETAIL_SHADER_GAIN + """
+}
+
+// Corrector 单 pass：mist → primary calibration → grading → curves(buffer) → hsl → soft_clip →
 // curves_soft_clip → mixer → warper → lut3d → blend/matte epilogue。
 // 禁用域的纹理槽仍须绑定有效纹理（占位 identity），由 flag 守卫不读取。
 kernel void tg_corrector(
@@ -178,6 +236,7 @@ kernel void tg_corrector(
     texture2d<float, access::sample> hsl_tex    [[texture(3)]],
     texture2d<float, access::sample> warper_tex [[texture(4)]],
     texture3d<float, access::sample> lut_tex    [[texture(5)]],
+    texture3d<float, access::sample> primary_tex [[texture(6)]],
     device const float* curves                [[buffer(0)]],
     constant GraphGradingParams& g            [[buffer(1)]],
     constant TexExtraParams& x                [[buffer(2)]],
@@ -192,7 +251,17 @@ kernel void tg_corrector(
         float2 uv = (float2(gid) + 0.5) / size;
         color += mist_delta(src, tg_sampler, uv, color, size, x.mist_spread, x.mist_amount);
     }
-    color = graph_apply_grading(color, g);
+    float3 source_color = color;
+    if (x.has_primary_calibration != 0u) {
+        color = tg_apply_primary_calibration(color, primary_tex);
+    }
+    color = graph_grading_before_detail(color, g);
+    if (x.mid_detail != 0.0) {
+        color = x.mid_detail_calibrated != 0u
+            ? tg_apply_calibrated_detail(color, source_color, src, gid, x.mid_detail)
+            : tg_apply_mid_detail(color, src, gid, x.mid_detail);
+    }
+    color = graph_grading_after_detail(color, source_color, g);
     if (g.has_curves == 2u) {
         color = graph_apply_calibrated_curves(color, curves);
     } else if (g.has_curves != 0u) {
@@ -548,6 +617,9 @@ TEX_EXTRA_PARAMS_DTYPE = np.dtype([
     ("cs_high_soft_y", "<f4"),
     ("cs_high_soft_z", "<f4"),
     ("mixer", "<f4", (24,)),
+    ("has_primary_calibration", "<u4"),
+    ("mid_detail", "<f4"),
+    ("mid_detail_calibrated", "<u4"),
     ("mist_spread", "<f4"),
     ("mist_amount", "<f4"),
 ])
@@ -594,6 +666,7 @@ def make_tex_extra_params(
     has_warper: bool = False,
     has_soft_clip: bool = False,
     has_curves_soft_clip: bool = False,
+    has_primary_calibration: bool = False,
 ) -> np.ndarray:
     """从 :func:`composition_uniform_values` 的提取结果打包扩展参数。
 
@@ -608,6 +681,9 @@ def make_tex_extra_params(
     params["has_mixer"] = 1 if has_mixer else 0
     params["has_warper"] = 1 if has_warper else 0
     params["has_soft_clip"] = 1 if has_soft_clip else 0
+    params["has_primary_calibration"] = int(has_primary_calibration)
+    params["mid_detail"] = _as_float(values.get("u_mid_detail"), 0.0)
+    params["mid_detail_calibrated"] = bool(values.get("u_mid_detail_calibrated"))
     if has_curves_soft_clip:
         params["has_curves_soft_clip"] = 2 if values.get("u_cs_calibrated") else 1
     params["blend_mode"] = int(_as_float(values.get("u_blend_mode"), 0.0))
@@ -640,6 +716,7 @@ def make_tex_extra_params(
     scalars = [float(v) for v in flat]
     scalars += [float(params[name][0]) for name in params.dtype.names[7:29]]
     scalars += [float(params[name][0]) for name in ("mist_spread", "mist_amount")]
+    scalars.append(float(params["mid_detail"][0]))
     if not all(np.isfinite(v) for v in scalars):
         raise ValueError("tg_corrector: 扩展参数含非有限值（fail-closed）")
     return params

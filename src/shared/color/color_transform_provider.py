@@ -24,11 +24,15 @@ Two APIs:
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
+from functools import lru_cache
 from typing import Optional, Protocol, runtime_checkable
 
 import numpy as np
+
+from src.shared.color.types import ColorPrimaries, ColorRange, ColorTransfer, is_hdr_transfer
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +302,14 @@ def _linear_to_bt709_np(rgba: np.ndarray) -> np.ndarray:
     return out
 
 
+def _signed_power_rgb(rgba: np.ndarray, exponent: float) -> np.ndarray:
+    """Apply a power law to RGB, preserving negative excursions and alpha."""
+    out = rgba.copy()
+    rgb = rgba[..., :3]
+    out[..., :3] = np.copysign(np.power(np.abs(rgb), exponent), rgb)
+    return out
+
+
 # ── Range conversion (full ↔ limited) ────────────────────────────────────
 #
 # Video pixels use limited ("legal", "TV") range: Y in 16-235, C in 16-240
@@ -501,6 +513,186 @@ _AP1_TO_BT709 = np.array([
     [-0.0240033, -0.1289187, 1.1529220],
 ], dtype=np.float32)
 
+# Preserve XYZ using the specified DCI white (x=0.314, y=0.351),
+# matching Resolve RCM with tone and gamut mapping disabled. Each RGB
+# space's normalized primary matrix uses reference white Y=1.
+_BT709_TO_P3DCI = np.array([
+    [0.898951560399, 0.194049203885, 0.0],
+    [0.031820755353, 0.926803234824, 0.0],
+    [0.019654168872, 0.083295807766, 1.047585277121],
+])
+
+# Academy S-2014-003 TRA1, converting linear AP0 to linear AP1.
+_AP0_TO_AP1 = np.array([
+    [1.4514393161, -0.2365107469, -0.2149285693],
+    [-0.0765537734, 1.1762296998, -0.0996759264],
+    [0.0083161484, -0.0060324498, 0.9977163014],
+])
+
+_VIDEO_BT709_TO_GAMUT = {
+    ColorPrimaries.BT709: np.eye(3),
+    # Derived from the reference chromaticities. The legacy rounded matrix
+    # moves some frame values across the discontinuous BT.2020 10-bit knee.
+    ColorPrimaries.BT2020: np.array([
+        [0.62740389593470, 0.32928303837788, 0.04331306568742],
+        [0.06909728935823, 0.91954039507546, 0.01136231556631],
+        [0.01639143887515, 0.08801330787723, 0.89559525324762],
+    ]),
+    ColorPrimaries.P3_DISPLAY: np.array([
+        [0.82246196871436, 0.17753803128564, 0.0],
+        [0.03319419885096, 0.96680580114904, 0.0],
+        [0.01708263072112, 0.07239744066396, 0.91051992861492],
+    ]),
+    ColorPrimaries.P3_DCI: _BT709_TO_P3DCI,
+    ColorPrimaries.AP0: np.linalg.solve(_AP0_TO_AP1, _BT709_TO_AP1),
+    ColorPrimaries.AP1: _BT709_TO_AP1.astype(np.float64),
+    # Blackmagic Design DaVinci Wide Gamut v1.1, D65.
+    ColorPrimaries.DAVINCI_WIDE_GAMUT: np.array([
+        [1.51667204, -0.28147805, -0.14696363],
+        [-0.46491710, 1.25142378, 0.17488461],
+        [0.06484905, 0.10913934, 0.76141462],
+    ]) @ np.array([
+        [0.412390799266, 0.357584339384, 0.180480788402],
+        [0.212639005872, 0.715168678768, 0.072192315361],
+        [0.019330818716, 0.119194779795, 0.950532152250],
+    ]),
+}
+
+
+@lru_cache(maxsize=49)
+def video_signal_gamut_matrix(source: ColorPrimaries, destination: ColorPrimaries) -> np.ndarray:
+    """Return a read-only linear-light matrix applied as ``rgb @ matrix.T``."""
+    try:
+        from_709_to_source = _VIDEO_BT709_TO_GAMUT[source]
+        from_709_to_target = _VIDEO_BT709_TO_GAMUT[destination]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported video gamut: {exc.args[0].value}") from exc
+    matrix = np.linalg.solve(from_709_to_source.T, from_709_to_target.T).T
+    matrix.setflags(write=False)
+    return matrix
+
+
+@dataclass(frozen=True)
+class VideoSignalLuminance:
+    """Luminance mapping for a normalized video signal transform.
+
+    One unit of relative linear light equals ``reference_white_nits``. PQ
+    decodes to absolute nits. The HLG system OOTF additionally needs the
+    reference display peak and gamma, assuming zero display black.
+    """
+
+    reference_white_nits: float
+    hlg_peak_nits: float | None = None
+    hlg_system_gamma: float | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("reference_white_nits", "hlg_peak_nits", "hlg_system_gamma"):
+            value = getattr(self, name)
+            if value is None and name != "reference_white_nits":
+                continue
+            if value is None or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and positive")
+        if (self.hlg_peak_nits is None) != (self.hlg_system_gamma is None):
+            raise ValueError("HLG peak luminance and system gamma must be set together")
+
+
+_VIDEO_DECODE = {
+    ColorTransfer.SRGB: _srgb_to_linear_np,
+    ColorTransfer.BT709: _bt709_to_linear_np,
+    ColorTransfer.BT2020_10: _bt709_to_linear_np,
+}
+_VIDEO_ENCODE = {
+    ColorTransfer.SRGB: _linear_to_srgb_np,
+    ColorTransfer.BT709: _linear_to_bt709_np,
+    ColorTransfer.BT2020_10: _linear_to_bt709_np,
+}
+_VIDEO_GAMMAS = {
+    ColorTransfer.GAMMA22: 2.2,
+    ColorTransfer.GAMMA24: 2.4,
+    ColorTransfer.GAMMA26: 2.6,
+    ColorTransfer.GAMMA28: 2.8,
+}
+_ACESCC_KNEE = 2.0 ** -15
+_ACESCCT_KNEE = 0.0078125
+_ACESCCT_SLOPE = 10.5402377416545
+_ACESCCT_OFFSET = 0.0729055341958355
+_HLG_LUMA = (0.2627, 0.6780, 0.0593)
+
+
+def _video_hlg_transfer(
+    rgb: np.ndarray, to_linear: bool, luminance: VideoSignalLuminance,
+) -> np.ndarray:
+    peak = luminance.hlg_peak_nits
+    gamma = luminance.hlg_system_gamma
+    if peak is None or gamma is None:
+        raise ValueError("HLG conversion requires display peak and system gamma")
+    scale = peak / luminance.reference_white_nits
+    weights = np.asarray(_HLG_LUMA, dtype=rgb.dtype)
+    if to_linear:
+        code = np.maximum(rgb, 0.0)
+        scene = np.where(code <= 0.5, np.square(code) / 3.0,
+                         (np.exp((code - _HLG_C) / _HLG_A) + _HLG_B) / 12.0)
+        y = (scene @ weights)[..., None]
+        # Avoid evaluating a negative exponent at black for gamma below 1.
+        factor = np.power(y, gamma - 1.0, out=np.zeros_like(y), where=y > 0.0)
+        return scene * factor * scale
+    display = np.maximum(rgb / scale, 0.0)
+    y = (display @ weights)[..., None]
+    # Invert the RGB-scaled OOTF by first recovering its scene luminance.
+    factor = np.power(y, 1.0 / gamma - 1.0, out=np.zeros_like(y), where=y > 0.0)
+    scene = display * factor
+    return np.where(scene <= 1.0 / 12.0, np.sqrt(3.0 * scene),
+                    _HLG_A * np.log(np.maximum(12.0 * scene - _HLG_B, 1e-10)) + _HLG_C)
+
+
+def _video_transfer(rgb: np.ndarray, transfer: ColorTransfer, *, to_linear: bool,
+                    luminance: VideoSignalLuminance | None) -> np.ndarray:
+    if transfer == ColorTransfer.LINEAR:
+        return rgb
+    formula = (_VIDEO_DECODE if to_linear else _VIDEO_ENCODE).get(transfer)
+    if formula is not None:
+        return formula(rgb)
+    gamma = _VIDEO_GAMMAS.get(transfer)
+    if gamma is not None:
+        return _signed_power_rgb(rgb, gamma if to_linear else 1.0 / gamma)
+    if transfer == ColorTransfer.BT2020_12:
+        alpha, beta = 1.0993, 0.0181
+        if to_linear:
+            power = np.power(np.maximum(rgb + alpha - 1.0, 0.0) / alpha, 1.0 / 0.45)
+            return np.where(rgb < 4.5 * beta, rgb / 4.5, power)
+        power = alpha * np.power(np.maximum(rgb, 0.0), 0.45) - (alpha - 1.0)
+        return np.where(rgb < beta, 4.5 * rgb, power)
+    if transfer == ColorTransfer.ACESCC:
+        if to_linear:
+            log2_value = rgb * 17.52 - 9.72
+            limit = math.log2(65504.0)
+            value = np.where(log2_value >= limit, 65504.0, np.exp2(np.minimum(log2_value, limit)))
+            return np.where(log2_value <= -15.0, 2.0 * (value - 2.0 ** -16), value)
+        value = np.where(rgb < _ACESCC_KNEE, (np.maximum(rgb, 0.0) + _ACESCC_KNEE) * 0.5, rgb)
+        return (np.log2(value) + 9.72) / 17.52
+    if transfer == ColorTransfer.ACESCCT:
+        if to_linear:
+            cut = _ACESCCT_KNEE * _ACESCCT_SLOPE + _ACESCCT_OFFSET
+            return np.where(rgb <= cut, (rgb - _ACESCCT_OFFSET) / _ACESCCT_SLOPE,
+                            np.exp2(rgb * 17.52 - 9.72))
+        power = (np.log2(np.maximum(rgb, _ACESCCT_KNEE)) + 9.72) / 17.52
+        return np.where(rgb <= _ACESCCT_KNEE, _ACESCCT_SLOPE * rgb + _ACESCCT_OFFSET, power)
+    if transfer == ColorTransfer.DAVINCI_INTERMEDIATE:
+        if to_linear:
+            return np.where(rgb <= 0.02740668, rgb / 10.44426855,
+                            np.exp2(rgb / 0.07329248 - 7.0) - 0.0075)
+        power = 0.07329248 * (np.log2(np.maximum(rgb, 0.00262409) + 0.0075) + 7.0)
+        return np.where(rgb <= 0.00262409, rgb * 10.44426855, power)
+    if is_hdr_transfer(transfer):
+        if luminance is None:
+            raise ValueError("HDR conversion requires a reference white luminance")
+        if transfer == ColorTransfer.HLG:
+            return _video_hlg_transfer(rgb, to_linear, luminance)
+        if to_linear:
+            return _pq_to_linear_np(rgb) / luminance.reference_white_nits
+        return np.where(rgb <= 0.0, 0.0, _linear_to_pq_np(rgb * luminance.reference_white_nits))
+    raise ValueError(f"Unsupported video transfer: {transfer.value}")
+
 
 def _apply_primaries_np(img: np.ndarray, src_prim: str, dst_prim: str) -> np.ndarray:
     """Convert linear RGB between primaries (gamut), BT.709-centric.
@@ -563,6 +755,39 @@ class BuiltinColorProvider:
         无 processor 概念——恒可转。"""
         return None
 
+    def transform_signal(
+        self, img: np.ndarray, src: ColorSpaceDescriptor, dst: ColorSpaceDescriptor,
+        *, luminance: VideoSignalLuminance | None = None,
+    ) -> np.ndarray:
+        """Convert full-range RGB(A) without clipping floating SDR or ACES values.
+
+        This is a colorimetric conversion used at project signal boundaries.
+        Display rendering (such as an ACES Output Transform) and integer signal
+        packing belong to the caller. Input RGB is straight and alpha is copied
+        without conversion.
+        """
+        if src.range != ColorRange.FULL or dst.range != ColorRange.FULL:
+            raise ValueError("Video RGB must be expanded to full range by the decoder")
+        if img.ndim < 1 or img.shape[-1] not in (3, 4) or img.dtype.kind != "f":
+            raise ValueError("Expected a floating-point RGB or RGBA signal")
+        if src == dst:
+            return img
+        if any(desc.transfer == ColorTransfer.HLG and desc.primaries != ColorPrimaries.BT2020
+               for desc in (src, dst)):
+            raise ValueError("HLG conversion requires Rec.2020 primaries")
+        matrix = video_signal_gamut_matrix(src.primaries, dst.primaries)
+        working_dtype = np.result_type(img.dtype, np.float32)
+        rgb = img[..., :3].astype(working_dtype, copy=False)
+        linear = _video_transfer(rgb, src.transfer, to_linear=True, luminance=luminance)
+        if src.primaries != dst.primaries:
+            linear = linear @ matrix.astype(working_dtype, copy=False).T
+        encoded = _video_transfer(linear, dst.transfer, to_linear=False, luminance=luminance)
+        if img.shape[-1] == 3:
+            return encoded.astype(img.dtype, copy=False)
+        result = img.copy()
+        result[..., :3] = encoded
+        return result
+
     def transform(self, img: np.ndarray, src, dst) -> np.ndarray:
         """Structured-descriptor transform (see ColorTransformProvider)."""
         from src.shared.color.types import ColorTransfer, ColorRange
@@ -590,6 +815,8 @@ class BuiltinColorProvider:
             out = _srgb_to_linear_np(out)
         elif src.transfer == ColorTransfer.BT709:
             out = _bt709_to_linear_np(out)
+        elif src.transfer == ColorTransfer.GAMMA24:
+            out = _signed_power_rgb(out, 2.4)
         elif src.transfer == ColorTransfer.PQ:
             out = _pq_to_linear_np(out)
         elif src.transfer == ColorTransfer.HLG:
@@ -606,6 +833,8 @@ class BuiltinColorProvider:
             out = _linear_to_srgb_np(out)
         elif dst.transfer == ColorTransfer.BT709:
             out = _linear_to_bt709_np(out)
+        elif dst.transfer == ColorTransfer.GAMMA24:
+            out = _signed_power_rgb(out, 1.0 / 2.4)
         elif dst.transfer == ColorTransfer.PQ:
             out = _linear_to_pq_np(out)
         elif dst.transfer == ColorTransfer.HLG:
@@ -744,6 +973,20 @@ class OCIOColorProvider:
             return "processor_missing"
         return None
 
+    def probe_exact_transform(self, src: ColorSpaceDescriptor,
+                              dst: ColorSpaceDescriptor) -> str | None:
+        """Probe a processor without accepting legacy fallback color spaces."""
+        if not self.is_available():
+            return "provider_unavailable"
+        source = src.exact_ocio_name()
+        destination = dst.exact_ocio_name()
+        if source is None or destination is None:
+            return "processor_missing"
+        cpu = self._get_processor(source, destination)
+        if cpu is None or (source != destination and cpu.isNoOp()):
+            return "processor_missing"
+        return None
+
     def export_encode(self, rgba: np.ndarray, src_space: str,
                       dst_space: str) -> np.ndarray:
         if not self.is_available():
@@ -852,6 +1095,145 @@ class OCIOColorProvider:
         if not dst.is_linear:
             out = np.clip(out, 0.0, 1.0)
         return out
+
+
+# The OCIO Studio configs pin both the ACES reference implementation and the
+# list of available display encodings. Each target specifies its rendering
+# transform explicitly because the selected display may have several views.
+_ACES_CONFIGS = {
+    "1.3": "studio-config-v2.2.0_aces-v1.3_ocio-v2.4",
+    "2.0": "studio-config-v4.0.0_aces-v2.0_ocio-v2.5",
+}
+_ACES_OUTPUT_VIEWS = {
+    "1.3": {
+        "rec709-g24": ("Rec.1886 Rec.709 - Display", "ACES 1.0 - SDR Video"),
+        "srgb": ("sRGB - Display", "ACES 1.0 - SDR Video"),
+        "display-p3": ("Display P3 - Display", "ACES 1.0 - SDR Video"),
+        "rec2020-g24": ("Rec.1886 Rec.2020 - Display", "ACES 1.1 - SDR Video (P3 lim)"),
+        "dci-p3-g26-d60-sim": ("P3-DCI - Display", "ACES 1.0 - SDR Cinema (D60 sim on DCI)"),
+        "rec2100-pq": ("Rec.2100-PQ - Display", "ACES 1.1 - HDR Video (1000 nits & Rec.2020 lim)"),
+        "rec2100-hlg": ("Rec.2100-HLG - Display", "ACES 1.1 - HDR Video (1000 nits & Rec.2020 lim)"),
+    },
+    "2.0": {
+        "rec709-g24": ("Rec.1886 Rec.709 - Display", "ACES 2.0 - SDR 100 nits (Rec.709)"),
+        "srgb": ("sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)"),
+        "display-p3": ("Display P3 - Display", "ACES 2.0 - SDR 100 nits (P3 D65)"),
+        "rec2100-pq": ("Rec.2100-PQ - Display", "ACES 2.0 - HDR 1000 nits (Rec.2020)"),
+        "rec2100-hlg-p3-lim": ("Rec.2100-HLG - Display", "ACES 2.0 - HDR 1000 nits (P3 D65)"),
+    },
+}
+_ACES_SOURCE_NAMES = {
+    (ColorPrimaries.AP0, ColorTransfer.LINEAR): "ACES2065-1",
+    (ColorPrimaries.AP1, ColorTransfer.LINEAR): "ACEScg",
+    (ColorPrimaries.AP1, ColorTransfer.ACESCC): "ACEScc",
+    (ColorPrimaries.AP1, ColorTransfer.ACESCCT): "ACEScct",
+}
+
+
+@dataclass(frozen=True)
+class AcesOutputView:
+    aces_version: str
+    target: str
+    config_id: str
+    display: str
+    view: str
+
+
+def resolve_aces_output_view(aces_version: str, target: str) -> AcesOutputView:
+    """Resolve the exact built-in OCIO config and Display/View identifiers."""
+    if aces_version not in _ACES_CONFIGS:
+        raise ValueError(f"Unsupported ACES version: {aces_version!r}")
+    pair = _ACES_OUTPUT_VIEWS[aces_version].get(target)
+    if pair is None:
+        raise ValueError(f"ACES {aces_version} has no registered output for {target!r}")
+    return AcesOutputView(aces_version, target, _ACES_CONFIGS[aces_version], *pair)
+
+
+class _AcesCpuProcessor(Protocol):
+    def applyRGB(self, pixels: np.ndarray) -> None: ...
+
+
+@lru_cache(maxsize=len(_ACES_CONFIGS))
+def _load_aces_config(config_id: str) -> "_OCIO.Config":
+    if not _OCIO_IMPORTABLE:
+        raise ValueError("OpenColorIO is unavailable")
+    try:
+        return _OCIO.Config.CreateFromBuiltinConfig(config_id)
+    except _OCIO.Exception as exc:
+        raise ValueError(f"OpenColorIO lacks the required ACES config {config_id!r}") from exc
+
+
+@lru_cache(maxsize=64)
+def _aces_display_processor(
+    output: AcesOutputView, source: str, reference_gamut_compression: bool,
+) -> "_OCIO.Processor":
+    config = _load_aces_config(output.config_id)
+    display = _OCIO.DisplayViewTransform(src=source, display=output.display, view=output.view)
+    transform = display
+    if reference_gamut_compression:
+        if output.aces_version != "1.3":
+            raise ValueError("Reference gamut compression is available only for ACES 1.3")
+        look = _OCIO.LookTransform(src=source, dst=source, looks="ACES 1.3 Reference Gamut Compression")
+        transform = _OCIO.GroupTransform(transforms=[look, display])
+    try:
+        return config.getProcessor(transform)
+    except _OCIO.Exception as exc:
+        raise ValueError(f"OpenColorIO lacks the ACES processor for {output.target!r}") from exc
+
+
+@lru_cache(maxsize=64)
+def _aces_output_processor(
+    output: AcesOutputView, source: str, reference_gamut_compression: bool,
+) -> _AcesCpuProcessor:
+    return _aces_display_processor(output, source, reference_gamut_compression).getDefaultCPUProcessor()
+
+
+def aces_output_gpu_shader(aces_version: str, target: str) -> "_OCIO.GpuShaderDesc":
+    """Extract the reference ODT for scene-linear AP1 input and its tables."""
+    output = resolve_aces_output_view(aces_version, target)
+    processor = _aces_display_processor(output, "ACEScg", False)
+    shader = _OCIO.GpuShaderDesc.CreateShaderDesc()
+    shader.setLanguage(_OCIO.GPU_LANGUAGE_GLSL_1_3)
+    shader.setFunctionName("topos_aces_ocio")
+    shader.setResourcePrefix("topos_aces_")
+    shader.setAllowTexture1D(False)
+    processor.getDefaultGPUProcessor().extractGpuShaderInfo(shader)
+    return shader
+
+
+@lru_cache(maxsize=1)
+def _aces_rgc_processor() -> _AcesCpuProcessor:
+    config = _load_aces_config(_ACES_CONFIGS["1.3"])
+    look = _OCIO.LookTransform(
+        src="ACEScg", dst="ACEScg", looks="ACES 1.3 Reference Gamut Compression")
+    return config.getProcessor(look).getDefaultCPUProcessor()
+
+
+def apply_aces_reference_gamut_compression(pixels: np.ndarray) -> None:
+    """Apply the reference ACES 1.3 look to contiguous float32 AP1 RGB."""
+    _aces_rgc_processor().applyRGB(pixels)
+
+
+def apply_aces_output_transform(
+    img: np.ndarray, source: ColorSpaceDescriptor, *, aces_version: str, target: str,
+    reference_gamut_compression: bool = False,
+) -> np.ndarray:
+    """Render straight RGB(A) in an ACES working encoding to a pinned target."""
+    source_name = _ACES_SOURCE_NAMES.get((source.primaries, source.transfer))
+    if source_name is None or source.range != ColorRange.FULL:
+        raise ValueError("Expected a full-range ACES source encoding")
+    if img.ndim < 1 or img.shape[-1] not in (3, 4) or img.dtype.kind != "f":
+        raise ValueError("Expected a floating-point RGB or RGBA signal")
+    output = resolve_aces_output_view(aces_version, target)
+    processor = _aces_output_processor(output, source_name, reference_gamut_compression)
+    pixels = np.array(img[..., :3], dtype=np.float32, order="C", copy=True)
+    if pixels.size:
+        processor.applyRGB(pixels)
+    if img.shape[-1] == 3:
+        return pixels.astype(img.dtype, copy=False)
+    result = img.copy()
+    result[..., :3] = pixels
+    return result
 
 
 # ── Factory ───────────────────────────────────────────────────────────────

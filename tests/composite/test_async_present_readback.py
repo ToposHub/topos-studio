@@ -15,6 +15,19 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 
 
+def test_linear_readback_keeps_straight_alpha_and_extended_rgb():
+    from src.features.composite.render.composite_export_renderer import CompositeExportRenderer
+
+    renderer = CompositeExportRenderer.__new__(CompositeExportRenderer)
+    renderer._readback_output = "linear_bgra_f32"
+    rgba = np.asarray([[[0.5, -0.25, 0.125, 0.25], [0.1, 0.2, 0.3, 0.0]]], dtype=np.float32)
+    actual = renderer._pack_linear_readback(rgba, premultiplied=True)
+    expected = np.asarray([[[0.5, -1.0, 2.0, 0.25], [0.0, 0.0, 0.0, 0.0]]], dtype=np.float32)
+    np.testing.assert_array_equal(actual, expected)
+    np.testing.assert_array_equal(renderer._pack_linear_readback(rgba, premultiplied=False),
+                                  rgba[..., [2, 1, 0, 3]])
+
+
 # ===================================================================
 # Test: PBO readback module
 # ===================================================================
