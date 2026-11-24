@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from fractions import Fraction
+from pathlib import Path
+import sys
 from unittest.mock import Mock, patch
 
+import numpy as np
 import pytest
 
 from src.shared.export.video_encoder import FFmpegEncoderConfig, FFmpegVideoEncoder
+from src.shared.media.frame import DecodedFrame
 from src.shared.media.metadata import Rational
 
 
@@ -72,3 +78,68 @@ def test_other_formats_keep_the_regular_encoder(tmp_path, codec, pixel_format, n
         assert local_open.return_value.add_stream.call_args.args == (native_name,)
         worker.assert_not_called()
         encoder.abort()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Main 10 FFmpeg route")
+def test_video_only_main10_without_ffmpeg_keeps_isolated_worker(tmp_path: Path) -> None:
+    config = replace(_config("hevc", "yuv420p10le"), video_only=True)
+    with (
+        patch("src.shared.ffmpeg_locator.find_ffmpeg", return_value=None),
+        patch("src.shared.export.hdr_hevc_encoder.HdrHevcEncoder") as worker,
+    ):
+        encoder = FFmpegVideoEncoder(str(tmp_path / "fallback.mp4"), config, total_frames=4)
+        encoder.open()
+        worker.return_value.open.assert_called_once()
+        encoder.abort()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Main 10 FFmpeg route")
+@pytest.mark.parametrize("exit_during_encode", [False, True])
+def test_windows_simd_main10_delivery(
+    tmp_path: Path, exit_during_encode: bool,
+) -> None:
+    import av
+
+    from src.shared.export.windows_main10_encoder import WindowsMain10Encoder
+
+    config = replace(
+        _config("hevc", "yuv420p10le"), width=66, height=66, fps=Rational(24000, 1001),
+        video_only=True, crf=18, preset="ultrafast",
+    )
+    output = tmp_path / "old master.mov"
+    old = b"previous export"
+    output.write_bytes(old)
+    encoder = FFmpegVideoEncoder(str(output), config, total_frames=4)
+    encoder.open()
+    try:
+        isolated = encoder._main10_encoder
+        if not isinstance(isolated, WindowsMain10Encoder):
+            pytest.skip("Installed FFmpeg lacks SIMD Main 10 encoding")
+        for index in range(4):
+            pixels = np.full((66, 66, 3), 60 + index * 32, dtype=np.uint8)
+            encoder.encode_frame(DecodedFrame(
+                frame_index=index, pts=index, time_seconds=index * 1001 / 24000,
+                data=pixels, pixel_format="bgr24", width=66, height=66,
+            ))
+        if exit_during_encode:
+            process = isolated._process
+            assert process is not None
+            process.kill()
+            process.wait(timeout=5)
+            with pytest.raises(RuntimeError, match="Main 10 FFmpeg exited"):
+                encoder.close(expected_frames=4)
+            assert output.read_bytes() == old
+        else:
+            assert encoder.close(should_cancel=lambda: False, expected_frames=4)
+            with av.open(str(output)) as movie:
+                stream = movie.streams.video[0]
+                assert stream.codec_context.profile == "Main 10"
+                assert stream.codec_context.codec_tag == "hvc1"
+                frames = list(movie.decode(video=0))
+                assert [frame.pts * frame.time_base for frame in frames] == [
+                    Fraction(index * 1001, 24000) for index in range(4)
+                ]
+                assert all(frame.format.name == "yuv420p10le" for frame in frames)
+    finally:
+        encoder.abort()
+    assert not list(tmp_path.glob(".topos-hdr-*"))

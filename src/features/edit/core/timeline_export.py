@@ -2163,6 +2163,24 @@ class _PassthroughFormatSpec:
 #: 3. 补端到端导出回读验证（色彩/帧数）。
 _PASSTHROUGH_FORMAT_SPECS = (
     _PassthroughFormatSpec(
+        codec="hevc",
+        target_pix_fmt="yuv420p10le",
+        source_pix_fmt="yuv420p",
+        source_bit_depth=8,
+        chroma_subsampling="420",
+        requires_high_precision=True,
+        untagged_siting_codecs=("h264", "hevc"),
+    ),
+    _PassthroughFormatSpec(
+        codec="hevc",
+        target_pix_fmt="yuv420p10le",
+        source_pix_fmt="yuv420p10le",
+        source_bit_depth=10,
+        chroma_subsampling="420",
+        requires_high_precision=True,
+        untagged_siting_codecs=("h264", "hevc"),
+    ),
+    _PassthroughFormatSpec(
         codec="topos",
         target_pix_fmt="yuv422p10le",
         source_pix_fmt="yuv422p10le",
@@ -3412,7 +3430,8 @@ class TimelineExporter:
             if metal_outcome is not None:
                 return metal_outcome
 
-            # 创建编码器
+            # The expanded sequence includes audio from nested timelines.
+            has_audio = self._has_export_audio(config)
             self._encoder = self._create_encoder(config.output_path, encoder_config)
 
             # 打开编码器
@@ -3422,16 +3441,6 @@ class TimelineExporter:
                 self._cleanup_clips()
                 return ExportOutcome.user_cancelled()
 
-            # 音频准备：在视频循环前添加音频流（如有音频轨道）。
-            # P1-02: 判定基于**展开后**的音频轨——纯嵌套音频（父序列自身
-            # 无音频轨）此前被这里短路：不加音频流、也不进入音频渲染。
-            # Already expanded strictly before encoder creation; video-only
-            # exports deliberately keep the original sequence.
-            has_audio = (
-                config.include_audio
-                and any(len(t.clips) > 0
-                        for t in self._audio_render_sequence.audio_tracks)
-            )
             # P1-02：无音轨编码器（GIF/图片序列；topos 容器 v1.1 起已带
             # 单音轨，不再触发）显式跳过音频——此前音频仍被完整渲染/混音
             # 后由编码器静默丢弃。跳过 + 结果标注 audio_omitted（能力、
@@ -6162,6 +6171,7 @@ class TimelineExporter:
             has_alpha=bool(getattr(config, 'has_alpha', False))
                       or pix_fmt.startswith((
                           'yuva', 'topos_yuva', 'topos_gbrap')),
+            video_only=codec == "hevc" and not self._has_export_audio(config),
             gif_color_count=int(getattr(config, 'gif_color_count', 256)),
         )
         if codec in ("png_sequence", "tiff_sequence", "exr_sequence"):
@@ -8523,9 +8533,9 @@ class TimelineExporter:
             variants.add((left.operations, right.operations))
         return eligible, variants
 
-    def _metal_h264_has_audio(self, config: TimelineExportConfig) -> bool:
+    def _has_export_audio(self, config: TimelineExportConfig) -> bool:
         """Whether the export window holds audio clips that must be delivered."""
-        audio_sequence = getattr(self, "_audio_render_sequence", None) or self._sequence
+        audio_sequence = getattr(self, "_audio_render_sequence", None) or getattr(self, "_sequence", None)
         return bool(config.include_audio and any(
             track.clips for track in getattr(audio_sequence, "audio_tracks", ()) or ()))
 
@@ -8667,7 +8677,7 @@ class TimelineExporter:
                 or os.path.splitext(config.output_path)[1].lower() not in {".mp4", ".mov"}):
             return None
         audio = None
-        if self._metal_h264_has_audio(config):
+        if self._has_export_audio(config):
             audio = self._metal_h264_audio(config)
             if audio is None:
                 # Audio the native path cannot carry keeps the regular path.
@@ -8954,6 +8964,16 @@ class TimelineExporter:
         spec_candidates = _passthrough_specs_for(encoder_config)
         if not spec_candidates:
             return None
+        main10_delivery = (
+            spec_candidates[0].codec == "hevc"
+            and spec_candidates[0].target_pix_fmt == "yuv420p10le"
+        )
+        if main10_delivery:
+            from src.shared.export.video_encoder import ColorMetadataConfig
+
+            if (sys.platform != "win32"
+                    or encoder_config.color_metadata != ColorMetadataConfig.sdr()):
+                return None
         if not getattr(self, "_use_high_precision_export", False):
             # 高精度关闭时只保留非高精度规格（帧级按 pixel_format 精选
             # 之前先按精度过滤，避免无谓解码）。
@@ -9036,6 +9056,13 @@ class TimelineExporter:
                 or asset_metadata.get("codec") or "")
         else:
             asset_codec_name = getattr(asset_metadata, "codec_name", "")
+        if main10_delivery and (source_path != getattr(asset, "path", None)
+                or (isinstance(asset_metadata, dict) and (
+                    asset_metadata.get("is_vfr") or asset_metadata.get("is_hdr")
+                    or asset_metadata.get("rotation") or asset_metadata.get("field_order")
+                    not in (None, "", "unknown", "progressive")
+                ))):
+            return None
         session_key = self._layer_session_key(layer)
         if str(asset_codec_name or "").lower() == "topos":
             # Topos TPIC 中间片：FFmpeg 无法解码（打开必败），改走
@@ -9085,6 +9112,9 @@ class TimelineExporter:
         if resize_delivery and not spec.scalar_delivery:
             # 帧级精选出的规格不支持标量交付时，放弃此前按候选集乐观
             # 判定的 resize 通道（当前白名单内该组合不存在，纯防御）。
+            return None
+        if main10_delivery and (getattr(decoded, "frame_index", None) != expected_source_frame
+                                or output_width % 2 or output_height % 2):
             return None
         if spec.av_hqx_reformat and (
                 getattr(encoder_config, "profile", None) != "hqx"
@@ -9362,6 +9392,26 @@ class TimelineExporter:
         # spec 改写——编码器据此走同格式直填零转换路径。
         if downconvert_depth or chroma_reshape_needed:
             output_pixel_format = spec.target_pix_fmt
+
+        if main10_delivery:
+            if spec.source_bit_depth == 8:
+                from src.shared.media.frame import PlaneInfo
+
+                # Limited Rec.709 maps 8-bit samples to 10-bit by scaling by
+                # four, with no change to chroma phase or spatial geometry.
+                planes = tuple(np.left_shift(plane, 2, dtype=np.uint16) for plane in planes)
+                output_plane_infos = tuple(
+                    PlaneInfo.create(index, plane.shape[1], plane.shape[0],
+                                     component, plane.dtype, 10)
+                    for index, (plane, component) in enumerate(zip(planes, ("Y", "U", "V")))
+                )
+                output_pixel_format = spec.target_pix_fmt
+                output_metadata = replace(
+                    metadata, pixel_format=output_pixel_format, bit_depth=10,
+                    chroma_siting=output_siting,
+                )
+                output_extra = None
+            self._frame_render_backend = "cpu"
 
         # Rebase source metadata onto output time. ToposVideoEncoder currently
         # assigns mux PTS in submission order, but keeping the DecodedFrame
@@ -14618,9 +14668,13 @@ class TimelineExporter:
                 == str(getattr(encoder_config, "pix_fmt", "")).lower()
                 and frame_pix_fmt in ("yuv422p10le", "yuv422p")
             )
+            planar_hevc_main10 = (
+                encoder_codec == "hevc" and frame_pix_fmt == "yuv420p10le"
+                and getattr(encoder_config, "pix_fmt", None) == frame_pix_fmt
+            )
             if (not frame_data.is_planar or frame_data.data is not None
                     or not (planar_topos or gpu_yuv420
-                            or planar_ffmpeg_same)):
+                            or planar_ffmpeg_same or planar_hevc_main10)):
                 raise TypeError(
                     "Planar timeline frames require a supported planar encoder"
                 )

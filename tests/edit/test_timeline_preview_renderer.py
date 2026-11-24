@@ -4033,6 +4033,55 @@ class TestTimelinePreviewRenderer:
         assert call_kwargs.get("stream_key") == "clip-next"
         renderer.shutdown()
 
+    @pytest.mark.parametrize("codec", ["h264", "hevc"])
+    def test_win_h264_cut_prebuffer_expires_when_playhead_reaches_cut(
+        self, multi_track_sequence, mock_frame_provider, monkeypatch: pytest.MonkeyPatch,
+        codec: str,
+    ) -> None:
+        import src.features.edit.core.timeline_preview_renderer as renderer_module
+
+        monkeypatch.setattr(renderer_module, "sys", SimpleNamespace(platform="win32"))
+        project = replace(EditProject.create("Prebuffer Project"), assets={
+            asset_id: MediaAsset(
+                asset_id=asset_id, path=f"/media/{asset_id}.mov", media_type="video",
+                display_name=asset_id, metadata={"codec": codec},
+            ) for asset_id in ("asset-001", "asset-002")
+        })
+        renderer = TimelinePreviewRenderer(
+            project=project, sequence=multi_track_sequence, frame_provider=mock_frame_provider,
+            viewport_size=(1920, 1080),
+        )
+        try:
+            renderer._prebuffer_lookahead_frames = 2
+            controller = SimpleNamespace(current_frame=40, playback_direction="forward")
+            renderer._playback_controller = controller
+            renderer._is_controller_playing = Mock(return_value=True)
+            manager = Mock()
+            renderer._worker._gpu_decode_manager = manager
+            generation = renderer._generation_id
+            plan = renderer._compute_frame_plan(40)
+            renderer._run_playback_prebuffer(40, 1, generation, plan, (generation, 40, 1))
+
+            if codec == "hevc":
+                manager.preposition_stream_frame.assert_not_called()
+                return
+            manager.preposition_stream_frame.assert_called_once()
+            args, kwargs = manager.preposition_stream_frame.call_args
+            assert args == ("/media/asset-002.mov", 0)
+            assert kwargs["stream_key"] == "clip-upper"
+            is_stale = kwargs["is_stale"]
+            assert not is_stale()
+            controller.current_frame = 50
+            assert is_stale()
+            controller.current_frame = 40
+            controller.playback_direction = "backward"
+            assert is_stale()
+            controller.playback_direction = "forward"
+            renderer._is_controller_playing.return_value = False
+            assert is_stale()
+        finally:
+            renderer.shutdown()
+
     def test_request_render_emits_cached_thumbnail_placeholder(
         self,
         mock_project,

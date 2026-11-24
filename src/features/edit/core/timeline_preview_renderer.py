@@ -10845,6 +10845,7 @@ class TimelinePreviewRenderer(QObject):
         anchor_plan: Any | None = None,
         *,
         cut_lookahead_frames: int | None = None,
+        win_h264_entries: Dict[tuple[str, str, str], int] | None = None,
     ) -> Dict[tuple[str, str, str], List[int]]:
         """
         Build source-frame prefetch jobs for the upcoming playback window.
@@ -10905,8 +10906,16 @@ class TimelinePreviewRenderer(QObject):
                 )
                 source_frame = int(getattr(layer, "source_frame", 0) or 0)
                 job_key = (asset_path, str(asset_id), decode_stream_key)
-                if offset <= lookahead or job_key not in anchor_jobs:
-                    jobs.setdefault(job_key, []).append(source_frame)
+                if offset > lookahead:
+                    if job_key in anchor_jobs:
+                        continue
+                    if win_h264_entries is not None:
+                        metadata = self._asset_resolver.get_asset_metadata(asset_id) or {}
+                        codec = str(metadata.get("codec") or metadata.get("codec_name") or "")
+                        if codec.lower() != "h264":
+                            continue
+                        win_h264_entries.setdefault(job_key, timeline_frame)
+                jobs.setdefault(job_key, []).append(source_frame)
             if offset == 0:
                 anchor_jobs = set(jobs)
 
@@ -11036,15 +11045,20 @@ class TimelinePreviewRenderer(QObject):
                 return
 
             for_playback = self._is_controller_playing()
+            win_cut_entries: Dict[tuple[str, str, str], int] | None = (
+                {} if sys.platform == "win32" and for_playback and step == 1 else None
+            )
             jobs = self._collect_playback_prebuffer_jobs(
                 frame,
                 step,
                 generation_id,
                 anchor_plan=plan,
-                # Leave time to create a VT session and reach the next long-GOP
-                # clip's entry. This discovers more cuts without buffering more
-                # decoded frames. The active display stream is excluded below.
-                cut_lookahead_frames=12 if sys.platform == "darwin" and for_playback else None,
+                # Long-GOP clip entry can take several frame periods while
+                # the decoder opens and advances from the preceding keyframe.
+                cut_lookahead_frames=(12 if for_playback and (
+                    sys.platform == "darwin" or win_cut_entries is not None
+                ) else None),
+                win_h264_entries=win_cut_entries,
             )
             if not jobs:
                 return
@@ -11077,6 +11091,15 @@ class TimelinePreviewRenderer(QObject):
                 with self._prebuffer_lock:
                     if schedule_key in self._preposition_scheduled_keys:
                         continue
+                cut_at = (win_cut_entries or {}).get((asset_path, asset_id, decode_stream_key))
+
+                def _entry_expired(cut_frame: int | None = cut_at) -> bool:
+                    return _stale() or (cut_frame is not None and (
+                        not self._is_controller_playing()
+                        or self._playback_prebuffer_step() != step
+                        or self._playback_controller.current_frame >= cut_frame
+                    ))
+
                 try:
                     if gpu_dm.preposition_stream_frame(
                         asset_path,
@@ -11084,7 +11107,7 @@ class TimelinePreviewRenderer(QObject):
                         target_size=target_size,
                         stream_key=decode_stream_key,
                         for_playback=for_playback,
-                        is_stale=_stale,
+                        is_stale=_entry_expired,
                     ):
                         prepositioned += 1
                         with self._prebuffer_lock:

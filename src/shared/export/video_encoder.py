@@ -41,6 +41,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     import numpy as np
     from .hdr_hevc_encoder import HdrHevcEncoder
+    from .windows_main10_encoder import WindowsMain10Encoder
     from ..media.frame import DecodedFrame
     from ..media.metadata import Rational, VideoMetadata
 
@@ -431,6 +432,7 @@ class FFmpegEncoderConfig:
     image_sequence_digits: Optional[int] = None
     image_sequence_start_index: Optional[int] = None
     image_sequence_overwrite: bool = False
+    video_only: bool = False  # The caller has established there is no export audio.
 
     def __post_init__(self) -> None:
         """验证配置并自动推断参数"""
@@ -810,7 +812,7 @@ class FFmpegVideoEncoder:
         self._config: FFmpegEncoderConfig = config
         self._isolated_hdr_main10 = isolated_hdr_main10
         self._centered_main10_chroma = centered_main10_chroma
-        self._main10_encoder: HdrHevcEncoder | None = None
+        self._main10_encoder: HdrHevcEncoder | WindowsMain10Encoder | None = None
         self._should_cancel = should_cancel
         self._total_frames = total_frames
         self._hqx_reformatter: Optional[Any] = None
@@ -1008,11 +1010,17 @@ class FFmpegVideoEncoder:
                     and not self._isolated_hdr_main10):
                 from .hdr_hevc_encoder import HdrHevcEncoder
 
-                isolated = HdrHevcEncoder(
-                    self._output_path, self._config, should_cancel=self._should_cancel,
-                    total_frames=self._total_frames, centered_chroma=False,
-                )
-                isolated.open()
+                isolated: HdrHevcEncoder | WindowsMain10Encoder | None = None
+                if sys.platform == "win32" and self._config.video_only:
+                    from .windows_main10_encoder import WindowsMain10Encoder
+
+                    isolated = WindowsMain10Encoder.create(self)
+                if isolated is None:
+                    isolated = HdrHevcEncoder(
+                        self._output_path, self._config, should_cancel=self._should_cancel,
+                        total_frames=self._total_frames, centered_chroma=False,
+                    )
+                    isolated.open()
                 self._main10_encoder = isolated
                 self._is_open = isolated.is_open
                 self._frame_count = 0
