@@ -456,6 +456,29 @@ class TestGradingGestureRouting:
         assert h.host.redo()
         assert not panel.automatic_calibration_pending
 
+    def test_mist_edits_legacy_stack_once_and_undo_restores_original(self, harness) -> None:
+        h, _, _ = harness
+        project, stack_id = EditProject.create(name="Mist").create_color_stack(asset_id="a1", name="Mist")
+        layers = f03_layer_stack()
+        layers[0].effects_params.update(mist_enabled=True, mist_radius=0.2, mist_mix=24.0)
+        project = project.update_color_stack(stack_id, layers=[layer.to_dict(None) for layer in layers])
+        h.holder["project"] = project
+        h.host.on_clip_stack_loaded(stack_id)
+        node = self._select_first_corrector(h, h.host.bound_graph())
+        assert h.host.panel_layer_payload(node.node_id)["effects_params"]["mist_mix"] == 24.0
+
+        h.host.begin_grade_gesture("mist")
+        for mixer in (28.0, 33.0):
+            assert h.host.submit_blur_sharpen_change(
+                node.node_id, {"mist_enabled": True, "mist_mix": mixer}, "mist")
+        assert h.holder["project"].color_stacks[stack_id].color_graph is None
+        assert h.host.end_grade_gesture()
+        h.engine.set_color_graph_preview.assert_called_with(None)
+        assert len(h.cmd_stack._undo_stack) == 1
+        assert h.host.panel_layer_payload(node.node_id)["effects_params"]["mist_mix"] == 33.0
+        assert h.host.undo()
+        assert h.host.panel_layer_payload(node.node_id)["effects_params"]["mist_mix"] == 24.0
+
     def test_primary_gesture_previews_with_no_cpu_frame_and_keeps_one_undo(self, harness):
         from src.features.color.core.color_graph_param_source import graph_node_layer_provider
         from src.features.color.core.color_graph_snapshot import freeze_graph

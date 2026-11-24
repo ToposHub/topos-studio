@@ -62,6 +62,9 @@ class C:
     BG_DARK         = "#1e1e1e"   # 面板标题 / 停靠窗口
     BG_PANEL_HEADER = "#222226"   # 独立面板标题栏
     BG_PANEL        = "#27272b"   # 面板背景（标准）
+    COLOR_PANEL_INSET = "#202024"  # 调色面板深色区
+    COLOR_PANEL_HEADER = COLOR_PANEL_INSET
+    COLOR_PANEL_RAISED = "#2C2D31"  # 调色面板浅色区
     KEYFRAMES_BG    = BG_PANEL
     TIMELINE_TIMECODE_BG = "#202025"
     BG_INPUT        = "#252529"   # 输入框 / 下拉框背景
@@ -95,6 +98,11 @@ class C:
     TOGGLE_PILL_BG  = "#3C3C42"  # 药丸背景
     TOGGLE_CIRCLE_ON  = ACCENT_SURFACE  # 开启圆点（与选中标签背景一致）
     TOGGLE_CIRCLE_OFF = "#666666"  # 关闭圆点（灰色）
+
+    # --- Slider tracks and disabled thumbs ---
+    SLIDER_TRACK          = "#3e3e44"
+    SLIDER_TRACK_DISABLED = "#303035"
+    SLIDER_THUMB_DISABLED = "#4a4a4e"
 
     # --- 曲线 / 示波器专用 ---
     SCOPE_BG        = "#050505"   # 示波器背景
@@ -141,6 +149,21 @@ class C:
 # 可复用 QSS 模板 — 供各控件直接引用，避免硬编码
 # ============================================================================
 
+PANEL_SLIDER_STYLE = f"""
+    QSlider {{ background: transparent; border: none; }}
+    QSlider::groove {{ background: {C.SLIDER_TRACK}; border: none; border-radius: 2px; margin: 0; }}
+    QSlider::groove:horizontal {{ height: 4px; }}
+    QSlider::groove:vertical {{ width: 4px; }}
+    QSlider::sub-page, QSlider::add-page {{ background: transparent; border: none; }}
+    QSlider::handle {{ background: {C.ACCENT_SURFACE}; border: none; border-radius: 5px; }}
+    QSlider::handle:horizontal {{ width: 10px; margin: -3px 0; }}
+    QSlider::handle:vertical {{ height: 10px; margin: 0 -3px; }}
+    QSlider::handle:hover, QSlider::handle:focus {{ background: {C.ORANGE_HOVER}; }}
+    QSlider::handle:pressed {{ background: {C.ORANGE_PRESS}; }}
+    QSlider::groove:disabled {{ background: {C.SLIDER_TRACK_DISABLED}; }}
+    QSlider::handle:disabled {{ background: {C.SLIDER_THUMB_DISABLED}; }}
+"""
+
 COMPACT_HORIZONTAL_SCROLLBAR_STYLE = f"""
     QScrollBar:horizontal {{ height: 8px; margin: 0; border: none;
         background: {C.SCROLLBAR_BG}; }}
@@ -160,32 +183,41 @@ DRAG_VALUE_LABEL_STYLE = f"""
     }}
 """
 
-DRAG_VALUE_NORMAL_STYLE = f"""
-    QLabel {{
-        color: {C.TEXT_BRIGHT}; font-size: 11px; font-weight: bold;
-        background: #232325; border: 1px solid #151517;
-        border-radius: 3px; padding: 0px 3px;
-    }}
-    QLabel:hover {{ border: 1px solid {C.BORDER_HOVER}; background: {C.BG_ACTIVE}; }}
-"""
-
-DRAG_VALUE_ACTIVE_STYLE = f"""
-    QLabel {{
-        color: #ffffff; font-size: 11px; font-weight: bold;
-        background: #3a3a40; border: 1px solid {C.ORANGE};
-        border-radius: 3px; padding: 0px 3px;
-    }}
-"""
-
-# --- 参数标签 / 数值格（禁用态，达芬奇式整列变灰） ---
 PARAM_LABEL_DISABLED_STYLE = "color: #555555; font-size: 11px;"
 
-DRAG_VALUE_DISABLED_STYLE = f"""
-    QLabel {{
-        color: {C.TEXT_DIM}; font-size: 11px; font-weight: bold;
-        background: #1c1c1e; border: 1px solid #1a1a1c;
-        border-radius: 3px; padding: 0px 3px;
+NUMERIC_FIELD_HEIGHT = 16
+_NUMERIC_FONT = "font-size: 11px; font-weight: 500;"
+_NUMERIC_FIELD = (
+    f"{_NUMERIC_FONT} border-radius: 3px; padding: 0px 1px; "
+    f"min-height: {NUMERIC_FIELD_HEIGHT - 2}px;"
+)
+_NUMERIC_NORMAL = f"color: {C.TEXT_BRIGHT}; background: #232325; border: 1px solid #151517;"
+_NUMERIC_HOVER = f"background: {C.BG_ACTIVE}; border-color: {C.BORDER_HOVER};"
+_NUMERIC_ACTIVE = f"color: #ffffff; background: #3a3a40; border: 1px solid {C.ORANGE};"
+_NUMERIC_DISABLED = f"color: {C.TEXT_DIM}; background: #1c1c1e; border: 1px solid #1a1a1c;"
+
+DRAG_VALUE_NORMAL_STYLE = f"""
+    QLabel {{ {_NUMERIC_FIELD} {_NUMERIC_NORMAL} }}
+    QLabel:hover {{ {_NUMERIC_HOVER} }}
+"""
+DRAG_VALUE_ACTIVE_STYLE = f"QLabel {{ {_NUMERIC_FIELD} {_NUMERIC_ACTIVE} }}"
+DRAG_VALUE_DISABLED_STYLE = f"QLabel {{ {_NUMERIC_FIELD} {_NUMERIC_DISABLED} }}"
+DRAG_VALUE_EDITOR_STYLE = f"""
+    QLineEdit {{ {_NUMERIC_FIELD} {_NUMERIC_ACTIVE} }}
+    QLineEdit:disabled {{ {_NUMERIC_DISABLED} }}
+"""
+
+NUMERIC_SPIN_BOX_STYLE = f"""
+    QAbstractSpinBox {{ {_NUMERIC_FIELD} {_NUMERIC_NORMAL} }}
+    QAbstractSpinBox:hover {{ {_NUMERIC_HOVER} }}
+    QAbstractSpinBox:focus {{ {_NUMERIC_ACTIVE} }}
+    QAbstractSpinBox:disabled {{ {_NUMERIC_DISABLED} }}
+    QAbstractSpinBox QLineEdit {{
+        {_NUMERIC_FONT} color: {C.TEXT_BRIGHT}; background: transparent;
+        border: none; padding: 0px;
     }}
+    QAbstractSpinBox QLineEdit:focus {{ color: #ffffff; }}
+    QAbstractSpinBox QLineEdit:disabled {{ color: {C.TEXT_DIM}; }}
 """
 
 # --- 曲线工具栏按钮容器 ---
@@ -665,14 +697,7 @@ DIALOG_BASE_STYLE = f"""
         min-width: 80px;
     }}
     QPushButton:hover {{ background-color: #5a5a5a; }}
-    QSlider::groove:horizontal {{
-        background: {C.BG_HOVER}; height: 6px; border: 1px solid {C.BORDER_MID};
-    }}
-    QSlider::handle:horizontal {{
-        background: #ddd; width: 14px; margin: -5px 0; border-radius: 7px;
-    }}
-    QSlider::sub-page:horizontal {{ background: #6a6a6a; }}
-"""
+""" + PANEL_SLIDER_STYLE
 
 # --- 保存预设对话框 ---
 PRESET_DIALOG_STYLE = f"""
@@ -781,16 +806,7 @@ LIBRARY_PANEL_STYLE = f"""
     QComboBox::drop-down {{ border: none; background: transparent; subcontrol-origin: padding; subcontrol-position: right; }}
 
     QLabel {{ background: transparent; }}
-    
-    QSlider {{ background: transparent; }}
-    QSlider::groove:horizontal {{
-        border: none; height: 4px; background: #222; margin: 2px 0; border-radius: 2px;
-    }}
-    QSlider::handle:horizontal {{
-        background: {C.ORANGE_PRESS}; border: none; width: 10px; height: 10px; margin: -4px 0; border-radius: 5px;
-    }}
-    QSlider::handle:horizontal:hover {{ background: {C.ORANGE_HOVER}; }}
-"""
+""" + PANEL_SLIDER_STYLE
 
 LIBRARY_LIST_VIEW_STYLE = f"QListView {{ background: {C.BG_PANEL}; border: none; padding: 10px; }}"
 
@@ -883,27 +899,7 @@ SHORTCUT_EDITOR_STYLE = f"""
 # --- 渐变滑块手柄样式（供 ToposSlider._apply_gradient_style 使用） ---
 def gradient_slider_groove_style(gradient_qss: str) -> str:
     """为渐变滑槽生成完整 QSS（保留手柄样式统一）。"""
-    return f"""
-        QSlider::groove:horizontal {{
-            border: 1px solid #444;
-            height: 4px;
-            background: {gradient_qss};
-            margin: 2px 0;
-            border-radius: 2px;
-        }}
-        QSlider::handle:horizontal {{
-            background: {C.ACCENT_SURFACE};
-            border: 2px solid {C.BG_DARK};
-            width: 10px;
-            height: 10px;
-            margin: -4px 0;
-            border-radius: 5px;
-        }}
-        QSlider::handle:horizontal:hover {{
-            background: {C.ORANGE_HOVER};
-            border: 2px solid {C.BORDER_DARK};
-        }}
-    """
+    return PANEL_SLIDER_STYLE + f"QSlider::groove:horizontal:enabled {{ background: {gradient_qss}; }}"
 
 
 # ============================================================================
@@ -1415,131 +1411,7 @@ AdjustmentPanel QLabel {
     background: transparent;
 }
 
-/* ============================================
-   === 滑动条样式 ===
-   ============================================
-   
-   滑动条由三部分组成：
-   1. groove - 滑槽（背景轨道）
-   2. sub-page - 已滑过部分（左侧/下方）
-   3. add-page - 未滑过部分（右侧/上方）
-   4. handle - 滑块手柄
-   
-   当前设计：无进度条，只有滑槽和手柄
-*/
-
-/* --- 水平滑动条 --- */
-
-/* 滑槽（轨道） */
-QSlider::groove:horizontal {
-    border: 1px solid #3d3d3d;   /* 边框颜色 */
-    height: 4px;                 /* 滑槽高度 */
-    background: #1a1a1c;         /* 滑槽背景色 */
-    margin: 2px 0;               /* 上下边距 */
-    border-radius: 2px;          /* 圆角 */
-}
-
-/* 已滑过部分（设为透明，不显示进度） */
-QSlider::sub-page:horizontal {
-    background: transparent;      /* 透明：不显示进度条 */
-    border: none;
-    height: 4px;
-    border-radius: 2px;
-}
-
-/* 未滑过部分 */
-QSlider::add-page:horizontal {
-    background: transparent;      /* 透明 */
-    border: none;
-    height: 4px;
-    border-radius: 2px;
-}
-
-/* 滑块手柄 */
-QSlider::handle:horizontal {
-    background: #cc6600;         /* 与选中标签背景一致 */
-    border: 1px solid #1e1e1e;   /* 边框：宽度 颜色 */
-    width: 10px;                 /* 手柄宽度 */
-    height: 10px;                /* 手柄高度 */
-    margin: -4px 0;              /* 负边距使手柄居中于滑槽 */
-    border-radius: 5px;          /* 圆角（设为宽高一半则为正圆） */
-}
-
-QSlider::handle:horizontal:hover {
-    background: #ffaa44;         /* 悬停时更亮的橙色 */
-    border: 1px solid #333333;
-}
-
-QSlider::handle:horizontal:pressed {
-    background: #cc6600;         /* 按下时更深的橙色 */
-}
-
-/* 滑杆禁用态：DenoisePanel 达芬奇式"整列变灰"联动专用（限定作用域，
-   不影响其他面板既有观感；几何与常规态一致，仅颜色转暗，避免布局跳动） */
-DenoisePanel QSlider::groove:horizontal:disabled {
-    border: 1px solid #262628;
-    height: 4px;
-    background: #202023;
-    margin: 2px 0;
-    border-radius: 2px;
-}
-
-DenoisePanel QSlider::handle:horizontal:disabled {
-    background: #4a4a4e;
-    border: 1px solid #1e1e1e;
-    width: 10px;
-    height: 10px;
-    margin: -4px 0;
-    border-radius: 5px;
-}
-
-/* --- 垂直滑动条 --- */
-
-/* 滑槽 */
-QSlider::groove:vertical {
-    border: 1px solid #3d3d3d;
-    width: 4px;                  /* 滑槽宽度 */
-    background: #2a2a2a;
-    margin: 0 2px;
-    border-radius: 2px;
-}
-
-/* 已滑过部分 */
-QSlider::sub-page:vertical {
-    background: transparent;
-    border: none;
-    width: 4px;
-    border-radius: 2px;
-}
-
-/* 未滑过部分 */
-QSlider::add-page:vertical {
-    background: transparent;
-    border: none;
-    width: 4px;
-    border-radius: 2px;
-}
-
-/* 手柄 */
-QSlider::handle:vertical {
-    background: #cc6600;         /* 与选中标签背景一致 */
-    border: 1px solid #1e1e1e;   /* 边框 */
-    width: 10px;                 /* 手柄宽度 */
-    height: 10px;                /* 手柄高度 */
-    margin: 0 -4px;              /* 负边距使手柄居中于滑槽 */
-    border-radius: 5px;          /* 圆角（设为宽高一半则为正圆） */
-}
-
-QSlider::handle:vertical:hover {
-    background: #ffaa44;         /* 悬停时更亮的橙色 */
-    border: 1px solid #333333;
-}
-
-QSlider::handle:vertical:pressed {
-    background: #cc6600;         /* 按下时更深的橙色 */
-}
-
-""" + GLOBAL_SPINBOX_STYLE + GLOBAL_LINE_EDIT_STYLE + GLOBAL_COMBOBOX_STYLE + """/* ============================================
+""" + PANEL_SLIDER_STYLE + GLOBAL_SPINBOX_STYLE + GLOBAL_LINE_EDIT_STYLE + GLOBAL_COMBOBOX_STYLE + """/* ============================================
    === 复选框 ===
    ============================================
 */
@@ -1854,25 +1726,20 @@ TAB_STYLE = """
 # ============================================================================
 # 图层列表样式
 # ============================================================================
-LAYER_LIST_STYLE = """
+LAYER_LIST_STYLE = f"""
     /* 图层列表 */
-    QListWidget { 
-        background: #27272b;              /* 列表背景 */
+    QListWidget {{
+        background: {C.BG_PANEL};
         border: none; 
         outline: none; 
-    }
+    }}
     
-    QListWidget::item { 
+    QListWidget::item {{
         border-bottom: 1px solid #2a2a2a;  /* 项目分隔线 */
-    }
+    }}
     
-    QListWidget::item:selected { 
-        background: #444;              /* 选中背景 */
-    }
-    
-    QListWidget::item:hover { 
-        background: #333;              /* 悬停背景 */
-    }
+    QListWidget::item:selected {{ background: {C.COLOR_PANEL_RAISED}; }}
+    QListWidget::item:hover:!selected {{ background: {C.COLOR_PANEL_INSET}; }}
 """
 
 # ============================================================================

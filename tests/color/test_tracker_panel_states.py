@@ -15,7 +15,9 @@ pytestmark = pytest.mark.usefixtures("qapp")
 
 from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtGui import QColor
+from PyQt6.QtWidgets import QStyle, QStyleOptionComboBox
 
+from src.features.color.ui.panel_chrome import PARAMETER_BAR_HEIGHT
 from src.features.color.ui.tracker_graph import (
     CHECKBOX_KEYS,
     CURVE_COMPONENTS,
@@ -29,6 +31,7 @@ from src.features.color.ui.tracker_graph import (
 from src.features.color.ui.tracker_panel import TrackerPanel
 from src.features.color.ui.tracker_status import LIGHT_COLORS, PanelState
 from src.features.color.ui.tracker_toolbar import TrackerToolBar
+from src.shared.ui.style_sheet import C
 
 
 _panels: list[TrackerPanel] = []
@@ -98,8 +101,9 @@ class TestPanelStates:
             panel.btn_forward_one, panel.btn_forward,
         ]
         assert {(button.width(), button.height()) for button in action_buttons} == {
-            (30, 30)
+            (24, 24)
         }
+        assert all(button.iconSize().width() == 16 for button in action_buttons)
 
         panel.set_bound_shape("Window 1")
         panel.btn_params.click()
@@ -107,6 +111,8 @@ class TestPanelStates:
         panel.channel_boxes["tx"].click()
         assert not panel.graph.view._visible["tx"]
         panel.segment_buttons["frame"].click()
+        assert panel.segment_buttons["frame"].isChecked()
+        assert not panel.segment_buttons["clip"].isChecked()
         assert panel.get_params()["correction_mode"] == "frame"
         assert panel.graph.view._mode == "clip"
 
@@ -115,6 +121,8 @@ class TestPanelStates:
         panel = make_panel()
         panel.set_bound_shape("Window 1")
         controls = [
+            panel.btn_backward_one, panel.btn_backward, panel.btn_stop,
+            panel.btn_auto, panel.btn_forward, panel.btn_forward_one,
             *panel.channel_boxes.values(), panel.channel_3d,
             panel.segment_buttons["clip"], panel.segment_buttons["frame"],
         ]
@@ -130,12 +138,14 @@ class TestPanelStates:
                 for widget in controls
             ]
             for index, rect in enumerate(rects):
-                assert rect.width() >= controls[index].sizeHint().width()
+                assert panel._control_area.rect().contains(rect)
+                assert rect.width() >= controls[index].minimumSizeHint().width()
                 assert all(
                     not rect.intersects(other)
                     for other_index, other in enumerate(rects)
                     if other_index != index
                 )
+            assert panel._window_bottom_bar.rect().contains(panel.cloud_combo.geometry())
 
     def test_running_disables_params_and_actions(self, qapp):
         panel = make_panel()
@@ -300,6 +310,22 @@ class TestParams:
 # ================================================================
 
 class TestCloudCombo:
+    def test_custom_chevron_opens_popup_without_native_button(self, qtbot) -> None:
+        panel = make_panel()
+        combo = panel.cloud_combo
+        option = QStyleOptionComboBox()
+        combo.initStyleOption(option)
+        arrow = combo.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox, option, QStyle.SubControl.SC_ComboBoxArrow, combo
+        )
+        assert arrow.isEmpty()
+
+        qtbot.mouseClick(
+            combo, Qt.MouseButton.LeftButton, pos=QPoint(combo.width() - 10, combo.height() // 2)
+        )
+        assert combo.view().isVisible()
+        combo.hidePopup()
+
     def test_cloud_tracker_is_a_local_algorithm(self, qapp):
         panel = make_panel()
         assert panel.cloud_combo.currentText() == "Cloud Tracker"
@@ -458,12 +484,37 @@ class TestSignals:
 def test_reference_width_uses_single_transport_row(qapp):
     panel = make_panel()
     panel.set_bound_shape("Window 1")
-    panel.resize(786, 418)
-    qapp.processEvents()
-    assert panel._control_area.height() == 44
     widgets = [panel._transport_widget, panel._channel_widget, panel._segment_widget]
-    positions = [widget.mapTo(panel._control_area, QPoint(0, 0)).y() for widget in widgets]
-    assert max(positions) - min(positions) < 5
+    for width, wraps in ((738, False), (540, False), (320, True), (540, False)):
+        panel.resize(width, 418)
+        qapp.processEvents()
+        positions = [widget.geometry().center().y() for widget in widgets]
+        if wraps:
+            assert panel._control_area.height() == 60
+            assert positions[0] == positions[2] < positions[1]
+        else:
+            assert panel._control_area.height() == PARAMETER_BAR_HEIGHT
+            assert len(set(positions)) == 1
+
+
+def test_graph_ruler_uses_shared_palette(qtbot):
+    graph = TrackerGraph(show_controls=False)
+    qtbot.addWidget(graph)
+    graph.resize(480, 200)
+    graph.set_frame_range(0, 150)
+    graph.set_current_frame(36)
+    graph.show()
+    image = graph.view.grab().toImage()
+    scale = image.devicePixelRatio()
+
+    assert image.pixelColor(round(3 * scale), round(3 * scale)) == QColor(C.BG_PANEL)
+    assert image.pixelColor(round(3 * scale), round(42 * scale)) == QColor(C.COLOR_PANEL_INSET)
+    label_colors = (
+        image.pixelColor(x, y)
+        for x in range(round(38 * scale), round(110 * scale))
+        for y in range(round(8 * scale), round(20 * scale))
+    )
+    assert any(color.red() > 180 and color.blue() >= color.red() for color in label_colors)
 
 
 def test_channels_and_perspective_emit_real_parameters(qapp):

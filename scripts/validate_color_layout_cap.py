@@ -33,8 +33,8 @@ sys.path.insert(0, str(ROOT))
 
 COLOR_TOOL_DOCKS = [
     "dockDenoise", "dockDeblur", "dockGrading", "dockCurves",
-    "dockColorMapping", "dockBlurSharpen", "dockGrain", "dockMasks",
-    "dockQualifier", "dockRaw", "dockAnalysis", "dockCrop", "dockTracker",
+    "dockColorMapping", "dockMixer", "dockBlurSharpen", "dockGrain", "dockMasks",
+    "dockQualifier", "dockRaw", "dockAnalysis", "dockCrop", "dockTracker", "dockColorKeyframes",
 ]
 
 
@@ -64,10 +64,10 @@ def main() -> int:
 
     import src.main as app_main
     from PyQt6.QtCore import QObject, QTimer, Qt
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QWIDGETSIZE_MAX
     from src.app.main_window import MainWindow
-    from src.app.controllers.dock_layout_controller import (
-        _COLOR_TOOL_DOCK_MAX_HEIGHT, _UNRESTRICTED_DOCK_HEIGHT,
+    from src.features.color.ui.panel_chrome import (
+        COLOR_TOOL_DOCK_MAX_HEIGHT, ColorToolDockWidget,
     )
 
     def safe_object_name(obj: Any) -> str:
@@ -110,6 +110,7 @@ def main() -> int:
                     "floating": dock.isFloating(), "visible": dock.isVisible(),
                     "x": dock.x(), "y": dock.y(), "w": dock.width(),
                     "h": dock.height(), "minH": dock.minimumHeight(),
+                    "tab_h": dock.tab_height() if isinstance(dock, ColorToolDockWidget) else 0,
                     "maxH": dock.maximumHeight(),
                     "tabbed_with": len(host.tabifiedDockWidgets(dock)),
                 })
@@ -127,7 +128,10 @@ def main() -> int:
         for name in COLOR_TOOL_DOCKS:
             dock = dock_for(host, name)
             if dock is not None:
-                dock.setMaximumHeight(height)
+                if height == COLOR_TOOL_DOCK_MAX_HEIGHT:
+                    dock.sync_height_limit()
+                else:
+                    dock.setMaximumHeight(height)
 
     def drag_bottom_to(host: Any, size: int) -> None:
         docks = [dock_for(host, n) for n in COLOR_TOOL_DOCKS]
@@ -135,7 +139,7 @@ def main() -> int:
                  and not d.isFloating()]
         host.resizeDocks(docks, [size] * len(docks), Qt.Orientation.Vertical)
 
-    report: dict[str, Any] = {"phase": args.phase, "cap": _COLOR_TOOL_DOCK_MAX_HEIGHT,
+    report: dict[str, Any] = {"phase": args.phase, "cap": COLOR_TOOL_DOCK_MAX_HEIGHT,
                               "scale_factor": os.environ.get("QT_SCALE_FACTOR", "1.0"),
                               "checks": {}}
 
@@ -191,13 +195,13 @@ def main() -> int:
             if self.step == 1:
                 # Lift caps and drag the bottom tool row absurdly tall —
                 # this is what a pre-fix saved layout looked like.
-                set_caps(host, _UNRESTRICTED_DOCK_HEIGHT)
+                set_caps(host, QWIDGETSIZE_MAX)
                 app.processEvents()
                 drag_bottom_to(host, 1100)
                 settle(app)
-                heights = {r["objectName"]: r["h"] for r in capped_rows(host)}
+                heights = {r["objectName"]: r["h"] + r["tab_h"] for r in capped_rows(host)}
                 report["checks"]["oversized_heights"] = heights
-                if not heights or max(heights.values()) <= _COLOR_TOOL_DOCK_MAX_HEIGHT:
+                if not heights or max(heights.values()) <= COLOR_TOOL_DOCK_MAX_HEIGHT:
                     raise AssertionError("seed could not create an oversized layout")
                 host.grab().save(str(output / "seed_oversized.png"))
                 self.step += 1
@@ -207,11 +211,11 @@ def main() -> int:
                 # immediately, handing the released height to Viewer/Nodes.
                 viewport_before = host.dock_viewport.height()
                 nodes_before = host.dock_layers.height()
-                set_caps(host, _COLOR_TOOL_DOCK_MAX_HEIGHT)
+                set_caps(host, COLOR_TOOL_DOCK_MAX_HEIGHT)
                 settle(app)
-                heights = {r["objectName"]: r["h"] for r in capped_rows(host)}
+                heights = {r["objectName"]: r["h"] + r["tab_h"] for r in capped_rows(host)}
                 report["checks"]["capped_after_sync"] = heights
-                assert heights and all(h <= _COLOR_TOOL_DOCK_MAX_HEIGHT
+                assert heights and all(h <= COLOR_TOOL_DOCK_MAX_HEIGHT
                                        for h in heights.values()), \
                     "cap restoration left a bottom tool dock above the cap"
                 report["checks"]["released_height"] = {
@@ -220,11 +224,11 @@ def main() -> int:
                 host.grab().save(str(output / "seed_capped.png"))
                 # Persist an oversized blob as the saved Color layout by
                 # lifting the caps once more right before saving state.
-                set_caps(host, _UNRESTRICTED_DOCK_HEIGHT)
+                set_caps(host, QWIDGETSIZE_MAX)
                 drag_bottom_to(host, 1100)
                 settle(app)
                 report["checks"]["seed_blob_heights"] = {
-                    r["objectName"]: r["h"] for r in capped_rows(host)}
+                    r["objectName"]: r["h"] + r["tab_h"] for r in capped_rows(host)}
                 blob = host.saveState().toHex().data().decode()
                 layouts = host.config_manager.get("page_layouts")
                 layouts = dict(layouts) if isinstance(layouts, dict) else {}
@@ -238,10 +242,10 @@ def main() -> int:
             if self.step == 1:
                 # Startup restored the oversized blob written by the seed
                 # phase; the persistent maximumHeight must clamp it.
-                heights = {r["objectName"]: r["h"] for r in capped_rows(host)}
+                heights = {r["objectName"]: r["h"] + r["tab_h"] for r in capped_rows(host)}
                 report["checks"]["startup_clamped"] = heights
                 assert heights, "no visible docked bottom tool docks found"
-                assert all(h <= _COLOR_TOOL_DOCK_MAX_HEIGHT
+                assert all(h <= COLOR_TOOL_DOCK_MAX_HEIGHT
                            for h in heights.values()), \
                     ("saved oversized layout survived startup restore: "
                      + json.dumps(heights))
@@ -252,9 +256,9 @@ def main() -> int:
                 # Separator drag to the extreme must stop at the cap.
                 drag_bottom_to(host, 2000)
                 settle(app)
-                heights = {r["objectName"]: r["h"] for r in capped_rows(host)}
+                heights = {r["objectName"]: r["h"] + r["tab_h"] for r in capped_rows(host)}
                 report["checks"]["drag_extreme"] = heights
-                assert all(h <= _COLOR_TOOL_DOCK_MAX_HEIGHT
+                assert all(h <= COLOR_TOOL_DOCK_MAX_HEIGHT
                            for h in heights.values()), \
                     "separator drag exceeded the cap"
                 host.grab().save(str(output / "restore_drag_extreme.png"))
@@ -269,9 +273,9 @@ def main() -> int:
                 settle(app)
                 report["checks"]["floating"] = {
                     "height": dock.height(), "max": dock.maximumHeight()}
-                assert dock.maximumHeight() > _COLOR_TOOL_DOCK_MAX_HEIGHT, \
+                assert dock.maximumHeight() > COLOR_TOOL_DOCK_MAX_HEIGHT, \
                     "floating did not lift the cap"
-                assert dock.height() > _COLOR_TOOL_DOCK_MAX_HEIGHT, \
+                assert dock.height() > COLOR_TOOL_DOCK_MAX_HEIGHT, \
                     "floating window could not be resized above the cap"
                 host.grab().save(str(output / "restore_floating.png"))
                 dock.setFloating(False)
@@ -279,7 +283,7 @@ def main() -> int:
                 settle(app)
                 report["checks"]["redocked"] = {
                     "height": dock.height(), "max": dock.maximumHeight()}
-                assert dock.maximumHeight() == _COLOR_TOOL_DOCK_MAX_HEIGHT, \
+                assert dock.maximumHeight() + dock.tab_height() == COLOR_TOOL_DOCK_MAX_HEIGHT, \
                     "re-docking at the bottom did not restore the cap"
                 self.step += 1
                 return
@@ -289,9 +293,9 @@ def main() -> int:
                 settle(app, rounds=10)
                 host.switch_to_page("Color")
                 settle(app, rounds=10)
-                heights = {r["objectName"]: r["h"] for r in capped_rows(host)}
+                heights = {r["objectName"]: r["h"] + r["tab_h"] for r in capped_rows(host)}
                 report["checks"]["after_page_roundtrip"] = heights
-                assert heights and all(h <= _COLOR_TOOL_DOCK_MAX_HEIGHT
+                assert heights and all(h <= COLOR_TOOL_DOCK_MAX_HEIGHT
                                        for h in heights.values()), \
                     "Edit→Color round trip lost the cap"
                 host.grab().save(str(output / "restore_page_roundtrip.png"))
@@ -302,9 +306,9 @@ def main() -> int:
 
         def restart_tick(self, app: Any, host: Any) -> None:
             if self.step == 1:
-                heights = {r["objectName"]: r["h"] for r in capped_rows(host)}
+                heights = {r["objectName"]: r["h"] + r["tab_h"] for r in capped_rows(host)}
                 report["checks"]["restart_clamped"] = heights
-                assert heights and all(h <= _COLOR_TOOL_DOCK_MAX_HEIGHT
+                assert heights and all(h <= COLOR_TOOL_DOCK_MAX_HEIGHT
                                        for h in heights.values()), \
                     "cap was not durable across save/restart"
                 host.grab().save(str(output / "restart_capped.png"))
@@ -331,36 +335,28 @@ def _radius_phase(output: Path) -> int:
     report: dict[str, Any] = {"phase": "radius",
                               "scale_factor": os.environ.get("QT_SCALE_FACTOR", "1.0")}
     try:
-        from src.app.controllers.dock_layout_controller import (
-            _COLOR_TOOL_DOCK_MAX_HEIGHT,
-        )
         from src.features.color.ui.color_wheel import GradingPanel
-        # The real app applies the global dark theme (pixel-sized fonts).
-        # Without it the system 13pt font inflates the numeric rows and a
-        # bare probe under-measures the wheel (98px at the cap panel height).
+        from src.features.color.ui.panel_chrome import COLOR_TOOL_DOCK_MAX_HEIGHT
+        from src.shared.ui.dock_tab_style import DOCK_TAB_BAR_HEIGHT
         from src.shared.ui.style_sheet import DARK_THEME
         app.setStyleSheet(DARK_THEME)
         panel = GradingPanel()
         panel.show()
         radii: dict[str, dict[str, float]] = {}
-        for width in (900, 1100, 1260, 1500):
+        for width in (940, 1100, 1260, 1500):
             row: dict[str, float] = {}
-            for label, height in (("at_cap", _COLOR_TOOL_DOCK_MAX_HEIGHT - 7),
-                                  ("above_cap", _COLOR_TOOL_DOCK_MAX_HEIGHT + 100)):
+            for label, height in (("docked", COLOR_TOOL_DOCK_MAX_HEIGHT - DOCK_TAB_BAR_HEIGHT),
+                                  ("floating", COLOR_TOOL_DOCK_MAX_HEIGHT + 100)):
                 panel.resize(width, height)
                 for _ in range(6):
                     app.processEvents()
                 row[label] = float(panel.lift_wheel._wheel_canvas._geometry()[1])
             radii[str(width)] = row
         report["wheel_radii"] = radii
-        report["radius_reaches_100_at_cap"] = all(
-            v["at_cap"] == 100.0 for v in radii.values())
-        report["radius_capped_above_cap"] = all(
-            v["at_cap"] == v["above_cap"] for v in radii.values())
-        assert report["radius_reaches_100_at_cap"], \
-            f"wheel radius at the dock cap is not 100px: {radii}"
-        assert report["radius_capped_above_cap"], \
-            f"extra dock height still grows the wheel: {radii}"
+        report["radius_reaches_100_when_floating"] = all(
+            v["docked"] < v["floating"] == 100.0 for v in radii.values())
+        assert report["radius_reaches_100_when_floating"], \
+            f"wheel radius did not grow to 100px with extra floating height: {radii}"
         panel.close()
         panel.deleteLater()
 

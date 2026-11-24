@@ -1,10 +1,19 @@
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QCheckBox, QGroupBox, QPushButton)
+from PyQt6.QtWidgets import (
+    QCheckBox, QGridLayout, QLabel, QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+)
 from src.shared.i18n.i18n import I18N
-from PyQt6.QtCore import pyqtSignal, QSize, QTimer
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.shared.assets.icon_manager import icon_reset
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_NAME_STYLE, PARAMETER_ROW_HEIGHT, PARAMETER_ROW_SPACING,
+    SECTION_TITLE_STYLE, create_panel_divider, create_panel_layout, style_reset_button,
+)
+from src.shared.ui.style_sheet import C
+
+_LABEL_WIDTH = 80
+_FORM_INSET = 10
+
 
 class FilmGrainPanel(QWidget):
     grain_changed = pyqtSignal(dict)
@@ -25,37 +34,35 @@ class FilmGrainPanel(QWidget):
 
         self.init_ui()
 
-    def get_style_sheet(self):
-        """Return panel-specific style sheet.
-        
-        QGroupBox/QCheckBox/QPushButton use global DARK_THEME styles.
-        """
-        return """
-            FilmGrainPanel {
-                background-color: #1a1a1a;
-            }
+    def get_style_sheet(self) -> str:
+        """Return the panel surface and option typography."""
+        return f"""
+            FilmGrainPanel {{ background-color: {C.BG_PANEL}; }}
+            FilmGrainPanel QCheckBox, FilmGrainPanel QCheckBox:checked {{ {PARAMETER_NAME_STYLE} }}
+            QToolButton#grainParameterSection {{
+                {SECTION_TITLE_STYLE} border: none; padding: 0 8px; text-align: left;
+            }}
+            QToolButton#grainParameterSection:hover,
+            QToolButton#grainParameterSection:focus {{ background: {C.COLOR_PANEL_RAISED}; }}
         """
 
     def init_ui(self) -> None:
         self.setStyleSheet(self.get_style_sheet())
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
+        enable_row, layout = create_panel_layout(self, (8, 8, 0), 6)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        # Enable toggle and reset button row (above Basic Settings)
-        enable_row = QHBoxLayout()
         self.enable_check = ToggleSwitch(checked=False)
+        self.enable_check.setAccessibleName(I18N.tr("film_grain.enable", "启用效果"))
         self.enable_check.toggled.connect(self.emit_params)
 
-        self._title_label = QLabel(I18N.tr("film_grain.enable", "启用效果"))
-        self._title_label.setStyleSheet("color: #bbbbbb; font-weight: bold; font-size: 10px; letter-spacing: 1px;")
+        self._title_label = QLabel(I18N.tr("panel.film_grain", "胶片颗粒"))
+        self._title_label.setStyleSheet(SECTION_TITLE_STYLE)
 
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr("tooltip.reset_film_grain", "重置所有胶片颗粒参数"))
         self.reset_btn.clicked.connect(self.reset_all)
 
@@ -63,31 +70,10 @@ class FilmGrainPanel(QWidget):
         enable_row.addWidget(self._title_label)
         enable_row.addStretch()
         enable_row.addWidget(self.reset_btn)
-        layout.addLayout(enable_row)
 
-        layout.addSpacing(4)
-
-        # Main Controls Group
-        controls_group = QGroupBox(I18N.tr("film_grain.basic_settings", "基本设置"))
-        controls_group.setStyleSheet(self.get_style_sheet())
-        controls_layout = QVBoxLayout(controls_group)
-        controls_layout.setContentsMargins(4, 0, 4, 4)
-        controls_layout.setSpacing(2)
-
-        # 1. Intensity
-        self.intensity_control = self._create_row(I18N.tr("film_grain.intensity", "强度"), 0.0, 1.0, 0.25, 0.01, label_width=80)
-        controls_layout.addWidget(self.intensity_control)
-
-        # 3. Size
-        self.size_control = self._create_row(I18N.tr("film_grain.size", "颗粒大小"), 0.1, 10.0, 2.0, 0.1, label_width=80)
-        controls_layout.addWidget(self.size_control)
-
-        # 4. Monochrome
         self.mono_check = QCheckBox(I18N.tr("film_grain.monochrome", "单色颗粒"))
         self.mono_check.setChecked(True)
-        # Use global DARK_THEME QCheckBox style
         self.mono_check.stateChanged.connect(self.emit_params)
-        controls_layout.addWidget(self.mono_check)
 
         # P1-COLOR-13: 动画颗粒（seed 随帧号确定推进）+ 显式换种子
         self.animated_check = QCheckBox(
@@ -97,51 +83,79 @@ class FilmGrainPanel(QWidget):
             "film_grain.animated_tooltip",
             "启用后颗粒种子随帧号确定推进：同一帧重渲一致，逐帧颗粒图案变化"))
         self.animated_check.stateChanged.connect(self.emit_params)
-        controls_layout.addWidget(self.animated_check)
-
-        reseed_row = QHBoxLayout()
-        reseed_row.addSpacing(80)
+        options = QGridLayout()
+        options.setContentsMargins(_FORM_INSET + _LABEL_WIDTH + 4, 5, _FORM_INSET, 5)
+        options.setHorizontalSpacing(8)
+        options.setVerticalSpacing(0)
+        options.setColumnStretch(0, 1)
+        for checkbox in (self.mono_check, self.animated_check):
+            checkbox.setFixedHeight(PARAMETER_ROW_HEIGHT)
+        options.addWidget(self.mono_check, 0, 0)
+        options.addWidget(self.animated_check, 1, 0, 1, 2)
         self.reseed_btn = QPushButton(
             I18N.tr("film_grain.reseed", "换种子"))
+        self.reseed_btn.setFixedHeight(22)
+        self.reseed_btn.setStyleSheet("QPushButton { padding: 0 10px; font-size: 11px; }")
         self.reseed_btn.setToolTip(I18N.tr(
             "film_grain.reseed_tooltip", "更换颗粒图案种子（可撤销渲染重渲一致）"))
         self.reseed_btn.clicked.connect(self.reseed_requested.emit)
-        reseed_row.addWidget(self.reseed_btn)
-        reseed_row.addStretch()
-        controls_layout.addLayout(reseed_row)
+        options.addWidget(self.reseed_btn, 0, 1)
+        layout.addLayout(options)
 
-        controls_layout.addStretch()
-        layout.addWidget(controls_group)
+        self.size_control = self._create_row(I18N.tr("film_grain.size", "颗粒大小"), 0.1, 10.0, 2.0, 0.1)
+        self.intensity_control = self._create_row(I18N.tr("film_grain.intensity", "强度"), 0.0, 1.0, 0.25, 0.01)
+        self.grain_section_toggle = self._add_parameter_section(
+            layout, I18N.tr("film_grain.grain_parameters", "颗粒参数"),
+            (self.size_control, self.intensity_control), expanded=True,
+        )
 
-        # Add spacing between groups
-        layout.addSpacing(8)
-
-        # Response Curve Group
-        response_group = QGroupBox(I18N.tr("film_grain.luminance_response", "亮度响应"))
-        response_group.setStyleSheet(self.get_style_sheet())
-        response_layout = QVBoxLayout(response_group)
-        response_layout.setContentsMargins(4, 0, 4, 4)
-        response_layout.setSpacing(2)
-
-        self.shadows_control = self._create_row(I18N.tr("film_grain.shadows", "阴影"), 0.0, 1.0, 0.0, 0.01, label_width=80)
-        response_layout.addWidget(self.shadows_control)
-
-        self.midtones_control = self._create_row(I18N.tr("film_grain.midtones", "中间调"), 0.0, 1.0, 1.0, 0.01, label_width=80)
-        response_layout.addWidget(self.midtones_control)
-
-        self.highlights_control = self._create_row(I18N.tr("film_grain.highlights", "高光"), 0.0, 1.0, 0.5, 0.01, label_width=80)
-        response_layout.addWidget(self.highlights_control)
-        
-        response_layout.addStretch()
-        layout.addWidget(response_group)
-        
+        self.shadows_control = self._create_row(I18N.tr("film_grain.shadows", "阴影"), 0.0, 1.0, 0.0, 0.01)
+        self.midtones_control = self._create_row(I18N.tr("film_grain.midtones", "中间调"), 0.0, 1.0, 1.0, 0.01)
+        self.highlights_control = self._create_row(I18N.tr("film_grain.highlights", "高光"), 0.0, 1.0, 0.5, 0.01)
+        self.response_section_toggle = self._add_parameter_section(
+            layout, I18N.tr("film_grain.luminance_response", "亮度响应"),
+            (self.shadows_control, self.midtones_control, self.highlights_control), expanded=False,
+        )
         layout.addStretch()
 
-    def _create_row(self, label, min_val, max_val, default_val, step, label_width=80):
+    def _add_parameter_section(
+        self, layout: QVBoxLayout, title: str, rows: tuple[ColorParameterRow, ...],
+        *, expanded: bool,
+    ) -> QToolButton:
+        layout.addWidget(create_panel_divider(Qt.Orientation.Horizontal))
+        toggle = QToolButton(self)
+        toggle.setObjectName("grainParameterSection")
+        toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle.setText(title)
+        toggle.setCheckable(True)
+        toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        toggle.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        toggle.setFixedHeight(23)
+        layout.addWidget(toggle)
+
+        content = QWidget(self)
+        form = QVBoxLayout(content)
+        form.setContentsMargins(_FORM_INSET, 2, _FORM_INSET, 6)
+        form.setSpacing(PARAMETER_ROW_SPACING)
+        for row in rows:
+            form.addWidget(row)
+        layout.addWidget(content)
+
+        def set_expanded(visible: bool) -> None:
+            content.setVisible(visible)
+            toggle.setArrowType(Qt.ArrowType.DownArrow if visible else Qt.ArrowType.RightArrow)
+
+        toggle.setChecked(expanded)
+        set_expanded(expanded)
+        toggle.toggled.connect(set_expanded)
+        return toggle
+
+    def _create_row(self, label: str, min_val: float, max_val: float,
+                    default_val: float, step: float) -> ColorParameterRow:
         """Create a ParamSliderRow with panel interaction wiring."""
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, min_val, max_val, default_val,
-            step=step, decimals=2, label_width=label_width)
+            step=step, decimals=2, label_width=_LABEL_WIDTH)
         row.interactionStarted.connect(self.interaction_started.emit)
         row.interactionEnded.connect(self.interaction_ended.emit)
         row.interactionEnded.connect(self._flush_pending_params)

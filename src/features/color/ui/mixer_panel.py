@@ -1,9 +1,22 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QTabWidget, QScrollArea
+from pathlib import Path
+
+from PyQt6.QtCore import QSize, QTimer, pyqtSignal
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import (
+    QButtonGroup, QGridLayout, QLabel, QScrollArea, QStackedWidget, QToolButton,
+    QVBoxLayout, QWidget,
+)
+
 from src.shared.i18n.i18n import I18N
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
-from PyQt6.QtGui import QColor
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
-from src.shared.assets.icon_manager import icon_reset
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, SECTION_TITLE_STYLE,
+    create_panel_layout, style_header_button, style_reset_button,
+)
+
+_MODE_ICON_DIR = Path(__file__).with_name("mixer_icons")
+_MODE_ICON_SIZE = 20
+
 
 class MixerPanel(QWidget):
     # Emits dict of parameters
@@ -15,10 +28,6 @@ class MixerPanel(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.colors = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta']
-        self.hue_map = {
-            'red': 0, 'orange': 30, 'yellow': 60, 'green': 120, 
-            'aqua': 180, 'blue': 240, 'purple': 280, 'magenta': 315
-        }
         self.params = {color: [0, 0, 0] for color in self.colors} # [Hue, Sat, Lum]
 
         # Throttle slider-driven updates to ~60 FPS
@@ -31,119 +40,90 @@ class MixerPanel(QWidget):
         self.init_ui()
 
     def init_ui(self) -> None:
-        layout = QVBoxLayout()
-        layout.setContentsMargins(5, 5, 5, 5)
-        self.setLayout(layout)
+        header, body = create_panel_layout(self, (6, 6, 0), 4)
+        body.setContentsMargins(0, 0, 0, 0)
+        self._mode_title = QLabel()
+        self._mode_title.setStyleSheet(SECTION_TITLE_STYLE)
+        header.addWidget(self._mode_title)
+        header.addStretch()
 
-        self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabBar::tab { padding: 5px 15px; background: #222; color: #888; }
-            QTabBar::tab:selected { background: #333; color: #cc6600; }
-        """)
+        self._mode_group = QButtonGroup(self)
+        modes = (
+            (I18N.tr("mixer.hue", "Hue"), "hue.svg"),
+            (I18N.tr("mixer.saturation", "Saturation"), "saturation.svg"),
+            (I18N.tr("mixer.luminance", "Luminance"), "luminance.svg"),
+        )
+        for index, (label, filename) in enumerate(modes):
+            button = QToolButton()
+            button.setCheckable(True)
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            style_header_button(button, width=30, icon=QIcon(str(_MODE_ICON_DIR / filename)))
+            button.setIconSize(QSize(_MODE_ICON_SIZE, _MODE_ICON_SIZE))
+            self._mode_group.addButton(button, index)
+            header.addWidget(button)
 
-        self.hue_tab = self.create_mixer_tab(0, I18N.tr("mixer.hue", "色相"))
-        self.sat_tab = self.create_mixer_tab(1, I18N.tr("mixer.saturation", "饱和度"))
-        self.lum_tab = self.create_mixer_tab(2, I18N.tr("mixer.luminance", "亮度"))
+        self.reset_btn = QToolButton()
+        self.reset_btn.setObjectName("reset_btn")
+        style_reset_button(self.reset_btn, global_reset=True)
+        self.reset_btn.clicked.connect(lambda: self.reset_group(self._pages.currentIndex()))
+        header.addWidget(self.reset_btn)
 
-        self.tabs.addTab(self.hue_tab, I18N.tr("mixer.hue", "色相"))
-        self.tabs.addTab(self.sat_tab, I18N.tr("mixer.saturation", "饱和度"))
-        self.tabs.addTab(self.lum_tab, I18N.tr("mixer.luminance", "亮度"))
+        self._pages = QStackedWidget()
+        self.hue_tab = self._create_mode_page(0)
+        self.sat_tab = self._create_mode_page(1)
+        self.lum_tab = self._create_mode_page(2)
+        for page in (self.hue_tab, self.sat_tab, self.lum_tab):
+            self._pages.addWidget(page)
+        body.addWidget(self._pages)
+        self._mode_group.idToggled.connect(self._on_mode_toggled)
+        self._mode_group.button(0).setChecked(True)
 
-        layout.addWidget(self.tabs)
+    def _on_mode_toggled(self, index: int, checked: bool) -> None:
+        if not checked:
+            return
+        self._pages.setCurrentIndex(index)
+        label = self._mode_group.button(index).toolTip()
+        self._mode_title.setText(label)
+        tooltip = I18N.tr("mixer.reset_mode", "Reset {mode}", mode=label)
+        self.reset_btn.setToolTip(tooltip)
+        self.reset_btn.setAccessibleName(tooltip)
 
-    def create_mixer_tab(self, param_idx, label_prefix):
-        tab = QWidget()
+    def _create_mode_page(self, param_idx: int) -> QScrollArea:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        
+
         container = QWidget()
         main_layout = QVBoxLayout(container)
-        main_layout.setContentsMargins(10, 5, 10, 5)
-        main_layout.setSpacing(5)
-
-        # Reset button at top-right - Using icon_manager
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        reset_btn = QPushButton()
-        reset_btn.setObjectName("reset_btn")
-        reset_btn.setIcon(icon_reset())
-        reset_btn.setIconSize(QSize(12, 12))
-        reset_btn.setFixedSize(16, 16)
-        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reset_btn.setStyleSheet("""
-            QPushButton#reset_btn {
-                padding: 0px;
-                border-radius: 8px;
-                background-color: transparent;
-                border: 1px solid #333;
-            }
-            QPushButton#reset_btn:hover {
-                background-color: #333;
-                border: 1px solid #ff8800;
-            }
-        """)
-        reset_btn.setToolTip(f"Reset {label_prefix}")
-        reset_btn.clicked.connect(lambda: self.reset_group(param_idx))
-        btn_layout.addWidget(reset_btn)
-        main_layout.addLayout(btn_layout)
+        main_layout.setContentsMargins(10, 16, 10, 5)
+        main_layout.setSpacing(0)
 
         # Grid for two columns
         grid = QGridLayout()
-        grid.setSpacing(10)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(7)
         grid.setContentsMargins(0, 0, 0, 0)
-        
+
         for i, color in enumerate(self.colors):
-            slider_info = self.create_color_row(color, param_idx)
-            row = i // 2
-            col = i % 2
-            
-            grid.addWidget(slider_info['row'], row, col)
+            grid.addWidget(self.create_color_row(color, param_idx), i // 2, i % 2)
 
         main_layout.addLayout(grid)
         main_layout.addStretch()
         scroll.setWidget(container)
-        
-        vbox = QVBoxLayout(tab)
-        vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.addWidget(scroll)
-        
-        return tab
+        return scroll
 
-    def create_color_row(self, color, param_idx):
+    def create_color_row(self, color: str, param_idx: int) -> ColorParameterRow:
         # 使用 I18N 翻译颜色名称
         name = I18N.tr(f"mixer.{color}", color.capitalize())
 
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             name, -100.0, 100.0, 0.0,
             step=1.0, decimals=0, label_width=50,
             slider_auto_hide=False)
         row.setProperty("color", color)
         row.setProperty("param_idx", param_idx)
         row.slider.enable_velocity_drag = True
-
-        # Apply Lightroom-style gradients
-        base_hue = self.hue_map.get(color, 0)
-        if param_idx == 0: # Hue
-            h1 = (base_hue - 25) % 360
-            h2 = base_hue
-            h3 = (base_hue + 25) % 360
-            row.slider.set_gradient_stops([
-                (0.0, QColor.fromHsv(int(h1), 200, 200)),
-                (0.5, QColor.fromHsv(int(h2), 200, 200)),
-                (1.0, QColor.fromHsv(int(h3), 200, 200))
-            ])
-        elif param_idx == 1: # Saturation
-            row.slider.set_gradient_stops([
-                (0.0, QColor(128, 128, 128)),
-                (1.0, QColor.fromHsv(int(base_hue), 255, 200))
-            ])
-        elif param_idx == 2: # Luminance
-            row.slider.set_gradient_stops([
-                (0.0, QColor(0, 0, 0)),
-                (0.5, QColor.fromHsv(int(base_hue), 200, 160)),
-                (1.0, QColor(255, 255, 255))
-            ])
 
         # 连接顺序即调用顺序：必须先 flush 尾值再发 interaction_ended，
         # 否则 on_interaction_ended（autosave/idle 渲染）先于最后 ≤16ms
@@ -152,8 +132,8 @@ class MixerPanel(QWidget):
         row.interactionEnded.connect(self._flush_pending_params)
         row.interactionEnded.connect(self.interaction_ended.emit)
         row.valueChanged.connect(lambda val, c=color, i=param_idx: self.update_param(c, i, int(val)))
-        
-        return {'row': row}
+
+        return row
 
     def update_param(self, color, idx, val) -> None:
         if self._syncing_ui:

@@ -19,28 +19,19 @@ from PyQt6.QtWidgets import (
 
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.features.color.ui.gallery_icons import gallery_icon
+from src.features.color.ui.panel_chrome import create_panel_header, header_icon, style_header_button
 
 if TYPE_CHECKING:
     from src.features.color.ui.presets_panel import PresetsPanel, PresetDelegate
 
 
-_BUTTON_STYLE = """
-QToolButton { background: transparent; border: none; border-radius: 2px;
-    padding: 0; margin: 0; color: #a2a2a6; }
-QToolButton:hover { background: #35353b; }
-QToolButton:checked { background: #3b3b40; }
-QToolButton::menu-indicator { image: none; }
-"""
-
-
 def _button(parent: QWidget, name: str, text: str) -> QToolButton:
     button = QToolButton(parent)
-    button.setIcon(gallery_icon(name))
-    button.setIconSize(QSize(20, 20))
-    button.setFixedSize(32, 28)
-    button.setStyleSheet(_BUTTON_STYLE)
+    button.setIcon(header_icon(gallery_icon(name)))
+    style_header_button(button, width=32)
     button.setToolTip(text)
     button.setAccessibleName(text)
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -54,7 +45,7 @@ class GalleryListHeader(QWidget):
 
     def paintEvent(self, event: QEvent) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#202024"))
+        painter.fillRect(self.rect(), QColor(C.COLOR_PANEL_INSET))
         painter.setPen(QColor("#b4b4b9"))
         font = QFont(self.font())
         font.setPixelSize(10)
@@ -171,25 +162,23 @@ class GalleryChrome(QObject):
         self._refreshing_folders = False
         panel.setObjectName("PresetsGallery")
         panel.setMinimumWidth(220)
-        panel.setStyleSheet("""
-            QWidget#PresetsGallery, QFrame#gallerySearchRow { background: #28282e; }
-            QFrame#galleryToolbar { background: #202024; border-bottom: 1px solid #111114; }
-            QListWidget#galleryStills { background: #28282e; border: none; padding: 0; outline: none; }
-            QListWidget#galleryStills::item { background: transparent; border: 0; padding: 0; }
-            QTreeWidget#galleryAlbums { background: #242429; border: 0; color: #c6c6cb; outline: none; font-size: 11px; }
-            QTreeWidget#galleryAlbums::item { height: 30px; border: none; }
-            QTreeWidget#galleryAlbums::item:selected { background: #3a3a40; color: #eee; }
-            QScrollBar:vertical { background: #28282e; width: 10px; margin: 0; }
-            QScrollBar::handle:vertical { background: #4b4b52; min-height: 24px; border-radius: 4px; }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+        panel.setStyleSheet(f"""
+            QWidget#PresetsGallery, QFrame#gallerySearchRow {{ background: {C.BG_PANEL}; }}
+            QListWidget#galleryStills {{ background: {C.BG_PANEL}; border: none; padding: 0; outline: none; }}
+            QListWidget#galleryStills::item {{ background: transparent; border: 0; padding: 0; }}
+            QTreeWidget#galleryAlbums {{ background: {C.COLOR_PANEL_INSET}; border: 0; color: #c6c6cb; outline: none; font-size: 11px; }}
+            QTreeWidget#galleryAlbums::item {{ height: 30px; border: none; }}
+            QTreeWidget#galleryAlbums::item:selected {{ background: {C.COLOR_PANEL_RAISED}; color: #eee; }}
+            QScrollBar:vertical {{ background: {C.BG_PANEL}; width: 10px; margin: 0; }}
+            QTreeWidget#galleryAlbums QScrollBar:vertical {{ background: {C.COLOR_PANEL_INSET}; }}
+            QScrollBar::handle:vertical {{ background: #4b4b52; min-height: 24px; border-radius: 4px; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
         """)
         root = QVBoxLayout(panel)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-        self.toolbar = QFrame(panel)
-        self.toolbar.setObjectName("galleryToolbar")
-        self.toolbar.setFixedHeight(28)
+        self.toolbar = create_panel_header(object_name="galleryToolbar")
         tools = QHBoxLayout(self.toolbar)
         tools.setContentsMargins(3, 0, 3, 0)
         tools.setSpacing(0)
@@ -465,7 +454,8 @@ def paint_gallery_item(painter: QPainter, option: object, index: object, delegat
         # Label 独立于文件名（未设置时退回文件主名显示）；timeline 名是
         # 抓帧时的快照，缺失留空——不推断成当前 timeline。
         row = option.rect
-        painter.fillRect(row, QColor("#454044" if selected else "#25252a" if index.row() % 2 == 0 else "#28282e"))
+        row_background = C.COLOR_PANEL_INSET if index.row() % 2 == 0 else C.BG_PANEL
+        painter.fillRect(row, QColor(C.COLOR_PANEL_RAISED if selected else row_background))
         meta = index.data(Qt.ItemDataRole.UserRole + 1)
         still_id = getattr(meta, "still_id", None)
         label = getattr(meta, "label", None)
@@ -495,7 +485,7 @@ def paint_gallery_item(painter: QPainter, option: object, index: object, delegat
         rect = QRect(option.rect.left() + inset, option.rect.top(), width, height)
         path = QPainterPath()
         path.addRoundedRect(QRectF(rect), 2.0, 2.0)
-        painter.fillPath(path, QColor("#17171b"))
+        painter.fillPath(path, QColor(C.COLOR_PANEL_INSET))
         pixmap = delegate._thumbnail_pixmap(index.data(Qt.ItemDataRole.UserRole)) if index.data(Qt.ItemDataRole.UserRole) else None
         if pixmap is not None:
             # Preserve the still's aspect ratio; non-16:9 media are letterboxed.

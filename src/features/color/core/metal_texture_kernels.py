@@ -37,6 +37,7 @@ from typing import Any, Mapping, Tuple
 import numpy as np
 
 from src.features.color.core.midtone_detail_calibration import DETAIL_SHADER_GAIN, detail_shader_taps
+from src.features.color.core.mist import MIST_MSL
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
     MSL_CURVES,
@@ -106,6 +107,8 @@ struct TexExtraParams {
     uint  has_primary_calibration;
     float mid_detail;
     uint  mid_detail_calibrated;
+    float mist_spread;
+    float mist_amount;
 };
 """
 
@@ -223,7 +226,7 @@ static inline float3 tg_apply_calibrated_detail(
 """ + DETAIL_SHADER_GAIN + """
 }
 
-// Corrector 单 pass：primary calibration → grading → curves(buffer) → hsl → soft_clip →
+// Corrector 单 pass：mist → primary calibration → grading → curves(buffer) → hsl → soft_clip →
 // curves_soft_clip → mixer → warper → lut3d → blend/matte epilogue。
 // 禁用域的纹理槽仍须绑定有效纹理（占位 identity），由 flag 守卫不读取。
 kernel void tg_corrector(
@@ -243,16 +246,22 @@ kernel void tg_corrector(
     float4 src4 = src.read(gid);
     float3 color = src4.rgb;
 
+    if (x.mist_amount != 0.0) {
+        float2 size = float2(src.get_width(), src.get_height());
+        float2 uv = (float2(gid) + 0.5) / size;
+        color += mist_delta(src, tg_sampler, uv, color, size, x.mist_spread, x.mist_amount);
+    }
+    float3 source_color = color;
     if (x.has_primary_calibration != 0u) {
         color = tg_apply_primary_calibration(color, primary_tex);
     }
     color = graph_grading_before_detail(color, g);
     if (x.mid_detail != 0.0) {
         color = x.mid_detail_calibrated != 0u
-            ? tg_apply_calibrated_detail(color, src4.rgb, src, gid, x.mid_detail)
+            ? tg_apply_calibrated_detail(color, source_color, src, gid, x.mid_detail)
             : tg_apply_mid_detail(color, src, gid, x.mid_detail);
     }
-    color = graph_grading_after_detail(color, src4.rgb, g);
+    color = graph_grading_after_detail(color, source_color, g);
     if (g.has_curves == 2u) {
         color = graph_apply_calibrated_curves(color, curves);
     } else if (g.has_curves != 0u) {
@@ -562,6 +571,7 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + MSL_SOFT_CLIP_HELPERS
     + MSL_SOFT_CLIP
     + MSL_CURVES_SOFT_CLIP
+    + MIST_MSL
     + _TEX_SAMPLERS
     + _TEX_EXTRA_PARAMS_MSL
     + _TEX_QUALIFIER_PARAMS_MSL
@@ -610,6 +620,8 @@ TEX_EXTRA_PARAMS_DTYPE = np.dtype([
     ("has_primary_calibration", "<u4"),
     ("mid_detail", "<f4"),
     ("mid_detail_calibrated", "<u4"),
+    ("mist_spread", "<f4"),
+    ("mist_amount", "<f4"),
 ])
 
 TEX_QUALIFIER_PARAMS_DTYPE = np.dtype([
@@ -677,6 +689,8 @@ def make_tex_extra_params(
     params["blend_mode"] = int(_as_float(values.get("u_blend_mode"), 0.0))
     params["lut_intensity"] = _as_float(values.get("u_lut_intensity"), 1.0)
     params["warper_space"] = int(_as_float(values.get("u_warper_space"), 0.0))
+    params["mist_spread"] = _as_float(values.get("u_mist_spread"), 0.0)
+    params["mist_amount"] = _as_float(values.get("u_mist_amount"), 0.0)
     for field in _SC_DEFAULTS:
         params[field] = _as_float(values.get(f"u_{field}"),
                                   _SC_DEFAULTS[field])
@@ -701,6 +715,7 @@ def make_tex_extra_params(
     mixer[0, :] = flat
     scalars = [float(v) for v in flat]
     scalars += [float(params[name][0]) for name in params.dtype.names[7:29]]
+    scalars += [float(params[name][0]) for name in ("mist_spread", "mist_amount")]
     scalars.append(float(params["mid_detail"][0]))
     if not all(np.isfinite(v) for v in scalars):
         raise ValueError("tg_corrector: 扩展参数含非有限值（fail-closed）")

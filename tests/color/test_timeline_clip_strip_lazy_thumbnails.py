@@ -308,7 +308,7 @@ class TestTimelineClipStripLazyThumbnails(unittest.TestCase):
             Qt.ScrollBarPolicy.ScrollBarAsNeeded,
         )
         horizontal_bar = strip._scroll_area.horizontalScrollBar()
-        self.assertGreaterEqual(horizontal_bar.minimumHeight(), 9)
+        self.assertEqual(horizontal_bar.minimumHeight(), 7)
 
         strip.deleteLater()
 

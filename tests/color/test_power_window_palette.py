@@ -3,10 +3,13 @@ import copy
 
 import pytest
 from PyQt6.QtTest import QSignalSpy
+from PyQt6.QtWidgets import QWidget
 
 from src.features.color.core.layer import MaskGroup, MaskShape
 from src.features.color.ui.mask_panel import MaskPanel
+from src.features.color.ui.panel_chrome import PARAMETER_ROW_HEIGHT, PARAMETER_ROW_SPACING
 from src.features.color.ui.power_window_panel import PowerWindowPanel
+from src.shared.ui.style_sheet import DARK_THEME
 
 pytestmark = pytest.mark.usefixtures("qapp")
 
@@ -20,6 +23,44 @@ def test_five_empty_templates_and_signal_only_creation(qapp):
         assert spy[-1] == [kind]
     assert not palette.delete_button.isEnabled()
     assert all(not value.isEnabled() for value in palette.controls.values())
+
+
+def test_video_palette_fits_five_shape_rows_at_a_compact_height(qtbot) -> None:
+    panel = MaskPanel()
+    qtbot.addWidget(panel)
+    panel.setStyleSheet(DARK_THEME + panel.styleSheet())
+    panel.set_image_only_tools_visible(False)
+    panel.resize(750, 260)
+    panel.show()
+    palette = panel.video_panel
+    tools = palette.findChild(QWidget, "window_tools")
+
+    assert tools.height() == 38
+    assert tools.grab().toImage().pixelColor(3, 3).name() == "#27272b"
+    assert panel.height() == 260
+    assert palette.parameters.minimumSizeHint().height() <= palette.parameters.height()
+    for upper, lower in (("size", "pan"), ("soft1", "soft3")):
+        assert (palette.controls[lower].y() - palette.controls[upper].y()
+                == PARAMETER_ROW_HEIGHT + PARAMETER_ROW_SPACING)
+
+    rows = [palette.rows_layout.itemAt(index).widget() for index in range(5)]
+    assert all(row.height() == 38 for row in rows)
+    assert rows[-1].geometry().bottom() < palette.scroll.viewport().height()
+    assert all(row.grab().toImage().pixelColor(3, 3).name() == "#27272b" for row in rows)
+
+    circle, curve = MaskShape("circle"), MaskShape("curve")
+    palette.set_shapes([circle, curve])
+    rows = [palette.rows_layout.itemAt(index).widget() for index in range(5)]
+    for selected in (circle, curve):
+        palette.select_shape(selected.id)
+        selected_row = palette._row_buttons[selected.id].parentWidget()
+        assert [row.grab().toImage().pixelColor(3, 3).name() for row in rows] == [
+            "#202024" if row is selected_row else "#27272b" for row in rows
+        ]
+
+    palette.set_shapes([MaskShape("circle") for _ in range(8)])
+    bar = palette.scroll.verticalScrollBar()
+    qtbot.waitUntil(lambda: bar.maximum() > 0)
 
 
 def test_video_selection_and_nested_identity_are_quiet(qapp):

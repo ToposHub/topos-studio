@@ -1272,6 +1272,7 @@ class FileOpsMixin:
 
         # Whole-frame video motion must never carry into still-image tools.
         self.engine.set_video_stabilization_state({})
+        self.effects_panel.set_mist_available(True)
         if not create_standalone_session and (aces is not None or hdr is not None):
             self._apply_color_project_viewer_signal(True)
         # Load original image first (sets img_source_full = original)
@@ -5837,8 +5838,7 @@ class FileOpsMixin:
             if hasattr(self, 'curves_panel'):
                 self.curves_panel.set_layer_state(
                     {"curves_soft_clip": {}, "curves_edit": {}})
-            if hasattr(self.effects_panel, 'reset_all'):
-                self.effects_panel.reset_all()
+            self.effects_panel.set_params_dict({}, emit=False)
             if hasattr(self.denoise_panel, 'reset_all'):
                 self.denoise_panel.reset_all()
 

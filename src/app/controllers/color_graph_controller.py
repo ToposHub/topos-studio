@@ -587,6 +587,7 @@ class GraphProjectBridge:
         graph = stack.color_graph
         pending = self._buffer._last_graph
         if pending is None and graph is None:
+            # begin_transaction captured the migration view of a legacy stack.
             pending = self._buffer._first_graph
         if pending is not None:
             graph = ColorGraphData.from_dict(pending)
@@ -2213,19 +2214,30 @@ class ColorGraphAppHost:
     def submit_curve_change(self, node_id: str, domains: Mapping[str, Any],
                             transaction_id: str) -> bool:
         """Commit the same curve-domain payload used by grade transfer."""
-        return self._bridge.submit_buffered(
+        return self._submit_tool_domains(node_id, domains, transaction_id)
+
+    def _submit_tool_domains(self, node_id: str, domains: Mapping[str, Any],
+                             transaction_id: str) -> bool:
+        stack = self._bridge._current_stack(self._get_project())
+        if self._adapter.preview_conflicts_with(stack):
+            return False
+        if not self._bridge.submit_buffered(
             "paste_selected_domains",
             {"node_ids": (node_id,), "payload": domains, "domains": tuple(domains)},
-            transaction_id, compound_path=self._tool_compound_path())
-
-    def preview_curve_gesture(self) -> None:
-        """Render the staged curve edit through the graph executor."""
-        from src.shared.project.color_graph import ColorGraphData
-
+            transaction_id, compound_path=self._tool_compound_path()):
+            return False
         pending = self._bridge._buffer._last_graph
         if pending is not None:
+            from src.shared.project.color_graph import ColorGraphData
+
             self._adapter.preview_graph = ColorGraphData.from_dict(pending)
             self.preview_grade_gesture()
+        return True
+
+    def submit_blur_sharpen_change(self, node_id: str, params: Mapping[str, Any],
+                                   transaction_id: str) -> bool:
+        """Buffer the built-in spatial effect settings and preview the draft graph."""
+        return self._submit_tool_domains(node_id, {"blur_sharpen": params}, transaction_id)
 
     def submit_warper_change(self, node_id: str, payload: Mapping[str, Any],
                              transaction_id: str) -> bool:

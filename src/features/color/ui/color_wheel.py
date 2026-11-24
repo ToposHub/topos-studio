@@ -7,8 +7,8 @@ Color Wheel Module - ColorWheel widget and GradingPanel (original visual design)
 - src/ui/grading_panel.py (GradingPanel 类, now at src/features/color/ui/color_wheel.py)
 
 视觉说明（原创设计，非达芬奇复刻）：
-- 单轮为"光学内凹双环"：极细外环（Master 亮度弧 + 环拖拽）+ 高饱和连续
-  光谱内盘 + 径向中性渐变遮罩 + 十字准星控制点。
+- 单轮为"光学内凹双环"：极细外环（Master 亮度弧 + 环拖拽）+ 高饱和彩环
+  + 低饱和度色相内盘 + 十字准星控制点。
 - 底部为金属滚花拨轮（KnurledJogWheel，相对式拖拽，不吸附）。
 - 面板四模式：色轮（Lift/Gamma/Gain/Offset）/ Color Bars / Log 色轮
   （Shadow/Midtone/Highlight/Offset）/ 色调饱和度。
@@ -28,16 +28,14 @@ from typing import Any, Optional
 from PyQt6.QtWidgets import (QWidget, QToolButton, QPushButton, QHBoxLayout,
                              QVBoxLayout, QStackedWidget, QSizePolicy, QLabel,
                              QFrame)
-from PyQt6.QtCore import QEvent, QObject, Qt, QPointF, pyqtSignal, QRectF, QSize, QTimer
+from PyQt6.QtCore import QEvent, QObject, Qt, QPointF, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import (QPainter, QColor, QConicalGradient, QRadialGradient,
                          QBrush, QPen, QMouseEvent, QKeyEvent, QPainterPath,
                          QLinearGradient)
 
-from src.shared.assets.icon_manager import (icon_reset, icon_add,
-                                             icon_delete, icon_circle,
-                                             IconColors)
+from src.shared.assets.icon_manager import icon_add, icon_delete, icon_circle
 from src.shared.ui.widgets.drag_value import DragValue, drag_speed_per_pixel
-from src.shared.ui.style_sheet import C, PARAM_LABEL_STYLE
+from src.shared.ui.style_sheet import C
 from src.shared.i18n.i18n import I18N
 from src.features.color.core.composition_uniforms import (
     params_to_offset_rgb, params_to_rgb, offset_chroma_scale, offset_master_scale,
@@ -52,6 +50,10 @@ from src.features.color.ui.primary_wheel_response import (
     multiplier_brightness, scalar_drag_rate, shift_master, wheel_chroma, wheel_luma, wheel_position,
 )
 from src.features.color.ui.tonal_saturation_panel import TonalSaturationPanel
+from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    PARAMETER_BAR_HEIGHT, create_panel_header, header_button_color, style_header_button, style_reset_button,
+)
 
 
 # ============================================================================
@@ -124,22 +126,38 @@ class _GradingValue(DragValue):
 
     def __init__(self, minimum: float, maximum: float, default: float,
                  decimals: int = 2, accent: str = "#919195",
-                 drag_span: float | None = None, *, drag_rate: float | None = None) -> None:
+                 drag_span: float | None = None, *, drag_rate: float | None = None,
+                 height: int = 24) -> None:
         super().__init__("", minimum, maximum, default, decimals=decimals, compact=True)
-        self._accent = accent
         self._drag_span = drag_span
         self._drag_rate = drag_rate
         self._cancelled_drag = False
         self.setFixedValueWidth(44)
-        self.setFixedHeight(24)
-        # Keep the shared DragValue normal/hover/active/editor styles intact.
-        # Channel identity lives only in a separate, non-interactive color bar.
-        self.layout().setContentsMargins(0, 0, 0, 4)
+        self.setFixedHeight(height)
+
         self._value_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self._edit.setFixedHeight(20)
+        layout = self.layout()
+        field = QVBoxLayout()
+        field.setContentsMargins(0, 0, 0, 0)
+        field.setSpacing(0)
+        for widget in (self._value_label, self._edit):
+            layout.removeWidget(widget)
+            field.addWidget(widget)
         self._accent_bar = QWidget(self)
         self._accent_bar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._accent_bar.setFixedHeight(2)
         self._accent_bar.setStyleSheet(f"background: {accent}; border: none;")
+        field.addWidget(self._accent_bar)
+        layout.addLayout(field)
+        layout.setAlignment(field, Qt.AlignmentFlag.AlignVCenter)
+
+    def fit_display_range(self, minimum_width: int) -> None:
+        self._value_label.ensurePolished()
+        metrics = self._value_label.fontMetrics()
+        text_width = max(metrics.horizontalAdvance(self._format_value(value))
+                         for value in (self._min, self._max))
+        # Leave room for the field border, padding, and inline editor cursor.
+        self.setFixedValueWidth(max(minimum_width, text_width + 6))
 
     @staticmethod
     def _precision(modifiers: Qt.KeyboardModifier) -> float:
@@ -158,12 +176,6 @@ class _GradingValue(DragValue):
         if self._drag_span is None:
             return super()._drag_sensitivity(modifiers)
         return drag_speed_per_pixel(self._drag_span, modifiers)
-
-    def resizeEvent(self, event: Any) -> None:
-        super().resizeEvent(event)
-        # 标识条几何对齐 Wheel_UI 设计稿：左右各缩进 1px、贴底 1.5px（取整 2px）。
-        self._accent_bar.setGeometry(1, self.height() - 2,
-                                     self.width() - 2, 2)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -218,6 +230,7 @@ class _GradingValue(DragValue):
 class _PrimaryValueRow(QWidget):
     """Label and value only; display units are independent of stored grade values."""
 
+    _VALUE_WIDTH = 48
     valueChanged = pyqtSignal(float)
     interactionStarted = pyqtSignal()
     interactionEnded = pyqtSignal()
@@ -239,13 +252,16 @@ class _PrimaryValueRow(QWidget):
         layout.setSpacing(4)
         layout.addStretch()
         self.label = QLabel(label)
-        self.label.setStyleSheet(PARAM_LABEL_STYLE)
+        self.label.setStyleSheet(PARAMETER_LABEL_STYLE)
+        self.label.setMinimumWidth(1)
+        self.label.setToolTip(label)
         layout.addWidget(self.label)
         self.spin = _GradingValue(minimum * scale + offset,
                                   maximum * scale + offset,
                                   self._default_value * scale + offset,
                                   decimals, accent, drag_rate=drag_rate * scale)
         self.spin.setAccessibleName(label)
+        self.spin.setFixedValueWidth(self._VALUE_WIDTH)
         layout.addWidget(self.spin)
         layout.addStretch()
         self.spin.valueChanged.connect(self._on_value_changed)
@@ -271,6 +287,7 @@ class _PrimaryValueRow(QWidget):
         self.spin.setRange(minimum, maximum)
         self.spin.setDefaultValue(self._default_value * scale + offset)
         self.spin.setDecimals(decimals)
+        self.spin.fit_display_range(self._VALUE_WIDTH)
         self.spin.set_drag_rate(self._drag_rate * scale)
         self.setValue(value)
         self.spin.blockSignals(blocked)
@@ -440,13 +457,14 @@ class KnurledJogWheel(QWidget):
         rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
         radius = h / 2.0
 
-        cylinder = QLinearGradient(0.0, 0.0, 0.0, h)
-        cylinder.setColorAt(0.00, QColor("#30343c"))
-        cylinder.setColorAt(0.45, QColor("#292d35" if self._hovered else "#22252b"))
-        cylinder.setColorAt(1.00, QColor("#121419"))
+        cylinder = QLinearGradient(0.0, 0.0, w, 0.0)
+        cylinder.setColorAt(0.00, QColor("#08090b"))
+        cylinder.setColorAt(0.15, QColor("#15171b"))
+        cylinder.setColorAt(0.50, QColor("#2a2d34" if self._hovered else "#23262c"))
+        cylinder.setColorAt(0.85, QColor("#15171b"))
+        cylinder.setColorAt(1.00, QColor("#08090b"))
 
-        border = QColor("#d99b38" if self._dragging else
-                        "#505663" if self._hovered else "#101116")
+        border = QColor("#d99b38" if self._dragging else "#0a0b0d")
         painter.setPen(QPen(border, 1.0))
         painter.setBrush(QBrush(cylinder))
         painter.drawRoundedRect(rect, radius, radius)
@@ -461,18 +479,18 @@ class KnurledJogWheel(QWidget):
             norm_pos = (x - w / 2.0) / (w / 2.0)
             if abs(norm_pos) <= 1.0:
                 cos_light = math.cos(norm_pos * (math.pi * 0.48))
-                dark_alpha = int(155 * cos_light)
-                light_alpha = int(65 * cos_light)
-                painter.setPen(QPen(QColor(6, 7, 9, dark_alpha), 1.2))
-                painter.drawLine(QPointF(x, 2.5), QPointF(x, h - 2.5))
-                painter.setPen(QPen(QColor(190, 198, 210, light_alpha), 0.8))
-                painter.drawLine(QPointF(x + 1.2, 2.5), QPointF(x + 1.2, h - 2.5))
+                dark_alpha = int(190 * cos_light)
+                light_alpha = int(75 * cos_light)
+                painter.setPen(QPen(QColor(6, 7, 9, dark_alpha), 1.4))
+                painter.drawLine(QPointF(x, 1.5), QPointF(x, h - 1.5))
+                painter.setPen(QPen(QColor(190, 198, 210, light_alpha), 0.9))
+                painter.drawLine(QPointF(x + 1.4, 2.0), QPointF(x + 1.4, h - 2.0))
             x += pitch
         painter.end()
 
 
 # ============================================================================
-# 光学内凹双环色轮画布（细外环 + 高饱和光谱内盘 + 准星控制点）
+# 光学内凹双环色轮画布
 # ============================================================================
 
 class _WheelCanvas(QWidget):
@@ -485,6 +503,7 @@ class _WheelCanvas(QWidget):
     interaction_started = pyqtSignal()
 
     _RING_WIDTH = 4.0
+    _HUE_RING_FRACTION = 0.09
     # 外环角向拖拽的亮度灵敏度（弧度 → brightness）：一整圈 ≈ ±1.43
     _RING_SENSITIVITY = 2.0 / (2.0 * math.pi * 1.4)
 
@@ -502,9 +521,7 @@ class _WheelCanvas(QWidget):
     # ── 几何（绘制与命中测试共用） ────────────────────────────────────
 
     def _geometry(self) -> tuple[QPointF, float]:
-        # 半径随面板缩放动态计算，封顶 100px（与 dock 高度上限联动，
-        # 见 dock_layout_controller._COLOR_TOOL_DOCK_MAX_HEIGHT 注释）。
-        # 纵向 padding 6px：保证在 dock 封顶高度下半径仍能达到 100。
+        # 半径随画布的可用空间缩放，封顶 100px。
         radius = max(1.0, min((self.width() - 12.0) / 2.0,
                               (self.height() - 6.0) / 2.0, 100.0))
         return QPointF(self.width() / 2.0, self.height() / 2.0), radius
@@ -533,6 +550,7 @@ class _WheelCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         center, outer_r = self._geometry()
         inner_r = self._inner_radius(outer_r)
+        disk_r = inner_r * (1.0 - self._HUE_RING_FRACTION)
         self._wheel._cached_center = center
         self._wheel._cached_radius = outer_r
 
@@ -554,23 +572,20 @@ class _WheelCanvas(QWidget):
                             Qt.PenCapStyle.RoundCap))
         painter.drawArc(track_rect, int(start_deg * 16), int(base_span * 16))
 
-        # 3. 高饱和连续光谱内盘（色相角经 rotation_degrees 校准）
+        # 3. 彩环与内盘共享色相，彩环也属于 Hue/Sat 拖拽区域。
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(self._hue_gradient(center)))
         painter.drawEllipse(center, inner_r, inner_r)
 
-        # 径向中性渐变遮罩：中心柔暗，边缘保留高饱和光谱环
-        mask = QRadialGradient(center, inner_r)
-        mask.setColorAt(0.00, QColor(40, 42, 48, 250))
-        mask.setColorAt(0.42, QColor(35, 37, 43, 240))
-        mask.setColorAt(0.74, QColor(28, 30, 36, 194))
-        mask.setColorAt(0.91, QColor(22, 24, 29, 104))
-        mask.setColorAt(0.975, QColor(12, 13, 16, 0))
-        mask.setColorAt(1.00, QColor(8, 9, 11, 48))
+        # 中性遮罩限定在内盘，色相从中性中心向外轻微增强。
+        mask = QRadialGradient(center, disk_r)
+        mask.setColorAt(0.0, QColor(47, 47, 47))
+        mask.setColorAt(0.48, QColor(42, 42, 42, 243))
+        mask.setColorAt(1.0, QColor(29, 29, 29, 225))
         painter.setBrush(QBrush(mask))
-        painter.drawEllipse(center, inner_r, inner_r)
+        painter.drawEllipse(center, disk_r, disk_r)
 
-        # 光谱内盘和石墨灰外环的细分界线。
+        # 彩环和 Master 外环的细分界线。
         painter.setPen(QPen(QColor(0, 0, 0, 120), 0.65))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(center, inner_r, inner_r)
@@ -578,10 +593,8 @@ class _WheelCanvas(QWidget):
         # 4. 极细十字基准线与同心圆
         painter.setPen(QPen(QColor(255, 255, 255, 26), 0.75))
         painter.drawEllipse(center, inner_r * 0.52, inner_r * 0.52)
-        painter.drawLine(center + QPointF(-inner_r + 1.5, 0.0),
-                         center + QPointF(inner_r - 1.5, 0.0))
-        painter.drawLine(center + QPointF(0.0, -inner_r + 1.5),
-                         center + QPointF(0.0, inner_r - 1.5))
+        painter.drawLine(center + QPointF(-disk_r, 0.0), center + QPointF(disk_r, 0.0))
+        painter.drawLine(center + QPointF(0.0, -disk_r), center + QPointF(0.0, disk_r))
 
         # 5. 动态矢量牵引线与准星控制点
         magnitude = math.hypot(self._wheel.knob_pos.x(), self._wheel.knob_pos.y())
@@ -761,19 +774,12 @@ class ColorWheel(QWidget):
         header.addWidget(self.zone_icon)
         header.addStretch(1)
         self.title_label = QLabel(title)
-        self.title_label.setStyleSheet(
-            "color: #d4d7dd; font-size: 12px; font-weight: 600;")
+        self.title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(self.title_label)
         header.addStretch(1)
         self.reset_btn = QToolButton(self)
-        self.reset_btn.setIcon(icon_reset(IconColors.DEFAULT))
-        self.reset_btn.setIconSize(QSize(13, 13))
-        self.reset_btn.setFixedSize(20, 20)
+        style_reset_button(self.reset_btn)
         self.reset_btn.setToolTip(I18N.tr("grading.reset_wheel", "重置") + " " + title)
-        self.reset_btn.setStyleSheet("""
-            QToolButton { background: transparent; border: none; border-radius: 3px; }
-            QToolButton:hover { background: #414146; }
-        """)
         self.reset_btn.clicked.connect(self.reset)
         header.addWidget(self.reset_btn)
         outer_layout.addLayout(header)
@@ -1195,40 +1201,27 @@ class ColorWheel(QWidget):
 # ============================================================================
 
 class ModeTabButton(QPushButton):
-    """自绘矢量模式图标按钮（激活态带内凹底座）。"""
+    """Draw the mode glyph using the shared title-row icon states."""
 
     def __init__(self, mode_key: str, tooltip: str,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.mode_key = mode_key
         self.setCheckable(True)
-        self.setFixedSize(36, 26)
+        style_header_button(self, width=36)
         self.setToolTip(tooltip)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("QPushButton { background: transparent; border: none; }")
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        active = self.isChecked()
-        hovered = self.underMouse()
-        col = QColor("#f3f4f6") if active else (
-            QColor("#b8bec8") if hovered else QColor("#6e7480"))
-
-        if active:
-            painter.setPen(QPen(QColor("#343842"), 1.0))
-            painter.setBrush(QColor("#252830"))
-            painter.drawRoundedRect(
-                QRectF(2.0, 2.0, self.width() - 4.0, self.height() - 4.0),
-                2.5, 2.5)
-
+        col = header_button_color(self)
         cx, cy = self.width() / 2.0, self.height() / 2.0
         painter.setPen(QPen(col, 1.25))
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         if self.mode_key == "wheels":
-            painter.drawEllipse(QPointF(cx, cy), 6.5, 6.5)
+            painter.drawEllipse(QPointF(cx, cy), 6.25, 6.25)
             painter.setBrush(col)
             painter.drawEllipse(QPointF(cx, cy), 1.3, 1.3)
         elif self.mode_key == "bars":
@@ -1241,24 +1234,19 @@ class ModeTabButton(QPushButton):
                                  QPointF(cx + dx + 1.0, notch_y))
                 painter.setPen(QPen(col, 1.25))
         elif self.mode_key == "log":
-            painter.drawArc(QRectF(cx - 7.5, cy - 7.0, 12.0, 12.0),
+            painter.drawArc(QRectF(cx - 6.0, cy - 6.0, 10.0, 10.0),
                             30 * 16, 260 * 16)
             painter.setBrush(col)
             painter.drawEllipse(QPointF(cx - 1.5, cy - 1.0), 1.1, 1.1)
             font = painter.font()
-            font.setPointSizeF(5.0)
+            font.setPixelSize(5)
             font.setBold(True)
             painter.setFont(font)
-            painter.drawText(QRectF(cx - 2.0, cy - 1.0, 16.0, 10.0),
+            painter.drawText(QRectF(cx - 4.0, cy + 1.0, 11.0, 6.0),
                              Qt.AlignmentFlag.AlignCenter, "LOG")
         else:  # tonal：三条影调带（暗/中/亮）
-            for idx, dy in enumerate((-4.5, 0.0, 4.5)):
-                band_col = (QColor("#525866") if idx == 0
-                            else QColor("#9ca3af") if idx == 1
-                            else QColor("#f3f4f6"))
-                painter.setPen(QPen(band_col if active or hovered else col, 2.4,
-                                    Qt.PenStyle.SolidLine,
-                                    Qt.PenCapStyle.RoundCap))
+            painter.setPen(QPen(col, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            for dy in (-4.5, 0.0, 4.5):
                 painter.drawLine(QPointF(cx - 5.0, cy + dy),
                                  QPointF(cx + 5.0, cy + dy))
         painter.end()
@@ -1358,35 +1346,27 @@ class GradingPanel(QWidget):
         from src.features.color.ui.color_bars_panel import ColorBarsPanel
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(6, 2, 6, 2)
-        layout.setSpacing(2)
+        layout.setContentsMargins(0, 0, 0, 2)
+        layout.setSpacing(0)
         self.setLayout(layout)
 
         # ── 0. 顶部导航行：关键帧按钮 + 模式标题/切换 + 全局重置 ──────
-        header = QWidget()
-        header.setFixedHeight(30)
+        header = create_panel_header()
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(4, 0, 4, 0)
+        header_layout.setContentsMargins(10, 0, 10, 0)
         header_layout.setSpacing(4)
 
         # P1-COLOR-03: 关键帧控制（录制模式 / 当前帧快照 / 删除当前帧关键帧）
         self.keyframe_mode_btn = QPushButton()
         self.keyframe_mode_btn.setCheckable(True)
-        self.keyframe_mode_btn.setIcon(icon_circle(IconColors.DEFAULT))
-        self.keyframe_mode_btn.setIconSize(QSize(10, 10))
-        self.keyframe_mode_btn.setFixedSize(24, 20)
+        style_header_button(self.keyframe_mode_btn, width=24, icon=icon_circle())
         self.keyframe_mode_btn.setToolTip(I18N.tr(
             "grading.keyframe_mode_tooltip",
             "关键帧模式：开启后，调色参数修改会在当前帧记录关键帧"))
-        self.keyframe_mode_btn.toggled.connect(
-            lambda checked: self.keyframe_mode_btn.setIcon(
-                icon_circle(IconColors.RED if checked else IconColors.DEFAULT)))
         self.keyframe_mode_btn.toggled.connect(self.keyframe_mode_changed.emit)
 
         self.kf_snapshot_btn = QPushButton()
-        self.kf_snapshot_btn.setIcon(icon_add(IconColors.ORANGE))
-        self.kf_snapshot_btn.setIconSize(QSize(10, 10))
-        self.kf_snapshot_btn.setFixedSize(24, 20)
+        style_header_button(self.kf_snapshot_btn, width=24, icon=icon_add())
         self.kf_snapshot_btn.setToolTip(I18N.tr(
             "grading.keyframe_snapshot_tooltip",
             "在当前帧为所有已动画参数记录关键帧"))
@@ -1394,9 +1374,7 @@ class GradingPanel(QWidget):
             self.keyframe_snapshot_requested.emit)
 
         self.kf_remove_btn = QPushButton()
-        self.kf_remove_btn.setIcon(icon_delete(IconColors.RED))
-        self.kf_remove_btn.setIconSize(QSize(10, 10))
-        self.kf_remove_btn.setFixedSize(24, 20)
+        style_header_button(self.kf_remove_btn, width=24, icon=icon_delete())
         self.kf_remove_btn.setToolTip(I18N.tr(
             "grading.keyframe_remove_tooltip",
             "删除当前帧的所有调色关键帧"))
@@ -1404,14 +1382,11 @@ class GradingPanel(QWidget):
             self.keyframe_remove_requested.emit)
 
         self.mode_title = QLabel(I18N.tr("panel.color_wheel", "色轮"))
-        self.mode_title.setStyleSheet(
-            "color: #e5e7eb; font-size: 12px; font-weight: 700;")
+        self.mode_title.setStyleSheet(SECTION_TITLE_STYLE)
 
         self.reset_all_btn = QPushButton()
         self.reset_all_btn.setObjectName("reset_btn")
-        self.reset_all_btn.setIcon(icon_reset())
-        self.reset_all_btn.setIconSize(QSize(12, 12))
-        self.reset_all_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_all_btn, global_reset=True)
         self.reset_all_btn.setToolTip(I18N.tr(
             "grading.reset_all_tooltip", "重置全部调色参数"))
         self.reset_all_btn.clicked.connect(self.reset_all)
@@ -1445,10 +1420,8 @@ class GradingPanel(QWidget):
         layout.addWidget(header)
         # 功能区之间的 1px 横向黑色细线（标题行 | 顶部参数 | 轮区 | 底部
         # 参数，对齐设计稿与达芬奇的分区方式）。
-        self._h_line_top = _h_divider()
         self._h_line_mid = _h_divider()
         self._h_line_bottom = _h_divider()
-        layout.addWidget(self._h_line_top)
 
         # ── 1. 顶部参数条（Primaries 与 Log 两页；共享参数各自持孪生行，
         #      经 _scalar_rows 注册表双向同步） ─────────────────────────
@@ -1503,6 +1476,7 @@ class GradingPanel(QWidget):
         self.lum_mix_slider = _make_row(
             "grading.lum_mix", "Lum Mix", "lum_mix", 0, 100, 100, decimals=2,
             accent=_ACCENT_RAINBOW)
+        self.lum_mix_slider.hide()
         # Log 顶排孪生行（temp/tint/contrast/pivot 与 Primaries 共享状态）
         self.log_low_range_slider = _make_row(
             "grading.log_low_range", "Low Range", "log_low_range",
@@ -1546,14 +1520,14 @@ class GradingPanel(QWidget):
             bar.setSizePolicy(QSizePolicy.Policy.Ignored,
                               QSizePolicy.Policy.Preferred)
             bar_layout = QHBoxLayout(bar)
-            bar_layout.setContentsMargins(4, 0, 4, 0)
+            bar_layout.setContentsMargins(10, 0, 10, 0)
             bar_layout.setSpacing(2)
             for row in rows:
-                bar_layout.addWidget(row, 1)
+                bar_layout.addWidget(row)
             return bar
 
         self.top_bar_stack = QStackedWidget()
-        self.top_bar_stack.setFixedHeight(34)
+        self.top_bar_stack.setFixedHeight(PARAMETER_BAR_HEIGHT)
         # 页 0：Primaries（色轮 / Color Bars 模式共享）
         self.top_bar_stack.addWidget(_param_bar([
             self.temp_slider, self.tint_slider, self.contrast_slider,
@@ -1566,7 +1540,7 @@ class GradingPanel(QWidget):
         ]))
 
         self.bottom_bar_stack = QStackedWidget()
-        self.bottom_bar_stack.setFixedHeight(34)
+        self.bottom_bar_stack.setFixedHeight(PARAMETER_BAR_HEIGHT)
         # 页 0：Primaries（Lum Mix 补入底排）
         self.bottom_bar_stack.addWidget(_param_bar([
             self.vibrance_slider, self.shadow_slider, self.highlights_slider,
@@ -1663,7 +1637,10 @@ class GradingPanel(QWidget):
         self.tonal_saturation_panel.interaction_ended.connect(
             self.interaction_ended.emit)
         self.mode_stack.addWidget(self.tonal_saturation_panel)
-        layout.addWidget(self.mode_stack, 1)
+        mode_layout = QHBoxLayout()
+        mode_layout.setContentsMargins(6, 0, 6, 0)
+        mode_layout.addWidget(self.mode_stack)
+        layout.addLayout(mode_layout, 1)
         layout.addWidget(self._h_line_bottom)
         # 底排参数（Color Boost / 阴影 / 高光 / 饱和度 / 色相 / Lum Mix）
         layout.addWidget(self.bottom_bar_stack)
@@ -1708,6 +1685,7 @@ class GradingPanel(QWidget):
             show_offset = self.mode_stack.contentsRect().width() >= self._offset_show_width
             for column in self._offset_columns:
                 column.setVisible(show_offset)
+            self.lum_mix_slider.setVisible(show_offset)
         return super().eventFilter(watched, event)
 
     def _switch_mode(self, mode: str) -> None:

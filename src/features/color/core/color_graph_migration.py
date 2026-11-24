@@ -25,6 +25,7 @@ from dataclasses import replace
 from threading import Lock
 from typing import Any, Mapping
 
+from src.features.color.core.mist import mist_is_active
 from src.shared.project.color_graph import (
     ColorEdgeData,
     ColorGraphData,
@@ -217,7 +218,7 @@ def _flat_view_nonempty(stack: ColorStackData) -> bool:
                 or stack.soft_clip_params.get("enabled"))
 
 
-def _uses_calibrated_grade(layer: Any) -> bool:
+def _needs_execution_graph(layer: Any) -> bool:
     from src.features.color.core.curves_calibration import curves_calibration_enabled
     from src.features.color.core.curves_soft_clip import (
         curves_soft_clip_is_identity,
@@ -228,6 +229,9 @@ def _uses_calibrated_grade(layer: Any) -> bool:
     from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHMS, WarperStateV2
 
     get = layer.get if isinstance(layer, Mapping) else lambda key: getattr(layer, key, None)
+    effects = get("effects_params")
+    if get("visible") is not False and isinstance(effects, Mapping) and mist_is_active(effects):
+        return True
     clip = get("curves_soft_clip")
     warper = get("warper_state")
     if isinstance(warper, Mapping) and warper.get("algorithm_version") in RESOLVE_HS_ALGORITHMS:
@@ -244,19 +248,15 @@ def _uses_calibrated_grade(layer: Any) -> bool:
 
 
 def stack_primary_execution_graph(stack: ColorStackData | None) -> ColorGraphData | None:
-    """Use the authoritative graph or build one for a calibrated legacy stack."""
+    """Use the authoritative graph or lift effects the flat path cannot apply."""
     if stack is None:
         return None
     graph = getattr(stack, "color_graph", None)
     if graph is not None:
         return graph
 
-    layers = getattr(stack, "layers", None) or ()
-    if layers:
-        calibrated = any(_uses_calibrated_grade(layer) for layer in layers)
-    else:
-        calibrated = _uses_calibrated_grade(stack)
-    if not calibrated:
+    layers = getattr(stack, "layers", None) or (stack,)
+    if not any(_needs_execution_graph(layer) for layer in layers):
         return None
 
     with _PRIMARY_EXECUTION_GRAPHS_LOCK:

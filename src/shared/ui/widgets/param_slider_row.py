@@ -53,6 +53,12 @@ class ParamSliderRow(QWidget):
     interactionStarted = pyqtSignal()
     interactionEnded = pyqtSignal()
 
+    _LABEL_STYLE = (
+        f"QLabel {{ {PARAM_LABEL_STYLE} }} "
+        f"QLabel:disabled {{ {PARAM_LABEL_DISABLED_STYLE} }}"
+    )
+    _VALUE_ROW_HEIGHT = 24
+
     def __init__(
         self,
         label: str,
@@ -88,7 +94,7 @@ class ParamSliderRow(QWidget):
         self._label.setFixedWidth(label_width)
         self._label.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._label.setStyleSheet(PARAM_LABEL_STYLE)
+        self._label.setStyleSheet(self._LABEL_STYLE)
         layout.addWidget(self._label)
 
         # 2) 滑动条
@@ -106,6 +112,7 @@ class ParamSliderRow(QWidget):
         self._drag = DragValue(
             "", min_v=min_val, max_v=max_val, default=default_val,
             decimals=decimals, suffix=suffix)
+        self._drag.setFixedHeight(self._VALUE_ROW_HEIGHT)
         self._drag.setFixedValueWidth(value_fixed_width)
         layout.addWidget(self._drag)
 
@@ -164,9 +171,6 @@ class ParamSliderRow(QWidget):
     def setEnabled(self, enabled: bool):
         self._slider.setEnabled(enabled)
         self._drag.setEnabled(enabled)
-        # 标签同步变暗/恢复（达芬奇式整列变灰；QSS 固定色不会自动置灰）
-        self._label.setStyleSheet(
-            PARAM_LABEL_STYLE if enabled else PARAM_LABEL_DISABLED_STYLE)
         super().setEnabled(enabled)
 
     def setDecimals(self, d: int):

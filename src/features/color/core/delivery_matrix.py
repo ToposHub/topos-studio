@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+from src.features.color.core.mist import mist_is_active
 
 DELIVERY_FULL = "full"
 DELIVERY_BAKED = "baked"
@@ -110,6 +111,10 @@ _OPERATIONS: Dict[str, Dict[str, str]] = {
     "effects": {
         "label_key": "delivery.op_effects", "label": "锐化/纹理/光晕效果",
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_DROPPED, TARGET_LUT: DELIVERY_DROPPED,
+    },
+    "mist": {
+        "label_key": "delivery.op_mist", "label": "雾化 (Mist)",
+        TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_DROPPED,
     },
     "qualifier": {
         # M05.2/M06.2：基础三带（hue/sat/lum）+invert 已由 CPU 导出的
@@ -268,8 +273,11 @@ def _layer_operations(data: Dict[str, Any]) -> set:
         from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
 
         ops.add("warper_709" if data.get("warper_space") in RESOLVE_HS709_SPACES else "warper")
-    if (data.get("effects_params") or {}).get("enabled"):
+    effects = data.get("effects_params") or {}
+    if effects.get("enabled"):
         ops.add("effects")
+    if mist_is_active(effects):
+        ops.add("mist")
     qp = data.get("qualifier_params") or {}
     if qp.get("enabled"):
         ops.add("qualifier")
@@ -764,6 +772,8 @@ CONSUMER_CAPABILITY_MATRIX: Dict[str, Dict[str, str]] = {
                        "lut_export": CAP_BAKED},
     "effects":        {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED},
+    "mist":           {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,
+                       "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL},
     "video_denoise":  {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL},
     "chain_segments_basic": {  # 调色链段（组前/微调/组后）基础参数

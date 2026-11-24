@@ -301,8 +301,8 @@ def _corrector_prefix_reference(image: np.ndarray, layer) -> np.ndarray:
 
 class TestStructural:
     def test_param_dtypes_layout(self) -> None:
-        # 31 标量（29 基础扩展位 + 校准开关、中间细节）+ mixer(24)
-        assert TEX_EXTRA_PARAMS_DTYPE.itemsize == 224
+        # 29 base fields + 24 mixer values + 3 primary/detail fields + 2 Mist fields.
+        assert TEX_EXTRA_PARAMS_DTYPE.itemsize == 232
         assert TEX_QUALIFIER_PARAMS_DTYPE.itemsize == 60
         for name in TEX_EXTRA_PARAMS_DTYPE.names:
             offset = (TEX_EXTRA_PARAMS_DTYPE.fields[name][1]
@@ -320,7 +320,8 @@ class TestStructural:
     def test_corrector_segment_order_matches_gl_main(self) -> None:
         source = METAL_TEX_GRAPH_OPS_MSL
         body = source[source.index("kernel void tg_corrector("):]
-        order = [body.index("tg_apply_primary_calibration("),
+        order = [body.index("mist_delta("),
+                 body.index("tg_apply_primary_calibration("),
                  body.index("graph_grading_before_detail("),
                  body.index("tg_apply_mid_detail("),
                  body.index("graph_grading_after_detail("),
@@ -664,6 +665,25 @@ class TestTextureGraphVsCpu:
             metal_ctx, executor, _graph_for([_soft_clip_layer()]), src)
         assert result.published, result.diagnostic_message
         _assert_dual(executor.read_output_rgba16f(result), cpu.output, "sc")
+
+    def test_mist_keeps_hdr_detail_and_matches_cpu(self, metal_ctx) -> None:
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        src = np.full((20, 512, 4), 0.05, dtype=np.float32)
+        src[..., 256:, :3] = 1.4
+        src[..., 3] = 0.75
+        layer = _neutral_layer("Mist")
+        layer.effects_params.update(mist_enabled=True, mist_radius=0.0, mist_mix=33.0,
+                                    blur_enabled=False, blur_detail=50.0)
+        try:
+            result, cpu = _run_graph(metal_ctx, executor, _graph_for([layer]), src)
+            assert result.published, result.diagnostic_message
+            got = executor.read_output_rgba16f(result)
+            _assert_dual(got, cpu.output, "Mist")
+            assert 0.15 < got[10, 255, 0] < 0.35
+            assert got[10, 256, 0] > 1.0
+            assert got[10, 255, 3] == 0.75
+        finally:
+            executor.release_pool()
 
     def test_lut3d_typical_and_boundary(self, metal_ctx, tmp_path):
         # 33³ 解析 LUT：通道交换 + 提亮（覆盖边界 0/1 与域内）

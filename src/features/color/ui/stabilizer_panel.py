@@ -12,6 +12,10 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QVBoxLayout, QWidget,
 )
 
+from src.features.color.ui.panel_chrome import (
+    PARAMETER_ROW_HEIGHT, PARAMETER_ROW_SPACING,
+    color_panel_stylesheet,
+)
 from src.features.color.ui.power_window_panel import WindowValue
 from src.features.color.ui.tracker_graph import TrackerGraph
 from src.shared.i18n.i18n import tr
@@ -21,14 +25,14 @@ from src.shared.ui.widgets import ChevronComboBox
 
 STABILIZER_DEFAULTS: dict[str, Any] = dict(DEFAULT_PARAMS)
 
-STYLE = """
-StabilizerPanel { background: #202024; }
-StabilizerPanel QWidget#stabilizer_bar { background: #2c2d32; }
-StabilizerPanel QLabel { color: #999b9d; font-size: 11px; background: transparent; }
-StabilizerPanel QLabel:disabled { color: #56585a; }
+STYLE = color_panel_stylesheet("""
+StabilizerPanel { background: __COLOR_PANEL_BASE__; }
+StabilizerPanel QWidget#stabilizer_bar { background: __COLOR_PANEL_RAISED__; }
+StabilizerPanel QLabel { __COLOR_PARAMETER_NAME__ }
+StabilizerPanel QLabel:disabled { color: __COLOR_PARAMETER_DISABLED__; }
 StabilizerPanel QLabel#stabilizer_status { font-size: 10px; padding: 0 8px; }
-StabilizerPanel QCheckBox { color: #a5a6a8; font-size: 11px; spacing: 6px; background: transparent; }
-StabilizerPanel QCheckBox:disabled { color: #56585a; }
+StabilizerPanel QCheckBox { __COLOR_PARAMETER_NAME__ spacing: 6px; }
+StabilizerPanel QCheckBox:disabled { color: __COLOR_PARAMETER_DISABLED__; }
 StabilizerPanel QCheckBox::indicator { width: 12px; height: 12px; }
 StabilizerPanel QPushButton#stabilizer_analyze {
     color: #a5a6a8; font-size: 11px; background: transparent;
@@ -36,7 +40,7 @@ StabilizerPanel QPushButton#stabilizer_analyze {
 }
 StabilizerPanel QPushButton#stabilizer_analyze:hover { background: #34363a; border-color: #74767b; }
 StabilizerPanel QPushButton#stabilizer_analyze:disabled { color: #55575b; border-color: #393b3f; }
-"""
+""")
 
 
 class StabilizerPanel(QWidget):
@@ -102,7 +106,7 @@ class StabilizerPanel(QWidget):
         self._footer_grid = QGridLayout(self.footer)
         self._footer_grid.setContentsMargins(20, 5, 32, 5)
         self._footer_grid.setHorizontalSpacing(9)
-        self._footer_grid.setVerticalSpacing(4)
+        self._footer_grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         for key, title in (("cropping_ratio", "Cropping Ratio"), ("smooth", "Smooth"),
                            ("strength", "Strength")):
             group = QWidget(self.footer)
@@ -113,11 +117,8 @@ class StabilizerPanel(QWidget):
             layout.addWidget(label)
             value = WindowValue("", 0.0, 1.0, STABILIZER_DEFAULTS[key],
                                 decimals=2, compact=True, parent=group)
-            value.setFixedSize(44, 20)
-            value._value_label.setMinimumWidth(40)
-            value._value_label.setFixedHeight(20)
-            value._edit.setFixedHeight(20)
-            value._apply_palette_style()
+            value.setFixedSize(44, PARAMETER_ROW_HEIGHT)
+            value.setFixedValueWidth(44)
             value.setAccessibleName(title)
             value.valueChanged.connect(self._on_parameter_edited)
             value.interaction_started.connect(self.interaction_started.emit)

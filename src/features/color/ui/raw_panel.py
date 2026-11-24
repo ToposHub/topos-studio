@@ -1,13 +1,17 @@
-from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QGroupBox)
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSizePolicy
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import PANEL_TITLE_LABEL_STYLE, PARAM_LABEL_STYLE
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QSize
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import os
-from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.shared.assets.icon_manager import icon_reset
 from src.shared.paths.paths import get_lut_dir
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_LABEL_STYLE, PARAMETER_ROW_HEIGHT, SECTION_TITLE_STYLE,
+    create_panel_divider, create_panel_layout, create_parameter_section, style_reset_button,
+)
+
+_RAW_ROW_SPACING = 6
+
 
 class RawPanel(QWidget):
     """
@@ -38,54 +42,41 @@ class RawPanel(QWidget):
         self.update_timer.setInterval(16)
         self.update_timer.timeout.connect(self._emit_params)
         
-        self.setMinimumHeight(220)
         self.init_ui()
 
     def init_ui(self) -> None:
-        # 使用全局 QSS，无需本地样式表
-
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(4, 4, 4, 4)
-        main_layout.setSpacing(4)
-        self.setLayout(main_layout)
+        header_layout, main_layout = create_panel_layout(self, (8, 8, 0), 6)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
         # Header with Enable switch
-        header_layout = QHBoxLayout()
         self.enable_cb = ToggleSwitch(checked=False)
         self.enable_cb.toggled.connect(self.on_enable_toggled)
         header_layout.addWidget(self.enable_cb)
 
         self._title_label = QLabel(I18N.tr("raw.title", "RAW 控制"))
-        self._title_label.setStyleSheet(PANEL_TITLE_LABEL_STYLE)
+        self._title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header_layout.addWidget(self._title_label)
         
         header_layout.addStretch()
         
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr(
             "raw.reset_tooltip", "Reset All RAW Parameters"))
         self.reset_btn.clicked.connect(self.reset_all)
         header_layout.addWidget(self.reset_btn)
-        main_layout.addLayout(header_layout)
 
         # Main 3-Column Container
-        self.container = QWidget()
-        columns_layout = QHBoxLayout()
+        self.container = QWidget(self)
+        columns_layout = QHBoxLayout(self.container)
         columns_layout.setContentsMargins(0, 0, 0, 0)
-        columns_layout.setSpacing(6)
-        self.container.setLayout(columns_layout)
-        main_layout.addWidget(self.container)
+        columns_layout.setSpacing(0)
+        main_layout.addWidget(self.container, 1)
 
         # --- Column 1: Color Space & Basics ---
-        col1 = QGroupBox(I18N.tr("raw.color_management", "色彩管理"))
-        col1_layout = QVBoxLayout()
-        col1_layout.setContentsMargins(4, 0, 4, 4)
-        col1_layout.setSpacing(6)
-        col1.setLayout(col1_layout)
+        col1, col1_layout = create_parameter_section(
+            I18N.tr("raw.color_management", "色彩管理"), spacing=_RAW_ROW_SPACING)
         
         self.decode_combo = self.create_labeled_combo(I18N.tr("raw.decode_using", "解码方式:"), ["Clip"])
         col1_layout.addLayout(self.decode_combo['layout'])
@@ -114,14 +105,12 @@ class RawPanel(QWidget):
         col1_layout.addLayout(self.lut_combo['layout'])
         
         col1_layout.addStretch()
-        columns_layout.addWidget(col1, 0) # Use 0 to let it take minimum space
+        columns_layout.addWidget(col1, 11)
+        columns_layout.addWidget(create_panel_divider(Qt.Orientation.Vertical))
 
         # --- Column 2: White Balance & Primary ---
-        col2 = QGroupBox(I18N.tr("raw.primary", "基本控制"))
-        col2_layout = QVBoxLayout()
-        col2_layout.setContentsMargins(4, 0, 4, 4)
-        col2_layout.setSpacing(6)
-        col2.setLayout(col2_layout)
+        col2, col2_layout = create_parameter_section(
+            I18N.tr("raw.primary", "基本控制"), spacing=_RAW_ROW_SPACING)
 
         self.temp_control = self._create_row(I18N.tr("raw.temp", "色温"), 2000, 12000, 6500, 100)
         col2_layout.addWidget(self.temp_control)
@@ -136,14 +125,12 @@ class RawPanel(QWidget):
         col2_layout.addWidget(self.sharp_control)
 
         col2_layout.addStretch()
-        columns_layout.addWidget(col2, 1)
+        columns_layout.addWidget(col2, 10)
+        columns_layout.addWidget(create_panel_divider(Qt.Orientation.Vertical))
 
         # --- Column 3: Advanced Tone Control ---
-        col3 = QGroupBox(I18N.tr("raw.tone_detail", "色调与细节"))
-        col3_layout = QVBoxLayout()
-        col3_layout.setContentsMargins(4, 0, 4, 4)
-        col3_layout.setSpacing(6)
-        col3.setLayout(col3_layout)
+        col3, col3_layout = create_parameter_section(
+            I18N.tr("raw.tone_detail", "色调与细节"), spacing=_RAW_ROW_SPACING)
 
         self.shadows_control = self._create_row(I18N.tr("raw.shadows", "阴影"), -100, 100, 0, 1)
         col3_layout.addWidget(self.shadows_control)
@@ -170,9 +157,7 @@ class RawPanel(QWidget):
         col3_layout.addWidget(self.contrast_control)
 
         col3_layout.addStretch()
-        columns_layout.addWidget(col3, 1)
-
-        main_layout.addStretch()
+        columns_layout.addWidget(col3, 10)
 
         # Initial State
         self.update_wb_visibility()
@@ -181,9 +166,10 @@ class RawPanel(QWidget):
     def _create_row(self, label, min_val, max_val, default_val, step):
         """Create a ParamSliderRow with panel interaction wiring."""
         decimals = 0 if step >= 1 else 2
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, min_val, max_val, default_val,
             step=step, decimals=decimals, label_width=65)
+        row.layout().setAlignment(Qt.AlignmentFlag.AlignLeft)
         row.interactionStarted.connect(self.start_interaction)
         row.interactionEnded.connect(self.end_interaction)
         row.valueChanged.connect(lambda _: self.on_param_changed())
@@ -195,17 +181,21 @@ class RawPanel(QWidget):
         label = QLabel(label_text)
         label.setFixedWidth(75) # Balanced width to show name but keep it narrow
         label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        label.setStyleSheet(PARAM_LABEL_STYLE)
+        label.setStyleSheet(PARAMETER_LABEL_STYLE)
         
         combo = ChevronComboBox()
-        combo.setMaximumWidth(110) # UI stay narrow
+        combo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        combo.setMinimumWidth(82)
+        combo.setFixedHeight(PARAMETER_ROW_HEIGHT)
+        combo.setStyleSheet(combo.styleSheet() + """
+            QComboBox { padding: 0 20px 0 6px; border-radius: 3px; font-size: 11px; }
+        """)
         combo.addItems(items)
-        combo.setMinimumHeight(18)
         combo.view().setMinimumWidth(200)
         combo.currentIndexChanged.connect(self.on_control_interacted)
         
         layout.addWidget(label)
-        layout.addWidget(combo)
+        layout.addWidget(combo, 1)
         return {'layout': layout, 'combo': combo}
 
     def load_lut_list(self) -> None:

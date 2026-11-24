@@ -6,7 +6,7 @@ import math
 import numpy as np
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
-from PyQt6.QtGui import QMouseEvent
+from PyQt6.QtGui import QFont, QMouseEvent
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QSplitter, QToolButton, QWidget
 
@@ -19,8 +19,47 @@ from src.features.color.core.primary_calibration import (
     PRIMARY_CALIBRATION_CURRENT_VERSION, PRIMARY_CALIBRATION_VERSION_KEY, calibrated_grade_inputs,
 )
 from src.features.color.ui.color_wheel import (
-    ColorWheel, GradingPanel, offset_display_to_hsb, offset_hsb_to_display,
+    ColorWheel, GradingPanel, KnurledJogWheel, offset_display_to_hsb, offset_hsb_to_display,
 )
+from src.shared.ui.style_sheet import DARK_THEME
+
+
+def test_scalar_value_strip_and_text_fit_at_supported_panel_widths(qtbot, qapp) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.setStyleSheet(DARK_THEME)
+    panel.resize(624, 392)
+    panel.show()
+    qapp.processEvents()
+
+    row = panel.lum_mix_slider
+    assert row.isHidden()
+    panel.resize(900, 392)
+    qapp.processEvents()
+    assert row.isVisible()
+    spin = row.spin
+    value = spin._value_label
+    strip = spin._accent_bar
+    assert value.text() == "100.00"
+    assert value.fontMetrics().horizontalAdvance(value.text()) <= value.contentsRect().width()
+    assert value.font().weight() < QFont.Weight.Bold
+    assert strip.geometry().top() == value.geometry().bottom() + 1
+    field = value.geometry().united(strip.geometry())
+    assert abs(spin.y() + field.center().y() - row.label.geometry().center().y()) <= 1
+    assert panel.rect().contains(strip.mapTo(panel, strip.rect().bottomRight()))
+
+    qtbot.mouseDClick(spin, Qt.MouseButton.LeftButton, pos=spin.rect().center())
+    assert spin._edit.isVisible()
+    assert strip.geometry().top() == spin._edit.geometry().bottom() + 1
+    qtbot.keyClick(spin._edit, Qt.Key.Key_Escape)
+
+    panel.resize(624, 392)
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: PRIMARY_CALIBRATION_CURRENT_VERSION})
+    panel.temp_slider.setValue(-100.0)
+    qapp.processEvents()
+    temperature = panel.temp_slider.spin._value_label
+    assert temperature.text() == "-10000.0"
+    assert temperature.fontMetrics().horizontalAdvance(temperature.text()) <= temperature.contentsRect().width()
 
 
 def test_measured_grade_uses_native_display_values_and_round_trips(qtbot) -> None:
@@ -124,17 +163,29 @@ def test_rendered_ring_pointer_and_rendered_grade_share_six_hue_directions(qapp,
     qapp.processEvents()
     canvas = wheel._wheel_canvas
     pixels = canvas.grab().toImage()
+    pixel_ratio = pixels.devicePixelRatio()
     center, outer_radius = canvas._geometry()
     inner_radius = canvas._inner_radius(outer_radius)
     try:
         for hue in range(0, 360, 60):
             angle = math.radians(hue + rotation)
             direction = QPointF(math.cos(angle), -math.sin(angle))
-            point = center + direction * (inner_radius - 1.5)
-            color = pixels.pixelColor(round(point.x()), round(point.y()))
-            error = abs((color.hsvHueF() * 360.0 - hue + 180.0) % 360.0 - 180.0)
-            assert color.hsvSaturationF() > 0.8
-            assert error < 4.0
+            for radius_fraction, saturation_range in (
+                (0.975, (0.8, 1.0)),  # outer part of the vivid ring
+                (0.94, (0.8, 1.0)),  # inner part of the vivid ring
+                (0.88, (0.3, 0.55)),  # muted disk near the ring
+            ):
+                point = center + direction * (inner_radius * radius_fraction)
+                color = pixels.pixelColor(round(point.x() * pixel_ratio),
+                                          round(point.y() * pixel_ratio))
+                error = abs((color.hsvHueF() * 360.0 - hue + 180.0) % 360.0 - 180.0)
+                assert saturation_range[0] <= color.hsvSaturationF() <= saturation_range[1]
+                assert error < 5.0
+
+            point = center + direction * (inner_radius * 0.2)
+            color = pixels.pixelColor(round(point.x() * pixel_ratio),
+                                      round(point.y() * pixel_ratio))
+            assert color.hsvSaturationF() < 0.15
 
             canvas._update_knob(center + direction * (inner_radius * 0.2))
             assert abs((wheel.hue - hue + 180.0) % 360.0 - 180.0) < 1e-7
@@ -639,6 +690,22 @@ def test_master_dials_align_with_fixed_value_groups_in_all_modes(qtbot, qapp) ->
         assert len(dial_positions) == 1
 
 
+def test_master_dial_has_dark_ends_and_a_brighter_center(qtbot) -> None:
+    dial = KnurledJogWheel(174)
+    qtbot.addWidget(dial)
+    image = dial.grab().toImage()
+    ratio = image.devicePixelRatio()
+    center_gap = dial.width() / 2.0 + 1.5
+    middle_y = int(dial.height() / 2.0 * ratio)
+    left, center, right = (
+        image.pixelColor(int((center_gap + offset) * ratio), middle_y)
+        for offset in (-54.0, 0.0, 54.0)
+    )
+    assert center.lightness() - max(left.lightness(), right.lightness()) >= 10
+    assert abs(left.lightness() - right.lightness()) <= 2
+    assert image.pixelColor(int(center_gap * ratio), int(2.5 * ratio)) == center
+
+
 def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp) -> None:
     splitter = QSplitter()
     qtbot.addWidget(splitter)
@@ -669,11 +736,13 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
                  + panel.width() - panel._wheel_page.width())
     set_panel_width(threshold - 1)
     assert all(column.isHidden() for _, column in rows.values())
+    assert panel.lum_mix_slider.isHidden()
     set_panel_width(threshold)
     for mode, (row, column) in rows.items():
         panel._mode_buttons[mode].click()
         qapp.processEvents()
         assert column.isVisible()
+        assert panel.lum_mix_slider.isVisible() == (mode != "log")
         layout = row.layout()
         for index in range(layout.count()):
             widget = layout.itemAt(index).widget()
@@ -683,6 +752,7 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
 
     offset._r_drag.setValue(40.0)
     panel.log_offset_wheel._g_drag.setValue(25.0)
+    panel.lum_mix_slider.setValue(75.0)
     panel.flush_pending_changes()
     grade = panel.get_extended_params()
     red_value = offset._r_drag.value()
@@ -692,6 +762,7 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
     panel.grading_extended_changed.connect(updates.append)
     set_panel_width(minimum_width)
     assert all(column.isHidden() for _, column in rows.values())
+    assert panel.lum_mix_slider.isHidden()
     panel._switch_mode("bars")
     set_panel_width(threshold)
     assert panel.color_bars_panel.offset.isVisible()
@@ -699,6 +770,8 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
     qapp.processEvents()
     assert offset.isVisible()
     assert offset._r_drag.value() == red_value
+    assert panel.lum_mix_slider.isVisible()
+    assert panel.lum_mix_slider.value() == 75.0
     assert panel.get_extended_params() == grade
     panel.flush_pending_changes()
     assert updates == []

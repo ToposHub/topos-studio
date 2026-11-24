@@ -24,6 +24,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
+from src.features.color.core.mist import (
+    MIST_KEYS, apply_mist_cpu, mist_is_active, mist_render_params,
+)
 from src.features.color.core.color_graph_compiler import (
     ColorGraphRenderPlan,
     RenderPass,
@@ -597,12 +600,24 @@ CPU_GRADING_BASIC_KEYS = frozenset({
 #: 与 GL 有效域一致——不因死键拒绝可执行层）
 _CPU_DEAD_GRADING_KEYS = frozenset({"temperature", "shadows"})
 
-#: fx/blur 组的中性值（enabled/blur_enabled 关闭且幅度全零 = GL no-op）
-def _fx_params_neutral(fx: Mapping[str, Any]) -> bool:
+_KNOWN_FX_KEYS = frozenset((
+    "enabled", "mode", "sharpen", "texture", "halo", "radius", "iterations",
+    "blur_enabled", "blur_mode", "blur_intensity", "blur_detail", "blur_radius",
+    "blur_bokeh", "blur_angle", "blur_iterations",
+    "texture_soften_intensity", "texture_soften_detail", "optical_blur_radius",
+    "optical_blur_bokeh", "motion_blur_intensity", "motion_blur_angle",
+    "fast_blur_intensity", "fast_blur_radius",
+)) | MIST_KEYS
+
+
+def _fx_params_neutral(fx: Mapping[str, Any], *, allow_mist: bool = False) -> bool:
+    """Check for active effects outside the calling backend's supported domain."""
     if fx.get("enabled") or fx.get("blur_enabled"):
         return False
+    if not allow_mist and mist_is_active(fx):
+        return False
     for key, value in fx.items():
-        if key in ("enabled", "blur_enabled", "mode", "iterations"):
+        if key in _KNOWN_FX_KEYS:
             continue
         try:
             if float(value) != 0.0:
@@ -691,7 +706,7 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
                 and not (backend == "pointwise" and uses_calibrated_soft_clip(soft_clip))):
             errors.append("curves_soft_clip 非默认（不在基础域）")
     fx = layer.get("effects_params")
-    if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx):
+    if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx, allow_mist=backend == "cpu"):
         errors.append("fx/blur 组非中性（不在基础域）")
     if layer.get("curves_data") and layer.get("curves_lut") is None:
         errors.append("curves_data 未预构建 curves_lut（GL 侧在 "
@@ -786,8 +801,14 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         raise UnsupportedNode("; ".join(errors))
     h, w = image.shape[:2]
     src = np.ascontiguousarray(image, dtype=_F32)
+    color = src[..., :3]
+    effects = layer.get("effects_params")
+    if isinstance(effects, Mapping):
+        spread, amount = mist_render_params(effects)
+        if amount != 0.0:
+            color = apply_mist_cpu(color, spread, amount)
     graded, values = apply_layer_grading_cpu(
-        src[..., :3], layer, width=width or w, height=height or h)
+        color, layer, width=width or w, height=height or h)
     lut = layer.get("curves_lut")
     if lut is not None:
         graded = apply_curves_cpu(graded, lut)

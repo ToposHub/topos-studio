@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import TYPE_CHECKING, Any, Iterator, Mapping, Optional
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Iterator, Optional
 
 import numpy as np
 
@@ -434,6 +435,7 @@ class ColorStackHydrator:
         if warper is not None and warper_layer is not None:
             warper.load_layer_state(warper_layer)
         self._apply_mixer_to_panel(stack, panels.get("mixer_panel"))
+        self._apply_effects_to_panel(stack, panels.get("effects_panel"), grading_payload)
         self._apply_lut_to_panel(stack, panels.get("lut_panel"))
         self._apply_video_denoise_to_panel(
             stack, panels.get("denoise_panel"))
@@ -763,6 +765,27 @@ class ColorStackHydrator:
             return
         if stack.mixer_params:
             panel.set_params(stack.mixer_params)
+
+    @staticmethod
+    def _apply_effects_to_panel(stack: ColorStackData, panel: Any,
+                                grading_payload: Mapping[str, Any] | None) -> None:
+        setter = getattr(panel, "set_params_dict", None)
+        if not callable(setter):
+            return
+        payload = grading_payload
+        if payload is None:
+            graph = stack.color_graph
+            if graph is not None:
+                if not can_project_to_legacy_layers(graph):
+                    return
+                layers = project_legacy_layers(graph)
+                index = 0
+            else:
+                layers = stack.layers
+                index = stack.active_layer_index if 0 <= stack.active_layer_index < len(layers) else 0
+            payload = layers[index] if layers else None
+        effects = payload.get("effects_params") if isinstance(payload, Mapping) else None
+        setter(dict(effects) if isinstance(effects, Mapping) else {}, emit=False)
 
     @staticmethod
     def _apply_lut_to_panel(stack: ColorStackData, panel: Any) -> None:

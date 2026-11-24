@@ -5,11 +5,13 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtCore import QRectF, QSize, QSizeF, QPointF, Qt
-from PyQt6.QtWidgets import QDockWidget, QGraphicsScene, QGraphicsView, QMainWindow, QWidget
+from PyQt6.QtCore import QRectF, QSize, QSizeF, QPointF, Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
+from PyQt6.QtWidgets import QDockWidget, QGraphicsScene, QGraphicsView, QMainWindow, QToolButton, QWidget
 
 from src.features.color.ui.canvas import Canvas, VideoControlBar, ViewportMenuBar
 from src.features.color.ui.color_viewport_chrome import ColorViewportChrome
+from src.features.color.ui.panel_chrome import HEADER_CONTROL_HEIGHT, HEADER_ICON_SIZE
 
 
 class _CanvasHost(QGraphicsView):
@@ -274,20 +276,34 @@ def test_header_uses_right_chevron_and_transparent_transport_groups(chrome) -> N
     assert chrome.zoom_button.icon().isNull()
     for button in (chrome.toolbar.mask_btn, chrome.toolbar.split_btn,
                    chrome.toolbar.guides_menu_btn, chrome.options_button):
-        assert button.size() == QSize(32, 28)
+        assert button.size() == QSize(32, HEADER_CONTROL_HEIGHT)
+        assert button.iconSize() == QSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE)
     for group in (chrome.left_tools, chrome.transport_center, chrome.right_timecode):
         assert "background: transparent" in group.styleSheet()
 
 
 def test_color_display_toggles_keep_fine_vector_artwork(chrome) -> None:
     toolbar = chrome.toolbar
+    size = QSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE)
+
+    def glyph_lightness(button: QToolButton) -> int:
+        image = button.grab().toImage()
+        return max(image.pixelColor(x, y).lightness()
+                   for y in range(image.height()) for x in range(image.width()))
+
     for button in (toolbar.mask_btn, toolbar.split_btn):
-        original = button.icon().pixmap(QSize(20, 20)).toImage()
+        icon = button.icon()
+        idle_lightness = glyph_lightness(button)
+        assert icon.pixmap(size, QIcon.Mode.Normal, QIcon.State.Off).toImage() != (
+            icon.pixmap(size, QIcon.Mode.Normal, QIcon.State.On).toImage()
+        )
         button.setChecked(True)
+        assert button.icon().cacheKey() == icon.cacheKey()
+        assert glyph_lightness(button) > idle_lightness
         button.setChecked(False)
-        assert button.icon().pixmap(QSize(20, 20)).toImage() == original
-    assert toolbar.guides_menu_btn.iconSize() == QSize(28, 20)
-    assert chrome.proxy_button.iconSize() == QSize(28, 20)
+        assert button.icon().cacheKey() == icon.cacheKey()
+    assert toolbar.guides_menu_btn.iconSize() == size
+    assert chrome.proxy_button.iconSize() == size
 
 
 def test_color_native_and_qt_backdrops_use_the_same_191919_surround(qapp) -> None:
@@ -299,7 +315,10 @@ def test_color_native_and_qt_backdrops_use_the_same_191919_surround(qapp) -> Non
     # QOpenGLWidget so no renderer/context/decoder is created in this test.
     from unittest.mock import patch
 
-    with patch("src.features.color.ui.canvas.GLCanvasViewport", QWidget):
+    class ViewportStub(QWidget):
+        gl_initialized = pyqtSignal()
+
+    with patch("src.features.color.ui.canvas.GLCanvasViewport", ViewportStub):
         canvas = Canvas()
     assert canvas.backgroundBrush().color().name() == "#191919"
     canvas.close()

@@ -52,7 +52,7 @@ class CurvesWidget(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setStyleSheet("background-color: #232326;")
+        self.setStyleSheet(f"background-color: {C.COLOR_PANEL_INSET};")
         self._scope = GpuScopeWidget(self, preserve_aspect=False, show_value_axis=False)
         self._scope.hide()
         self._has_histogram = False
@@ -256,7 +256,7 @@ class CurvesWidget(QWidget):
     def _draw_background(self, painter: QPainter, rect: QRectF):
         """Draw the curve surface with a fine black outer frame."""
         if not self._has_histogram:
-            painter.setBrush(QColor(35, 35, 38))
+            painter.setBrush(QColor(C.COLOR_PANEL_INSET))
         else:
             painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor(7, 7, 8), 0.8))
@@ -374,7 +374,7 @@ class CurvesWidget(QWidget):
                 painter.drawEllipse(QPointF(wx, wy), 5, 5)
             else:
                 # Unselected point: hollow circle with background fill
-                painter.setBrush(QColor(35, 35, 38))  # Match background #232326
+                painter.setBrush(QColor(C.COLOR_PANEL_INSET))
                 painter.setPen(QPen(QColor(160, 160, 160), 1.5))
                 painter.drawEllipse(QPointF(wx, wy), 4, 4)
 

@@ -18,6 +18,10 @@ from src.features.color.core.warper_state import (
     HS_GRID_NAME, RESOLVE_HS_ALGORITHMS, RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2,
     WarperGrid, WarperPin, WarperStateV2, make_point_id,
 )
+from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    create_panel_header, style_header_button, style_reset_button,
+)
 from src.features.color.ui.warper_tools import MeshTools, StrokeTools, tool_button, tr
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
@@ -119,14 +123,12 @@ class WarperPanel(QWidget):
         self.set_mode(self.mode)
 
     def _build_header(self, layout: QVBoxLayout) -> None:
-        header = QWidget()
-        header.setFixedHeight(35)
-        header.setStyleSheet(f"background: {C.BG_DARK};")
+        header = create_panel_header()
         top = QHBoxLayout(header)
         top.setContentsMargins(8, 0, 3, 0)
         top.setSpacing(2)
         self.title = QLabel()
-        self.title.setStyleSheet(f"color: {C.TEXT_PRIMARY}; font-size: 11px; font-weight: bold;")
+        self.title.setStyleSheet(SECTION_TITLE_STYLE)
         top.addWidget(self.title, 1)
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -134,23 +136,22 @@ class WarperPanel(QWidget):
         for mode, icon in zip(MODES, ("chroma", "hs", "cl")):
             button = tool_button(icon, tr(mode, MODE_LABELS[mode]), True)
             button.setObjectName(f"warper_mode_{mode}")
-            button.setFixedSize(32, 26)
-            button.setIconSize(QSize(18, 18))
+            style_header_button(button, width=32, icon=button.icon())
             group.addButton(button)
             button.setChecked(mode == self.mode)
             button.clicked.connect(lambda checked=False, mode=mode: self.set_mode(mode))
             top.addWidget(button)
             self.mode_buttons[mode] = button
         self.expand_button = tool_button("expand", tr("expand", "Expand"))
-        self.expand_button.setFixedWidth(32)
+        style_header_button(self.expand_button, width=32, icon=self.expand_button.icon())
         self.expand_button.clicked.connect(self.toggle_expanded)
         top.addWidget(self.expand_button)
         self.reset_btn = tool_button("reset", tr("reset_all", "Reset All"))
-        self.reset_btn.setFixedWidth(32)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.clicked.connect(self.on_reset)
         top.addWidget(self.reset_btn)
         self.options_button = tool_button("more", tr("options", "Options"))
-        self.options_button.setFixedWidth(32)
+        style_header_button(self.options_button, width=32, icon=self.options_button.icon())
         self.options_menu = QMenu(self.options_button)
         self.grid_action = self.options_menu.addAction(tr("show_grid", "Show Grid"))
         self.grid_action.setCheckable(True)
@@ -166,7 +167,6 @@ class WarperPanel(QWidget):
         self.upgrade_calibration_action.triggered.connect(self._upgrade_calibration)
         self.options_menu.addAction(tr("reset_selection", "Reset Selection / Pins"), lambda: self._mesh_action("reset_selection"))
         self.options_button.setMenu(self.options_menu)
-        self.options_button.setStyleSheet(self.options_button.styleSheet() + "QToolButton::menu-indicator { image: none; width: 0px; }")
         self.options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         top.addWidget(self.options_button)
         layout.addWidget(header)
@@ -225,7 +225,7 @@ class WarperPanel(QWidget):
         axis_layout.setContentsMargins(0, 0, 0, 0)
         axis_layout.setSpacing(4)
         self.axis_label = QLabel(tr("axis_angle", "Axis Angle"))
-        self.axis_label.setStyleSheet(f"color: {C.TEXT_HINT}; font-size: 11px;")
+        self.axis_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         axis_layout.addWidget(self.axis_label)
         self.axis_angle = DragValue("", -180, 180, 0, 2, compact=True)
         self.axis_angle.setFixedWidth(60)

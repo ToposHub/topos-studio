@@ -13,6 +13,7 @@ from src.features.color.core.color_graph_executor import ColorGraphExecutor
 from src.features.color.core.color_node_lut_spec import node_lut_projection
 from src.features.color.core.color_graph_param_source import graph_node_layer_provider
 from src.features.color.core.color_graph_snapshot import freeze_graph
+from src.features.color.core.mist import mist_is_active
 from src.features.color.core.shader_compiler import ShaderPipeline
 from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX
 from src.shared.color.lut_loader import load_lut, resample_to_unit_domain, resolve_lut_path
@@ -349,6 +350,7 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
                 and not layer.get("plugins")
                 and not effects.get("enabled")
                 and not effects.get("blur_enabled")
+                and not mist_is_active(effects)
                 and not grade.get("mid_detail")
                 and not grade.get("sharpness")
                 and not layer.get("mask_shapes")

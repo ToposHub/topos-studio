@@ -1954,6 +1954,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         grading_panel = getattr(self, "grading_panel", None)
         if grading_panel is not None:
             grading_panel.current_stack_id = graph_host.bound_stack_id
+        effects = getattr(self, "effects_panel", None)
+        if effects is not None:
+            effects.set_mist_available(graph_host.binding_description()["scope"] == "clip")
         # N03：读合并投影（legacy 基底 + params 域覆盖 + LUT/曲线投影）
         # ——裸 legacy_payload 会让图命令写入的 qualifier 等域在面板不可见
         payload = graph_host.panel_layer_payload(handle.node_id) or {}

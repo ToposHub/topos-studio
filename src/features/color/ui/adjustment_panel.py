@@ -3,6 +3,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout,
                              QLabel, QPushButton, QGridLayout)
 from PyQt6.QtCore import Qt, pyqtSignal
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
+from src.features.color.ui.panel_chrome import ColorParameterRow, PARAMETER_LABEL_STYLE
 
 class AdjustmentPanel(QWidget):
     # Signal emits (brightness, contrast, saturation, blur, sharpen)
@@ -36,7 +37,7 @@ class AdjustmentPanel(QWidget):
         for i, (display_name, internal_name) in enumerate(params):
             lbl = QLabel(display_name)
             lbl.setFixedWidth(75)
-            lbl.setStyleSheet("color: #ccc; font-size: 10px; font-weight: bold;")
+            lbl.setStyleSheet(PARAMETER_LABEL_STYLE)
             lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             
             row, reset_btn = self.create_param_row(internal_name, -100 if i < 3 else 0, 100, 0)
@@ -59,7 +60,7 @@ class AdjustmentPanel(QWidget):
         layout.addStretch()
 
     def create_param_row(self, label, min_val, max_val, default_val):
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, float(min_val), float(max_val), float(default_val),
             step=1.0, decimals=0, label_width=0, slider_auto_hide=False)
         row.valueChanged.connect(lambda _: self.on_value_change())

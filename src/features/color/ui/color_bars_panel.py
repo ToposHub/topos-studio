@@ -15,11 +15,14 @@ from typing import Any, Optional
 
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QToolButton,
                              QLabel, QSizePolicy)
-from PyQt6.QtCore import Qt, QPointF, QRectF, QSize, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer, pyqtSignal
 from PyQt6.QtGui import (QPainter, QColor, QPen, QPainterPath, QLinearGradient,
                          QMouseEvent, QKeyEvent)
 
-from src.shared.assets.icon_manager import icon_reset, IconColors
+from src.features.color.ui.panel_chrome import (
+    SECTION_TITLE_STYLE,
+    style_reset_button,
+)
 from src.shared.ui.widgets.drag_value import drag_speed_per_pixel
 from src.shared.i18n.i18n import I18N
 from src.features.color.ui.color_wheel import (
@@ -93,7 +96,8 @@ class _ChannelBar(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         w, h = float(self.width()), float(self.height())
-        track = QRectF(2.0, 2.0, w - 4.0, h - 4.0)
+        # Inset the painted bar while retaining the full-width drag target.
+        track = QRectF(0.0, 0.0, w, h).adjusted(3.5, 2.0, -3.5, -2.0)
         radius = track.width() / 2.0
 
         # 1. 圆角内凹纯黑滑槽
@@ -306,18 +310,12 @@ class _BarsColumn(QWidget):
         header.setContentsMargins(4, 0, 4, 0)
         header.addStretch(1)
         label = QLabel(title)
-        label.setStyleSheet("color: #d4d7dd; font-size: 12px; font-weight: 600;")
+        label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(label)
         header.addStretch(1)
         self.reset_btn = QToolButton()
-        self.reset_btn.setIcon(icon_reset(IconColors.DEFAULT))
-        self.reset_btn.setIconSize(QSize(13, 13))
-        self.reset_btn.setFixedSize(20, 20)
+        style_reset_button(self.reset_btn)
         self.reset_btn.setToolTip(I18N.tr("grading.reset_wheel", "重置") + " " + title)
-        self.reset_btn.setStyleSheet("""
-            QToolButton { background: transparent; border: none; border-radius: 3px; }
-            QToolButton:hover { background: #414146; }
-        """)
         self.reset_btn.clicked.connect(self.reset)
         header.addWidget(self.reset_btn)
         layout.addLayout(header)
@@ -347,16 +345,13 @@ class _BarsColumn(QWidget):
         num_row.setContentsMargins(0, 0, 0, 0)
         num_row.setSpacing(4)
         self._nums: dict[str, _GradingValue] = {}
-        box_width = 52 if self._math == "add" else 34
         box_span = 30.0 if self._math == "add" else 2.0
         box_height = 24 if self._math == "add" else 22
         for ch in self._channels:
             num = _GradingValue(num_min, num_max, neutral,
-                                accent=_CHANNEL_COLORS[ch], drag_span=box_span)
-            num.setFixedValueWidth(box_width)
-            num.setFixedHeight(box_height)
-            num.layout().setContentsMargins(0, 0, 0, 2)
-            num._edit.setFixedHeight(box_height - 4)
+                                accent=_CHANNEL_COLORS[ch], drag_span=box_span, height=box_height)
+            if self._math == "add":
+                num.setFixedValueWidth(52)
             num.setToolTip(ch)
             self._nums[ch] = num
             num_row.addWidget(num)

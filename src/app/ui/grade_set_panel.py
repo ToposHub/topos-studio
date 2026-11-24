@@ -31,6 +31,7 @@ from src.shared.i18n.i18n import I18N
 from src.shared.media.format_registry import IMAGE_EXTENSIONS, is_image
 from src.shared.media.graded_thumbnail import GRADED_PREVIEW_JPEG_HEADER, GRADED_PREVIEW_MAX_EDGE, is_webp_preview
 from src.shared.ui.style_sheet import C
+from src.features.color.ui.panel_chrome import create_panel_header, header_icon, style_header_button
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 if TYPE_CHECKING:
@@ -286,8 +287,8 @@ class GradeSetPanel(QWidget):
         self._request_timer.timeout.connect(self._request_visible_thumbnails)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(3)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self.message = QLabel(self)
         self.message.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.message.setTextFormat(Qt.TextFormat.PlainText)
@@ -309,14 +310,23 @@ class GradeSetPanel(QWidget):
         self.view.images_dropped.connect(self._add_images)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_context_menu)
-        layout.addLayout(self._build_toolbar())
-        divider = QFrame(self)
+        header = create_panel_header(object_name="gradeSetToolbar", bottom_rule=False)
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+        header_layout.addLayout(self._build_toolbar(), 1)
+        divider = QFrame(header)
         divider.setObjectName("gradeSetToolbarDivider")
         divider.setFixedHeight(1)
         divider.setStyleSheet(f"background-color: {C.PANEL_DIVIDER}; border: none;")
-        layout.addWidget(divider)
-        layout.addWidget(self.message)
-        layout.addWidget(self.view, 1)
+        header_layout.addWidget(divider)
+        layout.addWidget(header)
+        body = QVBoxLayout()
+        body.setContentsMargins(4, 0, 4, 4)
+        body.setSpacing(3)
+        body.addWidget(self.message)
+        body.addWidget(self.view, 1)
+        layout.addLayout(body, 1)
         self._order.rowsInserted.connect(self._refresh_message)
         self._order.rowsRemoved.connect(self._refresh_message)
         self._model.changed.connect(self._refresh)
@@ -325,6 +335,7 @@ class GradeSetPanel(QWidget):
 
     def _build_toolbar(self) -> QHBoxLayout:
         tools = QHBoxLayout()
+        tools.setContentsMargins(4, 0, 4, 0)
         tools.setSpacing(4)
         self.set_selector = ChevronComboBox(self)
         self.set_selector.setAccessibleName(_tr("title", "Grade Sets"))
@@ -343,12 +354,6 @@ class GradeSetPanel(QWidget):
         self.size_slider.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.size_slider.setAccessibleName(size_label)
         self.size_slider.setToolTip(size_label)
-        self.size_slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{ height: 3px; border-radius: 1px; background: {C.BORDER}; }}
-            QSlider::handle:horizontal {{ background: {C.TEXT_SECONDARY}; width: 9px;
-                margin: -3px 0; border-radius: 4px; }}
-            QSlider::handle:horizontal:hover, QSlider::handle:horizontal:focus {{ background: {C.ORANGE}; }}
-        """)
         self.size_slider.valueChanged.connect(self._resize_cards)
         tools.addWidget(self.size_slider)
         self.filter_button = self._menu_button(_tr("filter", "Filter Photos"), "fa5s.filter")
@@ -403,17 +408,9 @@ class GradeSetPanel(QWidget):
         button = QToolButton(self)
         button.setMenu(QMenu(button))
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        button.setIcon(qta.icon(icon, color=C.TEXT_SECONDARY))
-        button.setIconSize(QSize(13, 13))
-        button.setFixedSize(27, 23)
+        style_header_button(button, width=27, icon=qta.icon(icon))
         button.setToolTip(label)
         button.setAccessibleName(label)
-        button.setStyleSheet(f"""
-            QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 4px; }}
-            QToolButton:hover, QToolButton:pressed {{ background: {C.BG_ACTIVE}; }}
-            QToolButton:focus {{ border-bottom-color: {C.ORANGE}; }}
-            QToolButton::menu-indicator {{ image: none; }}
-        """)
         return button
 
     def _set_layout(self, action: QAction) -> None:
@@ -481,7 +478,7 @@ class GradeSetPanel(QWidget):
     def _apply_filters(self) -> None:
         filtered = bool(self._order.file_format) or self._order.rating >= 0
         self._clear_filter_action.setEnabled(filtered)
-        self.filter_button.setIcon(qta.icon("fa5s.filter", color=C.ORANGE if filtered else C.TEXT_SECONDARY))
+        self.filter_button.setIcon(header_icon(qta.icon("fa5s.filter"), highlighted=filtered))
         self._order.invalidate()
         self._refresh_message()
 

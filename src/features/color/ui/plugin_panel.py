@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBo
                              QMenu)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
-    PANEL_TITLE_LABEL_STYLE, ENABLE_LABEL_STYLE, SEPARATOR_LINE_STYLE,
+    ENABLE_LABEL_STYLE, SEPARATOR_LINE_STYLE,
     SCROLL_AREA_TRANSPARENT_STYLE, TRANSPARENT_STYLE,
     EMPTY_STATE_LABEL_STYLE, ERROR_GROUP_STYLE, ERROR_LABEL_STYLE,
     AI_EFFECT_GROUP_STYLE, AI_PROCESS_BTN_STYLE, SCALE_LABEL_STYLE)
@@ -23,6 +23,7 @@ from src.features.color.core.plugin_manager import (
     format_capability_summary, get_plugin_manager,
 )
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
+from src.features.color.ui.panel_chrome import ColorParameterRow, PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
 from src.shared.ui.widgets.color_picker_control import (
@@ -110,7 +111,7 @@ class PluginPanel(QWidget):
         header_layout = QHBoxLayout()
 
         self.title_label = QLabel(I18N.tr("plugin.title_label", "效果控制"))
-        self.title_label.setStyleSheet(PANEL_TITLE_LABEL_STYLE)
+        self.title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         self.main_layout.addLayout(header_layout)
@@ -482,7 +483,7 @@ class PluginPanel(QWidget):
         # Calculate step for reasonable precision
         step = (max_val - min_val) / 100.0
         
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, min_val, max_val, current_val,
             step=step, decimals=2, label_width=90)
         row.interactionStarted.connect(self.interaction_started.emit)
@@ -547,6 +548,7 @@ class PluginPanel(QWidget):
         param_layout.setSpacing(4)
 
         lbl = QLabel(label)
+        lbl.setStyleSheet(PARAMETER_LABEL_STYLE)
         lbl.setFixedWidth(90)
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         param_layout.addWidget(lbl)
@@ -591,6 +593,7 @@ class PluginPanel(QWidget):
         param_layout.setSpacing(4)
 
         lbl = QLabel(label)
+        lbl.setStyleSheet(PARAMETER_LABEL_STYLE)
         lbl.setFixedWidth(90)
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         param_layout.addWidget(lbl)

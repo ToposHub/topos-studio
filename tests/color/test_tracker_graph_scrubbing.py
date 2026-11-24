@@ -6,8 +6,10 @@ from unittest.mock import MagicMock
 
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QStyle, QStyleOptionSlider
 
 from src.app.controllers.color_controller import ColorControllerMixin
+from src.features.color.ui.tracker_graph import TrackerGraph
 from src.features.color.ui.tracker_panel import TrackerPanel
 
 
@@ -45,6 +47,38 @@ def test_single_frame_media_never_seeks_past_last_frame(qtbot) -> None:
     panel.graph.frame_clicked.connect(events.append)
     panel.graph.view._seek_from_x(10000)
     assert events == [37]
+
+
+def test_tracker_graph_scrollbar_handles_drag_along_both_axes(qtbot) -> None:
+    graph = TrackerGraph(show_controls=False)
+    qtbot.addWidget(graph)
+    graph.resize(550, 240)
+    graph.set_frame_range(0, 200)
+    graph.set_current_frame(100)
+    graph.show()
+    qtbot.waitExposed(graph)
+
+    for slider, movement in (
+        (graph.horizontal_position, QPoint(120, 0)),
+        (graph.vertical_zoom, QPoint(0, -55)),
+    ):
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        handle = slider.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, slider
+        )
+        assert handle.width() == handle.height()
+        assert slider.rect().contains(handle)
+        start = handle.center()
+        end = start + movement
+        QTest.mousePress(slider, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(slider, end)
+        QTest.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=end)
+
+    assert graph.horizontal_position.value() > 0
+    assert graph.vertical_zoom.value() < 100
+    assert graph.view._view_hi - graph.view._view_lo < 200
+    assert graph.view._value_zoom > 1.0
 
 
 class _ScrubHost(ColorControllerMixin):

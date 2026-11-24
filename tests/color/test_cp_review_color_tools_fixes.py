@@ -175,6 +175,58 @@ def test_blur_set_params_mode_aware_fallback(blur_panel):
     assert blur_panel.blur_radius_slider.value() == 0.0
 
 
+def test_mist_panel_gesture_and_legacy_hydration(blur_panel, qtbot) -> None:
+    from PyQt6.QtCore import QPoint, Qt
+    from PyQt6.QtWidgets import QStyle, QStyleOptionSlider, QWidget
+
+    panel = blur_panel
+    panel.resize(640, 336)
+    panel.show()
+    header = panel.findChild(QWidget, "colorToolHeader")
+    sharpen_top = panel.sharpen_slider.mapTo(panel, QPoint()).y()
+    assert sharpen_top - header.geometry().bottom() - 1 == 12
+    assert panel.mist_container.y() > panel.blur_container.y()
+    assert panel.mist_mix_slider.isVisible()
+    assert not panel.mist_container.isEnabled()
+
+    events = []
+    panel.interaction_started.connect(lambda: events.append("start"))
+    panel.effects_changed.connect(lambda params: events.append(params))
+    panel.interaction_ended.connect(lambda: events.append("end"))
+    qtbot.mouseClick(panel.mist_enable_cb, Qt.MouseButton.LeftButton)
+    assert events[0] == "start"
+    assert events[1]["mist_enabled"] is True
+    assert events[1]["mist_radius"] == 0.0
+    assert events[1]["mist_mix"] == 33.0
+    assert events[2] == "end"
+    assert panel.mist_container.isEnabled()
+
+    slider = panel.mist_mix_slider.slider
+    option = QStyleOptionSlider()
+    slider.initStyleOption(option)
+    handle = slider.style().subControlRect(
+        QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, slider)
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=handle.center())
+    qtbot.mouseMove(slider, pos=handle.center() + QPoint(45, 0))
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=handle.center() + QPoint(45, 0))
+    assert events[3] == "start"
+    assert events[4]["mist_mix"] > 33.0
+    assert events[5] == "end"
+
+    panel.set_params_dict({"mist_enabled": True, "mist_radius": 0.2, "mist_mix": 27})
+    assert panel.mist_mix_slider.value() == 27
+    panel.reset_mist()
+    assert panel.mist_enable_cb.isChecked()
+    assert panel.mist_mix_slider.value() == 33
+
+    panel.set_params_dict({})
+    qtbot.wait(20)
+    assert not panel.mist_enable_cb.isChecked()
+    assert not panel.mist_container.isEnabled()
+    assert panel.mist_mix_slider.value() == 33
+    assert len(events) == 9
+
+
 # ---------------------------------------------------------------------------
 # v1 栈回退：整体重置
 # ---------------------------------------------------------------------------

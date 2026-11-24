@@ -27,16 +27,20 @@ from src.features.color.core.curves_soft_clip import (
     normalize_curves_soft_clip,
     uses_calibrated_soft_clip,
 )
-from src.shared.assets.icon_manager import icon_link, icon_reset, icon_unlink
+from src.shared.assets.icon_manager import icon_link, icon_unlink
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import (
-    C, CURVE_RESET_BTN_STYLE, SCROLL_AREA_TRANSPARENT_STYLE,
+    C, SCROLL_AREA_TRANSPARENT_STYLE,
 )
 from src.shared.ui.widgets.curves_widget import CurvesWidget
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.curve_mode_button import CurveModeButton
 from src.shared.ui.widgets.hsl_curves_widget import CURVE_MODES
 from src.features.color.ui.hsl_curves_panel import HSLCurvesPanel
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_ROW_SPACING, SECTION_TITLE_STYLE,
+    create_panel_header, style_header_button, style_reset_button,
+)
 
 CURVE_PALETTE_ORDER = ('Custom', 'HueHue', 'HueSat', 'HueLum', 'LumSat', 'SatSat', 'SatLum')
 _SOFT_CLIP_DISPLAY_OFFSETS = {"low_clip": 50.0, "high_clip": -150.0}
@@ -81,13 +85,18 @@ class CurvesPanel(QWidget):
         self.soft_clip_buttons: dict[str, QPushButton] = {}
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 4, 6, 6)
-        layout.setSpacing(4)
-        toolbar = QHBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        header = create_panel_header()
+        toolbar = QHBoxLayout(header)
+        toolbar.setContentsMargins(6, 0, 6, 0)
+        toolbar.setSpacing(4)
         self.mode_title = QLabel(I18N.tr("curves_palette.custom", "Custom"))
+        self.mode_title.setStyleSheet(SECTION_TITLE_STYLE)
         toolbar.addWidget(self.mode_title)
         # Keep the picker beside its active curve mode so it is easy to find.
         self.picker_btn = curves_widget.picker_btn
+        style_header_button(self.picker_btn, width=28, icon=self.picker_btn.icon())
         toolbar.addWidget(self.picker_btn)
         toolbar.addStretch()
         self.mode_buttons: dict[str, CurveModeButton] = {}
@@ -95,6 +104,7 @@ class CurvesPanel(QWidget):
         for mode in CURVE_PALETTE_ORDER:
             title = self._mode_title(mode)
             button = CurveModeButton(mode, title, self)
+            style_header_button(button, width=28, icon=button.icon())
             self.mode_buttons[mode] = button
             self.mode_group.addButton(button)
             button.clicked.connect(lambda _checked=False, m=mode: self.set_curve_mode(m))
@@ -104,12 +114,14 @@ class CurvesPanel(QWidget):
         self.reset_curves_btn = curves_widget.btn_container.layout().itemAt(
             curves_widget.btn_container.layout().count() - 1
         ).widget()
+        style_reset_button(self.reset_curves_btn, global_reset=True)
         toolbar.addWidget(self.reset_curves_btn)
         self.reset_hsl_btn = self.hsl_panel.hsl_curves_widget.reset_btn
+        style_reset_button(self.reset_hsl_btn, global_reset=True)
         toolbar.addWidget(self.reset_hsl_btn)
         self.reset_hsl_btn.hide()
         curves_widget.btn_container.hide()
-        layout.addLayout(toolbar)
+        layout.addWidget(header)
 
         self.body = PanelSplitter(Qt.Orientation.Horizontal, self)
         self.body.setChildrenCollapsible(False)
@@ -136,35 +148,33 @@ class CurvesPanel(QWidget):
         self.sidebar = QWidget()
         self.sidebar.setObjectName("curves_sidebar")
         controls = QVBoxLayout(self.sidebar)
-        controls.setContentsMargins(4, 2, 4, 2)
+        controls.setContentsMargins(0, 2, 0, 2)
         controls.setSpacing(4)
 
+        edit_controls = QVBoxLayout()
+        edit_controls.setContentsMargins(4, 0, 4, 0)
+        edit_controls.setSpacing(PARAMETER_ROW_SPACING)
+        controls.addLayout(edit_controls)
         self.edit_link_btn = self._link_button("edit_link")
         self.edit_group = QButtonGroup(self)
-        controls.addLayout(self._section_header(
+        edit_controls.addLayout(self._section_header(
             I18N.tr("curves_palette.edit", "Edit"), self.edit_link_btn,
             "YRGB", self.edit_buttons, self.edit_group, self._reset_edit,
         ))
         for channel in "YRGB":
-            row = ParamSliderRow(
+            row = ColorParameterRow(
                 channel, 0.0, 100.0, 100.0, step=1.0, decimals=0,
                 label_width=16, slider_auto_hide=False, value_fixed_width=44,
             )
-            row.label.setStyleSheet(f"color: {self._channel_color(channel)}; font-weight: bold;")
-            row.slider.setStyleSheet(self._channel_slider_style(channel))
+            row.label.setStyleSheet(f"color: {self._channel_color(channel)}; font-size: 11px; font-weight: 600; background: transparent;")
             row.setObjectName(f"curve_amount_{channel}")
             line = QHBoxLayout()
             line.setSpacing(2)
             line.addWidget(row, 1)
-            reset = self._reset_button(
-                I18N.tr("curves_palette.reset_amount", "Reset channel amount"),
-                color="#95959a",
-                size=20,
-                icon_size=12,
-            )
+            reset = self._reset_button(I18N.tr("curves_palette.reset_amount", "Reset channel amount"))
             reset.clicked.connect(lambda _checked=False, ch=channel: self._reset_edit_amount(ch))
             line.addWidget(reset)
-            controls.addLayout(line)
+            edit_controls.addLayout(line)
             self.edit_rows[channel] = row
             row.valueChanged.connect(
                 lambda value, ch=channel: self._store_edit_amount(ch, value)
@@ -177,13 +187,17 @@ class CurvesPanel(QWidget):
         self._set_edit_linked(True)
 
         divider = QFrame()
-        divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet(f"color: {C.PANEL_DIVIDER};")
+        divider.setFixedHeight(1)
+        divider.setStyleSheet(f"background: {C.PANEL_DIVIDER}; border: none;")
         controls.addWidget(divider)
 
+        soft_clip_controls = QVBoxLayout()
+        soft_clip_controls.setContentsMargins(4, 0, 4, 0)
+        soft_clip_controls.setSpacing(PARAMETER_ROW_SPACING)
+        controls.addLayout(soft_clip_controls)
         self.soft_clip_link_btn = self._link_button("soft_clip_link")
         self.soft_clip_group = QButtonGroup(self)
-        controls.addLayout(self._section_header(
+        soft_clip_controls.addLayout(self._section_header(
             I18N.tr("curves_palette.soft_clip", "Soft Clip"), self.soft_clip_link_btn,
             "RGB", self.soft_clip_buttons, self.soft_clip_group, self._reset_soft_clip,
         ))
@@ -201,7 +215,7 @@ class CurvesPanel(QWidget):
             ("high_clip", "High"), ("high_soft", "High Soft"),
         ):
             row_min, row_max = self._soft_row_range(key, self._soft_defaults)
-            row = ParamSliderRow(
+            row = ColorParameterRow(
                 I18N.tr(f"curves_palette.{key}", fallback), row_min, row_max,
                 self._soft_defaults[key], step=0.01, decimals=2,
                 label_width=64, slider_auto_hide=False, value_fixed_width=44,
@@ -212,15 +226,10 @@ class CurvesPanel(QWidget):
             line = QHBoxLayout()
             line.setSpacing(2)
             line.addWidget(row, 1)
-            reset = self._reset_button(
-                I18N.tr("curves_palette.reset_parameter", "Reset parameter"),
-                color="#95959a",
-                size=20,
-                icon_size=12,
-            )
+            reset = self._reset_button(I18N.tr("curves_palette.reset_parameter", "Reset parameter"))
             reset.clicked.connect(lambda _checked=False, name=key: self._reset_soft_parameter(name))
             line.addWidget(reset)
-            controls.addLayout(line)
+            soft_clip_controls.addLayout(line)
             self.soft_clip_rows[key] = row
         for channel, button in self.soft_clip_buttons.items():
             button.clicked.connect(lambda _checked=False, ch=channel: self._select_soft_channel(ch))
@@ -293,24 +302,6 @@ class CurvesPanel(QWidget):
         }[channel]
 
     @classmethod
-    def _channel_slider_style(cls, channel: str) -> str:
-        """Color each YRGB amount handle to match its channel button."""
-        color = cls._channel_color(channel)
-        return f"""
-            QSlider::handle:horizontal {{
-                background: {color};
-                border: 1px solid #1e1e1e;
-                width: 10px;
-                height: 10px;
-                margin: -4px 0;
-                border-radius: 5px;
-            }}
-            QSlider::handle:horizontal:hover {{
-                border: 1px solid #f2f2f2;
-            }}
-        """
-
-    @classmethod
     def _channel_button_style(cls, channel: str) -> str:
         """Solid DaVinci-style channel button with a clear selected outline."""
         color = cls._channel_color(channel)
@@ -359,18 +350,9 @@ class CurvesPanel(QWidget):
         button.toggled.connect(lambda linked: button.setIcon(icon_link() if linked else icon_unlink()))
         return button
 
-    def _reset_button(
-        self,
-        tooltip: str,
-        color: str = "#ff8800",
-        size: int = 22,
-        icon_size: int = 16,
-    ) -> QPushButton:
+    def _reset_button(self, tooltip: str) -> QPushButton:
         button = QPushButton()
-        button.setIcon(icon_reset(color))
-        button.setIconSize(QSize(icon_size, icon_size))
-        button.setFixedSize(size, size)
-        button.setStyleSheet(CURVE_RESET_BTN_STYLE)
+        style_reset_button(button)
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
         return button
@@ -382,6 +364,7 @@ class CurvesPanel(QWidget):
         header = QHBoxLayout()
         header.setSpacing(3)
         label = QLabel(title)
+        label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(label)
         header.addStretch()
         header.addWidget(link)

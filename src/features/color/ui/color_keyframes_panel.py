@@ -16,6 +16,12 @@ from PyQt6.QtWidgets import (
 )
 
 from src.features.color.core.keyframe_tracks import DYNAMIC_WEIGHT_MAX, segment_weight
+from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    color_panel_stylesheet, create_panel_header, header_icon, style_header_button,
+)
+from src.shared.assets.icon_manager import icon_arrow_left, icon_arrow_right
+from src.shared.ui.style_sheet import C
 
 from .color_keyframes_view_state import (
     EditKind, EditRequest, KeyKind, KeyRef, Marker, Scope, Snapshot, Track, demo_snapshot, tr,
@@ -74,6 +80,7 @@ class _DissolveDialog(QDialog):
     def _slider(self, layout: QVBoxLayout, name: str, initial: float) -> QSlider:
         row = QHBoxLayout()
         label = QLabel(name)
+        label.setStyleSheet(PARAMETER_LABEL_STYLE)
         slider = QSlider(_HORIZONTAL)
         slider.setAccessibleName(name)
         slider.setRange(0, round(DYNAMIC_WEIGHT_MAX * 10))
@@ -127,17 +134,16 @@ class ColorKeyframesPanel(QWidget):
         self._frame_index: dict[str, list[int]] = {}
         self._dynamic_frames: dict[str, set[int]] = {}
         self._rows: list[tuple[str, int]] = []
-        self.setStyleSheet("""
-            QWidget#colorKeyframesPanel { background: #25252a; color: #e0e0e2; }
-            QWidget#colorKeyframesHeader { background: #222227; border-bottom: 1px solid #151518; }
-            QDialog#colorKeyframesDissolve { background: #27272c; }
+        self.setStyleSheet(color_panel_stylesheet("""
+            QWidget#colorKeyframesPanel { background: __COLOR_PANEL_BASE__; color: #e0e0e2; }
+            QDialog#colorKeyframesDissolve { background: __COLOR_PANEL_BASE__; }
             QDialog#colorKeyframesDissolve QPushButton {
                 background: #3b3b42; color: #e0e0e2; border: 1px solid #53535a;
                 border-radius: 3px; padding: 4px 14px;
             }
             QDialog#colorKeyframesDissolve QPushButton:hover { background: #4c4c53; }
             QComboBox QAbstractItemView, QMenu {
-                background: #2c2c32; color: #e0e0e2; border: 1px solid #47474e;
+                background: __COLOR_PANEL_RAISED__; color: #e0e0e2; border: 1px solid #47474e;
                 selection-background-color: #505058;
             }
             QMenu::item { padding: 4px 18px 4px 12px; }
@@ -145,31 +151,25 @@ class ColorKeyframesPanel(QWidget):
             QMenu::item:disabled { color: #85858a; }
             QLabel { color: #e0e0e2; background: transparent; }
             QLabel#colorKeyframesDemo { color: #aaa9ad; }
-            QComboBox, QToolButton { color: #e0e0e2; background: #25252a; border: 0; padding: 2px 5px; }
-            QComboBox:hover, QToolButton:hover, QToolButton:checked { background: #393940; }
-            QScrollBar { background: #222227; border: 0; }
+            QComboBox, QToolButton { color: #e0e0e2; background: __COLOR_PANEL_INSET__; border: 0; padding: 2px 5px; }
+            QComboBox:hover, QToolButton:hover, QToolButton:checked { background: __COLOR_PANEL_RAISED__; }
+            QScrollBar { background: __COLOR_PANEL_INSET__; border: 0; }
             QScrollBar:vertical { width: 9px; margin: 2px 1px; }
             QScrollBar:horizontal { height: 9px; margin: 1px 2px; }
             QScrollBar::handle { background: #585960; border-radius: 3px; min-height: 18px; min-width: 18px; }
             QScrollBar::handle:hover { background: #757781; }
             QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
             QScrollBar::add-page, QScrollBar::sub-page { background: none; }
-            QSlider::groove:horizontal { height: 3px; background: #151518; }
-            QSlider::handle:horizontal { width: 9px; margin: -3px 0; background: #a6a6ac; border-radius: 4px; }
-        """)
+        """))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        header = QWidget()
-        header.setObjectName("colorKeyframesHeader")
-        header.setFixedHeight(30)
+        header = create_panel_header(object_name="colorKeyframesHeader")
         toolbar = QHBoxLayout(header)
         toolbar.setContentsMargins(8, 0, 4, 0)
         toolbar.setSpacing(5)
         title = QLabel(tr("title", "Keyframes"))
-        font = title.font()
-        font.setBold(True)
-        title.setFont(font)
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         toolbar.addWidget(title)
         if demo:
             hint = QLabel(tr("demo", "Sample"))
@@ -190,7 +190,7 @@ class ColorKeyframesPanel(QWidget):
         self.zoom.valueChanged.connect(self._zoom_changed)
         toolbar.addWidget(self.zoom)
         self.expand_button = QToolButton()
-        self.expand_button.setText("⇤")
+        style_header_button(self.expand_button, width=26, icon=icon_arrow_left())
         self.expand_button.setCheckable(True)
         self.expand_button.setAccessibleName(tr("expand", "Expand Keyframes"))
         self.expand_button.setToolTip(self.expand_button.accessibleName())
@@ -343,7 +343,7 @@ class ColorKeyframesPanel(QWidget):
                      for ref in self.targets(t.id, frame))
 
     def _expand_changed(self, expanded: bool) -> None:
-        self.expand_button.setText("⇥" if expanded else "⇤")
+        self.expand_button.setIcon(header_icon(icon_arrow_right() if expanded else icon_arrow_left()))
         name = tr("collapse", "Collapse Keyframes") if expanded else tr("expand", "Expand Keyframes")
         self.expand_button.setToolTip(name)
         self.expand_button.setAccessibleName(name)
@@ -642,7 +642,7 @@ class _Timeline(QWidget):
                 self._paint_overlays(p)
 
     def _paint_surface(self, p: QPainter) -> None:
-        p.fillRect(self.rect(), QColor("#2c2d31"))
+        p.fillRect(self.rect(), QColor(C.BG_PANEL))
         p.setFont(QFont(self.font().family(), 10))
         if not self.panel.snapshot.frame_count:
             p.setPen(QColor("#9a9aa0"))
@@ -653,19 +653,21 @@ class _Timeline(QWidget):
         rows = self._visible_rows()
         p.save()
         p.setClipRect(0, _RULER, self.width(), max(0, self.height() - _RULER))
-        p.fillRect(0, _RULER, left, self.height(), QColor("#25252a"))
+        p.fillRect(0, _RULER, left, self.height(), QColor(C.COLOR_PANEL_INSET))
         colors = {"all": "#6e737f", "color": "#3f6551", "sizing": "#3c566f", "matte": "#655271"}
         for row, depth, y in rows:
             active = row == self.panel.active_row
-            p.fillRect(0, y, left, _ROW, QColor("#303035" if active else "#25252a"))
-            bg = colors[self.panel.scope] if row == self.panel.scope_row() else "#33343a" if active else "#27282d"
+            p.fillRect(0, y, left, _ROW, QColor(C.COLOR_PANEL_RAISED if active else C.COLOR_PANEL_INSET))
+            bg = C.COLOR_PANEL_RAISED if active else C.BG_PANEL
+            if row == self.panel.scope_row():
+                bg = colors[self.panel.scope]
             p.fillRect(left, y, self.width() - left, _ROW, QColor(bg))
             p.setPen(QColor("#17171b"))
             p.drawLine(0, y + _ROW - 1, self.width(), y + _ROW - 1)
             self._paint_header(p, row, depth, y)
         p.restore()
 
-        p.fillRect(0, 0, self.width(), _RULER, QColor("#202024"))
+        p.fillRect(0, 0, self.width(), _RULER, QColor(C.COLOR_PANEL_INSET))
         p.setPen(QColor("#121214"))
         p.drawLine(0, _RULER - 1, self.width(), _RULER - 1)
         p.drawLine(left - 1, 0, left - 1, self.height())

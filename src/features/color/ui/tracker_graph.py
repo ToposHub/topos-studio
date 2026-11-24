@@ -1,8 +1,8 @@
 """Tracker 曲线图（阶段 5，计划 §5.6）。
 
 自定义 ``QWidget`` + ``QPainter``（不用 QChart），保证视觉可控：
-- 背景 ``#111216``；上方时间刻度区 22 px；左侧数值刻度 38 px
-- 水平网格每 25% 一条细线；当前帧 1 px 红色竖线 + 8 px 红色三角标
+- 深色绘图区；上方时间刻度区 30 px；左侧数值刻度 22 px
+- 水平网格每 25% 一条细线；当前帧以红色播放头标记
 - 五色曲线：平移X ``#00E0B0`` / 平移Y ``#4DA3FF`` / 缩放 ``#FF38A8`` /
   旋转 ``#FFD43B`` / 透视 ``#C77DFF``（3D 深度 ``#FF9F43`` 预留）
 - 关键帧 6 px 菱形；手动修正紫色菱形；失败帧红色三角
@@ -18,13 +18,16 @@ from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QPolygonF
 from PyQt6.QtWidgets import QCheckBox, QGridLayout, QHBoxLayout, QSlider, QVBoxLayout, QWidget
 from src.shared.i18n.i18n import tr
+from src.shared.ui.style_sheet import C, PANEL_SLIDER_STYLE
 
 SeriesPoint = Tuple[int, float]
 
-GRAPH_BG = QColor(0x20, 0x20, 0x24)
-GRID_COLOR = QColor(0x2A, 0x2C, 0x33)
-AXIS_TEXT_COLOR = QColor(0x8C, 0x8C, 0x8C)
-PLAYHEAD_COLOR = QColor(0xFF, 0x40, 0x40)
+GRAPH_BG = QColor(C.COLOR_PANEL_INSET)
+GRID_COLOR = QColor(C.COLOR_PANEL_RAISED)
+RULER_BG = QColor(C.BG_PANEL)
+RULER_TICK_COLOR = QColor(C.BORDER_DARK)
+TIMECODE_COLOR = QColor(C.TIMELINE_TIMECODE_TEXT)
+PLAYHEAD_COLOR = QColor(C.KEYFRAME_PLAYHEAD)
 KEYFRAME_COLOR = QColor(0xD8, 0xD8, 0xD8)
 MANUAL_KEY_COLOR = QColor(0xC7, 0x7D, 0xFF)
 FAILED_KEY_COLOR = QColor(0xFF, 0x4D, 0x5E)
@@ -238,7 +241,7 @@ class _GraphView(QWidget):
 
     def _draw_grid(self, painter: QPainter, rect: QRectF,
                    vmin: float, vmax: float) -> None:
-        painter.setPen(QPen(QColor("#101114"), 1))
+        painter.setPen(QPen(QColor(C.PANEL_DIVIDER), 1))
         painter.drawRect(rect)
         if not any(self._series.values()):
             return
@@ -267,18 +270,19 @@ class _GraphView(QWidget):
 
     def _draw_time_ruler(self, painter: QPainter) -> None:
         lo, hi = self._frame_extent()
-        painter.fillRect(QRectF(VALUE_AXIS_W, 0, self._plot_rect().width(), TIME_RULER_H),
-                         QColor("#262929"))
-        painter.setPen(AXIS_TEXT_COLOR)
+        plot = self._plot_rect()
+        painter.fillRect(0, 0, self.width(), TIME_RULER_H, RULER_BG)
         font = QFont()
         font.setPixelSize(10)
         painter.setFont(font)
-        count = max(1, int(self._plot_rect().width() / 110))
+        count = max(1, int(plot.width() / 110))
         step = max(1, int((hi - lo) / count))
         for frame in range(int(lo), int(hi) + 1, step):
             x = self.frame_to_x(frame)
+            painter.setPen(RULER_TICK_COLOR)
             painter.drawLine(QPointF(x, 0), QPointF(x, TIME_RULER_H - 6))
-            if x + 86 <= self._plot_rect().right():
+            if x + 86 <= plot.right():
+                painter.setPen(TIMECODE_COLOR)
                 painter.drawText(QPointF(x + 8, 17), self.timecode(frame))
 
     def _draw_curve(self, painter: QPainter, key: str,
@@ -519,13 +523,13 @@ class TrackerGraph(QWidget):
         self.vertical_zoom.setRange(0, 100)
         self.vertical_zoom.setInvertedAppearance(True)
         self.vertical_zoom.setValue(100)
-        self.vertical_zoom.setFixedWidth(12)
+        self.vertical_zoom.setFixedWidth(14)
         self.vertical_zoom.setToolTip(tr("tracker.vertical_zoom", "Vertical curve zoom"))
         self.vertical_zoom.valueChanged.connect(self.view.set_vertical_zoom)
         plot.addWidget(self.vertical_zoom, 0, 1)
         self.horizontal_position = QSlider(Qt.Orientation.Horizontal, self)
         self.horizontal_position.setRange(0, 1000)
-        self.horizontal_position.setFixedHeight(12)
+        self.horizontal_position.setFixedHeight(14)
         self.horizontal_position.setToolTip(tr("tracker.horizontal_zoom", "Horizontal curve zoom"))
         self.horizontal_position.valueChanged.connect(self.view.set_horizontal_position)
         self.horizontal_zoom = self.horizontal_position
@@ -533,10 +537,7 @@ class TrackerGraph(QWidget):
         horizontal_row.setContentsMargins(VALUE_AXIS_W, 0, SCROLLBAR_W, 0)
         horizontal_row.addWidget(self.horizontal_position)
         plot.addLayout(horizontal_row, 1, 0)
-        self.setStyleSheet("QSlider::groove:horizontal { height: 3px; background: #16171A; }"
-            "QSlider::handle:horizontal { background: #969994; width: 9px; margin: -3px 0; border-radius: 4px; }"
-            "QSlider::groove:vertical { width: 3px; background: #16171A; }"
-            "QSlider::handle:vertical { background: #969994; height: 9px; margin: 0 -3px; border-radius: 4px; }")
+        self.setStyleSheet(PANEL_SLIDER_STYLE)
         layout.addLayout(plot, 1)
 
     # 数据接口透传

@@ -150,6 +150,54 @@ def test_dock_surfaces_reach_the_rule_and_keep_native_edge_drag(
     check_surfaces()
 
 
+def test_grading_rules_join_both_dock_seams(qapp, qtbot) -> None:
+    from src.features.color.ui.color_wheel import GradingPanel
+
+    class Window(QMainWindow):
+        def paintEvent(self, event: QPaintEvent) -> None:
+            super().paintEvent(event)
+            painter = QPainter(self)
+            paint_shared_dock_dividers(self, painter)
+            painter.end()
+
+    host = Window()
+    qtbot.addWidget(host)
+    host.setStyleSheet(DARK_THEME)
+    grading = GradingPanel()
+    left, middle, right = (PanelDockWidget(name, host) for name in ("A", "Grading", "B"))
+    for dock, content in ((left, QWidget()), (middle, grading), (right, QWidget())):
+        content.setMinimumWidth(80)
+        dock.setWidget(content)
+        title = QWidget()
+        title.setFixedHeight(1)
+        dock.setTitleBarWidget(title)
+        host.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+    host.splitDockWidget(left, middle, Qt.Orientation.Horizontal)
+    host.splitDockWidget(middle, right, Qt.Orientation.Horizontal)
+    host.resize(1060, 400)
+    host.show()
+    host.resizeDocks([left, middle, right], [180, 700, 180], Qt.Orientation.Horizontal)
+
+    for mode in ("wheels", "bars", "log"):
+        grading._mode_buttons[mode].click()
+        qapp.processEvents()
+        image = host.grab().toImage()
+        dpr = image.devicePixelRatio()
+        left_seam = middle.geometry().left() - 1
+        right_seam = middle.geometry().right() + 1
+        header = grading.reset_all_btn.parentWidget()
+        rows = [header.mapTo(host, header.rect().bottomLeft()).y()]
+        rows.extend(divider.mapTo(host, QPoint()).y()
+                    for divider in (grading._h_line_mid, grading._h_line_bottom))
+        for y in rows:
+            for x in range(left_seam, right_seam + 1):
+                assert image.pixelColor(int(x * dpr), int(y * dpr)).name() == C.PANEL_DIVIDER
+
+        y = header.mapTo(host, header.rect().center()).y()
+        for x in (left_seam + 1, right_seam - 1):
+            assert image.pixelColor(int(x * dpr), int(y * dpr)).name() == "#202024"
+
+
 @pytest.mark.skipif(
     sys.platform == "darwin",
     reason=(
