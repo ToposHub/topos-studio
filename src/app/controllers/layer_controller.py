@@ -64,7 +64,9 @@ from src.features.color.core.layer import (
     DEFAULT_EXTENDED_GRADING_PARAMS, Layer, MaskShape, MaskGroup,
 )
 from src.features.color.core.curves_calibration import curves_calibration_enabled
-from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
+from src.features.color.core.curves_soft_clip import (
+    curves_edit_is_default, curves_soft_clip_is_identity, uses_calibrated_soft_clip,
+)
 from src.features.color.core.primary_calibration import (
     PRIMARY_CALIBRATION_CURRENT_VERSION, PRIMARY_CALIBRATION_VERSION_KEY,
     ungraded_primary_params,
@@ -223,14 +225,16 @@ class LayerOpsMixin:
             curves_panel.set_layer_state({
                 "curves_soft_clip": getattr(layer, "curves_soft_clip", None) or {},
                 "curves_edit": getattr(layer, "curves_edit", None) or {},
+                "curves_data": layer.curves_data,
+                "hsl_curve_data": layer.hsl_curve_data,
+                "has_curve_lut": layer.curves_lut is not None or layer.hsl_curve_lut is not None,
             })
 
         # HSL Curve
         if layer.hsl_curve_data:
             self.hsl_curves_panel.set_curves_data(layer.hsl_curve_data)
         elif layer.hsl_curve_lut is not None:
-            # If only LUT exists, convert to curve data (fallback)
-            self.hsl_curves_panel.reset(emit_changed=False)
+            self.hsl_curves_panel.hsl_curves_widget.set_lut(layer.hsl_curve_lut, emit_changed=False)
         else:
             self.hsl_curves_panel.reset(emit_changed=False)
 
@@ -242,8 +246,7 @@ class LayerOpsMixin:
         self.qualifier_panel.set_params(layer.qualifier_params)
         # D2：旧 LutPanel 实例已删除——LUT 状态展示在 ColorLutBrowser
         # （R03 ack 水合）与节点 LUT 菜单（N04），不再经图层回填
-        if not self.warper_panel.set_warper_state(layer.warper_state, target_id=layer.id):
-            self.warper_panel.set_params(layer.warper_params)
+        self.warper_panel.load_layer_state(layer)
         if layer.mask_shapes:
             s = layer.mask_shapes[-1]
             if isinstance(s, MaskGroup):
@@ -2760,6 +2763,9 @@ class LayerOpsMixin:
     _GRADING_EXTENDED_KEYS = tuple(DEFAULT_EXTENDED_GRADING_PARAMS.keys())
 
     def _use_measured_video_primaries(self) -> bool:
+        return self._use_measured_rec709_grading()
+
+    def _use_measured_rec709_grading(self) -> bool:
         """Choose the calibration from the grading domain of the active video project."""
         from src.features.color.core.color_node_color_space import node_color_is_identity
         from src.shared.color.color_space_descriptor import TIMELINE_SPACE_KEY, project_timeline_space
@@ -3208,6 +3214,8 @@ class LayerOpsMixin:
     def on_warper_changed(self, grid_data) -> None:
         """变形网格（Warper）数据变化：写引擎 + 播放态防抖渲染。"""
         if self.engine.get_current_image() is None: return
+        if grid_data is not None:
+            self.warper_panel.confirm_mesh_edit()
         self.engine.set_warper_params(grid_data)
         # S5.C: 播放中调色参数变化时更新 cached render params
         self._invalidate_video_render_params_if_playing()
@@ -3266,13 +3274,13 @@ class LayerOpsMixin:
             }
 
         def _on_applied(layer: Layer, state: WarperStateV2 | None) -> None:
-            if self.engine.get_current_image() is None:
-                return
             if graph_gesture is not None:
                 graph_host, node_id, identity = graph_gesture
                 if (graph_host.active_grade_node_identity() != identity or
                         not graph_host.preview_warper_change(node_id, _graph_payload(layer))):
                     return
+            elif self.engine.get_current_image() is None:
+                return
             if self.engine.get_active_layer() is layer:
                 self.engine.set_warper_params(layer.warper_params, warper_space=layer.warper_space)
             elif graph_gesture is None:
@@ -3333,10 +3341,12 @@ class LayerOpsMixin:
 
     def _warper_command_target(self):
         """命令目标 = 当前活动层(无图/无层 → None,命令如实 no_target)。"""
-        if self.engine.get_current_image() is None: return None
         draft = getattr(self, "_warper_graph_draft", None)
         if draft is not None:
             return draft[1]
+        if (getattr(self, "_calibrated_warper_route", None) is None
+                and self.engine.get_current_image() is None):
+            return None
         try:
             return self.engine.get_active_layer()
         except (IndexError, ValueError):
@@ -3366,16 +3376,23 @@ class LayerOpsMixin:
         self._calibrated_warper_route = route
         try:
             result = adapter.submit(command)
+            layer = self._warper_command_target()
         except Exception:
             logger.warning("warper command failed: %s", command.get("action"), exc_info=True)
             return
         finally:
             self._calibrated_warper_route = None
-        if calibrated and not result.get("ok"):
-            layer = self._warper_command_target()
-            if layer is not None and not self.warper_panel.set_warper_state(layer.warper_state, target_id=layer.id):
-                self.warper_panel.set_params(layer.warper_params)
-        if calibrated and command.get("payload", {}).get("phase") != "update":
+        phase = command.get("payload", {}).get("phase")
+        if not result.get("ok") and calibrated:
+            if layer is not None:
+                self.warper_panel.load_layer_state(layer)
+        elif result.get("dirty") and phase != "update":
+            if layer is not None:
+                if calibrated:
+                    self.warper_panel.confirm_mesh_edit(layer.warper_state)
+                elif self.warper_panel.warper.calibrated_hs:
+                    self.warper_panel.load_layer_state(layer)
+        if calibrated and phase != "update":
             self._warper_graph_draft = None
         if result.get("handled") and not calibrated:
             timer = getattr(self, "_warper_flush_timer", None)
@@ -3435,29 +3452,59 @@ class LayerOpsMixin:
             graph_host.begin_grade_gesture(self._graph_gesture_tid)
         committed = graph_host.submit_curve_change(node_id, domains, self._graph_gesture_tid)
         self._tool_flush_timer().start()
-        return committed and graph_host.align_engine_active_layer(node_id)
-
-    def on_curves_calibration_changed(self, state: dict[str, Any]) -> None:
-        if self._preview_curve_change(state):
-            self.engine.set_curves_calibration_state(state)
+        if not committed:
+            return False
+        graph_host.preview_curve_gesture()
+        if graph_host.align_engine_active_layer(node_id):
+            return True
         self._invalidate_video_render_params_if_playing()
+        if self._is_video_playing():
+            self._debounce_grading_render()
+        else:
+            self.request_render()
+        return False
+
+    def _apply_curve_edit(self, domain: str, state: dict[str, Any], *,
+                          calibrated: bool, changed: bool) -> bool:
+        panel = getattr(self, "curves_panel", None)
+        pending = panel is not None and panel.automatic_calibration_pending
+        if pending and not changed:
+            return False
+        domains = panel.get_layer_state(include_pending=True) if pending else {}
+        if calibrated and not self._preview_curve_change({**domains, domain: state}):
+            return False
+        if pending:
+            self.engine.set_curves_calibration_state(domains, render=False)
+        if changed and panel is not None:
+            panel.confirm_curve_edit()
+        return True
 
     def on_curves_edit_changed(self, state: dict[str, Any]) -> None:
-        if (not curves_calibration_enabled(state)
-                or self._preview_curve_change({"curves_edit": state})):
+        layer = self.engine.get_active_layer()
+        linked = (layer.curves_edit if layer else {}).get("linked", True)
+        if self._apply_curve_edit("curves_edit", state,
+                calibrated=curves_calibration_enabled(state),
+                changed=not curves_edit_is_default(state) or state.get("linked", True) != linked):
             self.engine.set_curves_edit_params(state)
         self._invalidate_video_render_params_if_playing()
 
     def on_curves_soft_clip_changed(self, state: dict[str, Any]) -> None:
-        if (not uses_calibrated_soft_clip(state)
-                or self._preview_curve_change({"curves_soft_clip": state})):
+        layer = self.engine.get_active_layer()
+        linked = (layer.curves_soft_clip if layer else {}).get("linked", True)
+        if self._apply_curve_edit("curves_soft_clip", state,
+                calibrated=uses_calibrated_soft_clip(state),
+                changed=not curves_soft_clip_is_identity(state) or state.get("linked", True) != linked):
             self.engine.set_curves_soft_clip_params(state)
         self._invalidate_video_render_params_if_playing()
 
     def on_curves_changed(self, lut, curves_data) -> None:
         """RGB 曲线变化：应用 LUT 并把曲线数据存回当前图层。"""
-        if self.engine.get_current_image() is None: return
-        if self.curves_widget.calibrated and not self._preview_curve_change({"curves": curves_data}):
+        if self.engine.get_current_image() is None and (
+                not self.curves_widget.calibrated or self._graph_tool_route() is None):
+            return
+        if not self._apply_curve_edit("curves", curves_data,
+                calibrated=self.curves_widget.calibrated,
+                changed=any(points != [(0, 255), (255, 0)] for points in curves_data.values())):
             return
         layer = self.engine.get_active_layer()
         if layer: layer.curves_data = curves_data
@@ -3471,9 +3518,13 @@ class LayerOpsMixin:
 
     def on_hsl_curve_changed(self, lut, curves_data) -> None:
         """Handle HSL curve changes."""
-        if self.engine.get_current_image() is None: return
-        if (self.hsl_curves_panel.hsl_curves_widget.calibrated
-                and not self._preview_curve_change({"hsl": curves_data})):
+        calibrated = self.hsl_curves_panel.hsl_curves_widget.calibrated
+        if self.engine.get_current_image() is None and (
+                not calibrated or self._graph_tool_route() is None):
+            return
+        if not self._apply_curve_edit("hsl", curves_data,
+                calibrated=calibrated,
+                changed=any(points != [(0, 127.5), (255, 127.5)] for points in curves_data.values())):
             return
         layer = self.engine.get_active_layer()
         if layer: layer.hsl_curve_data = curves_data

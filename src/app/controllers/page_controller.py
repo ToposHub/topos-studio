@@ -3339,6 +3339,9 @@ class PageManagementMixin:
         # the engine and the panel. Publication can rehydrate the old stack.
         if graph_host is not None and graph_host.grade_gesture_open():
             graph_host.end_grade_gesture()
+        cancel_warper = getattr(self, "_cancel_warper_gestures", None)
+        if callable(cancel_warper):
+            cancel_warper()
         stack = self._current_edit_project.color_stacks[stack_id]
 
         from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
@@ -3453,6 +3456,8 @@ class PageManagementMixin:
                 panels["curves_palette"] = self.curves_panel
         if hasattr(self, 'hsl_curves_panel') and self.hsl_curves_panel:
             panels["hsl_panel"] = self.hsl_curves_panel
+        if getattr(self, "warper_panel", None):
+            panels["warper_panel"] = self.warper_panel
         if hasattr(self, 'mixer_panel') and self.mixer_panel:
             panels["mixer_panel"] = self.mixer_panel
         # D2：旧 lut_panel 实例已删除（LUT UI = ColorLutBrowser）

@@ -1989,7 +1989,7 @@ class ImageEngine(QObject, WindowRasterizer):
             })
         self.render_pipeline(render_reason='grading')
 
-    def set_curves_calibration_state(self, state: Dict[str, Any]) -> None:
+    def set_curves_calibration_state(self, state: Dict[str, Any], *, render: bool = True) -> None:
         """Switch the three curve stages together before submitting the new grade."""
         layer = self.get_active_layer()
         if not layer:
@@ -2011,14 +2011,15 @@ class ImageEngine(QObject, WindowRasterizer):
         if layer.hsl_curve_data:
             layer.hsl_curve_lut = build_hsl_curve_lut_from_data(
                 layer.hsl_curve_data, calibration_version=version)
-        if self.renderer:
+        if self.renderer and render:
             for kind, lut in (("curves", layer.curves_lut), ("hsl_curve", layer.hsl_curve_lut)):
                 if lut is not None:
                     self.renderer.submit(RenderCommand.UPDATE_AUX_TEX, {
                         "layer_id": layer.id, "type": kind,
                         "data": np.asarray(lut, dtype=np.float32).tobytes(),
                     })
-        self.render_pipeline(render_reason="grading")
+        if render:
+            self.render_pipeline(render_reason="grading")
 
     def set_qualifier_params(self, params: Dict[str, Any]) -> None:
         """Merge qualifier (keyer) params into the active layer and submit a grading render."""

@@ -1,12 +1,12 @@
 # Topos Studio 视频色彩管理升级计划
 
-更新于 2026-11-25，已开始实施。视频模式优先，新工程继续默认 **Rec.709 Gamma 2.4**，图片模式默认 **sRGB**。视频工程加入影视制作常用的 P3、Rec.2020、PQ、HLG 和 ACES 预设，并允许按需独立选择色域与伽马。每个开放的预设都要与 DaVinci Resolve 对拍，分别验证素材进时间线的颜色、导出再导入的颜色，以及两个查看器的观感。首批采集使用标准色彩空间的图卡和素材，摄像机厂牌专用色域、Log 与自动 RAW 色彩科学继续由现有素材流程负责。
+更新于 2026-11-25。SDR、HDR 和 ACES 已有可用路径，验收进度见第 5 节。新视频工程默认 **Rec.709 Gamma 2.4**，图片模式默认 **sRGB**。视频工程可将时间线和输出行分别展开为色域与伽马，在已登记的组合中选择。每个预设的素材输入、时间线、文件交付和监看按实际支持的角色分别与 DaVinci Resolve 对拍。摄像机厂牌专用色域、Log 与自动 RAW 色彩科学继续由现有素材流程负责。
 
-首轮已复测 Rec.709 中性和同 LUT，并对拍 Rec.709 时间线到 SDR 输出的实际 TIFF 交付。宽色域开放 Display P3、P3-D65 Gamma 2.4、DCI-P3 Gamma 2.6、Rec.2020 Gamma 2.4 及 Rec.2020 BT.2020 OETF 的 RGB 16 位 ICC TIFF。这些文件已按指定输入解释再次导入对拍。素材级受管输入、宽色域工作域的工具响应、硬件监看、HDR 与 ACES 产品路径仍待实施或验收。 [SDR 工程输出实测](../validation/resolve_comparison_workflow.md#sdr-工程输出实测2026-11-25)
+首轮已复测 Rec.709 中性和同 LUT，并对拍 Rec.709 时间线到八种 SDR 输出的实际 TIFF 交付。Display P3、P3-D65 Gamma 2.4、DCI-P3 Gamma 2.6、Rec.2020 Gamma 2.4 及 Rec.2020 BT.2020 OETF 当前开放 RGB 16 位 ICC TIFF 交付，并已按指定输入解释回导对拍。普通 SDR 素材级受管输入、这五种宽色域作为时间线工作域及其调色工具响应仍待实施或验收。 [SDR 工程输出实测](../validation/resolve_comparison_workflow.md#sdr-工程输出实测2026-11-25)
 
 第二轮已接入 SDR 桌面监看。剪辑的时间线查看器、调色和合成可使用同一个 macOS 显示器 ICC 开关。关闭 ICC 时，三种查看器的 Rec.709 Gamma 2.4 在同屏图卡上与 Resolve 逐码一致，其余七种输出最大差 1 个 8 位码值。ICC 开启已与本机 ColorSync 参考核对。Resolve 开启 ICC、双屏、探头和外接设备仍待验收。 [SDR 桌面查看器实测](../validation/resolve_comparison_workflow.md#sdr-桌面查看器实测2026-11-25)
 
-第三轮已接入 ACES 1.3 和 2.0。视频工程可选 ACEScct、ACEScc、ACES2065-1 或 ACEScg 时间线，按 EXR 色度信息或工程默认变换解释输入。剪辑时间线、调色和合成使用同版 ACES Rec.709 查看器变换。交付支持 Rec.709 成片及 AP0／AP1 浮点 OpenEXR 序列。Resolve 对拍覆盖输入、桌面查看器、16 位 TIFF 和 32 位 EXR。逐素材 IDT、相机原生 IDT、影院及 HDR ACES 输出仍待验收。 [ACES 实测](../validation/resolve_comparison_workflow.md#aces-预览与交付实测2026-11-25)
+第三轮已接入 ACES 1.3 和 2.0。视频工程可选 ACEScct、ACEScc、ACES2065-1 或 ACEScg 时间线，按 EXR 色度信息或工程默认变换解释输入。剪辑时间线、调色和合成使用同版 ACES Rec.709 查看器变换。交付支持 Rec.709 成片及 AP0／AP1 浮点 OpenEXR 序列。Resolve 对拍以 **ACEScct** 为时间线，覆盖 AP0／AP1 输入、桌面查看器、16 位 TIFF 和 32 位 AP0 EXR。其余 ACES 时间线的工具与交付、逐素材 IDT、影院及 HDR ACES 输出仍待验收。 [ACES 实测](../validation/resolve_comparison_workflow.md#aces-预览与交付实测2026-11-25)
 
 第四轮开放 DaVinci Wide Gamut／Intermediate 和 Rec.2100 PQ／HLG 时间线，接通 HDR 素材标签、浮点输入和输出转换。桌面可切换信号码值或 Rec.709 参考，交付支持 HEVC Main 10 和 ProRes 422／HQ。已对拍 Resolve 的 RCM 无色调及色域映射设置。原生 EDR、外接 HDR 参考监视器、HDR 示波器亮度和 Resolve DaVinci DRT 仍待验收。 [HDR 实测](../validation/resolve_comparison_workflow.md#hdr-桌面预览与交付实测2026-11-25)
 
@@ -16,11 +16,13 @@
 | --- | --- | --- |
 | 工程设置 | 偏好与工程共用 `ColorSpaceControls`。工程时间线和输出选择可保存、撤销。工程覆盖全局默认。 | 增加输入解释、组合预设、单独色域与伽马、不同处理方式的有效选项。沿用工程命令及不可变快照。 [偏好控件](../../src/features/color/preferences.py) · [工程命令](../../src/features/edit/core/commands/project_color_spaces.py) |
 | 输入与调色 | 普通 SDR 视频的手动路径把解码后的 RGB 信号按时间线空间解释。已有对应的 709 一级调色校准。 | 加入可指定的素材输入变换，同一素材的原片、代理、优化媒体和离线缓存使用同一解释。校准继续按节点保存，额外工作域的工具响应另行采集。 [视频信号](../../src/shared/color/project_video_signal.py) · [一级调色实测](../validation/resolve_primary_calibration.md) |
-| 色彩变换 | 描述符、内置 CPU 变换和 OCIO 提供可复用入口。基础 OCIO 配置包含部分 HDR 与 ACEScg 定义。 | 盘点每个现有变换的矩阵、白点、曲线和数值单位，补足 AP0、ACEScc、ACEScct、Gamma 2.6 及版本化 ACES 输出变换。显式校验 OCIO 处理器能力。 [描述符](../../src/shared/color/color_space_descriptor.py) · [变换提供器](../../src/shared/color/color_transform_provider.py) · [OCIO 配置](../../ocio/minimal.ocio) |
+| 色彩变换 | 描述符与内置 CPU 提供 DCI-P3 Gamma 2.6、PQ、HLG、AP0、AP1、ACEScc 和 ACEScct 等转换，版本化 ACES Rec.709 输出使用 OCIO Studio 配置。 | 补齐角色与后端覆盖，验证自定义组合、白点、曲线、HDR 量纲及新增 ACES 输出目标。显式校验所需的 OCIO 处理器能力。 [描述符](../../src/shared/color/color_space_descriptor.py) · [变换提供器](../../src/shared/color/color_transform_provider.py) · [OCIO 配置](../../ocio/minimal.ocio) |
 | 预览与合成 | 剪辑和交付已经处理部分时间线信号与合成线性帧之间的转换。Color 有原生 Metal 查看器。 | 让剪辑、调色、合成、Scopes 与交付消费同一配置快照。明确纹理在哪个域、各分支在哪里转换，补齐 GL 与 Metal 路径。 [时间线预览](../../src/features/edit/core/timeline_preview_renderer.py) · [时间线素材桥接](../../src/features/edit/core/timeline_clip_frame_provider.py) · [合成查看器](../../src/features/composite/ui/composite_viewport.py) · [Metal 调色预览](../../src/features/color/core/metal_color_preview.py) |
 | 导出 | Rec.709 模式已有实际交付对拍。同一 33³ LUT 下，Full 16 位 TIFF 的验证色块最大差 1 个码值，灰阶最大差 6 个码值。 | 按预设扩展像素、容器标签、编码器以及再次导入的一致性检查，把现有结果作为回归基线。 [对拍记录](../validation/resolve_comparison_workflow.md#对照项目色彩空间与-lut) · [实际交付](../../src/features/edit/core/timeline_export.py) |
 
 ## 2. 用户设置
+
+下表同时记录当前入口和后续设置目标。已实装的独立色域与伽马选择用于时间线和输出行，范围为已登记组合。输入行拆分、自定义组合和逐素材覆盖属于后续任务。HDR 工程目前设置 HLG 参考显示峰值，系统伽马由参考条件决定。macOS ICC 在偏好设置里控制。
 
 | 入口 | 默认显示 | 可展开的选项与行为 |
 | --- | --- | --- |
@@ -68,17 +70,17 @@ ACES 的 AP0、AP1 决定 RGB 基色，ACEScc、ACEScct 决定工作信号编码
 
 ## 5. 分阶段任务表
 
-工期为单人有效工作日估算。Resolve 版本、HDR 屏幕、校色仪和影院监看设备在 M0 登记。每一批预设在交付验证完成后即可启用，后续批次使用同一套夹具和报告格式。
+工期为原计划的单人有效工作日估算。每一批预设按已通过的角色、文件格式和软件路径开放；实体监看按设备单独验收。
 
-| 阶段 | 工期 | 依赖 | 实施任务 | 完成判定 |
+| 阶段 | 原估工期 | 依赖 | 已实施或已验收 | 剩余任务与完成判定 |
 | --- | ---: | --- | --- | --- |
-| M0 基线与用例 | 2–3 天 | 现有 Rec.709 对比 | 复跑中性与同 LUT。记录实际可用的 Resolve 模式、预设、传递函数、CST 和输出变换。导出图卡、灰阶及负值／超白 EXR，冻结支持矩阵和门槛。 | 现有 Rec.709、旧工程和 sRGB 图片结果有可复跑的参考值。每个目标预设已登记 Resolve 对应项、角色、格式和监看目标。 |
-| M1 模型与数学 | 4–6 天 | M0 | 扩展描述符、预设注册、格式匹配、精度与 HDR 亮度契约。补齐常用矩阵、白点、曲线；落实 CPU 参考实现和处理器版本。 | 独立规范向量通过，每个可供 UI 选择的组合有确定的变换。重复保存、撤销和旧配置往返通过。 |
-| M2 SDR 配置与交付 | 5–8 天 | M1 | 接入复选框、独立选择、素材输入覆盖，贯通 Rec.709、sRGB、P3、Rec.2020 与剪辑／调色／合成／交付。 | 每个 SDR 预设的输入、输出图卡及同 LUT 对拍过线。实时预览与交付帧在相同观察点一致。旧工程回归通过。 |
-| M3 桌面与参考监看 | 4–7 天 | M1、M2 | 接入 Color／Edit／Composite 的直接预览、系统 ICC 和参考监看路径。明确 Scopes 取样点。验证多屏、参考模式及外接设备。 | 文件值与监看互不误用。单次 ICC、双屏切换、探头光学测量和 Scopes 读数各有结果。 |
-| M4 HDR | 5–8 天 | M1–M3 | 接入 Rec.2100 PQ／HLG，完成亮度与映射、10 位编解码、HDR 标签、EDR 及 HDR → SDR 监看回退。 | 匹配参考条件的 HDR 输入、交付、再次读回和实际显示过线。HDR → SDR 与原 HDR 交付分开验证。 |
-| M5 ACES | 5–8 天 | M1、M2、M3，HDR 目标另依赖 M4 | 固定 ACES 与 OCIO 版本。接 AP0、AP1、ACEScct、ACEScc、EXR 及 ACES 输出变换，验证合成返回与 SDR／影院／HDR 目标。 | 浮点输入和母版交换、版本匹配的 ACES 成片及查看器各自过线。每个可交付目标登记对应的 ODT 和输出格式。 |
-| M6 发布回归 | 3–5 天 | 已启用批次 | 测两种产品模式、CPU／OpenGL／Metal、硬件与软件交付、缓存和代理切换、旧档重开。更新测试和交付支持表。 | 每个开放预设存档参考样本、实际工程设置、误差报告和复跑命令。显示实测记录对应硬件与目标。 |
+| M0 基线与用例 | 2–3 天 | 现有 Rec.709 对比 | 已复跑 Rec.709 中性和同 LUT，建立 SDR 图卡、HDR 色块与带负值／超白的浮点 EXR 样本。 | 将各阶段的可复跑样本和配置从临时目录转入稳定验证归档。登记旧工程与 sRGB 基线、目标预设和对拍门槛。 |
+| M1 模型与数学 | 4–6 天 | M0 | 已扩展预设描述、白点与传递函数，接入 HDR 参考亮度、版本化 ACES／OCIO 和交付格式能力。 | 补完角色支持矩阵及新增组合的独立规范向量，覆盖保存、撤销和旧工程往返。 |
+| M2 SDR 配置与交付 | 5–8 天 | M1 | 时间线／输出行已能分开选色域与伽马。已对拍 Rec.709 时间线到八种 SDR TIFF 输出，五种宽色域 TIFF 按指定输入解释回导。 | 接入普通宽色域时间线、逐素材输入和代理一致性。补宽色域同 LUT、调色工具响应及对应视频文件格式，各自对拍后开放。 |
+| M3 桌面与参考监看 | 4–7 天 | M1、M2 软件路径 | 三个查看器本机 ICC 关闭时已对拍 Resolve，开启时已核对 ColorSync。Scopes 使用时间线信号。 | Resolve ICC 开启的同屏对拍、双屏移动、探头、外接参考监看和影院实测。验证切换监看配置时交付像素保持一致。 |
+| M4 HDR | 5–8 天 | M1、M2、M3 软件监看 | 已对拍无色调及色域映射路径、四组 10 位成片样本及桌面 PQ／HLG 信号和 Rec.709 参考画面。 | 验收原生 EDR、外接 HDR、Scopes 亮度、DaVinci DRT、实际内容的多平台交付和长时播放。单独核对 MaxCLL／MaxFALL 等元数据。 |
+| M5 ACES | 5–8 天 | M1、M2、M3 软件监看，HDR 输出另依赖 M4 | ACES 1.3 和 2.0 的 ACEScct 时间线已与 Resolve 对拍 AP0／AP1 输入、Rec.709 查看器、16 位 TIFF、32 位 AP0 EXR。Topos 的 AP1 母版已回读验证。 | 验收 ACEScc、AP0／AP1 线性时间线、逐素材 IDT、反向输出变换、宽色域调色响应及影院／HDR 输出目标。记录每个目标的 ODT 和格式。 |
+| M6 发布回归 | 3–5 天 | 所交付的能力 | 已有色彩数学、预览、文件回读、旧工程和调色工具的自动回归入口。 | 完成两种产品模式、CPU／OpenGL／Metal、硬件与软件交付、缓存和代理切换的回归矩阵。按预设、角色、格式、后端归档配置、误差和复跑命令。 |
 
 ## 6. Resolve 对拍矩阵
 
@@ -104,7 +106,7 @@ Resolve 的工程处理方式必须和参考用例一起记录。DaVinci YRGB �
 | SDR 跨空间标准变换 | 无损 RGB 在匹配映射的验证样本上，报告 16 位码值 RMSE、P95、最大通道差，另报告共同显示条件下的 ΔE00。以 ΔE00 P95 ≤ 1、最大 ≤ 2 为初始目标，按灰阶、肤色与色域边界分组。 |
 | HDR 与 ACES | HDR 在共同显示目标的 ICtCp 域测 ΔE_ITP，初始目标 P95 ≤ 2，另外检查参考白和峰值实测亮度。ACES 浮点数学与独立规范向量先比对，在规定的可逆区间验收往返，再用目标显示域的 SDR／HDR 指标验收成片。曲线拐点、黑位及夹紧边界单列误差。 [ITU-R BT.2124 色差指标](https://www.itu.int/rec/R-REC-BT.2124/en) |
 | 后端与压缩 | CPU、OpenGL 和 Metal 的同域浮点读回与参考实现对比，按位深和纹理格式冻结容差。有损编码另记录编解码器配置与自身误差，单独比对标签、峰值、范围和回读。 |
-| 发布证据 | 每个公开预设保有输入、输出、适用监看目标、后端及已验格式的结果，状态为「通过」「差异待定位」或「待实测」。未通过的能力在其角色和格式中不开放为已验证选项。 |
+| 发布证据 | 每个预设按角色、文件格式、后端及监看环境记录「通过」「差异待定位」或「待实测」。软件图卡通过、可交付格式和设备测量分别注明。 |
 
 ## 7. 查看器和参考监看验收
 

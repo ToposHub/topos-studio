@@ -2156,6 +2156,12 @@ class FileOpsMixin:
             grading_panel = getattr(self, "grading_panel", None)
             if grading_panel is not None:
                 grading_panel.refresh_primary_calibration()
+            curves_panel = getattr(self, "curves_panel", None)
+            if curves_panel is not None:
+                curves_panel.refresh_automatic_calibration()
+            warper_panel = getattr(self, "warper_panel", None)
+            if warper_panel is not None:
+                warper_panel.refresh_automatic_calibration()
         self.timeline_panel.set_project(project)
         self.edit_project_dirty = True
 

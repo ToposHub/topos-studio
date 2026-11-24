@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any, Iterator, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Iterator, Mapping, Optional
 
 import numpy as np
 
@@ -26,6 +26,9 @@ from src.features.color.core.color_graph_migration import (
     can_project_to_legacy_layers,
     project_legacy_layers,
 )
+
+if TYPE_CHECKING:
+    from src.features.color.core.layer import Layer
 
 logger = logging.getLogger(__name__)
 
@@ -415,16 +418,21 @@ class ColorStackHydrator:
         panels: dict[str, Any],
         *,
         grading_payload: Mapping[str, Any] | None = None,
+        warper_layer: Layer | None = None,
     ) -> None:
         """Push all parameters from *stack* into the corresponding UI panels.
 
         *panels* is a plain dict whose values are the panel widget instances.
         Missing or incompatible panels are skipped with a debug log.
         """
-        self._apply_grading_to_panel(stack, panels.get("grading_panel"), grading_payload)
-        self._apply_curves_to_panel(stack, panels.get("curves_panel"))
-        self._apply_curves_palette_to_panel(stack, panels.get("curves_palette"))
-        self._apply_hsl_to_panel(stack, panels.get("hsl_panel"))
+        payload = grading_payload if grading_payload is not None else self._active_layer_payload(stack)
+        self._apply_grading_to_panel(stack, panels.get("grading_panel"), payload)
+        self._apply_curves_to_panel(stack, panels.get("curves_panel"), payload)
+        self._apply_curves_palette_to_panel(stack, panels.get("curves_palette"), payload)
+        self._apply_hsl_to_panel(stack, panels.get("hsl_panel"), payload)
+        warper = panels.get("warper_panel")
+        if warper is not None and warper_layer is not None:
+            warper.load_layer_state(warper_layer)
         self._apply_mixer_to_panel(stack, panels.get("mixer_panel"))
         self._apply_lut_to_panel(stack, panels.get("lut_panel"))
         self._apply_video_denoise_to_panel(
@@ -623,7 +631,8 @@ class ColorStackHydrator:
     ) -> None:
         """Apply *stack* to both engine and panels, then trigger render."""
         self.apply_stack_to_engine(stack, engine)
-        self.apply_stack_to_panels(stack, panels)
+        warper_layer = engine.get_active_layer() if engine is not None and "warper_panel" in panels else None
+        self.apply_stack_to_panels(stack, panels, warper_layer=warper_layer)
         if engine and hasattr(engine, "render_pipeline"):
             engine.render_pipeline()
         logger.debug("hydrate: stack %s fully applied", stack.stack_id[:8])
@@ -631,6 +640,16 @@ class ColorStackHydrator:
     # ------------------------------------------------------------------
     # Private helpers — per-panel apply
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _active_layer_payload(stack: ColorStackData) -> Mapping[str, Any] | None:
+        if stack.color_graph is not None and can_project_to_legacy_layers(stack.color_graph):
+            layers = project_legacy_layers(stack.color_graph)
+            return layers[0] if layers else None
+        if stack.layers:
+            index = stack.active_layer_index
+            return stack.layers[index if 0 <= index < len(stack.layers) else 0]
+        return None
 
     @staticmethod
     def _apply_grading_to_panel(stack: ColorStackData, panel: Any,
@@ -641,13 +660,6 @@ class ColorStackHydrator:
             logger.debug("grading_panel missing or incompatible API, skipping")
             return
 
-        if payload is None:
-            if stack.color_graph is not None and can_project_to_legacy_layers(stack.color_graph):
-                layers = project_legacy_layers(stack.color_graph)
-                payload = layers[0] if layers else None
-            elif stack.color_graph is None and stack.layers:
-                index = stack.active_layer_index
-                payload = stack.layers[index if 0 <= index < len(stack.layers) else 0]
         params = payload.get("grading_params", stack.grading_params) if payload else stack.grading_params
         lift = params.get("lift", (0, 0, 0))
         gamma = params.get("gamma", (0, 0, 0))
@@ -686,19 +698,24 @@ class ColorStackHydrator:
             panel.set_extended_params(extended, emit=False)
 
     @staticmethod
-    def _apply_curves_to_panel(stack: ColorStackData, panel: Any) -> None:
+    def _apply_curves_to_panel(stack: ColorStackData, panel: Any,
+                               payload: Mapping[str, Any] | None = None) -> None:
         if panel is None:
             return
         if not hasattr(panel, "set_curves_data"):
             logger.debug("curves_panel missing or incompatible API, skipping")
             return
-        if stack.curves_data:
-            panel.set_curves_data(stack.curves_data, emit_changed=False)
+        data = payload.get("curves_data") if payload is not None else stack.curves_data
+        if data:
+            panel.set_curves_data(data, emit_changed=False)
+        elif payload is not None and payload.get("curves_lut") is not None:
+            panel.set_lut(payload["curves_lut"], emit_changed=False)
         else:
             panel.reset(emit_changed=False)
 
     @staticmethod
-    def _apply_curves_palette_to_panel(stack: ColorStackData, panel: Any) -> None:
+    def _apply_curves_palette_to_panel(stack: ColorStackData, panel: Any,
+                                      payload: Mapping[str, Any] | None = None) -> None:
         """曲线面板侧栏回填（任务 7）：活动层快照优先，平铺键兜底。
 
         v2+ 工程的权威状态在 Layer 快照内（``curves_soft_clip`` /
@@ -711,32 +728,29 @@ class ColorStackHydrator:
         if not callable(setter):
             logger.debug("curves_palette missing set_layer_state, skipping")
             return
-        layers = getattr(stack, "layers", None) or ()
-        if layers:
-            idx = getattr(stack, "active_layer_index", 0) or 0
-            if not isinstance(idx, int) or not (0 <= idx < len(layers)):
-                idx = 0
-            entry = layers[idx]
-            if isinstance(entry, dict):
-                setter({
-                    "curves_soft_clip": entry.get("curves_soft_clip") or {},
-                    "curves_edit": entry.get("curves_edit") or {},
-                })
-                return
-        setter({
-            "curves_soft_clip": getattr(stack, "curves_soft_clip", None) or {},
-            "curves_edit": getattr(stack, "curves_edit", None) or {},
-        })
+        if payload is None:
+            payload = ColorStackHydrator._active_layer_payload(stack)
+        keys = ("curves_soft_clip", "curves_edit", "curves_data", "hsl_curve_data")
+        state = {key: getattr(stack, key, None) for key in keys} if payload is None else {
+            key: payload.get(key) for key in keys}
+        if payload is not None:
+            state["has_curve_lut"] = (
+                payload.get("curves_lut") is not None or payload.get("hsl_curve_lut") is not None)
+        setter(state)
 
     @staticmethod
-    def _apply_hsl_to_panel(stack: ColorStackData, panel: Any) -> None:
+    def _apply_hsl_to_panel(stack: ColorStackData, panel: Any,
+                            payload: Mapping[str, Any] | None = None) -> None:
         if panel is None:
             return
         if not hasattr(panel, "set_curves_data"):
             logger.debug("hsl_panel missing or incompatible API, skipping")
             return
-        if stack.hsl_curve_data:
-            panel.set_curves_data(stack.hsl_curve_data)
+        data = payload.get("hsl_curve_data") if payload is not None else stack.hsl_curve_data
+        if data:
+            panel.set_curves_data(data)
+        elif payload is not None and payload.get("hsl_curve_lut") is not None:
+            panel.hsl_curves_widget.set_lut(payload["hsl_curve_lut"], emit_changed=False)
         else:
             panel.reset(emit_changed=False)
 

@@ -1868,9 +1868,19 @@ class ColorGraphAppHost:
             if panels:
                 handle = self._host.active_handle
                 payload = self.panel_layer_payload(handle.node_id) if handle is not None else None
+                aligned = True
                 if handle is not None:
-                    self.align_engine_active_layer(handle.node_id)
-                hydrator.apply_stack_to_panels(stack, panels, grading_payload=payload)
+                    aligned = self.align_engine_active_layer(handle.node_id)
+                warper_layer = None
+                if "warper_panel" in panels:
+                    if aligned:
+                        warper_layer = engine.get_active_layer()
+                    elif payload is not None:
+                        from src.features.color.core.layer import Layer
+
+                        warper_layer = Layer.from_dict(payload)
+                hydrator.apply_stack_to_panels(
+                    stack, panels, grading_payload=payload, warper_layer=warper_layer)
         if self._request_render is not None:
             try:
                 self._request_render()
@@ -2208,6 +2218,15 @@ class ColorGraphAppHost:
             {"node_ids": (node_id,), "payload": domains, "domains": tuple(domains)},
             transaction_id, compound_path=self._tool_compound_path())
 
+    def preview_curve_gesture(self) -> None:
+        """Render the staged curve edit through the graph executor."""
+        from src.shared.project.color_graph import ColorGraphData
+
+        pending = self._bridge._buffer._last_graph
+        if pending is not None:
+            self._adapter.preview_graph = ColorGraphData.from_dict(pending)
+            self.preview_grade_gesture()
+
     def submit_warper_change(self, node_id: str, payload: Mapping[str, Any],
                              transaction_id: str) -> bool:
         """Store a complete Warper mesh as one grade-transfer transaction."""
@@ -2223,6 +2242,9 @@ class ColorGraphAppHost:
 
     def preview_warper_change(self, node_id: str, payload: Mapping[str, Any]) -> bool:
         """Render the mesh draft against the bound graph without publishing it."""
+        stack = self._bridge._current_stack(self._get_project())
+        if stack is None or stack.graph_locked:
+            return False
         graph = self.bound_graph()
         engine = self._engine_provider() if self._engine_provider else None
         if graph is None or engine is None:

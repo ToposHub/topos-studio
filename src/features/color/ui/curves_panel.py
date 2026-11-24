@@ -13,12 +13,16 @@ from collections.abc import Callable
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QSizePolicy, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from src.shared.ui.panel_splitter import PanelSplitter
-from src.features.color.core.curves_calibration import curves_calibration_enabled
+from src.features.color.core.curves_calibration import (
+    CURVES_CALIBRATION_VERSION, CURVES_CALIBRATION_VERSION_KEY, curves_calibration_enabled,
+)
 from src.features.color.core.curves_soft_clip import (
+    curves_edit_is_default,
+    curves_soft_clip_is_identity,
     normalize_curves_edit,
     normalize_curves_soft_clip,
     uses_calibrated_soft_clip,
@@ -48,13 +52,13 @@ class CurvesPanel(QWidget):
 
     soft_clip_changed = pyqtSignal(dict)
     edit_changed = pyqtSignal(dict)
-    calibration_changed = pyqtSignal(dict)
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
     curve_mode_changed = pyqtSignal(str)
 
     def __init__(self, curves_widget: CurvesWidget, parent: QWidget | None = None,
-                 *, hsl_panel: HSLCurvesPanel | None = None) -> None:
+                 *, hsl_panel: HSLCurvesPanel | None = None,
+                 use_measured_curves: Callable[[], bool] | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("curves_panel")
         # 接线守卫先于任何控件连接初始化：构造期的 toggle/setValue 噪声
@@ -62,6 +66,9 @@ class CurvesPanel(QWidget):
         self._syncing = False
         self._wiring_ready = False
         self._soft_calibrated = False
+        self._use_measured_curves = use_measured_curves
+        self._allow_automatic_calibration = False
+        self.automatic_calibration_pending = False
         # Keep the dock resizable on compact screens while preserving enough
         # room for a useful graph and the channel controls side by side.
         self.setMinimumWidth(420)
@@ -93,15 +100,6 @@ class CurvesPanel(QWidget):
             button.clicked.connect(lambda _checked=False, m=mode: self.set_curve_mode(m))
             toolbar.addWidget(button)
         self.mode_buttons['Custom'].setChecked(True)
-        self.calibration_btn = QToolButton(self)
-        self.calibration_btn.setText("709")
-        self.calibration_btn.setCheckable(True)
-        calibration_label = I18N.tr(
-            "curves_palette.rec709_calibration", "Rec.709 Gamma 2.4 curve calibration")
-        self.calibration_btn.setToolTip(calibration_label)
-        self.calibration_btn.setAccessibleName(calibration_label)
-        self.calibration_btn.clicked.connect(self._set_calibration)
-        toolbar.addWidget(self.calibration_btn)
         # Reparent the original buttons, retaining their existing slots/state.
         self.reset_curves_btn = curves_widget.btn_container.layout().itemAt(
             curves_widget.btn_container.layout().count() - 1
@@ -584,7 +582,8 @@ class CurvesPanel(QWidget):
     def get_soft_clip_payload(self) -> dict:
         """四参数柔化裁切的模型形 payload（``soft_clip_changed`` 载荷）。"""
         return {
-            **({"calibration_version": 1} if self._soft_calibrated else {}),
+            **({CURVES_CALIBRATION_VERSION_KEY: CURVES_CALIBRATION_VERSION}
+               if self._soft_calibrated else {}),
             "linked": self.soft_clip_link_btn.isChecked(),
             "channels": {ch: dict(values) for ch, values in self._soft_values.items()},
         }
@@ -592,17 +591,22 @@ class CurvesPanel(QWidget):
     def get_edit_payload(self) -> dict:
         """Edit 强度/链接的模型形 payload（``edit_changed`` 载荷）。"""
         return {
-            **({"calibration_version": 1} if self.curves_widget.calibrated else {}),
+            **({CURVES_CALIBRATION_VERSION_KEY: CURVES_CALIBRATION_VERSION}
+               if self.curves_widget.calibrated else {}),
             "linked": self.edit_link_btn.isChecked(),
             "amounts": self.curves_widget.get_edit_amounts(),
         }
 
-    def get_layer_state(self) -> dict:
+    def get_layer_state(self, *, include_pending: bool = False) -> dict:
         """当前侧栏状态（回填收集口径，与 ``set_layer_state`` 对偶）。"""
-        return {
+        state = {
             "curves_soft_clip": self.get_soft_clip_payload(),
             "curves_edit": self.get_edit_payload(),
         }
+        if self.automatic_calibration_pending and not include_pending:
+            for params in state.values():
+                params.pop(CURVES_CALIBRATION_VERSION_KEY, None)
+        return state
 
     def set_layer_state(self, state: dict) -> None:
         """图层/片段回填（任务 7）：屏蔽一切信号与节流发射。
@@ -612,22 +616,41 @@ class CurvesPanel(QWidget):
         """
         self._soft_timer.stop()
         self._edit_timer.stop()
-        self.set_soft_clip_state(state.get("curves_soft_clip") or {})
-        self.set_edit_state(state.get("curves_edit") or {})
+        raw_soft = state.get("curves_soft_clip")
+        raw_edit = state.get("curves_edit")
+        soft = raw_soft if isinstance(raw_soft, dict) else {}
+        edit = raw_edit if isinstance(raw_edit, dict) else {}
+        self._allow_automatic_calibration = (
+            not (state.get("curves_data") or state.get("hsl_curve_data") or state.get("has_curve_lut"))
+            and CURVES_CALIBRATION_VERSION_KEY not in soft
+            and CURVES_CALIBRATION_VERSION_KEY not in edit
+            and soft.get("linked", True)
+            and edit.get("linked", True)
+            and curves_soft_clip_is_identity(soft)
+            and curves_edit_is_default(edit)
+        )
+        self.set_soft_clip_state(soft)
+        self.set_edit_state(edit)
+        self.refresh_automatic_calibration()
 
     def _set_curve_model(self, enabled: bool) -> None:
-        self.calibration_btn.setChecked(enabled)
         self.curves_widget.set_calibrated(enabled)
         self.hsl_panel.hsl_curves_widget.set_calibrated(enabled)
 
-    def _set_calibration(self, enabled: bool) -> None:
-        self._flush_pending()
-        self.interaction_started.emit()
-        self._set_curve_model(enabled)
-        self._soft_calibrated = enabled
+    def refresh_automatic_calibration(self) -> None:
+        if not self._allow_automatic_calibration:
+            self.automatic_calibration_pending = False
+            return
+        self.automatic_calibration_pending = bool(
+            self._use_measured_curves and self._use_measured_curves())
+        self._set_curve_model(self.automatic_calibration_pending)
+        self._soft_calibrated = self.automatic_calibration_pending
         self._refresh_soft_rows()
-        self.calibration_changed.emit(self.get_layer_state())
-        self.interaction_ended.emit()
+
+    def confirm_curve_edit(self) -> None:
+        """Keep the current model once an edit has been accepted."""
+        self._allow_automatic_calibration = False
+        self.automatic_calibration_pending = False
 
     def set_soft_clip_state(self, state: dict) -> None:
         """回填四参数柔化裁切（归一化 + 界面刷新，不发渲染信号）。"""

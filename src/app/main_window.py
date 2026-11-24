@@ -1416,8 +1416,11 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.deblur_panel = DeblurPanel()
         self.curves_widget = CurvesWidget()
         self.hsl_curves_panel = HSLCurvesPanel(engine=self.engine)
-        self.curves_panel = CurvesPanel(self.curves_widget, hsl_panel=self.hsl_curves_panel)
-        self.warper_panel = WarperPanel()
+        self.curves_panel = CurvesPanel(
+            self.curves_widget, hsl_panel=self.hsl_curves_panel,
+            use_measured_curves=self._use_measured_rec709_grading,
+        )
+        self.warper_panel = WarperPanel(use_measured_warper=self._use_measured_rec709_grading)
         self.mixer_panel = MixerPanel()
         self.effects_panel = BlurSharpenPanel()
         self.film_grain_panel = FilmGrainPanel()
@@ -1948,6 +1951,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         self._set_color_graph_panels_enabled(not bool(handle.params.get("locked", False)))
         graph_host = self.color_graph_host
+        grading_panel = getattr(self, "grading_panel", None)
+        if grading_panel is not None:
+            grading_panel.current_stack_id = graph_host.bound_stack_id
         # N03：读合并投影（legacy 基底 + params 域覆盖 + LUT/曲线投影）
         # ——裸 legacy_payload 会让图命令写入的 qualifier 等域在面板不可见
         payload = graph_host.panel_layer_payload(handle.node_id) or {}
@@ -2345,7 +2351,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # 两路互不重复提交；interaction 对复用同一撤销快照通道。
         self.curves_panel.soft_clip_changed.connect(self.on_curves_soft_clip_changed)
         self.curves_panel.edit_changed.connect(self.on_curves_edit_changed)
-        self.curves_panel.calibration_changed.connect(self.on_curves_calibration_changed)
         self.curves_panel.interaction_started.connect(self.on_interaction_started)
         self.curves_panel.interaction_ended.connect(self.on_interaction_ended)
 

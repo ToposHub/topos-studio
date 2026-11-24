@@ -231,8 +231,7 @@ class ToolsPanel(QWidget):
 
         
         # Warper
-        if not self.warper_panel.set_warper_state(layer.warper_state, target_id=layer.id):
-            self.warper_panel.set_params(layer.warper_params)
+        self.warper_panel.load_layer_state(layer)
         
         # Mask
         if layer.mask_shapes:

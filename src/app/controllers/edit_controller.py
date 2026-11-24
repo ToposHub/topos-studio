@@ -10887,7 +10887,8 @@ class EditControllerMixin:
                     panels = collect_panels() if callable(collect_panels) else {
                         "grading_panel": getattr(self, "grading_panel", None),
                     }
-                    hydrator.apply_stack_to_panels(new_stack, panels)
+                    hydrator.apply_stack_to_panels(
+                        new_stack, panels, warper_layer=self.engine.get_active_layer())
                     self._pending_grading_color_stack = None
                 finally:
                     self._color_stack_hydration_in_progress = False
@@ -11027,7 +11028,8 @@ class EditControllerMixin:
                     panels = collect_panels() if callable(collect_panels) else {
                         "grading_panel": getattr(self, "grading_panel", None),
                     }
-                    hydrator.apply_stack_to_panels(new_stack, panels)
+                    hydrator.apply_stack_to_panels(
+                        new_stack, panels, warper_layer=self.engine.get_active_layer())
                     self._pending_grading_color_stack = None
                 finally:
                     self._color_stack_hydration_in_progress = False

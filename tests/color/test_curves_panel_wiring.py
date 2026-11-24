@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QSignalSpy, QTest
+from PyQt6.QtWidgets import QToolButton
 
 from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
 from src.features.color.core.composition_uniforms import composition_uniform_values
@@ -26,53 +27,54 @@ from src.shared.ui.widgets.curves_widget import CurvesWidget
 # ================================================================
 
 class TestPanelSignals:
-    def test_709_switch_and_soft_clip_use_resolve_units(self, qapp, image_engine):
-        panel = CurvesPanel(CurvesWidget())
-        panel.calibration_changed.connect(image_engine.set_curves_calibration_state)
-        panel.soft_clip_changed.connect(image_engine.set_curves_soft_clip_params)
-        panel.edit_changed.connect(image_engine.set_curves_edit_params)
+    def test_video_curves_save_model_with_first_soft_clip_edit(self, qapp, image_engine):
+        from src.app.controllers.layer_controller import LayerOpsMixin
+        from src.features.color.core.layer import Layer
+
+        host = LayerOpsMixin()
+        host.engine = image_engine
+        host.video_controller = None
+        host._graph_tool_route = lambda: None
+        panel = host.curves_panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
+        panel.soft_clip_changed.connect(host.on_curves_soft_clip_changed)
+        panel.edit_changed.connect(host.on_curves_edit_changed)
         layer = image_engine.get_active_layer()
-        layer.curves_data = {"M": [(0, 255), (128, 100), (255, 0)]}
-        layer.hsl_curve_data = {"HueSat": [(100, 110)]}
-        panel.curves_widget.set_curves_data(layer.curves_data)
-        panel.hsl_panel.set_curves_data(layer.hsl_curve_data)
-        switch = QSignalSpy(panel.calibration_changed)
-        panel.calibration_btn.click()
-        assert len(switch) == 1
-        assert layer.curves_edit["calibration_version"] == 1
-        assert layer.curves_soft_clip["calibration_version"] == 1
-        assert layer.curves_lut.shape == (512, 1, 3)
-        assert layer.hsl_curve_lut.shape == (6, 512)
+        panel.set_layer_state(layer.to_dict())
+        assert not any(button.text() == "709" for button in panel.findChildren(QToolButton))
+        assert panel.automatic_calibration_pending
+        assert "calibration_version" not in layer.curves_edit
         assert panel.soft_clip_rows["low_clip"].value() == 50.0
         assert panel.soft_clip_rows["high_clip"].value() == 50.0
+        panel._reset_soft_clip()
+        assert panel.automatic_calibration_pending
+        assert "calibration_version" not in layer.curves_soft_clip
 
         panel.soft_clip_rows["low_clip"].slider.setValue(5610)
         panel.soft_clip_rows["high_clip"].slider.setValue(3800)
         panel.soft_clip_rows["high_soft"].slider.setValue(1200)
         panel.edit_rows["Y"].slider.setValue(50)
         panel._on_row_interaction_ended()
+        assert not panel.automatic_calibration_pending
+        assert layer.curves_edit["calibration_version"] == 1
+        assert layer.curves_soft_clip["calibration_version"] == 1
         assert layer.curves_soft_clip["channels"]["B"] == pytest.approx(
             {"low_clip": 0.0305, "low_soft": 0.0, "high_clip": 0.94, "high_soft": 0.06})
         assert layer.curves_edit["amounts"]["Y"] == 50.0
 
-        from src.features.color.core.layer import Layer
-
         restored = Layer.from_dict(layer.to_dict(None))
-        np.testing.assert_array_equal(restored.curves_lut, layer.curves_lut)
-        np.testing.assert_array_equal(restored.hsl_curve_lut, layer.hsl_curve_lut)
         panel.set_layer_state({"curves_edit": restored.curves_edit,
                                "curves_soft_clip": restored.curves_soft_clip})
         assert panel.soft_clip_rows["low_clip"].value() == pytest.approx(56.1)
-        assert len(switch) == 1
-        panel.calibration_btn.click()
-        assert layer.curves_lut.shape == (256, 1, 3)
-        assert layer.hsl_curve_lut.shape == (6, 256)
-        assert "calibration_version" not in layer.curves_soft_clip
+
+        panel.set_layer_state({"curves_data": {"M": [(0, 255), (128, 100), (255, 0)]}})
+        assert not panel.automatic_calibration_pending
+        assert not panel.curves_widget.calibrated
+        assert panel.soft_clip_rows["low_clip"].value() == 0
 
     def test_709_linked_drag_commits_latest_xy_and_lut_in_one_gesture(self, qapp):
         widget = CurvesWidget()
-        panel = CurvesPanel(widget)
-        panel.calibration_btn.click()
+        panel = CurvesPanel(widget, use_measured_curves=lambda: True)
+        panel.set_layer_state({})
         widget.resize(360, 220)
         changed = QSignalSpy(widget.changed)
         order = []
@@ -92,8 +94,8 @@ class TestPanelSignals:
         assert lut.shape == (512, 1, 3)
 
     def test_709_sat_curve_starts_with_a_single_global_anchor(self, qapp):
-        panel = CurvesPanel(CurvesWidget())
-        panel.calibration_btn.click()
+        panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
+        panel.set_layer_state({})
         panel.set_curve_mode("SatSat")
         canvas = panel.hsl_panel.hsl_curves_widget
         canvas.resize(360, 220)
