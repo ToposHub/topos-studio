@@ -136,7 +136,7 @@ def test_trackerball_is_relative_and_flushes_before_gesture_end(qapp):
         canvas.mousePressEvent(_event(QMouseEvent.Type.MouseButtonPress, press))
         assert wheel.knob_pos == before  # clicking never jumps the correction
         canvas.mouseMoveEvent(_event(QMouseEvent.Type.MouseMove, press + QPointF(12, -8)))
-        expected = before + QPointF(12 / inner_radius, -8 / inner_radius)
+        expected = before + QPointF(1.2 / inner_radius, -0.8 / inner_radius)
         assert wheel.knob_pos.x() == pytest.approx(expected.x())
         assert wheel.knob_pos.y() == pytest.approx(expected.y())
         canvas.mouseReleaseEvent(_event(QMouseEvent.Type.MouseButtonRelease, press + QPointF(12, -8)))
@@ -515,8 +515,8 @@ def test_all_offset_columns_fit_at_the_same_width_and_preserve_grade(qtbot, qapp
     assert updates == []
 
 
-@pytest.mark.parametrize("mode", ["lift", "gamma", "gain"])
-def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str) -> None:
+@pytest.mark.parametrize("mode,delta_y", [("lift", 0.08), ("gamma", 0.04), ("gain", 0.16)])
+def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str, delta_y: float) -> None:
     panel = GradingPanel()
     panel.resize(1260, 405)
     panel.show()
@@ -532,11 +532,10 @@ def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str
         press = QPointF(20.0, 7.0)
         dial.mousePressEvent(_event(QMouseEvent.Type.MouseButtonPress, press))
         assert wheel.brightness == 0.0  # no absolute jump on a trough press
-        dial.mouseMoveEvent(_event(QMouseEvent.Type.MouseMove, press + QPointF(40.0, 0.0)))
-        dial.mouseReleaseEvent(_event(QMouseEvent.Type.MouseButtonRelease, press + QPointF(50.0, 0.0)))
-        assert wheel.brightness == pytest.approx(0.05)
+        dial.mouseMoveEvent(_event(QMouseEvent.Type.MouseMove, press + QPointF(100.0, 0.0)))
+        dial.mouseReleaseEvent(_event(QMouseEvent.Type.MouseButtonRelease, press + QPointF(120.0, 0.0)))
         assert (wheel.hue, wheel.sat) == (215.0, 0.17)
-        expected_master = 2.0 ** (wheel.brightness ** 2 * 6.0) - (mode != "gain")
+        expected_master = delta_y + (mode == "gain")
         assert wheel._bright_drag.value() == pytest.approx(expected_master)
         assert events == ["start", "change", "end"]
         assert not wheel._update_timer.isActive()
@@ -551,6 +550,87 @@ def test_master_dial_drag_only_changes_its_own_wheel_and_flushes(qapp, mode: str
     finally:
         panel.close()
         panel.deleteLater()
+
+
+@pytest.mark.parametrize("mode,point,expected,tolerance", [
+    ("lift", (0.120, 0.0), (0.0, -0.01, 0.08), 0.006),
+    ("lift", (-0.120, 0.0), (0.0, 0.01, -0.08), 0.006),
+    ("gamma", (0.085, -0.085), (0.02, -0.01, 0.03), 0.006),
+    ("gain", (0.0, -0.122), (1.22, 0.93, 1.0), 0.006),
+    ("gain", (0.0, 0.122), (0.78, 1.07, 1.0), 0.006),
+    ("offset", (0.085, -0.085), (29.82, 22.96, 30.68), 0.17),
+    ("log_shadow", (0.085, 0.085), (-0.11, 0.02, 0.13), 0.008),
+    ("log_midtone", (0.085, 0.085), (-0.02, 0.0, 0.03), 0.008),
+    ("log_highlight", (0.085, 0.085), (-0.11, 0.02, 0.13), 0.008),
+])
+def test_calibrated_wheel_tracks_resolve_direction_and_round_trips(
+    qtbot, mode: str, point: tuple[float, float], expected: tuple[float, ...], tolerance: float,
+) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1})
+    wheel = getattr(panel, mode + "_wheel")
+    wheel._edit_knob(QPointF(*point))
+    wheel.flush_pending_changes()
+    values = tuple(field.value() for field in (wheel._r_drag, wheel._g_drag, wheel._b_drag))
+    assert values == pytest.approx(expected, abs=tolerance)
+    if wheel._bright_drag is not None:
+        assert wheel._bright_drag.value() == pytest.approx(float(mode == "gain"))
+    values = wheel.hue, wheel.sat, wheel.brightness
+    wheel.set_hsv(*values)
+    assert (wheel.knob_pos.x(), wheel.knob_pos.y()) == pytest.approx(point, abs=1e-12)
+    wheel.set_rotation_degrees(210.0)
+    assert (wheel.knob_pos.x(), wheel.knob_pos.y()) == pytest.approx((point[1], -point[0]))
+    assert (wheel.hue, wheel.sat, wheel.brightness) == values
+
+
+def test_calibrated_master_moves_channels_together_in_wheels_bars_and_log(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1})
+    wheel = panel.lift_wheel
+    wheel._edit_knob(QPointF(0.12, -0.09))
+    panel.flush_pending_changes()
+    color = QPointF(wheel.knob_pos)
+    initial = wheel._wheel_rgb()
+
+    wheel._on_jog_delta(120.0)
+    panel.flush_pending_changes()
+    assert wheel._wheel_rgb() == pytest.approx(tuple(value + 0.08 for value in initial))
+    assert (wheel.knob_pos.x(), wheel.knob_pos.y()) == pytest.approx((color.x(), color.y()))
+    panel.color_bars_panel.lift._on_dial_delta(-120.0)
+    panel.flush_pending_changes()
+    assert wheel._wheel_rgb() == pytest.approx(initial)
+    assert panel.color_bars_panel.lift._nums["Y"].value() == pytest.approx(0.0)
+
+    panel.log_midtone_wheel._on_jog_delta(-120.0)
+    panel.offset_wheel._on_jog_delta(60.0)
+    panel.flush_pending_changes()
+    assert panel.log_midtone_wheel._r_drag.value() == pytest.approx(-0.16)
+    assert panel.log_offset_wheel._r_drag.value() == pytest.approx(27.0)
+    panel.color_bars_panel.offset._on_dial_delta(60.0)
+    panel.flush_pending_changes()
+    assert panel.offset_wheel._r_drag.value() == pytest.approx(35.0)
+
+
+def test_calibrated_drag_respects_existing_chroma_and_master_limits(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1})
+
+    offset = panel.offset_wheel
+    offset.set_hsv(0.0, 0.0, 1.0)
+    offset._edit_knob(QPointF(0.12, 0.0))
+    assert offset._master_value() == pytest.approx(1.0)
+    assert not offset._update_timer.isActive()
+
+    gain = panel.gain_wheel
+    gain.set_hsv(0.0, 1.0, 0.5)
+    master = gain._master_value()
+    gain._on_jog_delta(-120.0)
+    assert gain._master_value() == pytest.approx(master - 0.16)
+    assert min(gain._wheel_rgb()) >= 0.0
+    assert gain.hue == pytest.approx(0.0)
 
 
 def test_master_dial_sync_from_numbers_backend_and_reset_is_silent(qapp) -> None:

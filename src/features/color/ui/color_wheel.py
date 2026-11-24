@@ -21,6 +21,7 @@ Color Wheel Module - ColorWheel widget and GradingPanel (original visual design)
   grading_extended_changed(dict) 下发。
 """
 
+import colorsys
 import math
 from typing import Any, Optional
 from PyQt6.QtWidgets import (QWidget, QToolButton, QPushButton, QHBoxLayout,
@@ -38,11 +39,15 @@ from src.shared.ui.widgets.drag_value import DragValue, drag_speed_per_pixel
 from src.shared.ui.style_sheet import C, PARAM_LABEL_STYLE
 from src.shared.i18n.i18n import I18N
 from src.features.color.core.composition_uniforms import (
-    params_to_offset_rgb, offset_chroma_scale, offset_master_scale,
+    params_to_offset_rgb, params_to_rgb, offset_chroma_scale, offset_master_scale,
 )
 from src.features.color.core.layer import DEFAULT_EXTENDED_GRADING_PARAMS
 from src.features.color.core.primary_calibration import (
     PRIMARY_CALIBRATION_TEMP_SCALE, PRIMARY_CALIBRATION_VERSION_KEY,
+)
+from src.features.color.ui.primary_wheel_response import (
+    PUCK_DRAG_GAIN, RGB, brightness_multiplier, constrain_chroma, master_drag_rate,
+    multiplier_brightness, shift_master, wheel_chroma, wheel_luma, wheel_position,
 )
 from src.features.color.ui.tonal_saturation_panel import TonalSaturationPanel
 
@@ -108,12 +113,8 @@ def offset_display_to_hsb(rx: float, gy: float,
     chroma_scale = offset_chroma_scale()
     chroma = [(v - master) / chroma_scale + 1.0 for v in (bx, by, bz)]
     m = max(chroma[0], chroma[1], chroma[2], 1e-6)
-    color = QColor.fromRgbF(
-        max(0.0, min(1.0, chroma[0] / m)),
-        max(0.0, min(1.0, chroma[1] / m)),
-        max(0.0, min(1.0, chroma[2] / m)))
-    hue = float(color.hueF()) * 360.0 if color.hueF() >= 0 else 0.0
-    return hue, float(color.saturationF()), master
+    hue, sat, _ = colorsys.rgb_to_hsv(*(max(0.0, v / m) for v in chroma))
+    return hue * 360.0, sat, master
 
 
 class _GradingValue(DragValue):
@@ -306,10 +307,11 @@ class KnurledJogWheel(QWidget):
         self._last_x = 0.0
         self._hovered = False
 
-    def set_phase(self, phase: float) -> None:
-        """程序化同步滚花相位（回填/重置时保持视觉一致）。"""
-        self._phase = phase % self._PITCH
-        self.update()
+    def set_master_value(self, delta: float, rate: float) -> None:
+        phase = (delta / rate * PUCK_DRAG_GAIN) % self._PITCH
+        if phase != self._phase:
+            self._phase = phase
+            self.update()
 
     def enterEvent(self, event: Any) -> None:
         self._hovered = True
@@ -336,10 +338,8 @@ class KnurledJogWheel(QWidget):
             dx = event.position().x() - self._last_x
             self._last_x = event.position().x()
             fine = 0.2 if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) else 1.0
-            step_dx = dx * fine
-            self._phase = (self._phase + step_dx) % self._PITCH
-            self.update()
-            self.deltaMoved.emit(step_dx)
+            if dx:
+                self.deltaMoved.emit(dx * fine)
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -361,10 +361,7 @@ class KnurledJogWheel(QWidget):
     def wheelEvent(self, event: Any) -> None:
         dx = (event.angleDelta().y() / 120.0) * self._PITCH
         fine = 0.2 if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) else 1.0
-        step_dx = dx * fine
-        self._phase = (self._phase + step_dx) % self._PITCH
-        self.update()
-        self.deltaMoved.emit(step_dx)
+        self._nudge(dx * fine)
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -373,12 +370,19 @@ class KnurledJogWheel(QWidget):
         if event.key() in navigation:
             step = -self._PITCH if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Up) \
                 else self._PITCH
-            self._phase = (self._phase + step) % self._PITCH
-            self.update()
-            self.deltaMoved.emit(float(step))
+            self._nudge(step)
             event.accept()
         else:
             super().keyPressEvent(event)
+
+    def _nudge(self, dx: float) -> None:
+        if dx:
+            if self._dragging:
+                self.deltaMoved.emit(dx)
+                return
+            self.dragStarted.emit()
+            self.deltaMoved.emit(dx)
+            self.dragEnded.emit()
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
@@ -441,8 +445,7 @@ class _WheelCanvas(QWidget):
         self._wheel = wheel
         self.dragging_knob = False
         self.dragging_ring = False
-        self._press_pos = QPointF()
-        self._press_knob = QPointF()
+        self._last_pointer = QPointF()
         self._last_ring_angle = 0.0
         self._hovered = False
         self.setMinimumSize(96, 110)
@@ -459,7 +462,7 @@ class _WheelCanvas(QWidget):
         return QPointF(self.width() / 2.0, self.height() / 2.0), radius
 
     def _inner_radius(self, outer_radius: float) -> float:
-        return outer_radius - self._RING_WIDTH
+        return max(1.0, outer_radius - self._RING_WIDTH)
 
     def _hue_gradient(self, center: QPointF) -> QConicalGradient:
         gradient = QConicalGradient(center, self._wheel.rotation_degrees)
@@ -494,7 +497,7 @@ class _WheelCanvas(QWidget):
         ring_track_r = (outer_r + inner_r) / 2.0
         track_rect = QRectF(center.x() - ring_track_r, center.y() - ring_track_r,
                             ring_track_r * 2.0, ring_track_r * 2.0)
-        norm_y = max(-1.0, min(1.0, self._wheel.brightness))
+        norm_y = self._wheel._master_arc_position()
         base_span = 34.0
         center_deg = 285.0 - norm_y * 150.0
         start_deg = center_deg - base_span / 2.0
@@ -533,8 +536,8 @@ class _WheelCanvas(QWidget):
                          center + QPointF(0.0, inner_r - 1.5))
 
         # 5. 动态矢量牵引线与准星控制点
-        puck = center + self._wheel.knob_pos * inner_r
         magnitude = math.hypot(self._wheel.knob_pos.x(), self._wheel.knob_pos.y())
+        puck = center + self._wheel.knob_pos * (inner_r / max(1.0, magnitude))
         if magnitude > 0.01:
             painter.setPen(QPen(QColor(240, 180, 76, 180), 1.1))
             painter.drawLine(center, puck)
@@ -578,8 +581,7 @@ class _WheelCanvas(QWidget):
             event.accept()
         elif dist <= inner_r:
             self.dragging_knob = True
-            self._press_pos = event.position()
-            self._press_knob = QPointF(self._wheel.knob_pos)
+            self._last_pointer = event.position()
             self.interaction_started.emit()
             # Resolve uses a relative trackerball: pressing elsewhere on the
             # disk does not jump the current correction to that location.
@@ -589,8 +591,11 @@ class _WheelCanvas(QWidget):
         center, outer_r = self._geometry()
         inner_r = self._inner_radius(outer_r)
         if self.dragging_knob:
-            self._update_knob(center + self._press_knob * inner_r
-                              + event.position() - self._press_pos)
+            movement = event.position() - self._last_pointer
+            self._last_pointer = event.position()
+            if not movement.isNull():
+                self._update_knob(center + self._wheel.knob_pos * inner_r
+                                  + movement * PUCK_DRAG_GAIN)
             event.accept()
         elif self.dragging_ring:
             delta = event.position() - center
@@ -602,9 +607,10 @@ class _WheelCanvas(QWidget):
                 delta_angle += 2.0 * math.pi
             self._last_ring_angle = angle
             wheel = self._wheel
-            new_brightness = max(-1.0, min(
-                1.0, wheel.brightness + delta_angle * self._RING_SENSITIVITY))
-            wheel._set_brightness(new_brightness)
+            if wheel._measured_response:
+                wheel._on_jog_delta(delta_angle * inner_r)
+            else:
+                wheel._set_brightness(wheel.brightness + delta_angle * self._RING_SENSITIVITY)
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -616,6 +622,7 @@ class _WheelCanvas(QWidget):
             self.dragging_knob = False
             self._wheel._on_value_interaction_ended()
         elif self.dragging_ring:
+            self.mouseMoveEvent(event)
             self.dragging_ring = False
             self._wheel._on_value_interaction_ended()
         event.accept()
@@ -633,22 +640,13 @@ class _WheelCanvas(QWidget):
         inner_r = self._inner_radius(outer_r)
         delta = pos - center
         distance = math.hypot(delta.x(), delta.y())
-        if distance > inner_r:
-            delta *= inner_r / distance
-            distance = inner_r
         wheel = self._wheel
-        wheel.knob_pos = delta / inner_r if inner_r > 0 else QPointF(0, 0)
-        wheel.sat = distance / inner_r if inner_r > 0 else 0.0
-        if distance > 1e-8:
-            wheel.hue = (math.degrees(math.atan2(-delta.y(), delta.x()))
-                         - wheel.rotation_degrees) % 360.0
-        wheel._pending_hue = wheel.hue
-        wheel._pending_sat = wheel.sat
-        wheel._pending_val = wheel.brightness
-        wheel._update_rgb_values()
-        self.update()
-        if not wheel._update_timer.isActive():
-            wheel._update_timer.start()
+        # An existing numeric correction can project beyond the disk. Start
+        # from that correction so the first mouse movement does not snap it.
+        limit = inner_r * max(1.0, math.hypot(wheel.knob_pos.x(), wheel.knob_pos.y()))
+        if distance > limit:
+            delta *= limit / distance
+        wheel._edit_knob(delta / inner_r)
 
 
 # ============================================================================
@@ -695,6 +693,8 @@ class ColorWheel(QWidget):
         self.math = math
         self._add_display_scale = 1.0
         self._add_display_base = 0.0
+        self._measured_response = False
+        self._master_rate = master_drag_rate(mode)
         self.show_master_box = show_master_box and math == "mult"
         # A wheel's physical orientation is a calibration value, not a
         # rendering constant.  Keep it on each wheel so preferences can be
@@ -885,23 +885,23 @@ class ColorWheel(QWidget):
             return
         self._cancel_pending()
         self.interaction_started.emit()
+        master = self._master_value()
         self.hue = 0.0
         self.sat = 0.0
+        if self._measured_response:
+            self.brightness = (max(-1.0, min(1.0, master)) if self.math == "add"
+                               else multiplier_brightness(master))
         self.knob_pos = QPointF(0, 0)
-        self._update_rgb_values()
-        self._wheel_canvas.update()
-        self._pending_hue = self.hue
-        self._pending_sat = self.sat
-        self._pending_val = self.brightness
-        self.flush_pending_changes()
-        self.interaction_ended.emit()
+        self._queue_change()
+        self._on_value_interaction_ended()
 
     def _on_master_reset(self) -> None:
         """拨轮中键 / 双击：仅 Master 亮度归零（保留 hue/sat）。"""
-        if self.brightness == 0.0 or self.dragging_knob:
+        neutral = 0.0 if self.math == "add" else 1.0
+        if abs(self._master_value() - neutral) < 1e-12 or self.dragging_knob:
             return
         self.interaction_started.emit()
-        self._set_brightness(0.0)
+        self._change_master(neutral)
         # 先 flush 在途 pending 再结束手势：changed 必须先于 ended，
         # 撤销快照才能拿到归零后的值。
         self._on_value_interaction_ended()
@@ -941,11 +941,50 @@ class ColorWheel(QWidget):
         return (float(hue) + self.rotation_degrees) % 360.0
 
     def _update_knob_position(self) -> None:
+        if self._measured_response:
+            x, y = wheel_position(self.mode, self._wheel_rgb())
+            self.knob_pos = self._rotate_pointer(QPointF(x, y), inverse=False)
+            return
         screen_angle = math.radians(self._screen_angle_for_hue(self.hue))
         self.knob_pos = QPointF(
             self.sat * math.cos(screen_angle),
             -self.sat * math.sin(screen_angle),
         )
+
+    def _rotate_pointer(self, point: QPointF, *, inverse: bool) -> QPointF:
+        angle = math.radians(HUE_OFFSET_ANGLE - self.rotation_degrees)
+        if inverse:
+            angle = -angle
+        c, s = math.cos(angle), math.sin(angle)
+        return QPointF(c * point.x() - s * point.y(), s * point.x() + c * point.y())
+
+    def _edit_knob(self, point: QPointF) -> None:
+        if self._measured_response:
+            reference = self._rotate_pointer(point, inverse=True)
+            chroma = wheel_chroma(self.mode, reference.x(), reference.y())
+            rgb = self._wheel_rgb()
+            master = wheel_luma(rgb)
+            target = tuple(master + value for value in chroma)
+            new_rgb = constrain_chroma(rgb, target, additive=self.math == "add")
+            if new_rgb == rgb:
+                return
+            self._assign_rgb(new_rgb)
+            self._update_knob_position()
+        else:
+            if self.knob_pos == point:
+                return
+            self.knob_pos = point
+            self.sat = min(1.0, math.hypot(point.x(), point.y()))
+            if self.sat > 1e-8:
+                self.hue = (math.degrees(math.atan2(-point.y(), point.x()))
+                            - self.rotation_degrees) % 360.0
+        self._queue_change()
+
+    def set_measured_response(self, enabled: bool) -> None:
+        self._measured_response = enabled
+        self._update_knob_position()
+        self._update_rgb_values()
+        self._wheel_canvas.update()
 
     def blockSignals(self, block: bool) -> bool:
         self.master_jog.blockSignals(block)
@@ -965,9 +1004,13 @@ class ColorWheel(QWidget):
 
     def _set_brightness(self, brightness: float) -> None:
         """外环 / 拨轮路径：直接设置 Master 亮度并合并高频信号。"""
-        if self._updating_brightness:
+        brightness = max(-1.0, min(1.0, brightness))
+        if self._updating_brightness or brightness == self.brightness:
             return
-        self.brightness = max(-1.0, min(1.0, brightness))
+        self.brightness = brightness
+        self._queue_change()
+
+    def _queue_change(self) -> None:
         self._pending_hue = self.hue
         self._pending_sat = self.sat
         self._pending_val = self.brightness
@@ -977,26 +1020,24 @@ class ColorWheel(QWidget):
             self._update_timer.start()
 
     def _on_jog_delta(self, dx: float) -> None:
-        if self._updating_brightness:
-            return
-        # 固定 200px 参考宽度：满量程 ±1.0（与 DragValue 同手感约定）
-        self._set_brightness(
-            self.brightness + dx * drag_speed_per_pixel(2.0, Qt.KeyboardModifier.NoModifier))
+        if dx and not self._updating_brightness:
+            self._change_master(self._master_value() + dx * self._master_rate)
 
     def _on_brightness_drag_changed(self, val: float) -> None:
         """亮度数值变化，更新状态并合并高频信号。"""
-        if self._updating_brightness or self.math == "add":
-            return
-        multiplier = val + self._display_offset
-        stops = math.log2(max(multiplier, 2.0 ** -6.0))
-        self.brightness = math.copysign(math.sqrt(abs(stops) / 6.0), stops)
-        self._pending_hue = self.hue
-        self._pending_sat = self.sat
-        self._pending_val = self.brightness
-        self._update_rgb_values()
-        self._wheel_canvas.update()
-        if not self._update_timer.isActive():
-            self._update_timer.start()
+        if not self._updating_brightness and self.math != "add":
+            self._change_master(val + self._display_offset)
+
+    def _change_master(self, value: float) -> None:
+        if self._measured_response:
+            rgb = self._wheel_rgb()
+            new_rgb = shift_master(rgb, value - wheel_luma(rgb), additive=self.math == "add")
+            if new_rgb != rgb:
+                self._assign_rgb(new_rgb)
+                self._update_knob_position()
+                self._queue_change()
+        else:
+            self._set_brightness(value if self.math == "add" else multiplier_brightness(value))
 
     def _emit_changed_signal(self) -> None:
         if self._pending_hue is not None:
@@ -1017,67 +1058,69 @@ class ColorWheel(QWidget):
             self._emit_changed_signal()
 
     @staticmethod
-    def rgb_multipliers(hue: float, sat: float,
-                        brightness: float) -> tuple[float, float, float]:
+    def rgb_multipliers(hue: float, sat: float, brightness: float) -> RGB:
         """Forward HSV→RGB multiplier math shared by wheels and bars."""
-        stops = (brightness ** 2) * 6.0
-        if brightness < 0:
-            stops = -stops
-        b_mult = math.pow(2.0, stops)
-        if sat == 0:
-            return b_mult, b_mult, b_mult
-        c = QColor.fromHsvF(hue / 360.0, sat, 1.0)
-        rf, gf, bf = c.redF(), c.greenF(), c.blueF()
-        avg = (rf + gf + bf) / 3.0
-        return (rf / avg) * b_mult, (gf / avg) * b_mult, (bf / avg) * b_mult
+        r, g, b = params_to_rgb(hue, sat, brightness)
+        return r, g, b
+
+    def _wheel_rgb(self) -> RGB:
+        if self.math == "add":
+            r, g, b = params_to_offset_rgb(self.hue, self.sat, self.brightness)
+            return r, g, b
+        return self.rgb_multipliers(self.hue, self.sat, self.brightness)
+
+    def _master_value(self, rgb: RGB | None = None) -> float:
+        if self._measured_response:
+            return wheel_luma(self._wheel_rgb() if rgb is None else rgb)
+        return self.brightness if self.math == "add" else brightness_multiplier(self.brightness)
+
+    def _master_arc_position(self) -> float:
+        if not self._measured_response:
+            return max(-1.0, min(1.0, self.brightness))
+        master = self._master_value()
+        return (max(-1.0, min(1.0, master)) if self.math == "add"
+                else multiplier_brightness(master))
+
+    def _assign_rgb(self, rgb: RGB) -> None:
+        if self.math == "add":
+            self.hue, self.sat, self.brightness = offset_display_to_hsb(
+                *(value * 100.0 for value in rgb))
+        else:
+            self.hue, self.sat, self.brightness = self._rgb_to_hsv(
+                *(max(0.0, value) for value in rgb))
 
     def _update_rgb_values(self) -> None:
-        """从当前 hue/sat/brightness 计算显示值并更新 DragValue（防递归）。"""
+        """Synchronize the controls with the stored grade without emitting edits."""
         self._updating_rgb = True
         self._updating_brightness = True
+        rgb = self._wheel_rgb()
+        master = self._master_value(rgb)
+        fields = self._r_drag, self._g_drag, self._b_drag
         if self.math == "add":
-            rx, gy, bz = offset_hsb_to_display(self.hue, self.sat, self.brightness)
-            for field, value in zip((self._r_drag, self._g_drag, self._b_drag), (rx, gy, bz)):
-                field.setValue(value * self._add_display_scale + self._add_display_base)
-            self.master_jog.set_phase(self.brightness * 300.0)
+            for field, value in zip(fields, rgb):
+                field.setValue(value * 100.0 * self._add_display_scale + self._add_display_base)
         else:
-            r, g, b = self.rgb_multipliers(self.hue, self.sat, self.brightness)
-            b_mult = (r + g + b) / 3.0
             if self._bright_drag is not None:
-                self._bright_drag.setValue(b_mult - self._display_offset)
-            self._r_drag.setValue(r - self._display_offset)
-            self._g_drag.setValue(g - self._display_offset)
-            self._b_drag.setValue(b - self._display_offset)
-            self.master_jog.set_phase(self.brightness * 300.0)
+                self._bright_drag.setValue(master - self._display_offset)
+            for field, value in zip(fields, rgb):
+                field.setValue(value - self._display_offset)
+        self.master_jog.set_master_value(master - (0.0 if self.math == "add" else 1.0),
+                                         self._master_rate)
         self._updating_rgb = False
         self._updating_brightness = False
 
     def _on_rgb_changed(self, _val: float) -> None:
-        """RGB DragValue 变化 → 反算 hue/sat/brightness → 更新色轮。"""
+        """Invert the RGB numeric edit and position the control point."""
         if self._updating_rgb:
             return
+        fields = self._r_drag, self._g_drag, self._b_drag
         if self.math == "add":
-            self.hue, self.sat, self.brightness = offset_display_to_hsb(*(
-                (field.value() - self._add_display_base) / self._add_display_scale
-                for field in (self._r_drag, self._g_drag, self._b_drag)))
+            self._assign_rgb(tuple((field.value() - self._add_display_base)
+                                   / (100.0 * self._add_display_scale) for field in fields))
         else:
-            r = max(0.0, self._r_drag.value() + self._display_offset)
-            g = max(0.0, self._g_drag.value() + self._display_offset)
-            b = max(0.0, self._b_drag.value() + self._display_offset)
-            self.hue, self.sat, self.brightness = self._rgb_to_hsv(r, g, b)
-
-        # 更新控制点位置
+            self._assign_rgb(tuple(field.value() + self._display_offset for field in fields))
         self._update_knob_position()
-
-        self._update_rgb_values()
-        self._wheel_canvas.update()
-
-        # 通过节流发射 changed 信号
-        self._pending_hue = self.hue
-        self._pending_sat = self.sat
-        self._pending_val = self.brightness
-        if not self._update_timer.isActive():
-            self._update_timer.start()
+        self._queue_change()
 
     def set_additive_display_units(self, scale: float, base: float) -> None:
         """Use calibrated numeric units without changing the stored wheel position."""
@@ -1089,46 +1132,10 @@ class ColorWheel(QWidget):
         self._update_rgb_values()
 
     @staticmethod
-    def _rgb_to_hsv(r: float, g: float, b: float) -> tuple:
-        """从显示 RGB 值反算 hue/sat/brightness。
-
-        正向算法：
-            b_mult = 2^(stops),  c = fromHsvF(hue/360, sat, 1.0)
-            R = (c.r / avg) * b_mult  (G/B 同理)
-
-        反向：
-            b_mult = avg(R, G, B)  → brightness
-            归一化色度 → hue + sat
-        """
-        # 亮度反算：b_mult = mean(R, G, B)
-        b_mult = max((r + g + b) / 3.0, 1e-6)
-
-        # brightness from b_mult: stops = log2(b_mult), brightness ≈ sqrt(|stops|/6)
-        stops = math.log2(max(b_mult, 1e-6))
-        if stops >= 0:
-            brightness = math.sqrt(stops / 6.0)
-        else:
-            brightness = -math.sqrt(-stops / 6.0)
-        brightness = max(-1.0, min(1.0, brightness))
-
-        # 归一化色度
-        nr = r / b_mult
-        ng = g / b_mult
-        nb = b / b_mult
-
-        # AUD-25303：等比归一化而非 clamp(0,1) 截断。正向公式
-        # (_update_rgb_values) 产出的色度分量可 >1（sat=0.5 时 nr=1.5），
-        # 直接 clamp 会破坏分量比例、折叠饱和度（回读 sat=0.25）。
-        # HSV 对统一缩放不变，按最大分量等比缩放即可还原比例。
-        m = max(nr, ng, nb, 1e-6)
-        c = QColor.fromRgbF(
-            max(0.0, min(1.0, nr / m)),
-            max(0.0, min(1.0, ng / m)),
-            max(0.0, min(1.0, nb / m)))
-        hue = float(c.hueF()) * 360.0 if c.hueF() >= 0 else 0.0
-        sat = float(c.saturationF())
-
-        return hue, sat, brightness
+    def _rgb_to_hsv(r: float, g: float, b: float) -> tuple[float, float, float]:
+        """Invert the stored RGB factors without quantizing small drag steps."""
+        hue, sat, _ = colorsys.rgb_to_hsv(r, g, b)
+        return hue * 360.0, sat, multiplier_brightness((r + g + b) / 3.0)
 
 
 # ============================================================================
@@ -1836,6 +1843,12 @@ class GradingPanel(QWidget):
         for wheel in (self.offset_wheel, self.log_offset_wheel):
             wheel.set_additive_display_units(1.0, 25.0 if enabled else 0.0)
         self.color_bars_panel.offset.set_display_base(25.0 if enabled else 0.0)
+        for wheel in (self.lift_wheel, self.gamma_wheel, self.gain_wheel, self.offset_wheel,
+                      self.log_shadow_wheel, self.log_midtone_wheel,
+                      self.log_highlight_wheel, self.log_offset_wheel):
+            wheel.set_measured_response(enabled)
+        for column in self.color_bars_panel.columns():
+            column.set_measured_response(enabled)
 
     def _on_calibration_clicked(self, enabled: bool) -> None:
         self.interaction_started.emit()

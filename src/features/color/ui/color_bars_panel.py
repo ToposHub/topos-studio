@@ -11,7 +11,6 @@
 R/G/B 三条；乘性列（Lift/Gamma/Gain）保持 YRGB 四条与既有值域。
 """
 
-import math
 from typing import Any, Optional
 
 from PyQt6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QToolButton,
@@ -26,6 +25,9 @@ from src.shared.i18n.i18n import I18N
 from src.features.color.ui.color_wheel import (
     ColorWheel, KnurledJogWheel, _GradingValue,
     offset_hsb_to_display, offset_display_to_hsb,
+)
+from src.features.color.ui.primary_wheel_response import (
+    RGB, brightness_multiplier, master_drag_rate, multiplier_brightness, shift_master, wheel_luma,
 )
 
 _TRACK_FILL = "#0e0f12"
@@ -282,11 +284,13 @@ class _BarsColumn(QWidget):
         self._channels = _ADD_CHANNELS if self._math == "add" else _CHANNELS
         self._is_offset = (mode == "offset")
         self._add_display_base = 0.0
+        self._measured_response = False
+        self._master_rate = master_drag_rate(mode, bars=True)
 
         self.hue = 0.0
         self.sat = 0.0
         self.brightness = 0.0
-        self._rgb = (1.0, 1.0, 1.0)
+        self._rgb: RGB = (0.0, 0.0, 0.0) if self._math == "add" else (1.0, 1.0, 1.0)
         self._updating = False
         self._pending: Optional[tuple[float, float, float]] = None
         self._update_timer = QTimer(self)
@@ -397,10 +401,8 @@ class _BarsColumn(QWidget):
                 display.get("R", 0.0), display.get("G", 0.0),
                 display.get("B", 0.0))
         elif channel == "Y":
-            multiplier = value + self._display_offset
-            stops = math.log2(max(multiplier, 2.0 ** -6.0))
-            self.brightness = math.copysign(math.sqrt(abs(stops) / 6.0), stops)
-            self._rgb = ColorWheel.rgb_multipliers(self.hue, self.sat, self.brightness)
+            self._change_master(value + self._display_offset)
+            return
         else:
             r, g, b = self._rgb
             mult = value + self._display_offset
@@ -412,46 +414,72 @@ class _BarsColumn(QWidget):
                 b = max(0.0, mult)
             self._rgb = (r, g, b)
             self.hue, self.sat, self.brightness = ColorWheel._rgb_to_hsv(r, g, b)
+        self._queue_change()
+
+    def _queue_change(self) -> None:
         self._refresh_displays()
         self._pending = (self.hue, self.sat, self.brightness)
         if not self._update_timer.isActive():
             self._update_timer.start()
 
     def _on_dial_delta(self, dx: float) -> None:
-        if self._updating:
-            return
-        self.brightness = max(-1.0, min(1.0, self.brightness + dx *
-                                        drag_speed_per_pixel(2.0, Qt.KeyboardModifier.NoModifier)))
-        self._refresh_displays()
-        self._pending = (self.hue, self.sat, self.brightness)
-        if not self._update_timer.isActive():
-            self._update_timer.start()
+        if dx and not self._updating:
+            self._change_master(self._master_value() + dx * self._master_rate)
+
+    def _master_value(self) -> float:
+        if self._measured_response:
+            return wheel_luma(self._rgb)
+        return self.brightness if self._math == "add" else brightness_multiplier(self.brightness)
+
+    def _change_master(self, value: float) -> None:
+        additive = self._math == "add"
+        if self._measured_response:
+            rgb = shift_master(self._rgb, value - self._master_value(), additive=additive)
+            if rgb == self._rgb:
+                return
+            if additive:
+                self.hue, self.sat, self.brightness = offset_display_to_hsb(
+                    *(channel * 100.0 for channel in rgb))
+            else:
+                self.hue, self.sat, self.brightness = ColorWheel._rgb_to_hsv(*rgb)
+        else:
+            brightness = max(-1.0, min(1.0, value)) if additive else multiplier_brightness(value)
+            if brightness == self.brightness:
+                return
+            self.brightness = brightness
+        self._queue_change()
 
     def _on_dial_reset(self) -> None:
-        if self.brightness == 0.0:
+        neutral = 0.0 if self._math == "add" else 1.0
+        if abs(self._master_value() - neutral) < 1e-12:
             return
         self.interaction_started.emit()
-        self.brightness = 0.0
-        self._refresh_displays()
-        self.changed.emit(self.hue, self.sat, self.brightness)
-        self.interaction_ended.emit()
+        self._change_master(neutral)
+        self._on_interaction_ended()
 
     def _refresh_displays(self) -> None:
         self._updating = True
         if self._math == "add":
             rx, gy, bz = offset_hsb_to_display(self.hue, self.sat, self.brightness)
             values = {"R": rx, "G": gy, "B": bz}
+            self._rgb = (rx / 100.0, gy / 100.0, bz / 100.0)
         else:
             r, g, b = ColorWheel.rgb_multipliers(self.hue, self.sat, self.brightness)
             self._rgb = (r, g, b)
-            values = {"Y": (r + g + b) / 3.0 - self._display_offset,
+            values = {"Y": self._master_value() - self._display_offset,
                       "R": r - self._display_offset,
                       "G": g - self._display_offset,
                       "B": b - self._display_offset}
         for ch in self._channels:
             self._bars[ch].setValue(values[ch])
             self._nums[ch].setValue(values[ch] + self._add_display_base)
+        self._dial.set_master_value(self._master_value() - (0.0 if self._math == "add" else 1.0),
+                                    self._master_rate)
         self._updating = False
+
+    def set_measured_response(self, enabled: bool) -> None:
+        self._measured_response = enabled
+        self._refresh_displays()
 
     def set_display_base(self, base: float) -> None:
         self._add_display_base = base

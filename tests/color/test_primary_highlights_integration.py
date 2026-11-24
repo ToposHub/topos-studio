@@ -12,7 +12,7 @@ from PyQt6.QtGui import QMouseEvent
 from src.app.controllers.edit_controller import EditControllerMixin
 from src.app.controllers.layer_controller import LayerOpsMixin
 from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
-from src.features.color.core.composition_uniforms import composition_uniform_values
+from src.features.color.core.composition_uniforms import composition_uniform_values, params_to_rgb
 from src.features.color.core.the_decompiler import GradingMath
 from src.features.color.ui.color_wheel import GradingPanel
 from src.shared.project.color_stack import ColorStackData
@@ -106,8 +106,9 @@ def test_highlights_are_recorded_as_a_grade_keyframe() -> None:
     host._refresh_grade_keyframe_ui.assert_called_once_with()
 
 
-@pytest.mark.parametrize("mode", ["lift", "gamma", "gain"])
-def test_master_dial_gesture_updates_preview_and_saves_once(qapp, image_engine, mode: str) -> None:
+@pytest.mark.parametrize("mode,delta", [("lift", 0.08), ("gamma", 0.04), ("gain", 0.16)])
+def test_master_dial_gesture_updates_preview_and_saves_once(qapp, image_engine,
+                                                             mode: str, delta: float) -> None:
     panel = GradingPanel()
     image_engine.img_full_original = np.full((2, 2, 3), 0.4, np.float32)
     host = _Host(image_engine, panel)
@@ -130,14 +131,15 @@ def test_master_dial_gesture_updates_preview_and_saves_once(qapp, image_engine, 
 
     try:
         send(QMouseEvent.Type.MouseButtonPress, 20.0)
-        send(QMouseEvent.Type.MouseMove, 40.0)
-        send(QMouseEvent.Type.MouseMove, 60.0)
+        send(QMouseEvent.Type.MouseMove, 80.0)
+        send(QMouseEvent.Type.MouseMove, 120.0)
         host._on_grading_changed_for_color_stack.assert_not_called()
-        send(QMouseEvent.Type.MouseButtonRelease, 70.0)
-        assert image_engine.get_active_layer().grading_params[mode] == (0.0, 0.0, 0.05)
+        send(QMouseEvent.Type.MouseButtonRelease, 140.0)
+        saved_grade = image_engine.get_active_layer().grading_params[mode]
+        assert params_to_rgb(*saved_grade) == pytest.approx([1.0 + delta] * 3)
         host.request_render.assert_called_once_with()
         saved = host._on_grading_changed_for_color_stack.call_args
-        assert saved.args[1][mode] == (0.0, 0.0, 0.05)
+        assert saved.args[1][mode] == saved_grade
         assert host._on_grading_changed_for_color_stack.call_count == 1
     finally:
         panel.deleteLater()
