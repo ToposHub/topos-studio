@@ -942,11 +942,10 @@ class FFmpegVideoEncoder:
                     "nvenc": "NVIDIA NVENC",
                     "videotoolbox": "Apple VideoToolbox",
                 }.get(hw_vendor, hw_vendor)
-                if self._probe_encoder_open(encoder_name):
-                    logger.info(
-                        "使用 %s 硬件编码: %s（输入 %s；速度优先）",
-                        vendor_label, encoder_name, hw_input,
-                    )
+                # H.264 NVENC opens the fully configured stream below, before
+                # writing the header. A second session with synthetic
+                # pixels duplicates startup and validates different options.
+                if encoder_name == "h264_nvenc" or self._probe_encoder_open(encoder_name):
                     transfer = (
                         getattr(self._config.color_metadata, "transfer", None)
                         if self._config.color_metadata is not None else None
@@ -1073,6 +1072,9 @@ class FFmpegVideoEncoder:
                         pass
                     self.open()
                     return
+                logger.info(
+                    "使用硬件编码器 %s（输入 %s）", encoder_name, self._encode_pix_fmt,
+                )
 
             self._is_open = True
             self._frame_count = 0
@@ -1275,7 +1277,16 @@ class FFmpegVideoEncoder:
           实证：请求 20Mbps 输出与不设码率的对照组逐字节一致）。
         """
         opts: dict[str, str] = {}
-        preset = (self._config.preset or "medium").lower()
+        cfg = self._config
+        profile = (cfg.profile or "").strip().lower()
+        # UHD H.264 High delivery at a high VBR target uses the balanced
+        # NVENC preset. An explicit caller preset still takes precedence.
+        uhd_high_vbr = (
+            codec_lower == "h264" and profile == "high"
+            and (cfg.width, cfg.height) == (3840, 2160)
+            and (cfg.bitrate or 0) >= 50_000_000 and cfg.min_bitrate is None
+        )
+        preset = (cfg.preset or ("fast" if uhd_high_vbr else "medium")).lower()
         if preset in ("ultrafast", "superfast", "veryfast", "faster", "fast"):
             opts["preset"] = "p4"
         elif preset == "medium":
@@ -1283,7 +1294,10 @@ class FFmpegVideoEncoder:
         else:
             opts["preset"] = "p6"
 
-        cfg = self._config
+        if codec_lower == "h264" and profile in ("baseline", "main", "high"):
+            # NVENC uses a private profile option. The PyAV stream
+            # profile alone leaves the encoder at its Main default.
+            opts["profile"] = profile
         if cfg.bitrate is not None:
 
             def kbps(value: int) -> str:
@@ -2621,20 +2635,20 @@ class FFmpegVideoEncoder:
                 self._container.close()
             container_closed = True
 
-            if expected_frames is not None and self._frame_count != expected_frames:
-                raise RuntimeError(f"Encoded {self._frame_count} frames, expected {expected_frames}")
-
             # M21.1（R04）：发布事务——flush/trailer/容器关闭全部完成
             # 后才原子替换到最终路径。存在同名旧成片时，编码中途任何
             # 失败/异常都只清临时文件，旧成功输出保持不动。
             has_staged_output = (self._write_path != self._output_path
                                  and os.path.exists(self._write_path))
-            if has_staged_output and expected_frames and os.path.getsize(self._write_path) == 0:
-                raise RuntimeError("The staged video output was empty")
+            # A cancelled export can legitimately have fewer frames.
             if should_cancel is not None and should_cancel():
                 if has_staged_output:
                     os.unlink(self._write_path)
                 return False
+            if expected_frames is not None and self._frame_count != expected_frames:
+                raise RuntimeError(f"Encoded {self._frame_count} frames, expected {expected_frames}")
+            if has_staged_output and expected_frames and os.path.getsize(self._write_path) == 0:
+                raise RuntimeError("The staged video output was empty")
             if has_staged_output:
                 os.replace(self._write_path, self._output_path)
             elif self._write_path != self._output_path:

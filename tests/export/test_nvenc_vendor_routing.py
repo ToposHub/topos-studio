@@ -8,6 +8,8 @@ test_hwaccel_encoder_map 同语义——断言布尔而非真值）。
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -60,6 +62,74 @@ class TestNvencInputPixFmt:
         assert _cfg(pix_fmt="yuv422p10le").nvenc_input_pix_fmt() is None
         assert _cfg(pix_fmt="yuv422p").nvenc_input_pix_fmt() is None
         assert _cfg(pix_fmt="yuv444p").nvenc_input_pix_fmt() is None
+
+
+def test_h264_nvenc_open_failure_rebuilds_cpu_without_synthetic_probe(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, vendor: Callable[[str], None],
+) -> None:
+    import src.shared.export.video_encoder as ve
+
+    vendor("nvidia")
+    monkeypatch.setattr(ve, "nvenc_encoder_available", lambda _codec: True)
+    selected: list[str] = []
+    closed: list[str] = []
+
+    class Container:
+        name = ""
+
+        def add_stream(self, name: str, *, rate: object) -> SimpleNamespace:
+            self.name = name
+            selected.append(name)
+
+            def open_context() -> None:
+                raise RuntimeError("session unavailable")
+
+            return SimpleNamespace(codec_context=SimpleNamespace(open=open_context))
+
+        def close(self) -> None:
+            closed.append(self.name)
+
+    monkeypatch.setitem(sys.modules, "av", SimpleNamespace(open=lambda *_a, **_kw: Container()))
+    encoder = ve.FFmpegVideoEncoder(str(tmp_path / "fallback.mp4"), _cfg())
+
+    def unexpected_probe(_name: str) -> bool:
+        pytest.fail("NVENC should validate the configured stream directly")
+
+    monkeypatch.setattr(encoder, "_probe_encoder_open", unexpected_probe)
+    monkeypatch.setattr(encoder, "_configure_encoder", lambda: None)
+    monkeypatch.setattr(encoder, "_set_color_metadata", lambda: None)
+    encoder.open()
+
+    assert selected == ["h264_nvenc", "libx264"]
+    assert closed == ["h264_nvenc"]
+    assert encoder.hw_encoder_name == ""
+    assert encoder.hw_fallback_reason == "encoder_hw_unavailable:nvenc:RuntimeError: session unavailable"
+
+
+@pytest.mark.parametrize("profile", ["Baseline", "main", "high"])
+def test_h264_nvenc_passes_the_requested_profile_as_a_private_option(profile: str) -> None:
+    from src.shared.export.video_encoder import FFmpegVideoEncoder
+
+    encoder = FFmpegVideoEncoder("out.mp4", _cfg(hwaccel="nvenc", profile=profile))
+    assert encoder._build_nvenc_options("h264")["profile"] == profile.lower()
+
+
+@pytest.mark.parametrize(("overrides", "expected"), [
+    ({}, "p4"),
+    ({"profile": None}, "p4"),
+    ({"preset": "medium"}, "p5"),
+    ({"bitrate": 20_000_000}, "p5"),
+    ({"min_bitrate": 50_000_000, "max_bitrate": 50_000_000}, "p5"),
+    ({"width": 1920, "height": 1080}, "p5"),
+])
+def test_h264_nvenc_default_preset_for_uhd_vbr(overrides: dict, expected: str) -> None:
+    from src.shared.export.video_encoder import FFmpegVideoEncoder
+
+    settings = {"hwaccel": "nvenc", "profile": "high", "bitrate": 50_000_000,
+                "width": 3840, "height": 2160}
+    settings.update(overrides)
+    encoder = FFmpegVideoEncoder("out.mp4", _cfg(**settings))
+    assert encoder._build_nvenc_options("h264")["preset"] == expected
 
 
 class TestVendorRouting:

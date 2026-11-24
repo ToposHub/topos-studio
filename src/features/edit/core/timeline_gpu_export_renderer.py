@@ -32,9 +32,10 @@ BGR u8 源。任一不满足或运行失败 → 返回 None，调用方原样回
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -49,6 +50,9 @@ from src.features.edit.core.primary_grade_shader import (
     PRIMARY_GRADE_FRAGMENT,
 )
 from src.shared.media.gpu_frame import GpuFrameRelease
+
+if TYPE_CHECKING:
+    from src.features.edit.core.timeline_gl_lut import PlanarLutReadback, PendingPlanarLutFrame
 
 logger = logging.getLogger(__name__)
 
@@ -907,6 +911,7 @@ class TimelineGpuExportRenderer:
         self._released = False
         self.gl_errors = 0
         self._owner_thread: Optional[int] = None
+        self._wgl_context_id: Optional[int] = None
         self._warned_render_error = False
         self.frames_rendered = 0
         # 惰性分配/尺寸复用的 GL 资源
@@ -928,6 +933,7 @@ class TimelineGpuExportRenderer:
         self._fbo_uv_out = None
         self._tex_yuv422p10 = None
         self._fbo_yuv422p10 = None
+        self._planar_lut_readback: Optional[PlanarLutReadback] = None
         self._tex_yuv420_atlas = None
         self._fbo_yuv420_atlas = None
         # u16 管线（高精度交付：>8-bit 源走 RGB16UI 全链，8-bit 源仅出口 u16）
@@ -987,21 +993,39 @@ class TimelineGpuExportRenderer:
         """GL 初始化失败后不再重试（调用方据此短路）。"""
         return self._failed
 
-    def _ensure_ready(self) -> bool:
-        """惰性创建 standalone context + 程序/全屏四边形；失败后不再重试。"""
+    def _ensure_context(self) -> bool:
+        """Create the owner-thread context and quad without compiling passes."""
+        if self._failed or self._released:
+            return False
         if self._ctx is not None:
             return True
-        if self._failed:
-            return False
         try:
             import moderngl
-
-            ctx = moderngl.create_standalone_context(require=330)
-            self._ctx = ctx
+            self._ctx = moderngl.create_standalone_context(require=330)
             self._owner_thread = threading.get_ident()
-            self._quad = ctx.buffer(
+            if sys.platform == "win32":
+                try:
+                    from OpenGL import platform
+                    self._wgl_context_id = platform.PLATFORM.GetCurrentContext()
+                except ImportError:
+                    pass
+            self._quad = self._ctx.buffer(
                 np.array([-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0],
                          dtype=np.float32).tobytes())
+            return True
+        except Exception as error:
+            self._failed = True
+            logger.warning("TimelineGpuExportRenderer: headless GL unavailable (%s)", error)
+            return False
+
+    def _ensure_ready(self) -> bool:
+        """惰性创建 standalone context + 程序/全屏四边形；失败后不再重试。"""
+        if not self._ensure_context():
+            return False
+        if self._prog_yuv is not None:
+            return True
+        ctx = self._ctx
+        try:
             self._prog_yuv = ctx.program(
                 vertex_shader=_VERT_SRC, fragment_shader=_FRAG_YUV_SRC)
             self._prog_grade = ctx.program(
@@ -1919,6 +1943,62 @@ class TimelineGpuExportRenderer:
                 return None
         return result_tex, False
 
+    def submit_planar_lut(
+        self, planes: tuple[np.ndarray, ...], width: int, height: int,
+        lut: tuple[str, float], frame_index: int, time_seconds: float, pixel_format: str,
+    ) -> Optional[PendingPlanarLutFrame]:
+        """Submit a verified planar H.264 frame on the render owner thread."""
+        from OpenGL import platform
+        from src.features.edit.core.timeline_gl_lut import PlanarLutReadback
+
+        if not self._ensure_context():
+            raise RuntimeError("OpenGL is unavailable for planar LUT delivery")
+        if (not self._wgl_context_id
+                or platform.PLATFORM.GetCurrentContext() != self._wgl_context_id):
+            raise RuntimeError("Planar LUT context is no longer current")
+        if self._planar_lut_readback is None:
+            self._planar_lut_readback = PlanarLutReadback(
+                self._ctx, _VERT_SRC, self._quad, width, height, pixel_format)
+        reference, strength = lut
+        texture = self._color_graph_renderer().delivery_lut_texture(reference)
+        if not self._planar_lut_readback.supports_lut(texture):
+            return None
+        frame = self._planar_lut_readback.submit(planes, texture, strength, frame_index, time_seconds)
+        self.frames_rendered += 1
+        return frame
+
+    def submit_topos_planar_lut(
+        self, source: GpuYuvSource, lut: tuple[str, float],
+        width: int, height: int, frame_index: int, time_seconds: float,
+        *, borrow_slots: int = 0,
+    ) -> Optional[PendingPlanarLutFrame]:
+        """Render the existing RGB16 LUT path with asynchronous 4:2:2 readback."""
+        from OpenGL import platform
+        from src.features.edit.core.timeline_gl_lut import PlanarLutReadback
+
+        if not self._ensure_context():
+            return None
+        if (not self._wgl_context_id
+                or platform.PLATFORM.GetCurrentContext() != self._wgl_context_id):
+            raise RuntimeError("TOPOS planar LUT context is no longer current")
+        if not self._ensure_ready() or self._prog_yuv422p10_lut is None:
+            return None
+        if self._planar_lut_readback is None:
+            self._planar_lut_readback = PlanarLutReadback(
+                self._ctx, _VERT_SRC, self._quad, width, height, "yuv422p10le",
+                existing_422_atlas=True, borrow_slots=borrow_slots)
+        prepared = self._prepare_layer_texture(source, None, True)
+        if prepared is None or not prepared[1]:
+            return None
+        reference, strength = lut
+        texture = self._color_graph_renderer().delivery_lut_texture(reference)
+        if not self._draw_yuv422p10_atlas(prepared[0], width, height, (texture, strength)):
+            return None
+        frame = self._planar_lut_readback.capture_422_atlas(
+            self._fbo_yuv422p10, frame_index, time_seconds)
+        self.frames_rendered += 1
+        return frame
+
     def render_planar(
         self,
         source: GpuYuvSource,
@@ -2005,22 +2085,19 @@ class TimelineGpuExportRenderer:
                     f"({error}); CPU fallback for this export")
             return None
 
-    def _read_yuv422p10(
-        self, rgb: Any, width: int, height: int,
-        allocate: Optional[Callable[[int, int], Optional[Tuple[Any, tuple]]]] = None,
-        *, lut: Optional[Tuple[Any, float]] = None,
-    ) -> Optional[GpuYuv422P10Output]:
-        """Convert a same-size RGB signal to a 10-bit Y/Cb/Cr atlas for readback."""
+    def _draw_yuv422p10_atlas(
+        self, rgb: Any, width: int, height: int, lut: Optional[Tuple[Any, float]],
+    ) -> bool:
         program = self._prog_yuv422p10 if lut is None else self._prog_yuv422p10_lut
         if width % 2 or program is None:
-            return None
+            return False
         import moderngl
 
         atlas_size = (width, height * 2)
         if self._tex_yuv422p10 is None or self._tex_yuv422p10.size != atlas_size:
             target = self._allocate_planar_target(atlas_size, "u2")
             if target is None:
-                return None
+                return False
             if self._fbo_yuv422p10 is not None:
                 self._fbo_yuv422p10.release()
                 self._tex_yuv422p10.release()
@@ -2036,6 +2113,18 @@ class TimelineGpuExportRenderer:
         self._fbo_yuv422p10.use()
         self._vao["yuv422p10" if lut is None else "yuv422p10_lut"].render(
             mode=moderngl.TRIANGLE_STRIP)
+        return True
+
+    def _read_yuv422p10(
+        self, rgb: Any, width: int, height: int,
+        allocate: Optional[Callable[[int, int], Optional[Tuple[Any, tuple]]]] = None,
+        *, lut: Optional[Tuple[Any, float]] = None,
+    ) -> Optional[GpuYuv422P10Output]:
+        """Convert a same-size RGB signal to a 10-bit Y/Cb/Cr atlas for readback."""
+        import moderngl
+
+        if not self._draw_yuv422p10_atlas(rgb, width, height, lut):
+            return None
         if allocate is not None:
             try:
                 target = allocate(width, height)
@@ -2491,10 +2580,11 @@ class TimelineGpuExportRenderer:
         prog["u_opacity"].value = float(opacity)
         self._fbo_out_u16.use()
         self._vao[vao_key].render(mode=moderngl.TRIANGLE_STRIP)
-        data = self._fbo_out_u16.read(components=3, dtype="u2", alignment=2)
+        # Each queued frame owns its pixels. Read directly into that array.
+        pixels = np.empty((out_height, out_width, 3), dtype=np.uint16)
+        self._fbo_out_u16.read_into(pixels, components=3, dtype="u2", alignment=2)
         self.frames_rendered += 1
-        return np.frombuffer(data, dtype=np.uint16).reshape(
-            out_height, out_width, 3).copy()
+        return pixels
 
     def release(self) -> None:
         """释放全部 GL 资源（幂等；必须在创建线程调用）。
@@ -2519,6 +2609,50 @@ class TimelineGpuExportRenderer:
                 "creating thread; leaking GL context intentionally until "
                 "the owner thread releases it")
             return
+        if self._planar_lut_readback is not None:
+            # Keep borrowed pixels valid even if rebinding the GL context fails.
+            self._planar_lut_readback.wait_for_borrowed_frames()
+        if self._wgl_context_id:
+            from OpenGL import platform
+            if platform.PLATFORM.GetCurrentContext() != self._wgl_context_id:
+                self._release_with_wgl_binding()
+            else:
+                self._release_context()
+        else:
+            self._release_context()
+        if self.frames_rendered:
+            logger.info(
+                "TimelineGpuExportRenderer: released "
+                f"({self.frames_rendered} frames rendered)")
+
+    def _release_with_wgl_binding(self) -> None:
+        from OpenGL import WGL
+
+        previous_dc = WGL.wglGetCurrentDC()
+        previous_context = WGL.wglGetCurrentContext()
+        try:
+            self._release_context(rebind=True)
+        finally:
+            # glcontext's WGL release unbinds the thread's current context.
+            if previous_context and not WGL.wglMakeCurrent(previous_dc, previous_context):
+                logger.warning("Could not restore the previous timeline OpenGL context")
+
+    def _release_context(self, *, rebind: bool = False) -> None:
+        try:
+            if rebind:
+                with self._ctx:
+                    self._release_gl_objects()
+            else:
+                self._release_gl_objects()
+        finally:
+            try:
+                self._ctx.release()
+            except Exception:
+                logger.debug("Could not release the timeline export context", exc_info=True)
+            self._ctx = None
+            self._released = True
+
+    def _release_gl_objects(self) -> None:
         resources = [
             self._tex_y, self._tex_u, self._tex_v, self._tex_packed,
             self._tex_y_u8, self._tex_u_u8, self._tex_v_u8,
@@ -2538,6 +2672,13 @@ class TimelineGpuExportRenderer:
             self._fbo_side[1], self._tex_side[1],
             self._fbo_wipe, self._tex_wipe, self._tex_mask,
         ]
+        if self._planar_lut_readback is not None:
+            try:
+                self._planar_lut_readback.release()
+            except Exception:
+                logger.debug("Could not release planar LUT readback resources", exc_info=True)
+            finally:
+                self._planar_lut_readback = None
         graph_renderer = getattr(self, "_color_graph_texture_renderer", None)
         if graph_renderer is not None:
             graph_renderer.release()
@@ -2582,14 +2723,3 @@ class TimelineGpuExportRenderer:
             except Exception:
                 pass
             self._effect_runner = None
-        try:
-            self._ctx.release()
-        except Exception:
-            pass
-        self._ctx = None
-        # AUD-18502：资源已全部释放，此刻才闩死幂等标志。
-        self._released = True
-        if self.frames_rendered:
-            logger.info(
-                "TimelineGpuExportRenderer: released "
-                f"({self.frames_rendered} frames rendered)")

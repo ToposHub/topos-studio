@@ -65,12 +65,12 @@ static int32_t thread_default(void)
      * 追认 16 为解码默认：2K 打平（−0.2%）、4K +2.0%（12/12 正对）且方差
      * 显著更小；负载下 +14%（5/5 对）。编码在 8P/16L 机 t16 −8%（M10-6
      * 实测）——产品编码路径显式 min(8,cpu)，不受默认影响。 */
-    if (def > TC_SLICE_MAX_THREADS) { def = TC_SLICE_MAX_THREADS; }
+    if (def > TC_SLICE_DEFAULT_MAX_THREADS) { def = TC_SLICE_DEFAULT_MAX_THREADS; }
 #elif defined(_WIN32)
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     int32_t def = si.dwNumberOfProcessors > 0 ? (int32_t)si.dwNumberOfProcessors : 1;
-    if (def > TC_SLICE_MAX_THREADS) { def = TC_SLICE_MAX_THREADS; }
+    if (def > TC_SLICE_DEFAULT_MAX_THREADS) { def = TC_SLICE_DEFAULT_MAX_THREADS; }
 #else
     int32_t def = 1;
 #endif

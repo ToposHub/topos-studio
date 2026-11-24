@@ -11,11 +11,9 @@
  *  - 批次环（64 槽）满 / 初始化失败 / OOM / worker 内嵌套调用 → 调用线程
  *    顺序内联执行（正确性优先；环满即调用方回压——不排队、不阻塞他人）；
  *  - 批次内存双条件释放（全部 worker 越过 ∧ 调用方已离开），无 UAF/泄漏；
- *  - 上界 TC_SLICE_MAX_THREADS=16（M10-6：旧上界 8 在 16~24 逻辑核机器上
- *    白锁一半算力——编码 t8→t16 实测零增益的根因）；默认
- *    min(ncpu, TC_SLICE_MAX_THREADS)（16 逻辑核机 = 16；2026-09-02 静机交错
- *    对复验追认，详见 tpool.c thread_default 注释）；TOPOS_SLICE_THREADS
- *    可覆盖（1..16）；应用层自有线程池时可用
+ *  - 默认 min(ncpu, 16)。Windows 允许显式请求最多 32 条线程，
+ *    其他平台上限 16。TOPOS_SLICE_THREADS 可覆盖默认值；
+ *    应用层自有线程池时可用
  *    tc_dev_set_thread_count(1) 关闭，避免重复并行（计划 §12 阶段 9 任务）。
  *    Win32 镜像（SRWLOCK + CONDITION_VARIABLE + _beginthreadex）。
  */
@@ -24,7 +22,12 @@
 
 #include <stdint.h>
 
+#if defined(_WIN32)
+#define TC_SLICE_MAX_THREADS 32
+#else
 #define TC_SLICE_MAX_THREADS 16
+#endif
+#define TC_SLICE_DEFAULT_MAX_THREADS 16
 
 typedef struct tc_job {
     void (*fn)(void* ctx);

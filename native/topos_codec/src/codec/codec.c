@@ -2174,83 +2174,64 @@ static double rans2_rows_cost(const uint32_t* rows, uint32_t ctx_n, uint32_t nsy
     return bits;
 }
 
-/* ---- S5（ADR-C045）：后向对环的值语义 put 引擎 ----
- * x / fastdiv 以值传递（SSA 驻留寄存器）——导出版经 tc_rans_enc* 指针
- * 访问 e->x，renorm 的 uint8_t 存储按 C 别名规则可能改写任意对象，
- * 迫使每次 put 后从栈重载 e->x/fd（P0 复剖析：后向环自体 ~47%×r2e，
- * 反汇编证实栈往返与调用开销为主体）。运算与 tc_rans_put_fast /
- * tc_rans_put_chunk / tc_rans_put_rawbits 逐位一致（新旧 dylib 差分钉死）。
- *
- * 域契约（省略的防御检查在此为死码，量化管线保证）：lvl bitlen ≤ 27、
- * dc bitlen ≤ 28、run ≤ 62 恒在族字母表内；被发射符号在本 slice 计数
- * ≥1 ⟹ freq ≥1（model_build 保底）。溢出路径逐函数镜像：put_x 置错误
- * 消息（同 put_fast），chunk_x 不置（同 put_chunk——flush 统一补报）。 */
-static inline uint32_t rans2_put_chunk_x(uint32_t x, tc_rans_enc* e, uint32_t w,
-                                         uint32_t c, int32_t* rc)
+/* rANS2 writes backwards into a pre-sized scratch buffer. Each symbol
+ * starts below 2^31, and x_max is at least 2^19, so it emits at most two
+ * bytes. A raw chunk of w bits needs at most ceil(w/8) <= w bytes. */
+static inline uint32_t rans2_put_chunk_x(uint32_t x, uint8_t** out, uint32_t w,
+                                         uint32_t c)
 {
     const uint32_t thr = 1u << (31u - w);
     while (x >= thr) {
-        if (e->pos >= e->cap) {
-            e->overflow = 1;
-            *rc = TC_ERR_BUFFER_TOO_SMALL;
-            return x;
-        }
-        e->buf[e->cap - 1u - e->pos++] = (uint8_t)(x & 0xFFu);
+        *--*out = (uint8_t)x;
         x >>= 8;
     }
     return (x << w) | (c & ((1u << w) - 1u));
 }
 
-/* tc_rans_put_suffix 的值语义替身（cat−1 个幅度位；cat>24 拆高低块，
- * 次序同 rans.h 原函数）。b==0 为无操作。 */
-static inline uint32_t rans2_put_suffix_x(uint32_t x, tc_rans_enc* e, uint32_t cat,
-                                          uint32_t m, int32_t* rc)
+static inline uint32_t rans2_put_suffix_x(uint32_t x, uint8_t** out, uint32_t cat,
+                                          uint32_t m)
 {
-    uint32_t b = cat > 1u ? cat - 1u : 0u;
-    if (b == 0u || b > 27u) { return x; }
-    if (b > 23u) {
-        x = rans2_put_chunk_x(x, e, b - 16u, m >> 16u, rc);
-        if (*rc != TC_OK) { return x; }
-        b = 16u;
+    if (cat <= 1u || cat > 28u) { return x; }
+    uint32_t w = cat - 1u;
+    if (w > 23u) {
+        x = rans2_put_chunk_x(x, out, w - 16u, m >> 16u);
+        w = 16u;
     }
-    return rans2_put_chunk_x(x, e, b, m, rc);
+    return rans2_put_chunk_x(x, out, w, m);
 }
 
-/* Renormalization bytes are unchanged. The compact symbol table replaces
- * the general-purpose division parameters used by the quantizer. */
-static inline uint32_t rans2_put_x(uint32_t x, tc_rans_enc* e,
-                                   tc_rans_enc_symbol symbol, int32_t* rc)
+static inline uint32_t rans2_put_x(uint32_t x, uint8_t** out,
+                                   tc_rans_enc_symbol symbol)
 {
-    while (x >= symbol.x_max) {
-        if (e->pos >= e->cap) {
-            e->overflow = 1;
-            tc_set_error(TC_ERR_BUFFER_TOO_SMALL, "rans encode overflow (%zu/%zu)",
-                         e->pos, e->cap);
-            *rc = TC_ERR_BUFFER_TOO_SMALL;
-            return x;
-        }
-        e->buf[e->cap - 1u - e->pos++] = (uint8_t)(x & 0xFFu);
+    if (x >= symbol.x_max) {
+        *--*out = (uint8_t)x;
         x >>= 8;
+        if (x >= symbol.x_max) {
+            *--*out = (uint8_t)x;
+            x >>= 8;
+        }
     }
     return tc_rans_enc_symbol_next(x, symbol);
 }
 
-/* Emission runs backwards. The scratch suffix already has decoder byte
- * order, so only the final state needs to be written before those bytes. */
-static int32_t rans2_finish(const tc_rans_enc* enc, uint32_t state,
-                            const uint8_t** data, size_t* size)
+static int32_t rans2_scratch_acquire(enc_shared* es, uint32_t slot, size_t blocks,
+                                     size_t tokens, uint64_t suffix_bits,
+                                     uint8_t** scratch_end)
 {
-    const size_t total = enc->pos + TC_RANS_STATE_BYTES;
-    if (total > enc->cap) {
-        tc_set_error(TC_ERR_BUFFER_TOO_SMALL, "rans flush %zu > %zu", total, enc->cap);
-        return TC_ERR_BUFFER_TOO_SMALL;
+    /* Each block emits EOB and DC, each pair emits RUN and LEVEL.
+     * Include the raw suffix bytes and the four-byte state. Frame dimensions
+     * and token_count bound the arithmetic in uint64_t. */
+    const uint64_t cap = 4ull * blocks + 4ull * tokens + suffix_bits + TC_RANS_STATE_BYTES;
+    if (cap > PTRDIFF_MAX) {
+        tc_set_error(TC_ERR_OUT_OF_MEMORY, "rans2 scratch exceeds addressable size");
+        return TC_ERR_OUT_OF_MEMORY;
     }
-    *size = total;
-    if (data != NULL) {
-        uint8_t* start = enc->buf + enc->cap - total;
-        tc_store_be32(start, state);
-        *data = start;
+    uint8_t* scratch = enc_scratch_acquire(es, slot, (size_t)cap);
+    if (scratch == NULL) {
+        tc_set_error(TC_ERR_OUT_OF_MEMORY, "rans2 scratch %zu bytes", (size_t)cap);
+        return TC_ERR_OUT_OF_MEMORY;
     }
+    *scratch_end = scratch + (size_t)cap;
     return TC_OK;
 }
 
@@ -2260,6 +2241,77 @@ static void rans2_enc_symbols_init(tc_rans_enc_symbol* out, const tc_rans_model*
         const uint32_t freq = model->freq[i] != 0u ? model->freq[i] : 1u;
         tc_rans_enc_symbol_init(&out[i], freq, model->cum[i]);
     }
+}
+
+/* Walk the decoder's symbol order in reverse. POS reconstructs zigzag
+ * positions, PREV uses the preceding pair in forward order. */
+static size_t rans2_emit_reverse(const enc_band_tok* tok, size_t blocks,
+                                 uint32_t lvl_model, uint32_t dc_model,
+                                 tc_rans_enc_symbol dc_symbols[][TC_RANS_DC_SYMS],
+                                 const tc_rans_enc_symbol* run_symbols,
+                                 tc_rans_enc_symbol lvl_symbols[][TC_RANS_LVL_SYMS],
+                                 uint8_t* scratch_end, const uint8_t** data)
+{
+    uint8_t* out = scratch_end;
+    uint32_t x = TC_RANS_L;
+    size_t pi = (size_t)tok->token_count;
+    for (size_t b = blocks; b-- > 0u;) {
+        const uint32_t np = tok->npair[b];
+        pi -= np;
+        x = rans2_put_x(x, &out, run_symbols[63u]);
+        if (lvl_model == TC_RANS2_LVL_POS) {
+            uint8_t pos_block[63];
+            uint32_t prev = 0u;
+            for (uint32_t p = 0u; p < np; ++p) {
+                prev += tok->run[pi + p] + 1u;
+                pos_block[p] = (uint8_t)prev;
+            }
+            for (uint32_t p = np; p-- > 0u;) {
+                const uint32_t lm = tok->lvl_m[pi + p];
+                const uint32_t lsym = tc_vlc_bitlen32(lm);
+                x = rans2_put_suffix_x(x, &out, lsym, lm);
+                const uint32_t lc = tc_rans2_pos_ctx(pos_block[p]);
+                x = rans2_put_x(x, &out, lvl_symbols[lc][lsym]);
+                const uint32_t r = tok->run[pi + p];
+                x = rans2_put_x(x, &out, run_symbols[r]);
+            }
+        } else if (lvl_model == TC_RANS2_LVL_PREV) {
+            for (uint32_t p = np; p-- > 0u;) {
+                const uint32_t lm = tok->lvl_m[pi + p];
+                const uint32_t lsym = tc_vlc_bitlen32(lm);
+                x = rans2_put_suffix_x(x, &out, lsym, lm);
+                /* 前 lvl 上下文 = 前向邻居 p−1 的类（后向游走中尚未编码）——
+                 * 直接数组回查，勿用游走状态（那是 p+1） */
+                const uint32_t lc = tc_rans2_prevlvl_ctx(
+                    p != 0u ? tc_vlc_bitlen32(tok->lvl_m[pi + p - 1u]) : 0u,
+                    p != 0u);
+                x = rans2_put_x(x, &out, lvl_symbols[lc][lsym]);
+                const uint32_t r = tok->run[pi + p];
+                x = rans2_put_x(x, &out, run_symbols[r]);
+            }
+        } else {
+            for (uint32_t p = np; p-- > 0u;) {
+                const uint32_t lm = tok->lvl_m[pi + p];
+                const uint32_t lsym = tc_vlc_bitlen32(lm);
+                x = rans2_put_suffix_x(x, &out, lsym, lm);
+                x = rans2_put_x(x, &out, lvl_symbols[0u][lsym]);
+                const uint32_t r = tok->run[pi + p];
+                x = rans2_put_x(x, &out, run_symbols[r]);
+            }
+        }
+        const uint32_t dcm = tok->dc_m[b];
+        const uint32_t dsym = tc_vlc_bitlen32(dcm);
+        x = rans2_put_suffix_x(x, &out, dsym, dcm);
+        const uint32_t dctx = dc_model == TC_RANS2_DC_PREV && b != 0u
+            ? tc_rans2_dc_ctx(tc_vlc_bitlen32(tok->dc_m[b - 1u]), 1) : 0u;
+        x = rans2_put_x(x, &out, dc_symbols[dctx][dsym]);
+    }
+    out -= TC_RANS_STATE_BYTES;
+    if (data != NULL) {
+        tc_store_be32(out, x);
+        *data = out;
+    }
+    return (size_t)(scratch_end - out);
 }
 
 /* V7-R2 编码核心：joints/hists → per-slice 模型 argmin → flags + 条件表
@@ -2380,110 +2432,24 @@ static int32_t color_tokens_rans2_encode(const enc_band_tok* tok, size_t blocks,
     for (uint32_t s = 2u; s < TC_RANS_LVL_SYMS; ++s) {
         suffix_bits += (uint64_t)lvl_hist[s] * (uint64_t)(s - 1u);
     }
-    const uint64_t ops = 2ull * (uint64_t)blocks + 2ull * (uint64_t)tok->token_count
-                       + suffix_bits;
-    const size_t cap = (size_t)(2ull * ops + 8ull);
-    uint8_t* scratch = enc_scratch_acquire(es, slot, cap);
-    if (scratch == NULL) {
-        tc_set_error(TC_ERR_OUT_OF_MEMORY, "rans2 scratch %zu bytes", cap);
-        return TC_ERR_OUT_OF_MEMORY;
-    }
+    uint8_t* scratch_end;
+    rc = rans2_scratch_acquire(es, slot, blocks, tok->token_count, suffix_bits, &scratch_end);
+    if (rc != TC_OK) { return rc; }
     TC_R2E_STAGE(3);
-    tc_rans_enc enc;
-    tc_rans_enc_init(&enc, scratch, cap);
-
-    /* 后向遍历（解码正向序的严格倒序）。上下文回放：
-     *  - D1：块 b 的 ctx = 首块?0:桶(前块 dc 类)——dc_m 数组直查；
-     *  - L4：块内前向扫描预算各对 zigzag 位置——仅 POS 模型需要
-     *    （NONE/PREV 不再支付该前缀和遍，S5）；
-     *  - L2：编码对 p 的前向邻居 p−1 即后向游走的"上一已编码对"——
-     *    p==0 为块首，编码完一对更新 prev_cat。
-     * S5：按 lvl_model 专化块内对环——模型分支/argmin 双精度比较提出
-     * 环外（每块一次分派），x 值语义引擎见上；位流与原
-     * tc_rans_put_fast 环逐位一致。 */
-    uint32_t x = enc.x;
-    size_t pi = (size_t)tok->token_count;
-    for (size_t b = blocks; b-- > 0u;) {
-        const uint32_t np = tok->npair[b];
-        pi -= np;
-        x = rans2_put_x(x, &enc, run_symbols[63u], &rc);
-        if (rc != TC_OK) { goto done; }
-        if (lvl_model == TC_RANS2_LVL_POS) {
-            uint8_t pos_block[63];
-            uint32_t prev = 0u;
-            for (uint32_t p = 0u; p < np; ++p) {
-                prev += tok->run[pi + p] + 1u;
-                pos_block[p] = (uint8_t)prev;
-            }
-            for (uint32_t p = np; p-- > 0u;) {
-                const uint32_t lm = tok->lvl_m[pi + p];
-                const uint32_t lsym = tc_vlc_bitlen32(lm);
-                x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t lc = tc_rans2_pos_ctx(pos_block[p]);
-                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
-                if (rc != TC_OK) { goto done; }
-            }
-        } else if (lvl_model == TC_RANS2_LVL_PREV) {
-            for (uint32_t p = np; p-- > 0u;) {
-                const uint32_t lm = tok->lvl_m[pi + p];
-                const uint32_t lsym = tc_vlc_bitlen32(lm);
-                x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
-                if (rc != TC_OK) { goto done; }
-                /* 前 lvl 上下文 = 前向邻居 p−1 的类（后向游走中尚未编码）——
-                 * 直接数组回查，勿用游走状态（那是 p+1） */
-                const uint32_t lc = tc_rans2_prevlvl_ctx(
-                    p != 0u ? tc_vlc_bitlen32(tok->lvl_m[pi + p - 1u]) : 0u,
-                    p != 0u);
-                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
-                if (rc != TC_OK) { goto done; }
-            }
-        } else {
-            for (uint32_t p = np; p-- > 0u;) {
-                const uint32_t lm = tok->lvl_m[pi + p];
-                const uint32_t lsym = tc_vlc_bitlen32(lm);
-                x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
-                if (rc != TC_OK) { goto done; }
-                x = rans2_put_x(x, &enc, lvl_symbols[0u][lsym], &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
-                if (rc != TC_OK) { goto done; }
-            }
-        }
-        const uint32_t dcm = tok->dc_m[b];
-        const uint32_t dsym = tc_vlc_bitlen32(dcm);
-        x = rans2_put_suffix_x(x, &enc, dsym, dcm, &rc);
-        if (rc != TC_OK) { goto done; }
-        const uint32_t dprev_cat = b != 0u ? tc_vlc_bitlen32(tok->dc_m[b - 1u]) : 0u;
-        const uint32_t dctx = dc_model == TC_RANS2_DC_PREV
-            ? tc_rans2_dc_ctx(dprev_cat, b != 0u) : 0u;
-        x = rans2_put_x(x, &enc, dc_symbols[dctx][dsym], &rc);
-        if (rc != TC_OK) { goto done; }
-    }
-    TC_R2E_STAGE(4);
     const uint8_t* stream = NULL;
-    size_t rans_bytes = 0u;
-    rc = rans2_finish(&enc, x, bw != NULL ? &stream : NULL, &rans_bytes);
-    if (rc == TC_OK) {
-        if (bytes_out != NULL) {
-            *bytes_out = off + rans_bytes;
-        }
-        if (bw != NULL) {
-            /* C5：批量字节追加（同上） */
-            rc = tc_bitwriter_put_bytes(bw, prefix, off);
-            if (rc == TC_OK) {
-                rc = tc_bitwriter_put_bytes(bw, stream, rans_bytes);
-            }
+    const size_t rans_bytes = rans2_emit_reverse(tok, blocks, lvl_model, dc_model,
+                                                dc_symbols, run_symbols, lvl_symbols,
+                                                scratch_end, bw != NULL ? &stream : NULL);
+    TC_R2E_STAGE(4);
+    if (bytes_out != NULL) {
+        *bytes_out = off + rans_bytes;
+    }
+    if (bw != NULL) {
+        rc = tc_bitwriter_put_bytes(bw, prefix, off);
+        if (rc == TC_OK) {
+            rc = tc_bitwriter_put_bytes(bw, stream, rans_bytes);
         }
     }
-done:
     TC_R2E_STAGE(5);
     return rc; /* C1：scratch 归槽位池，无每 slice 释放 */
 #undef TC_R2E_STAGE
@@ -2543,84 +2509,14 @@ static int32_t rans2_encode_stream_with_models(const enc_band_tok* tok,
             pi += np;
         }
     }
-    const uint64_t ops = 2ull * (uint64_t)blocks + 2ull * (uint64_t)tok->token_count
-                       + suffix_bits;
-    const size_t cap = (size_t)(2ull * ops + 8ull);
-    uint8_t* scratch = enc_scratch_acquire(es, slot, cap);
-    if (scratch == NULL) {
-        tc_set_error(TC_ERR_OUT_OF_MEMORY, "rans2 sim scratch %zu bytes", cap);
-        return TC_ERR_OUT_OF_MEMORY;
-    }
-    tc_rans_enc enc;
-    tc_rans_enc_init(&enc, scratch, cap);
-    int32_t rc = TC_OK;
-    uint32_t x = enc.x;
-    size_t pi = (size_t)tok->token_count;
-    for (size_t b = blocks; b-- > 0u;) {
-        const uint32_t np = tok->npair[b];
-        pi -= np;
-        x = rans2_put_x(x, &enc, run_symbols[63u], &rc);
-        if (rc != TC_OK) { goto done; }
-        if (lvl_model == TC_RANS2_LVL_POS) {
-            uint8_t pos_block[63];
-            uint32_t prev = 0u;
-            for (uint32_t p = 0u; p < np; ++p) {
-                prev += tok->run[pi + p] + 1u;
-                pos_block[p] = (uint8_t)prev;
-            }
-            for (uint32_t p = np; p-- > 0u;) {
-                const uint32_t lm = tok->lvl_m[pi + p];
-                const uint32_t lsym = tc_vlc_bitlen32(lm);
-                x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t lc = tc_rans2_pos_ctx(pos_block[p]);
-                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
-                if (rc != TC_OK) { goto done; }
-            }
-        } else if (lvl_model == TC_RANS2_LVL_PREV) {
-            for (uint32_t p = np; p-- > 0u;) {
-                const uint32_t lm = tok->lvl_m[pi + p];
-                const uint32_t lsym = tc_vlc_bitlen32(lm);
-                x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t lc = tc_rans2_prevlvl_ctx(
-                    p != 0u ? tc_vlc_bitlen32(tok->lvl_m[pi + p - 1u]) : 0u,
-                    p != 0u);
-                x = rans2_put_x(x, &enc, lvl_symbols[lc][lsym], &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
-                if (rc != TC_OK) { goto done; }
-            }
-        } else {
-            for (uint32_t p = np; p-- > 0u;) {
-                const uint32_t lm = tok->lvl_m[pi + p];
-                const uint32_t lsym = tc_vlc_bitlen32(lm);
-                x = rans2_put_suffix_x(x, &enc, lsym, lm, &rc);
-                if (rc != TC_OK) { goto done; }
-                x = rans2_put_x(x, &enc, lvl_symbols[0u][lsym], &rc);
-                if (rc != TC_OK) { goto done; }
-                const uint32_t r = tok->run[pi + p];
-                x = rans2_put_x(x, &enc, run_symbols[r], &rc);
-                if (rc != TC_OK) { goto done; }
-            }
-        }
-        const uint32_t dcm = tok->dc_m[b];
-        const uint32_t dsym = tc_vlc_bitlen32(dcm);
-        x = rans2_put_suffix_x(x, &enc, dsym, dcm, &rc);
-        if (rc != TC_OK) { goto done; }
-        const uint32_t dprev_cat = b != 0u ? tc_vlc_bitlen32(tok->dc_m[b - 1u]) : 0u;
-        const uint32_t dctx = dc_model == TC_RANS2_DC_PREV
-            ? tc_rans2_dc_ctx(dprev_cat, b != 0u) : 0u;
-        x = rans2_put_x(x, &enc, dc_symbols[dctx][dsym], &rc);
-        if (rc != TC_OK) { goto done; }
-    }
-    rc = rans2_finish(&enc, x, stream_data, stream_out);
-done:
-    return rc;
+    uint8_t* scratch_end;
+    const int32_t rc = rans2_scratch_acquire(es, slot, blocks, tok->token_count,
+                                             suffix_bits, &scratch_end);
+    if (rc != TC_OK) { return rc; }
+    *stream_out = rans2_emit_reverse(tok, blocks, lvl_model, dc_model,
+                                     dc_symbols, run_symbols, lvl_symbols,
+                                     scratch_end, stream_data);
+    return TC_OK;
 }
 
 /* V8 批 0 实验专用：生产同构的模型选择镜像（严格复制

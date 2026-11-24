@@ -264,6 +264,24 @@ def test_untagged_non_prores_planar_frame_falls_back(
     assert requested == []
 
 
+@pytest.mark.parametrize("siting", [None, 0, 1])
+def test_rec709_dnxhr_hqx_mov_to_topos_preserves_source_planes(
+    monkeypatch: pytest.MonkeyPatch, siting: int | None,
+) -> None:
+    frame = _video_frame(codec_name="dnxhd", chroma_siting=siting)
+    frame.metadata = replace(frame.metadata, codec_profile="DNXHR HQX")
+    frame.planes[1][0, 1] = 723
+    frame.planes[2][0, 2] = 231
+    exporter, plan, config, _, _ = _make_env(monkeypatch, frame=frame)
+    output = exporter._try_render_planar_passthrough(plan, 12, config)
+    if siting == 1:
+        assert output is None
+    else:
+        assert output is not None
+        assert output.metadata.chroma_siting == 0
+        assert all(actual is expected for actual, expected in zip(output.planes, frame.planes))
+
+
 def test_chroma_siting_normalizes_ffmpeg_labels_and_enum_values() -> None:
     assert _normalize_chroma_siting("left") == 0
     assert _normalize_chroma_siting("AVCHROMA_LOC_CENTER") == 1
@@ -295,19 +313,35 @@ def test_topos_timeline_cpu_budget_reserves_decoder_workers(
     assert _topos_timeline_cpu_threads(logical_cpus) == expected
 
 
+def test_windows_uhd_topos_422_budget_leaves_decode_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features.edit.core import timeline_export
+
+    monkeypatch.setattr(timeline_export, "sys", SimpleNamespace(platform="win32"))
+    config = SimpleNamespace(codec="topos", profile="standard", pix_fmt="yuv422p10le",
+                             width=3840, height=2160, has_alpha=False)
+    assert _topos_timeline_cpu_threads(32, export_config=config) == (24, 8)
+    assert _topos_timeline_cpu_threads(24, export_config=config) == (16, 8)
+    config.has_alpha = True
+    assert _topos_timeline_cpu_threads(32, export_config=config) == (16, 8)
+
+
 @pytest.mark.parametrize(
-    ("encoder_codec", "source_codec", "expected_threads", "reject_setter"),
+    ("encoder_codec", "source_codec", "encoder_threads", "expected_threads", "reject_setter"),
     (
-        ("topos", "prores", 8, False),
-        ("ffmpeg", "prores", 0, False),
-        ("topos", "h264", 0, False),
-        ("topos", "prores", 0, True),
+        ("topos", "prores", 16, 8, False),
+        ("ffmpeg", "prores", 16, 0, False),
+        ("topos", "h264", 16, 0, False),
+        ("topos", "prores", 16, 0, True),
+        ("topos", "dnxhd", 24, 6, False),
     ),
 )
 def test_decoder_thread_budget_is_limited_to_topos_intra_sources(
     monkeypatch: pytest.MonkeyPatch,
     encoder_codec: str,
     source_codec: str,
+    encoder_threads: int,
     expected_threads: int,
     reject_setter: bool,
 ) -> None:
@@ -320,6 +354,8 @@ def test_decoder_thread_budget_is_limited_to_topos_intra_sources(
     class _CodecContext:
         def __init__(self) -> None:
             self.name = source_codec
+            self.pix_fmt = "yuv422p10le"
+            self.thread_type = "SLICE"
             self._thread_count = 0
             self.is_open = False
 
@@ -344,13 +380,14 @@ def test_decoder_thread_budget_is_limited_to_topos_intra_sources(
         def read_frame(self, _frame_index: int) -> SimpleNamespace:
             context = self._video_stream.codec_context
             seen["threads_when_read"] = context.thread_count
+            seen["type_when_read"] = context.thread_type
             seen["context_was_open"] = context.is_open
             context.is_open = True
             return SimpleNamespace(planes=(object(), object(), object()))
 
     monkeypatch.setattr(ffmpeg_module, "FFmpegMediaSource", _FakeSource)
     monkeypatch.setattr(
-        export_module, "_topos_timeline_cpu_threads", lambda: (16, 8))
+        export_module, "_topos_timeline_cpu_threads", lambda **_: (encoder_threads, 8))
 
     exporter = TimelineExporter.__new__(TimelineExporter)
     exporter._export_high_depth_sources = {}
@@ -362,6 +399,7 @@ def test_decoder_thread_budget_is_limited_to_topos_intra_sources(
 
     assert frame is not None
     assert seen["threads_when_read"] == expected_threads
+    assert seen["type_when_read"] == ("FRAME" if expected_threads == 6 else "SLICE")
     assert seen["context_was_open"] is False
     # open() ran before the targeted override, while the first read observes
     # the configured count. This is the point before PyAV opens its decoder.

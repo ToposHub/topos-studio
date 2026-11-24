@@ -262,6 +262,17 @@ degradations（T-P1-70，只记日志不可审计是不被接受的）。
   常规渲染路径。OpenGL 导出从独立母版会话解码，省去预览代理和单独的 GPU
   播放会话初始化。Intel macOS 上，符合 8-bit 4:2:0、UHD 及以下且不超过
   30 fps 条件的 H.264 母版解码使用最多 4 个线程。
+- **Windows UHD 单 LUT 交付**：符合渐进、等尺寸、限幅 Rec.709 的左置色度
+  H.264 母版直接上传 8-bit 平面。NVIDIA OpenGL 按 packed 解码的 2×2
+  色度复制和 RGB8 量化应用 LUT，直接生成 H.264 的 8-bit 4:2:0 或
+  DNxHR HQX 的 10-bit 4:2:2 编码平面。3 个持久映射 PBO 由渲染线程提交
+  并按帧序回读。完成的 PBO 复制到主机帧，PyAV 持有缓冲直至编码器释放。
+  不支持的格式或梯度过陡的 LUT 使用常规合成。回读失败时，尚未提交编码
+  的帧按原顺序重渲染。交付遥测记录实际硬件编码器与主机帧提交，区分
+  NVENC 硬编码和 GPU 驻留交付。
+- **Windows NVENC H.264**：编码器通过 NVENC 私有选项传递 Baseline、Main
+  或 High。UHD 的最终 Profile 为 High 且 VBR 目标码率至少 50 Mbps 时
+  默认用 P4，调用方显式预设优先。打开实际编码会话失败时回退到软件编码。
 - **CPU 回退**（`_gpu_render_composite` 返回 None）：自适应跳过（主机可见
   单层轻量帧，GPU 往返不划算）、alpha 交付、GPU 不适用 clip、headless
   上下文已失败（本导出内永久）等场景走 `_apply_clip_effects_cpu` +
@@ -522,6 +533,19 @@ macOS 上有**三条互补的硬件通路**，接入点各不相同：
 平面时使用自有内存副本。取消时归还未入队、未编码和仍在队列中的所有缓冲租约。
 
 ### 5.2 Windows：D3D11 / AMF / NVENC
+
+- **TOPOS 422 Standard**：同尺寸、同帧率的 Rec.709 限幅纯剪可以逐帧把
+  DNxHR HQX 的 10-bit 4:2:2 解码平面交给原生编码器。原始 MOV 未声明色度位置
+  时使用 Rec.709 水平左共址约定，已声明的位置优先。剪辑切点照常解码并重编码。
+  4K SDR 同规格 DNxHR HQX 单 LUT 导出在符合条件的 NVIDIA OpenGL 上复用既有
+  RGB16 和 LUT 着色器，用有界 PBO 队列异步读回 10-bit 编码平面。同步 TOPOS
+  编码直接借用已读回的映射平面，省去一份主机内存复制。3 个槽覆盖 GPU 读回，另有
+  4 个槽覆盖渲染编码队列和编码器。编码返回、异常或取消时归还借用，渲染线程等到
+  借用全部归还后解除映射。异步消费平面的编码器使用自有内存。读回失败时按时间线
+  顺序使用原合成路径完成同一帧。
+  Windows 的原生线程池允许显式请求最多 32 条线程。具备至少 32 个可用逻辑
+  CPU 的 UHD Standard 422 时间线请求 24 条原生编码线程，DNxHR 解码使用
+  6 个帧级线程。 [色度位置参考](https://academysoftwarefoundation.github.io/EncodingGuidelines/ChromaSiting.html)
 
 - **硬件编码（已通）**：Windows 的 h264/hevc 硬编走 `FFmpegVideoEncoder` 的
   AMF/NVENC 通道——`detect_hw_vendor()` 经 `windows_hw/gpu_capability.

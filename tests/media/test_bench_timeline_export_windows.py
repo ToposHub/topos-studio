@@ -157,6 +157,15 @@ class TestFfmpegRefCommand:
         assert "-c:v h264_nvenc" in joined
         assert "hwaccel_output_format" not in joined
 
+    def test_nvidia_resize_preserves_cuda_decode_surfaces(self) -> None:
+        cmd = build_ffmpeg_gpu_cmd(
+            "ffmpeg", Path("in.mp4"), Path("out.mp4"),
+            frames=30, bitrate_bps=20_000_000, vendor="nvidia",
+            gpu_surface=True, output_resolution=(1280, 720),
+        )
+        assert "-hwaccel cuda -hwaccel_output_format cuda" in " ".join(cmd)
+        assert "-vf scale_cuda=1280:720" in " ".join(cmd)
+
     def test_encoder_options_are_vendor_specific(self) -> None:
         """AMF 的 -quality/-rc vbr_peak 对 h264_nvenc 无效，必须按 vendor 区分。"""
         nvenc = build_ffmpeg_gpu_cmd(

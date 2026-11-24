@@ -247,7 +247,7 @@ def build_ffmpeg_gpu_cmd(
 
     同分辨率、同码率、vendor 硬编。``output_resolution`` 用于 T1 等需要
     resize 的用例；D3D11/CUDA 表面优先使用对应硬件缩放器。``gpu_surface=True``
-    时解码 surface 直接驻留 D3D11（``-hwaccel_output_format d3d11``）；机器
+    时通过 ``-hwaccel_output_format`` 保留 D3D11 或 CUDA 解码表面；机器
     不支持时调用方降级 ``gpu_surface=False``（hwaccel 下载模式），并在结果
     里记录 ``ref_mode_fallback``。
     """
@@ -256,8 +256,9 @@ def build_ffmpeg_gpu_cmd(
         ffmpeg_bin, "-y", "-loglevel", "error", "-nostats",
         "-hwaccel", hwaccel,
     ]
-    if gpu_surface and hwaccel == "d3d11va":
-        cmd += ["-hwaccel_output_format", "d3d11"]
+    if gpu_surface:
+        surface_format = "d3d11" if hwaccel == "d3d11va" else "cuda"
+        cmd += ["-hwaccel_output_format", surface_format]
     video_filter: Optional[str] = None
     if output_resolution is not None:
         out_width, out_height = output_resolution

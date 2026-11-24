@@ -961,6 +961,28 @@ def test_gpu_yuv420_output_matches_pyav_bt709_conversion():
 
 
 @pytest.mark.skipif(not _gl_available(), reason="headless GL 不可用")
+def test_packed_u16_readback_keeps_pixels_owned_by_each_frame() -> None:
+    from src.features.edit.core.timeline_gpu_export_renderer import TimelineGpuExportRenderer
+
+    width, height = 17, 9
+    source = np.arange(height * width * 3, dtype=np.uint8).reshape(height, width, 3)
+    renderer = TimelineGpuExportRenderer()
+    try:
+        first = renderer.render_packed_bgr(source, None, width, height, 1.0, output_u16=True)
+        assert first is not None
+        assert first.dtype == np.uint16 and first.shape == source.shape
+        assert first.flags.c_contiguous and first.flags.owndata and first.flags.writeable
+        reference = renderer._fbo_out_u16.read(components=3, dtype="u2", alignment=2)
+        second = renderer.render_packed_bgr(
+            np.zeros_like(source), None, width, height, 1.0, output_u16=True)
+        assert second is not None and not np.shares_memory(first, second)
+        assert not np.array_equal(first, second)
+        assert first.tobytes() == reference
+    finally:
+        renderer.release()
+
+
+@pytest.mark.skipif(not _gl_available(), reason="headless GL 不可用")
 @pytest.mark.parametrize("pixel_format", ["yuv420p", "yuv422p10le"])
 def test_fused_lut_delivery_matches_the_color_graph(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pixel_format: str,

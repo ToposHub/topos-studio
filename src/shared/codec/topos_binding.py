@@ -3151,8 +3151,9 @@ class ToposCodec:
         return int(self._lib.tc_dev_thread_count())
 
     def set_slice_threads(self, n: int) -> int:
-        """设置 codec 常驻线程池上限并返回生效值（钳位 1..16；M10-6 起池上界
-        从 8 提至 16，>8 仅在物理核充足的机器上有收益，默认建议不变）。
+        """设置 codec 常驻线程池上限并返回生效值。
+
+        实际上限由 DLL 决定。Windows 新版允许 32，其他平台为 16。
 
         R6 调度策略：导出等前台重负载建议满配（min(8, cpu)）；后台任务
         （渲染缓存等）建议 1 以避免与前台争抢。进程级全局设置——并发
