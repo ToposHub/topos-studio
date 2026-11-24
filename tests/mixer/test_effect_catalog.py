@@ -1,12 +1,14 @@
 """UI catalog, parameter-window ownership, and rack interaction regressions."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from PyQt6.QtCore import QCoreApplication, QEvent, QTimer
 from PyQt6.QtWidgets import QApplication, QComboBox, QScrollArea, QScrollBar, QWidget
 
+from src.features.mixer.effects import catalog as mixer_catalog
 from src.features.mixer.effects import (
     EFFECT_CATALOG, EffectBrowserWidget, EffectInstance, EffectRackWidget,
     EffectWindowManager, create_panel, get_effect, stop_panel_timers,
@@ -39,6 +41,25 @@ def test_catalog_has_unique_stable_ids_and_clip_tool_scope() -> None:
     assert get_effect("clip_editor").scope == ("clip",)
     with pytest.raises(KeyError):
         create_panel("../unsafe_module")
+
+
+def test_catalog_manifest_loads_without_utf8_locale_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """清单含中文：不得依赖平台默认编码（Windows 为区域代码页，如 GBK），否则启动即崩溃。"""
+    original_read_text = Path.read_text
+
+    def read_text_as_on_cp936_windows(self: Path, *args: Any, **kwargs: Any) -> str:
+        # 未指定 encoding 时，非 UTF-8 模式下 io.text_encoding(None) 解析为 ANSI 代码页
+        encoding = kwargs.get("encoding", args[0] if args else None)
+        if encoding is None:
+            if args:
+                args = ("gbk", *args[1:])
+            else:
+                kwargs["encoding"] = "gbk"
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read_text_as_on_cp936_windows)
+    entries = mixer_catalog._load_catalog()
+    assert [entry.name_zh for entry in entries] == [entry.name_zh for entry in EFFECT_CATALOG]
 
 
 @pytest.mark.parametrize("effect_id", ["declick_dehum", "pitch_correction", "exciter", "subharmonic", "doubler"])

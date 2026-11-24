@@ -164,7 +164,7 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
             }.get(name)
             self._programs[name] = self.ctx.program(
                 vertex_shader=PASSTHROUGH_VERTEX,
-                fragment_shader=fragment if fragment is not None else path.read_text())
+                fragment_shader=fragment if fragment is not None else path.read_text(encoding="utf-8"))
         return self._programs[name]
 
     def _texture(self, size: tuple[int, int], components: int, data: Any = None,

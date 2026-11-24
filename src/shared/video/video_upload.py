@@ -446,7 +446,7 @@ class YuvPlaneUploader:
             return self._create_builtin_yuv_program()
 
         try:
-            with open(shader_path, 'r') as f:
+            with open(shader_path, 'r', encoding='utf-8') as f:
                 shader_source = f.read()
 
             # 分离 vertex 和 fragment shader

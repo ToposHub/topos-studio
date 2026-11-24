@@ -49,9 +49,9 @@ class EffectInstance:
 
 
 def _load_catalog() -> tuple[EffectDescriptor, ...]:
-    rows = json.loads(Path(__file__).with_name("source_manifest.json").read_text())
+    rows = json.loads(Path(__file__).with_name("source_manifest.json").read_text(encoding="utf-8"))
     schemas_path = Path(__file__).with_name("parameter_schemas.json")
-    schemas = json.loads(schemas_path.read_text()) if schemas_path.exists() else {}
+    schemas = json.loads(schemas_path.read_text(encoding="utf-8")) if schemas_path.exists() else {}
     return tuple(EffectDescriptor(
         effect_id=row["effect_id"], name_zh=row["name_zh"], name_en=row["name_en"],
         group=row["group"], panel_module=row["panel_module"], panel_class=row["panel_class"],
