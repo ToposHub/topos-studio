@@ -11,9 +11,11 @@ from numbers import Real
 import math
 from typing import Any
 
+from src.features.color.core.mist import mist_is_active
+
 TOOL_LABELS: dict[str, str] = {
     "primary": "Primary correction", "curves": "Curves", "color_mapping": "Color mapping",
-    "qualifier": "Qualifier", "window": "Power Window", "blur": "Blur / Sharpen",
+    "qualifier": "Qualifier", "window": "Power Window", "blur": "Blur / Sharpen / Mist",
     "lut": "LUT", "ofx": "Effects", "key": "Key / Opacity", "keyframes": "Keyframes",
 }
 
@@ -119,6 +121,7 @@ def detect_tool_indicators(layer_payload: Mapping[str, Any] | None,
     if _nonzero(grade.get("sharpness")) or isinstance(fx, Mapping) and (
         (fx.get("enabled", False) and any(_nonzero(fx.get(key)) for key in ("sharpen", "texture", "halo", "radius")))
         or (fx.get("blur_enabled", False) and any(_nonzero(fx.get(key)) for key in ("blur_intensity", "blur_radius", "blur_detail", "blur_bokeh")))
+        or mist_is_active(fx)
     ):
         result.append("blur")
     if payload.get("active_lut_path") and _number(payload.get("lut_intensity"), 1.0) != 0.0:

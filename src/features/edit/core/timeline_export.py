@@ -93,6 +93,23 @@ from src.features.edit.core.timeline_v2 import (
     effective_timeline_duration_frames,
     resolve_timeline_in_out,
 )
+from src.shared.color.color_space_descriptor import (
+    LEGACY_SPACE,
+    LINEAR_SCENE,
+    project_output_space,
+)
+from src.shared.color.hdr_video_signal import (
+    HDR_OUTPUT_SPACES, hdr_delivery_is_supported, hdr_input_descriptor, project_hdr_settings,
+)
+from src.shared.color.project_video_signal import (
+    ACES_LINEAR_SPACES, aces_input_bgr, aces_input_descriptor, aces_timeline_black, project_aces_settings,
+    normalized_video_bgr, read_aces_still, read_video_still_bgr, render_aces_bgr,
+    convert_video_signal_bgr,
+    encode_timeline_linear_bgr,
+    video_signal_spaces,
+    video_signal_uses_legacy_space,
+)
+from src.shared.color.types import ColorPrimaries, ColorTransfer, delivery_transfer_tag
 from src.shared.export.gpu_trail import ExportGpuTrail, ExportGpuTrailSnapshot
 from src.shared.export.export_stage_telemetry import ExportTelemetryRecorder
 from src.features.edit.core.timeline_render_plan import (
@@ -105,6 +122,7 @@ if TYPE_CHECKING:
     from src.features.color.core.color_graph_metal import MetalDeliveryCorrector
     import numpy as np
     from src.shared.media.frame import DecodedFrame
+    from src.shared.color.color_space_descriptor import ColorSpaceDescriptor
     from src.shared.codec.topos_binding import ToposMovieSummary
     from src.shared.export.video_encoder import FFmpegVideoEncoder, FFmpegEncoderConfig
     from src.shared.export.video_encoder import ColorMetadataConfig
@@ -150,6 +168,21 @@ _TOPOS_PLANAR_RE = _re_mod.compile(
     r'|^topos_(yuva(422|444)p(10|12|16)|gbrap(10|12|16))a(8|10|12|16)$')
 _TOPOS_COLOR_DEPTH_RE = _re_mod.compile(r'p(10|12|16)(?:le|a)')
 _TOPOS_ALPHA_DEPTH_RE = _re_mod.compile(r'a(\d+)$')
+_TOPOS_HALF_FORMATS = frozenset({"gbrph16le", "topos_gbraph16a16"})
+
+
+def _source_color_tags_match(metadata: Any, color: "ColorMetadataConfig") -> bool:
+    if color is None or not hasattr(metadata, "get"):
+        return False
+    ranges = {"limited": ("limited", "tv"), "full": ("full", "pc", "jpeg")}
+    return (
+        color.transfer != "unknown"
+        and metadata.get("color_primaries") == color.primaries
+        and metadata.get("color_transfer") == color.transfer
+        and metadata.get("color_matrix") == color.matrix
+        and metadata.get("color_range") in ranges.get(color.range, ())
+    )
+
 
 # —— N03：后台 manifest 写线程登记表 ——————————————————————
 # _write_success_manifest_async 的 daemon 线程会跨导出调用存活（等待
@@ -402,6 +435,7 @@ class ExportCodec(Enum):
     # 图像序列
     PNG_SEQUENCE = "png_sequence"
     TIFF_SEQUENCE = "tiff_sequence"
+    EXR_SEQUENCE = "exr_sequence"
     TOPOS_IMAGE_SEQUENCE = "topos_image_sequence"
 
 
@@ -625,9 +659,10 @@ class TimelineExportConfig:
 
         # R17（第七轮审计）：图像序列位深只支持 8/16；帧号 padding 与
         # 起始号域校验（编码器据此生成 <base>_%0Nd 文件名）。
-        if self.codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE):
-            if self.bit_depth not in (8, 16):
-                errors.append("image sequence bit_depth must be 8 or 16")
+        if self.codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE, ExportCodec.EXR_SEQUENCE):
+            depths = (16, 32) if self.codec == ExportCodec.EXR_SEQUENCE else (8, 16)
+            if self.bit_depth not in depths:
+                errors.append(f"image sequence bit_depth must be {depths[0]} or {depths[1]}")
             if not 1 <= self.image_sequence_digits <= 10:
                 errors.append("image_sequence_digits must be 1..10")
             if self.image_sequence_start_index < 0:
@@ -658,7 +693,10 @@ class TimelineExportConfig:
         # 检查输出路径扩展名与编码器匹配
         if self.output_path:
             ext = os.path.splitext(self.output_path)[1].lower()
-            if self.codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE,
+            if self.codec == ExportCodec.EXR_SEQUENCE:
+                if not os.path.isdir(self.output_path) and ext not in ("", ".exr"):
+                    errors.append("OpenEXR sequence output requires a directory or .exr path")
+            elif self.codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE,
                               ExportCodec.TOPOS_IMAGE_SEQUENCE):
                 # G14（第六轮审计）：PNG/TIFF 标准序列已有专用编码器
                 # （StandardImageSequenceEncoder），不再 fail-fast 拒绝——
@@ -2824,6 +2862,10 @@ class TimelineExporter:
         self._gpu_encode_surface_provider = gpu_encode_surface_provider
         self._nested_render_stack: set = set()
         self._active_export_config: Optional[TimelineExportConfig] = None
+        self._export_video_signal_spaces: Optional[
+            tuple[ColorSpaceDescriptor, ColorSpaceDescriptor]
+        ] = None
+        self._export_float_pixels = False
 
         # CompositeFrameRenderer for comp_clip assets (lazy-initialized)
         self._comp_frame_renderer = None
@@ -3291,6 +3333,14 @@ class TimelineExporter:
 
             # 创建编码器配置
             encoder_config = self._create_encoder_config(config)
+            self._export_video_signal_spaces = self._configured_video_signal_spaces(
+                encoder_config.pix_fmt)
+            self._aces_export = project_aces_settings(
+                getattr(self._project, "color_management", None))
+            self._hdr_export = project_hdr_settings(getattr(self._project, "color_management", None))
+            self._export_delivery_pixel_format = encoder_config.pix_fmt
+            self._export_float_pixels = (
+                encoder_config.pix_fmt in _TOPOS_HALF_FORMATS or encoder_config.codec == "exr_sequence")
 
             if config.codec == ExportCodec.DNXHR_HQX:
                 outcome = self._try_copy_dnxhr_hqx(
@@ -3308,12 +3358,24 @@ class TimelineExporter:
                     config, encoder_config, start_frame, end_frame)
                 if outcome is not None:
                     return outcome
-                direct_plan, direct_reason = build_direct_topos_delivery_plan(
-                    self._sequence, self._project, config, encoder_config,
-                    start_frame, end_frame,
-                )
+                if self._needs_delivery_signal_conversion():
+                    direct_plan, direct_reason = None, "project_output_color_transform"
+                else:
+                    direct_plan, direct_reason = build_direct_topos_delivery_plan(
+                        self._sequence, self._project, config, encoder_config,
+                        start_frame, end_frame,
+                    )
                 if direct_plan is not None and self._delivery_guide_burns_in():
                     direct_plan, direct_reason = None, "program_guide_burn_in"
+                if (direct_plan is not None
+                        and self._export_video_signal_spaces is not None):
+                    frame = self._render_plan.get_frame_plan(start_frame)
+                    layer = next((layer for layer in frame.layers
+                                  if layer.clip_id == direct_plan.clip_id), None)
+                    asset = self._project.get_asset_by_id(layer.asset_id) if layer else None
+                    if not _source_color_tags_match(
+                            getattr(asset, "metadata", None), encoder_config.color_metadata):
+                        direct_plan, direct_reason = None, "source_color_tags_mismatch"
                 if direct_plan is not None and direct_plan.source_color_layout == "yuv422":
                     frame = self._render_plan.get_frame_plan(start_frame)
                     identity = self._identity_delivery_layer(frame, start_frame, config)
@@ -3336,14 +3398,14 @@ class TimelineExporter:
 
             self._use_high_precision_export = self._pixel_format_is_high_depth(
                 encoder_config.pix_fmt
-            )
+            ) or (self._aces_export is not None and encoder_config.codec == "exr_sequence") or self._hdr_export is not None
             # R2（审计 P0-1）：Alpha 开关贯通渲染侧——合成缓冲/帧提取/字幕
             # 烧录/编码分派按 4 通道工作；未勾选时严格保持既有 3 通道行为
             # （零回归风险）。内部合成约定 straight alpha。
             self._export_has_alpha = bool(encoder_config.has_alpha)
             # R2（审计 P1-2）：导出色彩元数据缓存——comp clip 场景线性帧的
             # 显式 OETF 转换依据（每帧重复解析素材元数据太浪费）。
-            self._export_color_metadata = self._resolve_export_color_metadata()
+            self._export_color_metadata = encoder_config.color_metadata
 
             metal_outcome = self._try_export_metal_h264_lut(
                 config, encoder_config, start_frame, end_frame)
@@ -3355,6 +3417,10 @@ class TimelineExporter:
 
             # 打开编码器
             self._encoder.open()
+            if self._cancel_requested and hasattr(self._encoder, "abort"):
+                self._encoder.abort()
+                self._cleanup_clips()
+                return ExportOutcome.user_cancelled()
 
             # 音频准备：在视频循环前添加音频流（如有音频轨道）。
             # P1-02: 判定基于**展开后**的音频轨——纯嵌套音频（父序列自身
@@ -3491,9 +3557,11 @@ class TimelineExporter:
                     _mux_started = time.perf_counter()
                     try:
                         from src.shared.export.video_encoder import FFmpegVideoEncoder
+                        from src.shared.export.hdr_hevc_encoder import HdrHevcEncoder
 
-                        if (config.codec in (ExportCodec.DNXHR_HQX, ExportCodec.H264)
-                                and isinstance(self._encoder, FFmpegVideoEncoder)):
+                        if (isinstance(self._encoder, HdrHevcEncoder)
+                                or (config.codec in (ExportCodec.DNXHR_HQX, ExportCodec.H264)
+                                    and isinstance(self._encoder, FFmpegVideoEncoder))):
                             published = self._encoder.close(
                                 should_cancel=lambda: self._cancel_requested,
                                 expected_frames=self._total_frames or None,
@@ -3602,6 +3670,11 @@ class TimelineExporter:
             self._use_high_precision_export = False
             self._export_has_alpha = False
             self._export_color_metadata = None
+            self._export_video_signal_spaces = None
+            self._export_float_pixels = False
+            self._aces_export = None
+            self._hdr_export = None
+            self._export_delivery_pixel_format = ""
             # T-P1-70：交付定稿——native muxer 已收尾，后台 manifest
             # 线程可以安全 probe 输出文件。
             self._delivery_finalized.set()
@@ -3657,7 +3730,7 @@ class TimelineExporter:
                 stage_telemetry=state.stage_telemetry,
                 effect_export_skips=state.effect_export_skips,
                 probe_media=hash_assets and codec_value not in (
-                    "png_sequence", "tiff_sequence"),
+                    "png_sequence", "tiff_sequence", "exr_sequence"),
             )
             write_manifest_file(manifest_path_for(config.output_path), manifest)
             self._last_export_manifest = manifest
@@ -3674,7 +3747,7 @@ class TimelineExporter:
         individual-clips 可能已重建 telemetry 实例）。
         """
         output_path = config.output_path
-        if config.codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE):
+        if config.codec in (ExportCodec.PNG_SEQUENCE, ExportCodec.TIFF_SEQUENCE, ExportCodec.EXR_SEQUENCE):
             seq_info = getattr(getattr(self, "_encoder", None), "sequence_info", None)
             if callable(seq_info):
                 output_path = seq_info().get("directory") or output_path
@@ -5846,6 +5919,37 @@ class TimelineExporter:
         except Exception as e:
             logger.warning(f"Failed to write loudness report: {e}")
 
+    def _configured_video_signal_spaces(
+        self, pixel_format: str,
+    ) -> Optional[tuple[ColorSpaceDescriptor, ColorSpaceDescriptor]]:
+        # RAW export carries camera CFA samples directly, including TOOS raw tiers.
+        if pixel_format.startswith("topos_cfa"):
+            return None
+        settings = getattr(getattr(self, "_project", None), "color_management", None)
+        spaces = video_signal_spaces(settings)
+        if pixel_format in _TOPOS_HALF_FORMATS:
+            # The TOOS half format carries scene-linear samples by definition.
+            if spaces is None:
+                return LINEAR_SCENE, LINEAR_SCENE
+            return spaces[0], spaces[1].with_transfer(ColorTransfer.LINEAR)
+        return spaces
+
+    def _needs_delivery_signal_conversion(self) -> bool:
+        spaces = getattr(self, "_export_video_signal_spaces", None)
+        return (getattr(self, "_aces_export", None) is not None
+                or getattr(self, "_hdr_export", None) is not None
+                or (spaces is not None and spaces[0] != spaces[1]))
+
+    def _native_bridge_color_compatible(self, config: "FFmpegEncoderConfig") -> bool:
+        from src.shared.export.video_encoder import ColorMetadataConfig
+
+        if getattr(self, "_export_video_signal_spaces", None) is None:
+            return True
+        return (
+            not self._needs_delivery_signal_conversion()
+            and config.color_metadata == ColorMetadataConfig.sdr()
+        )
+
     def _resolve_export_color_metadata(self) -> "ColorMetadataConfig":
         """Derive the encoder color metadata for the export.
 
@@ -5924,7 +6028,7 @@ class TimelineExporter:
         Returns:
             FFmpegEncoderConfig 实例
         """
-        from src.shared.export.video_encoder import FFmpegEncoderConfig
+        from src.shared.export.video_encoder import ColorMetadataConfig, FFmpegEncoderConfig
         from src.shared.media.metadata import Rational
 
         # 确定分辨率（TimelineSequence 的 width/height 是直接字段，无 settings 属性）
@@ -5957,7 +6061,70 @@ class TimelineExporter:
         # 色彩元数据：优先从时间线首个视频片段的源元数据推导（步骤3已持久化），
         # 否则回退到标准 SDR (BT.709 / limited)。这样 Rec.709 源导出仍标 Rec.709，
         # 而不是被硬编码成同样的 SDR。
-        color_metadata = self._resolve_export_color_metadata()
+        spaces = self._configured_video_signal_spaces(pix_fmt)
+        settings = getattr(getattr(self, "_project", None), "color_management", None)
+        output_profile = None
+        exr_space = None
+        aces = project_aces_settings(settings)
+        hdr = project_hdr_settings(settings)
+        output_preset = project_output_space(settings)
+        if output_preset in HDR_OUTPUT_SPACES:
+            container = os.path.splitext(config.output_path)[1].lower().lstrip(".")
+            if not hdr_delivery_is_supported(config.codec.value, container, pix_fmt) or config.has_alpha:
+                raise ValueError("HDR output requires HEVC Main 10 MP4/MOV or ProRes 422/HQ MOV, without alpha")
+        elif hdr is not None and (pix_fmt in _TOPOS_HALF_FORMATS or pix_fmt.startswith("topos_cfa")):
+            raise ValueError("Select a display-signal codec for this HDR timeline output")
+        if aces is not None and output_preset not in (*ACES_LINEAR_SPACES, aces.target):
+            raise ValueError(f"ACES video delivery is not available for {output_preset}")
+        if codec == "exr_sequence":
+            if aces is None or output_preset not in ACES_LINEAR_SPACES:
+                raise ValueError("OpenEXR delivery requires ACES2065-1 or ACEScg project output")
+            exr_space = output_preset
+        elif output_preset in ACES_LINEAR_SPACES:
+            raise ValueError("Scene-linear ACES delivery requires an OpenEXR sequence")
+        elif aces is not None and (pix_fmt in _TOPOS_HALF_FORMATS or pix_fmt.startswith("topos_cfa")):
+            raise ValueError("Select an SDR delivery codec for the ACES Rec.709 output transform")
+        if spaces is None:
+            color_metadata = self._resolve_export_color_metadata()
+        else:
+            from src.shared.color.video_delivery_profiles import (
+                SDR_VIDEO_OUTPUTS, WIDE_GAMUT_TIFF_OUTPUTS, video_tiff_output_profile,
+            )
+
+            output_space = spaces[1]
+            if output_preset in WIDE_GAMUT_TIFF_OUTPUTS:
+                if codec != "tiff_sequence" or pix_fmt != "rgb48le":
+                    raise ValueError(f"{output_preset} requires a 16-bit RGB TIFF sequence")
+                output_profile = video_tiff_output_profile(output_preset)
+            elif output_preset not in (*SDR_VIDEO_OUTPUTS, *ACES_LINEAR_SPACES, *HDR_OUTPUT_SPACES, LEGACY_SPACE):
+                raise ValueError(f"Video delivery is not available for {output_preset}")
+            transfer = delivery_transfer_tag(
+                output_space.transfer, native_topos=codec in ("topos", "topos_image_sequence"))
+            if output_space.transfer == ColorTransfer.ST2084:
+                transfer = ColorTransfer.PQ.value
+            legacy_full_range = (
+                settings and project_output_space(settings) == LEGACY_SPACE
+                and settings.get("color.output.timeline_range") == "full"
+            )
+            color_range = (
+                "full" if pix_fmt in _TOPOS_HALF_FORMATS or legacy_full_range
+                or codec in ("tiff_sequence", "exr_sequence")
+                else "limited"
+            )
+            color_metadata = ColorMetadataConfig(
+                primaries=output_space.primaries.value,
+                transfer=transfer,
+                matrix="bt2020nc" if output_space.primaries == ColorPrimaries.BT2020 else "bt709",
+                range=color_range,
+            )
+            if output_preset == "rec2100-pq" and codec == "hevc":
+                if settings.get("color.output.hdr_metadata", True) not in (False, "off"):
+                    color_metadata.mastering_display = (
+                        (0.265, 0.690, 0.150, 0.060, 0.680, 0.320, 0.3127, 0.3290)
+                        if hdr.master_gamut == "p3-d65" else
+                        (0.170, 0.797, 0.131, 0.046, 0.708, 0.292, 0.3127, 0.3290)
+                    )
+                    color_metadata.mastering_peak_nits = hdr.master_peak_nits
 
         # 构造 kwargs，按需添加 CRF / VBR / CBR 码率控制
         threads = 0
@@ -5976,6 +6143,8 @@ class TimelineExporter:
             pix_fmt=pix_fmt,
             profile=resolved_profile,
             color_metadata=color_metadata,
+            icc_profile=output_profile,
+            exr_space=exr_space,
             # threads=0（FFmpeg 自动 = 全核）：导出是独占式批处理，
             # libx264/x265/dnxhd 的线程扩展显著（4K 实测 threads=4 → 0
             # 各有 2-2.6×）；prores_ks 收益小但无回退。
@@ -5995,6 +6164,13 @@ class TimelineExporter:
                           'yuva', 'topos_yuva', 'topos_gbrap')),
             gif_color_count=int(getattr(config, 'gif_color_count', 256)),
         )
+        if codec in ("png_sequence", "tiff_sequence", "exr_sequence"):
+            encoder_kwargs.update(
+                bit_depth=config.bit_depth,
+                image_sequence_digits=config.image_sequence_digits,
+                image_sequence_start_index=config.image_sequence_start_index,
+                image_sequence_overwrite=config.image_sequence_overwrite,
+            )
         if codec == 'gif':
             # GIF is opaque in the first implementation; its palette is
             # controlled by GifVideoEncoder rather than FFmpeg quality flags.
@@ -6123,6 +6299,8 @@ class TimelineExporter:
                 "rgb48le" if getattr(config, "bit_depth", 8) >= 16 else "rgb24",
                 "standard",
             )
+        if config.codec == ExportCodec.EXR_SEQUENCE:
+            return ("exr_sequence", "gbrpf32le", "standard")
 
         if config.codec == ExportCodec.TOPOS_IMAGE_SEQUENCE:
             # M2-F8：``codec_profile`` 携带图片档位注册表 id（'422-high'/
@@ -6191,10 +6369,11 @@ class TimelineExporter:
             duck-type 同接口）
         """
         maybe_bridge = getattr(self, "_maybe_create_default_native_gpu_bridge", None)
-        if callable(maybe_bridge):
+        bridge_color_compatible = self._native_bridge_color_compatible(config)
+        if callable(maybe_bridge) and bridge_color_compatible:
             maybe_bridge(output_path, config)
         gpu_bridge = getattr(self, "_gpu_encode_surface_provider", None)
-        if getattr(gpu_bridge, "handles_timeline_video", False):
+        if bridge_color_compatible and getattr(gpu_bridge, "handles_timeline_video", False):
             codec = str(getattr(config, "codec", "")).lower()
             pixel_format = str(getattr(config, "pix_fmt", "")).lower()
             if (codec, pixel_format) not in {
@@ -6225,16 +6404,28 @@ class TimelineExporter:
             return ToposImageSequenceEncoder(
                 output_path, config,
                 slice_threads=min(16, _os.cpu_count() or 1))
-        if str(config.codec).lower() in ('png_sequence', 'tiff_sequence'):
+        if str(config.codec).lower() in ('png_sequence', 'tiff_sequence', 'exr_sequence'):
             # G14（第六轮审计）：标准 PNG/TIFF 图像序列交付——外部合成
             # 软件可直接回导（此前明确拒绝并要求改用 Topos 专有序列）。
             from src.shared.export.image_sequence_encoder import (
                 StandardImageSequenceEncoder,
             )
-            return StandardImageSequenceEncoder(output_path, config)
+            return StandardImageSequenceEncoder(
+                output_path, config, icc_profile=getattr(config, "icc_profile", None),
+                exr_space=getattr(config, "exr_space", None),
+            )
         if str(config.codec).lower() == 'gif':
             from src.shared.export.gif_encoder import GifVideoEncoder
             return GifVideoEncoder(output_path, config)
+        if config.codec == "hevc" and getattr(self, "_hdr_export", None) is not None:
+            from src.shared.color.types import is_hdr_transfer
+            from src.shared.export.hdr_hevc_encoder import HdrHevcEncoder
+
+            if is_hdr_transfer(self._export_video_signal_spaces[1].transfer):
+                return HdrHevcEncoder(
+                    output_path, config, should_cancel=lambda: self._cancel_requested,
+                    total_frames=self._total_frames,
+                )
         if str(config.codec).lower() == 'topos':
             # TOPOS timeline also runs the high-depth source decoder on the
             # render producer. Reserve part of a large CPU budget for that
@@ -7394,6 +7585,35 @@ class TimelineExporter:
         self._frame_render_backend = None
         result = self._render_frame_impl(frame_idx, config)
         try:
+            if result is not None and self._needs_delivery_signal_conversion():
+                import numpy as np
+
+                if not isinstance(result, np.ndarray):
+                    raise RuntimeError("Project output color conversion requires a packed BGR frame")
+                source, destination = self._export_video_signal_spaces
+                settings = getattr(getattr(self, "_project", None), "color_management", None)
+                aces = getattr(self, "_aces_export", None)
+                hdr = getattr(self, "_hdr_export", None)
+                if aces is not None and project_output_space(settings) == aces.target:
+                    result = render_aces_bgr(result, source, aces)
+                    height, width = result.shape[:2]
+                    if config.burn_subtitles:
+                        result = self._burn_in_subtitles(result, frame_idx, width, height)
+                    result = self._apply_program_guide_matte(result)
+                    result = self._quantize_export_frame(result, signal_ready=True)
+                elif hdr is not None:
+                    result = convert_video_signal_bgr(
+                        normalized_video_bgr(result), source, destination, luminance=hdr.luminance,
+                    )
+                    height, width = result.shape[:2]
+                    if config.burn_subtitles:
+                        result = self._burn_in_subtitles(result, frame_idx, width, height)
+                    result = self._apply_program_guide_matte(result)
+                    result = self._quantize_export_frame(result, signal_ready=True)
+                else:
+                    result = convert_video_signal_bgr(
+                        result, source, destination, legacy=video_signal_uses_legacy_space(settings),
+                    )
             pending = getattr(self, "_topos_lut_prefetch", None)
             if pending is not None and pending[0] <= frame_idx:
                 self._discard_topos_lut_prefetch()
@@ -7437,6 +7657,9 @@ class TimelineExporter:
 
         # 获取帧渲染计划
         frame_plan = self._render_plan.get_frame_plan(frame_idx)
+        aces = getattr(self, "_aces_export", None)
+        deferred_display = getattr(self, "_hdr_export", None) is not None or aces is not None and project_output_space(
+            getattr(self._project, "color_management", None)) == aces.target
 
         # TOPOS 高精度、严格无效果的单视频层可保留源 YUV 平面直达编码器。
         # 这仍然走同一个有界 render→encode 队列，只略过无意义的
@@ -7451,11 +7674,12 @@ class TimelineExporter:
             width, height = self._get_output_resolution(config)
             black = self._create_black_frame(width, height)
             # P10.3: 即使无视频内容，字幕也需要烧录（纯字幕视频）
-            if config.burn_subtitles:
+            if not deferred_display and config.burn_subtitles:
                 black = self._burn_in_subtitles(black, frame_idx, width, height)
-            return self._apply_program_guide_matte(black)
+            return black if deferred_display else self._apply_program_guide_matte(black)
 
         if (getattr(config, "codec", None) == ExportCodec.DNXHR_HQX
+                and not self._needs_delivery_signal_conversion()
                 and getattr(self, "_timeline_graphics_backend", None) == "metal"
                 and not self._gpu_render_disabled):
             try:
@@ -7492,11 +7716,11 @@ class TimelineExporter:
             frame_plan.layers, frame_plan.transitions, config, frame_idx)
 
         # P10.3: 字幕烧录（视频合成完成后，把字幕叠在顶上）
-        if composite is not None and config.burn_subtitles:
+        if composite is not None and config.burn_subtitles and not deferred_display:
             width, height = self._get_output_resolution(config)
             composite = self._burn_in_subtitles(composite, frame_idx, width, height)
 
-        if composite is not None:
+        if composite is not None and not deferred_display:
             composite = self._apply_program_guide_matte(composite)
         return composite
 
@@ -7825,6 +8049,7 @@ class TimelineExporter:
 
         if (
             start_frame >= end_frame
+            or self._needs_delivery_signal_conversion()
             or self._render_plan is None
             or self._project is None
             or os.path.splitext(config.output_path)[1].lower() != ".mov"
@@ -7867,6 +8092,9 @@ class TimelineExporter:
                     codec = str(metadata.get("codec") or metadata.get("codec_name") or "").lower()
                     if codec and codec not in ("dnxhd", "dnxhr"):
                         return None
+                if (getattr(self, "_export_video_signal_spaces", None) is not None
+                        and not _source_color_tags_match(metadata, encoder_config.color_metadata)):
+                    return None
                 source = export_source_path(self._project, asset)
                 if not source or os.path.splitext(source)[1].lower() != ".mov":
                     return None
@@ -7970,6 +8198,7 @@ class TimelineExporter:
 
         rate = self._rational_pair(encoder_config.fps)
         if (not config.bypass_reencode
+                or self._needs_delivery_signal_conversion()
                 or encoder_config.crf is not None
                 or encoder_config.profile not in {"lt", "standard", "hq"}
                 or encoder_config.pix_fmt != "yuv422p10le"
@@ -8420,6 +8649,7 @@ class TimelineExporter:
         native = os.getenv("TOPOS_EXPORT_NATIVE_VT", "").strip().lower()
         preference = getattr(self, "_timeline_graphics_requested", "auto")
         if (sys.platform != "darwin" or native in {"0", "false", "off", "no"}
+                or self._needs_delivery_signal_conversion()
                 or native_export_switched_off()
                 or preference not in {"auto", "metal"}
                 or os.environ.get(MACOS_HW_ENCODE_DISABLE_ENV)
@@ -8701,6 +8931,8 @@ class TimelineExporter:
         """
         import numpy as np
 
+        if self._needs_delivery_signal_conversion():
+            return None
         # An explicit native surface bridge must receive the Metal-rendered
         # CVPixelBuffer, never the older host-visible planar passthrough. The
         # latter is still valid for the ordinary FFmpeg/Topos encoders.
@@ -8750,6 +8982,10 @@ class TimelineExporter:
         asset = self._project.get_asset_by_id(layer.asset_id) \
             if self._project is not None else None
         if asset is None or str(getattr(asset, "media_type", "")) != "video":
+            return None
+        if (getattr(self, "_export_video_signal_spaces", None) is not None
+                and not _source_color_tags_match(
+                    getattr(asset, "metadata", None), encoder_config.color_metadata)):
             return None
 
         output_width, output_height = self._get_output_resolution(config)
@@ -9281,20 +9517,31 @@ class TimelineExporter:
             # 尺寸匹配（subtitle_renderer 保证与请求的 w/h 一致）
             if sub_rgba.shape[:2] != (h, w):
                 continue
+            hdr = getattr(self, "_hdr_export", None)
+            if hdr is not None:
+                from src.shared.color.color_space_descriptor import SRGB_IMAGE
+                from src.shared.color.color_transform_provider import BuiltinColorProvider
+
+                sub_rgba = BuiltinColorProvider().transform_signal(
+                    sub_rgba, SRGB_IMAGE, self._export_video_signal_spaces[1], luminance=hdr.luminance,
+                )
             bg_rgba = composite_over(sub_rgba, bg_rgba)
 
         # RGBA → BGR，并恢复输入位深与通道数。字幕的 alpha 合成在 float32
         # 中完成，避免高位深底图先降到 8-bit 才烧录文字。
-        rgb_out = np.clip(bg_rgba[..., :3], 0.0, 1.0)
+        bgr_out = bg_rgba[..., :3][..., ::-1]
+        if np.issubdtype(bgr_u8.dtype, np.floating):
+            if has_alpha_channel:
+                bgr_out = np.concatenate([bgr_out, bg_rgba[..., 3:4]], axis=-1)
+            return np.ascontiguousarray(bgr_out, dtype=bgr_u8.dtype)
+        bgr_out = np.clip(bgr_out, 0.0, 1.0)
         if has_alpha_channel:
             a_out = np.clip(bg_rgba[..., 3:4], 0.0, 1.0)
             out = np.rint(
-                np.concatenate([rgb_out[..., ::-1], a_out], axis=-1) * max_value
+                np.concatenate([bgr_out, a_out], axis=-1) * max_value
             ).astype(bgr_u8.dtype)
             return out
-        bgr_out = np.rint(rgb_out * max_value).astype(bgr_u8.dtype)
-        bgr_out = bgr_out[..., ::-1]  # RGB → BGR
-        return bgr_out
+        return np.rint(bgr_out * max_value).astype(bgr_u8.dtype)
 
 
     def _get_sequence_resolution(self) -> Tuple[int, int]:
@@ -9376,9 +9623,15 @@ class TimelineExporter:
         区域完全透明，而非不透明黑）。
         """
         import numpy as np
-        dtype = np.uint16 if getattr(self, "_use_high_precision_export", False) else np.uint8
+        if getattr(self, "_export_float_pixels", False) or getattr(self, "_aces_export", None) is not None:
+            dtype = np.float32
+        else:
+            dtype = np.uint16 if getattr(self, "_use_high_precision_export", False) else np.uint8
         channels = 4 if getattr(self, "_export_has_alpha", False) else 3
-        return np.zeros((height, width, channels), dtype=dtype)
+        black = np.zeros((height, width, channels), dtype=dtype)
+        if channels == 3 and getattr(self, "_aces_export", None) is not None:
+            black.fill(aces_timeline_black(self._export_video_signal_spaces[0]))
+        return black
 
     @staticmethod
     def _normalise_alpha_channel(alpha: "np.ndarray") -> "np.ndarray":
@@ -9428,7 +9681,9 @@ class TimelineExporter:
             out[..., 3] = np.clip(out[..., 3], 0.0, 1.0)
         return out
 
-    def _quantize_export_frame(self, frame: "np.ndarray") -> "np.ndarray":
+    def _quantize_export_frame(
+        self, frame: "np.ndarray", *, signal_ready: bool = False,
+    ) -> "np.ndarray":
         """Quantize the float compositor only at the selected delivery depth.
 
         复验 P1-04：HDR 导出（PQ/HLG 传输）的浮点线性值先经显式 OETF
@@ -9437,8 +9692,14 @@ class TimelineExporter:
         """
         import numpy as np
 
+        if getattr(self, "_export_float_pixels", False) or (
+            not signal_ready and (getattr(self, "_aces_export", None) is not None
+                                  or getattr(self, "_hdr_export", None) is not None)
+        ):
+            return self._normalise_bgr_frame(frame)
         f = frame
-        if np.issubdtype(f.dtype, np.floating) and f.ndim == 3:
+        if (getattr(self, "_export_video_signal_spaces", None) is None
+                and np.issubdtype(f.dtype, np.floating) and f.ndim == 3):
             # 复验 P1-04：只有 **>1.0 的浮点值**（场景线性 HDR 高光）才需要
             # OETF——整数/信号域源归一化后 ≤1，已是编码信号，再走 OETF
             # 会二次编码（HDR 信号域 240/255 被压暗）。SDR 传输无 >1 表示
@@ -9475,7 +9736,10 @@ class TimelineExporter:
                         "导出传输为 SDR（%s）但合成值最大 %.3f >1.0——高光将"
                         "在量化边界裁剪；如需 HDR 高光请在时间线色彩设置选择"
                         " PQ/HLG 传输", transfer, over)
-        if getattr(self, "_use_high_precision_export", False):
+        if getattr(self, "_use_high_precision_export", False) and (
+            getattr(self, "_hdr_export", None) is None
+            or self._pixel_format_is_high_depth(self._export_delivery_pixel_format)
+        ):
             return np.rint(np.clip(f, 0.0, 1.0) * 65535.0).astype(np.uint16)
         return np.rint(np.clip(f, 0.0, 1.0) * 255.0).astype(np.uint8)
 
@@ -9822,6 +10086,7 @@ class TimelineExporter:
             # 1080p frame to float32, multiplying by 1.0, then quantizing it
             # back to the same 8/16-bit values.
             if (not export_alpha
+                    and not getattr(self, "_export_float_pixels", False)
                     and len(sorted_layers) == 1
                     and not transitions
                     and abs(float(effective_opacity) - 1.0) <= 1e-6
@@ -9859,7 +10124,9 @@ class TimelineExporter:
                 composite[..., 3:4] = src_a + composite[..., 3:4] * one_minus
             elif composite is None:
                 # 第一层
-                composite = layer_float * src_a
+                black = (aces_timeline_black(self._export_video_signal_spaces[0])
+                         if getattr(self, "_aces_export", None) is not None else 0.0)
+                composite = layer_float * src_a + black * (1.0 - src_a)
             else:
                 # A1: 非 normal 图层混合模式 → 共享 NumPy 公式（与预览
                 # CPU/GPU、导出 GPU 三路同源）；normal 走既有 alpha over。
@@ -9995,9 +10262,11 @@ class TimelineExporter:
                 setattr(self, slot, None)
 
     def _decoded_frame_is_high_depth(self, decoded_frame: Any) -> bool:
-        """镜像 _get_video_frame 的高位深判定（格式名或 data itemsize）。"""
+        """Check both the decoded frame and the source format's precision."""
         pixel_format = str(getattr(decoded_frame, "pixel_format", "") or "")
-        if self._pixel_format_is_high_depth(pixel_format):
+        metadata = getattr(decoded_frame, "metadata", None)
+        if (self._pixel_format_is_high_depth(pixel_format)
+                or self._pixel_format_is_high_depth(getattr(metadata, "pixel_format", ""))):
             return True
         data = getattr(decoded_frame, "data", None)
         dtype = getattr(data, "dtype", None)
@@ -10019,7 +10288,8 @@ class TimelineExporter:
         此前一刀切导致所有默认配置的 GPU 合成导出永远拿不到 YUV 直读，
         白付 BGR 回读 + 编码侧 CPU 色彩转换。
         """
-        if (width <= 0 or height <= 0 or width % 2 or height % 2
+        if (self._needs_delivery_signal_conversion()
+                or width <= 0 or height <= 0 or width % 2 or height % 2
                 or bool(getattr(self, "_export_has_alpha", False))):
             return False
         if bool(getattr(config, "burn_subtitles", False)):
@@ -10075,7 +10345,8 @@ class TimelineExporter:
         fail-closed 回落 BGR。此前一刀切使默认配置下 TOPOS 10-bit 的
         Metal 原生 YUV 直出永不生效，每帧白付 BGR 回读 + 编码侧转换。
         """
-        if (width <= 0 or height <= 0 or width % 2
+        if (self._needs_delivery_signal_conversion()
+                or width <= 0 or height <= 0 or width % 2
                 or bool(getattr(self, "_export_has_alpha", False))):
             return False
         if bool(getattr(config, "burn_subtitles", False)):
@@ -10269,7 +10540,9 @@ class TimelineExporter:
             return None
         import numpy as np
 
-        if self._gpu_render_disabled:
+        if (self._gpu_render_disabled or getattr(self, "_export_float_pixels", False)
+                or getattr(self, "_aces_export", None) is not None
+                or getattr(self, "_hdr_export", None) is not None):
             return None
         graphics_backend = getattr(self, "_timeline_graphics_backend", "opengl")
         layer_graphs = [(layer, self._clip_color_graph(layer)) for layer in sorted_layers]
@@ -10278,7 +10551,7 @@ class TimelineExporter:
         renderer_slot = "_gpu_export_renderer"
         if graph_fallback:
             self._frame_render_backend = "cpu"
-            if getattr(self, "_gpu_encode_surface_provider", None) is not None:
+            if isinstance(self._encoder, _ExternalGpuSurfaceEncoder):
                 # A native encoder surface must be populated by Metal.
                 self._record_gpu_fallback("color_graph_cpu_compositor")
                 return None
@@ -11624,6 +11897,8 @@ class TimelineExporter:
             from src.features.edit.core.color_chain import chain_extra_params
             extras = chain_extra_params(self._project, str(getattr(
                 getattr(self, "_sequence", None), "timeline_id", "")), getattr(layer, "clip", None))
+            if any(extra.get("mid_detail") for extra in extras):
+                raise ValueError("Midtone Detail in a color-chain segment requires the CPU compositor")
             return {"color_graph": graph, "source_frame": int(layer.source_frame),
                     "chain_extra_params": extras}
         grade = self._get_clip_color_grade(layer)
@@ -11651,8 +11926,10 @@ class TimelineExporter:
         )
         from src.features.color.core.primary_calibration import grade_uses_calibration
 
-        if any(grade_uses_calibration({"grading_params": extra})
-               for extra in (grade.get("chain_extra_params") or ())):
+        chain_extras = grade.get("chain_extra_params") or ()
+        if grading_params.get("mid_detail") or any(extra.get("mid_detail") for extra in chain_extras):
+            raise ValueError("Midtone Detail outside the color graph requires the CPU compositor")
+        if any(grade_uses_calibration({"grading_params": extra}) for extra in chain_extras):
             raise ValueError("Measured color chain requires the CPU compositor")
         main = grade_params_to_uniforms(grading_params)
         # M05（S08）/F4.1：链段作为 grade pass 序列返回，渲染端按序逐段
@@ -11660,7 +11937,7 @@ class TimelineExporter:
         # 在主栈之后（pre→main→trim→post；未标记载荷按主栈之后处理）。
         # 高级标记段不进 GPU 序列（primary 域不可表示）。
         extras = [
-            e for e in (grade.get("chain_extra_params") or ())
+            e for e in chain_extras
             if isinstance(e, dict)
             and not e.get("_unsupported_advanced", False)]
         pre_chain = [
@@ -11750,7 +12027,8 @@ class TimelineExporter:
             timeline = getattr(self, "_timeline", None) or getattr(self, "_sequence", None)
             timeline_id = getattr(timeline, "timeline_id", None) or getattr(clip, "timeline_id", "")
             extras = chain_extra_params(project, str(timeline_id), clip, exclude_timeline=exclude_timeline)
-            if any(grade_uses_calibration({"grading_params": extra}) for extra in extras):
+            if any(extra.get("mid_detail") or grade_uses_calibration({"grading_params": extra})
+                   for extra in extras):
                 return {"grading_params": {}, "chain_extra_params": extras}
             return None
 
@@ -12562,15 +12840,11 @@ class TimelineExporter:
                             " 等高级操作，primary 导出跳过该段",
                             layer.clip_id)
                         continue
-                    buf = GradingMath.apply_grading(
-                        buf.reshape(-1, 3), extra).reshape(rgb.shape)
+                    buf = GradingMath.apply_grading(buf, extra)
                 return buf
 
             graded = _apply_entries(rgb, pre_entries)
-            graded = GradingMath.apply_grading(
-                graded.reshape(-1, 3),
-                grading_params,
-            ).reshape(rgb.shape)
+            graded = GradingMath.apply_grading(graded, grading_params)
             # M05.2b：RGB 曲线（GPU 合成序中 curves 在主 grade 之后，
             # 见 shader_compiler build_composition_shader 的段序）
             curves_data = grade.get("curves_data")
@@ -12714,7 +12988,7 @@ class TimelineExporter:
         if grade_uses_calibration({"grading_params": grading_params}):
             return None
 
-        coupled_controls = ("highlights", "vibrance", "hue_shift", "saturation")
+        coupled_controls = ("highlights", "vibrance", "hue_shift", "saturation", "mid_detail")
         try:
             if any(abs(float(grading_params.get(name, 0.0) or 0.0)) > 1e-6
                    for name in coupled_controls):
@@ -13059,12 +13333,13 @@ class TimelineExporter:
                     )
                     orig_type = orig_asset.media_type
                     if orig_type == "video":
-                        return self._get_video_frame(
+                        frame = self._get_video_frame(
                             orig_path, layer.source_frame, orig_asset_id,
                             session_key=self._layer_session_key(layer),
                             raw_params=getattr(
                                 getattr(layer, 'clip', None), 'raw', None),
                         )
+                        return self._interpret_export_video(frame, orig_path, getattr(orig_asset, "metadata", None))
                     elif orig_type == "image":
                         return self._get_image_frame(orig_path)
                     else:
@@ -13084,13 +13359,21 @@ class TimelineExporter:
                 return None
 
         elif asset_type == "video":
-            return self._get_video_frame(
+            frame = self._get_video_frame(
                 asset_path, layer.source_frame, layer.asset_id,
                 session_key=self._layer_session_key(layer),
                 raw_params=getattr(getattr(layer, 'clip', None), 'raw', None),
             )
+            return self._interpret_export_video(frame, asset_path, getattr(asset, "metadata", None))
         elif asset_type == "image":
             return self._get_image_frame(asset_path)
+        elif asset_type == "image_sequence" and (
+            getattr(self, "_aces_export", None) is not None or getattr(self, "_hdr_export", None) is not None
+        ):
+            from src.features.edit.core.sequence_classify import still_sequence_frame_path
+
+            path = still_sequence_frame_path(asset_path, asset.metadata, int(layer.source_frame))
+            return self._get_image_frame(path)
         elif asset_type == "nested_sequence":
             # P1-02：嵌套序列——解析子序列并复用导出合成管线递归求值
             # （防循环 + 子序列帧钳制与预览路径语义一致）。
@@ -13100,6 +13383,15 @@ class TimelineExporter:
             rgb = asset.solid_color or (0.0, 0.0, 0.0)
             w = int(getattr(self._sequence, "width", 1920) or 1920)
             h = int(getattr(self._sequence, "height", 1080) or 1080)
+            hdr = getattr(self, "_hdr_export", None)
+            if hdr is not None:
+                from src.shared.color.color_space_descriptor import SRGB_IMAGE
+
+                bgr = convert_video_signal_bgr(
+                    np.asarray(rgb[::-1], dtype=np.float32), SRGB_IMAGE,
+                    self._export_video_signal_spaces[0], luminance=hdr.luminance,
+                )
+                return np.broadcast_to(bgr, (h, w, 3)).copy()
             bgr = (
                 int(round(rgb[2] * 255)),
                 int(round(rgb[1] * 255)),
@@ -13114,6 +13406,25 @@ class TimelineExporter:
         else:
             logger.warning(f"Unsupported asset type: {asset_type}")
             return None
+
+    def _interpret_export_video(
+        self, frame: Optional["np.ndarray"], path: str, metadata: dict | None,
+    ) -> Optional["np.ndarray"]:
+        aces = getattr(self, "_aces_export", None)
+        hdr = getattr(self, "_hdr_export", None)
+        if frame is not None and hdr is not None:
+            timeline = self._export_video_signal_spaces[0]
+            source = hdr_input_descriptor(hdr, timeline, media_type="video", metadata=metadata, path=path)
+            return convert_video_signal_bgr(
+                normalized_video_bgr(frame), source, timeline, luminance=hdr.luminance,
+            )
+        if frame is None or aces is None:
+            return frame
+        source = aces_input_descriptor(aces, path, media_type="video")
+        return aces_input_bgr(
+            frame, source, self._export_video_signal_spaces[0],
+            reference_gamut_compression=aces.reference_gamut_compression,
+        )
 
     def _render_nested_sequence_layer(
         self,
@@ -13459,12 +13770,7 @@ class TimelineExporter:
             if _is_topos_planar_format(pixel_format) or 'cfa' in pixel_format.lower():
                 return self._finish_source_frame(decoded_frame,
                                                  raw_params=raw_params)
-            is_high_depth_decode = (
-                self._pixel_format_is_high_depth(pixel_format)
-                or getattr(getattr(decoded_frame, "data", None), "dtype", None) is not None
-                and getattr(decoded_frame.data.dtype, "itemsize", 1) > 1
-            )
-            if is_high_depth_decode:
+            if self._decoded_frame_is_high_depth(decoded_frame):
                 if getattr(self, "_use_high_precision_export", False):
                     high_depth_frame = self._get_export_high_depth_frame(
                         asset_path, source_frame, asset_id,
@@ -13518,7 +13824,7 @@ class TimelineExporter:
         self, asset_path: str, source_frame: int, asset_id: str,
         session_key: str = "",
     ) -> Optional[Any]:
-        """高精度导出的原生 YUV 平面解码源（会话缓存），GPU/CPU 共用。
+        """高精度导出的原生平面解码源（会话缓存），GPU/CPU 共用。
 
         P0-GPU-2: 从 _get_export_high_depth_frame 拆出解码部分，供 GPU
         合成直接消费 planar 帧（省去 CPU bgr16 转换）；失败语义与原实现
@@ -13608,11 +13914,23 @@ class TimelineExporter:
                 )
                 return None
         try:
-            decoded = source.read_frame(source_frame)
+            probe = getattr(source, "probe", None)
+            metadata = probe() if callable(probe) else None
+            source_format = str(getattr(metadata, "pixel_format", "") or "").lower()
+            if (source_format.startswith(("gbrp", "gbrap"))
+                    and self._pixel_format_is_high_depth(source_format)):
+                # r210/RGB10 decodes natively as GBR planes. Avoid swscale
+                # repacking so each original 10-bit code is kept exactly.
+                decoded = source.read_frame_planar(source_frame)
+            else:
+                decoded = source.read_frame(source_frame)
             if decoded is None:
                 return None
             if len(getattr(decoded, "planes", None) or ()) < 3:
-                return None
+                data = getattr(decoded, "data", None)
+                if (not source_format.startswith(("rgb", "bgr"))
+                        or getattr(getattr(data, "dtype", None), "itemsize", 1) != 2):
+                    return None
             self._record_gpu_stage(
                 "decode", "ffmpeg_planar",
                 wall_ms=(time.perf_counter() - decode_started) * 1000.0,
@@ -13629,7 +13947,7 @@ class TimelineExporter:
         self, asset_path: str, source_frame: int, asset_id: str,
         session_key: str = "",
     ) -> Optional["np.ndarray"]:
-        """Decode a source as native YUV planes and return full-range BGR16.
+        """Decode native high-depth samples and return full-range BGR16.
 
         PyAV's direct YUV→rgb48 reformat is unreliable for some 10-bit HEVC
         builds (it caused the magenta export regression).  Reading planes
@@ -13642,10 +13960,19 @@ class TimelineExporter:
             session_key=session_key or asset_id)
         if decoded is None:
             return None
+        planes = getattr(decoded, "planes", None) or ()
+        if not planes:
+            return self._finish_source_frame(decoded)
+        if getattr(self, "_hdr_export", None) is not None:
+            return self._planes_to_bgr_float(
+                planes, getattr(decoded, "pixel_format", ""), getattr(decoded, "metadata", None),
+                getattr(decoded, "plane_infos", None), bool(getattr(self, "_export_has_alpha", False)),
+            )
         return self._convert_yuv_planes_to_bgr16(
-            getattr(decoded, "planes", None) or (),
+            planes,
             getattr(decoded, "pixel_format", ""),
             getattr(decoded, "metadata", None),
+            getattr(decoded, "plane_infos", None),
         )
 
     @staticmethod
@@ -13765,7 +14092,9 @@ class TimelineExporter:
                 blue = y + 2.0 * (1.0 - kb) * cb
                 green = y - 2.0 * kb * (1.0 - kb) / kg * cb \
                     - 2.0 * kr * (1.0 - kr) / kg * cr
-                bgr = np.clip(np.dstack((blue, green, red)), 0.0, 1.0)
+                bgr = np.dstack((blue, green, red))
+                if getattr(self, "_hdr_export", None) is None:
+                    bgr = np.clip(bgr, 0.0, 1.0)
 
             if keep_alpha and len(planes) >= 4 and planes[3].ndim == 2:
                 a_up = planes[3]
@@ -13862,16 +14191,40 @@ class TimelineExporter:
             asset_path: 图片文件路径
 
         Returns:
-            帧数据（BGR uint8），或 None
+            帧数据（BGR/BGRA uint8 或 uint16），或 None
         """
         alpha_mode = bool(getattr(self, "_export_has_alpha", False))
-        cache_key = (str(asset_path), alpha_mode)
-        cache: "OrderedDict[tuple[str, bool], np.ndarray]" = (
+        high_depth = bool(getattr(self, "_use_high_precision_export", False))
+        cache_key = (str(asset_path), alpha_mode, high_depth)
+        cache: "OrderedDict[tuple[str, bool, bool], np.ndarray]" = (
             self.__dict__.setdefault("_image_frame_cache", OrderedDict()))
         cached = cache.get(cache_key)
         if cached is not None:
             cache.move_to_end(cache_key)
             return cached.copy()
+        aces = getattr(self, "_aces_export", None)
+        hdr = getattr(self, "_hdr_export", None)
+        if hdr is not None:
+            timeline = self._export_video_signal_spaces[0]
+            source = hdr_input_descriptor(hdr, timeline, media_type="image", path=asset_path)
+            pixels = normalized_video_bgr(read_video_still_bgr(asset_path))
+            if not alpha_mode:
+                pixels = pixels[..., :3]
+            img = convert_video_signal_bgr(pixels, source, timeline, luminance=hdr.luminance)
+            cache[cache_key] = img
+            while len(cache) > self._IMAGE_FRAME_CACHE_MAX:
+                cache.popitem(last=False)
+            return img.copy()
+        if aces is not None:
+            pixels, source = read_aces_still(asset_path, aces)
+            img = aces_input_bgr(
+                pixels, source, self._export_video_signal_spaces[0],
+                reference_gamut_compression=aces.reference_gamut_compression,
+            )
+            cache[cache_key] = img
+            while len(cache) > self._IMAGE_FRAME_CACHE_MAX:
+                cache.popitem(last=False)
+            return img.copy()
         try:
             import cv2
             import numpy as np
@@ -13893,7 +14246,10 @@ class TimelineExporter:
                         cache.popitem(last=False)
                 return img.copy() if img is not None else None
             # 使用 cv2.imread 加载图片
-            img = cv2.imread(asset_path, cv2.IMREAD_COLOR)
+            flags = cv2.IMREAD_COLOR
+            if high_depth:
+                flags |= cv2.IMREAD_ANYDEPTH
+            img = cv2.imread(asset_path, flags)
             if img is None:
                 logger.warning(f"Failed to load image {asset_path}")
                 return None
@@ -14005,6 +14361,11 @@ class TimelineExporter:
                         decoded_frame, planes, pixel_format,
                         raw_params=raw_params)
                 keep_alpha_planes = keep_alpha and len(planes) >= 4
+                if getattr(self, "_hdr_export", None) is not None:
+                    return self._planes_to_bgr_float(
+                        planes, pixel_format, getattr(decoded_frame, "metadata", None),
+                        getattr(decoded_frame, "plane_infos", None), keep_alpha_planes,
+                    )
                 if getattr(self, "_use_high_precision_export", False):
                     # 复验 P0-03：Topos planar 高精度导出走 16-bit 路径
                     # （此前 Topos 源 FFmpeg 打开失败后落到 8-bit fallback）
@@ -14040,10 +14401,11 @@ class TimelineExporter:
                 return np.flip(data[..., :3], axis=-1)
 
             elif pixel_format in ('rgb48le', 'rgb48be', 'rgba64le', 'rgba64be'):
-                # 高位深 RGB：FFmpegMediaSource 会将 10/12-bit 源转为
-                # rgb48/rgba64 的 full-range uint16。导出编码器只接收
-                # uint8 BGR；若直接透传，后续 /255 合成会导致通道饱和，
-                # 并因 RGB/BGR 顺序错误产生洋红画面。
+                if (getattr(self, "_use_high_precision_export", False)
+                        and np.issubdtype(data.dtype, np.unsignedinteger)):
+                    channels = [2, 1, 0, 3] if keep_alpha and data.shape[-1] == 4 else [2, 1, 0]
+                    return np.ascontiguousarray(data[..., channels], dtype=np.uint16)
+                # Lower-depth encoders need 8-bit BGR(A).
                 rgb = data[..., :3]
                 if np.issubdtype(rgb.dtype, np.integer):
                     max_value = np.iinfo(rgb.dtype).max
@@ -14270,7 +14632,9 @@ class TimelineExporter:
         # Labeling uint16 samples as bgr24 would silently truncate them.
         # R2：4 通道（Alpha 导出）→ bgra / bgra64le——两编码器均按
         # startswith('bgr') 分支显式处理第四通道。
-        if frame_data.dtype.itemsize > 1:
+        if getattr(self, "_export_float_pixels", False):
+            pixel_format = 'bgraf32le' if channels == 4 else 'bgrf32le'
+        elif frame_data.dtype.itemsize > 1:
             pixel_format = 'bgra64le' if channels == 4 else 'bgr48le'
         else:
             pixel_format = 'bgra' if channels == 4 else 'bgr24'
@@ -14377,7 +14741,9 @@ class TimelineExporter:
             segment_cache = None
             cache_key = None
             try:
-                segment_cache = self._segment_cache_config()
+                if not (getattr(self, "_export_float_pixels", False)
+                        or getattr(self, "_aces_export", None) is not None):
+                    segment_cache = self._segment_cache_config()
                 if segment_cache is not None:
                     cache_key = self._comp_frame_cache_key(
                         graph_id, graph_data, layer,
@@ -14410,6 +14776,7 @@ class TimelineExporter:
             # clip_id / timeline_id 兜底链：graph_data 字段优先，缺则用 layer/sequence 字段。
             # 不兜底会导致 _build_timeline_source_context 在 clip_id 为空时静默返回 None。
             source_refs = graph_data.get('source_refs') or {}
+            spaces = getattr(self, "_export_video_signal_spaces", None)
             result = renderer.render_comp_clip_frame(
                 graph_data=graph_data,
                 timeline_id=(
@@ -14433,6 +14800,7 @@ class TimelineExporter:
                 source_frame=layer.source_frame,
                 quality="export",
                 caption_input=caption_input,
+                **({"straight_alpha": True} if spaces is not None else {}),
             )
 
             if result is not None:
@@ -14444,19 +14812,29 @@ class TimelineExporter:
                 # 不再是无条件静默）。
                 import numpy as np
 
-                meta = getattr(self, "_export_color_metadata", None)
-                signal = self._linear_bgr_to_export_signal(
-                    result,
-                    transfer=str(getattr(meta, "transfer", "bt709") or "bt709"),
-                    primaries=str(getattr(meta, "primaries", "bt709") or "bt709"),
-                    color_range=str(getattr(meta, "range", "limited") or "limited"),
-                )
-                if signal is not None:
-                    result = signal
-                if getattr(self, "_use_high_precision_export", False):
-                    frame = np.clip(result * 65535.0, 0, 65535).astype(np.uint16)
+                if spaces is not None:
+                    settings = getattr(self._project, "color_management", None)
+                    hdr = getattr(self, "_hdr_export", None)
+                    frame = self._quantize_export_frame(
+                        encode_timeline_linear_bgr(
+                            np.asarray(result, dtype=np.float32), spaces[0],
+                            legacy=hdr is None and video_signal_uses_legacy_space(settings, timeline_only=True),
+                            luminance=hdr.luminance if hdr is not None else None,
+                        ))
                 else:
-                    frame = np.clip(result * 255.0, 0, 255).astype(np.uint8)
+                    meta = getattr(self, "_export_color_metadata", None)
+                    signal = self._linear_bgr_to_export_signal(
+                        result,
+                        transfer=str(getattr(meta, "transfer", "bt709") or "bt709"),
+                        primaries=str(getattr(meta, "primaries", "bt709") or "bt709"),
+                        color_range=str(getattr(meta, "range", "limited") or "limited"),
+                    )
+                    if signal is not None:
+                        result = signal
+                    if getattr(self, "_use_high_precision_export", False):
+                        frame = np.clip(result * 65535.0, 0, 65535).astype(np.uint16)
+                    else:
+                        frame = np.clip(result * 255.0, 0, 255).astype(np.uint8)
                 if segment_cache is not None and cache_key is not None:
                     try:
                         self._comp_frame_cache_put(
@@ -14556,6 +14934,12 @@ class TimelineExporter:
         ).encode("utf-8")
         graph_hash = hashlib.sha256(payload).hexdigest()
         meta = getattr(self, "_export_color_metadata", None)
+        spaces = getattr(self, "_export_video_signal_spaces", None)
+        color_management = (EXPORT_OETF_VERSION,) if spaces is None else (
+            EXPORT_OETF_VERSION, "straight-bgra", str(spaces[0]))
+        hdr = getattr(self, "_hdr_export", None)
+        if hdr is not None:
+            color_management += (hdr.input, str(hdr.luminance))
         width, height = self._get_sequence_resolution()
         fps_rational = self._get_sequence_fps_rational()
         fps_num = int(getattr(fps_rational, "num", 0) or 0)
@@ -14578,7 +14962,7 @@ class TimelineExporter:
                 str(getattr(meta, "matrix", "bt709") or "bt709"),
                 str(getattr(meta, "range", "limited") or "limited"),
             ),
-            color_management=(EXPORT_OETF_VERSION,),
+            color_management=color_management,
             output_format=(int(width), int(height), fps_num, fps_den, precision),
             renderer_backend="composite_graph_cpu",
             renderer_version=COMPOSITE_GRAPH_RENDERER_VERSION,

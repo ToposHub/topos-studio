@@ -66,6 +66,8 @@ class TestEmitterStructure:
             "msl_apply_grading")
         assert "params.u_fx_enabled != 0u" in src
         assert "params.u_blur_enabled != 0u" in src
+        assert body.index("mist_delta(") < body.index("msl_apply_grading")
+        assert "params.u_mist_amount != 0.0" in src
         assert "float2(params.u_tex_size_x, params.u_tex_size_y)" in src
 
     def test_radians_expanded(self):

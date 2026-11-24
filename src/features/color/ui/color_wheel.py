@@ -7,8 +7,8 @@ Color Wheel Module - ColorWheel widget and GradingPanel (original visual design)
 - src/ui/grading_panel.py (GradingPanel 类, now at src/features/color/ui/color_wheel.py)
 
 视觉说明（原创设计，非达芬奇复刻）：
-- 单轮为"光学内凹双环"：极细外环（Master 亮度弧 + 环拖拽）+ 高饱和连续
-  光谱内盘 + 径向中性渐变遮罩 + 十字准星控制点。
+- 单轮为"光学内凹双环"：极细外环（Master 亮度弧 + 环拖拽）+ 高饱和彩环
+  + 低饱和度色相内盘 + 十字准星控制点。
 - 底部为金属滚花拨轮（KnurledJogWheel，相对式拖拽，不吸附）。
 - 面板四模式：色轮（Lift/Gamma/Gain/Offset）/ Color Bars / Log 色轮
   （Shadow/Midtone/Highlight/Offset）/ 色调饱和度。
@@ -21,30 +21,39 @@ Color Wheel Module - ColorWheel widget and GradingPanel (original visual design)
   grading_extended_changed(dict) 下发。
 """
 
+import colorsys
 import math
+from collections.abc import Callable, Mapping
 from typing import Any, Optional
 from PyQt6.QtWidgets import (QWidget, QToolButton, QPushButton, QHBoxLayout,
                              QVBoxLayout, QStackedWidget, QSizePolicy, QLabel,
                              QFrame)
-from PyQt6.QtCore import QEvent, QObject, Qt, QPointF, pyqtSignal, QRectF, QSize, QTimer
+from PyQt6.QtCore import QEvent, QObject, Qt, QPointF, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import (QPainter, QColor, QConicalGradient, QRadialGradient,
                          QBrush, QPen, QMouseEvent, QKeyEvent, QPainterPath,
                          QLinearGradient)
 
-from src.shared.assets.icon_manager import (icon_reset, icon_add,
-                                             icon_delete, icon_circle,
-                                             IconColors)
+from src.shared.assets.icon_manager import icon_add, icon_delete, icon_circle
 from src.shared.ui.widgets.drag_value import DragValue, drag_speed_per_pixel
-from src.shared.ui.style_sheet import C, PARAM_LABEL_STYLE
+from src.shared.ui.style_sheet import C
 from src.shared.i18n.i18n import I18N
 from src.features.color.core.composition_uniforms import (
-    params_to_offset_rgb, offset_chroma_scale, offset_master_scale,
+    params_to_offset_rgb, params_to_rgb, offset_chroma_scale, offset_master_scale,
 )
 from src.features.color.core.layer import DEFAULT_EXTENDED_GRADING_PARAMS
 from src.features.color.core.primary_calibration import (
-    PRIMARY_CALIBRATION_TEMP_SCALE, PRIMARY_CALIBRATION_VERSION_KEY,
+    PRIMARY_CALIBRATION_CURRENT_VERSION, PRIMARY_CALIBRATION_TEMP_SCALE,
+    PRIMARY_CALIBRATION_VERSION_KEY, ungraded_primary_params,
+)
+from src.features.color.ui.primary_wheel_response import (
+    PUCK_DRAG_GAIN, RGB, brightness_multiplier, channel_drag_rate, constrain_chroma, master_drag_rate,
+    multiplier_brightness, scalar_drag_rate, shift_master, wheel_chroma, wheel_luma, wheel_position,
 )
 from src.features.color.ui.tonal_saturation_panel import TonalSaturationPanel
+from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    PARAMETER_BAR_HEIGHT, create_panel_header, header_button_color, style_header_button, style_reset_button,
+)
 
 
 # ============================================================================
@@ -108,12 +117,8 @@ def offset_display_to_hsb(rx: float, gy: float,
     chroma_scale = offset_chroma_scale()
     chroma = [(v - master) / chroma_scale + 1.0 for v in (bx, by, bz)]
     m = max(chroma[0], chroma[1], chroma[2], 1e-6)
-    color = QColor.fromRgbF(
-        max(0.0, min(1.0, chroma[0] / m)),
-        max(0.0, min(1.0, chroma[1] / m)),
-        max(0.0, min(1.0, chroma[2] / m)))
-    hue = float(color.hueF()) * 360.0 if color.hueF() >= 0 else 0.0
-    return hue, float(color.saturationF()), master
+    hue, sat, _ = colorsys.rgb_to_hsv(*(max(0.0, v / m) for v in chroma))
+    return hue * 360.0, sat, master
 
 
 class _GradingValue(DragValue):
@@ -121,32 +126,60 @@ class _GradingValue(DragValue):
 
     def __init__(self, minimum: float, maximum: float, default: float,
                  decimals: int = 2, accent: str = "#919195",
-                 drag_span: float | None = None) -> None:
+                 drag_span: float | None = None, *, drag_rate: float | None = None,
+                 height: int = 24) -> None:
         super().__init__("", minimum, maximum, default, decimals=decimals, compact=True)
-        self._accent = accent
         self._drag_span = drag_span
+        self._drag_rate = drag_rate
+        self._cancelled_drag = False
         self.setFixedValueWidth(44)
-        self.setFixedHeight(24)
-        # Keep the shared DragValue normal/hover/active/editor styles intact.
-        # Channel identity lives only in a separate, non-interactive color bar.
-        self.layout().setContentsMargins(0, 0, 0, 4)
-        self._edit.setFixedHeight(20)
+        self.setFixedHeight(height)
+
+        self._value_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout = self.layout()
+        field = QVBoxLayout()
+        field.setContentsMargins(0, 0, 0, 0)
+        field.setSpacing(0)
+        for widget in (self._value_label, self._edit):
+            layout.removeWidget(widget)
+            field.addWidget(widget)
         self._accent_bar = QWidget(self)
         self._accent_bar.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._accent_bar.setFixedHeight(2)
         self._accent_bar.setStyleSheet(f"background: {accent}; border: none;")
+        field.addWidget(self._accent_bar)
+        layout.addLayout(field)
+        layout.setAlignment(field, Qt.AlignmentFlag.AlignVCenter)
+
+    def fit_display_range(self, minimum_width: int) -> None:
+        self._value_label.ensurePolished()
+        metrics = self._value_label.fontMetrics()
+        text_width = max(metrics.horizontalAdvance(self._format_value(value))
+                         for value in (self._min, self._max))
+        # Leave room for the field border, padding, and inline editor cursor.
+        self.setFixedValueWidth(max(minimum_width, text_width + 6))
+
+    @staticmethod
+    def _precision(modifiers: Qt.KeyboardModifier) -> float:
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            return 10.0
+        if modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
+            return 0.1
+        return 1.0
+
+    def set_drag_rate(self, rate: float | None) -> None:
+        self._drag_rate = rate
 
     def _drag_sensitivity(self, modifiers: Qt.KeyboardModifier) -> float:
+        if self._drag_rate is not None:
+            return self._drag_rate * self._precision(modifiers)
         if self._drag_span is None:
             return super()._drag_sensitivity(modifiers)
         return drag_speed_per_pixel(self._drag_span, modifiers)
 
-    def resizeEvent(self, event: Any) -> None:
-        super().resizeEvent(event)
-        # 标识条几何对齐 Wheel_UI 设计稿：左右各缩进 1px、贴底 1.5px（取整 2px）。
-        self._accent_bar.setGeometry(1, self.height() - 2,
-                                     self.width() - 2, 2)
-
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._cancelled_drag = False
         if event.button() == Qt.MouseButton.MiddleButton:
             if self.value() != self.defaultValue():
                 self.interaction_started.emit()
@@ -156,12 +189,34 @@ class _GradingValue(DragValue):
             return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        super().mouseMoveEvent(event)
+        if self._drag_rate is not None and self._drag_engaged:
+            # Only the next movement uses a newly pressed modifier. An overshoot
+            # at a limit does not have to be dragged back before values change.
+            self._drag_start_x = event.position().x()
+            self._drag_start_value = self.value()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._cancelled_drag:
+                self._cancelled_drag = False
+                self.interaction_ended.emit()
+                event.accept()
+                return
+            if self._dragging:
+                self.mouseMoveEvent(event)
+        super().mouseReleaseEvent(event)
+
+    def cancel_drag(self) -> None:
+        """Keep the gesture boundary while discarding the old pointer baseline."""
+        if self._dragging:
+            self._cancelled_drag = self._drag_engaged
+            self._dragging = self._drag_engaged = False
+            self._value_label.setStyleSheet(self._normal_value_style)
+
     def wheelEvent(self, event: Any) -> None:
-        step = self._single_step
-        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            step *= 10.0
-        elif event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
-            step *= 0.1
+        step = self._single_step * self._precision(event.modifiers())
         delta = event.angleDelta().y()
         target = self.value() + (step if delta > 0 else -step if delta < 0 else 0.0)
         target = max(self._min, min(self._max, target))
@@ -175,17 +230,19 @@ class _GradingValue(DragValue):
 class _PrimaryValueRow(QWidget):
     """Label and value only; display units are independent of stored grade values."""
 
+    _VALUE_WIDTH = 48
     valueChanged = pyqtSignal(float)
     interactionStarted = pyqtSignal()
     interactionEnded = pyqtSignal()
 
     def __init__(self, label: str, minimum: float, maximum: float,
-                 *, scale: float = 1.0, offset: float = 0.0,
+                 *, drag_rate: float, scale: float = 1.0, offset: float = 0.0,
                  decimals: int = 2, accent: str = "#919195",
                  default: float | None = None) -> None:
         super().__init__()
         self._scale = scale
         self._offset = offset
+        self._drag_rate = drag_rate
         self._bounds = minimum, maximum
         # 引擎值域内的默认值（None 时回退旧行为 offset；用于 pivot /
         # lum_mix 等非零默认参数）。
@@ -195,12 +252,16 @@ class _PrimaryValueRow(QWidget):
         layout.setSpacing(4)
         layout.addStretch()
         self.label = QLabel(label)
-        self.label.setStyleSheet(PARAM_LABEL_STYLE)
+        self.label.setStyleSheet(PARAMETER_LABEL_STYLE)
+        self.label.setMinimumWidth(1)
+        self.label.setToolTip(label)
         layout.addWidget(self.label)
         self.spin = _GradingValue(minimum * scale + offset,
                                   maximum * scale + offset,
                                   self._default_value * scale + offset,
-                                  decimals, accent)
+                                  decimals, accent, drag_rate=drag_rate * scale)
+        self.spin.setAccessibleName(label)
+        self.spin.setFixedValueWidth(self._VALUE_WIDTH)
         layout.addWidget(self.spin)
         layout.addStretch()
         self.spin.valueChanged.connect(self._on_value_changed)
@@ -216,13 +277,18 @@ class _PrimaryValueRow(QWidget):
     def setValue(self, value: float) -> None:
         self.spin.setValue(value * self._scale + self._offset)
 
-    def set_display_units(self, scale: float, offset: float, decimals: int) -> None:
+    def set_display_units(self, scale: float, offset: float, decimals: int, *,
+                          display_bounds: tuple[float, float] | None = None) -> None:
         value = self.value()
         blocked = self.spin.blockSignals(True)
         self._scale, self._offset = scale, offset
-        self.spin.setRange(self._bounds[0] * scale + offset, self._bounds[1] * scale + offset)
+        minimum, maximum = display_bounds or (
+            self._bounds[0] * scale + offset, self._bounds[1] * scale + offset)
+        self.spin.setRange(minimum, maximum)
         self.spin.setDefaultValue(self._default_value * scale + offset)
         self.spin.setDecimals(decimals)
+        self.spin.fit_display_range(self._VALUE_WIDTH)
+        self.spin.set_drag_rate(self._drag_rate * scale)
         self.setValue(value)
         self.spin.blockSignals(blocked)
 
@@ -306,10 +372,11 @@ class KnurledJogWheel(QWidget):
         self._last_x = 0.0
         self._hovered = False
 
-    def set_phase(self, phase: float) -> None:
-        """程序化同步滚花相位（回填/重置时保持视觉一致）。"""
-        self._phase = phase % self._PITCH
-        self.update()
+    def set_master_value(self, delta: float, rate: float) -> None:
+        phase = (delta / rate * PUCK_DRAG_GAIN) % self._PITCH
+        if phase != self._phase:
+            self._phase = phase
+            self.update()
 
     def enterEvent(self, event: Any) -> None:
         self._hovered = True
@@ -336,10 +403,8 @@ class KnurledJogWheel(QWidget):
             dx = event.position().x() - self._last_x
             self._last_x = event.position().x()
             fine = 0.2 if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) else 1.0
-            step_dx = dx * fine
-            self._phase = (self._phase + step_dx) % self._PITCH
-            self.update()
-            self.deltaMoved.emit(step_dx)
+            if dx:
+                self.deltaMoved.emit(dx * fine)
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -361,10 +426,7 @@ class KnurledJogWheel(QWidget):
     def wheelEvent(self, event: Any) -> None:
         dx = (event.angleDelta().y() / 120.0) * self._PITCH
         fine = 0.2 if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier) else 1.0
-        step_dx = dx * fine
-        self._phase = (self._phase + step_dx) % self._PITCH
-        self.update()
-        self.deltaMoved.emit(step_dx)
+        self._nudge(dx * fine)
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -373,12 +435,19 @@ class KnurledJogWheel(QWidget):
         if event.key() in navigation:
             step = -self._PITCH if event.key() in (Qt.Key.Key_Left, Qt.Key.Key_Up) \
                 else self._PITCH
-            self._phase = (self._phase + step) % self._PITCH
-            self.update()
-            self.deltaMoved.emit(float(step))
+            self._nudge(step)
             event.accept()
         else:
             super().keyPressEvent(event)
+
+    def _nudge(self, dx: float) -> None:
+        if dx:
+            if self._dragging:
+                self.deltaMoved.emit(dx)
+                return
+            self.dragStarted.emit()
+            self.deltaMoved.emit(dx)
+            self.dragEnded.emit()
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
@@ -388,13 +457,14 @@ class KnurledJogWheel(QWidget):
         rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
         radius = h / 2.0
 
-        cylinder = QLinearGradient(0.0, 0.0, 0.0, h)
-        cylinder.setColorAt(0.00, QColor("#30343c"))
-        cylinder.setColorAt(0.45, QColor("#292d35" if self._hovered else "#22252b"))
-        cylinder.setColorAt(1.00, QColor("#121419"))
+        cylinder = QLinearGradient(0.0, 0.0, w, 0.0)
+        cylinder.setColorAt(0.00, QColor("#08090b"))
+        cylinder.setColorAt(0.15, QColor("#15171b"))
+        cylinder.setColorAt(0.50, QColor("#2a2d34" if self._hovered else "#23262c"))
+        cylinder.setColorAt(0.85, QColor("#15171b"))
+        cylinder.setColorAt(1.00, QColor("#08090b"))
 
-        border = QColor("#d99b38" if self._dragging else
-                        "#505663" if self._hovered else "#101116")
+        border = QColor("#d99b38" if self._dragging else "#0a0b0d")
         painter.setPen(QPen(border, 1.0))
         painter.setBrush(QBrush(cylinder))
         painter.drawRoundedRect(rect, radius, radius)
@@ -409,18 +479,18 @@ class KnurledJogWheel(QWidget):
             norm_pos = (x - w / 2.0) / (w / 2.0)
             if abs(norm_pos) <= 1.0:
                 cos_light = math.cos(norm_pos * (math.pi * 0.48))
-                dark_alpha = int(155 * cos_light)
-                light_alpha = int(65 * cos_light)
-                painter.setPen(QPen(QColor(6, 7, 9, dark_alpha), 1.2))
-                painter.drawLine(QPointF(x, 2.5), QPointF(x, h - 2.5))
-                painter.setPen(QPen(QColor(190, 198, 210, light_alpha), 0.8))
-                painter.drawLine(QPointF(x + 1.2, 2.5), QPointF(x + 1.2, h - 2.5))
+                dark_alpha = int(190 * cos_light)
+                light_alpha = int(75 * cos_light)
+                painter.setPen(QPen(QColor(6, 7, 9, dark_alpha), 1.4))
+                painter.drawLine(QPointF(x, 1.5), QPointF(x, h - 1.5))
+                painter.setPen(QPen(QColor(190, 198, 210, light_alpha), 0.9))
+                painter.drawLine(QPointF(x + 1.4, 2.0), QPointF(x + 1.4, h - 2.0))
             x += pitch
         painter.end()
 
 
 # ============================================================================
-# 光学内凹双环色轮画布（细外环 + 高饱和光谱内盘 + 准星控制点）
+# 光学内凹双环色轮画布
 # ============================================================================
 
 class _WheelCanvas(QWidget):
@@ -433,6 +503,7 @@ class _WheelCanvas(QWidget):
     interaction_started = pyqtSignal()
 
     _RING_WIDTH = 4.0
+    _HUE_RING_FRACTION = 0.09
     # 外环角向拖拽的亮度灵敏度（弧度 → brightness）：一整圈 ≈ ±1.43
     _RING_SENSITIVITY = 2.0 / (2.0 * math.pi * 1.4)
 
@@ -441,8 +512,7 @@ class _WheelCanvas(QWidget):
         self._wheel = wheel
         self.dragging_knob = False
         self.dragging_ring = False
-        self._press_pos = QPointF()
-        self._press_knob = QPointF()
+        self._last_pointer = QPointF()
         self._last_ring_angle = 0.0
         self._hovered = False
         self.setMinimumSize(96, 110)
@@ -451,15 +521,13 @@ class _WheelCanvas(QWidget):
     # ── 几何（绘制与命中测试共用） ────────────────────────────────────
 
     def _geometry(self) -> tuple[QPointF, float]:
-        # 半径随面板缩放动态计算，封顶 100px（与 dock 高度上限联动，
-        # 见 dock_layout_controller._COLOR_TOOL_DOCK_MAX_HEIGHT 注释）。
-        # 纵向 padding 6px：保证在 dock 封顶高度下半径仍能达到 100。
+        # 半径随画布的可用空间缩放，封顶 100px。
         radius = max(1.0, min((self.width() - 12.0) / 2.0,
                               (self.height() - 6.0) / 2.0, 100.0))
         return QPointF(self.width() / 2.0, self.height() / 2.0), radius
 
     def _inner_radius(self, outer_radius: float) -> float:
-        return outer_radius - self._RING_WIDTH
+        return max(1.0, outer_radius - self._RING_WIDTH)
 
     def _hue_gradient(self, center: QPointF) -> QConicalGradient:
         gradient = QConicalGradient(center, self._wheel.rotation_degrees)
@@ -482,6 +550,7 @@ class _WheelCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         center, outer_r = self._geometry()
         inner_r = self._inner_radius(outer_r)
+        disk_r = inner_r * (1.0 - self._HUE_RING_FRACTION)
         self._wheel._cached_center = center
         self._wheel._cached_radius = outer_r
 
@@ -494,7 +563,7 @@ class _WheelCanvas(QWidget):
         ring_track_r = (outer_r + inner_r) / 2.0
         track_rect = QRectF(center.x() - ring_track_r, center.y() - ring_track_r,
                             ring_track_r * 2.0, ring_track_r * 2.0)
-        norm_y = max(-1.0, min(1.0, self._wheel.brightness))
+        norm_y = self._wheel._master_arc_position()
         base_span = 34.0
         center_deg = 285.0 - norm_y * 150.0
         start_deg = center_deg - base_span / 2.0
@@ -503,23 +572,20 @@ class _WheelCanvas(QWidget):
                             Qt.PenCapStyle.RoundCap))
         painter.drawArc(track_rect, int(start_deg * 16), int(base_span * 16))
 
-        # 3. 高饱和连续光谱内盘（色相角经 rotation_degrees 校准）
+        # 3. 彩环与内盘共享色相，彩环也属于 Hue/Sat 拖拽区域。
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(self._hue_gradient(center)))
         painter.drawEllipse(center, inner_r, inner_r)
 
-        # 径向中性渐变遮罩：中心柔暗，边缘保留高饱和光谱环
-        mask = QRadialGradient(center, inner_r)
-        mask.setColorAt(0.00, QColor(40, 42, 48, 250))
-        mask.setColorAt(0.42, QColor(35, 37, 43, 240))
-        mask.setColorAt(0.74, QColor(28, 30, 36, 194))
-        mask.setColorAt(0.91, QColor(22, 24, 29, 104))
-        mask.setColorAt(0.975, QColor(12, 13, 16, 0))
-        mask.setColorAt(1.00, QColor(8, 9, 11, 48))
+        # 中性遮罩限定在内盘，色相从中性中心向外轻微增强。
+        mask = QRadialGradient(center, disk_r)
+        mask.setColorAt(0.0, QColor(47, 47, 47))
+        mask.setColorAt(0.48, QColor(42, 42, 42, 243))
+        mask.setColorAt(1.0, QColor(29, 29, 29, 225))
         painter.setBrush(QBrush(mask))
-        painter.drawEllipse(center, inner_r, inner_r)
+        painter.drawEllipse(center, disk_r, disk_r)
 
-        # 光谱内盘和石墨灰外环的细分界线。
+        # 彩环和 Master 外环的细分界线。
         painter.setPen(QPen(QColor(0, 0, 0, 120), 0.65))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(center, inner_r, inner_r)
@@ -527,14 +593,12 @@ class _WheelCanvas(QWidget):
         # 4. 极细十字基准线与同心圆
         painter.setPen(QPen(QColor(255, 255, 255, 26), 0.75))
         painter.drawEllipse(center, inner_r * 0.52, inner_r * 0.52)
-        painter.drawLine(center + QPointF(-inner_r + 1.5, 0.0),
-                         center + QPointF(inner_r - 1.5, 0.0))
-        painter.drawLine(center + QPointF(0.0, -inner_r + 1.5),
-                         center + QPointF(0.0, inner_r - 1.5))
+        painter.drawLine(center + QPointF(-disk_r, 0.0), center + QPointF(disk_r, 0.0))
+        painter.drawLine(center + QPointF(0.0, -disk_r), center + QPointF(0.0, disk_r))
 
         # 5. 动态矢量牵引线与准星控制点
-        puck = center + self._wheel.knob_pos * inner_r
         magnitude = math.hypot(self._wheel.knob_pos.x(), self._wheel.knob_pos.y())
+        puck = center + self._wheel.knob_pos * (inner_r / max(1.0, magnitude))
         if magnitude > 0.01:
             painter.setPen(QPen(QColor(240, 180, 76, 180), 1.1))
             painter.drawLine(center, puck)
@@ -578,8 +642,7 @@ class _WheelCanvas(QWidget):
             event.accept()
         elif dist <= inner_r:
             self.dragging_knob = True
-            self._press_pos = event.position()
-            self._press_knob = QPointF(self._wheel.knob_pos)
+            self._last_pointer = event.position()
             self.interaction_started.emit()
             # Resolve uses a relative trackerball: pressing elsewhere on the
             # disk does not jump the current correction to that location.
@@ -589,8 +652,11 @@ class _WheelCanvas(QWidget):
         center, outer_r = self._geometry()
         inner_r = self._inner_radius(outer_r)
         if self.dragging_knob:
-            self._update_knob(center + self._press_knob * inner_r
-                              + event.position() - self._press_pos)
+            movement = event.position() - self._last_pointer
+            self._last_pointer = event.position()
+            if not movement.isNull():
+                self._update_knob(center + self._wheel.knob_pos * inner_r
+                                  + movement * PUCK_DRAG_GAIN)
             event.accept()
         elif self.dragging_ring:
             delta = event.position() - center
@@ -602,9 +668,10 @@ class _WheelCanvas(QWidget):
                 delta_angle += 2.0 * math.pi
             self._last_ring_angle = angle
             wheel = self._wheel
-            new_brightness = max(-1.0, min(
-                1.0, wheel.brightness + delta_angle * self._RING_SENSITIVITY))
-            wheel._set_brightness(new_brightness)
+            if wheel._measured_response:
+                wheel._on_jog_delta(delta_angle * inner_r)
+            else:
+                wheel._set_brightness(wheel.brightness + delta_angle * self._RING_SENSITIVITY)
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -616,6 +683,7 @@ class _WheelCanvas(QWidget):
             self.dragging_knob = False
             self._wheel._on_value_interaction_ended()
         elif self.dragging_ring:
+            self.mouseMoveEvent(event)
             self.dragging_ring = False
             self._wheel._on_value_interaction_ended()
         event.accept()
@@ -633,22 +701,13 @@ class _WheelCanvas(QWidget):
         inner_r = self._inner_radius(outer_r)
         delta = pos - center
         distance = math.hypot(delta.x(), delta.y())
-        if distance > inner_r:
-            delta *= inner_r / distance
-            distance = inner_r
         wheel = self._wheel
-        wheel.knob_pos = delta / inner_r if inner_r > 0 else QPointF(0, 0)
-        wheel.sat = distance / inner_r if inner_r > 0 else 0.0
-        if distance > 1e-8:
-            wheel.hue = (math.degrees(math.atan2(-delta.y(), delta.x()))
-                         - wheel.rotation_degrees) % 360.0
-        wheel._pending_hue = wheel.hue
-        wheel._pending_sat = wheel.sat
-        wheel._pending_val = wheel.brightness
-        wheel._update_rgb_values()
-        self.update()
-        if not wheel._update_timer.isActive():
-            wheel._update_timer.start()
+        # An existing numeric correction can project beyond the disk. Start
+        # from that correction so the first mouse movement does not snap it.
+        limit = inner_r * max(1.0, math.hypot(wheel.knob_pos.x(), wheel.knob_pos.y()))
+        if distance > limit:
+            delta *= limit / distance
+        wheel._edit_knob(delta / inner_r)
 
 
 # ============================================================================
@@ -695,6 +754,8 @@ class ColorWheel(QWidget):
         self.math = math
         self._add_display_scale = 1.0
         self._add_display_base = 0.0
+        self._measured_response = False
+        self._master_rate = master_drag_rate(mode)
         self.show_master_box = show_master_box and math == "mult"
         # A wheel's physical orientation is a calibration value, not a
         # rendering constant.  Keep it on each wheel so preferences can be
@@ -713,19 +774,12 @@ class ColorWheel(QWidget):
         header.addWidget(self.zone_icon)
         header.addStretch(1)
         self.title_label = QLabel(title)
-        self.title_label.setStyleSheet(
-            "color: #d4d7dd; font-size: 12px; font-weight: 600;")
+        self.title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(self.title_label)
         header.addStretch(1)
         self.reset_btn = QToolButton(self)
-        self.reset_btn.setIcon(icon_reset(IconColors.DEFAULT))
-        self.reset_btn.setIconSize(QSize(13, 13))
-        self.reset_btn.setFixedSize(20, 20)
+        style_reset_button(self.reset_btn)
         self.reset_btn.setToolTip(I18N.tr("grading.reset_wheel", "重置") + " " + title)
-        self.reset_btn.setStyleSheet("""
-            QToolButton { background: transparent; border: none; border-radius: 3px; }
-            QToolButton:hover { background: #414146; }
-        """)
         self.reset_btn.clicked.connect(self.reset)
         header.addWidget(self.reset_btn)
         outer_layout.addLayout(header)
@@ -885,23 +939,23 @@ class ColorWheel(QWidget):
             return
         self._cancel_pending()
         self.interaction_started.emit()
+        master = self._master_value()
         self.hue = 0.0
         self.sat = 0.0
+        if self._measured_response:
+            self.brightness = (max(-1.0, min(1.0, master)) if self.math == "add"
+                               else multiplier_brightness(master))
         self.knob_pos = QPointF(0, 0)
-        self._update_rgb_values()
-        self._wheel_canvas.update()
-        self._pending_hue = self.hue
-        self._pending_sat = self.sat
-        self._pending_val = self.brightness
-        self.flush_pending_changes()
-        self.interaction_ended.emit()
+        self._queue_change()
+        self._on_value_interaction_ended()
 
     def _on_master_reset(self) -> None:
         """拨轮中键 / 双击：仅 Master 亮度归零（保留 hue/sat）。"""
-        if self.brightness == 0.0 or self.dragging_knob:
+        neutral = 0.0 if self.math == "add" else 1.0
+        if abs(self._master_value() - neutral) < 1e-12 or self.dragging_knob:
             return
         self.interaction_started.emit()
-        self._set_brightness(0.0)
+        self._change_master(neutral)
         # 先 flush 在途 pending 再结束手势：changed 必须先于 ended，
         # 撤销快照才能拿到归零后的值。
         self._on_value_interaction_ended()
@@ -941,11 +995,54 @@ class ColorWheel(QWidget):
         return (float(hue) + self.rotation_degrees) % 360.0
 
     def _update_knob_position(self) -> None:
+        if self._measured_response:
+            x, y = wheel_position(self.mode, self._wheel_rgb())
+            self.knob_pos = self._rotate_pointer(QPointF(x, y), inverse=False)
+            return
         screen_angle = math.radians(self._screen_angle_for_hue(self.hue))
         self.knob_pos = QPointF(
             self.sat * math.cos(screen_angle),
             -self.sat * math.sin(screen_angle),
         )
+
+    def _rotate_pointer(self, point: QPointF, *, inverse: bool) -> QPointF:
+        angle = math.radians(HUE_OFFSET_ANGLE - self.rotation_degrees)
+        if inverse:
+            angle = -angle
+        c, s = math.cos(angle), math.sin(angle)
+        return QPointF(c * point.x() - s * point.y(), s * point.x() + c * point.y())
+
+    def _edit_knob(self, point: QPointF) -> None:
+        if self._measured_response:
+            reference = self._rotate_pointer(point, inverse=True)
+            chroma = wheel_chroma(self.mode, reference.x(), reference.y())
+            rgb = self._wheel_rgb()
+            master = wheel_luma(rgb)
+            target = tuple(master + value for value in chroma)
+            new_rgb = constrain_chroma(rgb, target, additive=self.math == "add")
+            if new_rgb == rgb:
+                return
+            self._assign_rgb(new_rgb)
+            self._update_knob_position()
+        else:
+            if self.knob_pos == point:
+                return
+            self.knob_pos = point
+            self.sat = min(1.0, math.hypot(point.x(), point.y()))
+            if self.sat > 1e-8:
+                self.hue = (math.degrees(math.atan2(-point.y(), point.x()))
+                            - self.rotation_degrees) % 360.0
+        self._queue_change()
+
+    def set_measured_response(self, enabled: bool) -> None:
+        self._measured_response = enabled
+        rate = channel_drag_rate(self.mode) if enabled else None
+        for field in (self._bright_drag, self._r_drag, self._g_drag, self._b_drag):
+            if field is not None:
+                field.set_drag_rate(rate)
+        self._update_knob_position()
+        self._update_rgb_values()
+        self._wheel_canvas.update()
 
     def blockSignals(self, block: bool) -> bool:
         self.master_jog.blockSignals(block)
@@ -965,9 +1062,13 @@ class ColorWheel(QWidget):
 
     def _set_brightness(self, brightness: float) -> None:
         """外环 / 拨轮路径：直接设置 Master 亮度并合并高频信号。"""
-        if self._updating_brightness:
+        brightness = max(-1.0, min(1.0, brightness))
+        if self._updating_brightness or brightness == self.brightness:
             return
-        self.brightness = max(-1.0, min(1.0, brightness))
+        self.brightness = brightness
+        self._queue_change()
+
+    def _queue_change(self) -> None:
         self._pending_hue = self.hue
         self._pending_sat = self.sat
         self._pending_val = self.brightness
@@ -977,26 +1078,24 @@ class ColorWheel(QWidget):
             self._update_timer.start()
 
     def _on_jog_delta(self, dx: float) -> None:
-        if self._updating_brightness:
-            return
-        # 固定 200px 参考宽度：满量程 ±1.0（与 DragValue 同手感约定）
-        self._set_brightness(
-            self.brightness + dx * drag_speed_per_pixel(2.0, Qt.KeyboardModifier.NoModifier))
+        if dx and not self._updating_brightness:
+            self._change_master(self._master_value() + dx * self._master_rate)
 
     def _on_brightness_drag_changed(self, val: float) -> None:
         """亮度数值变化，更新状态并合并高频信号。"""
-        if self._updating_brightness or self.math == "add":
-            return
-        multiplier = val + self._display_offset
-        stops = math.log2(max(multiplier, 2.0 ** -6.0))
-        self.brightness = math.copysign(math.sqrt(abs(stops) / 6.0), stops)
-        self._pending_hue = self.hue
-        self._pending_sat = self.sat
-        self._pending_val = self.brightness
-        self._update_rgb_values()
-        self._wheel_canvas.update()
-        if not self._update_timer.isActive():
-            self._update_timer.start()
+        if not self._updating_brightness and self.math != "add":
+            self._change_master(val + self._display_offset)
+
+    def _change_master(self, value: float) -> None:
+        if self._measured_response:
+            rgb = self._wheel_rgb()
+            new_rgb = shift_master(rgb, value - wheel_luma(rgb), additive=self.math == "add")
+            if new_rgb != rgb:
+                self._assign_rgb(new_rgb)
+                self._update_knob_position()
+                self._queue_change()
+        else:
+            self._set_brightness(value if self.math == "add" else multiplier_brightness(value))
 
     def _emit_changed_signal(self) -> None:
         if self._pending_hue is not None:
@@ -1017,67 +1116,69 @@ class ColorWheel(QWidget):
             self._emit_changed_signal()
 
     @staticmethod
-    def rgb_multipliers(hue: float, sat: float,
-                        brightness: float) -> tuple[float, float, float]:
+    def rgb_multipliers(hue: float, sat: float, brightness: float) -> RGB:
         """Forward HSV→RGB multiplier math shared by wheels and bars."""
-        stops = (brightness ** 2) * 6.0
-        if brightness < 0:
-            stops = -stops
-        b_mult = math.pow(2.0, stops)
-        if sat == 0:
-            return b_mult, b_mult, b_mult
-        c = QColor.fromHsvF(hue / 360.0, sat, 1.0)
-        rf, gf, bf = c.redF(), c.greenF(), c.blueF()
-        avg = (rf + gf + bf) / 3.0
-        return (rf / avg) * b_mult, (gf / avg) * b_mult, (bf / avg) * b_mult
+        r, g, b = params_to_rgb(hue, sat, brightness)
+        return r, g, b
+
+    def _wheel_rgb(self) -> RGB:
+        if self.math == "add":
+            r, g, b = params_to_offset_rgb(self.hue, self.sat, self.brightness)
+            return r, g, b
+        return self.rgb_multipliers(self.hue, self.sat, self.brightness)
+
+    def _master_value(self, rgb: RGB | None = None) -> float:
+        if self._measured_response:
+            return wheel_luma(self._wheel_rgb() if rgb is None else rgb)
+        return self.brightness if self.math == "add" else brightness_multiplier(self.brightness)
+
+    def _master_arc_position(self) -> float:
+        if not self._measured_response:
+            return max(-1.0, min(1.0, self.brightness))
+        master = self._master_value()
+        return (max(-1.0, min(1.0, master)) if self.math == "add"
+                else multiplier_brightness(master))
+
+    def _assign_rgb(self, rgb: RGB) -> None:
+        if self.math == "add":
+            self.hue, self.sat, self.brightness = offset_display_to_hsb(
+                *(value * 100.0 for value in rgb))
+        else:
+            self.hue, self.sat, self.brightness = self._rgb_to_hsv(
+                *(max(0.0, value) for value in rgb))
 
     def _update_rgb_values(self) -> None:
-        """从当前 hue/sat/brightness 计算显示值并更新 DragValue（防递归）。"""
+        """Synchronize the controls with the stored grade without emitting edits."""
         self._updating_rgb = True
         self._updating_brightness = True
+        rgb = self._wheel_rgb()
+        master = self._master_value(rgb)
+        fields = self._r_drag, self._g_drag, self._b_drag
         if self.math == "add":
-            rx, gy, bz = offset_hsb_to_display(self.hue, self.sat, self.brightness)
-            for field, value in zip((self._r_drag, self._g_drag, self._b_drag), (rx, gy, bz)):
-                field.setValue(value * self._add_display_scale + self._add_display_base)
-            self.master_jog.set_phase(self.brightness * 300.0)
+            for field, value in zip(fields, rgb):
+                field.setValue(value * 100.0 * self._add_display_scale + self._add_display_base)
         else:
-            r, g, b = self.rgb_multipliers(self.hue, self.sat, self.brightness)
-            b_mult = (r + g + b) / 3.0
             if self._bright_drag is not None:
-                self._bright_drag.setValue(b_mult - self._display_offset)
-            self._r_drag.setValue(r - self._display_offset)
-            self._g_drag.setValue(g - self._display_offset)
-            self._b_drag.setValue(b - self._display_offset)
-            self.master_jog.set_phase(self.brightness * 300.0)
+                self._bright_drag.setValue(master - self._display_offset)
+            for field, value in zip(fields, rgb):
+                field.setValue(value - self._display_offset)
+        self.master_jog.set_master_value(master - (0.0 if self.math == "add" else 1.0),
+                                         self._master_rate)
         self._updating_rgb = False
         self._updating_brightness = False
 
     def _on_rgb_changed(self, _val: float) -> None:
-        """RGB DragValue 变化 → 反算 hue/sat/brightness → 更新色轮。"""
+        """Invert the RGB numeric edit and position the control point."""
         if self._updating_rgb:
             return
+        fields = self._r_drag, self._g_drag, self._b_drag
         if self.math == "add":
-            self.hue, self.sat, self.brightness = offset_display_to_hsb(*(
-                (field.value() - self._add_display_base) / self._add_display_scale
-                for field in (self._r_drag, self._g_drag, self._b_drag)))
+            self._assign_rgb(tuple((field.value() - self._add_display_base)
+                                   / (100.0 * self._add_display_scale) for field in fields))
         else:
-            r = max(0.0, self._r_drag.value() + self._display_offset)
-            g = max(0.0, self._g_drag.value() + self._display_offset)
-            b = max(0.0, self._b_drag.value() + self._display_offset)
-            self.hue, self.sat, self.brightness = self._rgb_to_hsv(r, g, b)
-
-        # 更新控制点位置
+            self._assign_rgb(tuple(field.value() + self._display_offset for field in fields))
         self._update_knob_position()
-
-        self._update_rgb_values()
-        self._wheel_canvas.update()
-
-        # 通过节流发射 changed 信号
-        self._pending_hue = self.hue
-        self._pending_sat = self.sat
-        self._pending_val = self.brightness
-        if not self._update_timer.isActive():
-            self._update_timer.start()
+        self._queue_change()
 
     def set_additive_display_units(self, scale: float, base: float) -> None:
         """Use calibrated numeric units without changing the stored wheel position."""
@@ -1089,46 +1190,10 @@ class ColorWheel(QWidget):
         self._update_rgb_values()
 
     @staticmethod
-    def _rgb_to_hsv(r: float, g: float, b: float) -> tuple:
-        """从显示 RGB 值反算 hue/sat/brightness。
-
-        正向算法：
-            b_mult = 2^(stops),  c = fromHsvF(hue/360, sat, 1.0)
-            R = (c.r / avg) * b_mult  (G/B 同理)
-
-        反向：
-            b_mult = avg(R, G, B)  → brightness
-            归一化色度 → hue + sat
-        """
-        # 亮度反算：b_mult = mean(R, G, B)
-        b_mult = max((r + g + b) / 3.0, 1e-6)
-
-        # brightness from b_mult: stops = log2(b_mult), brightness ≈ sqrt(|stops|/6)
-        stops = math.log2(max(b_mult, 1e-6))
-        if stops >= 0:
-            brightness = math.sqrt(stops / 6.0)
-        else:
-            brightness = -math.sqrt(-stops / 6.0)
-        brightness = max(-1.0, min(1.0, brightness))
-
-        # 归一化色度
-        nr = r / b_mult
-        ng = g / b_mult
-        nb = b / b_mult
-
-        # AUD-25303：等比归一化而非 clamp(0,1) 截断。正向公式
-        # (_update_rgb_values) 产出的色度分量可 >1（sat=0.5 时 nr=1.5），
-        # 直接 clamp 会破坏分量比例、折叠饱和度（回读 sat=0.25）。
-        # HSV 对统一缩放不变，按最大分量等比缩放即可还原比例。
-        m = max(nr, ng, nb, 1e-6)
-        c = QColor.fromRgbF(
-            max(0.0, min(1.0, nr / m)),
-            max(0.0, min(1.0, ng / m)),
-            max(0.0, min(1.0, nb / m)))
-        hue = float(c.hueF()) * 360.0 if c.hueF() >= 0 else 0.0
-        sat = float(c.saturationF())
-
-        return hue, sat, brightness
+    def _rgb_to_hsv(r: float, g: float, b: float) -> tuple[float, float, float]:
+        """Invert the stored RGB factors without quantizing small drag steps."""
+        hue, sat, _ = colorsys.rgb_to_hsv(r, g, b)
+        return hue * 360.0, sat, multiplier_brightness((r + g + b) / 3.0)
 
 
 # ============================================================================
@@ -1136,40 +1201,27 @@ class ColorWheel(QWidget):
 # ============================================================================
 
 class ModeTabButton(QPushButton):
-    """自绘矢量模式图标按钮（激活态带内凹底座）。"""
+    """Draw the mode glyph using the shared title-row icon states."""
 
     def __init__(self, mode_key: str, tooltip: str,
                  parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.mode_key = mode_key
         self.setCheckable(True)
-        self.setFixedSize(36, 26)
+        style_header_button(self, width=36)
         self.setToolTip(tooltip)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet("QPushButton { background: transparent; border: none; }")
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        active = self.isChecked()
-        hovered = self.underMouse()
-        col = QColor("#f3f4f6") if active else (
-            QColor("#b8bec8") if hovered else QColor("#6e7480"))
-
-        if active:
-            painter.setPen(QPen(QColor("#343842"), 1.0))
-            painter.setBrush(QColor("#252830"))
-            painter.drawRoundedRect(
-                QRectF(2.0, 2.0, self.width() - 4.0, self.height() - 4.0),
-                2.5, 2.5)
-
+        col = header_button_color(self)
         cx, cy = self.width() / 2.0, self.height() / 2.0
         painter.setPen(QPen(col, 1.25))
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         if self.mode_key == "wheels":
-            painter.drawEllipse(QPointF(cx, cy), 6.5, 6.5)
+            painter.drawEllipse(QPointF(cx, cy), 6.25, 6.25)
             painter.setBrush(col)
             painter.drawEllipse(QPointF(cx, cy), 1.3, 1.3)
         elif self.mode_key == "bars":
@@ -1182,24 +1234,19 @@ class ModeTabButton(QPushButton):
                                  QPointF(cx + dx + 1.0, notch_y))
                 painter.setPen(QPen(col, 1.25))
         elif self.mode_key == "log":
-            painter.drawArc(QRectF(cx - 7.5, cy - 7.0, 12.0, 12.0),
+            painter.drawArc(QRectF(cx - 6.0, cy - 6.0, 10.0, 10.0),
                             30 * 16, 260 * 16)
             painter.setBrush(col)
             painter.drawEllipse(QPointF(cx - 1.5, cy - 1.0), 1.1, 1.1)
             font = painter.font()
-            font.setPointSizeF(5.0)
+            font.setPixelSize(5)
             font.setBold(True)
             painter.setFont(font)
-            painter.drawText(QRectF(cx - 2.0, cy - 1.0, 16.0, 10.0),
+            painter.drawText(QRectF(cx - 4.0, cy + 1.0, 11.0, 6.0),
                              Qt.AlignmentFlag.AlignCenter, "LOG")
         else:  # tonal：三条影调带（暗/中/亮）
-            for idx, dy in enumerate((-4.5, 0.0, 4.5)):
-                band_col = (QColor("#525866") if idx == 0
-                            else QColor("#9ca3af") if idx == 1
-                            else QColor("#f3f4f6"))
-                painter.setPen(QPen(band_col if active or hovered else col, 2.4,
-                                    Qt.PenStyle.SolidLine,
-                                    Qt.PenCapStyle.RoundCap))
+            painter.setPen(QPen(col, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            for dy in (-4.5, 0.0, 4.5):
                 painter.drawLine(QPointF(cx - 5.0, cy + dy),
                                  QPointF(cx + 5.0, cy + dy))
         painter.end()
@@ -1262,8 +1309,14 @@ class GradingPanel(QWidget):
     # 与 layer_controller._GRADING_EXTENDED_KEYS 一致）
     _EXTENDED_KEYS = tuple(DEFAULT_EXTENDED_GRADING_PARAMS.keys())
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, *,
+                 use_measured_primaries: Callable[[], bool] | None = None) -> None:
         super().__init__(parent)
+        self._use_measured_primaries = use_measured_primaries
+        self._calibration_version = 0
+        self._display_calibration_version = 0
+        self._ungraded = True
+        self._stored_log_offset = (0.0, 0.0, 0.0)
 
         # 节流定时器：限制信号发射频率为 60FPS (16ms)
         self._grading_update_timer = QTimer(self)
@@ -1287,40 +1340,33 @@ class GradingPanel(QWidget):
         self._exposure_value: float = 0.0
 
         self._init_ui()
+        self.refresh_primary_calibration()
 
     def _init_ui(self) -> None:
         from src.features.color.ui.color_bars_panel import ColorBarsPanel
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(6, 2, 6, 2)
-        layout.setSpacing(2)
+        layout.setContentsMargins(0, 0, 0, 2)
+        layout.setSpacing(0)
         self.setLayout(layout)
 
         # ── 0. 顶部导航行：关键帧按钮 + 模式标题/切换 + 全局重置 ──────
-        header = QWidget()
-        header.setFixedHeight(30)
+        header = create_panel_header()
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(4, 0, 4, 0)
+        header_layout.setContentsMargins(10, 0, 10, 0)
         header_layout.setSpacing(4)
 
         # P1-COLOR-03: 关键帧控制（录制模式 / 当前帧快照 / 删除当前帧关键帧）
         self.keyframe_mode_btn = QPushButton()
         self.keyframe_mode_btn.setCheckable(True)
-        self.keyframe_mode_btn.setIcon(icon_circle(IconColors.DEFAULT))
-        self.keyframe_mode_btn.setIconSize(QSize(10, 10))
-        self.keyframe_mode_btn.setFixedSize(24, 20)
+        style_header_button(self.keyframe_mode_btn, width=24, icon=icon_circle())
         self.keyframe_mode_btn.setToolTip(I18N.tr(
             "grading.keyframe_mode_tooltip",
             "关键帧模式：开启后，调色参数修改会在当前帧记录关键帧"))
-        self.keyframe_mode_btn.toggled.connect(
-            lambda checked: self.keyframe_mode_btn.setIcon(
-                icon_circle(IconColors.RED if checked else IconColors.DEFAULT)))
         self.keyframe_mode_btn.toggled.connect(self.keyframe_mode_changed.emit)
 
         self.kf_snapshot_btn = QPushButton()
-        self.kf_snapshot_btn.setIcon(icon_add(IconColors.ORANGE))
-        self.kf_snapshot_btn.setIconSize(QSize(10, 10))
-        self.kf_snapshot_btn.setFixedSize(24, 20)
+        style_header_button(self.kf_snapshot_btn, width=24, icon=icon_add())
         self.kf_snapshot_btn.setToolTip(I18N.tr(
             "grading.keyframe_snapshot_tooltip",
             "在当前帧为所有已动画参数记录关键帧"))
@@ -1328,9 +1374,7 @@ class GradingPanel(QWidget):
             self.keyframe_snapshot_requested.emit)
 
         self.kf_remove_btn = QPushButton()
-        self.kf_remove_btn.setIcon(icon_delete(IconColors.RED))
-        self.kf_remove_btn.setIconSize(QSize(10, 10))
-        self.kf_remove_btn.setFixedSize(24, 20)
+        style_header_button(self.kf_remove_btn, width=24, icon=icon_delete())
         self.kf_remove_btn.setToolTip(I18N.tr(
             "grading.keyframe_remove_tooltip",
             "删除当前帧的所有调色关键帧"))
@@ -1338,14 +1382,11 @@ class GradingPanel(QWidget):
             self.keyframe_remove_requested.emit)
 
         self.mode_title = QLabel(I18N.tr("panel.color_wheel", "色轮"))
-        self.mode_title.setStyleSheet(
-            "color: #e5e7eb; font-size: 12px; font-weight: 700;")
+        self.mode_title.setStyleSheet(SECTION_TITLE_STYLE)
 
         self.reset_all_btn = QPushButton()
         self.reset_all_btn.setObjectName("reset_btn")
-        self.reset_all_btn.setIcon(icon_reset())
-        self.reset_all_btn.setIconSize(QSize(12, 12))
-        self.reset_all_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_all_btn, global_reset=True)
         self.reset_all_btn.setToolTip(I18N.tr(
             "grading.reset_all_tooltip", "重置全部调色参数"))
         self.reset_all_btn.clicked.connect(self.reset_all)
@@ -1356,15 +1397,6 @@ class GradingPanel(QWidget):
         header_layout.addSpacing(6)
         header_layout.addWidget(self.mode_title)
         header_layout.addStretch(1)
-        self.calibration_btn = QToolButton()
-        self.calibration_btn.setText("709")
-        self.calibration_btn.setCheckable(True)
-        calibration_label = I18N.tr(
-            "grading.rec709_calibration", "Rec.709 Gamma 2.4 primary grading calibration")
-        self.calibration_btn.setToolTip(calibration_label)
-        self.calibration_btn.setAccessibleName(calibration_label)
-        self.calibration_btn.clicked.connect(self._on_calibration_clicked)
-        header_layout.addWidget(self.calibration_btn)
         self._mode_buttons: dict[str, ModeTabButton] = {}
         for m_key, m_tip in (
             ("wheels", I18N.tr("panel.color_wheel", "色轮")),
@@ -1388,10 +1420,8 @@ class GradingPanel(QWidget):
         layout.addWidget(header)
         # 功能区之间的 1px 横向黑色细线（标题行 | 顶部参数 | 轮区 | 底部
         # 参数，对齐设计稿与达芬奇的分区方式）。
-        self._h_line_top = _h_divider()
         self._h_line_mid = _h_divider()
         self._h_line_bottom = _h_divider()
-        layout.addWidget(self._h_line_top)
 
         # ── 1. 顶部参数条（Primaries 与 Log 两页；共享参数各自持孪生行，
         #      经 _scalar_rows 注册表双向同步） ─────────────────────────
@@ -1446,6 +1476,7 @@ class GradingPanel(QWidget):
         self.lum_mix_slider = _make_row(
             "grading.lum_mix", "Lum Mix", "lum_mix", 0, 100, 100, decimals=2,
             accent=_ACCENT_RAINBOW)
+        self.lum_mix_slider.hide()
         # Log 顶排孪生行（temp/tint/contrast/pivot 与 Primaries 共享状态）
         self.log_low_range_slider = _make_row(
             "grading.log_low_range", "Low Range", "log_low_range",
@@ -1489,14 +1520,14 @@ class GradingPanel(QWidget):
             bar.setSizePolicy(QSizePolicy.Policy.Ignored,
                               QSizePolicy.Policy.Preferred)
             bar_layout = QHBoxLayout(bar)
-            bar_layout.setContentsMargins(4, 0, 4, 0)
+            bar_layout.setContentsMargins(10, 0, 10, 0)
             bar_layout.setSpacing(2)
             for row in rows:
-                bar_layout.addWidget(row, 1)
+                bar_layout.addWidget(row)
             return bar
 
         self.top_bar_stack = QStackedWidget()
-        self.top_bar_stack.setFixedHeight(34)
+        self.top_bar_stack.setFixedHeight(PARAMETER_BAR_HEIGHT)
         # 页 0：Primaries（色轮 / Color Bars 模式共享）
         self.top_bar_stack.addWidget(_param_bar([
             self.temp_slider, self.tint_slider, self.contrast_slider,
@@ -1509,7 +1540,7 @@ class GradingPanel(QWidget):
         ]))
 
         self.bottom_bar_stack = QStackedWidget()
-        self.bottom_bar_stack.setFixedHeight(34)
+        self.bottom_bar_stack.setFixedHeight(PARAMETER_BAR_HEIGHT)
         # 页 0：Primaries（Lum Mix 补入底排）
         self.bottom_bar_stack.addWidget(_param_bar([
             self.vibrance_slider, self.shadow_slider, self.highlights_slider,
@@ -1606,7 +1637,10 @@ class GradingPanel(QWidget):
         self.tonal_saturation_panel.interaction_ended.connect(
             self.interaction_ended.emit)
         self.mode_stack.addWidget(self.tonal_saturation_panel)
-        layout.addWidget(self.mode_stack, 1)
+        mode_layout = QHBoxLayout()
+        mode_layout.setContentsMargins(6, 0, 6, 0)
+        mode_layout.addWidget(self.mode_stack)
+        layout.addLayout(mode_layout, 1)
         layout.addWidget(self._h_line_bottom)
         # 底排参数（Color Boost / 阴影 / 高光 / 饱和度 / 色相 / Lum Mix）
         layout.addWidget(self.bottom_bar_stack)
@@ -1651,6 +1685,7 @@ class GradingPanel(QWidget):
             show_offset = self.mode_stack.contentsRect().width() >= self._offset_show_width
             for column in self._offset_columns:
                 column.setVisible(show_offset)
+            self.lum_mix_slider.setVisible(show_offset)
         return super().eventFilter(watched, event)
 
     def _switch_mode(self, mode: str) -> None:
@@ -1703,7 +1738,7 @@ class GradingPanel(QWidget):
         """
         row = _PrimaryValueRow(label, min_val, max_val, scale=scale,
                                offset=offset, decimals=decimals, accent=accent,
-                               default=default_val)
+                               default=default_val, drag_rate=scalar_drag_rate(key))
         self._scalar_rows.setdefault(key, []).append(row)
         row.valueChanged.connect(
             lambda value, r=row, k=key, is_base=base:
@@ -1717,26 +1752,21 @@ class GradingPanel(QWidget):
         """参数行变化：同步孪生行后走对应节流路径。"""
         if self._syncing_ui:
             return
-        self._sync_scalar_rows(source, value)
-        if is_base:
-            self._grading_update_timer.start()
-        else:
-            self._extended_update_timer.start()
+        self._sync_scalar_rows(key, source, value)
+        timer = self._grading_update_timer if is_base else self._extended_update_timer
+        if not timer.isActive():
+            timer.start()
 
-    def _sync_scalar_rows(self, source: _PrimaryValueRow, value: float) -> None:
+    def _sync_scalar_rows(self, key: str, source: _PrimaryValueRow, value: float) -> None:
         """同一参数的孪生行（Primaries/Log 参数条）静默跟随。"""
-        for rows in self._scalar_rows.values():
-            if source not in rows:
+        for row in self._scalar_rows[key]:
+            if row is source:
                 continue
-            for row in rows:
-                if row is source:
-                    continue
-                row.blockSignals(True)
-                try:
-                    row.setValue(value)
-                finally:
-                    row.blockSignals(False)
-            return
+            blocked = row.blockSignals(True)
+            try:
+                row.setValue(value)
+            finally:
+                row.blockSignals(blocked)
 
     # ==================== 信号发射 ====================
 
@@ -1785,7 +1815,7 @@ class GradingPanel(QWidget):
     def get_extended_params(self) -> dict[str, Any]:
         """当前扩展参数快照（与 grading_extended_changed payload 一致）。"""
         return {
-            PRIMARY_CALIBRATION_VERSION_KEY: int(self.calibration_btn.isChecked()),
+            PRIMARY_CALIBRATION_VERSION_KEY: self._calibration_version,
             "offset": (self.offset_wheel.hue, self.offset_wheel.sat,
                        self.offset_wheel.brightness),
             "pivot": self.pivot_slider.value(),
@@ -1797,7 +1827,7 @@ class GradingPanel(QWidget):
             "log_highlight": (self.log_highlight_wheel.hue,
                               self.log_highlight_wheel.sat,
                               self.log_highlight_wheel.brightness),
-            "log_offset": ((0.0, 0.0, 0.0) if self.calibration_btn.isChecked() else
+            "log_offset": (self._stored_log_offset if self._uses_measured_primaries else
                            (self.log_offset_wheel.hue, self.log_offset_wheel.sat,
                             self.log_offset_wheel.brightness)),
             "log_low_range": self.log_low_range_slider.value(),
@@ -1818,7 +1848,7 @@ class GradingPanel(QWidget):
             self._on_param_changed()
 
     def _on_offset_changed(self, source: ColorWheel) -> None:
-        if self.calibration_btn.isChecked():
+        if self._uses_measured_primaries:
             other = self.offset_wheel if source is self.log_offset_wheel else self.log_offset_wheel
             blocked = other.blockSignals(True)
             other.set_hsv(source.hue, source.sat, source.brightness)
@@ -1830,26 +1860,49 @@ class GradingPanel(QWidget):
         for row in self._scalar_rows["temp"]:
             row.set_display_units(PRIMARY_CALIBRATION_TEMP_SCALE if enabled else 1.0, 0.0, 1 if enabled else 2)
         for row in self._scalar_rows["pivot"]:
-            row.set_display_units(1.0, 0.255 if enabled else 0.0, 3)
+            row.set_display_units(1.0, 0.255 if enabled else 0.0, 3, display_bounds=(
+                (0.0, 1.0) if self._display_calibration_version == PRIMARY_CALIBRATION_CURRENT_VERSION else None))
         for wheel in (self.log_shadow_wheel, self.log_midtone_wheel, self.log_highlight_wheel):
             wheel.set_additive_display_units(0.01 if enabled else 1.0, 0.0)
         for wheel in (self.offset_wheel, self.log_offset_wheel):
             wheel.set_additive_display_units(1.0, 25.0 if enabled else 0.0)
         self.color_bars_panel.offset.set_display_base(25.0 if enabled else 0.0)
+        for wheel in (self.lift_wheel, self.gamma_wheel, self.gain_wheel, self.offset_wheel,
+                      self.log_shadow_wheel, self.log_midtone_wheel,
+                      self.log_highlight_wheel, self.log_offset_wheel):
+            wheel.set_measured_response(enabled)
+        for column in self.color_bars_panel.columns():
+            column.set_measured_response(enabled)
 
-    def _on_calibration_clicked(self, enabled: bool) -> None:
-        self.interaction_started.emit()
-        self._configure_calibration_units(enabled)
-        if enabled:
-            bias = [sum(channel) for channel in zip(*(
-                offset_hsb_to_display(w.hue, w.sat, w.brightness)
-                for w in (self.offset_wheel, self.log_offset_wheel)))]
-            self.offset_wheel.set_hsv(*offset_display_to_hsb(*bias))
-            self._on_offset_changed(self.offset_wheel)
-        else:
-            self.log_offset_wheel.set_hsv(0.0, 0.0, 0.0)
-            self._emit_grading_extended()
-        self.interaction_ended.emit()
+    @property
+    def _uses_measured_primaries(self) -> bool:
+        return self._display_calibration_version in (1, PRIMARY_CALIBRATION_CURRENT_VERSION)
+
+    @property
+    def pending_primary_calibration_version(self) -> int:
+        """The profile displayed for a neutral node until a grade is written."""
+        return self._display_calibration_version if self._calibration_version == 0 else 0
+
+    def refresh_primary_calibration(self) -> None:
+        """Refresh display units when the active video timeline space changes."""
+        version = self._calibration_version
+        if (version == 0 and self._ungraded and self._use_measured_primaries is not None
+                and self._use_measured_primaries()):
+            version = PRIMARY_CALIBRATION_CURRENT_VERSION
+        if version != self._display_calibration_version:
+            self._display_calibration_version = version
+            self._configure_calibration_units(self._uses_measured_primaries)
+
+    def load_extended_params(self, params: Mapping[str, Any], *, animated: bool = False) -> None:
+        """Project a complete grade onto the tools without committing changes."""
+        self._ungraded = not animated and ungraded_primary_params(params)
+        self.set_extended_params({key: params.get(key, default) for key, default
+                                  in DEFAULT_EXTENDED_GRADING_PARAMS.items()})
+
+    def confirm_primary_calibration(self, version: int) -> None:
+        """Keep the units of the profile persisted by the first grade edit."""
+        self._calibration_version = version
+        self.refresh_primary_calibration()
 
     def flush_pending_changes(self) -> None:
         """Bring engine listeners up to date before saving full layer payloads."""
@@ -1929,7 +1982,9 @@ class GradingPanel(QWidget):
                 column.blockSignals(False)
 
         if emit:
-            if wheel.math == "add":
+            if wheel is self.offset_wheel or wheel is self.log_offset_wheel:
+                self._on_offset_changed(wheel)
+            elif wheel.math == "add":
                 self._emit_grading_extended()
             else:
                 self._emit_grading_changed()
@@ -1948,13 +2003,6 @@ class GradingPanel(QWidget):
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(True)
         self.color_bars_panel.blockSignals(True)
-        for s in [
-            self.temp_slider, self.tint_slider,
-            self.contrast_slider, self.shadow_slider, self.highlights_slider,
-            self.sat_slider, self.vibrance_slider, self.mid_detail_slider,
-            self.hue_slider,
-        ]:
-            s.blockSignals(True)
 
         self.lift_wheel.set_hsv(*lift)
         self.gamma_wheel.set_hsv(*gamma)
@@ -1975,7 +2023,11 @@ class GradingPanel(QWidget):
             ("mid_detail", mid_det), ("hue_shift", hue),
         ]:
             for row in self._scalar_rows.get(key, []):
-                row.setValue(v)
+                blocked = row.blockSignals(True)
+                try:
+                    row.setValue(v)
+                finally:
+                    row.blockSignals(blocked)
 
         for w in [self.lift_wheel, self.gamma_wheel, self.gain_wheel]:
             w.blockSignals(False)
@@ -1992,10 +2044,11 @@ class GradingPanel(QWidget):
         self._syncing_ui = True
         self._extended_update_timer.stop()
         if PRIMARY_CALIBRATION_VERSION_KEY in params:
-            enabled = params[PRIMARY_CALIBRATION_VERSION_KEY] == 1
-            if enabled != self.calibration_btn.isChecked():
-                self.calibration_btn.setChecked(enabled)
-                self._configure_calibration_units(enabled)
+            self.confirm_primary_calibration(params[PRIMARY_CALIBRATION_VERSION_KEY])
+        if "log_offset" in params:
+            value = params["log_offset"]
+            if isinstance(value, (tuple, list)) and len(value) == 3:
+                self._stored_log_offset = tuple(value)
 
         wheels = [
             (self.offset_wheel, self.color_bars_panel.offset, "offset"),
@@ -2005,7 +2058,7 @@ class GradingPanel(QWidget):
             (self.log_offset_wheel, None, "log_offset"),
         ]
         for wheel, column, key in wheels:
-            if key == "log_offset" and self.calibration_btn.isChecked():
+            if key == "log_offset" and self._uses_measured_primaries:
                 key = "offset"
             if key not in params:
                 continue
@@ -2041,6 +2094,7 @@ class GradingPanel(QWidget):
 
     def reset_all(self) -> None:
         self._syncing_ui = True
+        self._stored_log_offset = (0.0, 0.0, 0.0)
         self._grading_update_timer.stop()
         self._extended_update_timer.stop()
 
@@ -2118,6 +2172,9 @@ class GradingPanel(QWidget):
     def current_stack_id(self, stack_id: str | None) -> None:
         """设置当前关联的调色栈 ID。"""
         self._current_stack_id = stack_id
+        for rows in self._scalar_rows.values():
+            for row in rows:
+                row.spin.cancel_drag()
 
     def set_save_callback(self, callback: Any) -> None:
         """

@@ -42,6 +42,7 @@ from typing import Optional, Any, Callable
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from src.app.controllers.dock_layout_controller import COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS
 from src.shared.diagnostics import flash_diag as _flash_diag
 
 logger = logging.getLogger(__name__)
@@ -495,9 +496,7 @@ class PageManagementMixin:
             # small delay lets Timeline report its actual restored height.
             schedule(50, self._migrate_edit_timeline_dock_height)
         if page_name == "Color" and hasattr(self, "_migrate_color_grading_dock_height"):
-            # The Color Wheel dock needs the restored splitter geometry to
-            # settle before the legacy height can be repaired.
-            schedule(50, self._migrate_color_grading_dock_height)
+            schedule(COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS, self._migrate_color_grading_dock_height)
         if page_name == "Color" and hasattr(self, "_migrate_color_remapping_dock_layout"):
             schedule(0, self._migrate_color_remapping_dock_layout)
         if page_name == "Composite" and hasattr(self, "_migrate_composite_scopes_dock_visibility"):
@@ -1168,6 +1167,11 @@ class PageManagementMixin:
             from src.shared.color.color_space_descriptor import (
                 descriptor_from_config,
             )
+            from src.shared.color.desktop_video_color import USE_DISPLAY_ICC
+            from src.shared.color.hdr_video_signal import hdr_monitor_space, project_hdr_settings
+            from src.shared.color.project_video_signal import (
+                aces_monitor_space, project_aces_settings, video_signal_spaces,
+            )
             from src.shared.color.types import ColorTransfer  # noqa: F401 — types 模块可用性探测（见下方 except 注释）
             # A timeline-clip composite (runtime_context set) is video;
             # otherwise it's a still-image composite.
@@ -1204,6 +1208,25 @@ class PageManagementMixin:
                             if cs in ("pq", "smpte2084", "hlg", "arib-std-b67"):
                                 is_hdr_source = True
                                 break
+            set_project_output = getattr(self.composite_viewer, "set_project_output_signal", None)
+            if callable(set_project_output):
+                set_display_icc = getattr(self.composite_viewer, "set_display_icc_enabled", None)
+                if callable(set_display_icc):
+                    set_display_icc(self.config_manager.get(USE_DISPLAY_ICC, False) is True)
+                project = getattr(self, "_current_edit_project", None)
+                settings = getattr(project, "color_management", None)
+                aces = project_aces_settings(settings) if is_video else None
+                if aces is not None and set_project_output(aces_monitor_space(), aces=aces):
+                    return
+                hdr = project_hdr_settings(settings) if is_video else None
+                if hdr is not None:
+                    spaces = video_signal_spaces(settings)
+                    if set_project_output(hdr_monitor_space(spaces[1], hdr), luminance=hdr.luminance):
+                        return
+                spaces = (video_signal_spaces(getattr(project, "color_management", None))
+                          if is_video and not is_hdr_source else None)
+                if set_project_output(spaces[1] if spaces is not None else None):
+                    return
             tonemap = 0
             target_peak = 100.0
             if is_hdr_source:
@@ -1248,6 +1271,7 @@ class PageManagementMixin:
         transfer_map = {
             ColorTransfer.LINEAR: 0, ColorTransfer.SRGB: 1,
             ColorTransfer.BT709: 2, ColorTransfer.PQ: 3,
+            ColorTransfer.GAMMA24: 5,
         }
         self.composite_viewer.set_display_transfer(
             transfer_map.get(desc.transfer, 1)
@@ -2575,18 +2599,29 @@ class PageManagementMixin:
             # if callable(activate_timeline_preview):
             #     activate_timeline_preview(context)
 
-        elif asset.is_image:
+        elif asset.is_image or (is_timeline_clip and self._is_aces_still_sequence(asset)):
             if hasattr(self, "_clear_color_timeline_clip_playback_context"):
                 self._clear_color_timeline_clip_playback_context()
             if is_timeline_clip:
+                path = asset.path
+                if self._is_aces_still_sequence(asset):
+                    from src.features.edit.core.sequence_classify import still_sequence_frame_path
+
+                    try:
+                        path = still_sequence_frame_path(path, asset_metadata, int(context.source_frame or 0))
+                    except (OSError, ValueError) as exc:
+                        self.status_bar.showMessage(str(exc), 5000)
+                        return
                 # TIMELINE_CLIP + image: do NOT create standalone session
-                if self.current_file_path != asset.path:
+                if self.current_file_path != path:
                     self._run_color_stack_hydration_step(
                         lambda: self.load_image(
-                            asset.path,
+                            path,
                             create_standalone_session=False,
                         ),
                     )
+                if hasattr(self, "_apply_color_project_viewer_signal"):
+                    self._apply_color_project_viewer_signal(True)
             else:
                 # Standalone image (SINGLE_ASSET / no clip_id):
                 # keep existing behavior with default create_standalone_session=True
@@ -3294,10 +3329,19 @@ class PageManagementMixin:
             logger.warning("No EditProject for color stack loading")
             return
 
-        stack = self._current_edit_project.color_stacks.get(stack_id)
-        if not stack:
+        if stack_id not in self._current_edit_project.color_stacks:
             logger.warning(f"Color stack not found: {stack_id}")
             return
+
+        graph_host = getattr(self, 'color_graph_host', None)
+        # Commit the departing graph before the next stack takes ownership of
+        # the engine and the panel. Publication can rehydrate the old stack.
+        if graph_host is not None and graph_host.grade_gesture_open():
+            graph_host.end_grade_gesture()
+        cancel_warper = getattr(self, "_cancel_warper_gestures", None)
+        if callable(cancel_warper):
+            cancel_warper()
+        stack = self._current_edit_project.color_stacks[stack_id]
 
         from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
 
@@ -3308,7 +3352,6 @@ class PageManagementMixin:
 
         # B06.5：图宿主随 clip 水合重绑（bind_stack + 会话切换 + 投影
         # 水合；scope owner = 真实 stack_id）
-        graph_host = getattr(self, 'color_graph_host', None)
         if graph_host is not None:
             try:
                 graph_host.on_clip_stack_loaded(
@@ -3412,8 +3455,12 @@ class PageManagementMixin:
                 panels["curves_palette"] = self.curves_panel
         if hasattr(self, 'hsl_curves_panel') and self.hsl_curves_panel:
             panels["hsl_panel"] = self.hsl_curves_panel
+        if getattr(self, "warper_panel", None):
+            panels["warper_panel"] = self.warper_panel
         if hasattr(self, 'mixer_panel') and self.mixer_panel:
             panels["mixer_panel"] = self.mixer_panel
+        if getattr(self, "effects_panel", None):
+            panels["effects_panel"] = self.effects_panel
         # D2：旧 lut_panel 实例已删除（LUT UI = ColorLutBrowser）
         if hasattr(self, 'denoise_panel') and self.denoise_panel:
             panels["denoise_panel"] = self.denoise_panel
@@ -3569,7 +3616,7 @@ class PageManagementMixin:
             return False
 
         asset = project.assets.get(clip.asset_id)
-        if asset is None or not (asset.is_video or asset.is_image):
+        if asset is None or not (asset.is_video or asset.is_image or self._is_aces_still_sequence(asset)):
             return False
 
         return bool(
@@ -3689,7 +3736,7 @@ class PageManagementMixin:
             return False
 
         # --- e. Validate asset type ---------------------------------------
-        if not (asset.is_video or asset.is_image):
+        if not (asset.is_video or asset.is_image or self._is_aces_still_sequence(asset)):
             self.status_bar.showMessage(
                 I18N.tr("edit.clip_not_video_or_image", "Clip is not video or image"), 3000
             )
@@ -3840,6 +3887,14 @@ class PageManagementMixin:
         if not is_subclip:
             return 0
         return self._metadata_int(metadata, "source_start", 0)
+
+    def _is_aces_still_sequence(self, asset: object) -> bool:
+        if getattr(asset, "media_type", None) != "image_sequence":
+            return False
+        from src.shared.color.project_video_signal import project_aces_settings
+
+        project = getattr(self, "_current_edit_project", None)
+        return project_aces_settings(getattr(project, "color_management", None)) is not None
 
     def _normalize_color_clip_source_frame(
         self,

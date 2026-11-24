@@ -35,6 +35,9 @@ from src.features.edit.core.edit_gpu_preview_renderer import (
 from src.features.edit.core.timeline_render_plan import ClipLayerInfo
 from src.features.edit.core.timeline_v2 import ClipInstance
 from src.features.edit.core.project import EditProject, MediaAsset
+from src.shared.color.color_space_descriptor import (
+    OUTPUT_SPACE_KEY, TIMELINE_SPACE_KEY, descriptor_for_space_preset,
+)
 
 
 # ================================================================
@@ -473,9 +476,14 @@ class TestPreviewWorkerCompClipDetection:
             assert result.shape == (1080, 1920, 3)
 
     @requires_gpu
-    def test_render_composite_id_video_clip_with_graph_data(self):
+    @pytest.mark.parametrize("configured", [False, True])
+    def test_render_composite_id_video_clip_with_graph_data(self, configured: bool) -> None:
         """Normal video clips with composite_id render through Composite."""
         project = EditProject.create("Test")
+        if configured:
+            project = project.with_color_management({
+                TIMELINE_SPACE_KEY: "rec709-g24", OUTPUT_SPACE_KEY: "rec709-g24",
+            })
         video_asset = _make_video_asset(asset_id="orig-asset-1")
         project = project.import_asset(
             path=video_asset.path,
@@ -498,9 +506,11 @@ class TestPreviewWorkerCompClipDetection:
 
         with patch.object(worker, '_get_comp_frame_renderer') as mock_get:
             mock_renderer = MagicMock()
-            mock_renderer.render_comp_clip_frame.return_value = np.zeros(
-                (1080, 1920, 3), dtype=np.float32
-            )
+            if configured:
+                data = np.array([[[0.04, 0.4, 0.6, 0.25]]], dtype=np.float32)
+            else:
+                data = np.zeros((1, 1, 3), dtype=np.float32)
+            mock_renderer.render_comp_clip_frame.return_value = data
             mock_get.return_value = mock_renderer
 
             result = worker._render_comp_clip_frame(layer)
@@ -508,6 +518,11 @@ class TestPreviewWorkerCompClipDetection:
             mock_renderer.render_comp_clip_frame.assert_called_once()
             assert result is not None
             assert result.dtype == np.uint8
+            kwargs = mock_renderer.render_comp_clip_frame.call_args.kwargs
+            assert kwargs.get("straight_alpha", False) == configured
+            if configured:
+                expected = np.rint(np.r_[np.power(data[0, 0, :3], 1 / 2.4), 0.25] * 255)
+                np.testing.assert_array_equal(result[0, 0], expected)
 
 
 # ================================================================
@@ -573,11 +588,18 @@ class TestGPUPatFallback:
         # not True — the strict gate must keep the CPU fallback.
         assert result[0] is False
 
-    def test_gpu_path_submits_comp_clip_handle_when_capability_declared(self):
+    @pytest.mark.parametrize("output_preset", [None, "rec709-g24", "display-p3"])
+    def test_gpu_path_submits_comp_clip_handle_when_capability_declared(
+        self, output_preset: str | None,
+    ) -> None:
         """Capability declared → the comp layer is submitted as a GPU
         handle with zero CPU frames (readback_count == 0 by construction:
         no numpy frame is produced anywhere in the flow)."""
         project = EditProject.create("Test")
+        if output_preset is not None:
+            project = project.with_color_management({
+                TIMELINE_SPACE_KEY: "rec709-g24", OUTPUT_SPACE_KEY: output_preset,
+            })
         comp_asset = _make_comp_clip_asset()
         project = project.import_asset(
             path=comp_asset.path,
@@ -628,6 +650,12 @@ class TestGPUPatFallback:
         assert submitted_task.layers[0]["frame_type"] == "comp_gpu_handle"
         assert "decoded_frame" not in submitted_task.layers[0]
         assert submitted_task.layers[0]["gpu_handle"] is handle
+        track = submitted_task.layers[0]["track_info"]
+        if output_preset is None:
+            assert "timeline_signal_space" not in track
+        else:
+            assert track["timeline_signal_space"] == descriptor_for_space_preset("rec709-g24")
+        assert (submitted_task.output_transform is None) == (output_preset != "display-p3")
 
     def test_comp_gpu_producer_stays_on_worker_gl_thread(self):
         """Comp GPU producers must not run on the generic decode pool."""

@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 # 与 GIF（编码器显式跳过音频，timeline_export P1-02）。
 # G14：PNG/TIFF 标准序列同样逐帧产物（无音轨）
 AUDIO_INCAPABLE_CODECS = frozenset({
-    "topos_image_sequence", "gif", "png_sequence", "tiff_sequence",
+    "topos_image_sequence", "gif", "png_sequence", "tiff_sequence", "exr_sequence",
 })
 
 #: 支持 alpha 直通的 codec 家族（ProRes 4444 系 + Topos 4444 系；
@@ -28,11 +28,11 @@ AUDIO_INCAPABLE_CODECS = frozenset({
 #: alpha_capable=False）
 ALPHA_CAPABLE_CODECS = frozenset({
     "prores_4444", "prores_4444xq", "topos_4444", "topos_4444xq",
-    "png_sequence", "tiff_sequence",
+    "png_sequence", "tiff_sequence", "exr_sequence",
 })
 
 _HDR_PIXEL_FORMATS = frozenset({"yuv420p10le", "yuv422p10le", "p010le",
-                                "yuv444p10le", "gbrp10le"})
+                                "yuv444p10le", "gbrp10le", "gbrpf32le"})
 
 
 @dataclass(frozen=True)
@@ -81,9 +81,11 @@ def describe_delivery_capability(
     codec_raw = getattr(config, "codec", "") or ""
     codec_value = str(getattr(codec_raw, "value", codec_raw)).strip().lower()
     pix_fmt = str(getattr(config, "pixel_format", "") or "").strip().lower()
+    if codec_value == "exr_sequence":
+        pix_fmt = "gbrpf32le"
     # R20（第七轮审计）：输出形态按事实——GIF/PNG/TIFF 序列此前全部
     # 误报 container=mov（GIF 是 gif 容器；PNG/TIFF 是帧目录交付）。
-    if codec_value in ("png_sequence", "tiff_sequence",
+    if codec_value in ("png_sequence", "tiff_sequence", "exr_sequence",
                        "topos_image_sequence"):
         container = "sequence"
     elif codec_value == "gif":

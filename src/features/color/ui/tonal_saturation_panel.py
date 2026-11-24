@@ -18,13 +18,16 @@ GradingPanel 的达芬奇式排版；未来 Log 轮盘页签也挂在同组。
 
 from typing import Optional
 
-from PyQt6.QtCore import QSize, pyqtSignal
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
+from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtWidgets import (QWidget,
                              QGridLayout, QPushButton)
 
-from src.shared.assets.icon_manager import icon_reset
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.i18n.i18n import I18N
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow,
+    create_panel_layout, style_reset_button,
+)
 
 
 class TonalSaturationPanel(QWidget):
@@ -38,23 +41,15 @@ class TonalSaturationPanel(QWidget):
         super().__init__(parent)
         self._syncing_ui = False
 
-        layout = QVBoxLayout()
-        layout.setContentsMargins(8, 2, 8, 2)
-        layout.setSpacing(1)
-        self.setLayout(layout)
-
-        header_layout = QHBoxLayout()
+        header_layout, layout = create_panel_layout(self, (8, 8, 2), 1)
         self.reset_all_btn = QPushButton()
         self.reset_all_btn.setObjectName("reset_btn")
-        self.reset_all_btn.setIcon(icon_reset())
-        self.reset_all_btn.setIconSize(QSize(12, 12))
-        self.reset_all_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_all_btn, global_reset=True)
         self.reset_all_btn.setToolTip(I18N.tr(
             "grading.tonal_saturation_reset", "重置全部色调区间饱和度"))
         self.reset_all_btn.clicked.connect(self.reset_all)
         header_layout.addWidget(self.reset_all_btn)
         header_layout.addStretch()
-        layout.addLayout(header_layout)
 
         # 标签宽度按当前语言字体度量自适应（三列统一取最长者），
         # 简写标签通常落在 50-80px；极端语言封顶 170，tooltip 兜底。
@@ -90,7 +85,7 @@ class TonalSaturationPanel(QWidget):
 
     @staticmethod
     def _create_slider(label: str, label_width: int) -> ParamSliderRow:
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, -100.0, 100.0, 0.0,
             step=0.5, decimals=1,
             label_width=label_width, slider_auto_hide=False)

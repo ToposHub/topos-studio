@@ -8,6 +8,10 @@ from PyQt6.QtWidgets import (
     QSlider, QToolButton, QVBoxLayout, QWidget,
 )
 
+from src.features.color.ui.panel_chrome import (
+    PARAMETER_LABEL_STYLE, PARAMETER_ROW_HEIGHT, SECTION_TITLE_STYLE,
+    style_reset_button,
+)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, COMPOSITE_KEYFRAMES_ICON_BTN_STYLE
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
@@ -135,7 +139,8 @@ class MeshTools(QWidget):
                 button.clicked.connect(lambda checked=False, index=i: self.grid_selected.emit(index))
                 grids.addWidget(button); self.grid_buttons.append(button)
             layout.addLayout(grids); layout.addSpacing(4)
-        title = QLabel(tr("tools", "Tools")); title.setFixedHeight(13)
+        title = QLabel(tr("tools", "Tools"))
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         layout.addWidget(title)
         row = QHBoxLayout(); row.setSpacing(0)
         group = QButtonGroup(self); group.setExclusive(True)
@@ -155,10 +160,13 @@ class MeshTools(QWidget):
                   ("all", "Select / Pin All or Deselect / De-pin All"), ("reset_selection", "Reset Selection / Pins"))
         for i, (name, label) in enumerate(labels):
             button = tool_button("reset" if name == "reset_selection" else name, tr(name, label))
+            if name == "reset_selection":
+                style_reset_button(button)
             button.clicked.connect(lambda checked=False, name=name: self.action_requested.emit(name))
             actions.addWidget(button, i // 4, i % 4); self.action_buttons[name] = button
         layout.addLayout(actions); layout.addSpacing(6)
-        range_label = QLabel(tr("range", "Range")); range_label.setFixedHeight(14)
+        range_label = QLabel(tr("range", "Range"))
+        range_label.setStyleSheet(SECTION_TITLE_STYLE)
         layout.addWidget(range_label)
         self.range_bar = WarperRange(rectangular)
         layout.addWidget(self.range_bar); layout.addSpacing(6)
@@ -166,7 +174,9 @@ class MeshTools(QWidget):
         self.auto_lock = ToggleSwitch()
         self.auto_lock.setAccessibleName(tr("auto_lock", "Auto Lock"))
         self.auto_lock.toggled.connect(self.lock_changed.emit)
-        lock_row.addWidget(self.auto_lock); lock_row.addWidget(QLabel(tr("auto_lock", "Auto Lock"))); lock_row.addStretch()
+        lock_label = QLabel(tr("auto_lock", "Auto Lock"))
+        lock_label.setStyleSheet(PARAMETER_LABEL_STYLE)
+        lock_row.addWidget(self.auto_lock); lock_row.addWidget(lock_label); lock_row.addStretch()
         layout.addLayout(lock_row)
         locks = QHBoxLayout(); locks.setSpacing(5)
         self.lock_combo = ChevronComboBox(); self.lock_combo.setFixedWidth(95)
@@ -191,12 +201,12 @@ class MeshTools(QWidget):
             col = QVBoxLayout(); col.setSpacing(3)
             number_row = QHBoxLayout(); number_row.setSpacing(2)
             value_label = QLabel(tr(name, label))
-            value_label.setStyleSheet(f"QLabel:disabled {{ color: {C.TEXT_HINT}; }}")
+            value_label.setStyleSheet(PARAMETER_LABEL_STYLE)
             value_label.setEnabled(False)
             self.value_labels[name] = value_label
             number_row.addWidget(value_label)
             value = DragValue("", -1 if name == "chroma" else 0, 1, 0, 3, compact=True, stretchable=True)
-            value.setFixedWidth(50)
+            value.setFixedSize(50, PARAMETER_ROW_HEIGHT)
             value.setAccessibleName(tr(name, label)); value.setMixedValue(True); value.setEnabled(False)
             value.valueChanged.connect(lambda v, key=name: self.component_edited.emit(key, v, False))
             value.interaction_started.connect(lambda key=name: self.interaction_started.emit(key))
@@ -209,7 +219,9 @@ class MeshTools(QWidget):
                 smooth.setEnabled(False)
                 smooth.clicked.connect(lambda checked=False, key=name: self.component_edited.emit(key, None, True))
                 buttons.addWidget(smooth); self.component_buttons[name].append(smooth)
-            reset = tool_button("reset", tr(f"reset_{name}", f"Reset {label}")); reset.setEnabled(False)
+            reset = tool_button("reset", tr(f"reset_{name}", f"Reset {label}"))
+            style_reset_button(reset)
+            reset.setEnabled(False)
             reset.clicked.connect(lambda checked=False, key=name: self.component_edited.emit(key, None, False))
             buttons.addWidget(reset); self.component_buttons[name].append(reset)
             col.addLayout(buttons); values.addLayout(col)
@@ -243,10 +255,10 @@ class StrokeTools(QWidget):
         self.setStyleSheet(f"""
             QLabel {{ font-size: 11px; }}
             QLabel:disabled {{ color: {C.TEXT_HINT}; }}
-            QSlider::handle:horizontal:disabled {{ background: {C.TEXT_HINT}; border-color: {C.BORDER_DARK}; }}
         """)
         layout = QVBoxLayout(self); layout.setContentsMargins(10, 7, 10, 10); layout.setSpacing(2)
-        title_label = QLabel(tr("tools", "Tools")); title_label.setFixedHeight(13)
+        title_label = QLabel(tr("tools", "Tools"))
+        title_label.setStyleSheet(SECTION_TITLE_STYLE)
         layout.addWidget(title_label)
         layout.addSpacing(4)
         row = QHBoxLayout(); row.setSpacing(0)
@@ -263,8 +275,10 @@ class StrokeTools(QWidget):
         layout.addSpacing(6); layout.addWidget(separator()); layout.addSpacing(6)
         title = QHBoxLayout()
         self.pin_label = QLabel(tr("pin_title", "Pin")); self.pin_label.setEnabled(False)
+        self.pin_label.setStyleSheet(SECTION_TITLE_STYLE)
         title.addWidget(self.pin_label); title.addStretch()
-        reset = tool_button("reset", tr("reset_pin", "Reset Pin")); reset.setFixedWidth(24)
+        reset = tool_button("reset", tr("reset_pin", "Reset Pin"))
+        style_reset_button(reset)
         reset.clicked.connect(lambda: self.action_requested.emit("reset_pin")); title.addWidget(reset)
         layout.addLayout(title)
         self.pin_reset = reset
@@ -277,10 +291,11 @@ class StrokeTools(QWidget):
         ):
             header = QHBoxLayout(); header.setSpacing(4)
             value_label = QLabel(tr(key, label)); value_label.setEnabled(False)
+            value_label.setStyleSheet(PARAMETER_LABEL_STYLE)
             self.value_labels[key] = value_label
             header.addWidget(value_label); header.addStretch()
             value = DragValue("", low, high, default, 3, compact=True)
-            value.setAccessibleName(tr(key, label)); value.setFixedWidth(62); value.setEnabled(False)
+            value.setAccessibleName(tr(key, label)); value.setFixedSize(62, PARAMETER_ROW_HEIGHT); value.setEnabled(False)
             header.addWidget(value); layout.addLayout(header)
             slider = QSlider(Qt.Orientation.Horizontal); slider.setRange(0, 1000)
             slider.setFixedHeight(10); slider.setEnabled(False)

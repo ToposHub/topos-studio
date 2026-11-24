@@ -58,6 +58,10 @@ class FilesPanel(QWidget):
     def get_main_window(self) -> QWidget | None:
         return self._main_window
 
+    def set_color_workspace_active(self, active: bool) -> None:
+        if self._native_panel is not None:
+            self._native_panel.set_color_workspace_active(active)
+
     def _show_context_menu(self, pos: QPoint) -> None:
         menu = QMenu(self)
         dock = self.parent()

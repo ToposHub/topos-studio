@@ -16,6 +16,7 @@ from src.features.edit.core.primary_grade_shader import (  # noqa: F401
     PRIMARY_GRADE_UNIFORMS,
 )
 from .layer_style_shaders import PSD_RGB_TRANSFER_GLSL
+from src.shared.color.video_signal_gl import VIDEO_SIGNAL_GLSL
 
 _PASSTHROUGH_VERTEX = """
 #version 330
@@ -1610,9 +1611,11 @@ void main() {
 
 _CS_TRANSFORM_FRAGMENT = """
 #version 330
+// PROJECT_VIDEO_SIGNAL_GLSL
+uniform bool u_project_signal;
 uniform sampler2D u_texture;
 uniform int u_direction;  // 0 = decode (encoded→Linear), 1 = encode (Linear→encoded)
-uniform int u_transfer;   // 0=sRGB, 1=Rec.709, 2=Linear, 3=PQ(ST.2084), 4=HLG, 5=TRAW PWL-log12
+uniform int u_transfer;   // 0=sRGB, 1=BT.709, 2=Linear, 3=PQ, 4=HLG, 5=TRAW PWL-log12, 6=Gamma 2.4
 uniform int u_primaries;  // gamut for the (de|en)coded side: 0=BT.709, 1=BT.2020, 2=DCI-P3, 3=AP1 (ACEScg)
 uniform bool u_input_premultiplied;
 in vec2 v_uv;
@@ -1764,12 +1767,15 @@ void main() {
     if (u_input_premultiplied && alpha > 0.0001) {
         color.rgb /= alpha;
     }
-    if (u_direction == 0) {
+    if (u_project_signal) {
+        color.rgb = topos_convert_video_signal(color.rgb);
+    } else if (u_direction == 0) {
         // decode: encoded -> linear
         if (u_transfer == 1) color.rgb = bt709_to_linear(color.rgb);
         else if (u_transfer == 3) color.rgb = pq_to_linear(color.rgb);
         else if (u_transfer == 4) color.rgb = hlg_to_linear(color.rgb);
         else if (u_transfer == 5) color.rgb = traw_log_to_linear(color.rgb);
+        else if (u_transfer == 6) color.rgb = sign(color.rgb) * pow(abs(color.rgb), vec3(2.4));
         else if (u_transfer == 2) { /* linear: no-op */ }
         else color.rgb = srgb_to_linear(color.rgb);
         // gamut: source primaries -> BT.709 working space (wide-gamut HDR)
@@ -1782,6 +1788,7 @@ void main() {
         else if (u_transfer == 3) color.rgb = linear_to_pq(color.rgb);
         else if (u_transfer == 4) color.rgb = linear_to_hlg(color.rgb);
         else if (u_transfer == 5) color.rgb = linear_to_traw_log(color.rgb);
+        else if (u_transfer == 6) color.rgb = sign(color.rgb) * pow(abs(color.rgb), vec3(1.0 / 2.4));
         else if (u_transfer == 2) { /* linear: no-op */ }
         else color.rgb = linear_to_srgb(color.rgb);
     }
@@ -1790,7 +1797,7 @@ void main() {
     }
     fragColor = color;
 }
-"""
+""".replace("// PROJECT_VIDEO_SIGNAL_GLSL", VIDEO_SIGNAL_GLSL)
 
 _COLOR_CORRECT_FRAGMENT = """
 #version 330

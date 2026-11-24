@@ -19,7 +19,7 @@
 样式常量统一引用自 src/shared/ui/style_sheet.py
 """
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QApplication,
+    QWidget, QAbstractSpinBox, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QApplication,
 )
 from PyQt6.QtCore import Qt, QEvent, QLocale, pyqtSignal
 from PyQt6.QtGui import QMouseEvent, QDoubleValidator
@@ -29,6 +29,9 @@ from src.shared.ui.style_sheet import (
     DRAG_VALUE_NORMAL_STYLE,
     DRAG_VALUE_ACTIVE_STYLE,
     DRAG_VALUE_DISABLED_STYLE,
+    DRAG_VALUE_EDITOR_STYLE,
+    NUMERIC_FIELD_HEIGHT,
+    NUMERIC_SPIN_BOX_STYLE,
 )
 
 # 进入拖拽前需要移动的最小像素数；小于此值视为点击，不改变数值，
@@ -48,6 +51,13 @@ _DEFAULT_SPEED = 0.1    # 默认 = base × 0.1（原 Shift 细调手感）
 _LARGE_SPEED = 1.0      # Shift = base × 1.0（大范围 / 粗调）
 _FINE_SPEED = 0.01      # Ctrl / ⌘ = base × 0.01（微调）
 _FINE_FLOOR = 0.1       # 微调档的每像素下限（仅当 base ≥ 0.1 时生效）
+
+
+def style_numeric_spin_box(spin: QAbstractSpinBox) -> None:
+    """Give an existing Qt spin box the shared numeric field appearance."""
+    spin.setStyleSheet(NUMERIC_SPIN_BOX_STYLE)
+    spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    spin.setFixedHeight(NUMERIC_FIELD_HEIGHT)
 
 
 def drag_speed_per_pixel(span: float, modifiers) -> float:
@@ -83,7 +93,8 @@ class DragValue(QWidget):
 
     def __init__(self, label: str, min_v: float, max_v: float, default: float,
                  decimals: int = 0, suffix: str = "", compact: bool = False,
-                 stretchable: bool = False, parent=None) -> None:
+                 stretchable: bool = False, parent=None, *,
+                 label_style: str = DRAG_VALUE_LABEL_STYLE) -> None:
         super().__init__(parent)
         self._min = float(min_v)
         self._max = float(max_v)
@@ -108,8 +119,7 @@ class DragValue(QWidget):
         # 内联编辑状态
         self._editing = False
 
-        # Match the global combo/input height so the inline editor has enough
-        # vertical room for its text and selection highlight.
+        # Keep the existing row height around the compact numeric field.
         self.setFixedHeight(24)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
 
@@ -124,15 +134,15 @@ class DragValue(QWidget):
             self._label.setMinimumWidth(50 if compact else 60)
             self._label.setAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self._label.setStyleSheet(DRAG_VALUE_LABEL_STYLE)
+            self._label.setStyleSheet(label_style)
             layout.addWidget(self._label)
 
-        # 数值格：QLabel（显示）与 QLineEdit（内联输入）叠放在同一格内，
-        # 通过 QStackedLayout 切换；非编辑态下 line edit 被隐藏，不会拦截鼠标事件。
+        # 数值格在 QLabel 和 QLineEdit 之间切换，隐藏的一项不参与布局。
         self._value_label = QLabel()
         self._value_label.setAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
         self._value_label.setStyleSheet(self._normal_value_style)
+        self._value_label.setFixedHeight(NUMERIC_FIELD_HEIGHT)
         self._value_label.setMinimumWidth(50 if compact else 60)
         if self._stretchable:
             self._value_label.setSizePolicy(
@@ -145,14 +155,7 @@ class DragValue(QWidget):
         self._edit.setObjectName("DragValueInlineEdit")
         self._edit.setAlignment(
             Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-        self._edit.setStyleSheet("""
-            QLineEdit {
-                color: #fff; font-size: 11px; font-weight: bold;
-                background: #3a3a40; border: 1px solid #ff8800;
-                border-radius: 3px; padding: 0px 3px;
-                min-height: 0px; max-height: 24px;
-            }
-        """)
+        self._edit.setStyleSheet(DRAG_VALUE_EDITOR_STYLE)
         self._edit.installEventFilter(self)
         self._edit.returnPressed.connect(self._commit_edit)
         self._edit.editingFinished.connect(self._commit_edit)
@@ -161,12 +164,12 @@ class DragValue(QWidget):
         # _edit 始终用 Maximum 策略，防止双击进入编辑模式时布局变形
         self._edit.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self._edit.setFixedHeight(24)
+        self._edit.setFixedHeight(NUMERIC_FIELD_HEIGHT)
         if not self._stretchable:
             self._edit.setMinimumWidth(50 if compact else 60)
 
-        layout.addWidget(self._value_label)
-        layout.addWidget(self._edit)
+        layout.addWidget(self._value_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._edit, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         self._update_display()
 
@@ -301,7 +304,8 @@ class DragValue(QWidget):
         self._editing = False
         self._edit.hide()
         self._value_label.show()
-        self._value_label.setStyleSheet(self._normal_value_style)
+        self._value_label.setStyleSheet(
+            self._normal_value_style if self.isEnabled() else self._disabled_value_style)
         # 移除全局事件过滤器
         app = QApplication.instance()
         if app:
@@ -401,7 +405,8 @@ class DragValue(QWidget):
             self._dragging = False
             self._drag_engaged = False
             if not self._editing:
-                self._value_label.setStyleSheet(self._normal_value_style)
+                self._value_label.setStyleSheet(
+                    self._normal_value_style if self.isEnabled() else self._disabled_value_style)
             if was_engaged:
                 self.interaction_ended.emit()
             event.accept()

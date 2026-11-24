@@ -34,6 +34,8 @@ P2 只支持创建 timeline 引用（TimelineSequenceRef），
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Optional, ClassVar
 import uuid
@@ -269,6 +271,10 @@ class MediaAsset:
         """获取帧率，图片返回 None"""
         if self.media_type == "image":
             return None
+        if self.media_type == "image_sequence" and "fps" not in self.metadata:
+            sequence = self.metadata.get("sequence")
+            if isinstance(sequence, dict) and isinstance(sequence.get("fps"), (int, float)):
+                return float(sequence["fps"])
         return self.metadata.get("fps")
 
     @property
@@ -276,6 +282,12 @@ class MediaAsset:
         """获取总帧数，图片返回 None"""
         if self.media_type == "image":
             return None
+        if self.media_type == "image_sequence" and "total_frames" not in self.metadata:
+            sequence = self.metadata.get("sequence")
+            if isinstance(sequence, dict):
+                start, end = sequence.get("first_number"), sequence.get("last_number")
+                if isinstance(start, int) and isinstance(end, int) and end >= start:
+                    return end - start + 1
         return self.metadata.get("total_frames")
 
     # P0 完整 Clip 元数据：来源时间码/音频技术字段类型化读取。
@@ -1132,6 +1144,9 @@ class EditProject:
     # 一致性比较（TAEP §6.2）。手动修改、脚本、AI 提交、XML 导入都必须走
     # 同一入口才能保证 revision 正确。
     revision: int = 0
+    # settings.color_management in the project package. Empty settings
+    # inherit the application defaults for documents without saved choices.
+    color_management: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """验证项目数据有效性"""
@@ -2506,6 +2521,10 @@ class EditProject:
         """F4.1：整体替换调色组表（命令层保证事务性；纯模型替换）。"""
         from dataclasses import replace as _replace
         return _replace(self, color_groups=dict(groups))
+
+    def with_color_management(self, settings: Mapping[str, Any]) -> EditProject:
+        """Replace the project's color settings, including unknown values."""
+        return replace(self, color_management=deepcopy(dict(settings)))
 
     def with_color_stack_versions(self, table: dict) -> "EditProject":
         """F4.2：整体替换版本/锁表（命令层保证事务性）。"""
@@ -4745,6 +4764,21 @@ def probe_media_metadata(path: str, *, include_pts_index: bool = True) -> dict[s
     metadata: dict[str, Any] = {}
 
     if ext in image_extensions:
+        if ext == ".exr":
+            from src.shared.io.openexr_io import read_exr_header
+
+            try:
+                header = read_exr_header(path)
+                lo, hi = header["dataWindow"]
+                width, height = hi - lo + 1
+                return {
+                    "width": int(width), "height": int(height), "format": "EXR",
+                    "file_size": os.path.getsize(path),
+                    "has_alpha": any(channel.name == "A" for channel in header["channels"]),
+                }
+            except (ImportError, OSError, RuntimeError, ValueError, KeyError) as error:
+                logger.warning("Failed to probe OpenEXR metadata: %s, %s", path, error)
+                return {"format": "EXR", "error": str(error)}
         # .toos 单图特化：走 topos image 探测链（档位/色彩/位深/像素格式
         # 齐全；FileIO/exiftool 路线对 TPIM 产不出 codec 信息）。探测失败
         # 回退 FileIO 通用路线（错误信息不丢）。

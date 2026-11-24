@@ -1049,27 +1049,6 @@ class ThresholdSlider(QFrame):
         self._slider.setMaximum(75)
         self._slider.setValue(55)
         self._slider.setFixedWidth(120)
-        self._slider.setStyleSheet(f"""
-            QSlider::groove:horizontal {{
-                background-color: {GRAPH_COLORS["scrubber_bg"]};
-                height: 4px;
-                border-radius: 2px;
-            }}
-
-            QSlider::handle:horizontal {{
-                background-color: {GRAPH_COLORS["threshold_line"]};
-                width: 12px;
-                height: 12px;
-                margin: -4px 0;
-                border-radius: 6px;
-            }}
-
-            QSlider::sub-page:horizontal {{
-                background-color: {GRAPH_COLORS["peak_normal"]};
-                height: 4px;
-                border-radius: 2px;
-            }}
-        """)
         layout.addWidget(self._slider)
 
         # Value display

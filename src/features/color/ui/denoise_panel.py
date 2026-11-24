@@ -8,20 +8,21 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QTimer
 from src.shared.i18n.i18n import I18N
 from src.features.color.core.denoise_engine import DenoiseEngine, get_model_tile_config
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_LABEL_STYLE, PARAMETER_ROW_SPACING, SECTION_TITLE_STYLE,
+    create_panel_layout, style_reset_button,
+)
+from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.shared.assets.icon_manager import icon_reset, get_icon, IconColors
+from src.shared.assets.icon_manager import get_icon, IconColors
 from src.shared.video.denoise.params import (
     SpatialDenoiseParams as SpatialParams,
     TemporalDenoiseParams as TemporalParams,
     VideoDenoiseParams,
 )
 
-# --- 达芬奇 Motion Effects 式标题样式 ---
-_PANEL_TITLE_STYLE = (
-    "color: #e8e8e8; font-weight: bold; font-size: 12px; letter-spacing: 0.5px;")
-_SECTION_TITLE_STYLE = "color: #dddddd; font-weight: bold; font-size: 11px;"
 # 行标签统一宽度：需容纳 "Mo. Est. Type" / "Edge Protection"（~80px）
 _LABEL_WIDTH = 88
 # 达芬奇 Motion Effects 每栏约 310px；这里放宽到 470 适配数值框/中英文，
@@ -95,28 +96,23 @@ class DenoisePanel(QWidget):
         if self.image_mode:
             self._init_image_ui()
             return
-        main_layout = QVBoxLayout()
-        main_layout.setContentsMargins(8, 6, 8, 6)
-        main_layout.setSpacing(4)
-        self.setLayout(main_layout)
+        header_layout, main_layout = create_panel_layout(self, (8, 8, 6), 4)
+        main_layout.setContentsMargins(0, 0, 0, 6)
+        main_layout.setSpacing(0)
 
         # === 面板标题行：标题 + 全部重置 ===
-        header_layout = QHBoxLayout()
         title_label = QLabel(I18N.tr("denoise.title", "降噪"))
-        title_label.setStyleSheet(_PANEL_TITLE_STYLE)
+        title_label.setStyleSheet(SECTION_TITLE_STYLE)
         header_layout.addWidget(title_label)
         header_layout.addStretch()
 
         self.reset_btn = QPushButton()
         self.reset_btn.setObjectName("reset_btn")
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(12, 12))
-        self.reset_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_btn, global_reset=True)
         self.reset_btn.setToolTip(I18N.tr(
             "denoise.reset_all_tooltip", "重置全部降噪参数"))
         self.reset_btn.clicked.connect(self.reset_defaults)
         header_layout.addWidget(self.reset_btn)
-        main_layout.addLayout(header_layout)
 
         # === 两栏主体：时域 | 空域（栏间 1px 竖分隔，达芬奇式） ===
         # 栏宽封顶 + 行尾 stretch：超宽停靠时面板左对齐（达芬奇调色板
@@ -129,15 +125,17 @@ class DenoisePanel(QWidget):
         spatial_col.setMaximumWidth(_COLUMN_MAX_WIDTH)
         divider = QWidget()
         divider.setFixedWidth(1)
-        divider.setStyleSheet("background-color: #333333;")
+        divider.setStyleSheet(f"background-color: {C.PANEL_DIVIDER}; border: none;")
         columns_layout.addWidget(temporal_col, 1)
         columns_layout.addWidget(divider)
         columns_layout.addWidget(spatial_col, 1)
         columns_layout.addStretch()
         main_layout.addLayout(columns_layout)
+        main_layout.addWidget(self._h_separator())
 
         # === 底部工具行：调试叠加（运动置信度，开发/调参用） ===
         footer_layout = QHBoxLayout()
+        footer_layout.setContentsMargins(8, 4, 8, 0)
         footer_layout.addStretch()
         self.video_debug_overlay_chk = QCheckBox(
             I18N.tr("denoise.debug_overlay", "调试叠加（运动置信度）"))
@@ -153,19 +151,17 @@ class DenoisePanel(QWidget):
 
     def _init_image_ui(self) -> None:
         """Expose only the still-image backends that DenoiseEngine implements."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
-        header = QHBoxLayout()
+        self.setStyleSheet(f"QGroupBox {{ {SECTION_TITLE_STYLE} }}")
+        header, layout = create_panel_layout(self, (8, 8, 6), 6)
         self.mode_combo = ChevronComboBox()
         self.mode_combo.addItem(I18N.tr("denoise.classic", "Classic"), "Basic")
         self.mode_combo.addItem(I18N.tr("denoise.ai", "AI Denoise"), "AI")
         header.addWidget(self.mode_combo)
         header.addStretch()
         self.reset_btn = self._make_section_reset_btn(
-            I18N.tr("denoise.reset_tooltip", "Reset Denoise"), self.reset_defaults)
+            I18N.tr("denoise.reset_tooltip", "Reset Denoise"), self.reset_defaults,
+            global_reset=True)
         header.addWidget(self.reset_btn)
-        layout.addLayout(header)
 
         self.classic_group = QGroupBox(I18N.tr("denoise.classic", "Classic"))
         classic = QVBoxLayout(self.classic_group)
@@ -326,20 +322,25 @@ class DenoisePanel(QWidget):
         """左栏：时域降噪（Frames 0=关闭，达芬奇行为）。"""
         col = QWidget()
         layout = QVBoxLayout(col)
-        layout.setContentsMargins(0, 0, 10, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
+        controls, threshold = QVBoxLayout(), QVBoxLayout()
+        for group in (controls, threshold):
+            group.setContentsMargins(8, 0, 10, 0)
+            group.setSpacing(PARAMETER_ROW_SPACING)
+        layout.addLayout(controls)
 
         # 节头：时域降噪 [⟲ 历史重置] [↺ 节重置]
         header = QHBoxLayout()
         title = QLabel(I18N.tr("denoise.temporal", "时域降噪"))
-        title.setStyleSheet(_SECTION_TITLE_STYLE)
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self._make_history_reset_btn())
         header.addWidget(self._make_section_reset_btn(
             I18N.tr("denoise.reset_temporal_tooltip", "重置时域降噪参数"),
             self._reset_temporal_section))
-        layout.addLayout(header)
+        controls.addLayout(header)
 
         # Frames：0 = 关闭（此时整列变灰，与达芬奇一致）
         self.temporal_frames = self.create_labeled_combo(
@@ -349,7 +350,7 @@ class DenoisePanel(QWidget):
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.temporal_frames['combo'].setSizeAdjustPolicy(
             QComboBox.SizeAdjustPolicy.AdjustToContents)
-        layout.addLayout(self.temporal_frames['layout'])
+        controls.addLayout(self.temporal_frames['layout'])
         # 紧凑下拉不吸收富余宽度；无 stretch 时 QBoxLayout 会把空隙均分
         # （视觉上内容居中），行尾 stretch 锁定左对齐
         self.temporal_frames['layout'].addStretch()
@@ -360,12 +361,13 @@ class DenoisePanel(QWidget):
             [I18N.tr("denoise.motion_fast", "快速"),
              I18N.tr("denoise.motion_balanced", "均衡"),
              I18N.tr("denoise.motion_accurate", "精确")])
-        layout.addLayout(self.temporal_motion['layout'])
+        controls.addLayout(self.temporal_motion['layout'])
 
         layout.addWidget(self._h_separator())
+        layout.addLayout(threshold)
 
         # 子节头：时域阈值 [↺]
-        layout.addLayout(self._make_sub_header(
+        threshold.addLayout(self._make_sub_header(
             I18N.tr("denoise.temporal_threshold", "时域阈值"),
             I18N.tr("denoise.reset_temporal_threshold_tooltip", "重置时域阈值"),
             self._reset_temporal_threshold))
@@ -397,7 +399,7 @@ class DenoisePanel(QWidget):
         temporal_grid = QGridLayout()
         temporal_grid.setContentsMargins(0, 0, 0, 0)
         temporal_grid.setHorizontalSpacing(2)
-        temporal_grid.setVerticalSpacing(6)
+        temporal_grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         temporal_grid.addWidget(self.temporal_link_btn, 0, 0, 2, 1)
         temporal_grid.addWidget(self.temporal_luma, 0, 1)
         temporal_grid.addWidget(self.temporal_chroma, 1, 1)
@@ -406,7 +408,7 @@ class DenoisePanel(QWidget):
         temporal_grid.addWidget(self.temporal_blend, 4, 1)
         temporal_grid.addWidget(self.temporal_scene_cut, 5, 1)
         temporal_grid.setColumnStretch(1, 1)
-        layout.addLayout(temporal_grid)
+        threshold.addLayout(temporal_grid)
 
         layout.addStretch()
         return col
@@ -415,38 +417,44 @@ class DenoisePanel(QWidget):
         """右栏：空域降噪（节标题 ToggleSwitch 启用）。"""
         col = QWidget()
         layout = QVBoxLayout(col)
-        layout.setContentsMargins(10, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
+        controls, threshold = QVBoxLayout(), QVBoxLayout()
+        for group in (controls, threshold):
+            group.setContentsMargins(10, 0, 8, 0)
+            group.setSpacing(PARAMETER_ROW_SPACING)
+        layout.addLayout(controls)
 
         # 节头：[⬤ 开关] 空域降噪 [↺ 节重置]
         header = QHBoxLayout()
         self.spatial_toggle = ToggleSwitch(checked=False)
         header.addWidget(self.spatial_toggle)
         title = QLabel(I18N.tr("denoise.spatial", "空域降噪"))
-        title.setStyleSheet(_SECTION_TITLE_STYLE)
+        title.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(title)
         header.addStretch()
         header.addWidget(self._make_section_reset_btn(
             I18N.tr("denoise.reset_spatial_tooltip", "重置空域降噪参数"),
             self._reset_spatial_section))
-        layout.addLayout(header)
+        controls.addLayout(header)
 
         self.spatial_mode = self.create_labeled_combo(
             I18N.tr("denoise.mode_q", "模式"),
             [I18N.tr("denoise.q_fast", "快速"),
              I18N.tr("denoise.q_better", "较好"),
              I18N.tr("denoise.q_enhanced", "增强")])
-        layout.addLayout(self.spatial_mode['layout'])
+        controls.addLayout(self.spatial_mode['layout'])
 
         self.spatial_radius = self._create_row(
             I18N.tr("denoise.radius", "半径"),
             1.0, 10.0, float(_SPATIAL_DEFAULTS.radius), 1.0, decimals=0)
-        layout.addWidget(self.spatial_radius)
+        controls.addWidget(self.spatial_radius)
 
         layout.addWidget(self._h_separator())
+        layout.addLayout(threshold)
 
         # 子节头：空域阈值 [↺]
-        layout.addLayout(self._make_sub_header(
+        threshold.addLayout(self._make_sub_header(
             I18N.tr("denoise.spatial_threshold", "空域阈值"),
             I18N.tr("denoise.reset_spatial_threshold_tooltip", "重置空域阈值"),
             self._reset_spatial_threshold))
@@ -472,14 +480,14 @@ class DenoisePanel(QWidget):
         spatial_grid = QGridLayout()
         spatial_grid.setContentsMargins(0, 0, 0, 0)
         spatial_grid.setHorizontalSpacing(2)
-        spatial_grid.setVerticalSpacing(6)
+        spatial_grid.setVerticalSpacing(PARAMETER_ROW_SPACING)
         spatial_grid.addWidget(self.spatial_link_btn, 0, 0, 2, 1)
         spatial_grid.addWidget(self.spatial_luma, 0, 1)
         spatial_grid.addWidget(self.spatial_chroma, 1, 1)
         spatial_grid.addWidget(self.spatial_threshold, 2, 1)
         spatial_grid.addWidget(self.spatial_detail, 3, 1)
         spatial_grid.setColumnStretch(1, 1)
-        layout.addLayout(spatial_grid)
+        threshold.addLayout(spatial_grid)
 
         layout.addStretch()
         return col
@@ -488,14 +496,11 @@ class DenoisePanel(QWidget):
     # 小构件工厂
     # ------------------------------------------------------------------
 
-    def _make_section_reset_btn(self, tooltip: str,
-                                slot: Callable[[], None]) -> QPushButton:
-        """节标题右侧的圆形重置小按钮（#reset_btn 全局样式）。"""
+    def _make_section_reset_btn(self, tooltip: str, slot: Callable[[], None],
+                                *, global_reset: bool = False) -> QPushButton:
         btn = QPushButton()
         btn.setObjectName("reset_btn")
-        btn.setIcon(icon_reset())
-        btn.setIconSize(QSize(12, 12))
-        btn.setFixedSize(16, 16)
+        style_reset_button(btn, global_reset=global_reset)
         btn.setToolTip(tooltip)
         btn.clicked.connect(slot)
         return btn
@@ -504,10 +509,7 @@ class DenoisePanel(QWidget):
         """时域节头的历史重置小按钮（⟲，与节重置 ↺ 视觉区分）。"""
         btn = QPushButton()
         btn.setObjectName("reset_btn")
-        icon = get_icon('fa5s.history', IconColors.WHITE)
-        btn.setIcon(icon if not icon.isNull() else icon_reset())
-        btn.setIconSize(QSize(12, 12))
-        btn.setFixedSize(16, 16)
+        style_reset_button(btn, glyph=lambda color: get_icon("fa5s.history", color))
         btn.setToolTip(I18N.tr("denoise.reset_history_tooltip", "重置时域历史"))
         btn.clicked.connect(self.video_history_reset_requested.emit)
         return btn
@@ -554,7 +556,7 @@ class DenoisePanel(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 2, 0, 0)
         label = QLabel(title)
-        label.setStyleSheet(_SECTION_TITLE_STYLE)
+        label.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(label)
         header.addStretch()
         header.addWidget(self._make_section_reset_btn(reset_tooltip, slot))
@@ -564,14 +566,14 @@ class DenoisePanel(QWidget):
         """栏内水平分隔线（达芬奇子节之间的细分隔）。"""
         line = QWidget()
         line.setFixedHeight(1)
-        line.setStyleSheet("background-color: #333333;")
+        line.setStyleSheet(f"background: {C.PANEL_DIVIDER}; border: none;")
         return line
 
     def _create_row(self, label: str, min_val: float, max_val: float,
                     default_val: float, step: float,
                     decimals: int = 2) -> ParamSliderRow:
         """创建标准参数行（标签 + 滑杆 + 数值框，标签宽对齐两栏）。"""
-        return ParamSliderRow(
+        return ColorParameterRow(
             label, min_val, max_val, default_val,
             step=step, decimals=decimals, label_width=_LABEL_WIDTH)
 
@@ -591,7 +593,7 @@ class DenoisePanel(QWidget):
         lbl = QLabel(label)
         lbl.setFixedWidth(_LABEL_WIDTH)
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        lbl.setStyleSheet("color: #bbbbbb; font-size: 11px;")
+        lbl.setStyleSheet(PARAMETER_LABEL_STYLE)
 
         combo = ChevronComboBox()
         combo.addItems(items)

@@ -944,6 +944,7 @@ class AsyncRenderer(QThread):
         """Loads and compiles fixed-function shaders from GLSL files."""
         shader_dir = os.path.join(os.path.dirname(__file__), "..", "shaders")
         from src.features.color.shaders.shaders import PASSTHROUGH_VERTEX, PASSTHROUGH_FRAGMENT, RAW_VIEW_FRAGMENT
+        from src.shared.color.video_signal_gl import VIDEO_SIGNAL_GLSL
         
         def load_prog(name, path):
             try:
@@ -967,6 +968,19 @@ class AsyncRenderer(QThread):
         self.utility_shaders["passthrough"] = self.ctx.program(
             vertex_shader=PASSTHROUGH_VERTEX,
             fragment_shader=PASSTHROUGH_FRAGMENT
+        )
+
+        self.utility_shaders["project_video_signal"] = self.ctx.program(
+            vertex_shader=PASSTHROUGH_VERTEX,
+            fragment_shader="#version 330\n" + VIDEO_SIGNAL_GLSL + """
+                uniform sampler2D u_texture;
+                in vec2 v_texcoord;
+                out vec4 f_color;
+                void main() {
+                    vec4 rgba = texture(u_texture, v_texcoord);
+                    f_color = vec4(topos_convert_video_signal(rgba.rgb), rgba.a);
+                }
+            """,
         )
 
         self.utility_shaders["raw_view"] = self.ctx.program(
@@ -1091,6 +1105,7 @@ class AsyncRenderer(QThread):
         elif cmd_type == RenderCommand.UPLOAD_IMAGE:
             if not isinstance(data, dict) or not data.get("is_video"):
                 self.__dict__.pop("_color_metal_source_transfer", None)
+                self.__dict__.pop("_video_source_primaries", None)
             if isinstance(data, dict):
                 # FIX: 传递 is_video 标志，防止视频模式下清除视频纹理状态
                 source_reference = {"use_source_as_reference": True} if data.get("use_source_as_reference") else {}
@@ -1357,7 +1372,8 @@ class AsyncRenderer(QThread):
     def _ensure_persistent_render_textures(
         self,
         width: int,
-        height: int
+        height: int,
+        dtype: str = "f2",
     ) -> Tuple[moderngl.Texture, moderngl.Framebuffer, moderngl.Texture, moderngl.Framebuffer, moderngl.Texture, moderngl.Framebuffer]:
         """
         P4: 获取或创建持久化的渲染纹理（raw_view/ping/pong）。
@@ -1375,7 +1391,8 @@ class AsyncRenderer(QThread):
         current_size = (width, height)
 
         # 尺寸匹配，直接返回缓存的纹理
-        if self._persistent_tex_size == current_size and self._persistent_raw_view_tex is not None:
+        if (self._persistent_tex_size == current_size and self._persistent_raw_view_tex is not None
+                and self._persistent_raw_view_tex.dtype == dtype):
             return (
                 self._persistent_raw_view_tex, self._persistent_raw_view_fbo,
                 self._persistent_ping_tex, self._persistent_ping_fbo,
@@ -1393,19 +1410,19 @@ class AsyncRenderer(QThread):
                 except Exception: logger.debug("GPU resource release failed during cleanup", exc_info=True)
 
         # 创建新纹理
-        self._persistent_raw_view_tex = self.ctx.texture((width, height), 4, dtype='f2')
+        self._persistent_raw_view_tex = self.ctx.texture((width, height), 4, dtype=dtype)
         self._persistent_raw_view_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._persistent_raw_view_tex.repeat_x = False
         self._persistent_raw_view_tex.repeat_y = False
         self._persistent_raw_view_fbo = self.ctx.framebuffer(color_attachments=[self._persistent_raw_view_tex])
 
-        self._persistent_ping_tex = self.ctx.texture((width, height), 4, dtype='f2')
+        self._persistent_ping_tex = self.ctx.texture((width, height), 4, dtype=dtype)
         self._persistent_ping_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._persistent_ping_tex.repeat_x = False
         self._persistent_ping_tex.repeat_y = False
         self._persistent_ping_fbo = self.ctx.framebuffer(color_attachments=[self._persistent_ping_tex])
 
-        self._persistent_pong_tex = self.ctx.texture((width, height), 4, dtype='f2')
+        self._persistent_pong_tex = self.ctx.texture((width, height), 4, dtype=dtype)
         self._persistent_pong_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
         self._persistent_pong_tex.repeat_x = False
         self._persistent_pong_tex.repeat_y = False
@@ -2027,6 +2044,34 @@ class AsyncRenderer(QThread):
                     self.__dict__.get("_color_metal_front_serial", 0),
                     self._video_generation_id, False)
 
+    def _draw_project_output_quad(
+        self, source_texture: Any, signal: Any, aces: Any = None, *, luminance: Any = None,
+    ) -> None:
+        """Write the output signal before display-device adaptation."""
+        if aces is not None:
+            from src.shared.color.aces_video_gl import AcesVideoGLPass, aces_shader_key
+
+            key = aces_shader_key(aces)
+            current = self.__dict__.get("_aces_output_pass")
+            if current is None or self._aces_output_key != key:
+                replacement = AcesVideoGLPass(self.ctx, aces)
+                if current is not None:
+                    current.release()
+                self._aces_output_pass, self._aces_output_key = replacement, key
+                current = replacement
+            current.draw(source_texture, signal[0])
+            return
+        if signal is None:
+            program = self.utility_shaders["passthrough"]
+        else:
+            from src.shared.color.video_signal_gl import bind_video_signal_transform
+
+            program = self.utility_shaders["project_video_signal"]
+            bind_video_signal_transform(program, *signal, luminance=luminance)
+        source_texture.use(0)
+        program["u_texture"].value = 0
+        self._render_quad(program)
+
     def _color_metal_display_allowed(self, params: dict) -> bool:
         """The native viewer takes display-encoded SDR at this entry."""
         if (params.get("film_grain", {}).get("enabled")
@@ -2144,7 +2189,8 @@ class AsyncRenderer(QThread):
                 # 节点与帧无关）
                 layer_param_provider=graph_node_layer_provider(
                     snapshot.graph,
-                    frame=params.get('color_graph_source_frame')),
+                    frame=params.get('color_graph_source_frame'),
+                    preview_grade=snapshot.preview_grade),
                 render_quad=self._render_quad,
                 bind_aux=lambda prog, layer:
                     self._bind_aux_textures_single_layer(prog, layer),
@@ -2900,6 +2946,10 @@ class AsyncRenderer(QThread):
         color_output_target = (
             params.get('color_output_target') if color_output_mode else None
         )
+        viewer_signal = params.get('project_viewer_signal')
+        viewer_aces = params.get('project_viewer_aces')
+        viewer_hdr = params.get('project_viewer_hdr')
+        project_luminance = viewer_hdr.luminance if viewer_hdr is not None else None
         color_output_tex = None
         color_output_fbo = None
         source_image = params.get('source_image')
@@ -3066,7 +3116,7 @@ class AsyncRenderer(QThread):
         # 对于 ColorOutput 模式，仍使用临时纹理以确保正确性
         if color_output_mode:
             # ColorOutput 模式：使用临时纹理（原有逻辑）
-            output_dtype = 'f4' if color_output_target == 'full_res' else 'f2'
+            output_dtype = 'f4' if color_output_target == 'full_res' or viewer_aces is not None or viewer_hdr is not None else 'f2'
             raw_view_tex = self._acquire_color_output_temp_texture(
                 render_temp_textures, w, h, dtype=output_dtype
             )
@@ -3074,8 +3124,9 @@ class AsyncRenderer(QThread):
             self._temp_texture_alloc_count += 1
         else:
             # 视频播放/预览模式：使用持久化纹理
-            raw_view_tex, raw_view_fbo, ping_tex, ping_fbo, pong_tex, pong_fbo = \
-                self._ensure_persistent_render_textures(w, h)
+            resources = (self._ensure_persistent_render_textures(w, h, "f4")
+                         if viewer_aces is not None or viewer_hdr is not None else self._ensure_persistent_render_textures(w, h))
+            raw_view_tex, raw_view_fbo, ping_tex, ping_fbo, pong_tex, pong_fbo = resources
         
         raw_view_fbo.use()
         self.ctx.viewport = (0, 0, w, h)
@@ -3201,6 +3252,30 @@ class AsyncRenderer(QThread):
             prog_raw = self.utility_shaders['raw_view']
             source_tex.use(0)
             prog_raw['u_texture'].value = 0
+            input_signal = params.get('project_input_signal')
+            if (input_signal is not None and viewer_hdr is not None and viewer_hdr.input == "auto"
+                    and not has_source_override and (has_video_planes or has_video_texture)):
+                from src.shared.color.hdr_video_signal import hdr_input_descriptor
+                from src.shared.media.color_metadata import normalize_color_transfer
+
+                transfer = normalize_color_transfer(self.__dict__.get("_color_metal_source_transfer"))
+                if transfer in ("smpte2084", "arib-std-b67"):
+                    timeline_space = input_signal[1]
+                    source_space = hdr_input_descriptor(
+                        viewer_hdr, timeline_space, media_type="video",
+                        metadata={"color_transfer": transfer,
+                                  "color_primaries": self.__dict__.get("_video_source_primaries")},
+                    )
+                    input_signal = (source_space, timeline_space)
+            prog_raw['u_project_input_signal'].value = input_signal is not None
+            if input_signal is not None:
+                from src.shared.color.video_signal_gl import bind_video_signal_transform
+
+                bind_video_signal_transform(
+                    prog_raw, *input_signal,
+                    reference_gamut_compression=bool(viewer_aces and viewer_aces.reference_gamut_compression),
+                    luminance=project_luminance,
+                )
 
             rp = params.get('raw_preview', self.raw_preview_params) or {'exposure': 0.0, 'gains': (1.0, 1.0, 1.0)}
             prog_raw['u_raw_prev_exposure'].value = float(rp.get('exposure', 0.0))
@@ -3214,8 +3289,8 @@ class AsyncRenderer(QThread):
             prog_raw['u_raw_color_boost'].value = float(rp.get('color_boost', 0.0))
             prog_raw['u_raw_mid_detail'].value = float(rp.get('mid_detail', 0.0))
             prog_raw['u_raw_sharpness'].value = float(rp.get('sharpness', 0.0))
-            prog_raw['u_raw_color_space'].value = int(rp.get('color_space', 0))
-            prog_raw['u_raw_gamma'].value = int(rp.get('gamma', 0))
+            prog_raw['u_raw_color_space'].value = -1 if input_signal is not None else int(rp.get('color_space', 0))
+            prog_raw['u_raw_gamma'].value = 0 if input_signal is not None else int(rp.get('gamma', 0))
             prog_raw['u_is_srgb_source'].value = bool(rp.get('is_srgb_source', False))
             # P3-1: GPU端 BGR->RGB swizzle（视频帧是 BGR/BGRA 时设置）
             # Full-resolution source overrides are already RGB.  Do not carry
@@ -3254,7 +3329,7 @@ class AsyncRenderer(QThread):
         # P4: 对于 ColorOutput 模式，使用临时纹理；否则使用持久化纹理
         if color_output_mode:
             # ColorOutput 模式：使用临时纹理（原有逻辑）
-            output_dtype = 'f4' if color_output_target == 'full_res' else 'f2'
+            output_dtype = 'f4' if color_output_target == 'full_res' or viewer_aces is not None or viewer_hdr is not None else 'f2'
             ping_tex = self._acquire_color_output_temp_texture(
                 render_temp_textures, w, h, dtype=output_dtype
             )
@@ -3299,12 +3374,15 @@ class AsyncRenderer(QThread):
             self._color_metal_front_serial = self.__dict__.get("_color_metal_front_serial", 0) + 1
         if (
             metal_preview is not None
+            and viewer_aces is None
+            and viewer_hdr is None
             and params.get("color_graph_snapshot") is not None
             and (not color_output_mode or color_output_target == "scope")
             and self._graph_execution_deferred_reason(params) is None
         ):
             surface = metal_preview.surface.publisher.current()
-            if (not color_output_mode and self._color_metal_display_allowed(params)
+            if (not color_output_mode and viewer_signal is None
+                    and self._color_metal_display_allowed(params)
                     and surface.is_usable()):
                 metal_display = (self._color_metal_front_serial,
                                  self._video_generation_id, surface.generation)
@@ -3535,10 +3613,13 @@ class AsyncRenderer(QThread):
             self.ctx.viewport = (0, 0, w, h)
             self.ctx.clear(0.0, 0.0, 0.0, 0.0)
 
-            prog_pass = self.utility_shaders['passthrough']
-            current_source_tex.use(0)
-            prog_pass['u_texture'].value = 0
-            self._render_quad(prog_pass)
+            # External monitoring receives project output. The desktop can
+            # use a different reference view, and Composite receives working RGB.
+            self._draw_project_output_quad(
+                current_source_tex, viewer_signal if color_output_target == "monitor" else None,
+                viewer_aces if color_output_target == "monitor" else None,
+                luminance=project_luminance,
+            )
             # Composite/monitor consumers read this texture outside the current
             # render pass and therefore require immediate completion.  The
             # scope target is consumed next in the same GL context; command
@@ -3572,10 +3653,14 @@ class AsyncRenderer(QThread):
                     params.get('mask_preview_style', 'highlight'), 0)
                 self._render_quad(prog_preview)
             else:
-                prog_pass = self.utility_shaders['passthrough']
-                current_source_tex.use(0)
-                prog_pass['u_texture'].value = 0
-                self._render_quad(prog_pass)
+                display_signal = viewer_signal
+                if viewer_hdr is not None and viewer_signal is not None:
+                    from src.shared.color.hdr_video_signal import hdr_monitor_space
+
+                    display_signal = (viewer_signal[0], hdr_monitor_space(viewer_signal[1], viewer_hdr))
+                self._draw_project_output_quad(
+                    current_source_tex, display_signal, viewer_aces, luminance=project_luminance,
+                )
 
             self.ctx.disable(moderngl.BLEND)
 
@@ -6237,6 +6322,8 @@ class AsyncRenderer(QThread):
         self.debug_last_render_command = "RENDER_VIDEO_FRAME"
         self._color_metal_source_transfer = getattr(
             getattr(decoded_frame, "metadata", None), "color_transfer", None)
+        self._video_source_primaries = getattr(
+            getattr(decoded_frame, "metadata", None), "color_primaries", None)
         # New frame content: qualifier mattes keyed on this epoch must regenerate
         # (__new__-constructed test stubs skip __init__; __dict__ access avoids
         # the QObject RuntimeError raised by plain attribute reads)
@@ -6446,6 +6533,7 @@ class AsyncRenderer(QThread):
         # Execute render using the external GPU texture planes
         self.debug_last_render_command = "RENDER_VIDEO_GPU_FRAME"
         self._color_metal_source_transfer = getattr(gpu_frame, "color_transfer", None)
+        self._video_source_primaries = getattr(gpu_frame, "color_primaries", None)
         # New frame content: qualifier mattes keyed on this epoch must regenerate
         # (__new__-constructed test stubs skip __init__; __dict__ access avoids
         # the QObject RuntimeError raised by plain attribute reads)
@@ -7044,6 +7132,9 @@ class AsyncRenderer(QThread):
         # Run this before the GL teardown while the render thread still owns
         # the context.  A queued zero-copy frame has no other release path once
         # ``run`` exits its command loop.
+        aces_output = self.__dict__.pop("_aces_output_pass", None)
+        if aces_output is not None:
+            aces_output.release()
         metal_preview = self.__dict__.pop("_color_metal_preview", None)
         if metal_preview is not None:
             try:

@@ -790,7 +790,11 @@ class ThumbnailRequest(QRunnable):
                 psd = PSDImage.open(path)
                 img = np.array(psd.composite())
                 img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-            elif ext == '.exr' or ext == '.hdr':
+            elif ext == '.exr':
+                from src.shared.io.openexr_io import read_exr_bgr
+
+                img = np.rint(np.clip(read_exr_bgr(path)[..., :3], 0.0, 1.0) * 255).astype(np.uint8)
+            elif ext == '.hdr':
                 # Use np.fromfile + imdecode to handle Unicode paths on Windows
                 img_data = np.fromfile(path, dtype=np.uint8)
                 img = cv2.imdecode(img_data, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH)
@@ -1850,15 +1854,20 @@ class ClipThumbnailWorker(QRunnable):
     def _extract_image_thumbnail(self) -> Optional[QImage]:
         """Extract single thumbnail from image file (returns QImage, thread-safe)."""
         try:
-            # Use np.fromfile to handle Unicode paths on Windows
-            img_data = np.fromfile(self._request.asset_path, dtype=np.uint8)
-            img_bgr = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+            path = self._request.asset_path
+            ext = os.path.splitext(path)[1].lower()
+            if ext == ".exr":
+                from src.shared.io.openexr_io import read_exr_bgr
+
+                img_bgr = np.rint(np.clip(read_exr_bgr(path)[..., :3], 0.0, 1.0) * 255).astype(np.uint8)
+            else:
+                # Use np.fromfile to handle Unicode paths on Windows.
+                img_bgr = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
 
             if img_bgr is None:
                 return None
 
             # Handle EXIF orientation
-            ext = os.path.splitext(self._request.asset_path)[1].lower()
             if ext in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.webp', '.heic', '.heif']:
                 img_bgr = FileIO._apply_exif_orientation(img_bgr, self._request.asset_path)
 

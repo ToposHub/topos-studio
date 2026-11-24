@@ -67,6 +67,8 @@ class ColorMetadataConfig:
     mastering_display: Optional[tuple[float, ...]] = None  # (gx,gy,bx,by,rx,ry,wpx,wpy)
     max_cll: Optional[int] = None               # nits
     max_fall: Optional[int] = None              # nits
+    mastering_peak_nits: float = 1000.0
+    mastering_black_nits: float = 0.005
 
     def __post_init__(self) -> None:
         """验证色彩元数据。

@@ -119,31 +119,6 @@ class _AsyncSaveWorker(QRunnable):
 # 转换函数：EditProject <-> ToposProject
 # ================================================================
 
-def _collect_color_management_settings() -> dict:
-    """收集用户全局色彩管理偏好（见 color_space_descriptor）。"""
-    try:
-        from src.shared.color.color_space_descriptor import (
-            collect_color_management_settings,
-        )
-        return collect_color_management_settings()
-    except ImportError:
-        # 模块缺失属可接受的降级（精简构建），落盘侧回退空 dict。
-        logger.debug(
-            "color_space_descriptor unavailable; saving without "
-            "color management settings",
-        )
-        return {}
-    except Exception:
-        # AUD-16713：收集逻辑的运行期错误不得静默——否则工程照常落盘但
-        # color_management 为空，P0-COLOR-04 的"色彩管理随工程落盘"承诺
-        # 无声失效且无从诊断。
-        logger.exception(
-            "Failed to collect color management settings; "
-            "project will be saved without them",
-        )
-        return {}
-
-
 def _serialize_source_patch_overrides(overrides: Any) -> dict[str, Any]:
     """F2.1：SourcePatchSpec 覆盖 → 可 JSON 化 dict。
 
@@ -444,8 +419,7 @@ def convert_edit_project_to_topos_project(
             # 写入 project.json；0/无键 = 未设置，由访问器解析默认 48000）
             "project_sample_rate": int(
                 getattr(edit_project, "project_sample_rate", 0) or 0),
-            # P0-COLOR-04：色彩管理设定随工程落盘（换机器/交接不丢）
-            "color_management": _collect_color_management_settings(),
+            "color_management": copy.deepcopy(edit_project.color_management),
             "render_cache_settings": (
                 edit_project.render_cache_settings.to_dict()
                 if hasattr(edit_project.render_cache_settings, "to_dict")
@@ -511,31 +485,6 @@ def convert_topos_project_to_edit_project(
     Returns:
         EditProject 实例
     """
-    # P0-COLOR-04：工程级色彩管理设定在此注入运行时覆盖层——两条加载
-    # 路径（Edit 工程 / standalone 图片工程）都经过本函数，一处注入
-    # 全覆盖。工程无该键时清空覆盖层（回退用户全局偏好）。
-    try:
-        from src.shared.color.color_space_descriptor import (
-            set_project_color_overrides,
-        )
-        set_project_color_overrides(
-            (getattr(topos_project, "settings", None) or {}).get(
-                "color_management"))
-    except ImportError:
-        # AUD-16714：模块缺失属可接受的降级（精简构建），保持全局默认。
-        logger.debug(
-            "color_space_descriptor unavailable; project color "
-            "overrides not injected",
-        )
-    except Exception:
-        # AUD-16714：注入失败意味着工程将以全局默认（而非作者所见）的
-        # 色彩管理渲染——静默吞掉会击穿"两条加载路径一处注入全覆盖"的
-        # 保证，必须留日志。
-        logger.exception(
-            "Failed to inject project color management overrides; "
-            "falling back to user global defaults",
-        )
-
     # 如果有完整数据，使用完整数据构建
     if full_data:
         # 从 full_data 获取完整的 assets
@@ -786,6 +735,7 @@ def convert_topos_project_to_edit_project(
     sync_diagnostics = sanitize_sync_diagnostics(
         project_settings.get("sync_diagnostics"))
 
+    color_management = project_settings.get("color_management")
     return EditProject(
         project_id=topos_project.project_id,
         name=topos_project.name,
@@ -812,6 +762,8 @@ def convert_topos_project_to_edit_project(
         created_at=topos_project.created_at,
         modified_at=topos_project.modified_at,
         revision=getattr(topos_project, "revision", 0),
+        color_management=copy.deepcopy(color_management)
+        if isinstance(color_management, dict) else {},
         # M14.3b：工程级采样率从 settings 恢复（旧工程无键 = 0 → 未设置）
         project_sample_rate=int(
             (getattr(topos_project, "settings", None) or {}).get(

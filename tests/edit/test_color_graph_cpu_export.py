@@ -127,15 +127,15 @@ class TestGraphCpuExport:
         graph = stack.color_graph
         correctors = [n for n in graph.nodes if n.node_type == "corrector"]
         service = ColorGraphService()
-        # C3：邻域参数（mid_detail）→ CPU 生产域显式 unsupported
+        # C3：邻域参数 sharpness 仍不在 CPU 生产域
         patched = service.apply_intent(graph, "set_node_option", {
             "node_id": correctors[2].node_id,
-            "name": "grade_patch", "value": ("mid_detail", 0.5)})
+            "name": "grade_patch", "value": ("sharpness", 0.5)})
         assert patched.ok, patched.diagnostics
         carrying = stack.with_color_graph(patched.graph)
         frame = _gradient_frame()
         strict = _exporter(carrying)
-        with pytest.raises(ExportGradeDegradedError, match="mid_detail"):
+        with pytest.raises(ExportGradeDegradedError, match="sharpness"):
             strict._apply_color_grade_unstabilized(
                 frame.copy(), _layer(sid, source_frame=20))
         # 显式降级：走扁平路径成片（不静默少效果——告警 + 扁平输出）

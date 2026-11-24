@@ -50,6 +50,14 @@ def test_detect_no_operations():
     assert detect_operations([_layer()]) == set()
 
 
+def test_mist_is_available_for_video_but_spatial_for_lut() -> None:
+    layers = [_layer(effects_params={"mist_enabled": True, "mist_mix": 33})]
+    assert detect_operations(layers) == {"mist"}
+    assert build_delivery_matrix_report(layers, TARGET_VIDEO).kept_rows[0].operation == "mist"
+    assert build_delivery_matrix_report(layers, TARGET_LUT).dropped_rows[0].operation == "mist"
+    assert not detect_operations([_layer(effects_params={"mist_enabled": True, "mist_mix": 50})])
+
+
 def test_detect_primary_and_texture_split():
     layer = _layer(grading_params={"exposure": 10.0})
     ops = detect_operations([layer])
@@ -58,7 +66,9 @@ def test_detect_primary_and_texture_split():
     assert detect_operations([layer]) == {"primary", "texture"}
     # 只有纹理参数：不算 primary
     layer = _layer(grading_params={"mid_detail": 5.0})
-    assert detect_operations([layer]) == {"texture"}
+    assert detect_operations([layer]) == {"mid_detail"}
+    assert build_delivery_matrix_report([layer], TARGET_VIDEO).rows[0].delivery == DELIVERY_FULL
+    assert build_delivery_matrix_report([layer], TARGET_LUT).rows[0].delivery == DELIVERY_DROPPED
     # 默认值不算
     layer = _layer(grading_params={"lift": (0.0, 0.0, 0.0), "contrast": 0.0})
     assert detect_operations([layer]) == set()

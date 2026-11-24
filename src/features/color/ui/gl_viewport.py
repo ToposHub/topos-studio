@@ -53,11 +53,25 @@ class GLCanvasViewport(QOpenGLWidget):
 
         if parent_canvas and hasattr(parent_canvas, 'engine'):
             parent_canvas.engine.initialize_async_renderer(self.context())
+            self.context().aboutToBeDestroyed.connect(self._release_aces_split)
             # Connect the frame_ready signal to trigger update
             parent_canvas.engine.renderer.frame_ready.connect(self._on_frame_ready)
 
         # Emit signal to notify that GL context and async renderer are ready
         self.gl_initialized.emit()
+
+    def _release_aces_split(self) -> None:
+        parent = self.parent()
+        while parent is not None and not hasattr(parent, "engine"):
+            parent = parent.parent()
+        release = getattr(getattr(parent, "engine", None), "release_aces_split_resources", None)
+        if not callable(release) or not self.isValid():
+            return
+        self.makeCurrent()
+        try:
+            release()
+        finally:
+            self.doneCurrent()
 
     def _on_frame_ready(self, tex_id) -> None:
         # ``frame_ready`` is emitted by the renderer thread.  Updating only the

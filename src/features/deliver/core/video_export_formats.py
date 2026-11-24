@@ -52,11 +52,12 @@ CODEC_CONTAINER_TABLE: dict[str, FrozenSet[str]] = {
     "topos_raw": frozenset({"mov"}),    # M4-R8（ADR-C058）：RAW 直出，自研 MOV only
     "png_sequence": frozenset({""}),
     "tiff_sequence": frozenset({""}),
+    "exr_sequence": frozenset({""}),
     "topos_image_sequence": frozenset({""}),
 }
 
 SEQUENCE_CODECS: frozenset[str] = frozenset({
-    "png_sequence", "tiff_sequence", "topos_image_sequence",
+    "png_sequence", "tiff_sequence", "exr_sequence", "topos_image_sequence",
 })
 
 

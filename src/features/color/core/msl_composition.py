@@ -32,6 +32,7 @@ from typing import Sequence
 from src.features.color.core.composition_uniforms import (
     CompositionUniformManifest,
 )
+from src.features.color.core.mist import MIST_MSL
 from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
@@ -145,7 +146,11 @@ _PIPELINE_CALLS = {
         "float2(params.u_tex_size_x, params.u_tex_size_y), "
         "params.u_fx_enabled != 0u, params.u_blur_enabled != 0u, "
         "params.u_blur_mode, params.u_blur_intensity, params.u_blur_detail, "
-        "params.u_blur_radius, params.u_blur_bokeh, params.u_blur_angle);"),
+        "params.u_blur_radius, params.u_blur_bokeh, params.u_blur_angle);\n"
+        "if (params.u_mist_amount != 0.0) { "
+        "color += mist_delta(u_input_tex, smp, r.uv, tex_color.rgb, "
+        "float2(params.u_tex_size_x, params.u_tex_size_y), "
+        "params.u_mist_spread, params.u_mist_amount); }"),
     "curves": "color = msl_apply_curves(color, u_curves_tex, smp);",
     "hsl_curve": "color = msl_apply_hsl_curve(color, u_hsl_curve_tex, smp);",
     "lut3d": "color = msl_apply_3dlut(color, u_lut_tex, smp, params.u_lut_intensity);",
@@ -236,7 +241,7 @@ def emit_composition_msl(
         else:
             parts.append(MSL_WARPER)
     if "blur_sharpen" in active_effects:
-        parts.append(MSL_BLUR_SHARPEN)
+        parts += [MSL_BLUR_SHARPEN, MIST_MSL]
     if "blend_modes" in active_effects:
         parts.append(MSL_BLEND_MODES)
     if "soft_clip" in active_effects:

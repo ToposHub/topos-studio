@@ -24,6 +24,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
+from src.features.color.core.mist import (
+    MIST_KEYS, apply_mist_cpu, mist_is_active, mist_render_params,
+)
 from src.features.color.core.color_graph_compiler import (
     ColorGraphRenderPlan,
     RenderPass,
@@ -289,23 +292,56 @@ def _hsv_to_rgb(hsv: np.ndarray) -> np.ndarray:
     return v * (kxxx * (_F32(1.0) - s) + p * s)
 
 
+def apply_midtone_detail_cpu(color: np.ndarray, source: np.ndarray, amount: float) -> np.ndarray:
+    """Apply the GLSL four-neighbor detail stage to a full-resolution RGB frame."""
+    if (color.ndim != 3 or color.shape[-1] != 3 or min(color.shape[:2]) == 0
+            or color.shape != source.shape):
+        raise UnsupportedNode("Midtone Detail requires an H × W RGB frame")
+    if not np.isfinite(amount):
+        raise ValueError("Midtone Detail strength must be finite")
+    dtype = color.dtype.type
+    radius = 3.0 * source.shape[1] / 2048.0
+    pixels = int(radius)
+    fraction = radius - pixels
+    average = np.zeros_like(color)
+    for axis in (0, 1):
+        length = source.shape[axis]
+        positions = np.arange(length)
+        for direction in (-1, 1):
+            near = positions + direction * pixels
+            sample = np.take(source, near.clip(0, length - 1), axis=axis)
+            sample *= dtype(1.0 - fraction)
+            average += sample
+            if fraction:
+                far = (near + direction).clip(0, length - 1)
+                sample = np.take(source, far, axis=axis)
+                sample *= dtype(fraction)
+                average += sample
+    average *= dtype(0.25)
+    lum = _luma601(color)
+    weight = _smoothstep_np(0.0, 0.5, lum) * (
+        dtype(1.0) - _smoothstep_np(0.5, 1.0, lum)) * dtype(4.0)
+    return color + (color - average) * (dtype(amount / 100.0) * weight[..., None])
+
+
 def apply_grading_uniforms_cpu(color: np.ndarray,
                                values: Mapping[str, Any], *,
                                source_color: np.ndarray | None = None) -> np.ndarray:
     """GRADING_SNIPPET.apply_grading 的 numpy 移植（基础点态域，逐条同序）。
 
     ``values`` 为 ``composition_uniform_values`` 的产物（与 GL 同一
-    提取路径）。邻域参数（mid_detail/sharpness）非零时显式
-    :class:`UnsupportedNode`（非点态，CPU oracle 不近似）。
+    提取路径）。中间细节在完整帧上应用；点态采样不可使用邻域参数。
     """
-    if float(values.get("u_mid_detail", 0.0)) != 0.0 or float(
-            values.get("u_sharpness", 0.0)) != 0.0:
-        raise UnsupportedNode(
-            "mid_detail/sharpness 为邻域采样，不在 CPU 点态基础域")
+    mid_detail = float(values.get("u_mid_detail", 0.0))
+    if float(values.get("u_sharpness", 0.0)) != 0.0:
+        raise UnsupportedNode("sharpness 为邻域采样，CPU 未接线")
+    if mid_detail != 0.0 and color.ndim != 3:
+        raise UnsupportedNode("Midtone Detail requires an H × W RGB frame")
     c = np.ascontiguousarray(color, dtype=_F32)
 
     # 0. 原始亮度（Lum Mix 用）
-    luma_original = _luma601(c if source_color is None else np.asarray(source_color, dtype=_F32))
+    source = c if source_color is None else np.asarray(source_color, dtype=_F32)
+    luma_original = _luma601(source)
 
     # 1. Exposure
     exposure = _F32(values.get("u_exposure", 0.0))
@@ -440,6 +476,15 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
         # mix(color, gray, -boost) = color + boost*(color - gray)
         c = (c + boost[..., None] * (c - gray[..., None])).astype(_F32)
 
+    # 8. Midtone Detail samples the ungraded input at the current node.
+    if mid_detail != 0.0:
+        if values.get("u_mid_detail_calibrated", 0.0):
+            from src.features.color.core.midtone_detail_calibration import apply_calibrated_detail_cpu
+
+            c = apply_calibrated_detail_cpu(c, source, mid_detail)
+        else:
+            c = apply_midtone_detail_cpu(c, source, mid_detail)
+
     # 9. Hue Shift（符号防护 HSV 旋转）
     hue_shift = _F32(values.get("u_hue_shift", 0.0))
     if hue_shift != 0.0:
@@ -555,12 +600,24 @@ CPU_GRADING_BASIC_KEYS = frozenset({
 #: 与 GL 有效域一致——不因死键拒绝可执行层）
 _CPU_DEAD_GRADING_KEYS = frozenset({"temperature", "shadows"})
 
-#: fx/blur 组的中性值（enabled/blur_enabled 关闭且幅度全零 = GL no-op）
-def _fx_params_neutral(fx: Mapping[str, Any]) -> bool:
+_KNOWN_FX_KEYS = frozenset((
+    "enabled", "mode", "sharpen", "texture", "halo", "radius", "iterations",
+    "blur_enabled", "blur_mode", "blur_intensity", "blur_detail", "blur_radius",
+    "blur_bokeh", "blur_angle", "blur_iterations",
+    "texture_soften_intensity", "texture_soften_detail", "optical_blur_radius",
+    "optical_blur_bokeh", "motion_blur_intensity", "motion_blur_angle",
+    "fast_blur_intensity", "fast_blur_radius",
+)) | MIST_KEYS
+
+
+def _fx_params_neutral(fx: Mapping[str, Any], *, allow_mist: bool = False) -> bool:
+    """Check for active effects outside the calling backend's supported domain."""
     if fx.get("enabled") or fx.get("blur_enabled"):
         return False
+    if not allow_mist and mist_is_active(fx):
+        return False
     for key, value in fx.items():
-        if key in ("enabled", "blur_enabled", "mode", "iterations"):
+        if key in _KNOWN_FX_KEYS:
             continue
         try:
             if float(value) != 0.0:
@@ -608,9 +665,10 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
                      - _CPU_DEAD_GRADING_KEYS)
     if unknown:
         errors.append(f"grading 参数未支持: {unknown}")
-    if float(grading.get("mid_detail") or 0.0) != 0.0 or float(
-            grading.get("sharpness") or 0.0) != 0.0:
-        errors.append("mid_detail/sharpness 为邻域采样（非点态基础域）")
+    if float(grading.get("sharpness") or 0.0) != 0.0:
+        errors.append("sharpness 为邻域采样（非点态基础域）")
+    if backend != "cpu" and float(grading.get("mid_detail") or 0.0) != 0.0:
+        errors.append("mid_detail 为邻域采样（非点态基础域）")
     if layer.get("plugins"):
         errors.append("插件无 CPU/Metal 实现（显式 unsupported）")
     if layer.get("_plugin_bindings"):
@@ -648,7 +706,7 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
                 and not (backend == "pointwise" and uses_calibrated_soft_clip(soft_clip))):
             errors.append("curves_soft_clip 非默认（不在基础域）")
     fx = layer.get("effects_params")
-    if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx):
+    if isinstance(fx, Mapping) and fx and not _fx_params_neutral(fx, allow_mist=backend == "cpu"):
         errors.append("fx/blur 组非中性（不在基础域）")
     if layer.get("curves_data") and layer.get("curves_lut") is None:
         errors.append("curves_data 未预构建 curves_lut（GL 侧在 "
@@ -743,8 +801,14 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         raise UnsupportedNode("; ".join(errors))
     h, w = image.shape[:2]
     src = np.ascontiguousarray(image, dtype=_F32)
+    color = src[..., :3]
+    effects = layer.get("effects_params")
+    if isinstance(effects, Mapping):
+        spread, amount = mist_render_params(effects)
+        if amount != 0.0:
+            color = apply_mist_cpu(color, spread, amount)
     graded, values = apply_layer_grading_cpu(
-        src[..., :3], layer, width=width or w, height=height or h)
+        color, layer, width=width or w, height=height or h)
     lut = layer.get("curves_lut")
     if lut is not None:
         graded = apply_curves_cpu(graded, lut)
@@ -1141,10 +1205,9 @@ def run_graph_frame_cpu(
         for extra in entries:
             if extra.get("_unsupported_advanced"):
                 raise UnsupportedNode("Advanced Color chain segment requires full graph execution")
-            flat = GradingMath.apply_grading(
-                buf[..., :3].reshape(-1, 3), dict(extra))
+            graded = GradingMath.apply_grading(buf[..., :3], dict(extra))
             buf = buf.copy()
-            buf[..., :3] = flat.reshape(buf.shape[:2] + (3,))
+            buf[..., :3] = graded
         return buf
 
     work = _apply_chain(work, pre_chain)

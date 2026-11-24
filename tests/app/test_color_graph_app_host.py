@@ -283,8 +283,87 @@ class TestGradingGestureRouting:
         h.host.panel_host._on_active_node_changed(corrector.node_id)
         return corrector
 
+    @pytest.mark.parametrize("control", ["temp", "log_shadow"])
+    @pytest.mark.parametrize("graphless", [False, True])
+    def test_video_primary_profile_and_first_edit_use_one_undo(self, qapp, qtbot, control, graphless):
+        from src.features.color.core.layer import Layer
+        from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
+        from src.features.color.ui.color_wheel import GradingPanel
+        from src.shared.color.color_space_descriptor import OUTPUT_SPACE_KEY, TIMELINE_SPACE_KEY
+
+        project, stack_id = EditProject.create(name="Rec.709").create_color_stack(asset_id="a1", name="s")
+        project = project.with_color_management({TIMELINE_SPACE_KEY: "rec709-g24", OUTPUT_SPACE_KEY: "srgb"})
+        stack = project.color_stacks[stack_id].with_layers([Layer("Neutral").to_dict()])
+        graph = migrate_legacy_stack(stack)
+        project = project.update_color_stack(
+            stack_id, layers=stack.layers, color_graph=None if graphless else graph)
+        h = _Harness(qapp, project)
+        h.host.on_clip_stack_loaded(stack_id)
+        corrector = self._select_first_corrector(h, graph)
+        grading = _GradingHarness(h.host, h.engine)
+        host = grading.mixin
+        host._is_video_playing = lambda: False
+        host._invalidate_video_render_params_if_playing = Mock()
+        host.request_render = Mock()
+        host._current_edit_project = project
+        host._is_video_work_mode = lambda: True
+        panel = GradingPanel(use_measured_primaries=host._use_measured_video_primaries)
+        qtbot.addWidget(panel)
+        host.grading_panel = panel
+        h.host._panels_provider = lambda: {"grading_panel": panel}
+        h.host._sync_engine_from_bound_stack(project)
+        assert panel.pending_primary_calibration_version == 2
+        assert panel.pivot_slider.spin.value() == pytest.approx(0.435)
+        assert h.host.panel_grade_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 0
+
+        host._is_video_work_mode = lambda: False
+        panel.refresh_primary_calibration()
+        assert panel.pending_primary_calibration_version == 0
+        host._is_video_work_mode = lambda: True
+        host._current_edit_project = project.with_color_management({OUTPUT_SPACE_KEY: "rec709-g24"})
+        panel.refresh_primary_calibration()
+        assert panel.pending_primary_calibration_version == 0
+        host._current_edit_project = project
+        panel.refresh_primary_calibration()
+
+        depth = len(h.cmd_stack._undo_stack)
+        host.on_grading_extended_changed(panel.get_extended_params())
+        assert not h.host.end_grade_gesture()
+        assert len(h.cmd_stack._undo_stack) == depth
+        if control == "temp":
+            value = 5.0
+            panel.grading_changed.connect(host.on_grading_changed)
+            panel.temp_slider.spin.setValue(500.0)
+            panel.flush_pending_changes()
+        else:
+            value = (120.0, 0.2, 0.0)
+            host.on_grading_extended_changed({**panel.get_extended_params(), control: value})
+
+        assert h.host.panel_grade_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 2
+        assert h.host.end_grade_gesture()
+        assert len(h.cmd_stack._undo_stack) == depth + 1
+        updated = h.holder["project"].color_stacks[stack_id].color_graph
+        grade = next(n for n in updated.nodes if n.node_id == corrector.node_id).params["grade"]
+        assert grade[control] == value
+        assert grade[PRIMARY_CALIBRATION_VERSION_KEY] == 2
+        assert panel.pending_primary_calibration_version == 0
+        assert h.host.undo()
+        assert h.host.panel_grade_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 0
+        assert panel.pending_primary_calibration_version == 2
+        assert h.host.redo()
+        assert h.host.panel_grade_params()[PRIMARY_CALIBRATION_VERSION_KEY] == 2
+        assert panel.pending_primary_calibration_version == 0
+        reopened = type(stack).from_dict(h.holder["project"].color_stacks[stack_id].to_dict())
+        assert next(n for n in reopened.color_graph.nodes
+                    if n.node_id == corrector.node_id).params["grade"][PRIMARY_CALIBRATION_VERSION_KEY] == 2
+
     def test_graph_context_routes_to_transaction(self, harness):
+        from src.features.color.core.color_graph_param_source import node_layer_payload
+        from src.features.color.core.layer import Layer
+
         h, stack_id, graph = harness
+        h.engine.layers = [Layer.from_dict(node_layer_payload(node)) for node in graph.nodes
+                           if node.node_type == "corrector"]
         h.host.on_clip_stack_loaded(stack_id)
         corrector = self._select_first_corrector(h, graph)
         assert h.host.graph_edit_context_active()
@@ -304,6 +383,264 @@ class TestGradingGestureRouting:
         node = next(n for n in new_graph.nodes
                     if n.node_id == corrector.node_id)
         assert node.params["grade"]["exposure"] == 15.0
+
+    @pytest.mark.parametrize("control", ["yrgb", "hsl", "soft_clip"])
+    @pytest.mark.parametrize("graphless", [False, True])
+    def test_first_video_curve_edit_saves_profile_in_same_graph_command(
+            self, qapp, qtbot, control, graphless):
+        from types import SimpleNamespace
+
+        from src.app.controllers.color_controller import ColorControllerMixin
+        from src.features.color.core.layer import Layer
+        from src.features.color.ui.curves_panel import CurvesPanel
+        from src.shared.color.color_space_descriptor import TIMELINE_SPACE_KEY
+        from src.shared.ui.widgets.curves_widget import CurvesWidget
+
+        project, stack_id = EditProject.create(name="709").create_color_stack(asset_id="a", name="s")
+        project = project.with_color_management({TIMELINE_SPACE_KEY: "rec709-g24"})
+        stack = project.color_stacks[stack_id].with_layers([Layer("Neutral").to_dict()])
+        graph = migrate_legacy_stack(stack)
+        project = project.update_color_stack(
+            stack_id, layers=stack.layers, color_graph=None if graphless else graph)
+        h = _Harness(qapp, project)
+        h.host.on_clip_stack_loaded(stack_id)
+        node = self._select_first_corrector(h, graph)
+
+        host = _GradingHarness(h.host, h.engine).mixin
+        host._graph_tool_route = lambda: ColorControllerMixin._graph_tool_route(host)
+        host._tool_flush_timer = Mock()
+        host._current_edit_project = project
+        host._is_video_work_mode = lambda: True
+        host._is_video_playing = lambda: False
+        host._invalidate_video_render_params_if_playing = Mock()
+        host.request_render = Mock()
+        host.grading_panel = SimpleNamespace(current_stack_id=stack_id)
+        h.engine.get_current_image.return_value = None
+        h.engine.get_active_layer.side_effect = lambda: h.engine.layers[h.engine.active_layer_index]
+        panel = host.curves_panel = CurvesPanel(
+            CurvesWidget(), use_measured_curves=host._use_measured_rec709_grading)
+        qtbot.addWidget(panel)
+        host.curves_widget = panel.curves_widget
+        host.hsl_curves_panel = panel.hsl_panel
+        h.host._panels_provider = lambda: {
+            "curves_palette": panel, "curves_panel": panel.curves_widget, "hsl_panel": panel.hsl_panel,
+        }
+        h.host._sync_engine_from_bound_stack(project)
+        assert panel.automatic_calibration_pending
+        assert not h.cmd_stack._undo_stack
+        if control == "yrgb":
+            panel.curves_widget.changed.connect(host.on_curves_changed)
+            panel.curves_widget.set_curves_data({"M": [(0, 255), (128, 100), (255, 0)]}, emit_changed=True)
+            panel.curves_widget.flush()
+        elif control == "hsl":
+            hsl = panel.hsl_panel.hsl_curves_widget
+            hsl.changed.connect(host.on_hsl_curve_changed)
+            hsl.set_curves_data({"SatSat": [(127.5, 95)]})
+            hsl.update_lut()
+            hsl.flush()
+        else:
+            panel.soft_clip_changed.connect(host.on_curves_soft_clip_changed)
+            panel.soft_clip_rows["low_soft"].slider.setValue(1200)
+            panel._on_row_interaction_ended()
+
+        draft = h.engine.set_color_graph_preview.call_args.args[0]
+        assert draft is not None
+        assert h.host.end_grade_gesture()
+        assert len(h.cmd_stack._undo_stack) == 1
+        assert not panel.automatic_calibration_pending
+        payload = h.host.panel_layer_payload(node.node_id)
+        for domain in ("curves_soft_clip", "curves_edit"):
+            assert payload[domain]["calibration_version"] == 1
+        assert h.host.undo()
+        assert panel.automatic_calibration_pending
+        assert h.host.redo()
+        assert not panel.automatic_calibration_pending
+
+    def test_mist_edits_legacy_stack_once_and_undo_restores_original(self, harness) -> None:
+        h, _, _ = harness
+        project, stack_id = EditProject.create(name="Mist").create_color_stack(asset_id="a1", name="Mist")
+        layers = f03_layer_stack()
+        layers[0].effects_params.update(mist_enabled=True, mist_radius=0.2, mist_mix=24.0)
+        project = project.update_color_stack(stack_id, layers=[layer.to_dict(None) for layer in layers])
+        h.holder["project"] = project
+        h.host.on_clip_stack_loaded(stack_id)
+        node = self._select_first_corrector(h, h.host.bound_graph())
+        assert h.host.panel_layer_payload(node.node_id)["effects_params"]["mist_mix"] == 24.0
+
+        h.host.begin_grade_gesture("mist")
+        for mixer in (28.0, 33.0):
+            assert h.host.submit_blur_sharpen_change(
+                node.node_id, {"mist_enabled": True, "mist_mix": mixer}, "mist")
+        assert h.holder["project"].color_stacks[stack_id].color_graph is None
+        assert h.host.end_grade_gesture()
+        h.engine.set_color_graph_preview.assert_called_with(None)
+        assert len(h.cmd_stack._undo_stack) == 1
+        assert h.host.panel_layer_payload(node.node_id)["effects_params"]["mist_mix"] == 33.0
+        assert h.host.undo()
+        assert h.host.panel_layer_payload(node.node_id)["effects_params"]["mist_mix"] == 24.0
+
+    def test_primary_gesture_previews_with_no_cpu_frame_and_keeps_one_undo(self, harness):
+        from src.features.color.core.color_graph_param_source import graph_node_layer_provider
+        from src.features.color.core.color_graph_snapshot import freeze_graph
+
+        h, stack_id, graph = harness
+        h.host.on_clip_stack_loaded(stack_id)
+        node = self._select_first_corrector(h, graph)
+        grading = _GradingHarness(h.host, h.engine)
+        current = h.host.panel_grade_params()
+        args = [current[key] for key in _keys()]
+        grading.run(*args)
+        h.engine.get_current_image = lambda: None
+        args[_keys().index("temp")] = 5.0
+        grading.mixin.on_grading_changed(*args)
+        grading.mixin.on_grading_extended_changed({"pivot": 0.3})
+
+        preview = h.engine.set_color_graph_preview.call_args
+        snapshot = freeze_graph(preview.args[0], session_id=stack_id, **preview.kwargs)
+        layer = graph_node_layer_provider(
+            snapshot.graph, frame=24, preview_grade=snapshot.preview_grade)(node.node_id)
+        assert layer["grading_params"]["temp"] == 5.0
+        assert layer["grading_params"]["pivot"] == 0.3
+        assert h.host.bound_graph() is graph
+        assert not h.cmd_stack._undo_stack
+
+        # Moving a value back to its original position is also a live update.
+        args[_keys().index("temp")] = current["temp"]
+        grading.mixin.on_grading_changed(*args)
+        assert h.host.panel_grade_params()["temp"] == current["temp"]
+        assert snapshot.preview_grade[node.node_id]["temp"] == 5.0
+        assert h.host.end_grade_gesture()
+        h.engine.set_color_graph_preview.assert_called_with(None)
+        assert len(h.cmd_stack._undo_stack) == 1
+        assert h.host.panel_grade_params()["temp"] == current["temp"]
+        assert h.host.panel_grade_params()["pivot"] == 0.3
+        assert h.host.undo()
+        assert h.host.panel_grade_params()["pivot"] == current["pivot"]
+
+    def test_locked_stack_does_not_preview_or_write_legacy_grade(self, harness):
+        h, stack_id, graph = harness
+        project = h.holder["project"]
+        locked = project.color_stacks[stack_id].with_graph_locked(True)
+        h.holder["project"] = project.with_color_stacks({
+            **project.color_stacks, stack_id: locked})
+        h.host.on_clip_stack_loaded(stack_id)
+        self._select_first_corrector(h, graph)
+        grading = _GradingHarness(h.host, h.engine)
+        grading.run(*_tuple_for(_keys(), 15.0))
+        h.engine.set_color_graph_preview.assert_not_called()
+        assert not grading.grade_calls
+        assert not h.host.end_grade_gesture()
+        assert not h.cmd_stack._undo_stack
+
+    def test_live_scalar_preview_overrides_only_the_edited_animation_track(self, harness):
+        from dataclasses import replace
+
+        from src.features.color.core.color_graph_param_source import graph_node_layer_provider
+
+        h, stack_id, graph = harness
+        node = next(node for node in graph.nodes if node.node_type == "corrector")
+        tracks = {name: {"keyframes": [{"frame": 24, "value": value}]}
+                  for name, value in (("temp", -3.0), ("tint", 12.0))}
+        animated = replace(node, params={**node.params, "grade_keyframes": tracks})
+        graph = replace(graph, nodes=tuple(animated if item is node else item
+                                           for item in graph.nodes))
+        h.holder["project"] = h.holder["project"].update_color_stack(stack_id, color_graph=graph)
+        h.host.on_clip_stack_loaded(stack_id)
+        self._select_first_corrector(h, graph)
+        h.host._adapter._frame_provider = lambda: 24
+        grading = _GradingHarness(h.host, h.engine)
+        current = h.host.panel_grade_params()
+        assert (current["temp"], current["tint"]) == (-3.0, 12.0)
+        grading.run(*(6.0 if key == "temp" else current[key] for key in _keys()))
+        draft = h.engine.set_color_graph_preview.call_args
+        output = graph_node_layer_provider(
+            draft.args[0], frame=24, **draft.kwargs)(node.node_id)["grading_params"]
+        assert (output["temp"], output["tint"]) == (6.0, 12.0)
+        assert h.host.end_grade_gesture()
+
+    def test_switching_clips_hydrates_after_the_pending_grade(self, harness, qtbot):
+        from src.app.controllers.page_controller import PageManagementMixin
+        from src.features.color.ui.color_wheel import GradingPanel
+
+        h, stack_id, graph = harness
+        project, next_stack = h.holder["project"].create_color_stack(asset_id="a2", name="Next")
+        h.holder["project"] = project.update_color_stack(next_stack, color_graph=graph)
+        panel = GradingPanel()
+        qtbot.addWidget(panel)
+        h.host._panels_provider = lambda: {"grading_panel": panel}
+
+        class Loader:
+            engine = h.engine
+            color_graph_host = h.host
+            _load_color_stack_to_grading_panel = PageManagementMixin._load_color_stack_to_grading_panel
+
+            @property
+            def _current_edit_project(self):
+                return h.holder["project"]
+
+            def _collect_color_panels(self):
+                return {"grading_panel": panel}
+
+            def _refresh_video_preview_after_color_stack_hydration(self):
+                pass
+
+        loader = Loader()
+        loader._load_color_stack_to_grading_panel(stack_id)
+        node = self._select_first_corrector(h, graph)
+        grading = _GradingHarness(h.host, h.engine)
+        current = h.host.panel_grade_params()
+        grading.run(*(8.0 if key == "temp" else current[key] for key in _keys()))
+        assert h.host.grade_gesture_open()
+        loader._load_color_stack_to_grading_panel(next_stack)
+        assert not h.host.grade_gesture_open()
+        assert panel.current_stack_id == next_stack
+        assert h.engine.set_active_color_graph.call_args.kwargs["stack_id"] == next_stack
+        assert h.host.bound_stack_id == next_stack
+        saved = h.holder["project"].color_stacks[stack_id].color_graph
+        assert next(item for item in saved.nodes if item.node_id == node.node_id).params["grade"]["temp"] == 8.0
+
+    def test_undo_drops_open_grade_draft(self, harness):
+        h, stack_id, graph = harness
+        h.host.on_clip_stack_loaded(stack_id)
+        self._select_first_corrector(h, graph)
+        grading = _GradingHarness(h.host, h.engine)
+        current = h.host.panel_grade_params()
+        args = [25.0 if key == "temp" else current[key] for key in _keys()]
+        grading.run(*args)
+        assert h.host.end_grade_gesture()
+        grading.run(*(20.0 if key == "tint" else value for key, value in zip(_keys(), args)))
+        assert h.host.grade_gesture_open()
+        assert h.host.undo()
+        assert not h.host.end_grade_gesture()
+        assert h.host.panel_grade_params()["temp"] == current["temp"]
+        assert h.host.panel_grade_params()["tint"] == current["tint"]
+
+    def test_animated_primary_preview_matches_the_committed_anchor(self, harness):
+        from dataclasses import replace
+
+        from src.app.controllers.color_keyframe_recorder import KeyframeAutoRecorder
+        from src.features.color.core.color_graph_param_source import graph_node_layer_provider
+
+        h, stack_id, graph = harness
+        node = next(item for item in graph.nodes if item.node_type == "corrector")
+        tracks = {"temp": {"keyframes": [
+            {"frame": 0, "value": -20.0}, {"frame": 48, "value": 20.0}]}}
+        animated = replace(node, params={**node.params, "grade_keyframes": tracks})
+        graph = replace(graph, nodes=tuple(animated if item is node else item for item in graph.nodes))
+        h.holder["project"] = h.holder["project"].update_color_stack(stack_id, color_graph=graph)
+        h.host.on_clip_stack_loaded(stack_id)
+        self._select_first_corrector(h, graph)
+        h.host.attach_keyframe_recorder(KeyframeAutoRecorder(), frame_provider=lambda: 24)
+        current = h.host.panel_grade_params()
+        assert current["temp"] == 0.0
+        grading = _GradingHarness(h.host, h.engine)
+        grading.run(*(10.0 if key == "temp" else current[key] for key in _keys()))
+        draft = h.engine.set_color_graph_preview.call_args
+        layer = graph_node_layer_provider(
+            draft.args[0], frame=24, **draft.kwargs)(node.node_id)
+        assert layer["grading_params"]["temp"] == 15.0
+        assert h.host.end_grade_gesture()
+        assert h.host.panel_grade_params()["temp"] == 15.0
 
     def test_no_selection_keeps_legacy_path(self, harness):
         h, stack_id, graph = harness
@@ -494,7 +831,7 @@ def test_warper_preview_remains_transient_and_commit_is_undoable(harness) -> Non
 
     before = h.holder["project"]
     assert h.host.preview_warper_change(node.node_id, payload)
-    draft = h.engine.set_warper_preview_graph.call_args.args[0]
+    draft = h.engine.set_color_graph_preview.call_args.args[0]
     draft_node = next(item for item in draft.nodes if item.node_id == node.node_id)
     assert draft_node.legacy_payload["warper_space"] == 3
     assert h.holder["project"] is before
@@ -503,3 +840,63 @@ def test_warper_preview_remains_transient_and_commit_is_undoable(harness) -> Non
     assert h.host.panel_layer_payload(node.node_id)["warper_state"] == state.to_dict()
     assert h.host.undo()
     assert h.host.panel_layer_payload(node.node_id).get("warper_state") is None
+
+
+def test_first_video_warper_edit_without_cpu_frame_uses_one_undo(qapp, qtbot) -> None:
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QObject
+
+    from src.app.controllers.color_controller import ColorControllerMixin
+    from src.app.controllers.layer_controller import LayerOpsMixin
+    from src.features.color.core.layer import Layer
+    from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHM_V2
+    from src.features.color.ui.warper_panel import WarperPanel
+    from src.shared.color.color_space_descriptor import TIMELINE_SPACE_KEY
+
+    class Host(QObject, LayerOpsMixin, ColorControllerMixin):
+        pass
+
+    project, stack_id = EditProject.create(name="709").create_color_stack(asset_id="a", name="s")
+    project = project.with_color_management({TIMELINE_SPACE_KEY: "rec709-g24"})
+    stack = project.color_stacks[stack_id].with_layers([Layer("Neutral").to_dict()])
+    graph = migrate_legacy_stack(stack)
+    project = project.update_color_stack(stack_id, layers=stack.layers, color_graph=graph)
+    h = _Harness(qapp, project)
+    h.host.on_clip_stack_loaded(stack_id)
+    node = next(node for node in graph.nodes if node.node_type == "corrector")
+    h.host.panel_host._on_active_node_changed(node.node_id)
+
+    host = Host()
+    host.color_graph_host = h.host
+    host.engine = h.engine
+    host._current_edit_project = project
+    host._is_video_work_mode = lambda: True
+    host._is_video_playing = lambda: False
+    host._invalidate_video_render_params_if_playing = Mock()
+    host._trigger_autosave = Mock()
+    host.request_render = Mock()
+    host.grading_panel = SimpleNamespace(current_stack_id=stack_id)
+    h.engine.get_current_image.return_value = None
+    h.engine.get_active_layer.side_effect = lambda: h.engine.layers[h.engine.active_layer_index]
+    panel = host.warper_panel = WarperPanel(use_measured_warper=host._use_measured_rec709_grading)
+    qtbot.addWidget(panel)
+    panel.command_requested.connect(host.on_warper_command_requested)
+    h.host._panels_provider = lambda: {"warper_panel": panel}
+    h.host._sync_engine_from_bound_stack(project)
+    assert panel.warper.calibrated_hs
+    assert h.host.panel_layer_payload(node.node_id).get("warper_state") is None
+    assert not h.cmd_stack._undo_stack
+
+    panel.warper.selected = {(2, 0)}
+    panel.warper.edit_component("hue", 0.075)
+    saved = h.host.panel_layer_payload(node.node_id)["warper_state"]
+    assert saved["algorithm_version"] == RESOLVE_HS_ALGORITHM_V2
+    assert saved["grids"]["hs"]["offsets"][2][0][0] == pytest.approx(-0.075)
+    assert len(h.cmd_stack._undo_stack) == 1
+    assert h.host.undo()
+    assert h.host.panel_layer_payload(node.node_id).get("warper_state") is None
+    assert panel.warper.calibrated_hs
+    assert not panel.warper.calibrated_offsets().any()
+    assert h.host.redo()
+    assert h.host.panel_layer_payload(node.node_id)["warper_state"] == saved

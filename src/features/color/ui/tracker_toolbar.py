@@ -6,18 +6,18 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QToolButton,
     QWidget,
 )
 
+from src.features.color.ui.panel_chrome import PARAMETER_BAR_HEIGHT, style_header_button
 from src.shared.i18n.i18n import tr
 from src.shared.ui.widgets import ChevronComboBox
 
-BTN_SIZE = 30          # 每个按钮 30x30 px
-ICON_SIZE = 18         # 图标 18x18 px
+BTN_SIZE = 30
 
 TOOL_IDS = ("point", "region", "planar", "camera3d")
 
@@ -27,16 +27,6 @@ TOOL_TIPS = {
     "planar": ("tracker.tool_planar", "平面/透视跟踪"),
     "camera3d": ("tracker.tool_camera3d", "3D 摄像机跟踪（暂未开放）"),
 }
-
-_SELECTED_STYLE = (
-    "QToolButton { background: rgba(255, 136, 0, 35); border: 1px solid transparent;"
-    " border-bottom: 2px solid #FF8800; border-radius: 3px; color: #FFFFFF; }"
-)
-_NORMAL_STYLE = (
-    "QToolButton { background: transparent; border: 1px solid transparent;"
-    " border-radius: 3px; color: #A9A9AE; }"
-    "QToolButton:hover { background: #2C2D31; border-color: #505158; }"
-)
 
 TOOL_GLYPHS = {
     "point": "•",
@@ -55,9 +45,7 @@ class TrackerToolBar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        # 作为面板标题下的上下文工具栏，保持 DaVinci 式紧凑高度；
-        # 工具按钮尺寸保留 30 px，方便鼠标操作和现有调用方复用。
-        self.setFixedHeight(34)
+        self.setFixedHeight(PARAMETER_BAR_HEIGHT)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 2, 8, 2)
         layout.setSpacing(2)
@@ -66,14 +54,13 @@ class TrackerToolBar(QWidget):
         for tool_id in TOOL_IDS:
             btn = QToolButton(self)
             btn.setObjectName(f"tracker_tool_{tool_id}")
-            btn.setFixedSize(BTN_SIZE, BTN_SIZE)
-            btn.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
+            style_header_button(btn, width=BTN_SIZE)
+            btn.setFixedHeight(BTN_SIZE)
             btn.setCheckable(True)
             btn.setFocusPolicy(Qt.FocusPolicy.TabFocus)
             label_key, label_default = TOOL_TIPS[tool_id]
             btn.setToolTip(tr(label_key, label_default))
             btn.setText(TOOL_GLYPHS[tool_id])
-            btn.setFont(btn.font())
             btn.clicked.connect(
                 lambda _checked=False, tid=tool_id: self._on_tool_clicked(tid)
             )
@@ -82,7 +69,6 @@ class TrackerToolBar(QWidget):
         # 阶段 9/10 不在范围：3D 摄像机禁用态
         self._tool_buttons["camera3d"].setEnabled(False)
         self._tool_buttons["region"].setChecked(True)
-        self._refresh_tool_styles()
 
         # 目标选择下拉框
         self.target_combo = ChevronComboBox(self)
@@ -115,14 +101,9 @@ class TrackerToolBar(QWidget):
 
     # ----------------------------------------------------------------
 
-    def _refresh_tool_styles(self) -> None:
-        for btn in self._tool_buttons.values():
-            btn.setStyleSheet(_SELECTED_STYLE if btn.isChecked() else _NORMAL_STYLE)
-
     def _on_tool_clicked(self, tool_id: str) -> None:
         for tid, btn in self._tool_buttons.items():
             btn.setChecked(tid == tool_id)
-        self._refresh_tool_styles()
         self.tool_changed.emit(tool_id)
 
     def _on_dim_changed(self, index: int) -> None:

@@ -34,6 +34,7 @@ from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import QWidget
 
 from src.features.edit.ui.metal_viewport_host import MetalViewportHost
+from src.shared.color.desktop_video_color import set_metal_video_color
 from src.shared.gpu.metal.present_port import (
     CAMetalLayerSink,
     MetalPresentPass,
@@ -142,6 +143,12 @@ class ColorMetalViewportHost(MetalViewportHost):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._edr_decision: Optional[EdrLayerDecision] = None
+        self._video_display: tuple[str | None, bool] = (None, False)
+
+    def set_video_display(self, preset: str | None, managed: bool) -> None:
+        self._video_display = (preset, managed)
+        if self._edr_decision is not None and not self._edr_decision.wants_edr:
+            set_metal_video_color(self._layer, *self._video_display)
 
     @property
     def edr_decision(self) -> Optional[EdrLayerDecision]:
@@ -199,10 +206,7 @@ class ColorMetalViewportHost(MetalViewportHost):
                     self._layer, "setWantsExtendedDynamicRangeContent_", None)
                 if callable(setter):
                     setter(False)
-                space = Quartz.CGColorSpaceCreateWithName(
-                    Quartz.kCGColorSpaceSRGB)
-                if space is not None:
-                    self._layer.setColorspace_(space)
+                set_metal_video_color(self._layer, *self._video_display)
         except Exception:  # noqa: BLE001 —— 配置失败保持 SDR，可见诊断
             logger.warning("ColorMetalViewportHost: EDR 配置失败",
                            exc_info=True)

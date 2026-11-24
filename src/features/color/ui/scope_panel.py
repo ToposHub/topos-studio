@@ -20,6 +20,10 @@ import logging
 
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.style_sheet import C
+from src.features.color.ui.panel_chrome import (
+    HEADER_CONTROL_HEIGHT, HEADER_HEIGHT, HEADER_ICON_SIZE, SECTION_TITLE_STYLE,
+    create_panel_header, header_button_color, style_header_button,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,7 @@ class _ScopeModeCombo(QComboBox):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setFont(_scope_header_font())
-        self.setFixedHeight(24)
+        self.setFixedHeight(HEADER_CONTROL_HEIGHT)
         self.setMinimumWidth(56)
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.currentTextChanged.connect(self._update_text_width)
@@ -66,15 +70,13 @@ class _ScopeModeCombo(QComboBox):
         self.updateGeometry()
 
     def sizeHint(self) -> QSize:
-        return QSize(self.fontMetrics().horizontalAdvance(self.currentText()) + 30, 24)
+        return QSize(self.fontMetrics().horizontalAdvance(self.currentText()) + 30, HEADER_CONTROL_HEIGHT)
 
     def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
-        if self.underMouse():
-            painter.fillRect(self.rect(), QColor("#2a2a2e"))
         painter.setFont(self.font())
         painter.setPen(QColor("#e4e4e6"))
         text_rect = self.rect().adjusted(4, 0, -23, 0)
@@ -90,26 +92,28 @@ class _ScopeModeCombo(QComboBox):
 
 
 class _ScopeHeaderButton(QPushButton):
-    """Resolve-like monochrome controls with full-height dividers."""
+    """Paint a scope glyph beside a full-height divider."""
 
     def __init__(self, kind: str, tooltip: str, parent: QWidget) -> None:
         super().__init__(parent)
         self.kind = kind
-        self.setFixedSize(36, 24)
+        style_header_button(self, width=36)
+        self.setFixedHeight(HEADER_HEIGHT)
         self.setToolTip(tooltip)
         self.setAccessibleName(tooltip)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
-        background = QColor("#2a2a2e" if self.underMouse() or self.isDown() else "#202024")
-        painter.fillRect(self.rect(), background)
-        painter.setPen(QColor("#111114"))
+        painter.setPen(QColor(C.PANEL_DIVIDER))
         painter.drawLine(0, 0, 0, self.height())
-        painter.translate((self.width() - 36) / 2.0, 0.0)
+        scale = HEADER_ICON_SIZE / 18.0
+        painter.translate(self.width() / 2.0 - 18.0 * scale, self.height() / 2.0 - 12.0 * scale)
+        painter.scale(scale, scale)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor("#85858a"), 1.0))
+        color = header_button_color(self)
+        painter.setPen(QPen(color, 1.35))
         if self.kind == 'settings':
-            painter.setBrush(background)
+            painter.setBrush(QColor(C.COLOR_PANEL_HEADER))
             for y, knob in ((7, 21), (12, 15), (17, 23)):
                 painter.drawLine(QPointF(11, y), QPointF(27, y))
                 painter.drawEllipse(QPointF(knob, y), 1.8, 1.8)
@@ -123,8 +127,6 @@ class _ScopeHeaderButton(QPushButton):
         elif self.kind in ('single', 'dual', 'quad', 'all'):
             columns, rows = {'single': (1, 1), 'dual': (2, 1),
                              'quad': (2, 2), 'all': (3, 3)}[self.kind]
-            if self.isChecked():
-                painter.setPen(QPen(QColor("#e4e4e6"), 1.0))
             for row in range(rows):
                 for col in range(columns):
                     painter.drawRect(QRectF(10 + col * 16 / columns,
@@ -132,7 +134,7 @@ class _ScopeHeaderButton(QPushButton):
                                             16 / columns - 1, 12 / rows - 1))
         else:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#85858a"))
+            painter.setBrush(color)
             for x in (12, 18, 24):
                 painter.drawEllipse(QPointF(x, 12), 1.3, 1.3)
         painter.end()
@@ -312,6 +314,8 @@ class ScopePanel(QWidget):
 
     def _make_multi_page(self, mode: str, backend: str) -> QWidget:
         page = QWidget()
+        page.setObjectName("scopeGrid")
+        page.setStyleSheet(f"QWidget#scopeGrid {{ background: {C.PANEL_DIVIDER}; }}")
         grid = QGridLayout(page)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(1)
@@ -322,15 +326,13 @@ class ScopePanel(QWidget):
             body = QVBoxLayout(cell)
             body.setContentsMargins(0, 0, 0, 0)
             body.setSpacing(0)
-            header = QWidget()
-            header.setFixedHeight(24)
-            header.setStyleSheet("background: #202024;")
+            header = create_panel_header()
             controls = QHBoxLayout(header)
             controls.setContentsMargins(8, 0, 0, 0)
             controls.setSpacing(0)
             label = QLabel(_scope_name(scope_mode))
             label.setFont(_scope_header_font())
-            label.setStyleSheet("color: #e4e4e6; background: transparent;")
+            label.setStyleSheet(SECTION_TITLE_STYLE)
             controls.addStretch(1)
             controls.addWidget(label)
             controls.addSpacing(12)
@@ -711,32 +713,21 @@ class ScopePanel(QWidget):
 
         # Resolve-style scope header: keep controls outside the plot so they
         # never obscure live waveform detail.
-        self.selector_container = QWidget(self)
-        self.selector_container.setObjectName("scopeHeader")
-        self.selector_container.setFixedHeight(24)
-        self.selector_container.setStyleSheet("""
-            QWidget#scopeHeader {
-                background-color: #202024;
-                border-bottom: 1px solid #111114;
-            }
-            QLabel#scopeTitle {
-                color: #e4e4e6;
-                background: transparent;
-                border: none;
-                padding: 0;
-            }
-        """)
+        self.selector_container = create_panel_header(object_name="scopeHeader")
         selector_layout = QHBoxLayout(self.selector_container)
         selector_layout.setContentsMargins(10, 0, 0, 0)
         selector_layout.setSpacing(0)
 
         self.scope_title = QLabel(I18N.tr("workspace.scopes", "Scopes"))
         self.scope_title.setObjectName("scopeTitle")
+        self.scope_title.setStyleSheet(SECTION_TITLE_STYLE)
         self.scope_title.setFont(_scope_header_font())
         selector_layout.addWidget(self.scope_title)
         selector_layout.addStretch(1)
 
         self.layout_toolbar = QWidget(self.selector_container)
+        self.layout_toolbar.setObjectName("scopeLayoutToolbar")
+        self.layout_toolbar.setStyleSheet("QWidget#scopeLayoutToolbar { background: transparent; }")
         layout_controls = QHBoxLayout(self.layout_toolbar)
         layout_controls.setContentsMargins(0, 0, 0, 0)
         layout_controls.setSpacing(0)
@@ -797,12 +788,12 @@ class ScopePanel(QWidget):
         # The selector spans the panel header; the plot starts below it.
         main_layout.insertWidget(0, self.selector_container)
 
-        # The host owns the panel boundary.
-        self.setStyleSheet("""
-            ScopePanel {
-                background-color: #050505;
+        # The measured trace keeps its dedicated dark canvas inside the panel.
+        self.setStyleSheet(f"""
+            ScopePanel {{
+                background-color: {C.BG_PANEL};
                 border: none;
-            }
+            }}
         """)
 
     def _expand_scope(self) -> None:

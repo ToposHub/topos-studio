@@ -199,6 +199,8 @@ def _iter_corrector_nodes(graph: ColorGraphData) -> Iterator[ColorNodeData]:
 def graph_node_layer_provider(
     graph: ColorGraphData,
     frame: int | None = None,
+    *,
+    preview_grade: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Callable[[str], Mapping[str, Any] | None]:
     """``layer_param_provider`` 工厂：node_id → 合并后的 Layer DTO。
 
@@ -276,12 +278,14 @@ def graph_node_layer_provider(
             if plugins is not None:
                 merged["plugins"] = plugins
 
-    def provide(node_id: str) -> Mapping[str, Any] | None:
-        if evaluated is not None:
-            return evaluated.get(node_id)
-        return payloads.get(node_id)
+    active = evaluated if evaluated is not None else payloads
+    for node_id, patch in (preview_grade or {}).items():
+        payload = active.get(node_id)
+        if payload is not None:
+            grading = {**(payload.get("grading_params") or {}), **patch}
+            active[node_id] = {**payload, "grading_params": grading}
 
-    return provide
+    return active.get
 
 
 def mixer_composite_params(node_params: Mapping[str, Any]) -> tuple[str, float]:

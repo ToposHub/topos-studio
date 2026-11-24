@@ -47,6 +47,7 @@ from .external_comp_snapshot import ExternalCompSnapshots
 
 if TYPE_CHECKING:
     from src.features.composite.core.graph_snapshot import GraphSnapshot
+    from src.shared.color.color_space_descriptor import ColorSpaceDescriptor
     from src.shared.media.metadata import Rational
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,18 @@ def _rgb_intermediate_descriptor(output_descriptor):
     if getattr(output_descriptor, "range", ColorRange.FULL) == ColorRange.FULL:
         return output_descriptor
     return _dc_replace(output_descriptor, range=ColorRange.FULL)
+
+
+def _encode_scene_rgb(
+    rgb: np.ndarray, destination: ColorSpaceDescriptor, config_manager: Any,
+) -> np.ndarray:
+    from src.shared.color.color_space_descriptor import LINEAR_SCENE
+    from src.shared.color.color_transform_provider import BuiltinColorProvider, transform_color
+    from src.shared.color.types import ColorTransfer
+
+    if destination.transfer == ColorTransfer.GAMMA24:
+        return BuiltinColorProvider().transform(rgb, LINEAR_SCENE, destination)
+    return transform_color(rgb, LINEAR_SCENE, destination, config_manager)
 
 
 def _pix_fmt_bit_depth(pix_fmt: str) -> int:
@@ -437,12 +450,8 @@ class CompositeRenderOutput:
             ColorMetadataConfig,
         )
         from src.shared.media.frame import DecodedFrame
-        from src.shared.color.color_space_descriptor import (
-            REC709_VIDEO, LINEAR_SCENE,
-        )
-        from src.shared.color.types import ColorPrimaries, ColorTransfer
-        # AUD-81008: transform_color 提升到函数头，不再逐帧 import
-        from src.shared.color.color_transform_provider import transform_color
+        from src.shared.color.color_space_descriptor import REC709_VIDEO
+        from src.shared.color.types import ColorPrimaries, ColorTransfer, delivery_transfer_tag
 
         total = max(0, end_frame - start_frame + 1)
         if total <= 0:
@@ -484,7 +493,7 @@ class CompositeRenderOutput:
                   else "bt709")
         descriptor_metadata = ColorMetadataConfig(
             primaries=output_descriptor.primaries.value,
-            transfer=output_descriptor.transfer.value,
+            transfer=delivery_transfer_tag(output_descriptor.transfer),
             matrix=matrix,
             range=output_descriptor.range.value,
         )
@@ -680,10 +689,8 @@ class CompositeRenderOutput:
                 # pix_fmt (10/12-bit upgrades incl. wide-gamut SDR use
                 # uint16/bgr48le), not just the HDR flag.
                 rgb_linear = np.ascontiguousarray(frame_img[..., ::-1])
-                frame_enc_rgb = transform_color(
-                    rgb_linear, LINEAR_SCENE, rgb_output_descriptor,
-                    config_manager=self._config_manager,
-                )
+                frame_enc_rgb = _encode_scene_rgb(
+                    rgb_linear, rgb_output_descriptor, self._config_manager)
                 frame_enc = np.ascontiguousarray(frame_enc_rgb[..., ::-1])  # RGB → BGR
                 frame_out, pixel_format = _pack_encoded_rgb(
                     frame_enc, high_depth_input)
@@ -1153,12 +1160,6 @@ class CompositeRenderOutput:
         # the parallel video stage could never complete.
         from src.shared.media.frame import DecodedFrame
         from functools import partial
-        # AUD-81008: transform_color 提升到 stage 函数头，不再逐帧 import
-        from src.shared.color.color_transform_provider import transform_color
-        # 基准复现修复（2026-10-14）：_convert 使用的 LINEAR_SCENE 此前只在
-        # render_video 的局部作用域导入，并行 stage 一进 _convert 即
-        # NameError（任何 parallel_frames>=2 的视频导出都会崩）。
-        from src.shared.color.color_space_descriptor import LINEAR_SCENE
 
         # AUD-81003: each stage gets its own generation so registrations
         # and worker-side teardowns can never collide across stages.
@@ -1182,10 +1183,8 @@ class CompositeRenderOutput:
             # 回退 output_descriptor（保持旧调用兼容）。
             target_descriptor = rgb_output_descriptor or output_descriptor
             rgb_linear = np.ascontiguousarray(frame_img[..., ::-1])
-            frame_enc_rgb = transform_color(
-                rgb_linear, LINEAR_SCENE, target_descriptor,
-                config_manager=self._config_manager,
-            )
+            frame_enc_rgb = _encode_scene_rgb(
+                rgb_linear, target_descriptor, self._config_manager)
             frame_enc = np.ascontiguousarray(frame_enc_rgb[..., ::-1])  # RGB → BGR
             return _pack_encoded_rgb(frame_enc, high_depth_input)
 
@@ -1574,15 +1573,12 @@ def _convert_for_image_ext(
         # OETF to depth/ID values would change their numeric meaning, so only
         # beauty follows the configured output color descriptor.
         if output_descriptor is not None and str(render_pass or "beauty") == "beauty":
-            from src.shared.color.color_transform_provider import transform_color
-            from src.shared.color.color_space_descriptor import LINEAR_SCENE
             # R-05：原色矩阵（P3/BT.2020 跨原色转换）按 RGB 语义作用前
             # 三通道——BGR 读回必须换序转换后再换回（视频路径已有同样
             # 处理，图片序列路径遗漏导致 P3 红色 BGR16 输出 [0,0,62886]，
             # 正确 [9080,13125,60127]）。第 4 通道（alpha）原样保留。
             rgb = np.ascontiguousarray(img[..., :3][..., ::-1])
-            encoded_rgb = transform_color(rgb, LINEAR_SCENE, output_descriptor,
-                                          config_manager=config_manager)
+            encoded_rgb = _encode_scene_rgb(rgb, output_descriptor, config_manager)
             encoded = np.ascontiguousarray(encoded_rgb[..., ::-1])
             if img.shape[-1] > 3:
                 encoded = np.concatenate(

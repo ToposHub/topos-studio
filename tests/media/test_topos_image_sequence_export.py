@@ -83,6 +83,51 @@ def test_persistent_encoder_writes_independent_toos(tmp_path) -> None:
         assert len(planes) == 3
 
 
+@pytest.mark.parametrize("with_alpha", [False, True])
+def test_timeline_float_tier_encodes_linear_samples(tmp_path, with_alpha) -> None:
+    import cv2
+
+    from src.features.edit.core.project import EditProject, MediaAsset
+    from src.features.edit.core.timeline_export import ExportCodec, TimelineExportConfig, create_timeline_exporter
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+    from src.shared.codec.topos_image_binding import get_image_codec
+    from src.shared.color.color_space_descriptor import OUTPUT_SPACE_KEY, TIMELINE_SPACE_KEY
+
+    values = np.array([18431, 32769, 49151, 30001], dtype=np.uint16)
+    pixels = np.broadcast_to(values[:4 if with_alpha else 3], (40, 64, 4 if with_alpha else 3))
+    source = tmp_path / "plate.tif"
+    assert cv2.imwrite(str(source), pixels)
+    asset = MediaAsset("a", str(source), "image", "Plate", {})
+    project = EditProject(
+        "p", "Float sequence", assets={asset.asset_id: asset},
+        color_management={TIMELINE_SPACE_KEY: "rec709-g24", OUTPUT_SPACE_KEY: "srgb"},
+    )
+    clip = ClipInstance("c", asset.asset_id, "v0", 0, 1, 0, 1)
+    seq = TimelineSequence(
+        timeline_id="t1", name="Half", width=64, height=40, fps=Rational(24, 1),
+        video_tracks=(EditTrack("v0", "V1", "video", 0, clips=(clip,)),),
+    )
+    target = tmp_path / "half"
+    exporter = create_timeline_exporter(project, seq)
+    outcome = exporter.export_timeline(TimelineExportConfig(
+        output_path=str(target), codec=ExportCodec.TOPOS_IMAGE_SEQUENCE, codec_profile="float-ultra",
+        timeline_id=seq.timeline_id, include_audio=False, has_alpha=with_alpha,
+    ))
+    if with_alpha:
+        assert not outcome.success and "Alpha" in outcome.cause
+        assert not list(target.glob("*.toos"))
+        return
+    assert outcome.success, outcome.cause
+
+    path, = target.glob("*.toos")
+    planes, info, _ = get_image_codec().decode_float(str(path))
+    assert info.color_transfer == 8  # H.273 linear
+    assert len(planes) == 3
+    linear_bgr = (values[:3].astype(np.float64) / 65535.0) ** 2.4
+    reconstructed_bgr = np.array([planes[channel][0, 0] for channel in (1, 0, 2)])
+    np.testing.assert_allclose(reconstructed_bgr, linear_bgr, atol=0.005, rtol=0)
+
+
 def test_image_sequence_rans2_native_payload(tmp_path) -> None:
     """rans2 序列原生入 .toos（2026-09-12 信封解封 V1..V8 后不再降级 v2）。
 

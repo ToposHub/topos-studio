@@ -3,10 +3,11 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLineEdit, QSlider, QMenu, QToolButton)
 from src.shared.i18n.i18n import I18N
 from PyQt6.QtCore import pyqtSignal, Qt, QSize
-from src.shared.ui.style_sheet import LAYER_LIST_STYLE
+from src.shared.ui.style_sheet import C, LAYER_LIST_STYLE
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+from src.features.color.ui.panel_chrome import create_panel_header, style_header_button, style_reset_button
 from src.shared.assets.icon_manager import (
-    icon_add, icon_delete, icon_reset, icon_up, icon_down,
+    icon_add, icon_delete, icon_up, icon_down,
     icon_visible, icon_hidden, icon_mask, icon_fx, IconColors,
     icon_copy, icon_paste, icon_duplicate, icon_grading, icon_ai,
     icon_settings
@@ -129,12 +130,10 @@ class LayerItemWidget(QWidget):
         self.bake_btn.clicked.connect(self._on_bake_clicked)
 
         self.reset_btn = QPushButton()
-        self.reset_btn.setIcon(icon_reset())
-        self.reset_btn.setIconSize(QSize(14, 14))
-        self.reset_btn.setFixedSize(20, 20)
         self.reset_btn.setToolTip(I18N.tr(
             "tooltip.reset_layer_adjustments", "Reset Layer Adjustments"))
-        self.reset_btn.setStyleSheet("QPushButton { border: none; background: transparent; } QPushButton:hover { background: rgba(255, 136, 0, 30); }")
+        self.reset_btn.setAccessibleName(self.reset_btn.toolTip())
+        style_reset_button(self.reset_btn)
         self.reset_btn.clicked.connect(self.reset_clicked.emit)
 
         self.del_btn = QPushButton()
@@ -334,9 +333,7 @@ class LayerPanel(QWidget):
         layout.setSpacing(0)
 
         # Header
-        header = QFrame()
-        header.setFixedHeight(30)
-        header.setStyleSheet("background: #2f2f33; border-bottom: 1px solid #222;")
+        header = create_panel_header(object_name="colorLayersHeader")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(10, 0, 5, 0)
 
@@ -347,16 +344,7 @@ class LayerPanel(QWidget):
 
         # Settings button (gear icon) for layer menu
         self.settings_btn = QPushButton()
-        self.settings_btn.setIcon(icon_settings(IconColors.DEFAULT))
-        self.settings_btn.setFixedSize(22, 22)
-        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.settings_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent; border: none; border-radius: 3px;
-            }
-            QPushButton:hover { background-color: #3d3d3d; }
-            QPushButton:pressed { background-color: #2d2d2d; }
-        """)
+        style_header_button(self.settings_btn, width=28, icon=icon_settings())
         self.settings_btn.clicked.connect(self._show_settings_menu)
         header_layout.addWidget(self.settings_btn)
         layout.addWidget(header)
@@ -386,7 +374,7 @@ class LayerPanel(QWidget):
         # Layer Properties (Blend Mode & Opacity)
         props_frame = QFrame()
         props_frame.setFixedHeight(65)
-        props_frame.setStyleSheet("background: #27272b; border-bottom: 1px solid #222;")
+        props_frame.setStyleSheet(f"background: {C.BG_PANEL}; border-bottom: 1px solid #222;")
         props_layout = QVBoxLayout(props_frame)
         props_layout.setContentsMargins(8, 5, 8, 5)
         props_layout.setSpacing(4)
@@ -441,7 +429,7 @@ class LayerPanel(QWidget):
         # Footer Toolbar
         footer = QFrame()
         footer.setFixedHeight(35)
-        footer.setStyleSheet("background: #2f2f33; border-top: 1px solid #222;")
+        footer.setStyleSheet(f"background: {C.COLOR_PANEL_RAISED}; border-top: 1px solid #222;")
         footer_layout = QHBoxLayout(footer)
         footer_layout.setContentsMargins(5, 0, 5, 0)
         footer_layout.setSpacing(2)

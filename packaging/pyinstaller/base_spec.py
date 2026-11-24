@@ -245,12 +245,21 @@ def generate_analysis(
             "src/features/color/ui/effect_icons",
         ),
         (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "mixer_icons"),
+            "src/features/color/ui/mixer_icons",
+        ),
+        (
             os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "node_badges"),
             "src/features/color/ui/node_badges",
         ),
         (
             os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
                          "primary_calibration_rec709_g24_v1.npz"),
+            "src/features/color/core/data",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
+                         "primary_calibration_rec709_g24_v2.npz"),
             "src/features/color/core/data",
         ),
         (

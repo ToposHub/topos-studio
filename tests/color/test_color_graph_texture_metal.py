@@ -301,8 +301,8 @@ def _corrector_prefix_reference(image: np.ndarray, layer) -> np.ndarray:
 
 class TestStructural:
     def test_param_dtypes_layout(self) -> None:
-        # 29 标量（6 uint + 3 int/float 槽 + 8 sc + 12 cs）+ mixer(24)
-        assert TEX_EXTRA_PARAMS_DTYPE.itemsize == 212
+        # 29 base fields + 24 mixer values + 3 primary/detail fields + 2 Mist fields.
+        assert TEX_EXTRA_PARAMS_DTYPE.itemsize == 232
         assert TEX_QUALIFIER_PARAMS_DTYPE.itemsize == 60
         for name in TEX_EXTRA_PARAMS_DTYPE.names:
             offset = (TEX_EXTRA_PARAMS_DTYPE.fields[name][1]
@@ -320,7 +320,11 @@ class TestStructural:
     def test_corrector_segment_order_matches_gl_main(self) -> None:
         source = METAL_TEX_GRAPH_OPS_MSL
         body = source[source.index("kernel void tg_corrector("):]
-        order = [body.index(f"graph_apply_grading("),
+        order = [body.index("mist_delta("),
+                 body.index("tg_apply_primary_calibration("),
+                 body.index("graph_grading_before_detail("),
+                 body.index("tg_apply_mid_detail("),
+                 body.index("graph_grading_after_detail("),
                  body.index("graph_apply_curves("),
                  body.index("msl_apply_hsl_curves("),
                  body.index("msl_apply_soft_clip("),
@@ -351,11 +355,14 @@ class TestStructural:
             "u_blend_mode": 3, "u_lut_intensity": 0.7,
             "u_red_p": (1.0, 2.0, 3.0),
             "u_sc_high": 0.9, "u_cs_high_clip": (1.2, 1.1, 1.3),
+            "u_mid_detail": -42.0,
         }
         params = make_tex_extra_params(
-            values, has_mixer=True, has_lut3d=True)
+            values, has_mixer=True, has_lut3d=True, has_primary_calibration=True)
         assert params["blend_mode"].item() == 3
         assert params["lut_intensity"].item() == pytest.approx(0.7)
+        assert params["has_primary_calibration"].item() == 1
+        assert params["mid_detail"].item() == -42.0
         assert params["has_mixer"].item() == 1
         assert params["has_lut3d"].item() == 1
         assert params["mixer"][0, :3].tolist() == [1.0, 2.0, 3.0]
@@ -392,15 +399,15 @@ class TestStructural:
             {"effects_params": {"blur_enabled": True,
                                 "blur_intensity": 5.0}}))
 
-    def test_resolve_primary_requires_compatible_graph(self) -> None:
-        assert not texture_layer_domain_errors({
-            "grading_params": {"primary_calibration_version": 0},
-        })
-        for version in (1, 99):
-            assert any("primary calibration" in error.lower() for error in
-                       texture_layer_domain_errors({
-                           "grading_params": {"primary_calibration_version": version},
-                       }))
+    def test_resolve_primary_supported_version(self) -> None:
+        for version in (0, 1):
+            assert not texture_layer_domain_errors({
+                "grading_params": {"primary_calibration_version": version, "mid_detail": 15.0},
+            })
+        assert any("primary calibration" in error.lower() for error in
+                   texture_layer_domain_errors({
+                       "grading_params": {"primary_calibration_version": 99},
+                   }))
 
     def test_shared_definition_keeps_primary_calibration_in_execution_payload(self) -> None:
         graph = _graph_for([_neutral_layer("Shared")])
@@ -417,7 +424,7 @@ class TestStructural:
         )
         payload = graph_node_layer_provider(shared_graph)(node.node_id)
         assert payload["grading_params"]["primary_calibration_version"] == 1
-        assert any("primary calibration" in error for error in texture_layer_domain_errors(payload))
+        assert texture_layer_domain_errors(payload) == []
 
 
 # ---------------------------------------------------------------------------
@@ -472,6 +479,128 @@ class TestTextureGraphVsCpu:
         assert result.published
         got = executor.read_output_rgba16f(result)
         _assert_dual(got, cpu.output, "rich")
+
+    @pytest.mark.parametrize("grade", [
+        {"temp": 7.5},
+        {"tint": -20.0},
+        {"contrast": 18.0},
+        {"tint": 12.0, "contrast": 20.0, "pivot": 0.24},
+        {"vibrance": 25.0},
+        {"shadow": 25.0},
+        {"highlights": -20.0},
+        {"saturation": 26.0},
+        {"hue_shift": -45.0},
+        {"temp": 7.5, "highlights": -12.0, "saturation": 12.0, "lum_mix": 42.0},
+        {"log_shadow": (0.0, 0.0, 0.09), "log_low_range": 0.2,
+         "log_highlight": (0.0, 0.0, -0.15), "log_high_range": 0.65,
+         "hue_shift": 15.0},
+    ])
+    @pytest.mark.parametrize("version", [1, 2])
+    def test_resolve_primary_controls_match_cpu(self, metal_ctx, grade, version: int):
+        layer = _neutral_layer("Calibrated")
+        layer.grading_params.update({"primary_calibration_version": version, **grade})
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        src = np.concatenate((f02_patches(32), f01_hdr_ramp(32)), axis=0)
+        result, cpu = _run_graph(metal_ctx, executor, _graph_for([layer]), src)
+        try:
+            assert result.published, result.diagnostic_message
+            assert not np.allclose(cpu.output, _quantized(src))
+            got = executor.read_output_rgba16f(result)
+            _assert_dual(got, cpu.output, str(grade))
+        finally:
+            executor.release_revision(result.request_id)
+            executor.release_pool()
+
+    def test_resolve_primary_neutral_and_interactive_texture_cache(self, metal_ctx):
+        layer = _neutral_layer("Calibrated")
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        src = f02_patches(32)
+
+        def grade_frame(amount: float) -> np.ndarray:
+            layer.grading_params["temp"] = amount
+            result, _ = _run_graph(metal_ctx, executor, _graph_for([layer]), src, with_cpu=False)
+            try:
+                assert result.published, result.diagnostic_message
+                return executor.read_output_rgba16f(result)
+            finally:
+                executor.release_revision(result.request_id)
+
+        try:
+            baseline = grade_frame(0.0)
+            layer.grading_params["primary_calibration_version"] = 1
+            neutral = grade_frame(0.0)
+            np.testing.assert_array_equal(neutral, baseline)
+            assert not executor._primary_textures
+            warm = grade_frame(5.0)
+            before = next(iter(executor._primary_textures.values()))[1]
+            np.testing.assert_array_equal(grade_frame(5.0), warm)
+            assert len(executor._primary_textures) == 1
+            assert next(iter(executor._primary_textures.values()))[1] is before
+            assert not np.array_equal(grade_frame(-5.0), warm)
+            for amount in (1.0, 2.0, 3.0, 4.0):
+                grade_frame(amount)
+            assert len(executor._primary_textures) == executor._PRIMARY_CACHE_SIZE
+            assert all(texture is not before for _, texture in executor._primary_textures.values())
+            np.testing.assert_array_equal(grade_frame(0.0), neutral)
+        finally:
+            executor.release_pool()
+        assert not executor._primary_textures
+
+    def test_midtone_detail_uses_neighbor_input_at_same_resolution(self, metal_ctx):
+        layer = _neutral_layer("Midtone Detail")
+        layer.grading_params.update({"primary_calibration_version": 1, "mid_detail": 50.0})
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        height, width = 16, 512
+        src = np.ones((height, width, 4), dtype=np.float32)
+        src[..., :3] = 0.4
+        src[height // 2:, width // 2:, :3] = 0.6
+        source = _quantized(src)
+        rgb = source[..., :3]
+        padded = np.pad(rgb, ((1, 1), (1, 1), (0, 0)), mode="edge")
+        cross = (padded[1:-1, 2:] + padded[1:-1, :-2]
+                 + padded[2:, 1:-1] + padded[:-2, 1:-1]) * 0.25
+        radius = 3.0 * width / 2048.0
+        average = rgb + radius * (cross - rgb)
+        lum = rgb @ np.array((0.299, 0.587, 0.114), dtype=np.float32)
+        lo = np.clip(lum * 2.0, 0.0, 1.0)
+        hi = np.clip((lum - 0.5) * 2.0, 0.0, 1.0)
+        mask = lo**2 * (3.0 - 2.0 * lo) * (1.0 - hi**2 * (3.0 - 2.0 * hi)) * 4.0
+        expected = source.copy()
+        expected[..., :3] += (rgb - average) * 0.5 * mask[..., None]
+
+        result, cpu = _run_graph(metal_ctx, executor, _graph_for([layer]), src)
+        try:
+            assert result.published, result.diagnostic_message
+            got = executor.read_output_rgba16f(result)
+            assert not np.array_equal(got, source)
+            _assert_dual(got, expected, "midtone detail")
+            _assert_dual(got, cpu.output, "midtone detail CPU")
+        finally:
+            executor.release_revision(result.request_id)
+            executor.release_pool()
+
+    def test_refined_midtone_detail_with_pointwise_primaries_matches_cpu(self, metal_ctx):
+        layer = _neutral_layer("Calibrated Midtone Detail")
+        layer.grading_params.update({
+            "primary_calibration_version": 2, "mid_detail": -65.0,
+            "contrast": 24.0, "pivot": 0.325, "offset": (112.0, 0.13, -0.045),
+        })
+        height, width = 61, 507
+        src = np.ones((height, width, 4), dtype=np.float32)
+        src[..., :3] = 0.40
+        src[:, :15, :3] = (0.22, 0.41, 0.67)
+        src[15:44, 101:222, :3] = (0.54, 0.3, 0.42)
+        src[..., 3] = 0.75
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        result, cpu = _run_graph(metal_ctx, executor, _graph_for([layer]), src)
+        try:
+            assert result.published, result.diagnostic_message
+            output = executor.read_output_rgba16f(result)
+            _assert_dual(output, cpu.output, "refined detail and pointwise primaries")
+            np.testing.assert_array_equal(output[..., 3], _quantized(src)[..., 3])
+        finally:
+            executor.release_revision(result.request_id)
+            executor.release_pool()
 
     def test_curves(self, metal_ctx):
         executor = ColorGraphMetalTextureExecutor(metal_ctx)
@@ -536,6 +665,25 @@ class TestTextureGraphVsCpu:
             metal_ctx, executor, _graph_for([_soft_clip_layer()]), src)
         assert result.published, result.diagnostic_message
         _assert_dual(executor.read_output_rgba16f(result), cpu.output, "sc")
+
+    def test_mist_keeps_hdr_detail_and_matches_cpu(self, metal_ctx) -> None:
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        src = np.full((20, 512, 4), 0.05, dtype=np.float32)
+        src[..., 256:, :3] = 1.4
+        src[..., 3] = 0.75
+        layer = _neutral_layer("Mist")
+        layer.effects_params.update(mist_enabled=True, mist_radius=0.0, mist_mix=33.0,
+                                    blur_enabled=False, blur_detail=50.0)
+        try:
+            result, cpu = _run_graph(metal_ctx, executor, _graph_for([layer]), src)
+            assert result.published, result.diagnostic_message
+            got = executor.read_output_rgba16f(result)
+            _assert_dual(got, cpu.output, "Mist")
+            assert 0.15 < got[10, 255, 0] < 0.35
+            assert got[10, 256, 0] > 1.0
+            assert got[10, 255, 3] == 0.75
+        finally:
+            executor.release_pool()
 
     def test_lut3d_typical_and_boundary(self, metal_ctx, tmp_path):
         # 33³ 解析 LUT：通道交换 + 提亮（覆盖边界 0/1 与域内）

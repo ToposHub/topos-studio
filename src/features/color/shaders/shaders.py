@@ -1,5 +1,8 @@
 # Basic shaders for image rendering
 
+from src.shared.color.desktop_video_color import DISPLAY_COLOR_GLSL
+from src.shared.color.video_signal_gl import VIDEO_SIGNAL_GLSL
+
 # Rotation preview vertex shader for crop tool
 # Implements physical space rotation with viewport aspect ratio correction
 # Key insight: NDC is square [-1,1] but viewport is rectangular, so we must
@@ -58,8 +61,21 @@ void main() {
 }
 """
 
+DESKTOP_PASSTHROUGH_FRAGMENT = """
+#version 330
+// MONITOR_COLOR_GLSL
+uniform sampler2D u_texture;
+in vec2 v_texcoord;
+out vec4 f_color;
+void main() {
+    vec4 pixel = texture(u_texture, v_texcoord);
+    f_color = vec4(topos_monitor_color(pixel.rgb), pixel.a);
+}
+""".replace("// MONITOR_COLOR_GLSL", DISPLAY_COLOR_GLSL)
+
 ROTATION_PREVIEW_FRAGMENT = """
 #version 330
+// MONITOR_COLOR_GLSL
 uniform sampler2D u_texture;
 in vec2 v_texcoord;
 out vec4 f_color;
@@ -69,13 +85,17 @@ void main() {
         // 输出 50% 中灰，与画布背景无缝融合
         f_color = vec4(0.5, 0.5, 0.5, 1.0);
     } else {
-        f_color = texture(u_texture, v_texcoord);
+        vec4 pixel = texture(u_texture, v_texcoord);
+        f_color = vec4(topos_monitor_color(pixel.rgb), pixel.a);
     }
 }
-"""
+""".replace("// MONITOR_COLOR_GLSL", DISPLAY_COLOR_GLSL)
 
 SPLIT_VIEW_FRAGMENT = """
 #version 330
+// MONITOR_COLOR_GLSL
+// PROJECT_VIDEO_SIGNAL_GLSL
+uniform bool topos_split_convert_original;
 uniform sampler2D u_tex_current;
 uniform sampler2D u_tex_original;
 uniform float u_split_pos;
@@ -96,6 +116,9 @@ void main() {
         original = vec4(0.15, 0.15, 0.18, 1.0); // Match viewport background
     } else {
         original = texture(u_tex_original, original_uv);
+        if (topos_split_convert_original) {
+            original.rgb = topos_convert_video_signal(original.rgb);
+        }
     }
     
     // F4.3: difference 模式——全屏 |current - reference|（同域比较：
@@ -107,9 +130,9 @@ void main() {
     
     // Split logic: Original on left, Current on right
     if (v_texcoord.x < u_split_pos) {
-        f_color = original;
+        f_color = vec4(topos_monitor_color(original.rgb), original.a);
     } else {
-        f_color = current;
+        f_color = vec4(topos_monitor_color(current.rgb), current.a);
     }
     
     // Draw a thin white line at the split position
@@ -118,7 +141,10 @@ void main() {
         f_color = vec4(1.0, 1.0, 1.0, 1.0);
     }
 }
-"""
+""".replace("// MONITOR_COLOR_GLSL", DISPLAY_COLOR_GLSL).replace(
+    "// PROJECT_VIDEO_SIGNAL_GLSL", VIDEO_SIGNAL_GLSL
+)
+
 
 # ── LUT3D Shader for LutNode ──
 LUT3D_FRAGMENT = """
@@ -196,6 +222,8 @@ void main() {
 
 RAW_VIEW_FRAGMENT = """
         #version 330
+        // PROJECT_VIDEO_SIGNAL_GLSL
+        uniform bool u_project_input_signal;
         uniform sampler2D u_texture;
         uniform sampler3D u_lut_tex;
         uniform bool u_lut_enabled;
@@ -412,6 +440,9 @@ RAW_VIEW_FRAGMENT = """
         vec3 prepare_color_space(vec3 c) {
             if (u_bgr_swizzle) {
                 c = c.bgr;
+            }
+            if (u_project_input_signal) {
+                return topos_convert_video_signal(c);
             }
             if (u_is_srgb_source) {
                 c = SRGB_TO_PROPHOTO * srgb_to_linear(c);
@@ -693,4 +724,4 @@ RAW_VIEW_FRAGMENT = """
             
             f_color = vec4(color, tex_color.a);
         }
-"""
+""".replace("// PROJECT_VIDEO_SIGNAL_GLSL", VIDEO_SIGNAL_GLSL)

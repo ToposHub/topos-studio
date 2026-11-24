@@ -41,6 +41,8 @@ LOG = {"log_shadow", "log_midtone", "log_highlight", "log_offset"}
 RGB = {"r", "g", "b"}
 PRIMARY_SCALARS = {"temp": 0.0, "tint": 0.0, "contrast": 1.0, "vibrance": 0.0,
                    "shadow": 0.0, "highlights": 0.0, "saturation": 50.0, "hue_shift": 50.0}
+EXTRA_SCALARS = {"pivot": 0.435, "lum_mix": 100.0, "mid_detail": 0.0,
+                 "log_low_range": 0.333, "log_high_range": 0.550}
 
 
 @dataclass(frozen=True)
@@ -57,7 +59,8 @@ class Edit:
 
     @property
     def delta(self) -> float:
-        neutral = {"gain": 1.0, "offset": 25.0}.get(self.key[0], PRIMARY_SCALARS.get(self.control, 0.0))
+        neutral = {"gain": 1.0, "offset": 25.0}.get(
+            self.key[0], PRIMARY_SCALARS.get(self.control, EXTRA_SCALARS.get(self.control, 0.0)))
         return round(self.value - neutral, 8)
 
 
@@ -71,7 +74,7 @@ def parse_edits(raw: Any) -> list[Edit]:
             raise ValueError(f"Invalid edit: {row!r}")
         mode, control, channel, value = row
         controls = {"wheels": PRIMARY, "bars": PRIMARY, "log": LOG,
-                    "primaries": PRIMARY_SCALARS}.get(mode, set())
+                    "primaries": PRIMARY_SCALARS.keys() | EXTRA_SCALARS.keys()}.get(mode, set())
         channels = ({"value"} if mode == "primaries" else
                     RGB | {"y"} if control in {"lift", "gamma", "gain"} else RGB)
         if (control not in controls or channel not in channels or type(value) not in (float, int)
@@ -111,7 +114,7 @@ def write_chart(path: Path) -> None:
         raise OSError(f"Cannot write {path}")
 
 
-def read_patches(path: Path, *, flat_tolerance: int = 2) -> np.ndarray:
+def read_patches(path: Path, *, flat_tolerance: int | None = 2) -> np.ndarray:
     image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
     if image is None or image.dtype != np.uint16 or image.shape != (HEIGHT, WIDTH, 3):
         raise ValueError(f"Expected a {WIDTH}×{HEIGHT} RGB 16-bit TIFF: {path}")
@@ -123,7 +126,7 @@ def read_patches(path: Path, *, flat_tolerance: int = 2) -> np.ndarray:
     for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1)):
         neighbor = image[y + dy, x + dx, ::-1].astype(np.int32)
         max_delta = max(max_delta, int(np.max(np.abs(neighbor - centers))))
-    if max_delta > flat_tolerance:
+    if flat_tolerance is not None and max_delta > flat_tolerance:
         raise ValueError(f"Chart patches are not flat (delta {max_delta} codes). "
                          f"Check scaling and spatial grading: {path}")
     return centers
@@ -298,8 +301,12 @@ def _table(values: np.ndarray, size: int = GRID) -> LoadedLut:
     return LoadedLut(values.reshape(size, size, size, 3), size, "cube")
 
 
-def _flat_tolerance(edits: list[Edit]) -> int:
-    return 256 if any(edit.control in ("shadow", "highlights") for edit in edits) else 2
+def _flat_tolerance(edits: list[Edit]) -> int | None:
+    if any(edit.control == "mid_detail" for edit in edits):
+        return None
+    if any(edit.control in ("shadow", "highlights") for edit in edits):
+        return 256
+    return 4 if any(edit.mode == "log" for edit in edits) else 2
 
 
 def _read_capture(path: Path, version: str) -> tuple[list[Edit], np.ndarray]:
@@ -338,7 +345,7 @@ class Calibration:
                 raise ValueError(f"Capture is missing its edits: {name}")
             output = _normalize(codes)
             self.cases[name] = (edits, output)
-            if len(edits) == 1:
+            if len(edits) == 1 and edits[0].control not in EXTRA_SCALARS:
                 edit = edits[0]
                 samples = self.responses.setdefault(edit.key, {})
                 shift = _table(output[:GRID**3] - base)
@@ -346,8 +353,8 @@ class Calibration:
                 if prior and np.max(np.abs(prior.table - shift.table)) > 2 / MAX_CODE:
                     raise ValueError(f"Conflicting repeat captures for {edit.key} at {edit.value}")
                 samples[edit.delta] = shift
-        if not self.responses:
-            raise ValueError("Capture at least one isolated edit")
+        if not self.cases:
+            raise ValueError("Capture at least one edit")
 
     def apply(self, encoded: np.ndarray, edits: list[Edit]) -> np.ndarray:
         result = encoded.copy()
@@ -375,6 +382,8 @@ class Calibration:
         if case is not None:
             if case not in self.cases:
                 raise ValueError(f"Unknown capture: {case}")
+            if any(edit.control == "mid_detail" for edit in self.cases[case][0]):
+                raise ValueError("Midtone Detail uses neighboring pixels and cannot be baked into a LUT")
             output = sample_lut_trilinear(_table(self.cases[case][1][:GRID**3]), encoded)
         else:
             output = self.apply(encoded, edits)
@@ -387,7 +396,7 @@ class Calibration:
             np.savetxt(stream, output.reshape(-1, 3), fmt="%.8f")
 
 
-def _topos_response(encoded: np.ndarray, edits: list[Edit], *, calibrated: bool = False) -> np.ndarray:
+def _topos_response(encoded: np.ndarray, edits: list[Edit], *, calibrated: int = 0) -> np.ndarray:
     from PyQt6.QtWidgets import QApplication
 
     from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
@@ -397,7 +406,7 @@ def _topos_response(encoded: np.ndarray, edits: list[Edit], *, calibrated: bool 
     app = QApplication.instance() or QApplication([])
     panel = GradingPanel()
     if calibrated:
-        panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: 1})
+        panel.set_extended_params({PRIMARY_CALIBRATION_VERSION_KEY: int(calibrated)})
     bars = dict(zip(("lift", "gamma", "gain", "offset"), panel.color_bars_panel.columns()))
     fields = {"y": "_bright_drag", "r": "_r_drag", "g": "_g_drag", "b": "_b_drag"}
     for edit in edits:
@@ -417,8 +426,17 @@ def _topos_response(encoded: np.ndarray, edits: list[Edit], *, calibrated: bool 
             wheel = getattr(panel, f"{edit.control}_wheel")
             getattr(wheel, fields[edit.channel]).setValue(value)
             wheel.flush_pending_changes()
-    linear, _ = apply_layer_grading_cpu(encoded**TONE_CURVE, {"grading_params": panel.get_current_params()},
-                                        width=1, height=1)
+    params = {"grading_params": panel.get_current_params()}
+    if any(edit.control == "mid_detail" for edit in edits):
+        codes = chart_codes()
+        tiles = np.zeros((HEIGHT // TILE, WIDTH // TILE, 3), dtype=np.float32)
+        tiles.reshape(-1, 3)[:len(codes)] = _normalize(codes) ** TONE_CURVE
+        source = tiles.repeat(TILE, axis=0).repeat(TILE, axis=1)
+        frame, _ = apply_layer_grading_cpu(source, params, width=WIDTH, height=HEIGHT)
+        y, x = np.divmod(np.arange(len(codes) - len(encoded), len(codes)), WIDTH // TILE)
+        linear = frame[y * TILE + TILE // 2, x * TILE + TILE // 2]
+    else:
+        linear, _ = apply_layer_grading_cpu(encoded**TONE_CURVE, params, width=1, height=1)
     panel.close()
     # Keep the application alive through widget creation, evaluation and close.
     app.processEvents()
@@ -438,6 +456,8 @@ def _metrics(predicted: np.ndarray, reference: np.ndarray, source: np.ndarray) -
 
 
 def report(calibration: Calibration, *, include_topos: bool) -> dict[str, Any]:
+    from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_CURRENT_VERSION
+
     points = _normalize(chart_codes())[GRID**3:]
     report_data: dict[str, Any] = {
         "resolve_version": calibration.resolve_version,
@@ -452,13 +472,17 @@ def report(calibration: Calibration, *, include_topos: bool) -> dict[str, Any]:
     for name, (edits, output) in calibration.cases.items():
         target = output[GRID**3:]
         predictions = {}
-        if len(edits) == 1:
+        if len(edits) == 1 and edits[0].control not in EXTRA_SCALARS:
             predictions["measured_lut"] = sample_lut_trilinear(_table(output[:GRID**3]), points)
-        else:
+        elif all(edit.key in calibration.responses
+                 and min(0.0, *calibration.responses[edit.key]) <= edit.delta
+                 <= max(0.0, *calibration.responses[edit.key]) for edit in edits):
             predictions["interpolated_edits"] = calibration.apply(points, edits)
         if include_topos:
             predictions["topos_wheels_linear_rec709"] = _topos_response(points, edits)
-            predictions["topos_measured_primaries"] = _topos_response(points, edits, calibrated=True)
+            predictions["topos_measured_primaries"] = _topos_response(points, edits, calibrated=1)
+            predictions["topos_refined_primaries"] = _topos_response(
+                points, edits, calibrated=PRIMARY_CALIBRATION_CURRENT_VERSION)
         report_data["cases"][name] = {
             model: {key: _metrics(prediction[span], target[span], points[span])
                     for key, span in groups.items()}
@@ -527,9 +551,62 @@ def export_runtime_profile(sessions: list[Calibration], path: Path) -> None:
         )
 
 
+def export_refined_profile(sessions: list[Calibration], path: Path) -> None:
+    """Package unclipped encoded response curves and temperature matrices for 709 v2."""
+    versions = {session.resolve_version for session in sessions}
+    if len(versions) != 1:
+        raise ValueError("Runtime profile sessions must use the same Resolve version")
+    cases = {name: data for session in sessions for name, data in session.cases.items()}
+    points = _normalize(chart_codes())
+    gray = points[-GRAY:, 0]
+    contrast = {0.0: np.zeros_like(gray)}
+    for name in ("contrast-108", "primary-contrast-plus", "contrast-train-130"):
+        (edit,), output = cases[name]
+        contrast[edit.delta] = output[-GRAY:].mean(axis=1) - gray
+
+    log = np.empty((3, 2, GRAY), dtype=np.float32)
+    for band, control in enumerate(("log_shadow", "log_midtone", "log_highlight")):
+        for sign, label in enumerate(("minus", "plus")):
+            channels = []
+            for index, channel in enumerate("rgb"):
+                (_,), output = cases[f"{control}-{channel}-{label}"]
+                rgb = output[-GRAY:]
+                response = rgb[:, index] - np.delete(rgb, index, axis=1).mean(axis=1)
+                # Extend the measured straight section through the clipped toe or shoulder.
+                if (band, sign) == (0, 0):
+                    fit = (gray > 0.14) & (gray < 0.21)
+                    clipped = rgb[:, index] <= 1.0 / MAX_CODE
+                elif (band, sign) == (2, 1):
+                    fit = (gray > 0.71) & (gray < 0.80)
+                    clipped = rgb[:, index] >= 1.0 - 1.0 / MAX_CODE
+                else:
+                    channels.append(response)
+                    continue
+                response[clipped] = np.polyval(np.polyfit(gray[fit], response[fit], 1), gray[clipped])
+                channels.append(response)
+            log[band, sign] = np.mean(channels, axis=0)
+
+    temperature = {0.0: np.eye(3)}
+    for name in ("temp-minus-1800", "primary-temp-minus", "temp-650", "primary-temp-plus"):
+        (edit,), output = cases[name]
+        mask = np.all((output[:GRID**3] > 0.03) & (output[:GRID**3] < 0.97), axis=-1)
+        temperature[edit.delta] = np.linalg.lstsq(
+            points[:GRID**3][mask], output[:GRID**3][mask], rcond=None)[0].T
+    with path.open("xb") as stream:
+        np.savez_compressed(
+            stream, resolve_version=next(iter(versions)),
+            contrast_knots=np.array(sorted(contrast), dtype=np.float64),
+            contrast_deltas=np.stack([contrast[knot] for knot in sorted(contrast)]),
+            log_deltas=log,
+            temperature_knots=np.array(sorted(temperature), dtype=np.float64),
+            temperature_matrices=np.stack([temperature[knot] for knot in sorted(temperature)]),
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("chart", "setup", "capture", "restore", "report", "bake", "profile"))
+    parser.add_argument("action", choices=(
+        "chart", "setup", "capture", "restore", "report", "bake", "profile", "refined-profile"))
     parser.add_argument("work", type=Path)
     parser.add_argument("--case")
     parser.add_argument("--edits", type=json.loads)
@@ -559,10 +636,11 @@ def main() -> None:
         Calibration(work).bake(args.output, case=args.case,
                                edits=parse_edits(args.edits) if args.edits is not None else [],
                                size=args.size, domain=args.domain)
-    elif args.action == "profile":
+    elif args.action in ("profile", "refined-profile"):
         if not args.output:
-            parser.error("profile requires --output")
-        export_runtime_profile([Calibration(path) for path in (work, *args.additional_session)], args.output)
+            parser.error(f"{args.action} requires --output")
+        export = export_runtime_profile if args.action == "profile" else export_refined_profile
+        export([Calibration(path) for path in (work, *args.additional_session)], args.output)
     else:
         {"setup": setup, "restore": restore}[args.action](work)
 

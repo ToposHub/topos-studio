@@ -11,6 +11,8 @@ This page is always shown since Color is the core feature.
 from __future__ import annotations
 
 import logging
+import sys
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -21,10 +23,31 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QCheckBox, QLineEdit,
     QScrollArea, QGroupBox, QSpinBox, QDoubleSpinBox,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSignalBlocker, Qt
 from PyQt6.QtGui import QFont
 
 from src.shared.i18n.i18n import I18N
+from src.shared.color.color_space_descriptor import (
+    COLOR_SPACE_PRESETS,
+    LEGACY_SPACE,
+    OUTPUT_SPACE_KEY,
+    TIMELINE_SPACE_KEY,
+    project_output_space,
+    project_timeline_space,
+)
+from src.shared.color.desktop_video_color import USE_DISPLAY_ICC
+from src.shared.color.hdr_video_signal import (
+    HDR_HLG_PEAK_KEY, HDR_INPUT_KEY, HDR_INPUT_SPACES, HDR_MASTER_GAMUT_KEY, HDR_MASTER_PEAK_KEY,
+    HDR_MONITOR_KEY, HDR_OUTPUT_SPACES,
+    HDR_WHITE_KEY, HDR_WORKING_SPACES,
+)
+from src.shared.color.project_video_signal import (
+    ACES_DISPLAY_TARGETS, ACES_INPUT_KEY, ACES_INPUT_SPACES, ACES_LINEAR_SPACES,
+    ACES_RGC_KEY, ACES_VERSION_KEY, ACES_WORKING_SPACES,
+)
+from src.shared.color.types import ColorPrimaries, ColorTransfer
+from src.shared.color.video_delivery_profiles import SDR_VIDEO_OUTPUTS, WIDE_GAMUT_TIFF_OUTPUTS
+from src.shared.feature_flags import get_workspace_work_mode
 from src.shared.ui.widgets import ChevronComboBox
 from src.shared.ui.widgets.topos_controls import ToposClickableSlider
 from src.shared.ui.widgets.pref_form_layout import make_pref_form, make_pref_label
@@ -58,6 +81,297 @@ from src.shared.control_surfaces.tangent.settings import (
 logger = logging.getLogger(__name__)
 
 
+class ColorSpaceControls(QWidget):
+    """Compact project color selectors shared by Preferences and Project Settings."""
+
+    _ROWS = {
+        TIMELINE_SPACE_KEY: ("timeline_space", "Timeline color space", project_timeline_space),
+        OUTPUT_SPACE_KEY: ("output_space", "Video output color space", project_output_space),
+    }
+    _OPTIONS = {
+        "rec709-g24": ("preset_rec709_g24", "Rec.709 Gamma 2.4"),
+        "rec709-bt709": ("preset_rec709_bt709", "Rec.709 (BT.709 OETF)"),
+        "srgb": ("preset_srgb", "sRGB"),
+        "display-p3": ("preset_display_p3", "Display P3"),
+        "p3-d65-g24": ("preset_p3_d65_g24", "P3-D65 Gamma 2.4"),
+        "dci-p3-g26": ("preset_dci_p3_g26", "DCI-P3 Gamma 2.6"),
+        "rec2020-g24": ("preset_rec2020_g24", "Rec.2020 Gamma 2.4"),
+        "rec2020-bt2020": ("preset_rec2020_bt2020", "Rec.2020 (BT.2020 OETF)"),
+        "aces2065-1": ("preset_aces2065_1", "ACES2065-1 (AP0 Linear)"),
+        "acescg": ("preset_acescg", "ACEScg (AP1 Linear)"),
+        "acescct": ("preset_acescct", "ACEScct"),
+        "acescc": ("preset_acescc", "ACEScc"),
+        "auto": ("aces_auto_input", "Auto (EXR metadata or SDR default)"),
+        "linear-rec709": ("preset_linear_rec709", "Linear Rec.709"),
+        "rec2100-pq": ("preset_rec2100_pq", "Rec.2100 PQ (ST 2084)"),
+        "rec2100-hlg": ("preset_rec2100_hlg", "Rec.2100 HLG"),
+        "davinci-wide-gamut-intermediate": ("preset_davinci_intermediate", "DaVinci Wide Gamut / Intermediate"),
+        LEGACY_SPACE: ("preset_legacy", "Existing color settings"),
+    }
+    _ROLE_OPTIONS = {
+        TIMELINE_SPACE_KEY: (*SDR_VIDEO_OUTPUTS, *HDR_WORKING_SPACES, *ACES_WORKING_SPACES),
+        OUTPUT_SPACE_KEY: (*SDR_VIDEO_OUTPUTS, *WIDE_GAMUT_TIFF_OUTPUTS, *HDR_OUTPUT_SPACES),
+    }
+    _PRIMARIES_LABELS = {
+        ColorPrimaries.BT709: "Rec.709",
+        ColorPrimaries.BT2020: "Rec.2020",
+        ColorPrimaries.P3_DISPLAY: "P3-D65",
+        ColorPrimaries.P3_DCI: "DCI-P3",
+        ColorPrimaries.AP0: "ACES AP0",
+        ColorPrimaries.AP1: "ACES AP1",
+        ColorPrimaries.DAVINCI_WIDE_GAMUT: "DaVinci Wide Gamut",
+    }
+    _TRANSFER_LABELS = {
+        ColorTransfer.GAMMA24: "Gamma 2.4",
+        ColorTransfer.GAMMA26: "Gamma 2.6",
+        ColorTransfer.SRGB: "sRGB",
+        ColorTransfer.BT709: "BT.709 OETF",
+        ColorTransfer.BT2020_10: "BT.2020 OETF",
+        ColorTransfer.LINEAR: "Linear",
+        ColorTransfer.ACESCC: "ACEScc",
+        ColorTransfer.ACESCCT: "ACEScct",
+        ColorTransfer.PQ: "PQ (ST 2084)",
+        ColorTransfer.HLG: "HLG",
+        ColorTransfer.DAVINCI_INTERMEDIATE: "DaVinci Intermediate",
+    }
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._combos: dict[str, ChevronComboBox] = {}
+        self._parts: dict[str, tuple[QWidget, ChevronComboBox, ChevronComboBox]] = {}
+        self._loaded: dict[str, str] = {}
+        self._aces_group = QWidget(self)
+        self._aces_combos: dict[str, ChevronComboBox] = {}
+        self._hdr_group = QWidget(self)
+        self._hdr_combos: dict[str, ChevronComboBox] = {}
+        form = make_pref_form(self)
+        for key, (label_key, label, _) in self._ROWS.items():
+            combo = ChevronComboBox(self)
+            combo.setObjectName(key)
+            combo.setMinimumWidth(160)
+            title = I18N.tr(f"preferences.color_management.{label_key}", label)
+            combo.setAccessibleName(title)
+            row = QWidget(self)
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(combo)
+            split = QWidget(row)
+            split_layout = QHBoxLayout(split)
+            split_layout.setContentsMargins(0, 0, 0, 0)
+            gamut, gamma = ChevronComboBox(split), ChevronComboBox(split)
+            for widget, name, label in ((gamut, "primaries", "Gamut"), (gamma, "transfer", "Gamma")):
+                caption = I18N.tr(f"preferences.color_management.{name}", label)
+                widget.setObjectName(f"{key}.{name}")
+                widget.setAccessibleName(caption)
+                split_layout.addWidget(make_pref_label(caption))
+                split_layout.addWidget(widget, 1)
+            row_layout.addWidget(split)
+            form.addRow(make_pref_label(title), row)
+            self._combos[key] = combo
+            self._parts[key] = (split, gamut, gamma)
+            combo.currentIndexChanged.connect(lambda _, row_key=key: self._sync_parts(row_key))
+            gamut.currentIndexChanged.connect(lambda _, row_key=key: self._select_parts(row_key))
+            gamma.currentIndexChanged.connect(lambda _, row_key=key: self._select_parts(row_key))
+        self._combine = QCheckBox(I18N.tr(
+            "preferences.color_management.combined_color_space", "Combine gamut and gamma"), self)
+        self._combine.setObjectName("color.combine_gamut_gamma")
+        self._combine.setChecked(True)
+        self._combine.toggled.connect(self._sync_all_parts)
+        form.addRow("", self._combine)
+        self._wide_delivery_notice = make_pref_label(I18N.tr(
+            "preferences.color_management.wide_tiff_delivery",
+            "This output uses a 16-bit RGB TIFF sequence with an ICC profile."))
+        self._wide_delivery_notice.setWordWrap(True)
+        form.addRow("", self._wide_delivery_notice)
+        aces_form = make_pref_form(self._aces_group)
+        for key, title, fallback, items in (
+            (ACES_VERSION_KEY, "aces_version", "ACES version", (("1.3", "1.3"), ("2.0", "2.0"))),
+            (ACES_INPUT_KEY, "aces_input", "Default ACES input",
+             tuple((option, self._option_label(option)) for option in ACES_INPUT_SPACES)),
+            (ACES_RGC_KEY, "aces_rgc", "ACES 1.3 Reference Gamut Compression",
+             (("off", I18N.tr("preferences.color_management.aces_off", "Off")),
+              ("on", I18N.tr("preferences.color_management.aces_on", "On")))),
+        ):
+            combo = ChevronComboBox(self._aces_group)
+            combo.setObjectName(key)
+            label = I18N.tr(f"preferences.color_management.{title}", fallback)
+            combo.setAccessibleName(label)
+            for value, caption in items:
+                combo.addItem(caption, value)
+            aces_form.addRow(make_pref_label(label), combo)
+            self._aces_combos[key] = combo
+        form.addRow(self._aces_group)
+        self._aces_combos[ACES_VERSION_KEY].currentIndexChanged.connect(self._sync_aces_compression)
+        self._combos[TIMELINE_SPACE_KEY].currentIndexChanged.connect(self._refresh_output_choices)
+        self._aces_delivery_notice = make_pref_label(I18N.tr(
+            "preferences.color_management.aces_exr_delivery",
+            "OpenEXR delivery is scene-linear. The viewer uses the ACES Rec.709 output transform."))
+        self._aces_delivery_notice.setWordWrap(True)
+        form.addRow("", self._aces_delivery_notice)
+        hdr_form = make_pref_form(self._hdr_group)
+        hdr_inputs = (
+            ("auto", I18N.tr("preferences.color_management.hdr_auto", "Auto (video tags or SDR default)")),
+            ("timeline", I18N.tr("preferences.color_management.hdr_timeline_input", "Same as timeline")),
+            *((option, self._option_label(option)) for option in HDR_INPUT_SPACES[2:]),
+        )
+        for key, name, fallback, choices in (
+            (HDR_INPUT_KEY, "hdr_input", "Default HDR input", hdr_inputs),
+            (HDR_WHITE_KEY, "hdr_white", "Reference white", (("100", "100 nit"), ("203", "203 nit"))),
+            (HDR_HLG_PEAK_KEY, "hdr_hlg_peak", "HLG reference display peak",
+             tuple((str(peak), f"{peak} nit") for peak in (1000, 600, 2000, 4000))),
+            (HDR_MONITOR_KEY, "hdr_monitor", "HDR desktop preview",
+             (("signal", I18N.tr("preferences.color_management.hdr_signal", "PQ / HLG reference signal")),
+              ("rec709", I18N.tr("preferences.color_management.hdr_rec709", "Rec.709 SDR reference")))),
+            (HDR_MASTER_PEAK_KEY, "hdr_master_peak", "PQ mastering display peak",
+             tuple((str(peak), f"{peak} nit") for peak in (1000, 600, 2000, 4000, 10000))),
+            (HDR_MASTER_GAMUT_KEY, "hdr_master_gamut", "PQ mastering display gamut",
+             (("bt2020", "Rec.2020"), ("p3-d65", "P3-D65"))),
+        ):
+            combo = ChevronComboBox(self._hdr_group)
+            combo.setObjectName(key)
+            label = I18N.tr(f"preferences.color_management.{name}", fallback)
+            combo.setAccessibleName(label)
+            for value, caption in choices:
+                combo.addItem(caption, value)
+            hdr_form.addRow(make_pref_label(label), combo)
+            self._hdr_combos[key] = combo
+        form.addRow(self._hdr_group)
+        self._hdr_combos[HDR_MONITOR_KEY].setToolTip(I18N.tr(
+            "preferences.color_management.hdr_desktop_signal_tip",
+            "Signal codes can be compared to Resolve with viewer ICC disabled. "
+            "Rec.709 reference converts to SDR and clips values beyond the display range.",
+        ))
+        self.load(None)
+
+    def _option_label(self, option: str) -> str:
+        if option in self._OPTIONS:
+            key, label = self._OPTIONS[option]
+            return I18N.tr(f"preferences.color_management.{key}", label)
+        return str(COLOR_SPACE_PRESETS[option])
+
+    def _sync_aces_compression(self) -> None:
+        self._aces_combos[ACES_RGC_KEY].setEnabled(
+            self._aces_combos[ACES_VERSION_KEY].currentData() == "1.3")
+
+    def _refresh_output_choices(self, *, selection: str | None = None) -> None:
+        combo = self._combos[OUTPUT_SPACE_KEY]
+        if selection is None:
+            selection = combo.currentData()
+        active = self._combos[TIMELINE_SPACE_KEY].currentData() in ACES_WORKING_SPACES
+        options = (*ACES_DISPLAY_TARGETS, *ACES_LINEAR_SPACES) if active else self._ROLE_OPTIONS[OUTPUT_SPACE_KEY]
+        if not active and selection is not None and selection not in (*options, *ACES_LINEAR_SPACES):
+            options = (*options, selection)
+        with QSignalBlocker(combo):
+            combo.clear()
+            for option in options:
+                combo.addItem(self._option_label(option), option)
+            combo.setCurrentIndex(max(0, combo.findData(selection)))
+        self._aces_group.setVisible(active)
+        self._sync_parts(OUTPUT_SPACE_KEY)
+        self._sync_hdr_group()
+
+    def _sync_hdr_group(self) -> None:
+        timeline = self._combos[TIMELINE_SPACE_KEY].currentData()
+        output = self._combos[OUTPUT_SPACE_KEY].currentData()
+        self._hdr_group.setVisible(timeline in HDR_WORKING_SPACES or output in HDR_OUTPUT_SPACES)
+        monitor = self._hdr_combos.get(HDR_MONITOR_KEY)
+        if monitor is not None:
+            monitor.setEnabled(output in HDR_OUTPUT_SPACES)
+            for key in (HDR_MASTER_PEAK_KEY, HDR_MASTER_GAMUT_KEY):
+                self._hdr_combos[key].setEnabled(output == "rec2100-pq")
+
+    def load(
+        self, settings: Mapping[str, Any] | None,
+        config_manager: ConfigManager | Mapping[str, Any] | None = None,
+    ) -> None:
+        """Load effective project choices without emitting change signals."""
+        for key, combo in self._combos.items():
+            if key == OUTPUT_SPACE_KEY:
+                continue
+            selection = self._ROWS[key][2](settings, config_manager)
+            options = self._ROLE_OPTIONS[key]
+            if selection not in options:
+                options = (*options, selection)
+            with QSignalBlocker(combo):
+                combo.clear()
+                for option in options:
+                    combo.addItem(self._option_label(option), option)
+                combo.setCurrentIndex(combo.findData(selection))
+        self._refresh_output_choices(selection=project_output_space(settings, config_manager))
+        for key, combo in (self._aces_combos | self._hdr_combos).items():
+            value = (settings or {}).get(key, config_manager.get(key) if config_manager else None)
+            with QSignalBlocker(combo):
+                if key in (HDR_WHITE_KEY, HDR_HLG_PEAK_KEY, HDR_MASTER_PEAK_KEY) and value is not None:
+                    value = str(value)
+                    if combo.findData(value) == -1:
+                        combo.addItem(f"{value} nit", value)
+                combo.setCurrentIndex(max(0, combo.findData(value)))
+        self._sync_aces_compression()
+        self._sync_all_parts()
+        self._loaded = self.settings()
+
+    def _sync_all_parts(self) -> None:
+        for key in self._combos:
+            self._sync_parts(key)
+
+    def _sync_parts(self, key: str) -> None:
+        combo = self._combos[key]
+        selection = combo.currentData()
+        split, gamut, gamma = self._parts[key]
+        options = tuple(combo.itemData(index) for index in range(combo.count())
+                        if combo.itemData(index) in COLOR_SPACE_PRESETS)
+        choices = tuple(COLOR_SPACE_PRESETS[option] for option in options
+                        if COLOR_SPACE_PRESETS[option].primaries in self._PRIMARIES_LABELS
+                        and COLOR_SPACE_PRESETS[option].transfer in self._TRANSFER_LABELS)
+        show_split = (not self._combine.isChecked() and selection in options
+                      and COLOR_SPACE_PRESETS[selection] in choices)
+        combo.setVisible(not show_split)
+        split.setVisible(show_split)
+        if key == OUTPUT_SPACE_KEY:
+            self._sync_hdr_group()
+            self._wide_delivery_notice.setVisible(selection in WIDE_GAMUT_TIFF_OUTPUTS)
+            if hasattr(self, "_aces_delivery_notice"):
+                self._aces_delivery_notice.setVisible(selection in ACES_LINEAR_SPACES)
+        if not show_split:
+            return
+        space = COLOR_SPACE_PRESETS[selection]
+        with QSignalBlocker(gamut), QSignalBlocker(gamma):
+            gamut.clear()
+            for primaries in dict.fromkeys(choice.primaries for choice in choices):
+                gamut.addItem(self._PRIMARIES_LABELS[primaries], primaries)
+            gamut.setCurrentIndex(gamut.findData(space.primaries))
+            gamma.clear()
+            for choice in choices:
+                if choice.primaries == space.primaries:
+                    gamma.addItem(self._TRANSFER_LABELS[choice.transfer], choice.transfer)
+            gamma.setCurrentIndex(gamma.findData(space.transfer))
+
+    def _select_parts(self, key: str) -> None:
+        _, gamut, gamma = self._parts[key]
+        combo = self._combos[key]
+        options = [combo.itemData(index) for index in range(combo.count())
+                   if combo.itemData(index) in COLOR_SPACE_PRESETS
+                   and COLOR_SPACE_PRESETS[combo.itemData(index)].primaries == gamut.currentData()]
+        if not options:
+            return
+        selection = next((option for option in options
+                          if COLOR_SPACE_PRESETS[option].transfer == gamma.currentData()), options[0])
+        combo.setCurrentIndex(combo.findData(selection))
+
+    def settings(self) -> dict[str, str]:
+        """Return the color space IDs selected in this widget."""
+        values = {key: combo.currentData() for key, combo in self._combos.items()}
+        if values[TIMELINE_SPACE_KEY] in ACES_WORKING_SPACES:
+            values.update({key: combo.currentData() for key, combo in self._aces_combos.items()})
+        if values[TIMELINE_SPACE_KEY] in HDR_WORKING_SPACES or values[OUTPUT_SPACE_KEY] in HDR_OUTPUT_SPACES:
+            values.update({key: combo.currentData() for key, combo in self._hdr_combos.items()})
+        return values
+
+    def changes(self) -> dict[str, str]:
+        """Return the selections edited since the most recent load."""
+        return {key: value for key, value in self.settings().items() if value != self._loaded.get(key)}
+
+
 class _TangentSensitivitySpinBox(QDoubleSpinBox):
     """Display normalized sensitivity without a redundant trailing .0."""
 
@@ -81,39 +395,9 @@ class ColorProcessingPreferencePage:
 
     page_id = "color.processing"
 
-    # AUD-24611: color.{scope}.{kind}_{field} 缺键时的运行时默认，与
-    # descriptor_from_config 的 smart-default 回退（descriptor_for_source_kind）
-    # 一致：timeline → REC709_VIDEO（BT.709 / BT.709 / limited），
-    # image → SRGB_IMAGE（BT.709 / sRGB / full）。load() 按运行时默认预选
-    # 缺失键，apply() 写回的就是引擎当前生效的值——旧实现缺键时组合框
-    # 停在首项 "limited"，点确定即把 image 范围静默覆盖为 limited。
-    _CMS_RUNTIME_DEFAULTS: dict[tuple[str, str], str] = {
-        ("timeline", "primaries"): "bt709",
-        ("timeline", "transfer"): "bt709",
-        ("timeline", "range"): "limited",
-        ("image", "primaries"): "bt709",
-        ("image", "transfer"): "iec61966_2_1",
-        ("image", "range"): "full",
-    }
-
-    # 12 个 CMS 键（load/apply/restore_defaults 三处共用同一顺序）。
-    _CMS_CONFIG_KEYS: tuple[str, ...] = (
-        "color.preview.timeline_primaries",
-        "color.preview.timeline_transfer",
-        "color.preview.timeline_range",
-        "color.preview.image_primaries",
-        "color.preview.image_transfer",
-        "color.preview.image_range",
-        "color.output.timeline_primaries",
-        "color.output.timeline_transfer",
-        "color.output.timeline_range",
-        "color.output.image_primaries",
-        "color.output.image_transfer",
-        "color.output.image_range",
-    )
-
-    def __init__(self):
+    def __init__(self) -> None:
         self._widgets: dict[str, QWidget] = {}
+        self._color_space_controls: ColorSpaceControls | None = None
         self._dialog_ref: Any = None  # Weak reference to PreferencesDialog for _browse_path
 
     # ── Widget Creation ─────────────────────────────────────────────
@@ -134,6 +418,28 @@ class ColorProcessingPreferencePage:
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(16)
 
+        if get_workspace_work_mode(getattr(parent, "_config_manager", None)) == "video":
+            spaces_group = QGroupBox(I18N.tr(
+                "preferences.color_management.project_color_defaults", "Project Color Defaults"))
+            spaces_group.setObjectName("PrefSettingsGroup")
+            spaces_layout = QVBoxLayout(spaces_group)
+            self._color_space_controls = ColorSpaceControls(spaces_group)
+            spaces_layout.addWidget(self._color_space_controls)
+            if sys.platform == "darwin":
+                display_icc = QCheckBox(I18N.tr(
+                    "preferences.color_management.use_display_icc",
+                    "Use macOS display profiles for video viewers",
+                ))
+                display_icc.setToolTip(I18N.tr(
+                    "preferences.color_management.use_display_icc_tip",
+                    "Match the “Use Mac Display Color Profile for Viewers” setting in DaVinci Resolve.",
+                ))
+                self._widgets[USE_DISPLAY_ICC] = display_icc
+                spaces_layout.addWidget(display_icc)
+            layout.addWidget(spaces_group)
+        else:
+            self._color_space_controls = None
+
         # ── Group 1: Color Settings ──
         color_group = QGroupBox(
             I18N.tr("preferences.color_management.section_title", "Color Settings")
@@ -141,14 +447,14 @@ class ColorProcessingPreferencePage:
         color_group.setObjectName("PrefSettingsGroup")
         color_form = make_pref_form(color_group)
 
-        # Default color space
+        # Reference profile for warnings on imported still images.
         cs_combo = ChevronComboBox()
         cs_combo.setMinimumWidth(120)
         for cs in ["sRGB", "Adobe RGB", "ProPhoto RGB", "Rec.709", "DCI-P3"]:
             cs_combo.addItem(cs)
         self._widgets['default_color_space'] = cs_combo
-        cs_label = make_pref_label(I18N.tr("preferences.color_management.default_color_space",
-                                            "Default Color Space:"))
+        cs_label = make_pref_label(I18N.tr("preferences.color_management.image_warning_profile",
+                                            "Image profile warning reference:"))
         color_form.addRow(cs_label, cs_combo)
 
         # Default bit depth
@@ -373,98 +679,6 @@ class ColorProcessingPreferencePage:
         tangent_form.addRow("", smoothing_note)
         layout.addWidget(tangent_group)
 
-        # ── Group: Color Space Presets (preview & output, video vs image) ──
-        # Separate gamut+gamma for timeline (video) and image (still) sources.
-        # MVP: primaries is BT.709 only (sRGB and Rec.709 share it); users
-        # choose the transfer function (gamma curve). Stage 2 adds primaries.
-        cms_group = QGroupBox(
-            I18N.tr("preferences.color_management.presets_section",
-                    "Color Space Presets (Preview & Output)")
-        )
-        cms_group.setObjectName("PrefSettingsGroup")
-        cms_form = make_pref_form(cms_group)
-
-        # Transfer-function options (the gamma curve). Primaries fixed to
-        # BT.709 for MVP; this combo is reused for all 4 (preview/output ×
-        # timeline/image) selectors. Values are ColorTransfer enum values.
-        def _make_transfer_combo(key: str) -> ChevronComboBox:
-            combo = ChevronComboBox()
-            combo.setMinimumWidth(120)
-            combo.addItem(I18N.tr("preferences.color_management.tf_srgb", "sRGB (~gamma 2.2)"), "iec61966_2_1")
-            combo.addItem(I18N.tr("preferences.color_management.tf_rec709", "Rec.709 (~gamma 2.4)"), "bt709")
-            combo.addItem(I18N.tr("preferences.color_management.tf_linear", "Linear (no encode)"), "linear")
-            combo.addItem(I18N.tr("preferences.color_management.tf_pq", "PQ / SMPTE ST 2084 (HDR10)"), "smpte2084")
-            combo.addItem(I18N.tr("preferences.color_management.tf_hlg", "HLG / ARIB STD-B67 (HDR broadcast)"), "arib-std-b67")
-            self._widgets[key] = combo
-            return combo
-
-        # P0-COLOR-04：色域与范围显式暴露。运行时 descriptor_from_config
-        # 早已支持 color.{scope}.{kind}_primaries/_range 键，但 UI 从未提供
-        # 入口，HDR/宽色域只能依赖隐含默认值。键名与运行时读取一致。
-        def _make_primaries_combo(key: str) -> ChevronComboBox:
-            combo = ChevronComboBox()
-            combo.setMinimumWidth(120)
-            combo.addItem(I18N.tr("preferences.color_management.prim_bt709",
-                                  "BT.709 (sRGB/HD)"), "bt709")
-            combo.addItem(I18N.tr("preferences.color_management.prim_p3",
-                                  "Display P3 (wide gamut)"), "smpte432")
-            combo.addItem(I18N.tr("preferences.color_management.prim_bt2020",
-                                  "BT.2020 (UHD/HDR)"), "bt2020")
-            self._widgets[key] = combo
-            return combo
-
-        def _make_range_combo(key: str) -> ChevronComboBox:
-            combo = ChevronComboBox()
-            combo.setMinimumWidth(120)
-            combo.addItem(I18N.tr("preferences.color_management.range_limited",
-                                  "Limited (video 16-235)"), "limited")
-            combo.addItem(I18N.tr("preferences.color_management.range_full",
-                                  "Full (PC 0-255)"), "full")
-            self._widgets[key] = combo
-            return combo
-
-        def _add_cms_row(scope: str, kind: str, kind_label: str) -> None:
-            """一组三联选择器：色域 + 传输函数 + 范围（键名与运行时一致）。"""
-            cms_form.addRow(
-                make_pref_label(I18N.tr(
-                    f"preferences.color_management.{scope}_{kind}_primaries",
-                    f"{'Preview' if scope == 'preview' else 'Output'} "
-                    f"Primaries ({kind_label}):")),
-                _make_primaries_combo(f"color.{scope}.{kind}_primaries"),
-            )
-            cms_form.addRow(
-                make_pref_label(I18N.tr(
-                    f"preferences.color_management.{scope}_{kind}_transfer",
-                    f"{'Preview' if scope == 'preview' else 'Output'} "
-                    f"Transfer ({kind_label}):")),
-                _make_transfer_combo(
-                    f"color.{scope}.{kind}_transfer",
-                ),
-            )
-            cms_form.addRow(
-                make_pref_label(I18N.tr(
-                    f"preferences.color_management.{scope}_{kind}_range",
-                    f"{'Preview' if scope == 'preview' else 'Output'} "
-                    f"Range ({kind_label}):")),
-                _make_range_combo(f"color.{scope}.{kind}_range"),
-            )
-
-        _add_cms_row("preview", "timeline", "Timeline/Video")
-        _add_cms_row("preview", "image", "Image")
-        _add_cms_row("output", "timeline", "Timeline/Video")
-        _add_cms_row("output", "image", "Image")
-
-        # Smart-default toggle: auto-pick video→Rec.709, image→sRGB.
-        smart_default = QCheckBox(
-            I18N.tr("preferences.color_management.smart_default",
-                    "Smart default (timeline→Rec.709, image→sRGB)")
-        )
-        smart_default.setChecked(True)
-        self._widgets['color.smart_default'] = smart_default
-        cms_form.addRow(make_pref_label(""), smart_default)
-
-        layout.addWidget(cms_group)
-
         # ── Group 2: Image Processing ──
         proc_group = QGroupBox(
             I18N.tr("preferences.image_processing.section_default_title",
@@ -614,20 +828,6 @@ class ColorProcessingPreferencePage:
                 combo.setCurrentIndex(i)
                 return
 
-    @classmethod
-    def _cms_value(cls, key: str, value: object) -> object:
-        """CMS 键取值：缺键（None）回退运行时默认（AUD-24611）。
-
-        未匹配的键原样返回 None，由 _set_combo_data 保持当前选择。
-        """
-        if value is not None:
-            return value
-        parts = key.split(".")  # color.{scope}.{kind}_{field}
-        if len(parts) == 3 and parts[0] == "color":
-            kind, _, field = parts[2].rpartition("_")
-            return cls._CMS_RUNTIME_DEFAULTS.get((kind, field))
-        return None
-
     @staticmethod
     def _config_float(value: object, fallback: float, key: str = "") -> float:
         """AUD-24612: 外部配置值防御式 float 转换。
@@ -730,15 +930,10 @@ class ColorProcessingPreferencePage:
                     value, DEFAULT_TANGENT_SENSITIVITY[key], key)
             )
 
-        # Color Space Presets (preview/output transfer functions)
-        for key in self._CMS_CONFIG_KEYS:
-            # AUD-24611: 缺键按运行时默认预选（image→full 等），apply()
-            # 写回值与引擎当前行为一致，不再静默固化为组合框首项。
-            self._set_combo_data(
-                self._widgets[key], self._cms_value(key, config.get(key)))
-        self._widgets['color.smart_default'].setChecked(
-            config.get('color.smart_default', True)
-        )
+        if self._color_space_controls is not None:
+            self._color_space_controls.load(None, config)
+        if USE_DISPLAY_ICC in self._widgets:
+            self._widgets[USE_DISPLAY_ICC].setChecked(config.get(USE_DISPLAY_ICC, False) is True)
 
         # Image Processing
         self._widgets['default_denoise_strength'].setValue(
@@ -772,6 +967,9 @@ class ColorProcessingPreferencePage:
         if 'default_color_space' not in self._widgets:
             return
 
+        if USE_DISPLAY_ICC in self._widgets:
+            config_manager.set(USE_DISPLAY_ICC, self._widgets[USE_DISPLAY_ICC].isChecked(),
+                               auto_save=False)
         # Color Settings
         config_manager.set('default_color_space',
                            self._widgets['default_color_space'].currentText(),
@@ -826,12 +1024,9 @@ class ColorProcessingPreferencePage:
                 auto_save=False,
             )
 
-        # Color Space Presets (preview/output transfer functions)
-        for key in self._CMS_CONFIG_KEYS:
-            config_manager.set(key, self._widgets[key].currentData(), auto_save=False)
-        config_manager.set('color.smart_default',
-                           self._widgets['color.smart_default'].isChecked(),
-                           auto_save=False)
+        if self._color_space_controls is not None:
+            for key, value in self._color_space_controls.settings().items():
+                config_manager.set(key, value, auto_save=False)
 
         # Image Processing
         config_manager.set('default_denoise_strength',
@@ -913,15 +1108,10 @@ class ColorProcessingPreferencePage:
                 else float(value)
             )
 
-        # Color Space Presets
-        for key in self._CMS_CONFIG_KEYS:
-            # AUD-24611: DEFAULT_CONFIG 未覆盖的 range 键同样按运行时默认
-            # 预选，"恢复默认"后组合框与引擎行为一致。
-            self._set_combo_data(
-                self._widgets[key], self._cms_value(key, defaults.get(key)))
-        self._widgets['color.smart_default'].setChecked(
-            defaults.get('color.smart_default', True)
-        )
+        if USE_DISPLAY_ICC in self._widgets:
+            self._widgets[USE_DISPLAY_ICC].setChecked(defaults.get(USE_DISPLAY_ICC, False) is True)
+        if self._color_space_controls is not None:
+            self._color_space_controls.load(None, defaults)
 
         # Image Processing
         self._widgets['default_denoise_strength'].setValue(

@@ -25,7 +25,10 @@ from PyQt6.QtWidgets import (
     QMenu,
     QPushButton,
     QScrollArea,
+    QScrollBar,
     QSizePolicy,
+    QStyle,
+    QStyleOptionSlider,
     QVBoxLayout,
     QWidget,
     QToolTip,
@@ -35,6 +38,7 @@ from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identit
 from src.shared.i18n.i18n import I18N
 from src.shared.media.thumbnail_provider import ThumbnailProvider
 from src.shared.media.metadata import format_codec_label
+from src.shared.ui.style_sheet import C
 from src.features.color.ui.clip_version_ui import (
     ClipVersionCollection, ClipVersionResult, ClipVersionTarget,
     ClipVersionUiController, VersionScope,
@@ -61,21 +65,22 @@ def _emit_color_clip_debug(message: str, *args: object) -> None:
 # ---------------------------------------------------------------------------
 # Dark-theme palette constants (matching the rest of the app)
 # ---------------------------------------------------------------------------
-_BG_DARK = "#242426"
-_BG_CARD = _BG_DARK
-_BG_CARD_HOVER = "#3a3a40"
 _BORDER_SELECTED = "#e65b50"
 _TEXT_PRIMARY = "#cccccc"
 _TEXT_SECONDARY = "#888888"
 
 # Fixed metadata rows and a compact picture size keep the strip's density
 # independent of the main window's dock allocation.
-_MIN_CARD_HEIGHT = 114
-_CARD_VERTICAL_MARGINS = 8
-_CARD_CONTENT_SPACING = 2
+_CARD_TOP_MARGIN = 2
+_CARD_BOTTOM_MARGIN = 1
+_CARD_VERTICAL_MARGINS = _CARD_TOP_MARGIN + _CARD_BOTTOM_MARGIN
+_CARD_CONTENT_SPACING = 1
 _THUMBNAIL_ASPECT_RATIO = 16.0 / 9.0
-_HEADER_HEIGHT = 26
-_FOOTER_HEIGHT = 18
+_HEADER_HEIGHT = 21
+_FOOTER_HEIGHT = 14
+_CARD_METADATA_HEIGHT = _HEADER_HEIGHT + _FOOTER_HEIGHT + 2 * _CARD_CONTENT_SPACING
+_MIN_CARD_HEIGHT = _CARD_METADATA_HEIGHT + 58
+_SCROLLBAR_HEIGHT = 7
 
 # AUD-25702：viewport 高度 ≤ 0（隐藏/零高度 dock）时自适应重试的上限；
 # 超过后停止空转，等待下一次 resizeEvent/卡片重建重新启动。
@@ -108,33 +113,15 @@ class CardSize(Enum):
     LARGE = "large"
 
 
-# Card size presets
-CARD_SIZE_PRESETS = {
-    CardSize.SMALL: {
-        "width": 128,
-        "thumb_height": 72,
-        "bottom_height": 16,
-        "total_height": 118,
-        "font_size": 9,
-        "bottom_font_size": 9,
-    },
-    CardSize.MEDIUM: {
-        "width": 146,
-        "thumb_height": 82,
-        "bottom_height": 18,
-        "total_height": 130,
-        "font_size": 11,
-        "bottom_font_size": 11,
-    },
-    CardSize.LARGE: {
-        "width": 181,
-        "thumb_height": 102,
-        "bottom_height": 20,
-        "total_height": 148,
-        "font_size": 12,
-        "bottom_font_size": 12,
-    },
+_CARD_THUMBNAIL_HEIGHTS = {
+    CardSize.SMALL: 63,
+    CardSize.MEDIUM: 82,
+    CardSize.LARGE: 100,
 }
+
+
+def _preset_card_height(size: CardSize) -> int:
+    return _CARD_THUMBNAIL_HEIGHTS[size] + _CARD_METADATA_HEIGHT
 
 
 # ---------------------------------------------------------------------------
@@ -535,33 +522,12 @@ def build_clip_entries(
 class ThumbnailWidget(QWidget):
     """Thumbnail picture with an independent selection border."""
 
-    def __init__(self, card_size: CardSize = CardSize.MEDIUM, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._pixmap: QPixmap | None = None
         self._clip_index: str = ""
         self._timecode: str = ""
         self._track_name: str = ""
-        self._card_size = card_size
-        self._font_size = CARD_SIZE_PRESETS[card_size]["font_size"]
-        self._apply_size()
-
-    def _apply_size(self) -> None:
-        """Apply size based on card_size preset."""
-        preset = CARD_SIZE_PRESETS[self._card_size]
-        self.setFixedHeight(preset["thumb_height"])
-        self.setMinimumWidth(preset["width"] - 4)
-
-    def set_card_size(self, size: CardSize) -> None:
-        """Update card size and reapply."""
-        self._card_size = size
-        self._apply_size()
-        self.update()
-
-    def set_display_size(self, width: int, height: int, font_size: int) -> None:
-        """Set the runtime picture size used by the compact clip strip."""
-        self._font_size = max(8, int(font_size))
-        self.setFixedSize(max(1, int(width)), max(1, int(height)))
-        self.update()
 
     def set_pixmap(self, pixmap: QPixmap | None) -> None:
         self._pixmap = pixmap
@@ -589,7 +555,7 @@ class ThumbnailWidget(QWidget):
         outline = QPainterPath()
         outline.addRoundedRect(bounds, radius, radius)
 
-        painter.fillRect(self.rect(), QColor(_BG_DARK))
+        painter.fillRect(self.rect(), QColor(C.BG_PANEL))
         painter.save()
         painter.setClipPath(outline)
         painter.fillRect(self.rect(), QColor("#1a1a1a"))
@@ -648,19 +614,23 @@ class ClipMetadataHeader(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         row = QHBoxLayout(self)
         row.setContentsMargins(2, 0, 2, 0)
-        row.setSpacing(5)
+        row.setSpacing(3)
+        self._track = ""
         self.index_label = ClipIndexBadge(self)
         self.index_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.index_label.setFixedHeight(17)
+        self.index_label.setFixedHeight(15)
         self.index_label.setStyleSheet(
             "color: #d2d2d4; border: none;"
-            "font-size: 10px; font-weight: bold; padding: 0 3px; background: transparent;"
+            "font-size: 10px; font-weight: bold; padding: 0 2px; background: transparent;"
         )
         self.timecode_label = QLabel(self)
         self.timecode_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.timecode_label.setStyleSheet(
-            "color: #dddddf; font-size: 10px; font-weight: bold; border: none; background: transparent;"
+            "color: #dddddf; font-size: 10px; font-weight: 500; border: none; background: transparent;"
         )
+        timecode_font = self.timecode_label.font()
+        timecode_font.setStretch(92)
+        self.timecode_label.setFont(timecode_font)
         self.track_label = QLabel(self)
         self.track_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.track_label.setStyleSheet(
@@ -673,9 +643,21 @@ class ClipMetadataHeader(QWidget):
     def set_info(self, index: str, timecode: str, track: str) -> None:
         self.index_label.setText(index)
         self.timecode_label.setText(timecode)
+        self._track = track
+        self._fit_track_label()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._fit_track_label()
+
+    def _fit_track_label(self) -> None:
         # Custom track names remain available in the card tooltip.
+        row = self.layout()
+        margins = row.contentsMargins()
+        available = (self.width() - margins.left() - margins.right() - 2 * row.spacing()
+                     - self.index_label.sizeHint().width() - self.timecode_label.sizeHint().width())
         self.track_label.setText(self.track_label.fontMetrics().elidedText(
-            track, Qt.TextElideMode.ElideRight, 28,
+            self._track, Qt.TextElideMode.ElideRight, max(0, min(28, available)),
         ))
 
 
@@ -703,7 +685,7 @@ class TimelineClipCard(QFrame):
         preview_mode: ClipPreviewMode = ClipPreviewMode.MIDDLE_FRAME,
         bottom_mode: BottomLabelMode = BottomLabelMode.CODEC,
         fps: float = 24.0,
-        card_size: CardSize = CardSize.MEDIUM,
+        card_size: CardSize = CardSize.SMALL,
         parent: QWidget | None = None
     ) -> None:
         super().__init__(parent)
@@ -713,24 +695,16 @@ class TimelineClipCard(QFrame):
         self._preview_mode = preview_mode
         self._bottom_mode = bottom_mode
         self._fps = fps
-        self._card_size = card_size
         self._selected = False
         self._version_text = ""
         self._pixmap: QPixmap | None = None
         self._thumbnail_requested: bool = False
         self._preview_override_active: bool = False
-        self._display_height = CARD_SIZE_PRESETS[card_size]["total_height"]
-        self._bottom_height = CARD_SIZE_PRESETS[card_size]["bottom_height"]
-        self._bottom_font_size = CARD_SIZE_PRESETS[card_size]["bottom_font_size"]
-
-        # Apply size preset
-        preset = CARD_SIZE_PRESETS[card_size]
-        self.setFixedSize(preset["width"], preset["total_height"])
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFrameShape(QFrame.Shape.NoFrame)
 
         self._build_ui()
-        self._apply_display_geometry(preset["width"], preset["total_height"])
+        self.set_card_size(card_size)
         self._apply_style()
         self.setToolTip(f"{entry.asset_name}\n{entry.track_name} · {entry.codec_label or entry.media_type.upper()}")
         self.setAccessibleName(f"{clip_index:02d} {entry.asset_name}")
@@ -738,7 +712,6 @@ class TimelineClipCard(QFrame):
     # ---- UI construction ----
 
     def _build_ui(self) -> None:
-        preset = CARD_SIZE_PRESETS[self._card_size]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(_CARD_CONTENT_SPACING)
@@ -746,7 +719,7 @@ class TimelineClipCard(QFrame):
         layout.addWidget(self._header)
 
         # Picture has no metadata overlay.
-        self._thumb_widget = ThumbnailWidget(self._card_size, self)
+        self._thumb_widget = ThumbnailWidget(self)
         self._thumb_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(self._thumb_widget)
 
@@ -755,7 +728,7 @@ class TimelineClipCard(QFrame):
         self._bottom_label.setObjectName("bottomLabel")
         self._bottom_label.setTextFormat(Qt.TextFormat.PlainText)
         self._bottom_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self._bottom_label.setFixedHeight(preset["bottom_height"])
+        self._bottom_label.setFixedHeight(_FOOTER_HEIGHT)
         self._bottom_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._update_bottom_label()
         layout.addWidget(self._bottom_label)
@@ -792,7 +765,7 @@ class TimelineClipCard(QFrame):
         else:
             text = self._entry.asset_name
         self._bottom_label.setStyleSheet(
-            f"QLabel#bottomLabel {{ color: {'#e4e4e6' if self._selected else _TEXT_SECONDARY}; font-size: 10px;"
+            f"QLabel#bottomLabel {{ color: {'#e4e4e6' if self._selected else _TEXT_SECONDARY}; font-size: 9px;"
             " background: transparent; border: none; padding-left: 2px; }"
         )
         self._bottom_label.setText(self._bottom_label.fontMetrics().elidedText(
@@ -806,7 +779,7 @@ class TimelineClipCard(QFrame):
         self._header.index_label.update()
 
     def _apply_style(self) -> None:
-        self.setStyleSheet(f"TimelineClipCard {{ background: {_BG_DARK}; border: none; }}")
+        self.setStyleSheet(f"TimelineClipCard {{ background: {C.BG_PANEL}; border: none; }}")
         self._thumb_widget.setProperty("selected", self._selected)
         self._thumb_widget.update()
         self._update_bottom_label()
@@ -892,20 +865,15 @@ class TimelineClipCard(QFrame):
 
     def set_card_size(self, size: CardSize) -> None:
         """Resize a standalone card without discarding its thumbnail."""
-        self._card_size = size
-        preset = CARD_SIZE_PRESETS[size]
-        self._apply_display_geometry(preset["width"], preset["total_height"])
+        self._apply_display_geometry(_preset_card_height(size))
 
-    def _apply_display_geometry(self, width: int, height: int) -> None:
+    def _apply_display_geometry(self, height: int) -> None:
         """Keep metadata fixed and derive the picture width from its height."""
         card_height = max(_MIN_CARD_HEIGHT, int(height))
-        thumbnail_height = max(24, card_height - _HEADER_HEIGHT - _FOOTER_HEIGHT - 2 * _CARD_CONTENT_SPACING)
+        thumbnail_height = card_height - _CARD_METADATA_HEIGHT
         card_width = round(thumbnail_height * _THUMBNAIL_ASPECT_RATIO)
-        self._display_height = card_height
-        self._bottom_height = _FOOTER_HEIGHT
         self.setFixedSize(card_width, card_height)
-        self._thumb_widget.set_display_size(card_width, thumbnail_height, 10)
-        self._bottom_label.setFixedHeight(_FOOTER_HEIGHT)
+        self._thumb_widget.setFixedSize(card_width, thumbnail_height)
         self._update_bottom_label()
         # Apply child geometry in the same resize pass; otherwise the previous
         # layout can overlap the newly resized picture until the next event.
@@ -964,6 +932,24 @@ class TimelineClipCard(QFrame):
 # TimelineClipStrip
 # ---------------------------------------------------------------------------
 
+class _ClipStripScrollBar(QScrollBar):
+    """Draw only the rounded thumb at Qt's native scroll position."""
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        slider = QStyle.SubControl.SC_ScrollBarSlider
+        thumb = self.style().subControlRect(QStyle.ComplexControl.CC_ScrollBar, option, slider, self)
+        highlighted = bool(option.activeSubControls & slider)
+        radius = thumb.height() / 2.0
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#a0a0ab" if highlighted else "#62676a"))
+        painter.drawRoundedRect(QRectF(thumb), radius, radius)
+        painter.end()
+
+
 class TimelineClipStrip(QWidget):
     """Horizontal scrollable strip of TimelineClipCards.
 
@@ -1013,7 +999,7 @@ class TimelineClipStrip(QWidget):
         self._preview_mode = _get_preview_mode_setting()
         self._bottom_mode = _get_bottom_label_mode_setting()
         # Keep the same compact density when restoring a taller saved dock.
-        self._card_size = CardSize.MEDIUM
+        self._card_size = CardSize.SMALL
         self._fps = 24.0
 
         # Lazy thumbnail loading state
@@ -1067,6 +1053,7 @@ class TimelineClipStrip(QWidget):
 
         # Scroll area
         self._scroll_area = QScrollArea(self)
+        self._scroll_area.setHorizontalScrollBar(_ClipStripScrollBar(Qt.Orientation.Horizontal))
         self._scroll_area.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._scroll_area.viewport().installEventFilter(self)
         self._scroll_area.setWidgetResizable(False)
@@ -1078,32 +1065,23 @@ class TimelineClipStrip(QWidget):
         )
         self._scroll_area.setStyleSheet(f"""
             QScrollArea {{
-                background: {_BG_DARK};
+                background: {C.BG_PANEL};
                 border: none;
             }}
             QScrollBar:horizontal {{
-                background: #1c1c1e;
-                height: 9px;
+                background: transparent;
+                height: {_SCROLLBAR_HEIGHT}px;
                 border: none;
-                margin: 0 4px 1px 4px;
-                border-radius: 4px;
-            }}
-            QScrollBar::groove:horizontal {{
-                background: #1c1c1e;
-                height: 8px;
-                border-radius: 4px;
+                margin: 0 4px;
             }}
             QScrollBar::handle:horizontal {{
-                background: #62676a;
-                border-radius: 3px;
+                border: none;
                 min-width: 48px;
-                margin: 1px 0;
+                margin: 0;
             }}
-            QScrollBar::handle:horizontal:hover {{
-                background: #a0a0ab;
-            }}
+            QScrollBar::groove:horizontal,
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
-                background: #1c1c1e;
+                background: transparent;
             }}
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
                 width: 0px;
@@ -1111,7 +1089,7 @@ class TimelineClipStrip(QWidget):
         """)
         # Show a slim native scrollbar only when there are off-screen clips.
         # Qt derives handle length from viewport/content width.
-        self._scroll_area.horizontalScrollBar().setMinimumHeight(9)
+        self._scroll_area.horizontalScrollBar().setMinimumHeight(_SCROLLBAR_HEIGHT)
         self._scroll_area.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -1120,9 +1098,9 @@ class TimelineClipStrip(QWidget):
         # Container widget inside scroll area
         self._container = QWidget()
         self._container.installEventFilter(self)
-        self._container.setStyleSheet(f"background: {_BG_DARK};")
+        self._container.setStyleSheet(f"background: {C.BG_PANEL};")
         self._card_layout = QHBoxLayout(self._container)
-        self._card_layout.setContentsMargins(4, 4, 4, 4)
+        self._card_layout.setContentsMargins(4, _CARD_TOP_MARGIN, 4, _CARD_BOTTOM_MARGIN)
         self._card_layout.setSpacing(4)
         self._card_layout.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
@@ -1139,7 +1117,7 @@ class TimelineClipStrip(QWidget):
             QLabel {{
                 color: {_TEXT_SECONDARY};
                 font-size: 11px;
-                background: {_BG_DARK};
+                background: {C.BG_PANEL};
                 padding: 20px;
             }}
         """)
@@ -1198,10 +1176,10 @@ class TimelineClipStrip(QWidget):
 
     def _update_strip_height(self) -> None:
         """Reserve the selected thumbnail size, including metadata and scroll bar."""
-        self.setFixedHeight(CARD_SIZE_PRESETS[self._card_size]["total_height"] + _CARD_VERTICAL_MARGINS + 9)
+        self.setFixedHeight(self.sizeHint().height())
 
     def sizeHint(self) -> QSize:
-        return QSize(800, CARD_SIZE_PRESETS[self._card_size]["total_height"] + _CARD_VERTICAL_MARGINS + 9)
+        return QSize(800, _preset_card_height(self._card_size) + _CARD_VERTICAL_MARGINS + _SCROLLBAR_HEIGHT)
 
     def _set_card_size(self, size: CardSize) -> None:
         self._card_size = size
@@ -1257,11 +1235,11 @@ class TimelineClipStrip(QWidget):
 
         card_height = max(
             _MIN_CARD_HEIGHT,
-            min(viewport_height - _CARD_VERTICAL_MARGINS, CARD_SIZE_PRESETS[self._card_size]["total_height"]),
+            min(viewport_height - _CARD_VERTICAL_MARGINS, _preset_card_height(self._card_size)),
         )
 
         for card in self._cards:
-            card._apply_display_geometry(card.width(), card_height)
+            card._apply_display_geometry(card_height)
 
         card_width = self._cards[0].width()
         margins = 8
@@ -1287,7 +1265,7 @@ class TimelineClipStrip(QWidget):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
-                background: {_BG_DARK};
+                background: {C.COLOR_PANEL_INSET};
                 border: 1px solid #444;
             }}
             QMenu::item {{
@@ -1295,7 +1273,7 @@ class TimelineClipStrip(QWidget):
                 padding: 6px 20px;
             }}
             QMenu::item:selected {{
-                background: {_BG_CARD_HOVER};
+                background: {C.COLOR_PANEL_RAISED};
             }}
             QMenu::separator {{
                 height: 1px;

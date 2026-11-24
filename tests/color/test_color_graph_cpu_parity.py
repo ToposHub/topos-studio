@@ -7,8 +7,7 @@ CPU oracle（N09 ``corrector_production_oracle``）vs GL 执行器（N07，
 - SDR（0..1）：abs ≤ 1/255；
 - HDR（>1 或 <0）：rel ≤ 2e-3（near-zero 有 abs 下限）。
 
-fail-closed 断言：插件/邻域/非 Normal 混合在 CPU 域显式
-``UnsupportedNode``，不静默近似。
+fail-closed 断言：不支持的插件和锐化显式报错，中间细节需有整帧采样域。
 """
 
 from __future__ import annotations
@@ -169,6 +168,24 @@ class TestProductionCorrectorParity:
         cpu, gl = self._run_pair([layer], f02_patches(64))
         _assert_dual_tolerance(cpu, gl, "opacity-0.35")
 
+    @pytest.mark.parametrize("version", [1, 2])
+    def test_midtone_detail_with_calibration_matches_gl_order(self, version: int):
+        layer = _neutral_layer("Measured detail")
+        layer.grading_params.update({
+            "primary_calibration_version": version,
+            "temp": 5.0,
+            "mid_detail": 30.0,
+            "lum_mix": 60.0,
+        })
+        src = np.full((24, 512, 4), 0.4, dtype=np.float32)
+        src[8:16, 240:272, :3] = (0.52, 0.6, 0.72)
+        if version == 2:
+            src[:, :8, :3] = (0.18, 0.25, 0.16)
+        src[..., 3] = 0.75
+        cpu, gl = self._run_pair([layer], src)
+        _assert_dual_tolerance(cpu, gl, "measured detail")
+        np.testing.assert_array_equal(cpu[..., 3], src[..., 3])
+
 
 class TestCpuDomainFailClosed:
     def test_plugin_params_rejected(self):
@@ -177,9 +194,19 @@ class TestCpuDomainFailClosed:
             corrector_production_oracle(f01_hdr_ramp(16), layer)
 
     def test_neighborhood_params_rejected(self):
-        layer = {"grading_params": {"mid_detail": 5.0}}
+        layer = {"grading_params": {"sharpness": 5.0}}
         with pytest.raises(UnsupportedNode):
             corrector_production_oracle(f01_hdr_ramp(16), layer)
+
+    def test_midtone_detail_requires_a_frame_and_cannot_be_baked(self):
+        from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
+
+        layer = {"grading_params": {"mid_detail": 5.0, "primary_calibration_version": 1}}
+        assert any("mid_detail" in error for error in production_layer_domain_errors(
+            layer, backend="pointwise"))
+        assert not production_layer_domain_errors(layer)
+        with pytest.raises(UnsupportedNode, match="RGB frame"):
+            apply_layer_grading_cpu(np.ones((8, 3), dtype=np.float32), layer, width=1, height=1)
 
     def test_unknown_grading_key_rejected(self):
         layer = {"grading_params": {"mystery_knob": 1.0}}

@@ -3789,6 +3789,8 @@ class ToposImageSequenceEncoder(ToposVideoEncoder):
             raise ValueError(
                 f"Topos encoder: RAW 档 {tier.tier_id!r} 不支持 Alpha"
                 f"（TRAW 与 alpha 互斥，native 编码域契约）——请关闭 Alpha 输出")
+        if tier.family == 'float' and bool(getattr(config, 'has_alpha', False)):
+            raise ValueError("Topos HALF image sequences do not support Alpha")
         video_tier = self._IMAGE_TIER_VIDEO_TIER[tier.family]
         if not hasattr(config, '_replace') and dataclasses.is_dataclass(config):
             updates = dict(

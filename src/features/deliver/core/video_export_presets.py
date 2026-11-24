@@ -359,7 +359,11 @@ def build_job_from_preset(
 
 def _container_extension(container: str, codec: str) -> str:
     """Pick the conventional file extension for a container/codec pair."""
-    if codec in ("png_sequence", "tiff_sequence", "topos_image_sequence"):
+    from src.features.deliver.core.video_export_formats import SEQUENCE_CODECS
+
+    if codec == "exr_sequence":
+        return ".exr"
+    if codec in SEQUENCE_CODECS:
         return ""  # directory-style output
     container = container.lower()
     return {

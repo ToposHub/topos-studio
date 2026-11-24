@@ -151,7 +151,7 @@ def test_empty_curve_grid_survives_resize_and_scope_clear(qapp):
         colors = {image.pixelColor(x, y).name() for x in range(20, width - 20)}
         assert len(colors) >= 3
         # The old 15px black surround must not return.
-        assert image.pixelColor(2, 30).name() == "#232326"
+        assert image.pixelColor(2, 30).name() == "#202024"
         assert not canvas._scope.isVisible()
     canvas.close()
 

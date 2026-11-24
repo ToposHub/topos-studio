@@ -184,15 +184,24 @@ class ConfigManager:
         "composite.working_space": "linear",
         "composite.display_space": "srgb",
         "composite.color_engine": "ocio",
-        # Colour-management MVP: structured preview/output color spaces,
-        # chosen separately for the timeline (video) and image (still) sources.
-        # Each is (primaries, transfer, range); primaries+transfer combine
-        # into a ColorSpaceDescriptor (see color_space_descriptor.py).
-        # Defaults: timeline → Rec.709 video; image → sRGB. Users override
-        # via the Color & Processing preference page.
+        # Default project color spaces. The older component settings remain
+        # available for customized legacy projects and preferences.
+        "color.timeline_space": "rec709-g24",
+        "color.aces.version": "1.3",
+        "color.aces.input": "auto",
+        "color.aces.reference_gamut_compression": "off",
+        "color.hdr.input": "auto",
+        "color.hdr.reference_white": "100",
+        "color.hdr.hlg_peak": "1000",
+        "color.hdr.monitor": "signal",
+        "color.hdr.master_peak": "1000",
+        "color.hdr.master_gamut": "bt2020",
+        "color.output_space": "rec709-g24",
+        "color.image_space": "srgb",
         # Preview (viewer ODT) — what you see on screen.
+        "color.preview.use_macos_display_profile": False,
         "color.preview.timeline_primaries": "bt709",
-        "color.preview.timeline_transfer": "bt709",      # Rec.709 ~gamma 2.4
+        "color.preview.timeline_transfer": "bt709",      # BT.709 OETF
         "color.preview.image_primaries": "bt709",        # sRGB shares BT.709 primaries
         "color.preview.image_transfer": "iec61966_2_1",  # sRGB curve ~2.2
         # Output (export) — what gets baked into the file/stream.
@@ -392,6 +401,7 @@ class ConfigManager:
                         # Migrate Tangent defaults without overwriting a
                         # calibration the user has already changed.
                         needs_save = self._migrate_tangent_settings(config, loaded_config) or needs_save
+                        needs_save = self._migrate_color_spaces(config, loaded_config) or needs_save
                     # W01（Windows 实案）：必须先关掉读句柄再保存——CPython
                     # 的 open 不带 FILE_SHARE_DELETE，读句柄开着时对目标做
                     # os.replace 恒 WinError 5，迁移保存全程静默失败。
@@ -412,6 +422,15 @@ class ConfigManager:
             config = self.DEFAULT_CONFIG.copy()
             self._save_config_dict(config)
             return config
+
+    @staticmethod
+    def _migrate_color_spaces(config: dict, loaded_config: dict) -> bool:
+        """Upgrade factory color choices without replacing legacy custom values."""
+        from src.shared.color.color_space_descriptor import migrate_color_space_preferences
+
+        updates = migrate_color_space_preferences(loaded_config)
+        config.update(updates)
+        return bool(updates)
 
     def _migrate_tangent_settings(self, config: dict, loaded_config: dict) -> bool:
         """Apply the current trackerball defaults to older config files.

@@ -46,6 +46,21 @@ def test_fingerprint_changes_when_effect_changes():
         build_render_cache_fingerprint(project, "tl-1", second)
     )
 
+def test_timeline_color_space_invalidates_working_signal_cache():
+    project = _project().with_color_management({
+        "color.timeline_space": "rec709-g24", "color.output_space": "rec709-g24",
+    })
+    clip = _clip()
+    fingerprint = build_render_cache_fingerprint(project, "tl-1", clip)
+    changed_output = project.with_color_management({
+        "color.timeline_space": "rec709-g24", "color.output_space": "display-p3",
+    })
+    assert build_render_cache_fingerprint(changed_output, "tl-1", clip) == fingerprint
+    changed_timeline = project.with_color_management({
+        "color.timeline_space": "srgb", "color.output_space": "rec709-g24",
+    })
+    assert build_render_cache_fingerprint(changed_timeline, "tl-1", clip) != fingerprint
+
 
 def test_current_semantic_fingerprint_keeps_cache_green():
     project = _project()

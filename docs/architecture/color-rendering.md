@@ -64,6 +64,8 @@ flowchart TD
 模块顺序：`image_engine.py` → `async_renderer.py` → `shader_compiler.py` →
 `opengl_render_backend.py`（+ `msl_composition.py` Metal 侧对应物）。
 
+视频项目的级联调色输出保留时间线 RGB 信号。工程变换来自渲染参数快照中的时间线和输出描述符。Edit 的 CPU 与 OpenGL、Color 的 OpenGL 前缓冲和 Composite 的项目输出预览都使用这一信号定义。Color 的 Scopes 和提供给 Composite 的调色纹理保留时间线取样点。Composite 返回 Edit 时，场景线性输入在片段调色前转入时间线空间。交付从同一工作信号独立转换，RGB TIFF 宽色域档在文件端嵌入 ICC。使用独立设备配置和输出链的参考监看仍需按设备验证。
+
 ### 2.1 ImageEngine：UI 侧编排者（`src/features/color/core/image_engine.py`）
 
 `ImageEngine` 是 QObject，住在 UI 线程，职责是 **状态持有 + 参数 DTO 组装 + 命令
@@ -199,10 +201,14 @@ resolution_readbacks` 在命令循环里轮询，fence 就绪后 emit）；PBO �
   `COMMON_DEFINITIONS → GRADING → CURVES → MIXER → LUT3D → WARPER →
   BLEND_MODES → BLUR_SHARPEN（必须在 FILM_GRAIN 之前，声明 u_tex_size）→
   FILM_GRAIN → SOFT_CLIP → QUALIFIER`。
-- **main() 效果顺序**：blur/sharpen → grading → curves → hsl_curve → soft_clip
+- **main() 效果顺序**：blur/sharpen/mist → grading → curves → hsl_curve → soft_clip
   （if u_sc_enabled）→ mixer → warper → 3D LUT → 插件 `process_P{i}` →
   blend_mode → `mix(color, blended, mask * u_opacity)` → film grain → 输出
   `vec4(color, tex_color.a)`。
+- 雾化在现有 `effects_params` 中保存 `mist_enabled`、`mist_radius`（0–1）和
+  `mist_mix`（0–100）。旧工程缺字段时关闭，打开后默认半径 0、Mixer 33。
+  片段级 OpenGL、Metal 纹理预览和 CPU 视频交付使用相同的扩散采样权重。
+  3D LUT 导出会在交付报告中列出雾化，因为采样依赖相邻像素。
 - **插件命名空间改写**（GL emitter 内部实现细节，MSL 禁止依赖）：`process(`
   → `process_P{i}(`，`@param` 裸名 → `u_P{i}_name`；改写后残留的未声明 `u_*`
   标识符**提前拒绝**并写入诊断缓冲（`record_compile_failure`，含
@@ -241,6 +247,9 @@ macOS 的 `TOPOS_COLOR_METAL=1` 启用调色工作线程的 Metal 图执行与�
 
 生产示波器使用 GL 的密度计算、显示布局及 `ScopePublication` 发布协议，输入可以来自 Metal 调色后的整帧。
 `MetalScopeEngine` 可用于独立对拍。原生视口的已验证显示域为 SDR。HDR 和时间线传输有各自的兼容呈现路径。
+
+视频工程的 SDR 查看器先得到工程输出 RGB。macOS 的查看器 ICC 开关默认关闭。关闭时，Qt 使用窗口的显示器编码，原生 Metal 层采用无源 ICC 标记的呈现。打开时，Metal 层附上工程输出的源 ICC，交给系统合成器转换。OpenGL 查看器在已有画面呈现阶段使用 ColorSync 按照窗口的实际 ICC 计算的 129³ LUT，Color 时间线的 QImage 分支在后台转换。显示器配置和全屏窗口的变化会刷新目标 ICC。ICC 处理晚于工程输出变换，只供桌面显示使用。参考监看的调色播放和暂停共用工程输出信号；Scopes 和文件处理均在设备适配之前取值。
+
 
 - **`opengl_render_backend.py`**：`AsyncRenderer` 的 GraphicsBackend 契约
   （`src/shared/gpu/graphics_backend.py`）'opengl' 维度实现，放 feature 侧是为
@@ -591,3 +600,24 @@ ImageEngine.bake_layer → submit(BAKE_LAYER)              [关键命令]
 - `docs/audit/2026-09-28/batches/batch-002-color-core-async-renderer.md`
   （AUD-0201 ColorOutput 立即释放 vs garbage 延迟、AUD-0202 YUV ring 无上限）
 - `docs/audit/2026-09-28/batches/batch-006-color-core-image-engine.md`
+
+## 9. 视频工程的 ACES 边界
+
+选择 ACES 时间线后，剪辑、调色和交付在调色前把素材转换到所选工作编码。ACES 1.3 可在这个边界应用参考色域压缩。ACES 输入和调色缓冲保留浮点负值和高光。合成图内部使用场景线性 RGB，时间线输入节点在进入图之前解码素材或调色输出，返回剪辑时再编码到时间线空间。
+
+三处查看器以线性 AP1 为共同输入调用固定版本的 OpenColorIO Rec.709 输出变换。OpenGL 使用 OCIO 生成的解析着色器和它的查表纹理。CPU 回退与 Rec.709 交付使用同版 OCIO 处理器。macOS 显示器 ICC 在桌面呈现时应用。AP0 和 AP1 OpenEXR 的输出阶段写入场景线性浮点像素、色度及关联 Alpha，预览继续使用 Rec.709 输出变换。
+
+- [工程设置、输入和 CPU 路径](../../src/shared/color/project_video_signal.py)
+- [OpenGL 输出变换](../../src/shared/color/aces_video_gl.py)
+- [OpenEXR 读入](../../src/shared/io/openexr_io.py)
+- [Resolve 对拍](../validation/resolve_comparison_workflow.md#aces-预览与交付实测2026-11-25)
+
+## 10. 视频工程的 HDR 信号
+
+工程可选 DaVinci Wide Gamut／Intermediate 或 Rec.2100 PQ／HLG 工作域。导入时记录码流的基色、传递函数、矩阵和电平。解码完成矩阵和电平扩展后，剪辑、调色和交付按工程输入设置转换到时间线。自动输入读取视频标签，普通未标记视频默认 Rec.709 Gamma 2.4。OpenEXR 使用原始浮点样本，自动模式读取 AP0、AP1 或 Rec.709 色度，无色度时按线性 Rec.709。未知的 EXR 色度需要显式指定输入。
+
+CPU 和 OpenGL 共享浮点色域矩阵与 PQ、HLG、Intermediate 曲线。信号转换中的相对线性值 1.0 是工程参考白，PQ 根据 ST 2084 在相对线性与绝对亮度间换算。HLG 采用 BT.2100 的亮度相关 OOTF，参考显示默认 1000 nit，系统伽马为 1.2。合成图的线性 Rec.709 RGB 也以工程参考白为单位。时间线合成和调色阶段保留浮点样本，量化由预览和交付边界负责。
+
+工程输出独立于桌面选择。桌面可显示 PQ／HLG 信号码值，也可显示 Rec.709 Gamma 2.4 的 SDR 参考转换。后者在桌面量化时裁切超出 SDR 显示范围的样本。工程交付使用输出指定的传递函数和 BT.2020 NCL 矩阵，将 RGB 打包为 10 位视频电平。烧录字幕按工程参考白编码。PQ HEVC 将所选母版峰值和色度写入 ST 2086。HEVC Main 10 在独立进程运行，通过单个共享内存帧缓冲和控制管道输入视频。完成帧数校验和封装后原子发布，取消或失败会删除暂存内容。常规进程内 HEVC 的防崩溃逻辑继续生效。
+
+[工程设置及输入解释](../../src/shared/color/hdr_video_signal.py) · [GPU 转换](../../src/shared/color/video_signal_gl.py) · [Main 10 封装](../../src/shared/export/hdr_hevc_encoder.py) · [实测记录](../validation/resolve_comparison_workflow.md#hdr-桌面预览与交付实测2026-11-25)

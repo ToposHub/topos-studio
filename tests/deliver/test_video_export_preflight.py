@@ -73,6 +73,22 @@ def test_timeline_not_found_blocks():
     r = run_video_export_preflight(job, ctx)
     assert any(i.code == "context.timeline_missing" for i in r.blocking)
 
+@pytest.mark.parametrize(("codec", "container", "depth", "blocked"), [
+    ("prores_422", "mov", 10, True),
+    ("tiff_sequence", "", 8, True),
+    ("tiff_sequence", "", 16, False),
+])
+def test_wide_gamut_output_requires_16bit_tiff(tmp_path, codec, container, depth, blocked):
+    from types import SimpleNamespace
+
+    project = SimpleNamespace(color_management={"color.output_space": "display-p3"})
+    job = VideoExportJob(
+        timeline_id="t1", output_path=str(tmp_path / "wide"),
+        video_config=VideoConfig(codec=codec, container=container, bit_depth=depth),
+    )
+    preflight = run_video_export_preflight(job, PreflightContext(project=project, sequence=_StubSequence()))
+    assert any(issue.code == "color.delivery.wide_gamut_tiff" for issue in preflight.blocking) == blocked
+
 
 def test_revision_drift_warns(tmp_path):
     out = tmp_path / "x.mov"

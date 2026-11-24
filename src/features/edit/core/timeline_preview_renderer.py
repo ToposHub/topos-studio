@@ -109,6 +109,15 @@ from src.features.edit.core.timeline_v2 import TimelineSequence
 from src.features.edit.core.project import EditProject
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.crop_cpu import apply_crop_cpu, crop_is_identity
+from src.shared.color.color_space_descriptor import LINEAR_SCENE
+from src.shared.color.hdr_video_signal import hdr_input_descriptor, hdr_monitor_space, project_hdr_settings
+from src.shared.color.project_video_signal import (
+    aces_input_bgr, aces_input_descriptor, aces_monitor_space, aces_timeline_black, normalized_video_bgr,
+    project_aces_settings, read_aces_still, read_video_still_bgr, render_aces_bgr,
+    convert_video_signal_bgr, encode_timeline_linear_bgr,
+    video_signal_spaces, video_signal_uses_legacy_space,
+)
+from src.shared.color.video_signal_gl import can_render_video_signal_gl
 from src.shared.gpu.gl_backend import GLContextManager
 
 if TYPE_CHECKING:
@@ -2069,6 +2078,27 @@ class PreviewRenderWorker(QThread):
         from src.features.color.core.primary_calibration import grade_uses_calibration
         from src.shared.media.gpu_frame import safe_release_gpu_frame
 
+        settings = self._preview_color_settings()
+        spaces = video_signal_spaces(settings)
+        aces = project_aces_settings(settings)
+        hdr = project_hdr_settings(settings)
+        output_transform = (
+            (spaces[0], aces_monitor_space()) if aces is not None
+            else (spaces[0], hdr_monitor_space(spaces[1], hdr)) if hdr is not None
+            else spaces if spaces is not None and spaces[0] != spaces[1] else None
+        )
+        if output_transform is not None and (
+            (hdr is None and video_signal_uses_legacy_space(settings))
+            or not can_render_video_signal_gl(*output_transform)
+        ):
+            return False, {"fallback_reason": "project_output_gl_unsupported"}
+        timeline_space = spaces[0] if spaces is not None else None
+        comp_signal_supported = timeline_space is None or (
+            (hdr is not None or not video_signal_uses_legacy_space(settings, timeline_only=True))
+            and can_render_video_signal_gl(LINEAR_SCENE, timeline_space)
+        )
+        task_meta = task_meta or {}
+
         # F2.8：变速插值 GPU 门控（与导出 GPU 路径同语义，预览/成片一致）
         requires_cpu = self._retime_interp_requires_cpu(layers, frame)
         if requires_cpu:
@@ -2190,7 +2220,6 @@ class PreviewRenderWorker(QThread):
             )
 
         trace_info: Dict[str, Any] = {}
-        task_meta = task_meta or {}
         layer_jobs: list[tuple[ClipLayerInfo, str, int, Optional[Dict[str, Any]]]] = []
         # Adjustment Clip layers collected separately — their effect chains and
         # sampled Transform/Opacity are applied at their z-position by the
@@ -2309,8 +2338,17 @@ class PreviewRenderWorker(QThread):
             # T-P1-22 ColorStack grade 快照。
             preview_grade = (op.grade if isinstance(op, ApplyAdjustment)
                              else self._get_preview_color_grade(layer))
+            grade_packet = preview_grade or {}
+            chain_extras = grade_packet.get("chain_extra_params") or ()
+            if (any(extra.get("mid_detail") for extra in chain_extras)
+                    or (grade_packet.get("color_graph") is None and (
+                        (grade_packet.get("grading_params") or {}).get("mid_detail")
+                        or "mid_detail" in (grade_packet.get("grade_keyframes") or {})
+                    ))):
+                trace_info["fallback_reason"] = "midtone_detail_cpu_compositor"
+                return False, trace_info
             if any(grade_uses_calibration({"grading_params": extra})
-                   for extra in ((preview_grade or {}).get("chain_extra_params") or ())):
+                   for extra in chain_extras):
                 trace_info["fallback_reason"] = "measured_color_chain_cpu_compositor"
                 return False, trace_info
             if isinstance(op, ApplyAdjustment):
@@ -2370,7 +2408,7 @@ class PreviewRenderWorker(QThread):
                 # Without the declared capability the historical CPU
                 # fallback holds.
                 if asset_type == 'comp_clip' \
-                        and self._comp_clip_gpu_direct_supported():
+                        and comp_signal_supported and self._comp_clip_gpu_direct_supported():
                     layer_jobs.append(
                         (layer, COMP_GPU_JOB_SENTINEL, 0, preview_grade,
                          clip_effects))
@@ -2481,6 +2519,12 @@ class PreviewRenderWorker(QThread):
             if asset_path == COMP_GPU_JOB_SENTINEL:
                 result = self._decode_comp_clip_gpu_layer(layer, frame)
                 if result.get("ok"):
+                    if timeline_space is not None:
+                        handle = result["gpu_handle"]
+                        if getattr(handle, "color_space", "linear") != "linear":
+                            release_layer_data(result)
+                            return {"ok": False, "fallback_reason": "comp_gpu_color_space_unsupported"}
+                        result.setdefault("track_info", {})["timeline_signal_space"] = timeline_space
                     # A comp graph is the clip's source, but the timeline clip
                     # may still own a ColorStack, filters, crop and transform.
                     # Keep those semantics on the Edit task exactly like a
@@ -2511,6 +2555,10 @@ class PreviewRenderWorker(QThread):
                     # cropped like any other clip). See video-layer track_info.
                     'crop': getattr(layer, 'crop', None),
                 }
+                if hdr is not None:
+                    from src.shared.color.color_space_descriptor import SRGB_IMAGE
+
+                    track_info.update(input_signal=(SRGB_IMAGE, timeline_space), input_luminance=hdr.luminance)
                 return {
                     'ok': True,
                     'frame_type': 'solid',
@@ -2646,6 +2694,16 @@ class PreviewRenderWorker(QThread):
                 # grade. Without this key the crop silently no-ops in preview.
                 'crop': getattr(layer, 'crop', None),
             }
+            if aces is not None:
+                source = aces_input_descriptor(aces, asset_path, media_type="video")
+                track_info["input_signal"] = (source, timeline_space)
+                track_info["aces_input_compression"] = aces.reference_gamut_compression
+            elif hdr is not None:
+                source = hdr_input_descriptor(
+                    hdr, timeline_space, media_type="video",
+                    metadata=self._asset_resolver.get_asset_metadata(layer.asset_id), path=asset_path,
+                )
+                track_info.update(input_signal=(source, timeline_space), input_luminance=hdr.luminance)
 
             # P0-PREV-GPU-T：转场帧的有效 opacity 覆写（CPU 同语义）。
             # GPU 合成器按 u_opacity 混合，cross dissolve 的 lerp、dip 的
@@ -2851,6 +2909,9 @@ class PreviewRenderWorker(QThread):
             adjustment_layers=adjustment_layers,
             # P0-PREV-GPU-T：转场任务（spatial mask / dip 颜色 pass）。
             transition_jobs=transition_jobs,
+            output_transform=output_transform,
+            aces=aces,
+            luminance=hdr.luminance if hdr is not None else None,
         )
 
         playback_trace(
@@ -3095,9 +3156,10 @@ class PreviewRenderWorker(QThread):
                             * mask_c
                             * right_opacity
                         )
-                        wipe_composited[trans.transition_id] = np.clip(
-                            blended, 0, 255
-                        ).astype(np.uint8)
+                        wipe_composited[trans.transition_id] = (
+                            blended if np.issubdtype(left_frame.dtype, np.floating)
+                            else np.clip(blended, 0, 255).astype(np.uint8)
+                        )
                 if trans.left_clip_id:
                     wipe_skip_ids.add(trans.left_clip_id)
                 if trans.right_clip_id:
@@ -3299,6 +3361,28 @@ class PreviewRenderWorker(QThread):
         （与 GPU blend.glsl / blend_modes.py 同一公式），normal 走原
         alpha over 路径不变。
         """
+        settings = self._preview_color_settings()
+        aces = project_aces_settings(settings)
+        if (aces is not None
+                or np.issubdtype(layer_frame.dtype, np.floating)):
+            frame = normalized_video_bgr(layer_frame)
+            black = aces_timeline_black(video_signal_spaces(settings)[0]) if aces is not None else 0.0
+            base = (
+                np.full_like(frame[..., :3], black) if composite_buffer is None
+                else normalized_video_bgr(composite_buffer[..., :3])
+            )
+            alpha = max(0.0, min(1.0, effective_opacity))
+            if frame.shape[-1] == 4:
+                alpha = np.clip(frame[..., 3:4], 0.0, 1.0) * alpha
+            bgr = frame[..., :3]
+            mode = getattr(blend_mode, "code", 0)
+            if mode and composite_buffer is not None:
+                from src.features.edit.core.blend_modes import blend_rgb
+
+                bgr = blend_rgb(base[..., ::-1], bgr[..., ::-1], mode)[..., ::-1]
+            if isinstance(alpha, float) and alpha == 1.0:
+                return bgr
+            return base * (1.0 - alpha) + bgr * alpha
         if layer_frame.ndim == 3 and layer_frame.shape[2] == 4:
             # Straight BGRA from transparent scene/caption renderers.
             bgr = layer_frame[..., :3].astype(np.float32)
@@ -3627,6 +3711,11 @@ class PreviewRenderWorker(QThread):
             if graph_data is None:
                 logger.debug(f"Graph data not found for graph_id='{graph_id}'")
                 return None
+            color_settings = self._preview_color_settings()
+            spaces = video_signal_spaces(color_settings)
+            hdr = project_hdr_settings(color_settings)
+            timeline_space = spaces[0] if spaces is not None else None
+            timeline_legacy = hdr is None and video_signal_uses_legacy_space(color_settings, timeline_only=True)
             cache_key = (
                 graph_id,
                 int(source_frame),
@@ -3634,6 +3723,8 @@ class PreviewRenderWorker(QThread):
                 int(timeline_frame),
                 int(graph_data.get("width", 0) or 0),
                 int(graph_data.get("height", 0) or 0),
+                timeline_space,
+                timeline_legacy,
             )
             cached = self._get_comp_clip_cached_frame(cache_key)
             if cached is not None:
@@ -3676,6 +3767,8 @@ class PreviewRenderWorker(QThread):
                     source_frame=layer.source_frame,
                     quality="preview",
                     caption_input=caption_input,
+                    **({"linear_readback": True, "straight_alpha": True}
+                       if timeline_space is not None else {}),
                 )
             finally:
                 if gl_mutex is not None:
@@ -3683,7 +3776,16 @@ class PreviewRenderWorker(QThread):
                     gl_mutex.unlock()
 
             if result is not None:
-                if result.dtype == np.uint8:
+                if timeline_space is not None:
+                    signal = encode_timeline_linear_bgr(
+                        result, timeline_space, legacy=timeline_legacy,
+                        luminance=hdr.luminance if hdr is not None else None,
+                    )
+                    frame_uint8 = (
+                        signal if hdr is not None or project_aces_settings(color_settings) is not None
+                        else np.rint(np.clip(signal, 0.0, 1.0) * 255.0).astype(np.uint8)
+                    )
+                elif result.dtype == np.uint8:
                     # Preview 路径：readback shader 已在 GPU 完成 sRGB OETF +
                     # BGR 重排 + 翻转（CompositeExportRenderer srgb_u8 模式），
                     # 直接就是预览合成器期望的格式，跳过下面的 numpy 链。
@@ -3961,6 +4063,8 @@ class PreviewRenderWorker(QThread):
 
         # Generator handling (CPU fallback path).
         asset_type = self._asset_resolver.get_asset_type(layer.asset_id)
+        settings = self._preview_color_settings()
+        hdr = project_hdr_settings(settings)
         if asset_type == 'adjustment':
             # Adjustment clips have no source frame; their effect chain is
             # applied as a post-composite pass in _composite_layers. Returning
@@ -3976,6 +4080,14 @@ class PreviewRenderWorker(QThread):
                 if sc is not None:
                     rgb = sc
             vw, vh = self._decode_target_size
+            if hdr is not None:
+                from src.shared.color.color_space_descriptor import SRGB_IMAGE
+
+                bgr = convert_video_signal_bgr(
+                    np.asarray(rgb[::-1], dtype=np.float32), SRGB_IMAGE,
+                    video_signal_spaces(settings)[0], luminance=hdr.luminance,
+                )
+                return np.broadcast_to(bgr, (vh, vw, 3)).copy()
             bgr = (
                 int(round(rgb[2] * 255.0)),
                 int(round(rgb[1] * 255.0)),
@@ -4045,7 +4157,16 @@ class PreviewRenderWorker(QThread):
                             layer.decoder_stream_key,
                         )
                     elif orig_path and orig_type == "image":
+                        if hdr is not None:
+                            return self._interpret_hdr_source(orig_path, "image", orig_asset_id)
+                        if project_aces_settings(self._preview_color_settings()) is not None:
+                            return self._get_aces_preview_source(orig_path, "image")
                         frame_data = self._get_image_frame(orig_path)
+                    if (frame_data is not None and orig_path
+                            and project_aces_settings(self._preview_color_settings()) is not None):
+                        return self._get_aces_preview_source(orig_path, orig_type, frame_data)
+                    if hdr is not None and orig_path:
+                        return self._interpret_hdr_source(orig_path, orig_type, orig_asset_id, frame_data)
             # If no original source (empty comp clip), return None
             if frame_data is None:
                 return None
@@ -4058,7 +4179,19 @@ class PreviewRenderWorker(QThread):
                 layer.decoder_stream_key,
                 raw_params=getattr(getattr(layer, 'clip', None), 'raw', None),
             )
+        elif asset_type == "image_sequence" and (hdr is not None or project_aces_settings(settings) is not None):
+            from src.features.edit.core.sequence_classify import still_sequence_frame_path
+
+            metadata = self._asset_resolver.get_asset_metadata(layer.asset_id) or {}
+            path = still_sequence_frame_path(asset_path, metadata, int(layer.source_frame))
+            if hdr is not None:
+                return self._interpret_hdr_source(path, "image", layer.asset_id)
+            return self._get_aces_preview_source(path, "image")
         elif asset_type == "image":
+            if hdr is not None:
+                return self._interpret_hdr_source(asset_path, "image", layer.asset_id)
+            if project_aces_settings(self._preview_color_settings()) is not None:
+                return self._get_aces_preview_source(asset_path, "image")
             frame_data = self._get_image_frame(asset_path)
         else:
             logger.warning(f"Unsupported asset type: {asset_type}")
@@ -4066,6 +4199,11 @@ class PreviewRenderWorker(QThread):
 
         if frame_data is None:
             return None
+
+        if hdr is not None:
+            return self._interpret_hdr_source(asset_path, asset_type, layer.asset_id, frame_data)
+        if project_aces_settings(self._preview_color_settings()) is not None:
+            return self._get_aces_preview_source(asset_path, asset_type, frame_data)
 
         # 确保返回 uint8 格式
         if frame_data.dtype != np.uint8:
@@ -4399,6 +4537,9 @@ class PreviewRenderWorker(QThread):
             混合结果（uint8 BGR）
         """
         import cv2
+
+        if np.issubdtype(frame.dtype, np.floating):
+            return frame * (1.0 - factor) + np.asarray(color[::-1], dtype=np.float32) * factor
 
         # color 是 RGB，需要转换为 BGR uint8
         bgr_color = np.array([color[2] * 255, color[1] * 255, color[0] * 255], dtype=np.uint8)
@@ -4964,7 +5105,9 @@ class PreviewRenderWorker(QThread):
                                     exclude_timeline=exclude_timeline)
         measured_extras = any(grade_uses_calibration({"grading_params": extra}) for extra in extras)
         if stack is None:
-            return {"grading_params": {}, "chain_extra_params": extras} if measured_extras else None
+            if measured_extras or any(extra.get("mid_detail") for extra in extras):
+                return {"grading_params": {}, "chain_extra_params": extras}
+            return None
 
         grading_params = dict(getattr(stack, "grading_params", {}) or {})
         wheel_defaults = {
@@ -5480,16 +5623,12 @@ class PreviewRenderWorker(QThread):
                                         "hue_shift")) or any(
                             any(abs(float(v)) > 1e-6 for v in extra.get(w, ()))
                             for w in ("lift", "gamma", "gain")):
-                        buf = GradingMath.apply_grading(
-                            buf.reshape(-1, 3), extra).reshape(rgb.shape)
+                        buf = GradingMath.apply_grading(buf, extra)
                 return buf
 
             graded = _apply_chain_entries(
                 rgb, [e for e in extras if e.get("_chain_segment") == "pre"])
-            graded = GradingMath.apply_grading(
-                graded.reshape(-1, 3),
-                grading_params,
-            ).reshape(rgb.shape)
+            graded = GradingMath.apply_grading(graded, grading_params)
             # F4.1: 调色链段（pre_group → trim → post_group）顺序应用。
             # 非线性参数无代数合并，顺序执行即精确组合；高级标记段
             # （curves/LUT）在 primary 域不可表示——跳过并告警（与
@@ -5631,7 +5770,7 @@ class PreviewRenderWorker(QThread):
         frame: int,
     ) -> Optional[QImage]:
         """Fast path for the common edit case: one plain source clip, no effects."""
-        if transitions or len(layers) != 1:
+        if transitions or len(layers) != 1 or project_hdr_settings(self._preview_color_settings()) is not None:
             return None
 
         layer = layers[0]
@@ -5653,6 +5792,8 @@ class PreviewRenderWorker(QThread):
         if frame_data is None:
             return None
 
+        if project_aces_settings(self._preview_color_settings()) is not None:
+            frame_data = self._get_aces_preview_source(asset_path, "video", frame_data)
         return self._numpy_to_qimage(frame_data)
 
     def _get_video_frame(
@@ -5684,11 +5825,10 @@ class PreviewRenderWorker(QThread):
         Returns:
             帧数据（numpy.ndarray）或 None
         """
-        direct_frame = self._get_direct_preview_frame(
-            asset_path,
-            source_frame,
-            asset_id,
-            clip_key,
+        hdr = project_hdr_settings(self._preview_color_settings())
+        direct_frame = (
+            self._get_direct_preview_frame(asset_path, source_frame, asset_id, clip_key)
+            if hdr is None else None
         )
         if direct_frame is not None:
             return direct_frame
@@ -5948,6 +6088,62 @@ class PreviewRenderWorker(QThread):
             logger.error(f"Failed to load image {asset_path}: {e}")
             return None
 
+    def _get_aces_preview_source(
+        self, path: str, media_type: str, pixels: np.ndarray | None = None,
+    ) -> np.ndarray:
+        settings = self._preview_color_settings()
+        aces = project_aces_settings(settings)
+        track_space = video_signal_spaces(settings)[0]
+        if pixels is None:
+            identity = os.stat(path)
+            cache_key = (path, identity.st_mtime_ns, identity.st_size, aces,
+                         track_space, self._decode_target_size)
+            cached = self.__dict__.get("_aces_still_cache")
+            if cached is not None and cached[0] == cache_key:
+                return cached[1].copy()
+            pixels, source = read_aces_still(path, aces)
+            result = aces_input_bgr(
+                pixels, source, track_space,
+                reference_gamut_compression=aces.reference_gamut_compression,
+            )
+            self._aces_still_cache = (cache_key, result)
+            return result.copy()
+        source = aces_input_descriptor(aces, path, media_type=media_type)
+        return aces_input_bgr(
+            pixels, source, track_space,
+            reference_gamut_compression=aces.reference_gamut_compression,
+        )
+
+    def _interpret_hdr_source(
+        self, path: str, media_type: str, asset_id: str, pixels: np.ndarray | None = None,
+    ) -> np.ndarray | None:
+        settings = self._preview_color_settings()
+        hdr = project_hdr_settings(settings)
+        if hdr is None:
+            raise ValueError("HDR input interpretation requires an HDR project")
+        source_space = video_signal_spaces(settings)[0]
+        source = hdr_input_descriptor(
+            hdr, source_space, media_type=media_type,
+            metadata=self._asset_resolver.get_asset_metadata(asset_id), path=path,
+        )
+        if pixels is None:
+            if media_type != "image":
+                return None
+            identity = os.stat(path)
+            key = (path, identity.st_mtime_ns, identity.st_size, hdr, source, source_space)
+            cached = self.__dict__.get("_hdr_still_cache")
+            if cached is not None and cached[0] == key:
+                return cached[1].copy()
+            result = convert_video_signal_bgr(
+                normalized_video_bgr(read_video_still_bgr(path)), source, source_space,
+                luminance=hdr.luminance,
+            )
+            self._hdr_still_cache = (key, result)
+            return result.copy()
+        return convert_video_signal_bgr(
+            normalized_video_bgr(pixels), source, source_space, luminance=hdr.luminance,
+        )
+
     def _extract_frame_data(self, decoded_frame: Any,
                             raw_params: Any = None) -> Optional[np.ndarray]:
         """
@@ -6054,6 +6250,30 @@ class PreviewRenderWorker(QThread):
             # 获取 pixel_format
             pixel_format = getattr(decoded_frame, 'pixel_format', 'gbrp')
             bit_depth = int(getattr(decoded_frame, 'bit_depth', 8) or 8)
+            if (project_hdr_settings(self._preview_color_settings()) is not None
+                    and not pixel_format.startswith("topos_cfa")):
+                from src.shared.media.color_decode import ColorConverter
+                from src.shared.color.types import ColorMatrix, ColorRange
+
+                if pixel_format.startswith(("gbrp", "topos_gbrp")):
+                    bgr = np.stack((planes[1], planes[0], planes[2]), axis=-1).astype(np.float32)
+                    return bgr if np.issubdtype(planes[0].dtype, np.floating) else bgr / ((1 << bit_depth) - 1)
+                metadata = getattr(decoded_frame, "metadata", None)
+                matrix = getattr(metadata, "color_matrix", None)
+                if matrix not in ColorMatrix._value2member_map_:
+                    matrix = "bt2020nc" if getattr(metadata, "color_primaries", "") == "bt2020" else "bt709"
+                color_range = (ColorRange.FULL if getattr(metadata, "color_range", "") == "full"
+                               or pixel_format.startswith("yuvj") else ColorRange.LIMITED)
+                if pixel_format.startswith(("nv12", "p010")):
+                    y, uv = planes[:2]
+                    uv = uv.reshape(uv.shape[0], -1, 2)
+                    u, v = uv[..., 0], uv[..., 1]
+                    if pixel_format.startswith("p010"):
+                        y, u, v = y >> 6, u >> 6, v >> 6
+                else:
+                    y, u, v = planes[:3]
+                rgb = ColorConverter().yuv_to_rgb(y, u, v, ColorMatrix(matrix), color_range, bit_depth)
+                return np.ascontiguousarray(rgb[..., ::-1])
 
             # W4：TRAW CFA 相位平面——CPU debayer 回退（GPU 链不可用时
             # 的显示路径；LOG0 逆曲线/16-bit linear/双线性与 GPU shader
@@ -6256,6 +6476,23 @@ class PreviewRenderWorker(QThread):
         Returns:
             QImage
         """
+        settings = self._preview_color_settings()
+        spaces = video_signal_spaces(settings)
+        aces = project_aces_settings(settings)
+        hdr = project_hdr_settings(settings)
+        if aces is not None:
+            output = render_aces_bgr(frame_data, spaces[0], aces)
+            frame_data = np.rint(np.clip(output[..., :3], 0.0, 1.0) * 255.0).astype(np.uint8)
+        elif hdr is not None:
+            output = convert_video_signal_bgr(
+                normalized_video_bgr(frame_data), spaces[0], hdr_monitor_space(spaces[1], hdr),
+                luminance=hdr.luminance,
+            )
+            frame_data = np.rint(np.clip(output[..., :3], 0.0, 1.0) * 255.0).astype(np.uint8)
+        elif spaces is not None and spaces[0] != spaces[1]:
+            frame_data = convert_video_signal_bgr(
+                frame_data, *spaces, legacy=video_signal_uses_legacy_space(settings),
+            )
         h, w = frame_data.shape[:2]
 
         # 确保连续内存
@@ -6275,8 +6512,17 @@ class PreviewRenderWorker(QThread):
         qimage._bgr_data_ref = bgr_data
         return qimage
 
+    def _preview_color_settings(self) -> Mapping[str, Any] | None:
+        """Read the worker's project color settings from its asset resolver."""
+        resolver = self.__dict__.get("_asset_resolver")
+        project = getattr(resolver, "_project", None)
+        settings = getattr(project, "color_management", None)
+        return settings if isinstance(settings, Mapping) else None
+
     def cleanup_clips(self) -> None:
         """清理所有打开的 clip"""
+        self.__dict__.pop("_aces_still_cache", None)
+        self.__dict__.pop("_hdr_still_cache", None)
         with self._open_clips_lock:
             open_clips = list(self._open_clips.items())
             self._open_clips.clear()

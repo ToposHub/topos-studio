@@ -39,7 +39,6 @@ _YUV422P10_LUT_MSL = """
 #include <metal_stdlib>
 using namespace metal;
 """ + MSL_LUT3D + """
-/* LUT_HELPERS */
 constexpr sampler lut_sampler(coord::normalized, filter::linear, address::clamp_to_edge);
 constant float3 luma_weights = float3(0.2126, 0.7152, 0.0722);
 
@@ -130,18 +129,13 @@ def _yuv422p10_lut_shader(lut_count: int) -> str:
     if lut_count == 1:
         return source
 
-    from src.shared.gpu.metal.kernels_color import METAL_NEGATIVE_LUMA_MSL
-
     names = tuple(f"lut_{index}" for index in range(1, lut_count))
-    # Every subsequent neutral Corrector still protects negative luma.
-    # Keep signed RGB until the existing final YUV conversion.
+    # Neutral Correctors preserve signed values between LUTs, as in OpenGL.
     operations = [
-        f"graded = msl_apply_3dlut(graph_protect_negative_luma(graded), "
-        f"{name}, lut_sampler, strengths[{index}]);"
+        f"graded = msl_apply_3dlut(graded, {name}, lut_sampler, strengths[{index}]);"
         for index, name in enumerate(names, 1)
     ]
     return (source
-            .replace("/* LUT_HELPERS */", METAL_NEGATIVE_LUMA_MSL)
             .replace("/* LUT_PARAMETERS */", "".join(f", texture3d<float> {name}" for name in names))
             .replace("/* LUT_ARGUMENTS */", "".join(f", {name}" for name in names))
             .replace("/* LUT_TEXTURES */", "\n    ".join(
@@ -218,15 +212,11 @@ def _nv12_delivery_shader(operations: tuple[tuple[str, ...], ...]) -> tuple[str,
         grade_lines.append(f"float3 rgb{side} = delivery_rgb(y{side}, uv{side}, p);")
         precision = "65535.0" if nodes else "255.0"
         grade_lines.append(f"rgb{side} = rint(rgb{side} * {precision}) / {precision};")
-        for index, node in enumerate(nodes):
+        for node in nodes:
             color = f"rgb{side}"
             if node != "lut":
                 color = f"graded{primary_index}"
                 grade_lines.append(f"float3 {color} = graph_apply_grading(rgb{side}, grades[{primary_index}]);")
-            elif index:
-                # Later LUT-only Correctors receive the signed output of the
-                # previous node and still run the neutral grade's shadow guard.
-                grade_lines.append(f"{color} = graph_protect_negative_luma({color});")
             if node != "primary":
                 lut = f"lut{strength_index}"
                 arguments.append(f"texture3d<float> {lut} [[texture({texture_index})]]")
@@ -258,9 +248,6 @@ def _nv12_delivery_shader(operations: tuple[tuple[str, ...], ...]) -> tuple[str,
         from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
         helpers = METAL_POINTWISE_GRADING_MSL
         arguments.append("constant GraphGradingParams *grades [[buffer(1)]]")
-    elif any(len(nodes) > 1 for nodes in operations):
-        from src.shared.gpu.metal.kernels_color import METAL_NEGATIVE_LUMA_MSL
-        helpers = METAL_NEGATIVE_LUMA_MSL
     signature = f"kernel void {name}(\n" + ",\n    ".join(arguments) + ",\n"
     return name, _NV12_DELIVERY_MSL + helpers + signature + _NV12_DELIVERY_BODY.replace(
         "/* GRADE */", "\n            ".join(grade_lines))

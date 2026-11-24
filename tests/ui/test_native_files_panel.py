@@ -4,6 +4,7 @@ from PyQt6.QtGui import QColor, QFont, QIcon, QImage
 from PyQt6.QtWidgets import QFrame, QMenu
 from pytestqt.qtbot import QtBot
 
+from src.app.ui.native_files_gallery import FILES_LOCATION_BACKGROUND
 from src.app.ui.native_files_locations import MountedVolume
 from src.app.ui.native_files_panel import NativeFilesPanel
 from src.shared.ui.panel_splitter import PanelSplitter
@@ -311,6 +312,25 @@ def test_functional_sections_use_shared_black_rules(qtbot):
     rule = panel.findChild(QFrame, "filesRule")
     assert rule.height() == 1
     assert rule.grab().toImage().pixelColor(0, 0).name() == QColor(C.PANEL_DIVIDER).name()
+
+
+def test_color_workspace_restyles_only_file_browser_surfaces(qtbot: QtBot) -> None:
+    panel = _panel(qtbot)
+    panel.resize(1120, 650)
+    panel.show()
+    dark_surfaces = (panel.sidebar, panel._location_toolbar, panel.locations.viewport(),
+                     panel.inspector, panel.inspector_body)
+    for active, expected in ((False, FILES_LOCATION_BACKGROUND), (True, C.COLOR_PANEL_INSET),
+                             (False, FILES_LOCATION_BACKGROUND)):
+        panel.set_color_workspace_active(active)
+        for surface in (*dark_surfaces, panel.gallery_toolbar):
+            image = surface.grab().toImage()
+            sample = int(image.devicePixelRatio())
+            assert image.pixelColor(sample, sample).name() == (
+                C.BG_PANEL if surface is panel.gallery_toolbar else expected
+            )
+        assert panel.card_delegate.placeholder_color == FILES_LOCATION_BACKGROUND
+        assert panel.current_path == "/media"
 
 
 def test_home_tree_hides_system_folders_without_hiding_named_media_folders(qtbot):

@@ -583,13 +583,15 @@ class VideoExportJob:
 
     def _validate_output_extension(self) -> List[str]:
         import os
+        from src.features.deliver.core.video_export_formats import SEQUENCE_CODECS
 
         ext = os.path.splitext(self.output_path)[1].lower()
         codec = self.video_config.codec
 
         # Image sequences can target a directory or carry a frame extension.
-        if codec in ("png_sequence", "tiff_sequence", "topos_image_sequence"):
-            if ext not in ("", ".png", ".tiff", ".tif") and not os.path.isdir(self.output_path):
+        if codec in SEQUENCE_CODECS:
+            image_extensions = ("", ".exr") if codec == "exr_sequence" else ("", ".png", ".tiff", ".tif")
+            if ext not in image_extensions and not os.path.isdir(self.output_path):
                 return ["Image sequence output requires a directory or image extension"]
             return []
 
@@ -850,10 +852,8 @@ class VideoExportJob:
             # P8-Topos：Alpha 开关显式转发（此前只持久化不消费——Topos 等
             # 自带 Alpha 语义的 codec 依赖它）
             has_alpha=bool(self.video_config.alpha),
-            # R7：Topos pix_fmt 显式覆盖（空 = 编码侧 codec_map 档位默认）。
-            # 只在 Topos codec 且值在编码域内透传——防 VideoConfig 的
-            # yuv420p 类默认值/非 Topos 残留闯入 Topos 编码域被拒
             pixel_format=(
+                "gbrpf32le" if self.video_config.codec == "exr_sequence" else
                 _topos_pixel_format_override(self.video_config)
                 or _hevc_pixel_format_override(self.video_config)),
             # R7：Alpha 预算超限策略 UI 授权开关（ADR-C014 C-114）
@@ -1014,6 +1014,7 @@ def _map_codec(codec: str) -> Any:
         "topos_raw": ExportCodec.TOPOS_RAW,        # M4-R8（ADR-C058）视频 RAW
         "png_sequence": ExportCodec.PNG_SEQUENCE,
         "tiff_sequence": ExportCodec.TIFF_SEQUENCE,
+        "exr_sequence": ExportCodec.EXR_SEQUENCE,
         "topos_image_sequence": ExportCodec.TOPOS_IMAGE_SEQUENCE,
     }
     if codec not in mapping:

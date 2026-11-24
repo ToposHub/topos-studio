@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import QDialogButtonBox, QStyleOptionViewItem
 from src.features.color.ui import presets_panel
 from src.features.color.ui.gallery_compare import GalleryCompareDialog
 from src.features.color.ui.gallery_icons import GALLERY_ICON_NAMES, gallery_icon
+from src.features.color.ui.panel_chrome import HEADER_HEIGHT, HEADER_ICON_SIZE
 from src.shared.ui.style_sheet import DARK_THEME
 
 
@@ -31,7 +32,7 @@ def panel(qtbot, monkeypatch, tmp_path):
 
 
 def test_gallery_is_single_toolbar_with_fixed_aspect_stills(panel, qtbot):
-    assert panel._gallery.toolbar.height() == 28
+    assert panel._gallery.toolbar.height() == HEADER_HEIGHT
     assert panel.search_edit.parentWidget().isHidden()
     assert panel.folder_combo.isHidden()
     assert panel.list_widget.iconSize() == QSize(108, 61)
@@ -84,6 +85,7 @@ def test_narrow_dark_theme_keeps_core_tools_inside_panel(panel, qtbot):
                    panel._gallery.list_button, panel._gallery.search_button,
                    panel._gallery.more_button):
         assert not button.isHidden()
+        assert button.iconSize() == QSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE)
         assert button.mapTo(panel, button.rect().topRight()).x() < panel.width()
     # BR05：传输服务已接线——导入按钮真实可用（不再是无服务桩的禁用态）
     assert panel._gallery.import_button.isEnabled()

@@ -10,12 +10,17 @@ from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.qualifier_range_bar import QualifierRangeBar
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
 from src.shared.assets.icon_manager import (
-    icon_reset, icon_color_picker, icon_invert, get_icon,
+    icon_color_picker, icon_invert, get_icon,
 )
 from src.shared.i18n.i18n import I18N
+from src.features.color.ui.panel_chrome import (
+    ColorParameterRow, PARAMETER_ROW_SPACING,
+    color_panel_stylesheet, create_panel_header, style_reset_button,
+)
+from src.shared.ui.style_sheet import C
 
 
-class _RangeParameterRow(ParamSliderRow):
+class _RangeParameterRow(ColorParameterRow):
     """Show HSL as percentages while preserving the normalized model API."""
 
     def __init__(self, label: str, default: float, parent: QWidget) -> None:
@@ -77,23 +82,19 @@ class QualifierPanel(QWidget):
 
     def get_style_sheet(self) -> str:
         """Keep numeric inputs/sliders global; style only the palette chrome."""
-        return """
-            QualifierPanel { background: #27272b; }
-            QWidget#qualifierHeader {
-                background: #202024; border-bottom: 1px solid #111113;
-            }
+        return color_panel_stylesheet("""
+            QualifierPanel { background: __COLOR_PANEL_BASE__; }
             QLabel#qualifierTitle {
-                background: transparent; color: #eeeeee;
-                font-size: 12px; font-weight: bold;
+                __COLOR_SECTION_TITLE__
             }
             QWidget#qualifierTools {
-                background: #2c2d32; border-bottom: 1px solid #111113;
+                background: __COLOR_PANEL_RAISED__; border-bottom: 1px solid __PANEL_DIVIDER__;
             }
             QWidget#qualifierRanges, QWidget#qualifierChannel,
-            QWidget#qualifierFinesse { background: #27272b; }
-            QWidget#qualifierFinesse { border-left: 1px solid #111113; }
+            QWidget#qualifierFinesse { background: __COLOR_PANEL_BASE__; }
+            QWidget#qualifierFinesse { border-left: 1px solid __PANEL_DIVIDER__; }
             QLabel#qualifierFinesseTitle {
-                color: #eeeeee; font-size: 12px; background: transparent;
+                __COLOR_SECTION_TITLE__
             }
             QPushButton[qualifierTool="true"] {
                 background: transparent; border: 1px solid transparent;
@@ -107,11 +108,10 @@ class QualifierPanel(QWidget):
                 background: #45464b; border-color: #626269; color: #ff8800;
             }
             QLabel#qualifierChannelTitle {
-                color: #eeeeee; font-size: 12px;
-                background: transparent;
+                __COLOR_SECTION_TITLE__
             }
             QFrame#qualifierToolDivider { background: #18181c; border: none; }
-        """
+        """).replace("__PANEL_DIVIDER__", C.PANEL_DIVIDER)
 
     def _tool_button(self, name: str, tooltip: str) -> QPushButton:
         button = QPushButton(self)
@@ -136,9 +136,7 @@ class QualifierPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        header_widget = QWidget(self)
-        header_widget.setObjectName("qualifierHeader")
-        header_widget.setFixedHeight(28)
+        header_widget = create_panel_header(object_name="qualifierHeader")
         header = QHBoxLayout(header_widget)
         header.setContentsMargins(12, 0, 8, 0)
         header.setSpacing(3)
@@ -154,9 +152,7 @@ class QualifierPanel(QWidget):
         self.reset_all_btn.setObjectName("reset_btn")
         self.reset_all_btn.setToolTip(I18N.tr("tooltip.reset_qualifier", "重置所有限定器参数"))
         self.reset_all_btn.setAccessibleName(self.reset_all_btn.toolTip())
-        self.reset_all_btn.setIcon(icon_reset())
-        self.reset_all_btn.setIconSize(QSize(12, 12))
-        self.reset_all_btn.setFixedSize(16, 16)
+        style_reset_button(self.reset_all_btn, global_reset=True)
         self.reset_all_btn.clicked.connect(self.reset_all)
         header.addWidget(self.reset_all_btn)
         layout.addWidget(header_widget)
@@ -202,7 +198,7 @@ class QualifierPanel(QWidget):
         self.controls_scroll = QScrollArea(self)
         self.controls_scroll.setWidgetResizable(True)
         self.controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.controls_scroll.setStyleSheet("QScrollArea { border: none; background: #27272b; }")
+        self.controls_scroll.setStyleSheet(f"QScrollArea {{ border: none; background: {C.BG_PANEL}; }}")
         content = QWidget()
         body = QHBoxLayout(content)
         body.setContentsMargins(0, 0, 0, 0)
@@ -247,7 +243,7 @@ class QualifierPanel(QWidget):
         self.refine_group.setFixedWidth(188)
         finesse = QVBoxLayout(self.refine_group)
         finesse.setContentsMargins(16, 10, 16, 10)
-        finesse.setSpacing(4)
+        finesse.setSpacing(PARAMETER_ROW_SPACING)
         title = QLabel(I18N.tr("qualifier.matte_finesse", "Matte Finesse"))
         title.setObjectName("qualifierFinesseTitle")
         finesse.addWidget(title)
@@ -299,9 +295,7 @@ class QualifierPanel(QWidget):
         heading.addStretch()
         reset = self._tool_button(f"qualifierReset_{channel}",
                                   f'{I18N.tr("lut.reset", "重置")} {title}')
-        reset.setIcon(icon_reset("#95959a"))
-        reset.setIconSize(QSize(12, 12))
-        reset.setFixedSize(20, 20)
+        style_reset_button(reset)
         reset.clicked.connect(lambda _checked=False, name=channel: self.reset_channel(name))
         self._channel_resets[channel] = reset
         heading.addWidget(reset)
@@ -330,7 +324,7 @@ class QualifierPanel(QWidget):
         return section
 
     def _build_matte_row(self, label: str, maximum: float) -> ParamSliderRow:
-        row = ParamSliderRow(
+        row = ColorParameterRow(
             label, 0.0, maximum, 0.0, step=1.0, decimals=1,
             label_width=98, value_fixed_width=48, slider_auto_hide=False,
             parent=self.refine_group,

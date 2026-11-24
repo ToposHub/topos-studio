@@ -159,9 +159,36 @@ def test_decomposed_fastpath_declines_nonlinear_coupled_params():
     assert ex._get_decomposed_grade_fastpath({"vibrance": 10.0}) is None
     assert ex._get_decomposed_grade_fastpath({"highlights": 5.0}) is None
     assert ex._get_decomposed_grade_fastpath({"hue_shift": 3.0}) is None
+    assert ex._get_decomposed_grade_fastpath({"mid_detail": 40.0}) is None
     # 纯 saturation 极端值仍在快路内
     result = ex._get_decomposed_grade_fastpath({"saturation": -100.0})
     assert result is not None and result[1] is not None
+
+
+@pytest.mark.parametrize("version", [0, 1])
+def test_midtone_detail_uses_full_frames_in_preview_and_delivery(version: int) -> None:
+    from src.features.edit.core.timeline_preview_renderer import PreviewRenderWorker
+    from src.shared.project.color_stack import ColorStackData
+
+    params = {"mid_detail": 40.0, "primary_calibration_version": version}
+    exporter, layer = _exporter_for_grade(params)
+    exporter._project.color_stacks["stack"] = ColorStackData(
+        stack_id="stack", grading_params=params)
+    worker = PreviewRenderWorker.__new__(PreviewRenderWorker)
+    worker._asset_resolver = SimpleNamespace(_project=exporter._project)
+    worker._timeline_sequence = SimpleNamespace(timeline_id="timeline")
+    frame = np.full((16, 512, 4), 102, dtype=np.uint8)
+    frame[:, 256:, :3] = 153
+    frame[..., 3] = 203
+
+    delivered = exporter._apply_color_grade(frame, layer)
+    preview = worker._apply_preview_color_grade_unstabilized(frame, layer)
+    np.testing.assert_array_equal(delivered, preview)
+    np.testing.assert_array_equal(delivered[..., 3], frame[..., 3])
+    np.testing.assert_array_equal(delivered[:, 200, :3], frame[:, 200, :3])
+    assert np.all(delivered[:, 255, :3] < frame[:, 255, :3])
+    assert np.all(delivered[:, 256, :3] > frame[:, 256, :3])
+    assert not exporter._color_grade_lut_cache
 
 
 def test_measured_chain_without_a_main_stack_uses_same_cpu_grade(

@@ -45,6 +45,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, 
 
 from src.features.color.core.layer import Layer
 from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
+from src.features.color.core.mist import mist_render_params
+from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
 from src.features.shared.effects.effect_spec import PluginBinding
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
@@ -252,6 +254,8 @@ _BASE_DECLS = [
     ("u_log_low_range", "float"),
     ("u_log_high_range", "float"),
     ("u_lum_mix", "float"),
+    ("u_mist_spread", "float"),
+    ("u_mist_amount", "float"),
 ]
 
 _GRAIN_DECLS = [
@@ -328,6 +332,10 @@ def build_composition_uniform_manifest(
     # Append the Metal field so earlier constant-buffer offsets are stable.
     decls.append(UniformDecl(name="u_cs_calibrated", glsl_type="bool",
                              section="curves_soft_clip"))
+    # The grading snippet reads this uniform, so GLSL declares it before the
+    # snippet while the Metal constant-buffer field stays appended.
+    decls.append(UniformDecl(name="u_mid_detail_calibrated", glsl_type="float",
+                             section="header"))
     return CompositionUniformManifest(_layout(decls), warper_space=warper_space if has_warper else 0)
 
 
@@ -480,6 +488,8 @@ def composition_uniform_values(
     values["u_shadow"] = float(p.get("shadow") or 0.0)
     values["u_highlights"] = float(p.get("highlights") or 0.0)
     values["u_mid_detail"] = float(p.get("mid_detail") or 0.0)
+    values["u_mid_detail_calibrated"] = float(
+        p.get(PRIMARY_CALIBRATION_VERSION_KEY) == 2)
     values["u_sharpness"] = float(p.get("sharpness") or 0.0)
     values["u_hue_shift"] = float(p.get("hue_shift") or 0.0)
     values["u_lift_saturation"] = float(p.get("lift_saturation") or 0.0)
@@ -532,6 +542,7 @@ def composition_uniform_values(
     values["u_blur_radius"] = float(fx.get("blur_radius", 0.0))
     values["u_blur_bokeh"] = float(fx.get("blur_bokeh", 0.0))
     values["u_blur_angle"] = float(fx.get("blur_angle", 0.0))
+    values["u_mist_spread"], values["u_mist_amount"] = mist_render_params(fx)
     values["u_aspect_ratio"] = float(aspect_ratio
                                      if aspect_ratio is not None
                                      else width / height)

@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from src.features.color.core.color_graph_cpu import run_graph_frame_cpu
-from src.features.color.core.color_graph_migration import migrate_legacy_stack
+from src.features.color.core.color_graph_migration import (
+    migrate_legacy_stack, stack_primary_execution_graph,
+)
 from src.features.color.core.color_graph_texture import ColorGraphTextureRenderer
 from src.features.color.core.grade_keyframes import GradeKeyframe, GradeKeyframeTrack
 from tests.color.fixtures.color_graph import _neutral_layer
@@ -126,6 +128,42 @@ def test_shared_graph_gl_matches_cpu_for_both_animated_nodes(ctx, matte):
             results.append(gl)
         assert not np.allclose(results[0], results[-1])
         assert len(renderer.plan_cache) == 1
+    finally:
+        renderer.release()
+        source.release()
+
+
+def test_mist_retains_detail_and_reaches_video_delivery_from_a_legacy_stack(ctx: Any) -> None:
+    layer = _neutral_layer("Mist")
+    layer.effects_params.update(mist_enabled=True, mist_radius=0.0, mist_mix=33.0,
+                                blur_enabled=False, texture_soften_detail=50.0)
+    stack = _stack_with_layers([layer])
+    graph = stack_primary_execution_graph(stack)
+    assert graph is not None
+
+    rgb = np.full((24, 512, 3), 0.0625, dtype="f4")
+    rgb[:, 256:] = 0.92
+    source = ctx.texture((512, 24), 3, rgb, dtype="f4")
+    source.repeat_x = source.repeat_y = False
+    source.filter = (ctx.LINEAR, ctx.LINEAR)
+    renderer = ColorGraphTextureRenderer(ctx)
+    try:
+        result = renderer.render(source, graph, 0, output_key="mist")
+        gl = np.frombuffer(result.read(), dtype="f4").reshape(24, 512, 4)[..., :3]
+        cpu = run_graph_frame_cpu(graph, rgb[..., ::-1], 0)[..., ::-1]
+        np.testing.assert_allclose(gl, cpu, atol=2e-4)
+        assert gl[12, 30, 0] == pytest.approx(0.0625, abs=2e-4)
+        assert 0.15 < gl[12, 255, 0] < 0.25
+        assert gl[12, 256, 0] - gl[12, 255, 0] > 0.55
+        assert gl[12, 480, 0] == pytest.approx(0.92, abs=2e-4)
+
+        layer.effects_params["mist_mix"] = 50.0
+        neutral_stack = _stack_with_layers([layer])
+        assert stack_primary_execution_graph(neutral_stack) is None
+        neutral = renderer.render(source, migrate_legacy_stack(neutral_stack), 0, output_key="mist")
+        np.testing.assert_allclose(
+            np.frombuffer(neutral.read(), dtype="f4").reshape(24, 512, 4)[..., :3],
+            rgb, atol=2e-4)
     finally:
         renderer.release()
         source.release()
