@@ -282,6 +282,22 @@ def generate_analysis(
             "src/shared/assets/icons/locations",
         ),
         (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "viewer"),
+            "src/shared/assets/icons/viewer",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "curves"),
+            "src/shared/assets/icons/curves",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "tracker"),
+            "src/shared/assets/icons/tracker",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "warper"),
+            "src/shared/assets/icons/warper",
+        ),
+        (
             os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "buttons", "folder-open.svg"),
             "src/shared/assets/icons/buttons",
         ),

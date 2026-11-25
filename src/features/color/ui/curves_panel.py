@@ -105,6 +105,7 @@ class CurvesPanel(QWidget):
             title = self._mode_title(mode)
             button = CurveModeButton(mode, title, self)
             style_header_button(button, width=28, icon=button.icon())
+            button.setIconSize(QSize(26, 18))
             self.mode_buttons[mode] = button
             self.mode_group.addButton(button)
             button.clicked.connect(lambda _checked=False, m=mode: self.set_curve_mode(m))

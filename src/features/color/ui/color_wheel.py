@@ -52,7 +52,8 @@ from src.features.color.ui.primary_wheel_response import (
 from src.features.color.ui.tonal_saturation_panel import TonalSaturationPanel
 from src.features.color.ui.panel_chrome import (
     PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
-    PARAMETER_BAR_HEIGHT, create_panel_header, header_button_color, style_header_button, style_reset_button,
+    PARAMETER_BAR_BOTTOM_MARGIN, PARAMETER_BAR_HEIGHT, create_panel_header, header_button_color,
+    style_header_button, style_reset_button,
 )
 
 
@@ -1346,7 +1347,7 @@ class GradingPanel(QWidget):
         from src.features.color.ui.color_bars_panel import ColorBarsPanel
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 2)
+        layout.setContentsMargins(0, 0, 0, PARAMETER_BAR_BOTTOM_MARGIN)
         layout.setSpacing(0)
         self.setLayout(layout)
 

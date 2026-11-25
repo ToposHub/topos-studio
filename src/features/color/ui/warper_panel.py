@@ -19,10 +19,10 @@ from src.features.color.core.warper_state import (
     WarperGrid, WarperPin, WarperStateV2, make_point_id,
 )
 from src.features.color.ui.panel_chrome import (
-    PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
-    create_panel_header, style_header_button, style_reset_button,
+    PARAMETER_BAR_BOTTOM_MARGIN, PARAMETER_BAR_HEIGHT, PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
+    create_panel_divider, create_panel_header, style_header_button,
 )
-from src.features.color.ui.warper_tools import MeshTools, StrokeTools, tool_button, tr
+from src.features.color.ui.warper_tools import MeshTools, StrokeTools, reset_button, tool_button, tr
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.chroma_warp_canvas import ChromaWarpCanvas
@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 MODES = ("chroma_warp", "hue_saturation", "chroma_luma")
 MODE_LABELS = {"chroma_warp": "Chroma Warp", "hue_saturation": "Hue - Saturation", "chroma_luma": "Chroma - Luma"}
 HS_RESOLUTIONS = (6, 8, 12, 16, 24)
+_TOOLS_SIDEBAR_WIDTH = 234
 
 
 class _PaletteStack(QStackedWidget):
@@ -136,22 +137,24 @@ class WarperPanel(QWidget):
         for mode, icon in zip(MODES, ("chroma", "hs", "cl")):
             button = tool_button(icon, tr(mode, MODE_LABELS[mode]), True)
             button.setObjectName(f"warper_mode_{mode}")
-            style_header_button(button, width=32, icon=button.icon())
+            style_header_button(button, width=32)
+            button.setIconSize(QSize(18, 18))
+            button.setStyleSheet(button.styleSheet() +
+                                 "QToolButton:checked { background: #393b42; border-radius: 3px; }")
             group.addButton(button)
             button.setChecked(mode == self.mode)
             button.clicked.connect(lambda checked=False, mode=mode: self.set_mode(mode))
             top.addWidget(button)
             self.mode_buttons[mode] = button
         self.expand_button = tool_button("expand", tr("expand", "Expand"))
-        style_header_button(self.expand_button, width=32, icon=self.expand_button.icon())
+        style_header_button(self.expand_button, width=32)
         self.expand_button.clicked.connect(self.toggle_expanded)
         top.addWidget(self.expand_button)
-        self.reset_btn = tool_button("reset", tr("reset_all", "Reset All"))
-        style_reset_button(self.reset_btn, global_reset=True)
+        self.reset_btn = reset_button(tr("reset_all", "Reset All"), global_reset=True)
         self.reset_btn.clicked.connect(self.on_reset)
         top.addWidget(self.reset_btn)
         self.options_button = tool_button("more", tr("options", "Options"))
-        style_header_button(self.options_button, width=32, icon=self.options_button.icon())
+        style_header_button(self.options_button, width=32)
         self.options_menu = QMenu(self.options_button)
         self.grid_action = self.options_menu.addAction(tr("show_grid", "Show Grid"))
         self.grid_action.setCheckable(True)
@@ -174,6 +177,7 @@ class WarperPanel(QWidget):
     @staticmethod
     def _combo(items: list[str], width: int) -> ChevronComboBox:
         combo = ChevronComboBox()
+        combo.setStyleSheet(combo.styleSheet() + "QComboBox { padding-left: 6px; padding-right: 19px; }")
         combo.addItems(items)
         combo.setFixedWidth(width)
         return combo
@@ -187,22 +191,23 @@ class WarperPanel(QWidget):
 
     def _build_footer(self, layout: QVBoxLayout) -> None:
         self.footer = QWidget()
-        self.footer.setFixedHeight(47)
         self.footer.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self._footer_layout = QVBoxLayout(self.footer)
-        self._footer_layout.setContentsMargins(0, 0, 0, 0)
+        self._footer_layout.setContentsMargins(0, 0, 0, PARAMETER_BAR_BOTTOM_MARGIN)
         self._footer_layout.setSpacing(0)
+        self._footer_layout.addWidget(create_panel_divider(Qt.Orientation.Horizontal))
         self._footer_row = QWidget()
+        self._footer_row.setFixedHeight(PARAMETER_BAR_HEIGHT)
         self._footer_layout.addWidget(self._footer_row)
         footer = QHBoxLayout(self._footer_row)
         self._footer_controls = footer
-        footer.setContentsMargins(10, 0, 10, 0)
-        footer.setSpacing(4)
+        footer.setContentsMargins(6, 0, 6, 0)
+        footer.setSpacing(2)
         self.resolution_h_icon = tool_button("resolution_h", tr("hue_resolution", "Hue Resolution"))
         self.resolution_s_icon = tool_button("resolution_s", tr("sat_resolution", "Saturation Resolution"))
         items = [str(size) for size in HS_RESOLUTIONS]
-        self.grid_combo = self._combo(items, 59)
-        self.saturation_combo = self._combo(items, 59)
+        self.grid_combo = self._combo(items, 48)
+        self.saturation_combo = self._combo(items, 48)
         self.grid_combo.currentIndexChanged.connect(self.on_grid_size_changed)
         self.saturation_combo.currentIndexChanged.connect(lambda index: self._resolution_changed(1))
         for icon, combo in ((self.resolution_h_icon, self.grid_combo), (self.resolution_s_icon, self.saturation_combo)):
@@ -211,7 +216,7 @@ class WarperPanel(QWidget):
             footer.addWidget(combo)
             icon.clicked.connect(lambda checked=False, combo=combo: combo.showPopup())
         self.link_button = tool_button("link", tr("link", "Link"), True)
-        self.link_button.setFixedWidth(26)
+        self.link_button.setFixedWidth(24)
         self.link_button.setChecked(True)
         self.link_button.clicked.connect(self._link_changed)
         footer.addWidget(self.link_button)
@@ -223,12 +228,12 @@ class WarperPanel(QWidget):
         axis_layout = QHBoxLayout()
         axis_group_layout.addLayout(axis_layout)
         axis_layout.setContentsMargins(0, 0, 0, 0)
-        axis_layout.setSpacing(4)
+        axis_layout.setSpacing(2)
         self.axis_label = QLabel(tr("axis_angle", "Axis Angle"))
         self.axis_label.setStyleSheet(PARAMETER_LABEL_STYLE)
         axis_layout.addWidget(self.axis_label)
         self.axis_angle = DragValue("", -180, 180, 0, 2, compact=True)
-        self.axis_angle.setFixedWidth(60)
+        self.axis_angle.setFixedWidth(56)
         self.axis_angle.setAccessibleName(tr("axis_angle", "Axis Angle"))
         self.axis_angle.valueChanged.connect(self._axis_changed)
         axis_layout.addWidget(self.axis_angle)
@@ -240,7 +245,7 @@ class WarperPanel(QWidget):
         space_icon = tool_button("space", tr("color_space", "Color Space"))
         space_icon.setFixedWidth(20)
         footer.addWidget(space_icon)
-        self.space_combo = self._combo(["HSV", "HSL", "HSP"], 82)
+        self.space_combo = self._combo(["HSV", "HSL", "HSP"], 64)
         self.space_combo.setCurrentText("HSP")
         self.space_combo.setAccessibleName(tr("color_space", "Color Space"))
         self.space_combo.currentTextChanged.connect(self._space_changed)
@@ -249,13 +254,15 @@ class WarperPanel(QWidget):
         layout.addWidget(self.footer)
 
     def _build_tools(self, body: QHBoxLayout) -> None:
+        self._tools_divider = create_panel_divider(Qt.Orientation.Vertical)
+        body.addWidget(self._tools_divider)
         self.tools_scroll = QScrollArea()
         self.tools_scroll.setObjectName("warperToolsScroll")
-        self.tools_scroll.setFixedWidth(253)
+        self.tools_scroll.setFixedWidth(_TOOLS_SIDEBAR_WIDTH)
         self.tools_scroll.setWidgetResizable(True)
         self.tools_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self.tools_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.tools_scroll.setStyleSheet(f"QScrollArea#warperToolsScroll {{ background: {C.BG_PANEL}; border-left: 1px solid {C.PANEL_DIVIDER}; }}")
+        self.tools_scroll.setStyleSheet(f"QScrollArea#warperToolsScroll {{ background: {C.BG_PANEL}; border: none; }}")
         self.tools_stack = _PaletteStack()
         self.hs_tools = MeshTools()
         self.cl_tools = MeshTools(True)
@@ -295,7 +302,9 @@ class WarperPanel(QWidget):
             self.canvas_stack.setCurrentWidget(self.canvases[mode])
             self.tools_stack.setCurrentWidget(self.tools[mode])
             self.tools_stack.updateGeometry()
-            self.tools_scroll.setFixedWidth(max(253, self.tools[mode].minimumSizeHint().width() + 1))
+            scrollbar_width = self.tools_scroll.verticalScrollBar().sizeHint().width()
+            content_width = self.tools[mode].minimumSizeHint().width()
+            self.tools_scroll.setFixedWidth(max(_TOOLS_SIDEBAR_WIDTH, content_width + scrollbar_width))
             self.title.setText(f"Color Warper - {tr(mode, MODE_LABELS[mode])}")
             self.footer.setVisible(mode != "chroma_warp")
             rectangular = mode == "chroma_luma"
@@ -340,20 +349,24 @@ class WarperPanel(QWidget):
         return super().eventFilter(watched, event)
 
     def _adapt_footer(self) -> None:
-        sidebar_width = self.tools_scroll.width() if hasattr(self, "tools_scroll") else 253
-        # Shared Topos inputs need more width than Resolve's 44px fields, but
-        # should still keep Axis Angle inline in the usual 550–625px canvas.
-        narrow = self.mode == "chroma_luma" and self.surface.width() - sidebar_width < 480
+        if not hasattr(self, "tools_scroll"):
+            return
+        canvas_width = self.surface.width() - self.tools_scroll.width() - self._tools_divider.width()
+        inline_width = self._footer_controls.minimumSize().width()
+        if self._footer_narrow:
+            # The wrapped axis controls currently live outside the main row.
+            inline_width += self._axis_group.minimumSizeHint().width() + self._footer_controls.spacing()
+        narrow = self.mode == "chroma_luma" and canvas_width < inline_width
         if narrow == self._footer_narrow:
             return
         self._footer_narrow = narrow
         self._footer_controls.removeWidget(self._axis_group)
         self._footer_layout.removeWidget(self._axis_group)
         if narrow:
-            self._footer_layout.addWidget(self._axis_group, 0, Qt.AlignmentFlag.AlignCenter)
+            self._footer_layout.insertWidget(0, self._axis_group, 0, Qt.AlignmentFlag.AlignCenter)
         else:
-            self._footer_controls.insertWidget(self._footer_controls.count() - 2, self._axis_group)
-        self.footer.setFixedHeight(70 if narrow else 47)
+            self._footer_controls.insertWidget(self._footer_controls.count() - 2, self._axis_group,
+                                              0, Qt.AlignmentFlag.AlignVCenter)
 
     def ui_state(self) -> dict[str, Any]:
         return {"version": 1, "mode": self.mode, "linked": dict(self._linked),

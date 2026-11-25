@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF, QResizeEvent
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap, QPolygonF, QResizeEvent
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -48,9 +48,8 @@ from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets import ChevronComboBox
 from src.shared.ui.widgets.drag_value import style_numeric_spin_box
 
-_CHECKMARK_ICON_FILE = (
-    Path(__file__).resolve().parents[3] / "shared" / "assets" / "icons" / "checkmark.svg"
-)
+_ICONS_DIR = Path(__file__).resolve().parents[3] / "shared" / "assets" / "icons"
+_CHECKMARK_ICON_FILE = _ICONS_DIR / "checkmark.svg"
 # 与 style_sheet.DARK_THEME 相同：QSS url() 必须用正斜杠路径，
 # 原生的 Windows 反斜杠绝对路径会让整张面板样式表解析失败。
 # （带引号的 url("file:...") URI 形式会被 QSS 解析成相对路径，不能用。）
@@ -332,6 +331,7 @@ class TrackerPanel(QWidget):
             button = QPushButton(bar)
             button.setObjectName("tracker_icon_action")
             style_header_button(button, width=30, icon=self._title_icon(key))
+            button.setIconSize(QSize(18, 18))
             button.setFixedHeight(HEADER_HEIGHT)
             button.setAccessibleName(label)
             button.setToolTip(label if key in ("window", "stabilizer") else tr(
@@ -406,39 +406,7 @@ class TrackerPanel(QWidget):
 
     @staticmethod
     def _title_icon(kind: str) -> QIcon:
-        """Draw palette modes on a retina-sized logical 20px canvas."""
-        pixmap = QPixmap(40, 40)
-        pixmap.setDevicePixelRatio(2.0)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor("#A2A4A4"), 1.15))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        if kind == "window":
-            painter.drawEllipse(QRectF(3.5, 3.5, 13.0, 13.0))
-            painter.drawEllipse(QRectF(6.0, 6.0, 8.0, 8.0))
-            for x1, y1, x2, y2 in ((10, 0, 10, 6), (10, 14, 10, 20), (0, 10, 6, 10), (14, 10, 20, 10)):
-                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-        elif kind == "stabilizer":
-            for points in (((2, 7), (8, 4), (13, 7), (13, 15), (7, 17), (2, 14), (2, 7)),
-                           ((8, 4), (8, 12), (13, 15)), ((2, 7), (8, 10), (13, 7)),
-                           ((14, 7), (18, 5), (18, 13), (14, 11), (14, 7))):
-                painter.drawPolyline(QPolygonF([QPointF(x, y) for x, y in points]))
-        elif kind == "fx":
-            path = QPainterPath(QPointF(4, 17))
-            path.cubicTo(8, 17, 5, 3, 11, 3)
-            path.lineTo(13, 4)
-            painter.drawPath(path)
-            painter.drawLine(QPointF(3, 8), QPointF(11, 8))
-            painter.drawLine(QPointF(11, 10), QPointF(17, 16))
-            painter.drawLine(QPointF(17, 10), QPointF(11, 16))
-        else:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#969899"))
-            for x in (4.0, 10.0, 16.0):
-                painter.drawEllipse(QPointF(x, 10), 1.25, 1.25)
-        painter.end()
-        return QIcon(pixmap)
+        return QIcon(str(_ICONS_DIR / "tracker" / f"{kind}.svg"))
 
     @staticmethod
     def _transport_icon(kind: str) -> QIcon:

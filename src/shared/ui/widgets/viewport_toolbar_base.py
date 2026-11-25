@@ -14,11 +14,29 @@ from PyQt6.QtWidgets import (
     QComboBox,
 )
 from PyQt6.QtCore import Qt, QSize, QPointF, QSignalBlocker, pyqtSignal
+from PyQt6.QtGui import QColor, QPaintEvent, QPainter, QPen, QPolygonF
 
 from src.shared.i18n.i18n import I18N
-from src.shared.assets.icon_manager import icon_mask, get_icon, IconColors
+from src.shared.assets.icon_manager import get_icon, IconColors
+from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
+
+
+class ViewerZoomMenuButton(QToolButton):
+    """Draw the monitor zoom selector's chevron beside the percentage."""
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = self.palette().buttonText().color() if self.isEnabled() else QColor("#4e5158")
+        pen = QPen(color, 1.4, cap=Qt.PenCapStyle.RoundCap, join=Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        x, y = self.width() - 10.0, self.height() / 2.0
+        painter.drawPolyline(QPolygonF([QPointF(x - 2.8, y - 1.4), QPointF(x, y + 1.4),
+                                        QPointF(x + 2.8, y - 1.4)]))
+        painter.end()
 
 
 class ViewportToolBarBase(QFrame):
@@ -159,8 +177,8 @@ class ViewportToolBarBase(QFrame):
         self.mask_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.mask_btn.setAutoRaise(True)
         self.mask_btn.setStyleSheet(self._BTN_STYLE)
-        self.mask_btn.setIcon(icon_mask(IconColors.DEFAULT))
-        self.mask_btn.setIconSize(QSize(15, 15))
+        self.mask_btn.setIcon(viewer_icon("highlight"))
+        self.mask_btn.setIconSize(viewer_icon_size("highlight"))
         self.mask_btn.setCheckable(True)
         self.mask_btn.setFixedSize(26, 26)
         self.mask_btn.setToolTip(
@@ -189,8 +207,8 @@ class ViewportToolBarBase(QFrame):
         self.split_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.split_btn.setAutoRaise(True)
         self.split_btn.setStyleSheet(self._BTN_STYLE)
-        self.split_btn.setIcon(get_icon('fa5s.columns', color=IconColors.DEFAULT))
-        self.split_btn.setIconSize(QSize(15, 15))
+        self.split_btn.setIcon(viewer_icon("image_wipe"))
+        self.split_btn.setIconSize(viewer_icon_size("image_wipe"))
         self.split_btn.setCheckable(True)
         self.split_btn.setFixedSize(26, 26)
         self.split_btn.setToolTip(
@@ -200,8 +218,13 @@ class ViewportToolBarBase(QFrame):
 
     def _make_guides_btn(self) -> QToolButton:
         """Create the Guides button (opens ViewerGuidesPanel on click)."""
-        self.guides_menu_btn = self._make_menu_button(
-            I18N.tr("viewport.guides", "Guides"))
+        label = I18N.tr("viewport.guides", "Viewer Guides")
+        self.guides_menu_btn = self._make_menu_button(label)
+        self.guides_menu_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.guides_menu_btn.setIcon(viewer_icon("guides"))
+        self.guides_menu_btn.setIconSize(viewer_icon_size("guides"))
+        self.guides_menu_btn.setToolTip(label)
+        self.guides_menu_btn.setAccessibleName(label)
         self._guides_panel = None
         self.guides_menu_btn.clicked.connect(self._show_guides_panel)
         return self.guides_menu_btn
@@ -253,19 +276,13 @@ class ViewportToolBarBase(QFrame):
     # ── Internal toggle handlers ────────────────────────────────────────
 
     def _on_mask_toggled(self, checked: bool) -> None:
-        """Toggle mask icon color: orange when active, default when inactive."""
-        color = IconColors.ORANGE if checked else IconColors.DEFAULT
-        self.mask_btn.setIcon(icon_mask(color))
-        # AUD-38417: 程序化 setChecked 引发的 toggled 只同步图标，不重发信号
+        """Forward user mask changes; the icon follows the native checked state."""
         if getattr(self, '_programmatic_toggle', False):
             return
         self.mask_toggled.emit(checked)
 
     def _on_split_toggled(self, checked: bool) -> None:
-        """Toggle split icon color: orange when active, default when inactive."""
-        color = IconColors.ORANGE if checked else IconColors.DEFAULT
-        self.split_btn.setIcon(get_icon('fa5s.columns', color=color))
-        # AUD-38417: 程序化 setChecked 引发的 toggled 只同步图标，不重发信号
+        """Forward user wipe changes; the icon follows the native checked state."""
         if getattr(self, '_programmatic_toggle', False):
             return
         self.split_toggled.emit(checked)

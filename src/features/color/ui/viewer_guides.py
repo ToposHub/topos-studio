@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QByteArray, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QBrush,
     QColor,
@@ -21,6 +21,7 @@ from PyQt6.QtGui import (
     QPainterPath,
     QPen,
 )
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (
     QFrame,
     QCheckBox,
@@ -223,15 +224,46 @@ class GuideOverlayItem(QGraphicsItem):
 # GuideItemWidget — single clickable thumbnail card
 # ---------------------------------------------------------------------------
 
+# The 3:2 source frame leaves visible side or top mattes for both portrait
+# and widescreen guides. The retained image inside it uses the actual ratio.
+def _guide_preview_svg(guide: GuideDefinition) -> QByteArray:
+    if guide.guide_type == GuideType.ASPECT_RATIO:
+        width, height = 33.0, 22.0
+        if guide.value > 0.0:
+            width = min(width, height * guide.value)
+            height = width / guide.value
+        x = (38.0 - width) / 2.0
+        y = (26.0 - height) / 2.0
+        detail = (
+            f'<rect x="{x:.3f}" y="{y:.3f}" width="{width:.3f}" height="{height:.3f}" '
+            'fill="#444851" stroke="#edf0f4" stroke-width="1.15"/>'
+        )
+    else:
+        # Enlarge the inset differences for legibility at thumbnail size.
+        marks = {
+            "extents": "M2.5 7V2h6m21 0h6v5m0 12v5h-6m-21 0h-6v-5",
+            "action": "M6 9V5h5m16 0h5v4m0 8v4h-5m-16 0H6v-4",
+            "title": "M9 11V7h4m12 0h4v4m0 4v4h-4m-12 0H9v-4M19 7v2m0 8v2",
+            "center": "M14.5 13h9M19 8.5v9",
+        }
+        detail = (
+            f'<path d="{marks[guide.id]}" fill="none" stroke="#edf0f4" '
+            'stroke-width="1.5" stroke-linecap="square"/>'
+        )
+
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="38" height="26" viewBox="0 0 38 26">'
+        '<rect x="2.5" y="2" width="33" height="22" rx="0.5" '
+        'fill="#16181c" stroke="#7c828d" stroke-width="1"/>'
+        f'{detail}</svg>'
+    )
+    return QByteArray(svg.encode("ascii"))
+
+
 class GuideItemWidget(QWidget):
-    """A single clickable guide thumbnail card."""
+    """A clickable, vector-rendered miniature of a viewer guide."""
 
     clicked = pyqtSignal(str)
-
-    _THUMB_W: int = 44
-    _THUMB_H: int = 38
-    _LABEL_H: int = 12
-    _MARGIN: int = 3
 
     def __init__(
         self,
@@ -239,17 +271,18 @@ class GuideItemWidget(QWidget):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self._guide: GuideDefinition = guide
-        self._is_active: bool = False
-        self.setFixedSize(self._THUMB_W, self._THUMB_H)
+        self._guide = guide
+        self._preview = QSvgRenderer(_guide_preview_svg(guide), self)
+        self._is_active = False
+        self.setFixedSize(44, 40)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(guide.label)
+        self.setAccessibleName(guide.label)
 
     def set_active(self, active: bool) -> None:
         self._is_active = active
         self.update()
-
-    # -- events --------------------------------------------------------------
 
     def mousePressEvent(self, event: object) -> None:
         self.clicked.emit(self._guide.id)
@@ -257,95 +290,23 @@ class GuideItemWidget(QWidget):
     def paintEvent(self, event: object) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height()
-        preview_h = h - self._LABEL_H
+        if self._is_active:
+            label_color, opacity = "#f3f4f6", 1.0
+        elif self.underMouse():
+            label_color, opacity = "#d9dce2", 0.9
+        else:
+            label_color, opacity = "#a8adb6", 0.7
 
-        # Miniature guide preview
-        self._draw_preview(painter, w, preview_h)
-
-        # Label
-        painter.setPen(
-            QColor("#eeeeee") if self._is_active else QColor("#a6a7aa")
-        )
+        painter.setOpacity(opacity)
+        self._preview.render(painter, QRectF((self.width() - 38) / 2, 0, 38, 26))
+        painter.setOpacity(1.0)
+        painter.setPen(QColor(label_color))
         font = painter.font()
-        font.setPixelSize(9)
-        font.setBold(False)
+        font.setPixelSize(10)
+        font.setBold(self._is_active)
         painter.setFont(font)
-        painter.drawText(0, preview_h, w, self._LABEL_H, Qt.AlignmentFlag.AlignCenter, self._guide.label)
+        painter.drawText(0, 26, self.width(), 14, Qt.AlignmentFlag.AlignCenter, self._guide.label)
         painter.end()
-
-    # -- preview drawing -----------------------------------------------------
-
-    def _draw_preview(self, painter: QPainter, thumb_w: int, thumb_h: int) -> None:
-        m = self._MARGIN
-        area = QRectF(m, m, thumb_w - 2 * m, thumb_h - 2 * m)
-
-        if self._guide.guide_type == GuideType.ASPECT_RATIO:
-            self._draw_aspect_preview(painter, area)
-        elif self._guide.guide_type == GuideType.SAFE_AREA:
-            self._draw_safe_preview(painter, area)
-
-    def _draw_aspect_preview(self, painter: QPainter, area: QRectF) -> None:
-        if self._guide.value <= 0.0:
-            # Default — empty frame
-            color = QColor("#e6e6e6") if self._is_active else QColor("#77787c")
-            painter.setPen(QPen(color, 1.0))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(area)
-            return
-
-        ratio = self._guide.value
-        area_aspect = area.width() / area.height()
-        if ratio > area_aspect:
-            bar_h = (area.height() - area.width() / ratio) / 2.0
-            painter.fillRect(
-                QRectF(area.left(), area.top(), area.width(), bar_h),
-                QColor(0, 0, 0, 120),
-            )
-            painter.fillRect(
-                QRectF(area.left(), area.bottom() - bar_h, area.width(), bar_h),
-                QColor(0, 0, 0, 120),
-            )
-        else:
-            bar_w = (area.width() - area.height() * ratio) / 2.0
-            painter.fillRect(
-                QRectF(area.left(), area.top(), bar_w, area.height()),
-                QColor(0, 0, 0, 120),
-            )
-            painter.fillRect(
-                QRectF(area.right() - bar_w, area.top(), bar_w, area.height()),
-                QColor(0, 0, 0, 120),
-            )
-
-        color = QColor("#e6e6e6") if self._is_active else QColor("#77787c")
-        painter.setPen(QPen(color, 1.0))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(area)
-
-    def _draw_safe_preview(self, painter: QPainter, area: QRectF) -> None:
-        color = QColor("#e6e6e6") if self._is_active else QColor("#77787c")
-        painter.setPen(QPen(color, 1.0))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRect(area)
-
-        if self._guide.id == "center":
-            cx, cy = area.center().x(), area.center().y()
-            painter.setPen(QPen(color, 1.0))
-            painter.drawLine(QPointF(cx - 6, cy), QPointF(cx + 6, cy))
-            painter.drawLine(QPointF(cx, cy - 6), QPointF(cx, cy + 6))
-        else:
-            inset = self._guide.value
-            if inset > 0.0:
-                dx = area.width() * inset
-                dy = area.height() * inset
-                inner = QRectF(
-                    area.left() + dx,
-                    area.top() + dy,
-                    area.width() - 2 * dx,
-                    area.height() - 2 * dy,
-                )
-                painter.setPen(QPen(color, 1.0))
-                painter.drawRect(inner)
 
 
 # ---------------------------------------------------------------------------
@@ -369,22 +330,18 @@ class ViewerGuidesPanel(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(304)
 
-        self._active_id: Optional[str] = None
         self._active_guide: Optional[GuideDefinition] = None
         self._items: Dict[str, GuideItemWidget] = {}
 
         self._setup_ui()
+        self.set_active_guide(None)
 
     # -- public API ----------------------------------------------------------
 
     def set_active_guide(self, guide_id: Optional[str]) -> None:
-        old = self._active_id
-        if old and old in self._items:
-            self._items[old].set_active(False)
-        self._active_id = guide_id
         self._active_guide = self._guide_by_id(guide_id)
-        if guide_id and guide_id in self._items:
-            self._items[guide_id].set_active(True)
+        for key, item in self._items.items():
+            item.set_active(key == (guide_id or "default"))
 
     def show_at(self, global_pos: QPointF) -> None:
         self.move(int(global_pos.x()), int(global_pos.y()))
@@ -401,6 +358,10 @@ class ViewerGuidesPanel(QWidget):
                 background-color: #202126;
                 border: 1px solid #34353a;
                 border-radius: 4px;
+            }
+            QFrame#guidesPanelOuter QCheckBox {
+                background: transparent;
+                border: none;
             }
         """)
         outer_layout = QVBoxLayout(outer)
@@ -482,14 +443,7 @@ class ViewerGuidesPanel(QWidget):
         return row
 
     def _on_item_clicked(self, guide_id: str, guide: GuideDefinition) -> None:
-        old = self._active_id
-        self._active_id = guide_id
-        self._active_guide = guide
-
-        if old and old in self._items:
-            self._items[old].set_active(False)
-        self._items[guide_id].set_active(True)
-
+        self.set_active_guide(guide_id)
         self._emit_guide_selection(guide)
         self.close()
 

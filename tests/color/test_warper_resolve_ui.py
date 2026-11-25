@@ -18,6 +18,8 @@ from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS
 from src.features.color.core.warper_state import (
     RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2, WARPER_SCHEMA_VERSION, WarperGrid, WarperPin, WarperStateV2,
 )
+from src.features.color.ui.color_wheel import GradingPanel
+from src.features.color.ui.panel_chrome import PARAMETER_BAR_HEIGHT
 from src.features.color.ui.warper_panel import WarperPanel
 from src.shared.ui.widgets.warper_canvas import CALIBRATED_MAX_RADIUS, CALIBRATED_SAT_SCALE, WarperCanvas
 
@@ -464,13 +466,15 @@ def test_hydration_none_cancels_pending_and_clears_selection(panel: WarperPanel,
 
 def test_expand_restore_and_narrow_footer(panel: WarperPanel, qtbot: QtBot) -> None:
     panel.set_mode("chroma_luma")
-    panel.resize(640, 425)
+    panel.resize(600, 425)
     qtbot.wait(10)
-    assert panel.footer.height() == 70
+    assert panel._axis_group.geometry().bottom() < panel._footer_row.y()
+    assert panel._footer_row.height() == PARAMETER_BAR_HEIGHT
     panel.toggle_expanded()
     qtbot.wait(10)
     assert panel.surface.parent() is panel._dialog
-    assert panel.footer.height() == 47
+    assert panel._axis_group.parent() is panel._footer_row
+    assert panel._footer_row.height() == PARAMETER_BAR_HEIGHT
     panel.toggle_expanded()
     assert panel.surface.parent() is panel
     assert panel._dialog is None
@@ -547,9 +551,16 @@ def test_axis_angle_recolors_field_without_changing_grid_or_publishing_legacy(pa
 
 
 def test_chroma_luma_footer_stays_inline_at_user_screenshot_width(panel: WarperPanel, qtbot: QtBot) -> None:
-    panel.resize(825, 380)
     panel.set_mode("chroma_luma")
+    panel.resize(panel.tools_scroll.width() + 450, 380)
     qtbot.wait(10)
-    assert panel.footer.height() == 47
+    wheel = GradingPanel()
+    qtbot.addWidget(wheel)
+    wheel.resize(825, panel.height())
+    wheel.show()
+    qtbot.wait(10)
+    assert panel._footer_row.height() == wheel.bottom_bar_stack.height()
+    assert panel._footer_row.mapTo(panel, QPoint()).y() == wheel.bottom_bar_stack.y()
+    assert panel.footer.mapTo(panel, QPoint()).y() == wheel._h_line_bottom.y()
     assert panel._axis_group.parent() is panel._footer_row
     assert panel._axis_group.geometry().right() < panel.space_combo.geometry().left()

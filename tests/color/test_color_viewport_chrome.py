@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QDockWidget, QGraphicsScene, QGraphicsView, QMainWin
 
 from src.features.color.ui.canvas import Canvas, VideoControlBar, ViewportMenuBar
 from src.features.color.ui.color_viewport_chrome import ColorViewportChrome
-from src.features.color.ui.panel_chrome import HEADER_CONTROL_HEIGHT, HEADER_ICON_SIZE
+from src.features.color.ui.panel_chrome import HEADER_CONTROL_HEIGHT
 
 
 class _CanvasHost(QGraphicsView):
@@ -274,22 +274,27 @@ def test_enhanced_viewer_follows_canvas_host_while_dock_floats(chrome, qapp) -> 
 def test_header_uses_right_chevron_and_transparent_transport_groups(chrome) -> None:
     assert chrome.zoom_button.width() == 62
     assert chrome.zoom_button.icon().isNull()
-    for button in (chrome.toolbar.mask_btn, chrome.toolbar.split_btn,
-                   chrome.toolbar.guides_menu_btn, chrome.options_button):
+    menus = (chrome.toolbar.guides_menu_btn, chrome.proxy_button, chrome.resolution_button)
+    tools = (chrome.toolbar.mask_btn, chrome.toolbar.split_btn, chrome.split_screen_button,
+             chrome.bypass_button, chrome.enhanced_button, chrome.options_button)
+    for button in (*tools, *menus):
         assert button.size() == QSize(32, HEADER_CONTROL_HEIGHT)
-        assert button.iconSize() == QSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE)
+        assert button.iconSize() == QSize(30 if button in menus else 20, 16)
+        assert not button.icon().pixmap(button.iconSize()).isNull()
     for group in (chrome.left_tools, chrome.transport_center, chrome.right_timecode):
         assert "background: transparent" in group.styleSheet()
 
 
 def test_color_display_toggles_keep_fine_vector_artwork(chrome) -> None:
     toolbar = chrome.toolbar
-    size = QSize(HEADER_ICON_SIZE, HEADER_ICON_SIZE)
+    size = toolbar.mask_btn.iconSize()
 
     def glyph_lightness(button: QToolButton) -> int:
         image = button.grab().toImage()
-        return max(image.pixelColor(x, y).lightness()
-                   for y in range(image.height()) for x in range(image.width()))
+        pixels = (image.pixelColor(x, y)
+                  for y in range(image.height()) for x in range(image.width()))
+        # Nearly transparent antialiased edges can round to white in straight RGB.
+        return max(pixel.lightness() for pixel in pixels if pixel.alpha() >= 128)
 
     for button in (toolbar.mask_btn, toolbar.split_btn):
         icon = button.icon()
@@ -302,8 +307,6 @@ def test_color_display_toggles_keep_fine_vector_artwork(chrome) -> None:
         assert glyph_lightness(button) > idle_lightness
         button.setChecked(False)
         assert button.icon().cacheKey() == icon.cacheKey()
-    assert toolbar.guides_menu_btn.iconSize() == size
-    assert chrome.proxy_button.iconSize() == size
 
 
 def test_color_native_and_qt_backdrops_use_the_same_191919_surround(qapp) -> None:

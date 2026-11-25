@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Callable
 
-from PyQt6.QtCore import QEvent, QObject, QPointF, QRectF, QSignalBlocker, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QResizeEvent
+from PyQt6.QtCore import QEvent, QObject, QRectF, QSignalBlocker, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QFont, QIcon, QResizeEvent
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLayout, QMenu, QSizePolicy, QSlider,
     QToolButton, QVBoxLayout, QWidget,
@@ -21,7 +21,8 @@ from src.shared.ui.style_sheet import UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
 from src.shared.i18n.i18n import I18N
 from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
-from src.shared.ui.viewport_icons import viewer_icon
+from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
+from src.shared.ui.widgets.viewport_toolbar_base import ViewerZoomMenuButton
 from src.shared.assets.icon_manager import (
     IconColors, icon_jump_start, icon_step_back, icon_play, icon_pause,
     icon_step_forward, icon_jump_end, icon_loop,
@@ -62,10 +63,10 @@ QSlider::handle:horizontal { width: 8px; margin: -6px 0; background: transparent
 
 
 def _tool(icon: str, tooltip: str, parent: QWidget, width: int = 32) -> QToolButton:
-    """Create a flat monitor control on a consistent 20px vector grid."""
+    """Create a flat monitor control using the shared viewer artwork."""
     button = QToolButton(parent)
     button.setIcon(viewer_icon(icon))
-    button.setIconSize(QSize(20, 20))
+    button.setIconSize(viewer_icon_size(icon))
     button.setFixedSize(width, 28)
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setToolTip(tooltip)
@@ -102,35 +103,11 @@ class _DragSourceButton(QToolButton):
         super().mousePressEvent(event)
 
 
-class _DropdownTool(QToolButton):
-    """A platform-independent icon/text menu with a fine, inset chevron."""
-
-    def __init__(self, parent: QWidget, icon: str | None = None) -> None:
-        super().__init__(parent)
-        self.setFixedSize(48, 28)
-        self.setIconSize(QSize(20, 20))
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setStyleSheet(_BUTTON_STYLE + "QToolButton { padding-right: 12px; }")
-        if icon is not None:
-            self.setIcon(viewer_icon(icon))
-        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-
-    def paintEvent(self, event: QEvent) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(QColor("#96969c" if self.isEnabled() else "#555559"), 1.0))
-        x, y = self.width() - 10.0, self.height() / 2.0
-        painter.drawLine(QPointF(x - 3.0, y - 1.0), QPointF(x, y + 2.0))
-        painter.drawLine(QPointF(x, y + 2.0), QPointF(x + 3.0, y - 1.0))
-        painter.end()
-
-
 def _adopt(layout: QHBoxLayout, widget: QToolButton, icon: str, width: int = 32) -> None:
     """Keep a live button and its connections, replacing only its artwork."""
     widget.setText("")
     widget.setIcon(viewer_icon(icon))
-    widget.setIconSize(QSize(20, 20))
+    widget.setIconSize(viewer_icon_size(icon))
     widget.setFixedSize(width, 28)
     widget.setStyleSheet(_BUTTON_STYLE)
     widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -269,8 +246,10 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
             self.left.addWidget(button)
         self.source_tape_button.setEnabled(False)
         self.source_tape_button.setToolTip(I18N.tr("edit.viewport.source_tape", "Source Tape") + " — " + I18N.tr("edit.viewport.backend_pending", "Not available in this version"))
-        self.zoom_button = _DropdownTool(self.left_group)
-        self.zoom_button.setFixedWidth(62)
+        self.zoom_button = ViewerZoomMenuButton(self.left_group)
+        self.zoom_button.setFixedSize(62, 28)
+        self.zoom_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.zoom_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.zoom_button.setText(I18N.tr("viewport.fit", "Fit"))
         self.zoom_button.setToolTip(I18N.tr("edit.viewport.zoom", "Viewer Zoom"))
         self.zoom_button.setAccessibleName(self.zoom_button.toolTip())
@@ -555,22 +534,13 @@ class EditViewport(QWidget):
         options.aboutToShow.connect(self.capabilities_context_requested.emit)
         header.options_button.setMenu(options)
         self._program_options = options
-        guides_group = QWidget(header)
-        guides_group.setObjectName("monitorGuidesGroup")
-        guides_group.setStyleSheet("QWidget#monitorGuidesGroup { background: transparent; border: none; }")
-        guides_row = QHBoxLayout(guides_group)
-        guides_row.setContentsMargins(0, 0, 0, 0)
-        guides_row.setSpacing(0)
-        _adopt(guides_row, toolbar.guides_menu_btn, "guides", 28)
-        guides_arrow = _tool("chevron_down", I18N.tr("edit.viewport.guides", "Viewer Guides"), guides_group, 14)
-        guides_arrow.clicked.connect(toolbar.guides_menu_btn.click)
-        guides_row.addWidget(guides_arrow)
-        guides_group.setFixedWidth(42)
-        header.add_display_control(guides_group)
-        proxy = _DropdownTool(header, "proxy")
-        proxy.setToolTip(I18N.tr("edit.viewport.proxy", "Proxy Handling"))
-        quality = _DropdownTool(header, "resolution")
-        quality.setToolTip(I18N.tr("edit.viewport.quality", "Timeline Proxy Resolution"))
+        guides = toolbar.guides_menu_btn
+        guides.setFixedSize(42, 28)
+        guides.setStyleSheet(_BUTTON_STYLE)
+        header.add_display_control(guides)
+        proxy = _tool("proxy", I18N.tr("edit.viewport.proxy", "Proxy Handling"), header, 48)
+        quality = _tool("resolution", I18N.tr("edit.viewport.quality", "Timeline Proxy Resolution"), header, 48)
+        quality.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         quality.setMenu(toolbar.quality_menu)
         bypass = _tool("bypass", I18N.tr("edit.viewport.bypass", "Bypass Color Grades and Fusion Effects"), header, 36)
         for control in (proxy, bypass):

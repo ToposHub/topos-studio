@@ -1,7 +1,7 @@
 """Resolve-shaped Color Warper tool palettes using Topos' shared controls."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QLinearGradient, QMouseEvent, QPainter, QPaintEvent, QPen
 from PyQt6.QtWidgets import (
     QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy,
@@ -13,15 +13,44 @@ from src.features.color.ui.panel_chrome import (
     style_reset_button,
 )
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import C, COMPOSITE_KEYFRAMES_ICON_BTN_STYLE
+from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.drag_value import DragValue
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
-from src.shared.ui.widgets.warper_icons import warper_icon
+from src.shared.ui.widgets.warper_icons import WARPER_TOOL_HOVER, WARPER_TOOL_IDLE, warper_icon
 
 
 def tr(key: str, fallback: str) -> str:
     return I18N.tr(f"warper.{key}", fallback)
+
+
+_TOOL_BUTTON_STYLE = f"""
+    QToolButton {{
+        background: {C.COLOR_PANEL_INSET}; border: 1px solid {C.PANEL_DIVIDER};
+        color: {WARPER_TOOL_IDLE}; border-radius: 3px; padding: 0; margin: 0;
+    }}
+    QToolButton:hover {{ background: #35363c; color: {WARPER_TOOL_HOVER}; }}
+    QToolButton:checked, QToolButton:pressed {{
+        background: #45474f; color: white; border-color: #666a74;
+    }}
+    QToolButton:disabled {{ background: #222226; color: #646870; border-color: #19191d; }}
+    QToolButton:focus {{ border-color: #9298a3; }}
+    QToolButton[segment="first"] {{ border-top-right-radius: 0; border-bottom-right-radius: 0; }}
+    QToolButton[segment="middle"], QToolButton[segment="last"] {{
+        border-top-left-radius: 0; border-bottom-left-radius: 0; border-left-width: 0;
+    }}
+    QToolButton[segment="middle"] {{ border-radius: 0; }}
+"""
+
+
+def _join_buttons(*buttons: QToolButton) -> None:
+    """Give adjacent tools a common outline and a single seam per pair."""
+    if len(buttons) < 2:
+        return
+    buttons[0].setProperty("segment", "first")
+    for button in buttons[1:-1]:
+        button.setProperty("segment", "middle")
+    buttons[-1].setProperty("segment", "last")
 
 
 def tool_button(name: str, label: str, checkable: bool = False) -> QToolButton:
@@ -32,9 +61,30 @@ def tool_button(name: str, label: str, checkable: bool = False) -> QToolButton:
     button.setToolTip(label)
     button.setCheckable(checkable)
     button.setFixedHeight(24)
+    button.setIconSize(QSize(18, 18))
+    button.setCursor(Qt.CursorShape.PointingHandCursor)
     button.setMinimumWidth(24)
     button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-    button.setStyleSheet(COMPOSITE_KEYFRAMES_ICON_BTN_STYLE)
+    button.setStyleSheet(_TOOL_BUTTON_STYLE)
+    return button
+
+
+_SIDEBAR_BUTTON_HEIGHT = 21
+
+
+def _sidebar_button(name: str, label: str, checkable: bool = False) -> QToolButton:
+    button = tool_button(name, label, checkable)
+    button.setIconSize(QSize(16, 16))
+    button.setFixedHeight(_SIDEBAR_BUTTON_HEIGHT)
+    return button
+
+
+def reset_button(label: str, *, global_reset: bool = False) -> QToolButton:
+    button = QToolButton()
+    button.setObjectName("warper_reset")
+    button.setAccessibleName(label)
+    button.setToolTip(label)
+    style_reset_button(button, global_reset=global_reset)
     return button
 
 
@@ -125,7 +175,7 @@ class MeshTools(QWidget):
         self.component_buttons: dict[str, list[QToolButton]] = {}
         self.value_labels: dict[str, QLabel] = {}
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 7, 10, 10); layout.setSpacing(6)
+        layout.setContentsMargins(6, 5, 6, 5); layout.setSpacing(3)
         self.grid_buttons: list[QToolButton] = []
         if rectangular:
             grids = QHBoxLayout(); grids.setSpacing(0)
@@ -133,12 +183,13 @@ class MeshTools(QWidget):
             for i in range(2):
                 button = QToolButton(); button.setText(tr(f"grid_{i + 1}", f"Grid {i + 1}"))
                 button.setCheckable(True); button.setChecked(i == 0)
-                button.setStyleSheet(COMPOSITE_KEYFRAMES_ICON_BTN_STYLE)
+                button.setStyleSheet(_TOOL_BUTTON_STYLE)
                 button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-                button.setFixedHeight(24); group.addButton(button)
+                button.setFixedHeight(_SIDEBAR_BUTTON_HEIGHT); group.addButton(button)
                 button.clicked.connect(lambda checked=False, index=i: self.grid_selected.emit(index))
                 grids.addWidget(button); self.grid_buttons.append(button)
-            layout.addLayout(grids); layout.addSpacing(4)
+            _join_buttons(*self.grid_buttons)
+            layout.addLayout(grids); layout.addSpacing(2)
         title = QLabel(tr("tools", "Tools"))
         title.setStyleSheet(SECTION_TITLE_STYLE)
         layout.addWidget(title)
@@ -146,12 +197,16 @@ class MeshTools(QWidget):
         group = QButtonGroup(self); group.setExclusive(True)
         for name, fallback in (("select", "Select / Deselect"), ("draw", "Draw Selection"),
                                ("pin", "Pin / De-pin"), ("pull", "Pull Points"), ("push", "Push Points")):
-            button = tool_button(name, tr(name, fallback), True)
+            button = _sidebar_button(name, tr(name, fallback), True)
             group.addButton(button); button.setChecked(name == "select")
             button.clicked.connect(lambda checked=False, name=name: self.tool_selected.emit(name))
             row.addWidget(button); self.tool_buttons[name] = button
-        layout.addLayout(row); layout.addSpacing(3); layout.addWidget(separator()); layout.addSpacing(3)
-        actions = QGridLayout(); actions.setSpacing(4)
+        _join_buttons(*self.tool_buttons.values())
+        layout.addLayout(row)
+        layout.addWidget(separator())
+        actions = QGridLayout()
+        actions.setHorizontalSpacing(4)
+        actions.setVerticalSpacing(2)
         labels = (("falloff_add", "Increase Fall Off / Smooth Selection"),
                   ("falloff_sub", "Decrease Fall Off / Smooth Selection"),
                   ("invert", "Invert Selection"), ("convert_pin", "Convert Selected to Pin"),
@@ -159,17 +214,17 @@ class MeshTools(QWidget):
                   ("row" if rectangular else "ring", "Select / Pin Row" if rectangular else "Select / Pin Ring"),
                   ("all", "Select / Pin All or Deselect / De-pin All"), ("reset_selection", "Reset Selection / Pins"))
         for i, (name, label) in enumerate(labels):
-            button = tool_button("reset" if name == "reset_selection" else name, tr(name, label))
-            if name == "reset_selection":
-                style_reset_button(button)
+            tooltip = tr(name, label)
+            button = reset_button(tooltip) if name == "reset_selection" else _sidebar_button(name, tooltip)
             button.clicked.connect(lambda checked=False, name=name: self.action_requested.emit(name))
             actions.addWidget(button, i // 4, i % 4); self.action_buttons[name] = button
-        layout.addLayout(actions); layout.addSpacing(6)
+        actions.setAlignment(self.action_buttons["reset_selection"], Qt.AlignmentFlag.AlignCenter)
+        layout.addLayout(actions); layout.addSpacing(3)
         range_label = QLabel(tr("range", "Range"))
         range_label.setStyleSheet(SECTION_TITLE_STYLE)
         layout.addWidget(range_label)
         self.range_bar = WarperRange(rectangular)
-        layout.addWidget(self.range_bar); layout.addSpacing(6)
+        layout.addWidget(self.range_bar); layout.addSpacing(3)
         lock_row = QHBoxLayout(); lock_row.setSpacing(6)
         self.auto_lock = ToggleSwitch()
         self.auto_lock.setAccessibleName(tr("auto_lock", "Auto Lock"))
@@ -188,39 +243,39 @@ class MeshTools(QWidget):
         if rectangular:
             axes = QButtonGroup(self); axes.setExclusive(True)
             for name in ("columns", "rows", "single"):
-                button = tool_button(name, tr(f"auto_pin_{name}", f"Auto Pin surrounding {name}"), True)
+                button = _sidebar_button(name, tr(f"auto_pin_{name}", f"Auto Pin surrounding {name}"), True)
                 button.setEnabled(False); axes.addButton(button); button.setChecked(name == "columns")
                 button.clicked.connect(self.lock_changed.emit)
                 locks.addWidget(button); self.lock_axes[name] = button
         else:
             locks.addStretch()
-        layout.addLayout(locks); layout.addSpacing(7)
-        values = QHBoxLayout(); values.setSpacing(4)
+        layout.addLayout(locks); layout.addSpacing(3)
+        values = QHBoxLayout(); values.setSpacing(2)
         components = (("chroma", "Chroma"), ("luma", "Luma")) if rectangular else (("hue", "Hue"), ("sat", "Sat"), ("luma", "Luma"))
         for name, label in components:
-            col = QVBoxLayout(); col.setSpacing(3)
-            number_row = QHBoxLayout(); number_row.setSpacing(2)
+            col = QVBoxLayout(); col.setSpacing(2)
+            number_row = QHBoxLayout(); number_row.setSpacing(1)
             value_label = QLabel(tr(name, label))
             value_label.setStyleSheet(PARAMETER_LABEL_STYLE)
             value_label.setEnabled(False)
             self.value_labels[name] = value_label
             number_row.addWidget(value_label)
-            value = DragValue("", -1 if name == "chroma" else 0, 1, 0, 3, compact=True, stretchable=True)
-            value.setFixedSize(50, PARAMETER_ROW_HEIGHT)
+            value = DragValue("", -1 if name == "chroma" else 0, 1, 0, 3, compact=True)
+            value.setFixedValueWidth(42)
+            value.setFixedSize(42, PARAMETER_ROW_HEIGHT)
             value.setAccessibleName(tr(name, label)); value.setMixedValue(True); value.setEnabled(False)
             value.valueChanged.connect(lambda v, key=name: self.component_edited.emit(key, v, False))
             value.interaction_started.connect(lambda key=name: self.interaction_started.emit(key))
             value.interaction_ended.connect(lambda key=name: self.interaction_ended.emit(key))
             number_row.addWidget(value); col.addLayout(number_row); self.values[name] = value
-            buttons = QHBoxLayout(); buttons.setSpacing(0)
+            buttons = QHBoxLayout(); buttons.setSpacing(3)
             self.component_buttons[name] = []
             if rectangular or name != "luma":
-                smooth = tool_button("smooth", tr(f"smooth_{name}", f"Smooth {label}"))
+                smooth = _sidebar_button("smooth", tr(f"smooth_{name}", f"Smooth {label}"))
                 smooth.setEnabled(False)
                 smooth.clicked.connect(lambda checked=False, key=name: self.component_edited.emit(key, None, True))
                 buttons.addWidget(smooth); self.component_buttons[name].append(smooth)
-            reset = tool_button("reset", tr(f"reset_{name}", f"Reset {label}"))
-            style_reset_button(reset)
+            reset = reset_button(tr(f"reset_{name}", f"Reset {label}"))
             reset.setEnabled(False)
             reset.clicked.connect(lambda checked=False, key=name: self.component_edited.emit(key, None, False))
             buttons.addWidget(reset); self.component_buttons[name].append(reset)

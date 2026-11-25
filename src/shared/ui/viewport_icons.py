@@ -1,10 +1,12 @@
 """Small, consistent vector controls shared by video monitor chrome.
 
-Every glyph is drawn on a 20-unit grid by a QIconEngine, so native scaling and
-high-DPI screens retain the original outlines.  No font or bitmap is involved.
+Header controls share SVG artwork and state colors across workspaces. Other
+monitor controls are drawn on a 20-unit grid by a QIconEngine.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from PyQt6.QtCore import QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import (
@@ -12,6 +14,14 @@ from PyQt6.QtGui import (
     QPolygonF,
 )
 
+from src.shared.ui.tinted_icon import TintedIconEngine
+
+
+_VIEWER_ASSETS = Path(__file__).resolve().parents[1] / "assets/icons/viewer"
+_MENU_GLYPHS = {"guides", "proxy", "resolution"}
+_SVG_GLYPHS = _MENU_GLYPHS | {
+    "bypass", "enhanced_viewer", "highlight", "image_wipe", "more", "split_screen",
+}
 
 VIEWER_ICON_NAMES = frozenset({
     "source_clip", "source_tape", "timeline", "single_view", "dual_view",
@@ -102,20 +112,15 @@ class _ViewerIconEngine(QIconEngine):
         pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        self._draw(painter, color, mode)
+        self._draw(painter, color)
         painter.restore()
 
-    def _draw(self, painter: QPainter, color: QColor, mode: QIcon.Mode) -> None:
+    def _draw(self, painter: QPainter, color: QColor) -> None:
         name = self._name
         if name in {"single_view", "dual_view"}:
             painter.drawRect(QRectF(2.5, 4.5, 15.0, 11.0))
             if name == "dual_view":
                 _line(painter, (10.0, 4.5), (10.0, 15.5))
-        elif name == "more":
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(color)
-            for x in (4.0, 10.0, 16.0):
-                painter.drawEllipse(QPointF(x, 10.0), 1.25, 1.25)
         elif name in {"chevron_down", "previous_marker", "next_marker"}:
             points = {
                 "chevron_down": ((6.5, 8.0), (10.0, 11.5), (13.5, 8.0)),
@@ -169,16 +174,12 @@ class _ViewerIconEngine(QIconEngine):
                 _line(painter, (x, 5.0), (x, 15.0))
             _line(painter, (2.5, 8.0), (17.5, 8.0))
             _line(painter, (2.5, 12.0), (17.5, 12.0))
-        elif name in {"transform", "guides"}:
+        elif name == "transform":
             for x, y, dx, dy in ((3.0, 4.0, 4.0, 4.0), (17.0, 4.0, -4.0, 4.0), (3.0, 16.0, 4.0, -4.0), (17.0, 16.0, -4.0, -4.0)):
                 _line(painter, (x, y + dy), (x, y), (x + dx, y))
-            if name == "transform":
-                painter.drawRect(QRectF(5.3, 6.3, 9.4, 7.4))
-                for x, y in ((3.0, 4.0), (17.0, 4.0), (3.0, 16.0), (17.0, 16.0)):
-                    painter.fillRect(QRectF(x - 1.3, y - 1.3, 2.6, 2.6), color)
-            else:
-                _line(painter, (10.0, 6.0), (10.0, 14.0))
-                _line(painter, (6.0, 10.0), (14.0, 10.0))
+            painter.drawRect(QRectF(5.3, 6.3, 9.4, 7.4))
+            for x, y in ((3.0, 4.0), (17.0, 4.0), (3.0, 16.0), (17.0, 16.0)):
+                painter.fillRect(QRectF(x - 1.3, y - 1.3, 2.6, 2.6), color)
         elif name == "match_frame":
             _line(painter, (6.5, 4.2), (3.5, 4.2), (3.5, 15.8), (6.5, 15.8))
             _line(painter, (13.5, 4.2), (16.5, 4.2), (16.5, 15.8), (13.5, 15.8))
@@ -196,53 +197,10 @@ class _ViewerIconEngine(QIconEngine):
             _film(painter, QRectF(2.0, 3.5, 10.5, 8.0))
             _line(painter, (7.5, 12.7), (7.5, 17.0), (10.0, 17.0), (12.4, 15.0), (12.4, 12.7))
             _line(painter, (15.0, 7.0), (17.0, 9.0), (19.0, 7.0))
-        elif name in {"proxy", "resolution"}:
-            if name == "resolution":
-                painter.drawRect(QRectF(2.0, 3.5, 13.5, 10.0))
-                painter.drawRect(QRectF(7.0, 9.5, 11.0, 7.0))
-                x, y, scale = 8.5, 11.0, 0.72
-            else:
-                painter.drawRect(QRectF(2.5, 5.0, 15.0, 10.0))
-                x, y, scale = 5.5, 7.4, 1.0
-            painter.save()
-            painter.translate(x, y)
-            painter.scale(scale, scale)
-            # Deliberately drawn letterforms: no platform font dependency.
-            _line(painter, (0.0, 0.0), (0.0, 5.0))
-            _line(painter, (3.0, 0.0), (3.0, 5.0))
-            _line(painter, (0.0, 2.5), (3.0, 2.5))
-            painter.drawRect(QRectF(5.0, 0.0, 3.3, 4.9))
-            _line(painter, (7.1, 3.3), (9.0, 5.4))
-            painter.restore()
-        elif name == "bypass":
-            colors = ("#d2b342", "#6fa586", "#b96b82") if mode != QIcon.Mode.Disabled else ("#555559",) * 3
-            for start, ring_color in zip((30, 150, 270), colors):
-                ring_pen = QPen(QColor(ring_color), 1.35)
-                painter.setPen(ring_pen)
-                painter.drawArc(QRectF(3.1, 3.1, 13.8, 13.8), start * 16, 105 * 16)
-            painter.setPen(QPen(color, 1.1))
-            _line(painter, (3.0, 17.0), (17.0, 3.0))
         elif name == "marker":
             painter.setBrush(color)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawPolygon(QPolygonF([QPointF(10.0, 4.0), QPointF(15.0, 10.0), QPointF(10.0, 16.0), QPointF(5.0, 10.0)]))
-        elif name == "image_wipe":
-            painter.drawRect(QRectF(2.5, 4.5, 15.0, 11.0))
-            painter.fillRect(QRectF(3.0, 5.0, 6.5, 10.0), color)
-            _line(painter, (10.0, 3.0), (10.0, 17.0))
-        elif name == "split_screen":
-            painter.drawRect(QRectF(2.5, 4.5, 15.0, 11.0))
-            for x in (7.5, 12.5):
-                _line(painter, (x, 4.5), (x, 15.5))
-            _line(painter, (2.5, 10.0), (17.5, 10.0))
-        elif name == "highlight":
-            painter.drawEllipse(QRectF(3.0, 3.0, 14.0, 14.0))
-            painter.save()
-            painter.setClipRect(QRectF(10.0, 2.0, 9.0, 16.0))
-            painter.setBrush(color)
-            painter.drawEllipse(QRectF(3.0, 3.0, 14.0, 14.0))
-            painter.restore()
-            _line(painter, (2.0, 18.0), (18.0, 2.0))
         elif name == "power_window":
             painter.drawEllipse(QRectF(3.5, 4.5, 13.0, 11.0))
             for x, y in ((10.0, 3.5), (10.0, 16.5), (2.5, 10.0), (17.5, 10.0)):
@@ -257,17 +215,27 @@ class _ViewerIconEngine(QIconEngine):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawArc(QRectF(8.0, 5.0, 8.0, 10.0), -60 * 16, 120 * 16)
             painter.drawArc(QRectF(6.0, 2.5, 13.0, 15.0), -55 * 16, 110 * 16)
-        elif name == "enhanced_viewer":
-            for x, y, dx, dy in ((3.0, 3.0, 5.0, 5.0), (17.0, 3.0, -5.0, 5.0),
-                                  (3.0, 17.0, 5.0, -5.0), (17.0, 17.0, -5.0, -5.0)):
-                _line(painter, (x, y + dy), (x, y), (x + dx, y))
         elif name == "audio_only":
             for x, half in ((3.0, 1.2), (5.8, 3.5), (8.6, 6.0), (11.4, 4.0), (14.2, 2.2), (17.0, 1.0)):
                 _line(painter, (x, 10.0 - half), (x, 10.0 + half))
+
+
+def viewer_icon_size(name: str) -> QSize:
+    """Return the designed logical size, including the arrow on menu glyphs."""
+    if name in _MENU_GLYPHS:
+        return QSize(30, 16)
+    if name in _SVG_GLYPHS:
+        return QSize(20, 16)
+    return QSize(20, 20)
 
 
 def viewer_icon(name: str) -> QIcon:
     """Return a vector icon; reject unknown names to catch UI wiring errors."""
     if name not in VIEWER_ICON_NAMES:
         raise ValueError(f"Unknown viewer icon: {name}")
+    if name in _SVG_GLYPHS:
+        return QIcon(TintedIconEngine(
+            QIcon(str(_VIEWER_ASSETS / f"{name}.svg")), idle="#9ba1aa",
+            hover="#b8bec8", active="#f3f4f6", disabled="#4e5158",
+        ))
     return QIcon(_ViewerIconEngine(name))

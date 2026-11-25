@@ -2,8 +2,8 @@
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt
-from PyQt6.QtGui import QColor, QIcon, QIconEngine, QPainter, QPixmap
+from PyQt6.QtCore import QEvent, QObject, QSize, Qt
+from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import (
     QAbstractButton, QHBoxLayout, QLabel, QMainWindow, QToolButton, QVBoxLayout, QWidget,
     QWIDGETSIZE_MAX,
@@ -13,10 +13,12 @@ from src.shared.assets.icon_manager import icon_reset
 from src.shared.ui.dock_tab_style import DOCK_TAB_BAR_HEIGHT
 from src.shared.ui.panel_divider import PanelDockWidget
 from src.shared.ui.style_sheet import C
+from src.shared.ui.tinted_icon import TintedIconEngine
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 
 HEADER_HEIGHT = 30
 PARAMETER_BAR_HEIGHT = 34
+PARAMETER_BAR_BOTTOM_MARGIN = 2
 PARAMETER_ROW_HEIGHT = 20
 PARAMETER_ROW_SPACING = 3
 SECTION_TITLE_STYLE = f"color: {C.TEXT_PRIMARY}; font-size: 12px; font-weight: 600; background: transparent;"
@@ -171,44 +173,15 @@ def create_panel_divider(orientation: Qt.Orientation) -> QWidget:
     return divider
 
 
-class _HeaderIconEngine(QIconEngine):
-    def __init__(self, icon: QIcon, highlighted: bool) -> None:
-        super().__init__()
-        self._icon = QIcon(icon)
-        self._highlighted = highlighted
-
-    def clone(self) -> QIconEngine:
-        return _HeaderIconEngine(self._icon, self._highlighted)
-
-    def paint(self, painter: QPainter, rect: QRect, mode: QIcon.Mode, state: QIcon.State) -> None:
-        pixmap = self.scaledPixmap(rect.size(), mode, state, painter.device().devicePixelRatioF())
-        painter.drawPixmap(rect, pixmap)
-
-    def pixmap(self, size: QSize, mode: QIcon.Mode, state: QIcon.State) -> QPixmap:
-        return self.scaledPixmap(size, mode, state, 1.0)
-
-    def scaledPixmap(self, size: QSize, mode: QIcon.Mode, state: QIcon.State, scale: float) -> QPixmap:
-        pixmap = self._icon.pixmap(size, scale, QIcon.Mode.Normal, state)
-        if pixmap.isNull():
-            return pixmap
-        if mode == QIcon.Mode.Disabled:
-            color = HEADER_ICON_DISABLED
-        elif self._highlighted or state == QIcon.State.On or mode == QIcon.Mode.Selected:
-            color = HEADER_ICON_ACTIVE
-        elif mode == QIcon.Mode.Active:
-            color = HEADER_ICON_HOVER
-        else:
-            color = HEADER_ICON_IDLE
-        painter = QPainter(pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-        painter.fillRect(QRectF(QPointF(), pixmap.deviceIndependentSize()), QColor(color))
-        painter.end()
-        return pixmap
-
-
 def header_icon(icon: QIcon, *, highlighted: bool = False) -> QIcon:
     """Keep the glyph shape and apply the title-row palette in every Qt state."""
-    return QIcon() if icon.isNull() else QIcon(_HeaderIconEngine(icon, highlighted))
+    if icon.isNull():
+        return QIcon()
+    return QIcon(TintedIconEngine(
+        icon, idle=HEADER_ICON_ACTIVE if highlighted else HEADER_ICON_IDLE,
+        hover=HEADER_ICON_ACTIVE if highlighted else HEADER_ICON_HOVER,
+        active=HEADER_ICON_ACTIVE, disabled=HEADER_ICON_DISABLED,
+    ))
 
 
 def header_button_color(button: QAbstractButton) -> QColor:

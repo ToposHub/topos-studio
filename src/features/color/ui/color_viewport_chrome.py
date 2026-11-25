@@ -9,15 +9,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Mapping, Optional
 
 from PyQt6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPaintEvent, QPainter, QPen
+from PyQt6.QtGui import QColor, QPainter, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QToolButton, QWidget
 
 from src.features.color.ui.panel_chrome import (
-    HEADER_HEIGHT, header_button_color, header_icon, style_header_button,
+    HEADER_HEIGHT, style_header_button,
 )
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
-from src.shared.ui.viewport_icons import viewer_icon
+from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
+from src.shared.ui.widgets.viewport_toolbar_base import ViewerZoomMenuButton
 
 if TYPE_CHECKING:
     from PyQt6.QtGui import QAction
@@ -36,42 +37,29 @@ QToolButton::menu-indicator {{ image: none; }}
 """
 
 
+def _style_viewer_header(button: QToolButton, name: str) -> None:
+    style_header_button(button, width=32)
+    button.setIcon(viewer_icon(name))
+    button.setIconSize(viewer_icon_size(name))
+    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+
+
 def _button(
     parent: QWidget, icon: str, label: str, enabled: bool = True, *, header: bool = False,
 ) -> QToolButton:
     button = QToolButton(parent)
-    glyph = viewer_icon(icon)
     if header:
-        style_header_button(button, width=32, icon=glyph)
+        _style_viewer_header(button, icon)
     else:
         button.setFixedSize(32, 28)
         button.setIconSize(QSize(20, 20))
-        button.setIcon(glyph)
+        button.setIcon(viewer_icon(icon))
         button.setStyleSheet(_TRANSPORT_BUTTON_STYLE)
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setAccessibleName(label)
     button.setToolTip(label if enabled else label + " — " + I18N.tr("viewport.unavailable", "此版本暂不支持"))
     button.setEnabled(enabled)
     return button
-
-
-class _ColorZoomButton(QToolButton):
-    """Compact text button with the reference chevron on its right edge."""
-
-    def paintEvent(self, event: QPaintEvent) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(header_button_color(self), 1.1))
-        x, y = self.width() - 10.0, self.height() / 2.0
-        painter.drawLine(QPointF(x - 3.0, y - 1.5), QPointF(x, y + 1.5))
-        painter.drawLine(QPointF(x, y + 1.5), QPointF(x + 3.0, y - 1.5))
-        painter.end()
-
-
-def _show_menu_chevron(button: QToolButton) -> None:
-    button.setText("⌄")
-    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
 
 
 def paint_color_scrubber(slider: QSlider) -> None:
@@ -156,11 +144,12 @@ class ColorViewportChrome(QObject):
         left = QHBoxLayout(self.header_left)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(1)
-        self.zoom_button = _ColorZoomButton(self.header_left)
+        self.zoom_button = ViewerZoomMenuButton(self.header_left)
         self.zoom_button.setText(I18N.tr("viewport.fit_short", "Fit"))
         style_header_button(self.zoom_button, width=62)
         self.zoom_button.setStyleSheet(
-            self.zoom_button.styleSheet() + "QToolButton { padding-right: 16px; padding-left: 4px; }"
+            self.zoom_button.styleSheet() + "QToolButton:enabled { padding-right: 16px; "
+            "padding-left: 4px; color: #d6d6d9; font-weight: 600; }"
         )
         self.zoom_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.zoom_button.setAccessibleName(I18N.tr("viewport.zoom", "Viewer Zoom"))
@@ -174,12 +163,8 @@ class ColorViewportChrome(QObject):
             zoom_menu.addAction(f"{percent}%", lambda checked=False, value=percent: self.set_zoom(value))
         self.zoom_button.setMenu(zoom_menu)
         left.addWidget(self.zoom_button)
-        wipe_icon = header_icon(viewer_icon("image_wipe"))
-        toolbar.split_btn.setIcon(wipe_icon)
-        # The shared toolbar's toggle handler refreshes its own glyph first.
-        toolbar.split_btn.toggled.connect(lambda _checked: toolbar.split_btn.setIcon(wipe_icon))
         toolbar.split_btn.setToolTip(I18N.tr("viewport.image_wipe", "Image Wipe"))
-        self._adopt_header(left, toolbar.split_btn)
+        self._adopt_header(left, toolbar.split_btn, "image_wipe")
         self.split_screen_button = _button(
             self.header_left, "split_screen", I18N.tr("viewport.split_screen", "Split Screen"), header=True,
         )
@@ -187,11 +172,8 @@ class ColorViewportChrome(QObject):
         self.split_screen_button.clicked.connect(
             lambda: self.gallery_compare_requested.emit("split"))
         left.addWidget(self.split_screen_button)
-        highlight_icon = header_icon(viewer_icon("highlight"))
-        toolbar.mask_btn.setIcon(highlight_icon)
-        toolbar.mask_btn.toggled.connect(lambda _checked: toolbar.mask_btn.setIcon(highlight_icon))
         toolbar.mask_btn.setToolTip(I18N.tr("viewport.highlight", "Highlight (Shift+H)"))
-        self._adopt_header(left, toolbar.mask_btn)
+        self._adopt_header(left, toolbar.mask_btn, "highlight")
         layout.addWidget(self.header_left)
         layout.addStretch(1)
 
@@ -207,10 +189,8 @@ class ColorViewportChrome(QObject):
         self.header_timecode.setAccessibleName(I18N.tr("viewport.timecode", "Current Timecode"))
         self.transport.timecode_changed.connect(self.header_timecode.setText)
         right.addWidget(self.header_timecode)
-        toolbar.guides_menu_btn.setIcon(header_icon(viewer_icon("guides")))
         toolbar.guides_menu_btn.setToolTip(I18N.tr("viewport.guides", "Viewer Guides"))
-        self._adopt_header(right, toolbar.guides_menu_btn)
-        _show_menu_chevron(toolbar.guides_menu_btn)
+        self._adopt_header(right, toolbar.guides_menu_btn, "guides")
         self.proxy_button = _button(
             self.header_right, "proxy", I18N.tr("viewport.proxy_handling", "Proxy Handling"),
             False, header=True,
@@ -219,8 +199,6 @@ class ColorViewportChrome(QObject):
             self.header_right, "resolution", I18N.tr("viewport.timeline_resolution", "Timeline Resolution"),
             False, header=True,
         )
-        _show_menu_chevron(self.proxy_button)
-        _show_menu_chevron(self.resolution_button)
         self.bypass_button = _button(
             self.header_right, "bypass", I18N.tr("viewport.bypass_grades", "Bypass Color Grades and Fusion Effects"),
             False, header=True,
@@ -267,8 +245,8 @@ class ColorViewportChrome(QObject):
         self.photo_title.hide()
 
     @staticmethod
-    def _adopt_header(layout: QHBoxLayout, button: QToolButton) -> None:
-        style_header_button(button, width=32)
+    def _adopt_header(layout: QHBoxLayout, button: QToolButton, name: str) -> None:
+        _style_viewer_header(button, name)
         button.setAccessibleName(button.toolTip())
         layout.addWidget(button)
         button.show()
