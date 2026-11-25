@@ -24,7 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from PyQt6.QtGui import QMouseEvent
+    from PyQt6.QtGui import QAction, QMouseEvent
 
 import logging
 import math
@@ -433,6 +433,18 @@ DRAG_FRAME_LABEL_SNAP_TEXT_COLOR = QColor(255, 255, 255, 255)  # White text for 
 DRAG_THRESHOLD_PX: float = 2.0
 
 
+def _visible_track_item_rect(item: QGraphicsItem, bounds: QRectF, track_type: str) -> QRectF:
+    """Clip an item's local rectangle to the same lane used for editing."""
+    scene = item.scene()
+    views = scene.views() if scene is not None else ()
+    engine = getattr(views[0], "_layout_engine", None) if views else None
+    if engine is None:
+        return bounds
+    area = engine.area_layout().visible_track_area(track_type)
+    lane = QRectF(bounds.left(), area.top() - item.scenePos().y(), bounds.width(), area.height())
+    return bounds.intersected(lane)
+
+
 def _is_menu_action_selected(action: Any, candidate: Any) -> bool:
     """Return whether a real QAction was chosen from a context menu.
 
@@ -560,8 +572,8 @@ class ClipItem(QGraphicsObject):
     clip_clicked = pyqtSignal(str, str)  # clip_id, track_id
     clip_double_clicked = pyqtSignal(str, str)
     clip_moved = pyqtSignal(str, str, int, float)  # clip_id, track_id, new_start, scene_y (live preview, supports track change)
-    clip_trim_left = pyqtSignal(str, str, int)  # clip_id, track_id, new_start (live preview)
-    clip_trim_right = pyqtSignal(str, str, int)  # clip_id, track_id, new_duration (live preview)
+    clip_trim_left = pyqtSignal(str, str, int, bool)  # clip_id, track_id, new_start, bypass_snap
+    clip_trim_right = pyqtSignal(str, str, int, bool)  # clip_id, track_id, new_duration, bypass_snap
     # Motion Graphic retiming changes the timeline span while preserving the
     # authored scene range; it is intentionally separate from source trim.
     motion_graphic_duration_changed = pyqtSignal(str, str, int)  # live preview
@@ -588,12 +600,13 @@ class ClipItem(QGraphicsObject):
     clip_slide = pyqtSignal(str, str, int)  # clip_id, track_id, delta_frames (live preview)
     slide_finished = pyqtSignal(str, str, int, str, str)  # clip_id, track_id, delta_frames, prev_clip_id, next_clip_id
     # Ripple trim signals (P4.2)
-    ripple_trim_left = pyqtSignal(str, str, int)  # clip_id, track_id, new_start (live preview)
-    ripple_trim_right = pyqtSignal(str, str, int)  # clip_id, track_id, new_end (live preview)
+    ripple_trim_left = pyqtSignal(str, str, int, bool)  # clip_id, track_id, pointer frame, bypass snap
+    ripple_trim_right = pyqtSignal(str, str, int, bool)
     ripple_trim_left_finished = pyqtSignal(str, str, int, int)  # clip_id, track_id, old_start, new_start
     ripple_trim_right_finished = pyqtSignal(str, str, int, int)  # clip_id, track_id, old_end, new_end
-    # B4: 比例拉伸结束（clip_id, track_id, original_duration, new_duration）
-    rate_stretch_finished = pyqtSignal(str, str, int, int)
+    # Clip and retime strip edges share the same speed and geometry preview.
+    rate_stretch_preview = pyqtSignal(str, str, str, int, bool)
+    rate_stretch_finished = pyqtSignal(str, str, int, int, str)
     # P9.2: Edit → Composite page linkage
     open_in_composite_requested = pyqtSignal(str, str)  # clip_id, track_id
     # Phase 6: Comp Clip context menu signals
@@ -861,6 +874,7 @@ class ClipItem(QGraphicsObject):
         self._retime_point_drag_offset: int | None = None
         self._retime_reverse = False
         self._original_retime_speed: float = float(speed)
+        self._retime_requested_duration = duration_frames
         self._retime_controls_visible = retime_controls_visible
         self._opacity = opacity  # 透明度
         self._effects = effects or ()  # 效果列表（默认空元组）
@@ -1620,8 +1634,12 @@ class ClipItem(QGraphicsObject):
         pixels and the following clip can steal clicks at the preceding
         clip's out-point.
         """
+        rect = QRectF(0, 0, self._width, self._track_height)
+        if not (self._is_dragging or self._drag_pending):
+            rect = _visible_track_item_rect(self, rect, "audio" if self._is_audio_track() else "video")
         path = QPainterPath()
-        path.addRect(QRectF(0, 0, self._width, self._track_height))
+        if not rect.isEmpty():
+            path.addRect(rect)
         return path
 
     # ==================== P5: Thumbnail LOD & Cache ====================
@@ -1979,7 +1997,8 @@ class ClipItem(QGraphicsObject):
             painter.save()
             if not self._is_track_output_enabled:
                 painter.setOpacity(painter.opacity() * 0.4)
-            self._draw_waveform(painter, QRectF(option.exposedRect))
+            style = QStyleOptionGraphicsItem(option)
+            self._draw_waveform(painter, QRectF(style.exposedRect))
             painter.restore()
 
         # Draw asset name with text protection bar (DaVinci-like label bar)
@@ -2156,27 +2175,10 @@ class ClipItem(QGraphicsObject):
         """Clip scrolling track content to its V/A area so split scrolling feels continuous."""
         if self._is_dragging or self._drag_pending:
             return
-        try:
-            view = self.scene().views()[0] if self.scene() and self.scene().views() else None
-            engine = getattr(view, "_layout_engine", None)
-            if engine is None:
-                return
-            area = engine.area_layout()
-            scene_clip = (
-                area.audio_area
-                if self._is_audio_track()
-                else area.video_area
-            )
-            scene_y = self.scenePos().y()
-            local_clip = QRectF(
-                -100000.0,
-                scene_clip.top() - scene_y,
-                200000.0,
-                scene_clip.height(),
-            )
-            painter.setClipRect(local_clip, Qt.ClipOperation.IntersectClip)
-        except (RuntimeError, IndexError, AttributeError):
-            return
+        rect = _visible_track_item_rect(
+            self, self.boundingRect(), "audio" if self._is_audio_track() else "video",
+        )
+        painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)
 
     def _is_audio_track(self) -> bool:
         """Return True when this item currently belongs to an audio track."""
@@ -4662,7 +4664,8 @@ class ClipItem(QGraphicsObject):
         """
         return bool(getattr(self, "_position_lock_enabled", False)) and drag_mode in {
             "move", "slide", "ripple_trim_left", "ripple_trim_right",
-            "rate_stretch_left", "rate_stretch_right", "retime_stretch", "motion_graphic_duration",
+            "rate_stretch_left", "rate_stretch_right", "retime_stretch",
+            "retime_point_move", "motion_graphic_duration",
         }
 
     def hoverMoveEvent(self, event: Any) -> None:
@@ -4706,6 +4709,12 @@ class ClipItem(QGraphicsObject):
             new_edge = new_fade = None
             new_tooltip = self._asset_name
             new_cursor = Qt.CursorShape.CrossCursor
+
+        elif self._retime_point_handle_at(pos) is not None:
+            new_edge = "retime_point_move"
+            new_fade = None
+            new_tooltip = I18N.tr("edit.retime.drag_point", "Drag to move the speed point")
+            new_cursor = Qt.CursorShape.SizeHorCursor
 
         elif self._retime_controls_visible and (QRectF(1, 1, 15, 16).contains(pos)
                                                or pos.y() >= self._track_height - 20.0):
@@ -4909,21 +4918,10 @@ class ClipItem(QGraphicsObject):
                 event.accept()
                 return
 
-            # R08：速度点把手优先于底部分段菜单——把手是独立拖动状态，
-            # 点击不落入分段速度菜单或片段移动。
-            if self._retime_controls_visible:
-                point_handle = self._retime_point_handle_at(pos)
-                if point_handle is not None:
-                    self._drag_mode = "retime_point_move"
-                    self._drag_pending = True
-                    self._is_dragging = False
-                    self._drag_start_pos = event.scenePos()
-                    self._begin_retime_point_drag(point_handle)
-                    event.accept()
-                    return
+            point_handle = self._retime_point_handle_at(pos)
 
             # P1-1：包络节点独立编辑模式——命中优先于片段移动/修剪。
-            if self._handle_envelope_press(event):
+            if point_handle is None and self._handle_envelope_press(event):
                 return
 
             # In Resolve the percentage label is itself the segment editor.
@@ -4932,6 +4930,7 @@ class ClipItem(QGraphicsObject):
             if (
                 self._retime_controls_visible
                 and pos.y() >= self._track_height - 20.0
+                and point_handle is None
             ):
                 self._retime_menu_pending_x = pos.x()
                 event.accept()
@@ -4953,6 +4952,7 @@ class ClipItem(QGraphicsObject):
             self._final_new_start = self._start_frame
             self._final_new_end = self._start_frame + self._duration_frames
             self._original_retime_speed = float(self._speed)
+            self._retime_requested_duration = self._duration_frames
 
             # Shift+right-edge is reserved for Motion Graphic duration
             # retiming.  Check it before the fade handle so a clip that also
@@ -4966,7 +4966,9 @@ class ClipItem(QGraphicsObject):
             # tool-specific edge handling.  This is intentionally larger than
             # the visible tab so audio waveform clips remain easy to use.
             fade_handle = self._fade_handle_at(pos)
-            if self._retime_controls_visible and pos.y() <= 26.0:
+            if point_handle is not None:
+                self._drag_mode = "retime_point_move"
+            elif self._retime_controls_visible and pos.y() <= 26.0:
                 self._drag_mode = "retime_stretch"
                 self._drag_start_frame = self._duration_frames
             elif motion_graphic_retime:
@@ -5055,6 +5057,9 @@ class ClipItem(QGraphicsObject):
                 self.setCursor(Qt.CursorShape.ForbiddenCursor)
                 event.accept()
                 return
+
+            if point_handle is not None:
+                self._begin_retime_point_drag(point_handle)
 
             # INT-02：让 view 的 InteractionSession 感知片段级拖拽/修剪，
             # Esc/换工具/失焦才能取消；此前媒体 item press 从不 begin，
@@ -5923,16 +5928,14 @@ class ClipItem(QGraphicsObject):
         if self._is_dragging:
             delta = event.scenePos() - self._drag_start_pos
             delta_frames = int(delta.x() / self._pixels_per_frame)
-            scene_y = event.scenePos().y()  # Track Y for cross-track drag detection
-
-            if self._drag_mode == "retime_stretch":
-                content_span = self._original_duration * self._original_retime_speed
-                minimum = max(1, math.ceil(content_span / 8.0))
-                maximum = max(minimum, math.floor(content_span / 0.1))
-                self._duration_frames = max(minimum, min(maximum, self._original_duration + delta_frames))
-                self._speed = content_span / self._duration_frames
-                self._update_geometry()
-                self.update()
+            if self._drag_mode in {"retime_stretch", "rate_stretch_left", "rate_stretch_right"}:
+                anchor_end = self._drag_mode == "rate_stretch_left"
+                duration_delta = -delta_frames if anchor_end else delta_frames
+                self.rate_stretch_preview.emit(
+                    self._clip_id, self._track_id, "left" if anchor_end else "right",
+                    self._original_duration + duration_delta,
+                    bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier),
+                )
 
             elif self._drag_mode == "retime_point_move":
                 # R08：把手拖动按像素 x 反解源偏移（本地预览 + 钳制）
@@ -5945,14 +5948,8 @@ class ClipItem(QGraphicsObject):
                     fine=bool(event.modifiers()
                               & Qt.KeyboardModifier.AltModifier))
 
-            elif self._drag_mode == "move":
-                new_start = self._drag_start_frame + delta_frames
-                # Don't update geometry here - let the view handler apply snap
-                # and update the final position (avoids snap flicker)
-                emit_key = (new_start, int(scene_y))
-                if emit_key != self._last_move_emit:
-                    self._last_move_emit = emit_key
-                    self.clip_moved.emit(self._clip_id, self._track_id, new_start, scene_y)
+            elif self.can_scroll_during_drag():
+                self.update_scrollable_drag(event.scenePos(), event.modifiers())
 
             elif self._drag_mode == "fade_curve" and self._fade_curve_drag_end is not None:
                 end = self._fade_curve_drag_end
@@ -5995,55 +5992,6 @@ class ClipItem(QGraphicsObject):
             elif self._drag_mode == "slide":
                 self.clip_slide.emit(self._clip_id, self._track_id, delta_frames)
 
-            elif self._drag_mode == "ripple_trim_left":
-                # Ripple trim left (P4.2): adjust start, emit ripple signal
-                new_start = self._drag_start_frame + delta_frames
-                # Clamp to prevent negative start
-                if new_start >= 0 and new_start < self._start_frame + self._duration_frames:
-                    self._start_frame = new_start
-                    # Duration changes as well for visual preview
-                    self._duration_frames = self._original_duration - (new_start - self._original_start)
-                    self._update_geometry()
-                    # Save final state for mouseRelease
-                    self._final_new_start = new_start
-                    self.ripple_trim_left.emit(self._clip_id, self._track_id, new_start)
-
-            elif self._drag_mode == "ripple_trim_right":
-                # Ripple trim right (P4.2): adjust end, emit ripple signal
-                new_end = self._drag_start_frame + delta_frames
-                # Clamp to prevent zero/negative duration
-                if new_end > self._start_frame:
-                    self._duration_frames = new_end - self._start_frame
-                    self._update_geometry()
-                    # Save final state for mouseRelease
-                    self._final_new_end = new_end
-                    self.ripple_trim_right.emit(self._clip_id, self._track_id, new_end)
-
-            elif self._drag_mode == "trim_left":
-                new_start = self._drag_start_frame + delta_frames
-                new_duration = self._original_duration - delta_frames
-                if new_duration > 0:
-                    # Don't update geometry here - let the view handler apply snap
-                    self.clip_trim_left.emit(self._clip_id, self._track_id, new_start)
-
-            elif self._drag_mode == "trim_right":
-                new_duration = self._drag_start_frame + delta_frames
-                if new_duration > 0:
-                    # Don't update geometry here - let the view handler apply snap
-                    self.clip_trim_right.emit(self._clip_id, self._track_id, new_duration)
-
-            elif self._drag_mode == "rate_stretch_left":
-                # B4: live preview identical to trim (view snaps/repaints);
-                # release converts the resulting duration into a speed change.
-                new_start = self._drag_start_frame + delta_frames
-                if new_start < self._start_frame + self._duration_frames:
-                    self.clip_trim_left.emit(self._clip_id, self._track_id, new_start)
-
-            elif self._drag_mode == "rate_stretch_right":
-                new_end = self._drag_start_frame + delta_frames
-                if new_end > self._start_frame:
-                    self.clip_trim_right.emit(self._clip_id, self._track_id, new_end - self._start_frame)
-
             elif self._drag_mode == "motion_graphic_duration":
                 new_duration = self._drag_start_frame + delta_frames
                 if new_duration > 0:
@@ -6055,6 +6003,32 @@ class ClipItem(QGraphicsObject):
                     )
 
         super().mouseMoveEvent(event)
+
+    def can_scroll_during_drag(self) -> bool:
+        return self._is_dragging and self._drag_mode in {
+            "move", "trim_left", "trim_right", "ripple_trim_left", "ripple_trim_right",
+        }
+
+    def update_scrollable_drag(self, scene_pos: QPointF, modifiers: Qt.KeyboardModifier) -> None:
+        """Project the held pointer after either a mouse move or a viewport scroll."""
+        self._last_pointer_scene_pos = scene_pos
+        target = self._drag_start_frame + int((scene_pos.x() - self._drag_start_pos.x()) / self._pixels_per_frame)
+        bypass_snap = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        if self._drag_mode == "move":
+            emit_key = (target, int(scene_pos.y()))
+            if emit_key != self._last_move_emit:
+                self._last_move_emit = emit_key
+                self.clip_moved.emit(self._clip_id, self._track_id, target, scene_pos.y())
+        elif self._drag_mode == "trim_left":
+            self.clip_trim_left.emit(self._clip_id, self._track_id, target, bypass_snap)
+        elif self._drag_mode == "trim_right":
+            self.clip_trim_right.emit(self._clip_id, self._track_id, target, bypass_snap)
+        elif self._drag_mode == "ripple_trim_left":
+            self._final_new_start = target
+            self.ripple_trim_left.emit(self._clip_id, self._track_id, target, bypass_snap)
+        elif self._drag_mode == "ripple_trim_right":
+            self._final_new_end = target
+            self.ripple_trim_right.emit(self._clip_id, self._track_id, target, bypass_snap)
 
     def mouseReleaseEvent(self, event: Any) -> None:
         """Handle mouse release to finish interaction and emit command signals."""
@@ -6076,13 +6050,10 @@ class ClipItem(QGraphicsObject):
 
             # Restore the transient retime preview before the model command.
             if self._drag_mode == "retime_stretch":
-                new_duration = self._duration_frames
-                self._duration_frames = self._original_duration
-                self._speed = self._original_retime_speed
-                self._update_geometry()
-                if was_dragging and new_duration != self._original_duration:
+                if was_dragging:
                     self.retime_stretch_finished.emit(
-                        self._clip_id, self._track_id, self._original_duration, new_duration)
+                        self._clip_id, self._track_id, self._original_duration,
+                        self._retime_requested_duration)
 
             # R08：速度点把手松手——单命令提交（MoveSpeedPointCommand）
             elif self._drag_mode == "retime_point_move":
@@ -6205,66 +6176,26 @@ class ClipItem(QGraphicsObject):
                         self._duration_frames,
                     )
 
-            elif self._drag_mode == "rate_stretch_left":
-                if self._start_frame != self._original_start:
-                    original_duration = self._original_duration
-                    new_duration = (self._original_start + self._original_duration) - self._start_frame
-                    # 还原几何与源区间——速度命令会从模型重建视觉；拖拽
-                    # 预览改过 _source_start/_source_duration，命令失败
-                    # （异常被 view 吞掉）时不还原会一直错位到下次全量
-                    # reload。slip 分支同款处理。
-                    self._start_frame = self._original_start
-                    self._duration_frames = original_duration
-                    self._source_start = self._original_source_start
-                    self._source_duration = self._original_source_duration
-                    self._update_geometry()
+            elif self._drag_mode in {"rate_stretch_left", "rate_stretch_right"}:
+                if was_dragging:
                     self.rate_stretch_finished.emit(
                         self._clip_id, self._track_id,
-                        original_duration, new_duration,
-                    )
-
-            elif self._drag_mode == "rate_stretch_right":
-                if self._duration_frames != self._original_duration:
-                    new_duration = self._duration_frames
-                    # 还原几何与源区间（同 rate_stretch_left 注释）。
-                    self._start_frame = self._original_start
-                    self._duration_frames = self._original_duration
-                    self._source_start = self._original_source_start
-                    self._source_duration = self._original_source_duration
-                    self._update_geometry()
-                    self.rate_stretch_finished.emit(
-                        self._clip_id, self._track_id,
-                        self._original_duration, new_duration,
+                        self._original_duration, self._retime_requested_duration,
+                        "left" if self._drag_mode == "rate_stretch_left" else "right",
                     )
 
             elif self._drag_mode == "ripple_trim_left":
-                # Ripple trim left (P4.2): emit ripple trim finished signal
-                if self._final_new_start != self._original_start:
-                    # Restore original state before command execution
-                    self._start_frame = self._original_start
-                    self._duration_frames = self._original_duration
-                    self._update_geometry()
-                    # Emit signal with saved final position
+                if was_dragging:
                     self.ripple_trim_left_finished.emit(
-                        self._clip_id,
-                        self._track_id,
-                        self._original_start,
-                        self._final_new_start
+                        self._clip_id, self._track_id,
+                        self._original_start, self._final_new_start,
                     )
 
             elif self._drag_mode == "ripple_trim_right":
-                # Ripple trim right (P4.2): emit ripple trim finished signal
-                original_end = self._original_start + self._original_duration
-                if self._final_new_end != original_end:
-                    # Restore original state before command execution
-                    self._start_frame = self._original_start
-                    self._duration_frames = self._original_duration
-                    self._update_geometry()
+                if was_dragging:
                     self.ripple_trim_right_finished.emit(
-                        self._clip_id,
-                        self._track_id,
-                        original_end,
-                        self._final_new_end
+                        self._clip_id, self._track_id,
+                        self._original_start + self._original_duration, self._final_new_end,
                     )
 
             if self._drag_mode in {
@@ -6309,6 +6240,8 @@ class ClipItem(QGraphicsObject):
             self._cancel_envelope_drag()
         if self._drag_mode == "retime_stretch":
             self._speed = self._original_retime_speed
+        if self._drag_mode == "retime_point_move":
+            self._cancel_retime_point_drag()
         self._start_frame = self._original_start
         self._duration_frames = self._original_duration
         self._source_start = self._original_source_start
@@ -6340,15 +6273,6 @@ class ClipItem(QGraphicsObject):
 
     def keyPressEvent(self, event: Any) -> None:
         """Handle key press for deletion."""
-        # R08：Esc 取消进行中的速度点把手拖动（返回原位，不发提交）
-        if event.key() == Qt.Key.Key_Escape and \
-                self._retime_point_drag_origin is not None:
-            self._drag_mode = ""
-            self._is_dragging = False
-            self._drag_pending = False
-            self._cancel_retime_point_drag()
-            event.accept()
-            return
         # P1-1：包络独立编辑模式——Esc 取消拖动/清选择，Delete 删节点
         # （有选中节点时不落入 clip 删除）。
         if self._drag_mode == "envelope_node" and \
@@ -7774,7 +7698,8 @@ class TrackHeaderItem(QGraphicsObject):
         volume_changed: Volume changed (track_id, volume)
         rename_requested: Rename requested (track_id)
         delete_requested: Delete requested (track_id)
-        add_track_requested: Add track requested (track_type, position, track_index)
+        add_track_requested: Add track requested (track_type, position, reference_track_id)
+        add_tracks_requested: Open the batch add dialog (reference_track_id)
         move_track_requested: Move track requested (track_id, direction)
         height_changed: Track height changed (track_id, new_height)
         target_track_changed: Target track changed (track_id)
@@ -7809,7 +7734,8 @@ class TrackHeaderItem(QGraphicsObject):
     recording_input_requested = pyqtSignal(str)
     rename_requested = pyqtSignal(str)  # track_id
     delete_requested = pyqtSignal(str)  # track_id
-    add_track_requested = pyqtSignal(str, str, int)  # track_type, position ('above'/'below'), track_index
+    add_track_requested = pyqtSignal(str, str, str)  # track_type, position, reference_track_id
+    add_tracks_requested = pyqtSignal(str)
     move_track_requested = pyqtSignal(str, str)  # track_id, direction ('up'/'down')
     height_changed = pyqtSignal(str, int)  # track_id, new_height
     height_preset_requested = pyqtSignal(str)  # preset name: 'small', 'medium', 'large', 'default'
@@ -7990,8 +7916,10 @@ class TrackHeaderItem(QGraphicsObject):
 
     def shape(self) -> QPainterPath:
         """Return shape for collision detection."""
+        rect = _visible_track_item_rect(self, self.boundingRect(), self._track_type)
         path = QPainterPath()
-        path.addRect(self.boundingRect())
+        if not rect.isEmpty():
+            path.addRect(rect)
         return path
 
     # ==================== Button Areas (Enhanced) ====================
@@ -8183,28 +8111,8 @@ class TrackHeaderItem(QGraphicsObject):
 
     def _apply_track_area_clip(self, painter: QPainter) -> None:
         """Clip pinned track headers to their own V/A area during split scrolling."""
-        try:
-            view = self.scene().views()[0] if self.scene() and self.scene().views() else None
-            engine = getattr(view, "_layout_engine", None)
-            if engine is None:
-                return
-            area = engine.area_layout()
-            if self._track_type == "audio":
-                scene_clip = area.audio_area
-            elif self._track_type == "subtitle":
-                scene_clip = area.subtitle_area
-            else:
-                scene_clip = area.video_area
-            scene_y = self.scenePos().y()
-            local_clip = QRectF(
-                -100000.0,
-                scene_clip.top() - scene_y,
-                200000.0,
-                scene_clip.height(),
-            )
-            painter.setClipRect(local_clip, Qt.ClipOperation.IntersectClip)
-        except (RuntimeError, IndexError, AttributeError):
-            return
+        rect = _visible_track_item_rect(self, self.boundingRect(), self._track_type)
+        painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)
 
     def _paint_two_rows(self, painter: QPainter) -> None:
         """Paint two-row DaVinci layout: Row 1 = badge+name+clip_count, Row 2 = buttons."""
@@ -9283,22 +9191,22 @@ class TrackHeaderItem(QGraphicsObject):
         add_track_menu = _QMenu(
             I18N.tr("timeline.track.add_track_menu", "Add Track"), menu)
 
-        def _build_type_submenus(label_text: str, position: str) -> _QMenu:
+        def _build_type_submenus(label_text: str) -> tuple[_QMenu, QAction, QAction, QAction]:
             """Build a submenu with Video/Audio/Subtitle entries for the given position."""
             sub = _QMenu(label_text, add_track_menu)
             sub_v = sub.addAction(I18N.tr("timeline.track.type_video", "Video Track"))
             sub_a = sub.addAction(I18N.tr("timeline.track.type_audio", "Audio Track"))
             sub_s = sub.addAction(I18N.tr("timeline.track.type_subtitle", "Subtitle Track"))
-            sub.aboutToShow.connect(lambda: None)  # keep reference alive
             return sub, sub_v, sub_a, sub_s
 
         above_menu, above_v, above_a, above_s = _build_type_submenus(
-            I18N.tr("timeline.track.add_above", "Add Above"), "above")
+            I18N.tr("timeline.track.add_above", "Add Above"))
         below_menu, below_v, below_a, below_s = _build_type_submenus(
-            I18N.tr("timeline.track.add_below", "Add Below"), "below")
+            I18N.tr("timeline.track.add_below", "Add Below"))
         add_track_menu.addMenu(above_menu)
         add_track_menu.addMenu(below_menu)
         menu.addMenu(add_track_menu)
+        add_tracks_action = menu.addAction(I18N.tr("timeline.track.add_tracks_menu", "Add Tracks…"))
 
         menu.addSeparator()
 
@@ -9419,17 +9327,19 @@ class TrackHeaderItem(QGraphicsObject):
             self.caption_track_graphic_template_requested.emit(self._track_id, "")
         # P10.3: Add track submenu — Video/Audio/Subtitle, Above/Below
         elif action == above_v:
-            self.add_track_requested.emit("video", "above", self._track_index)
+            self.add_track_requested.emit("video", "above", self._track_id)
         elif action == above_a:
-            self.add_track_requested.emit("audio", "above", self._track_index)
+            self.add_track_requested.emit("audio", "above", self._track_id)
         elif action == above_s:
-            self.add_track_requested.emit("subtitle", "above", self._track_index)
+            self.add_track_requested.emit("subtitle", "above", self._track_id)
         elif action == below_v:
-            self.add_track_requested.emit("video", "below", self._track_index)
+            self.add_track_requested.emit("video", "below", self._track_id)
         elif action == below_a:
-            self.add_track_requested.emit("audio", "below", self._track_index)
+            self.add_track_requested.emit("audio", "below", self._track_id)
         elif action == below_s:
-            self.add_track_requested.emit("subtitle", "below", self._track_index)
+            self.add_track_requested.emit("subtitle", "below", self._track_id)
+        elif action == add_tracks_action:
+            self.add_tracks_requested.emit(self._track_id)
         elif action == move_up_action:
             self.move_track_requested.emit(self._track_id, "up")
         elif action == move_down_action:
@@ -9865,7 +9775,8 @@ class TimecodeRulerItem(QGraphicsObject):
                          QColor(get_color("timeline_divider")))
 
         # Get visible rect for efficient rendering
-        exposed_rect = option.exposedRect.intersected(self.boundingRect())
+        style = QStyleOptionGraphicsItem(option)
+        exposed_rect = style.exposedRect.intersected(self.boundingRect())
         visible_left = max(0.0, exposed_rect.left() - TRACK_HEADER_WIDTH)
         visible_right = exposed_rect.right() - TRACK_HEADER_WIDTH
 
@@ -10268,7 +10179,7 @@ class RollHandleItem(QGraphicsObject):
 
     Signals:
         roll_trim_started: Roll trim drag started (left_clip_id, right_clip_id, cut_frame)
-        roll_trim_dragged: Roll trim dragging (delta_frames) - live preview
+        roll_trim_dragged: Roll trim dragging (delta_frames, bypass_snap)
         roll_trim_finished: Roll trim drag finished (left_clip_id, right_clip_id, delta_frames)
         roll_handle_clicked: Handle clicked for selection
 
@@ -10287,7 +10198,7 @@ class RollHandleItem(QGraphicsObject):
 
     # Signals
     roll_trim_started = pyqtSignal(str, str, int)  # left_clip_id, right_clip_id, cut_frame
-    roll_trim_dragged = pyqtSignal(int)  # delta_frames (live preview)
+    roll_trim_dragged = pyqtSignal(int, bool)  # delta_frames, bypass_snap
     roll_trim_finished = pyqtSignal(str, str, int)  # left_clip_id, right_clip_id, delta_frames
     roll_handle_clicked = pyqtSignal(str, str)  # left_clip_id, right_clip_id
 
@@ -10531,7 +10442,9 @@ class RollHandleItem(QGraphicsObject):
             self._update_geometry()
 
             # Emit dragged signal for live preview
-            self.roll_trim_dragged.emit(delta_frames)
+            self.roll_trim_dragged.emit(
+                delta_frames, bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier),
+            )
 
             logger.debug(f"Roll trim dragging: delta = {delta_frames} frames")
             event.accept()
@@ -10612,6 +10525,8 @@ class RollHandleItem(QGraphicsObject):
 
     def set_preview_delta(self, delta_frames: int) -> None:
         """Apply a clamped live-preview delta supplied by TimelineView."""
+        if self._current_delta == delta_frames:
+            return
         self._current_delta = int(delta_frames)
         self._cut_frame = self._original_cut_frame + self._current_delta
         self._update_geometry()

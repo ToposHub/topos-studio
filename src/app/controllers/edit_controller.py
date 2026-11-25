@@ -12159,13 +12159,12 @@ class EditControllerMixin:
         """
         Handle View → Timeline → Fit to Window.
 
-        Delegates to TimelineView.zoom_fit_content()（整段时间线适配当前
-        视口，与工具栏 Fit 按钮一致）。
+        Toggle between the full edit and the previous zoom and scroll position.
         Registered via callback_name="on_timeline_fit" in module.py.
         """
         timeline_view = self._resolve_timeline_view("Fit to window")
         if timeline_view is not None:
-            timeline_view.zoom_fit_content()
+            timeline_view.toggle_zoom_fit()
 
     def _resolve_timeline_view(self, action_label: str):
         """定位当前 TimelineView；缺失时记 warning 并返回 None。"""

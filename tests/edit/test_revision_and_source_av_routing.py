@@ -58,7 +58,7 @@ def _view(timeline: TimelineSequence):
     view.status_message_requested = MagicMock()
     view._clip_change_detector = lambda old, new: MagicMock(full_reload_needed=True)
     view._update_range_visuals = lambda tl: None
-    view.load_timeline = lambda tl: None
+    view.load_timeline = lambda tl, *, preserve_viewport=False: None
     view.command_executed = MagicMock()
     view.timeline_changed = MagicMock()
     view._update_cache_indicator = lambda: None

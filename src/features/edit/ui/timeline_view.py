@@ -38,8 +38,10 @@ import math
 import os
 import random
 import uuid
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field, replace
 from fractions import Fraction
+from itertools import accumulate
 from pathlib import Path
 from typing import Optional, Dict, Any, List, NamedTuple, Callable, Mapping, Iterable
 
@@ -174,6 +176,7 @@ class TimelineChanges(NamedTuple):
 
 from src.features.edit.core.timeline_ops import (
     SnapManager,
+    SnapPoint,
     SnapPointType,
     TimelineOperationError,
 )
@@ -392,6 +395,8 @@ ZOOM_STEP = 1.2  # Zoom multiplier per wheel step
 # Small forgiving hit band for the playhead, used only when the pointer is
 # over a gap.  Clip content keeps its normal, more precise hit testing.
 PLAYHEAD_EMPTY_HIT_TOLERANCE = 5.0
+DRAG_SCROLL_MARGIN_PX = 28
+DRAG_SCROLL_INTERVAL_MS = 16
 TIMELINE_EXTENSION_SECONDS = 10  # Extend editable timeline in usable chunks
 EMPTY_TIMELINE_PREVIEW_SECONDS = 10  # Preview span shown before a timeline exists
 EMPTY_TIMELINE_FPS = 25.0
@@ -771,6 +776,52 @@ _UNSET = object()
 PRESENTATION_STATE_VERSION = 1
 
 
+@dataclass
+class _EdgeTrimDrag:
+    sequence: TimelineSequence
+    side: str
+    members: tuple[ClipInstance, ...]
+    minimum: int
+    maximum: int
+    excluded_snap_ids: set[str]
+    pointer_target: int | None = None
+    bypass_snap: bool = False
+    delta: int = 0
+
+
+@dataclass(frozen=True)
+class _RippleTrimMember:
+    clip: ClipInstance
+    max_source_frames: int | None
+    followers: tuple[ClipInstance, ...]
+
+
+@dataclass(frozen=True)
+class _RippleSyncLane:
+    clips: tuple[ClipInstance, ...]
+    starts: tuple[int, ...]
+    preceding_ends: tuple[int, ...]
+
+
+@dataclass
+class _RippleTrimDrag:
+    sequence: TimelineSequence
+    session_id: int
+    side: str
+    members: tuple[_RippleTrimMember, ...]
+    minimum_delta: int
+    maximum_delta: int | None
+    sync_lanes: tuple[_RippleSyncLane, ...]
+    edited_ids: set[str]
+    member_follower_ids: set[str]
+    sync_follower_indices: dict[str, tuple[int, int]]
+    snap_owners: dict[str, tuple[str, ...]]
+    pointer_boundary: int | None = None
+    bypass_snap: bool = False
+    delta: int = 0
+    shifted_followers: dict[str, ClipInstance] = field(default_factory=dict)
+
+
 class TimelineView(QGraphicsView):
     """
     Main timeline view widget using QGraphicsView.
@@ -907,6 +958,7 @@ class TimelineView(QGraphicsView):
         # pending until the view becomes visible and Qt has applied the final
         # scrollbar range.
         self._timeline_start_reset_pending: bool = False
+        self._timeline_start_scroll_request_id = 0
         self._project: Optional[Any] = None  # EditProject reference for drag operations
         # Motion Graphic frames are cached asynchronously in the shared scene
         # cache, so a small UI-only poll lets the ruler turn green immediately
@@ -929,6 +981,7 @@ class TimelineView(QGraphicsView):
         QApplication.instance().applicationStateChanged.connect(
             self._on_application_state_changed)
         self._selection = TimelineSelection()
+        self._selection_visual_ids: set[str] = set()
         self._selected_edit_edges: dict[str, str] = {}
         self._playhead_frame = 0
         # Retime controls are transient presentation state, just as in
@@ -937,6 +990,7 @@ class TimelineView(QGraphicsView):
         self._trim_monitor_host: Optional[ProgramViewerWidget] = None
         self._corner_timecode_text: str = "00:00:00:00"
         self._pixels_per_frame = DEFAULT_ZOOM
+        self._zoom_fit_restore: tuple[float, int] | None = None
         self._active_tool = EditTool.SELECT
         self._position_lock_enabled: bool = False
         self._thumbnail_display_mode: str = ClipItem._thumbnail_display_mode
@@ -956,6 +1010,7 @@ class TimelineView(QGraphicsView):
         self._independent_selection: bool = False
         self._linked_selection_enabled: bool = True  # P3: Toggle linked A/V selection (on by default)
         self._audio_only = False
+        self._edit_wheel_controls = True
         self._timeline_recording_enabled = False
         self._track_meter_generation = 0
         self._professional_audio_editor_available = False
@@ -981,7 +1036,11 @@ class TimelineView(QGraphicsView):
 
         # UI-10: Playhead drag state
         self._playhead_dragging: bool = False
-        self._playhead_drag_start_frame: int = 0
+        self._scrub_pointer: tuple[int, bool] | None = None
+        self._drag_scroll_pointer: tuple[QPoint, Qt.KeyboardModifier] | None = None
+        self._drag_scroll_timer = QTimer(self)
+        self._drag_scroll_timer.setInterval(DRAG_SCROLL_INTERVAL_MS)
+        self._drag_scroll_timer.timeout.connect(self._scroll_held_drag)
 
         # INT-03: 手型/中键平移状态（viewport 像素 → 滚动条原点）
         self._pan_origin_scroll: tuple[int, int] = (0, 0)
@@ -1058,6 +1117,8 @@ class TimelineView(QGraphicsView):
         # 片、波纹跟随）登记处——取消时统一从不可变模型重投影，此前
         # cancel 只恢复 primary，伙伴/邻片残留错误源区间与几何。
         self._preview_affected_item_ids: set[str] = set()
+        self._edge_trim: _EdgeTrimDrag | None = None
+        self._ripple_trim_drag: _RippleTrimDrag | None = None
         self._source_edit_linked_at_press: bool = True
         self._source_edit_timeline_at_press: Optional[TimelineSequence] = None
         # RI-08/R19：亚像素锚定残差挂点——当前缩放锚定用连续 double 帧
@@ -1097,7 +1158,6 @@ class TimelineView(QGraphicsView):
 
         # Enhanced Snap System (参考 kdenlive SnapModel)
         self._snap_manager = SnapManager()  # 吸附点管理器
-        self._snap_temporarily_disabled: bool = False  # Shift 键临时禁用吸附
         self._snap_excluded_types: set[SnapPointType] = set()  # 排除的吸附点类型
 
         # Create scene
@@ -2287,7 +2347,7 @@ class TimelineView(QGraphicsView):
 
     # ==================== Timeline Loading ====================
 
-    def load_timeline(self, timeline: TimelineSequence) -> None:
+    def load_timeline(self, timeline: TimelineSequence, *, preserve_viewport: bool = False) -> None:
         """
         Load a timeline into the view.
 
@@ -2295,23 +2355,26 @@ class TimelineView(QGraphicsView):
 
         Args:
             timeline: TimelineSequence to load
+            preserve_viewport: Retain horizontal scroll and selection during a command reload.
         """
         if self._updating:
             return
 
         # F2.3：切换序列——旧素材双帧解码器不跨序列复用（切源不显示旧
         # generation：bump + 关解码器，线程保留待下次会话）。
-        if not self._interaction.is_idle:
+        if self._playhead_dragging or not self._interaction.is_idle:
             self._cancel_current_interaction()
         self._hide_trim_monitor()
         provider = getattr(self, "_trim_frame_provider_instance", None)
         if provider is not None:
             provider.close_decoders()
 
+        scroll = self.horizontalScrollBar().value()
         self._updating = True
         try:
             previous_id = getattr(self._timeline, "timeline_id", None)
             if previous_id != timeline.timeline_id:
+                self._zoom_fit_restore = None
                 self._selected_edit_edges.clear()
                 self._clear_recording_previews()
             known_snapshot = (
@@ -2395,6 +2458,7 @@ class TimelineView(QGraphicsView):
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
+                header.add_tracks_requested.connect(self._show_add_tracks_dialog)
                 header.move_track_requested.connect(self._on_move_track_requested)
                 header.height_changed.connect(self._on_track_height_changed)
                 header.height_preset_requested.connect(self.set_track_height_preset)
@@ -2433,6 +2497,7 @@ class TimelineView(QGraphicsView):
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
+                header.add_tracks_requested.connect(self._show_add_tracks_dialog)
                 header.move_track_requested.connect(self._on_move_track_requested)
                 header.height_changed.connect(self._on_track_height_changed)
                 header.height_preset_requested.connect(self.set_track_height_preset)
@@ -2465,6 +2530,7 @@ class TimelineView(QGraphicsView):
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
+                header.add_tracks_requested.connect(self._show_add_tracks_dialog)
                 header.move_track_requested.connect(self._on_move_track_requested)
                 header.height_changed.connect(self._on_track_height_changed)
                 header.height_preset_requested.connect(self.set_track_height_preset)
@@ -2611,6 +2677,7 @@ class TimelineView(QGraphicsView):
                     item.drag_finished.connect(self._on_drag_finished)
                     item.trim_left_finished.connect(self._on_trim_left_finished)
                     item.trim_right_finished.connect(self._on_trim_right_finished)
+                    item.rate_stretch_preview.connect(self._on_rate_stretch_preview)
                     item.rate_stretch_finished.connect(self._on_rate_stretch_finished)
                     item.retime_stretch_finished.connect(self._on_retime_stretch_finished)
                     item.retime_action_requested.connect(self._on_retime_action_requested)
@@ -2811,10 +2878,8 @@ class TimelineView(QGraphicsView):
             # Update gap indicators (Phase 3.3)
             self._update_gap_indicators()
 
-            # Loading a sequence starts the editing viewport at frame zero.
-            # The deferred pass also covers direct TimelineView callers that
-            # do not go through TimelinePanel.load_timeline().
-            self.scroll_to_timeline_start(deferred=True)
+            if not preserve_viewport:
+                self.scroll_to_timeline_start(deferred=True)
 
             # Re-sync the scene cut overlay with the new tracks/fps geometry.
             self._sync_scene_cut_overlay()
@@ -2824,6 +2889,12 @@ class TimelineView(QGraphicsView):
         finally:
             self._updating = False
 
+        if preserve_viewport:
+            self._timeline_start_scroll_request_id += 1
+            self._timeline_start_reset_pending = False
+            self.horizontalScrollBar().setValue(scroll)
+            self._update_clip_visibility()
+            self._rebind_selection_tracks(force=True)
         self.audio_track_heights_changed.emit()
 
     def _clear_items(self) -> None:
@@ -2866,6 +2937,7 @@ class TimelineView(QGraphicsView):
         self._marker_items.clear()
         self._roll_handles.clear()
         self._roll_preview_state = None
+        self._edge_trim = None
         self._preview_affected_item_ids.clear()
 
     def _invalidate_timeline_media_requests(self) -> None:
@@ -2909,6 +2981,7 @@ class TimelineView(QGraphicsView):
         header.rename_requested.connect(self._on_track_rename_requested)
         header.delete_requested.connect(self._on_track_delete_requested)
         header.add_track_requested.connect(self._on_add_track_requested)
+        header.add_tracks_requested.connect(self._show_add_tracks_dialog)
         header.move_track_requested.connect(self._on_move_track_requested)
         header.height_changed.connect(self._on_track_height_changed)
         header.height_preset_requested.connect(self.set_track_height_preset)
@@ -3045,8 +3118,12 @@ class TimelineView(QGraphicsView):
         ranges for the new scene rectangle.
         """
         self._timeline_start_reset_pending = True
+        self._timeline_start_scroll_request_id += 1
+        request_id = self._timeline_start_scroll_request_id
 
         def reset_scroll_position() -> None:
+            if request_id != self._timeline_start_scroll_request_id:
+                return
             scroll_bar = self.horizontalScrollBar()
             scroll_bar.setValue(scroll_bar.minimum())
             # If the view is still hidden, the parent dock may apply another
@@ -3083,6 +3160,7 @@ class TimelineView(QGraphicsView):
 
         self._updating = True
         try:
+            self._zoom_fit_restore = None
             self._pixels_per_frame = pixels_per_frame
 
             # Update layout engine zoom
@@ -3312,11 +3390,37 @@ class TimelineView(QGraphicsView):
 
     def zoom_in(self) -> None:
         """Zoom in by one step."""
-        self.set_zoom(self._pixels_per_frame * ZOOM_STEP)
+        self.set_zoom_at_playhead(self._pixels_per_frame * ZOOM_STEP)
 
     def zoom_out(self) -> None:
         """Zoom out by one step."""
-        self.set_zoom(self._pixels_per_frame / ZOOM_STEP)
+        self.set_zoom_at_playhead(self._pixels_per_frame / ZOOM_STEP)
+
+    def set_zoom_at_playhead(self, pixels_per_frame: float) -> None:
+        """Keep a visible playhead in place and bring an offscreen one into view."""
+        if self._timeline is None:
+            self.set_zoom(pixels_per_frame)
+            return
+        playhead_x = self._layout_engine.frame_to_x(self._playhead_frame)
+        anchor_x = self.mapFromScene(QPointF(playhead_x, 0.0)).x()
+        width = self.viewport().width()
+        if not TRACK_HEADER_WIDTH <= anchor_x < width:
+            anchor_x = (TRACK_HEADER_WIDTH + width) // 2
+        self._set_anchored_zoom(pixels_per_frame, self._playhead_frame, anchor_x)
+
+    def _set_anchored_zoom(self, pixels_per_frame: float, frame: float, anchor_x: int) -> None:
+        old_zoom = self._pixels_per_frame
+        self.set_zoom(pixels_per_frame)
+        if self._pixels_per_frame == old_zoom:
+            return
+        self._timeline_start_scroll_request_id += 1
+        if self.isVisible():
+            self._timeline_start_reset_pending = False
+        target_x = TRACK_HEADER_WIDTH + frame * self._pixels_per_frame
+        current_x = self.mapToScene(anchor_x, 0).x()
+        bar = self.horizontalScrollBar()
+        view_scale = self.transform().m11() or 1.0
+        bar.setValue(round(bar.value() + (target_x - current_x) * view_scale))
 
     # ==================== Visibility Culling (参考 kdenlive) ====================
 
@@ -3389,6 +3493,10 @@ class TimelineView(QGraphicsView):
                 item.hide()
                 continue
             if isinstance(item, ClipItem):
+                # Hiding the item that owns the gesture releases the scene's
+                # mouse grab, so it would never receive the eventual mouse-up.
+                if item._is_dragging or item._drag_pending:
+                    continue
                 # Output-disabled tracks stay editable on the timeline.
                 # Only viewport culling hides graphics; the model still
                 # excludes these tracks from preview and export.
@@ -3491,59 +3599,53 @@ class TimelineView(QGraphicsView):
         if dx != 0:
             self._debounce_thumbnail_schedule()
 
+    def set_edit_wheel_controls(self, enabled: bool) -> None:
+        """Select the Edit workspace's wheel controls for this shared view."""
+        self._edit_wheel_controls = enabled
+
     def wheelEvent(self, event: QWheelEvent) -> None:
-        """Handle mouse wheel / trackpad for zoom and scrolling.
-
-        INT-06：触控板 pixelDelta 优先（angleDelta/120 回退）；无 Ctrl 时
-        x 轴增量优先做水平滚动（触控板两指横扫），y 轴映射水平（鼠标滚
-        轮习惯）；Ctrl 只对非零有效 zoom delta 做指数平滑缩放并锚定鼠标
-        下的时间线帧（旧行为 y=0 的横向事件走 zoom_out 分支意外缩小）。
-
-        Behavior:
-        - Ctrl + wheel: smooth zoom anchored at the cursor's frame
-        - Shift + wheel: vertical scroll of the area under the cursor
-        - No modifier: horizontal scroll
-        """
+        """Handle mouse-wheel and trackpad input in the active workspace."""
         modifiers = event.modifiers()
         pixel = event.pixelDelta()
         angle = event.angleDelta()
+        has_pixels = not pixel.isNull()
+        # A standard wheel notch provides 120 angle units, or about 15 px.
+        dx, dy = (float(pixel.x()), float(pixel.y())) if has_pixels else (
+            angle.x() / 8.0, angle.y() / 8.0,
+        )
+        if not (dx or dy):
+            event.accept()
+            return
 
-        # 归一化：触控板像素增量优先；没有时用角度增量/120 折算
-        def _axis(pix: int, ang: int) -> float:
-            if pix != 0:
-                return float(pix)
-            return float(ang) / 8.0  # 角度→近似像素（120 单位≈15px）
-
-        dx = _axis(pixel.x() if pixel is not None else 0, angle.x())
-        dy = _axis(pixel.y() if pixel is not None else 0, angle.y())
-
-        if modifiers & Qt.KeyboardModifier.ControlModifier:
-            # Ctrl = 缩放。y 优先、x 兜底（触控板捏合/横滚轮）；
-            # 零有效增量只 accept 不缩放（审计实测 Ctrl+横向事件意外缩小）
-            zoom_units = dy if dy != 0 else dx
-            if zoom_units == 0:
-                event.accept()
-                return
-            self._zoom_anchored_at(
-                event.position().toPoint(), zoom_units
-            )
-        elif modifiers & Qt.KeyboardModifier.ShiftModifier:
-            # Shift = 光标所在 V/A/字幕区域各自垂直滚动
-            self._scroll_split_area_at(event.position().toPoint(), int(round(dy if dy else dx)))
-        else:
-            scroll_bar = self.horizontalScrollBar()
-            if scroll_bar is None:
-                super().wheelEvent(event)
-                return
-            if dx != 0:
-                # 触控板水平两指：直接水平滚
-                scroll_bar.setValue(int(scroll_bar.value() - dx))
-            elif dy != 0:
-                # 鼠标滚轮：垂直增量映射水平（上滚=时间前进）
-                scroll_bar.setValue(int(scroll_bar.value() - dy))
+        pos = event.position().toPoint()
+        vertical_delta = dy or dx
+        horizontal_delta = dx or dy
+        if self._edit_wheel_controls and not self._audio_only:
+            if modifiers & Qt.KeyboardModifier.AltModifier:
+                scale = 2.0 ** (vertical_delta / 360.0)
+                self.set_zoom_at_playhead(self._pixels_per_frame * scale)
+            elif modifiers & Qt.KeyboardModifier.ControlModifier:
+                self._scroll_timeline_horizontally(horizontal_delta)
+            elif modifiers & Qt.KeyboardModifier.ShiftModifier:
+                self._configure_layout_engine()
+                _, lane = self._layout_engine.track_at_y_with_area(self.mapToScene(pos).y())
+                if lane in {"video", "audio"}:
+                    self.set_track_height_for_type(lane, round(vertical_delta), relative=True)
+            elif has_pixels and abs(dy) > abs(dx):
+                self._scroll_split_area_at(pos, round(dy), pixel_precise=True)
             else:
-                event.accept()
-                return
+                self._scroll_timeline_horizontally(horizontal_delta)
+        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+            self._zoom_anchored_at(pos, vertical_delta)
+        elif modifiers & Qt.KeyboardModifier.ShiftModifier:
+            self._scroll_split_area_at(pos, round(vertical_delta))
+        else:
+            self._scroll_timeline_horizontally(horizontal_delta)
+        event.accept()
+
+    def _scroll_timeline_horizontally(self, delta: float) -> None:
+        bar = self.horizontalScrollBar()
+        bar.setValue(round(bar.value() - delta))
 
     def _zoom_anchored_at(self, viewport_pos: QPoint, zoom_units: float) -> None:
         """INT-06：指数平滑缩放并保持鼠标下的帧在相同屏幕 x。
@@ -3553,7 +3655,6 @@ class TimelineView(QGraphicsView):
         """
         import time
 
-        hbar = self.horizontalScrollBar()
         # N16/T3-08：手势窗口（0.8s）内复用起点连续锚帧，量化误差不回
         # 灌；超窗（新手势/停顿后的首次事件）重测。锚帧只从量化视图测
         # 一次，之后所有目标滚动都由缓存锚解析推导。
@@ -3565,55 +3666,28 @@ class TimelineView(QGraphicsView):
                 anchor_scene_x - TRACK_HEADER_WIDTH
             ) / self._pixels_per_frame
         self._zoom_gesture_last_t = now
-        anchor_frame_f = self._zoom_gesture_anchor_frame
-
         scale = 2.0 ** (float(zoom_units) / 360.0)
-        new_ppf = max(
-            MIN_ZOOM, min(MAX_ZOOM, self._pixels_per_frame * scale)
+        self._set_anchored_zoom(
+            self._pixels_per_frame * scale, self._zoom_gesture_anchor_frame, viewport_pos.x(),
         )
-        if abs(new_ppf - self._pixels_per_frame) < 1e-9:
-            return
-        self.set_zoom(new_ppf)
 
-        # 把锚定帧拉回光标下方：scene(anchor) = viewport_x + scroll（线
-        # 性、由滚动条驱动）。目标滚动值由缓存锚帧**解析**求出——连续
-        # float 直达 setValue 的 round，整数滚动条的量化残差不进入下一
-        # 次计算的输入，长手势不再累计漂移。
-        self._configure_layout_engine()
-        target_scene_x = (
-            TRACK_HEADER_WIDTH + anchor_frame_f * self._pixels_per_frame
-        )
-        current_scene_x = self.mapToScene(viewport_pos).x()
-        if hbar is not None:
-            # scene 位移 → 滚动条单位：滚动条以视图像素计（随 transform
-            # 缩放）。目标由缓存锚帧**绝对**给出，本事件把量化残差一并
-            # 校正（不累计）。
-            view_scale = self.transform().m11() or 1.0
-            delta_units = (target_scene_x - current_scene_x) * view_scale
-            hbar.setValue(int(round(hbar.value() + delta_units)))
-
-    def _scroll_split_area_at(self, pos: QPoint, wheel_delta_y: int) -> None:
+    def _scroll_split_area_at(self, pos: QPoint, wheel_delta_y: int, *, pixel_precise: bool = False) -> None:
         """Scroll video / audio / subtitle tracks independently by cursor position."""
         if self._timeline is None or wheel_delta_y == 0:
             return
 
         self._configure_layout_engine()
-        scene_pos = self.mapToScene(pos)
-        area = self._layout_engine.area_layout()
-        if area.video_area.top() <= scene_pos.y() < area.video_area.bottom():
-            bar = self._video_v_scroll
-        elif area.audio_area.top() <= scene_pos.y() < area.audio_area.bottom():
-            bar = self._audio_v_scroll
-        elif area.subtitle_area.top() <= scene_pos.y() < area.subtitle_area.bottom():
-            # SUB-P1-06: route wheel events over the subtitle lane to its own
-            # scrollbar so a tall cue stack can be browsed.
-            bar = self._subtitle_v_scroll
-        else:
+        _, lane = self._layout_engine.track_at_y_with_area(self.mapToScene(pos).y())
+        bar = {"video": self._video_v_scroll, "audio": self._audio_v_scroll,
+               "subtitle": self._subtitle_v_scroll}.get(lane)
+        if bar is None:
             return
 
-        steps = max(24, abs(wheel_delta_y) // 3)
-        direction = -1 if wheel_delta_y > 0 else 1
-        bar.setValue(bar.value() + direction * steps)
+        if pixel_precise:
+            bar.setValue(bar.value() - wheel_delta_y)
+        else:
+            steps = max(24, abs(wheel_delta_y) // 3)
+            bar.setValue(bar.value() + (-steps if wheel_delta_y > 0 else steps))
 
     # ==================== Thumbnail Scheduler ====================
 
@@ -3746,59 +3820,57 @@ class TimelineView(QGraphicsView):
         if not selection.items:
             self._set_selected_edit_edges({})
 
-        # P10.3: SubtitleClipItem is also a selectable timeline item
-        # (imported at module top)
-
         self._updating = True
         try:
-            # Clear previous selection visuals
-            for item in self._items_map.values():
+            visual_ids = set(selection.selected_clip_ids) | set(selection.selected_transition_ids)
+            linked_ids: set[str] = set()
+            if self._timeline is not None and self._effective_linked_selection():
+                for clip_id in selection.selected_clip_ids:
+                    if clip_id in linked_ids:
+                        continue
+                    partner = self._timeline.get_reciprocal_linked_clip(clip_id)
+                    if partner is not None:
+                        linked_ids.update((clip_id, partner.clip_id))
+                visual_ids.update(linked_ids)
+            for item_id in self._selection_visual_ids | visual_ids:
+                item = self._items_map.get(item_id)
+                selected = item_id in visual_ids
                 if isinstance(item, ClipItem):
-                    item.set_selected(False)
-                    item.set_linked_to_selection(False)
+                    item.set_selected(selected)
+                    item.set_linked_to_selection(item_id in linked_ids)
                 elif isinstance(item, TransitionItem):
-                    item.set_selected(False)
+                    item.set_selected(selected)
                 elif isinstance(item, SubtitleClipItem):
-                    item.set_selected_state(False)
-
-            # Apply new selection visuals
-            for clip_id in selection.selected_clip_ids:
-                item = self._items_map.get(clip_id)
-                if item and isinstance(item, ClipItem):
-                    item.set_selected(True)
-                elif item and isinstance(item, SubtitleClipItem):
-                    item.set_selected_state(True)
-
-            # P2-03: light up every linked group that the selection touches.
-            # While either member of a reciprocal pair is selected, both
-            # borders glow — the user sees which clips an edit will carry
-            # (move/delete/trim) before performing it.
-            for clip_id in selection.selected_clip_ids:
-                clip = (
-                    self._timeline.get_clip_by_id(clip_id)
-                    if self._timeline is not None else None
-                )
-                partner = (
-                    self._get_reciprocal_linked_clip(clip) if clip is not None else None
-                )
-                if partner is None or not self._effective_linked_selection():
-                    continue
-                for member_id in (clip.clip_id, partner.clip_id):
-                    item = self._items_map.get(member_id)
-                    if isinstance(item, ClipItem):
-                        item.set_selected(True)
-                        item.set_linked_to_selection(True)
-
-            for trans_id in selection.selected_transition_ids:
-                item = self._items_map.get(trans_id)
-                if item and isinstance(item, TransitionItem):
-                    item.set_selected(True)
-
+                    item.set_selected_state(selected)
+            self._selection_visual_ids = visual_ids
             self._selection = selection
             self.selection_changed.emit(selection)
 
         finally:
             self._updating = False
+
+    def _rebind_selection_tracks(self, *, force: bool = False) -> None:
+        """Keep selected media associated with its current lane after a move or history load."""
+        selection = self._selection
+        if not selection.items:
+            return
+        items = []
+        primary = None
+        for selected in selection.items:
+            item = self._items_map.get(selected.item_id)
+            if selected.item_type in {SelectionType.CLIP, SelectionType.TRANSITION}:
+                if item is None:
+                    continue
+                selected = replace(selected, track_id=item.track_id)
+            if (selection.primary_item is not None
+                    and selected.item_id == selection.primary_item.item_id
+                    and selected.item_type == selection.primary_item.item_type):
+                primary = selected
+            items.append(selected)
+        if force or tuple(items) != selection.items:
+            if primary is None and items and selection.primary_item is not None:
+                primary = items[0]
+            self.set_selection(replace(selection, items=tuple(items), primary_item=primary))
 
     def get_selection_diagnostics(self) -> "SelectionDiagnostics":
         """Summarize why an edit would carry other objects (P2-03).
@@ -3841,17 +3913,25 @@ class TimelineView(QGraphicsView):
 
     def _set_selected_edit_edges(self, edges: Mapping[str, str]) -> None:
         """Project selected edit points independently of whole-clip selection."""
+        previous = self._selected_edit_edges
+        if previous == edges:
+            return
         self._selected_edit_edges = dict(edges)
-        for clip_id, item in self._items_map.items():
+        for clip_id in previous.keys() | edges.keys():
+            item = self._items_map.get(clip_id)
             if isinstance(item, ClipItem):
-                item._selected_edit_edge = edges.get(clip_id)
-                item.update()
+                edge = edges.get(clip_id)
+                if item._selected_edit_edge != edge:
+                    item._selected_edit_edge = edge
+                    item.update()
         for handle in self._roll_handles.values():
-            handle._is_selected = (
+            selected = (
                 edges.get(handle.left_clip_id) == "right"
                 and edges.get(handle.right_clip_id) == "left"
             )
-            handle.update()
+            if handle._is_selected != selected:
+                handle._is_selected = selected
+                handle.update()
 
     def _on_clip_clicked(self, clip_id: str, track_id: str) -> None:
         """Select a linked editing unit; Option-click temporarily isolates a side."""
@@ -4805,6 +4885,7 @@ class TimelineView(QGraphicsView):
 
     def _configure_clip_presentation(self, item: ClipItem) -> None:
         """Project view-only preferences onto newly created graphics items."""
+        item.set_active_tool(self._active_tool)
         item._thumbnail_display_mode = self._thumbnail_display_mode
         item._waveforms_visible = self._waveforms_visible
         item._position_lock_enabled = self._position_lock_enabled
@@ -4970,7 +5051,7 @@ class TimelineView(QGraphicsView):
                         self.source_patch_track_id(header.track_type)
                         == header.track_id)
 
-    def set_track_height_for_type(self, track_type: str, height: int) -> None:
+    def set_track_height_for_type(self, track_type: str, height: int, *, relative: bool = False) -> None:
         """Resize a track group in one layout pass using the shared engine."""
         from src.features.edit.ui.timeline_layout import (
             MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
@@ -4986,9 +5067,11 @@ class TimelineView(QGraphicsView):
         if self._timeline is None:
             return
         lo, hi = limits[track_type]
-        clamped = max(lo, min(hi, int(height)))
         tracks = getattr(self._timeline, f"{track_type}_tracks")
         for track in tracks:
+            current = self._layout_state.track_heights.get(track.track_id, self._default_track_height(track))
+            requested = current + height if relative else height
+            clamped = max(lo, min(hi, int(requested)))
             self._layout_state.track_heights[track.track_id] = clamped
             self._layout_engine.set_track_height(track.track_id, clamped)
         self._layout_track_items()
@@ -5066,6 +5149,30 @@ class TimelineView(QGraphicsView):
         # Hide indicator when snap disabled
         if not enabled and self._snap_indicator:
             self._snap_indicator.hide_indicator()
+        session = self._current_drag_session
+        if session is not None and session.pointer_target is not None:
+            clip_id = session.primary_clip_id
+            self._on_clip_moved(
+                clip_id, session.original_track_ids[clip_id], *session.pointer_target,
+            )
+        edge = self._edge_trim
+        if edge is not None and edge.pointer_target is not None:
+            clip = edge.members[0]
+            self._preview_edge_trim(
+                clip.clip_id, clip.track_id, edge.side, edge.pointer_target, edge.bypass_snap,
+            )
+        ripple = self._ripple_trim_drag
+        if ripple is not None and ripple.pointer_boundary is not None:
+            clip = ripple.members[0].clip
+            self._preview_ripple_trim(
+                clip.clip_id, clip.track_id, ripple.side,
+                ripple.pointer_boundary, ripple.bypass_snap,
+            )
+        if self._playhead_dragging and self._scrub_pointer is not None:
+            self._update_playhead_scrub(*self._scrub_pointer)
+        roll = self._roll_preview_state
+        if roll is not None and roll["pointer_delta"] is not None:
+            self._on_roll_trim_dragged(*roll["pointer_delta"])
 
     def set_snap_threshold(self, threshold_frames: int) -> None:
         """
@@ -5213,7 +5320,7 @@ class TimelineView(QGraphicsView):
         try:
             virtual = _dc_replace(
                 clip, timeline_start=0,
-                timeline_duration=max(1, int(offset_from_clip_start) + 1))
+                timeline_duration=max(clip.timeline_duration, int(offset_from_clip_start) + 1))
             return int(virtual.timeline_to_source_frame(
                 int(offset_from_clip_start)))
         except (ValueError, ZeroDivisionError, OverflowError):
@@ -5350,9 +5457,6 @@ class TimelineView(QGraphicsView):
             if new_duration <= 0:
                 return
             src_start, src_dur = clip.with_left_edge_source_values(new_edge)
-            edited = _dc_replace(
-                clip, timeline_start=0, timeline_duration=new_duration,
-                source_start=src_start, source_duration=src_dur)
             left_offset = 0
             neighbor = next((
                 c for c in track.clips
@@ -5370,9 +5474,6 @@ class TimelineView(QGraphicsView):
             if new_duration <= 0:
                 return
             src_start, src_dur = clip.with_right_edge_source_values(new_duration)
-            edited = _dc_replace(
-                clip, timeline_start=0, timeline_duration=new_duration,
-                source_start=src_start, source_duration=src_dur)
             left_offset = new_duration - 1
             neighbor = next((
                 c for c in track.clips
@@ -5383,6 +5484,15 @@ class TimelineView(QGraphicsView):
                 if neighbor is not None else None)
             tc = self._tc(new_edge - 1)
         try:
+            edited = _dc_replace(
+                clip, timeline_start=0, timeline_duration=new_duration,
+                source_start=src_start, source_duration=src_dur,
+                fade_in_duration=min(clip.fade_in_duration, new_duration),
+                fade_out_duration=min(clip.fade_out_duration, new_duration),
+                **clip.source_window_mapping_updates(
+                    src_start, src_dur, delta if edge == "left" else 0,
+                ),
+            )
             monitor = self._trim_monitor()
             item = self._items_map.get(clip.clip_id)
             max_frames = getattr(item, "_max_source_frames", 0) or 0
@@ -5432,131 +5542,88 @@ class TimelineView(QGraphicsView):
             logger.debug("Slip monitor update skipped: %s", e)
 
     def _on_clip_numeric_trim_requested(self, clip_id: str, track_id: str) -> None:
-        """P1-04 数值 trim：对话框输入帧增量（含对齐标记），执行命令。"""
+        """Open frame-accurate trim with bounds for the actual selected edge."""
+        from src.features.edit.core.linked_roll import (
+            build_linked_roll_command, linked_roll_bounds, linked_roll_pairs,
+        )
         from src.features.edit.core.timeline_ops import (
-            build_numeric_trim_command,
-            clip_handle_headroom,
-            nearest_marker_frame,
-            numeric_trim_bounds,
+            build_linked_numeric_trim_command, build_numeric_trim_command,
+            clip_handle_headroom, nearest_marker_frame, numeric_trim_bounds,
         )
         from src.features.edit.ui.trim_numeric_dialog import TrimNumericDialog
-        if self._timeline is None:
-            return
-        track = self._timeline.get_track_by_id(track_id)
+
+        sequence = self._timeline
+        track = sequence.get_track_by_id(track_id) if sequence is not None else None
         clip = track.get_clip_by_id(clip_id) if track is not None else None
-        if clip is None or track is None:
+        if clip is None:
             return
-        if self._is_track_locked(track_id):  # 审计修复：锁轨不绕过
-            # AUD-21408: TimelineView has no status_bar attribute — the old
-            # getattr() path never showed anything.  Emit the existing
-            # status_message_requested signal like the other feedback paths.
-            self.status_message_requested.emit(
-                I18N.tr("timeline.track_locked", "Track is locked")
-            )
+        linked_enabled = self._effective_linked_selection()
+        partner = self._get_reciprocal_linked_clip(clip) if linked_enabled else None
+        if track.is_locked or (partner is not None and self._is_track_locked(partner.track_id)):
+            self.status_message_requested.emit(I18N.tr("timeline.track_locked", "Track is locked"))
             return
-        max_frames = self._get_asset_duration(clip.asset_id)
+        max_frames = self._roll_clip_limit(clip)
+        partner_limit = self._roll_clip_limit(partner) if partner is not None else None
+        right = next((member for member in track.clips
+                      if member.clip_id != clip_id and member.timeline_start == clip.timeline_end), None)
 
-        has_right = any(
-            other.clip_id != clip.clip_id
-            and other.timeline_start >= clip.timeline_start + clip.timeline_duration
-            for other in track.clips
-        )
-
-        def _bounds_for(edge: str, mode: str):
+        def bounds_for(edge: str, mode: str) -> tuple[int, int]:
             if mode == "roll":
-                right = None
-                clip_end = clip.timeline_start + clip.timeline_duration
-                for other in track.clips:
-                    if (other.clip_id != clip.clip_id
-                            and other.timeline_start >= clip_end
-                            and (right is None
-                                 or other.timeline_start < right.timeline_start)):
-                        right = other
                 if right is None:
-                    return (0, 0)
-                from src.features.edit.core.linked_roll import (
-                    linked_roll_bounds, linked_roll_pairs,
-                )
+                    return 0, 0
                 try:
-                    pairs = linked_roll_pairs(
-                        self._timeline, clip.clip_id, right.clip_id,
-                        self._linked_selection_enabled and not self._audio_only)
+                    pairs = linked_roll_pairs(sequence, clip_id, right.clip_id, linked_enabled)
                     return linked_roll_bounds(pairs, self._roll_clip_limit)
                 except ValueError:
-                    return (0, 0)
-            return numeric_trim_bounds(
-                track, clip, edge, max_source_frames=max_frames,
-                ripple=(mode == "ripple"),
-            )
+                    return 0, 0
+            side = "left" if edge == "in" else "right"
+            lower, upper = numeric_trim_bounds(track, clip, side, max_frames, ripple=mode == "ripple")
+            if partner is not None:
+                partner_track = sequence.get_track_by_id(partner.track_id)
+                lo, hi = numeric_trim_bounds(
+                    partner_track, partner, side, partner_limit, ripple=mode == "ripple",
+                )
+                lower, upper = max(lower, lo), min(upper, hi)
+            return lower, upper
 
         dialog = TrimNumericDialog(
-            self.window(),
-            bounds_for=_bounds_for,
+            self.window(), bounds_for=bounds_for,
             headroom=clip_handle_headroom(clip, max_frames),
-            duration_frames=int(clip.timeline_duration),
-            can_roll=has_right,
-            markers_available=bool(self._timeline.markers),
+            duration_frames=clip.timeline_duration, can_roll=right is not None,
+            markers_available=bool(sequence.markers),
         )
-        if dialog.exec() != TrimNumericDialog.DialogCode.Accepted:
+        if dialog.exec() != TrimNumericDialog.DialogCode.Accepted or sequence is not self._timeline:
             return
         edge, mode, delta, align_marker = dialog.values()
+        if align_marker:
+            edge_frame = clip.timeline_start if edge == "in" else clip.timeline_end
+            marker = nearest_marker_frame(sequence.markers, edge_frame, 1 if delta >= 0 else -1)
+            if marker is not None:
+                delta = marker - edge_frame
 
-        # 对齐到最近标记：目标边缘吸附到方向上最近标记帧
-        if align_marker and self._timeline.markers:
-            edge_frame = (
-                clip.timeline_start if edge == "in"
-                else clip.timeline_start + clip.timeline_duration)
-            direction = 1 if delta >= 0 else -1
-            marker_frame = nearest_marker_frame(
-                self._timeline.markers, edge_frame, direction)
-            if marker_frame is not None:
-                delta = marker_frame - edge_frame
-
-        if mode == "roll":
-            from src.features.edit.core.linked_roll import build_linked_roll_command
-            right = next((candidate for candidate in track.clips
-                          if candidate.clip_id != clip_id
-                          and candidate.timeline_start == clip.timeline_end), None)
-            if right is None:
-                return
-            try:
-                command, clamped = build_linked_roll_command(
-                    self._timeline, clip_id, right.clip_id,
-                    delta, self._roll_clip_limit, self._linked_selection_enabled and not self._audio_only)
-            except ValueError as exc:
-                logger.warning("Numeric Roll rejected: %s", exc)
-                self.status_message_requested.emit(str(exc))
-                return
-        else:
-            command, clamped = build_numeric_trim_command(
-                self._timeline, track_id, clip_id,
-                "left" if edge == "in" else "right", delta,
-                mode=mode, max_source_frames=max_frames,
-            )
-        if command is None:
-            return
-        # 审计修复：linked 联动走 B19 域级共同边界计划（UI/service 同一
-        # 语义）；linked 共同钳制失败整体拒绝
-        if self._linked_selection_enabled and not self._audio_only:
-            linked = self._timeline.get_reciprocal_linked_clip(clip_id)
-            if linked is not None and mode != "roll":
-                from src.features.edit.core.timeline_ops import (
-                    build_linked_numeric_trim_command,
-                )
-                linked_command, _common = build_linked_numeric_trim_command(
-                    self._timeline, track_id, clip_id,
-                    "left" if edge == "in" else "right", clamped,
-                    mode=mode, max_source_frames=max_frames,
-                    linked_max_source_frames=(
-                        self._get_asset_duration(linked.asset_id)),
-                    mismatch="reject",
-                )
-                if linked_command is None:
-                    self.status_message_requested.emit(I18N.tr(
-                        "timeline.linked_trim_limit", "Linked clips cannot be trimmed by the same amount."))
+        side = "left" if edge == "in" else "right"
+        try:
+            if mode == "roll":
+                if right is None:
                     return
-                command = linked_command
-        self._execute_command(command)
+                command, _ = build_linked_roll_command(
+                    sequence, clip_id, right.clip_id, delta, self._roll_clip_limit, linked_enabled,
+                )
+            elif partner is not None:
+                command, _ = build_linked_numeric_trim_command(
+                    sequence, track_id, clip_id, side, delta, mode=mode,
+                    max_source_frames=max_frames, linked_max_source_frames=partner_limit,
+                    mismatch="clamp",
+                )
+            else:
+                command, _ = build_numeric_trim_command(
+                    sequence, track_id, clip_id, side, delta, mode=mode, max_source_frames=max_frames,
+                )
+            if command is not None:
+                self._execute_command(command)
+        except (TimelineOperationError, ValueError) as exc:
+            logger.warning("Numeric trim rejected: %s", exc)
+            self.status_message_requested.emit(str(exc))
 
     # ------------------------------------------------------------------
     # P1-02: 嵌套序列（Nested Sequence / Compound Clip）
@@ -5700,7 +5767,11 @@ class TimelineView(QGraphicsView):
                         "timeline.linked_trim_limit", "Linked clips cannot be trimmed by the same amount."))
                     return False
                 command = linked_command
-        self._execute_command(command)
+        try:
+            self._execute_command(command)
+        except (TimelineOperationError, ValueError) as exc:
+            self.status_message_requested.emit(str(exc))
+            return False
         return True
 
     def _nudge_selected_edit_point(self, delta_frames: int) -> None:
@@ -5772,7 +5843,7 @@ class TimelineView(QGraphicsView):
 
         Zoom:
         - Z: Zoom in
-        - Shift+Z: Fit all timeline content to about 80% of the viewport
+        - Shift+Z: Toggle fit and the previous view
         - F: Zoom fit all (show entire timeline)
         - Shift+F: Zoom fit selection
         - Ctrl+Z: Undo
@@ -5842,12 +5913,12 @@ class TimelineView(QGraphicsView):
                     else FRAME_STEP
                 if key == Qt.Key.Key_L:
                     self._on_roll_trim_dragged(
-                        int(self._roll_preview_state.get("delta", 0)) + step)
+                        int(self._roll_preview_state.get("delta", 0)) + step, snap=False)
                     event.accept()
                     return
                 if key == Qt.Key.Key_J:
                     self._on_roll_trim_dragged(
-                        int(self._roll_preview_state.get("delta", 0)) - step)
+                        int(self._roll_preview_state.get("delta", 0)) - step, snap=False)
                     event.accept()
                     return
                 if key == Qt.Key.Key_K:
@@ -5900,6 +5971,11 @@ class TimelineView(QGraphicsView):
             self._move_playhead(step)
             return
 
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_Down) and modifiers == Qt.KeyboardModifier.AltModifier:
+            self._nudge_selected_clips_between_tracks(up=key == Qt.Key.Key_Up)
+            event.accept()
+            return
+
         # Up arrow: Jump to previous clip boundary
         if key == Qt.Key.Key_Up:
             self._jump_to_prev_clip_boundary()
@@ -5946,11 +6022,19 @@ class TimelineView(QGraphicsView):
             self.zoom_fit_selection()
             return
 
-        # Shift+Z: fit all timeline content with breathing room.  Keep this
-        # before the plain Z tool shortcut so Shift+Z never switches to the
-        # Zoom tool or falls through to a parent widget.
-        if key == Qt.Key.Key_Z and modifiers == Qt.KeyboardModifier.ShiftModifier:
-            self.zoom_fit_content(CONTENT_FIT_FILL_RATIO)
+        # Standalone timeline views receive the key directly. The main
+        # window's corresponding menu action calls the same toggle.
+        if matches_key_event(event, "edit.timeline.fit", "Shift+Z"):
+            self.toggle_zoom_fit()
+            event.accept()
+            return
+        if matches_key_event(event, "edit.timeline.zoom_in", "Ctrl+="):
+            self.zoom_in()
+            event.accept()
+            return
+        if matches_key_event(event, "edit.timeline.zoom_out", "Ctrl+-"):
+            self.zoom_out()
+            event.accept()
             return
 
         # ==================== Tool Shortcuts ====================
@@ -6002,7 +6086,7 @@ class TimelineView(QGraphicsView):
 
         # Escape: Cancel interaction if active, otherwise clear selection
         elif key == Qt.Key.Key_Escape:
-            if not self._interaction.is_idle:
+            if self._playhead_dragging or not self._interaction.is_idle:
                 self._cancel_current_interaction()
             else:
                 self._clear_selection()
@@ -6051,7 +6135,7 @@ class TimelineView(QGraphicsView):
         INT-03：平移会话同样在此收尾并恢复光标。
         Trim Monitor 是不接收焦点的 viewer 子控件；真正失焦继续取消。
         """
-        if self._interaction.is_dragging:
+        if self._playhead_dragging or self._interaction.is_dragging:
             self._cancel_current_interaction()
         elif self._interaction.state == InteractionState.PANNING:
             if self._pan_prev_cursor is not None:
@@ -6062,7 +6146,7 @@ class TimelineView(QGraphicsView):
 
     def _on_application_focus_window_changed(self, window: Any) -> None:
         """Cancel a clip gesture when another real window becomes active."""
-        if window is None or not self._interaction.is_dragging:
+        if window is None or not (self._playhead_dragging or self._interaction.is_dragging):
             return
         if window is self.window().windowHandle():
             return
@@ -6070,7 +6154,9 @@ class TimelineView(QGraphicsView):
 
     def _on_application_state_changed(self, state: Qt.ApplicationState) -> None:
         """A switch to another application also ends a pending gesture."""
-        if state != Qt.ApplicationState.ApplicationActive and self._interaction.is_dragging:
+        if state != Qt.ApplicationState.ApplicationActive and (
+            self._playhead_dragging or self._interaction.is_dragging
+        ):
             self._cancel_current_interaction()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -6190,7 +6276,9 @@ class TimelineView(QGraphicsView):
                 super().mousePressEvent(event)
                 return
 
-        if self._active_tool == EditTool.BLADE:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+        elif self._active_tool == EditTool.BLADE:
             # Blade tool: split clip at click position
             self._interaction.begin(
                 InteractionState.SPLITTING,
@@ -6203,10 +6291,12 @@ class TimelineView(QGraphicsView):
                 InteractionState.ZOOMING,
                 self.mapToScene(event.pos()),
             )
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                self.zoom_out()
-            else:
-                self.zoom_in()
+            step = 1.0 / ZOOM_STEP if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else ZOOM_STEP
+            self._set_anchored_zoom(
+                self._pixels_per_frame * step,
+                (scene_pos.x() - TRACK_HEADER_WIDTH) / self._pixels_per_frame,
+                event.pos().x(),
+            )
         else:
             # Check if clicking on a clip item
             scene_pos = self.mapToScene(event.pos())
@@ -6297,15 +6387,17 @@ class TimelineView(QGraphicsView):
             return False
 
         frame = self._frame_from_scene_x(scene_pos.x())
+        bypass_snap = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         self._playhead_dragging = True
-        self._playhead_drag_start_frame = self._playhead_frame
+        self._scrub_pointer = (frame, bypass_snap)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
 
         if self._playhead_item:
             self._playhead_item.set_dragging(True)
 
-        self.scrub_started.emit(frame)
-        self.set_playhead(frame)
+        snapped_frame = self._snap_scrub_frame(frame, bypass_snap)
+        self.scrub_started.emit(snapped_frame)
+        self.set_playhead(snapped_frame)
         event.accept()
         logger.debug(f"Ruler scrub started at frame {frame}")
         return True
@@ -6403,7 +6495,7 @@ class TimelineView(QGraphicsView):
 
         # Start playhead drag
         self._playhead_dragging = True
-        self._playhead_drag_start_frame = self._playhead_frame
+        self._scrub_pointer = None
         self.setCursor(Qt.CursorShape.SizeHorCursor)
 
         # Set dragging state on playhead item (shows timecode label)
@@ -6428,22 +6520,32 @@ class TimelineView(QGraphicsView):
         # playhead drag is a horizontal timeline operation.
         self.setCursor(Qt.CursorShape.SizeHorCursor)
 
-        frame = self._frame_from_scene_x(scene_pos.x())
+        self._update_playhead_scrub(
+            self._frame_from_scene_x(scene_pos.x()),
+            bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier),
+        )
 
-        # Update playhead position (live preview)
-        self.set_playhead(frame)
-        self.scrub_moved.emit(frame)
+    def _snap_scrub_frame(self, frame: int, bypass_snap: bool) -> int:
+        """Snap a ruler point without considering the playhead itself."""
+        if not bypass_snap and self._timeline is not None:
+            return self._snap_frame(frame, (), exclude_types={SnapPointType.PLAYHEAD})[0]
+        if self._snap_indicator:
+            self._snap_indicator.hide_indicator()
+        return frame
 
-        logger.debug(f"Playhead dragged to frame {frame}")
+    def _update_playhead_scrub(self, frame: int, bypass_snap: bool) -> None:
+        self._scrub_pointer = (frame, bypass_snap)
+        frame = self._snap_scrub_frame(frame, bypass_snap)
+        if frame != self._playhead_frame:
+            self.set_playhead(frame)
+            self.scrub_moved.emit(frame)
 
     def _finish_playhead_drag(self, *, cancelled: bool = False) -> None:
         """Complete playhead drag."""
         self._playhead_dragging = False
-
-        # Clear dragging state on playhead item
-        if self._playhead_item:
-            self._playhead_item.set_dragging(False)
-        self._refresh_playhead_visual()
+        self._scrub_pointer = None
+        self._stop_drag_scroll()
+        self._on_ruler_scrub_finished()
 
         self._interaction.finish()
         signal = self.scrub_cancelled if cancelled else self.scrub_finished
@@ -6533,7 +6635,7 @@ class TimelineView(QGraphicsView):
         scene_pos = self.mapToScene(event.pos())
 
         # Only allow resize in header area
-        if scene_pos.x() >= TRACK_HEADER_WIDTH:
+        if event.position().x() >= TRACK_HEADER_WIDTH:
             return False
 
         self._configure_layout_engine()
@@ -6637,7 +6739,7 @@ class TimelineView(QGraphicsView):
                 self.setCursor(Qt.CursorShape.SizeVerCursor)
                 return
             # Track boundary resize only in header area
-            if scene_pos.x() < TRACK_HEADER_WIDTH:
+            if self.mapFromScene(scene_pos).x() < TRACK_HEADER_WIDTH:
                 boundary = self._layout_engine.track_boundary_at_y(scene_pos.y())
                 if boundary is not None:
                     track = self._timeline.get_track_by_id(boundary[0])
@@ -6658,6 +6760,54 @@ class TimelineView(QGraphicsView):
             item = item.parentItem()
         if self.cursor().shape() != Qt.CursorShape.ArrowCursor:
             self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _drag_scroll_step(self, x: int) -> int:
+        left = TRACK_HEADER_WIDTH + DRAG_SCROLL_MARGIN_PX
+        right = self.viewport().width() - DRAG_SCROLL_MARGIN_PX
+        if left >= right:
+            return 0
+        if x < left:
+            return -min(DRAG_SCROLL_MARGIN_PX, left - x)
+        return min(DRAG_SCROLL_MARGIN_PX, max(0, x - right))
+
+    def _update_drag_scroll(self, event: QMouseEvent) -> None:
+        item = self._items_map.get(self._interaction.primary_clip_id)
+        active = self._playhead_dragging or (isinstance(item, ClipItem) and item.can_scroll_during_drag())
+        if not active or not self._drag_scroll_step(event.pos().x()):
+            self._stop_drag_scroll()
+            return
+        self._drag_scroll_pointer = (event.pos(), event.modifiers())
+        if not self._drag_scroll_timer.isActive():
+            self._drag_scroll_timer.start()
+
+    def _stop_drag_scroll(self) -> None:
+        self._drag_scroll_timer.stop()
+        self._drag_scroll_pointer = None
+
+    def _scroll_held_drag(self) -> None:
+        if self._drag_scroll_pointer is None:
+            return
+        item = self._items_map.get(self._interaction.primary_clip_id)
+        clip_dragging = isinstance(item, ClipItem) and item.can_scroll_during_drag()
+        if not self._playhead_dragging and not clip_dragging:
+            self._stop_drag_scroll()
+            return
+        point, modifiers = self._drag_scroll_pointer
+        bar = self.horizontalScrollBar()
+        before = bar.value()
+        bar.setValue(before + self._drag_scroll_step(point.x()))
+        if before == bar.value():
+            self._stop_drag_scroll()
+            return
+        scene_pos = self.mapToScene(point)
+        if self._playhead_dragging:
+            self._update_playhead_scrub(
+                self._frame_from_scene_x(scene_pos.x()),
+                bool(modifiers & Qt.KeyboardModifier.ShiftModifier),
+            )
+        elif clip_dragging:
+            self._interaction.update_pos(scene_pos)
+            item.update_scrollable_drag(scene_pos, modifiers)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Handle mouse move for rubber band selection, playhead drag, and splitter drag."""
@@ -6693,6 +6843,7 @@ class TimelineView(QGraphicsView):
             InteractionState.DRAGGING_RULER,
         ):
             self._handle_playhead_drag(event)
+            self._update_drag_scroll(event)
             return
 
         # Update cursor for splitter hover
@@ -6708,9 +6859,12 @@ class TimelineView(QGraphicsView):
             self._rubber_band.setGeometry(rect)
         else:
             super().mouseMoveEvent(event)
+            self._update_drag_scroll(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         """Handle mouse release to complete rubber band selection, playhead drag, or splitter drag."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._stop_drag_scroll()
         # INT-03：结束平移会话并恢复光标
         if self._interaction.state == InteractionState.PANNING and event.button() in (
             Qt.MouseButton.LeftButton,
@@ -6815,11 +6969,14 @@ class TimelineView(QGraphicsView):
         selected_clip_ids: list[str] = []
         selected_track_ids: list[str] = []
 
-        for clip_id, item in self._items_map.items():
-            if isinstance(item, (ClipItem, SubtitleClipItem)):
-                # Check if item intersects with selection rect
-                item_rect = item.sceneBoundingRect()
-                if selection_rect.intersects(item_rect):
+        if not selection_rect.isEmpty():
+            hits = {
+                item.clip_id for item in self._scene.items(
+                    selection_rect, Qt.ItemSelectionMode.IntersectsItemShape,
+                ) if isinstance(item, (ClipItem, SubtitleClipItem))
+            }
+            for clip_id, item in self._items_map.items():
+                if clip_id in hits:
                     selected_clip_ids.append(clip_id)
                     selected_track_ids.append(item.track_id)
 
@@ -6910,13 +7067,7 @@ class TimelineView(QGraphicsView):
     def _handle_blade_click(self, event: QMouseEvent) -> None:
         """Handle blade tool click to split clip.
 
-        P5a: Uses layout engine hit-test on Y coordinate to determine which
-        track was clicked. Only splits clips on THAT track. Hold Shift to
-        split all tracks at the click frame (mirroring split-all behaviour).
-
-        INT-04：仅左键执行切割——右键保留给上下文菜单、中键平移；局部
-        刀片与 Shift 全轨一样尊重轨道锁；轨道解析失败时不再 fallback
-        逐轨扫描（可能误切别轨），记诊断直接返回。
+        Hold Shift to split all tracks. Option temporarily isolates a linked clip.
         """
         if self._timeline is None:
             return
@@ -6932,7 +7083,7 @@ class TimelineView(QGraphicsView):
         if frame < 0:
             return
 
-        modifiers = QApplication.keyboardModifiers()
+        modifiers = event.modifiers()
         split_all = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
 
         if split_all:
@@ -6957,11 +7108,26 @@ class TimelineView(QGraphicsView):
         if track is None:
             return
         clip = track.get_clip_at(frame)
-        if clip is not None and clip.timeline_start < frame < clip.timeline_end:
-            if self._split_hits_crossfade(track, clip.clip_id, frame):
-                return
-            cmd = SplitClipCommand.create(track.track_id, clip.clip_id, frame)
-            self._execute_command(cmd)
+        if clip is None or not (clip.timeline_start < frame < clip.timeline_end):
+            return
+        if self._split_hits_crossfade(track, clip.clip_id, frame):
+            return
+        command = SplitClipCommand.create(track.track_id, clip.clip_id, frame)
+        if (self._linked_selection_enabled and not self._audio_only
+                and not modifiers & Qt.KeyboardModifier.AltModifier):
+            partner = self._get_reciprocal_linked_clip(clip)
+            if partner is not None and partner.timeline_start < frame < partner.timeline_end:
+                partner_track = self._timeline.get_track_by_id(partner.track_id)
+                if partner_track is not None and not partner_track.is_locked:
+                    if self._split_hits_crossfade(partner_track, partner.clip_id, frame):
+                        return
+                    command = MacroCommand.create("Split linked clips", [
+                        command, SplitClipCommand.create(partner.track_id, partner.clip_id, frame),
+                    ])
+        try:
+            self._execute_command(command)
+        except ValueError as exc:
+            self.status_message_requested.emit(str(exc))
 
     def _split_hits_crossfade(self, track: EditTrack, clip_id: str, frame: int) -> bool:
         if any(
@@ -7171,7 +7337,7 @@ class TimelineView(QGraphicsView):
 
             if changes.full_reload_needed:
                 # Full reload required (track structure changed, FPS changed, etc.)
-                self.load_timeline(new_timeline)
+                self.load_timeline(new_timeline, preserve_viewport=True)
             else:
                 # Incremental update for better performance
                 self.update_timeline_incremental(changes)
@@ -7256,7 +7422,7 @@ class TimelineView(QGraphicsView):
             # APP-01：undo 恢复内容快照但 revision 继续单调 +1，不回旧值
             new_timeline = self._bump_revision_at_commit(new_timeline)
             self._timeline = new_timeline
-            self.load_timeline(new_timeline)
+            self.load_timeline(new_timeline, preserve_viewport=True)
             # Emit timeline_changed so MainWindow/EditPage stay synchronized
             self._publish_timeline_history_change(new_timeline, transaction)
 
@@ -7277,7 +7443,7 @@ class TimelineView(QGraphicsView):
         if new_timeline is not None:
             new_timeline = self._bump_revision_at_commit(new_timeline)
             self._timeline = new_timeline
-            self.load_timeline(new_timeline)
+            self.load_timeline(new_timeline, preserve_viewport=True)
             # Emit timeline_changed so MainWindow/EditPage stay synchronized
             self._publish_timeline_history_change(new_timeline, transaction)
 
@@ -8178,6 +8344,7 @@ class TimelineView(QGraphicsView):
         item.drag_finished.connect(self._on_drag_finished)
         item.trim_left_finished.connect(self._on_trim_left_finished)
         item.trim_right_finished.connect(self._on_trim_right_finished)
+        item.rate_stretch_preview.connect(self._on_rate_stretch_preview)
         item.rate_stretch_finished.connect(self._on_rate_stretch_finished)
         item.retime_stretch_finished.connect(self._on_retime_stretch_finished)
         item.retime_action_requested.connect(self._on_retime_action_requested)
@@ -8467,10 +8634,9 @@ class TimelineView(QGraphicsView):
 
     def _preview_scoped_marker_move(
         self,
-        clip_id: str,
-        old_start: int,
-        new_start: int,
-        target_track_id: str,
+        markers: Iterable[TimelineMarker],
+        delta: int,
+        track_y: float,
     ) -> None:
         """Move scoped MarkerItems during a clip drag preview.
 
@@ -8478,24 +8644,12 @@ class TimelineView(QGraphicsView):
         the visual marker in sync during the drag, then resync from the model
         when the drag finishes or is rejected.
         """
-        if self._timeline is None:
-            return
-
-        delta = new_start - old_start
-        preview_marker = None
-        for marker in self._timeline.markers:
-            if marker.clip_id != clip_id:
-                continue
+        for marker in markers:
             marker_item = self._marker_items.get(marker.marker_id)
             if marker_item is None:
                 continue
-            preview_marker = replace(
-                marker,
-                frame=max(0, marker.frame + delta),
-                track_id=target_track_id,
-            )
-            marker_item.update_marker(frame=preview_marker.frame)
-            marker_item.update_target_y(self._marker_target_y(preview_marker))
+            marker_item.update_marker(frame=max(0, marker.frame + delta))
+            marker_item.update_target_y(track_y + MarkerItem.CLIP_MARKER_INSET_Y)
 
     def _sync_marker_items_to_timeline(self) -> None:
         """Restore MarkerItem geometry from the committed timeline model."""
@@ -8722,58 +8876,55 @@ class TimelineView(QGraphicsView):
         scene_y: float,
     ) -> None:
         """Implementation of _on_clip_moved with error handling."""
-        # Check for Shift key to temporarily disable snap (参考 kdenlive)
-        modifiers = QApplication.keyboardModifiers()
-        self._snap_temporarily_disabled = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-
         item = self._items_map.get(clip_id)
         if not (item and isinstance(item, ClipItem)):
             return
 
         # P2-2 / P3 / P4: Create drag session on first move if not yet created
         if self._current_drag_session is None:
-            clip = self._timeline.get_clip_by_id(clip_id)
-            linked_ids: list[str] = []
-            selected_ids: list[str] = []
-            original_positions: dict[str, int] = {clip_id: item._start_frame}
-            original_track_ids: dict[str, str] = {clip_id: track_id}
-            current_track_ids: dict[str, str] = {clip_id: track_id}
-
-            # Collect linked clip (if linked selection is enabled)
-            linked_clip_obj = self._get_reciprocal_linked_clip(clip)
-            if linked_clip_obj is not None and not self._audio_only and (
-                    self._linked_selection_enabled if item._copy_mode else self._effective_linked_selection()):
-                linked_ids.append(linked_clip_obj.clip_id)
-                linked_item = self._items_map.get(linked_clip_obj.clip_id)
-                if linked_item and isinstance(linked_item, ClipItem):
-                    original_positions[linked_clip_obj.clip_id] = linked_item._start_frame
-                    original_track_ids[linked_clip_obj.clip_id] = linked_item._track_id
-                    current_track_ids[linked_clip_obj.clip_id] = linked_item._track_id
-
-            # P3: Collect multi-selected clips (excluding primary and linked)
-            if len(self._selection.selected_clip_ids) > 1:
-                for sel_id in self._selection.selected_clip_ids:
-                    if sel_id == clip_id or sel_id in linked_ids:
+            selected = self._selection.selected_clip_ids
+            member_ids = dict.fromkeys((clip_id, *selected) if clip_id in selected else (clip_id,))
+            linked_ids: set[str] = set()
+            include_links = (self._linked_selection_enabled if item._copy_mode
+                             else self._effective_linked_selection())
+            if include_links and not self._audio_only:
+                for member_id in tuple(member_ids):
+                    if member_id in linked_ids:
                         continue
-                    sel_item = self._items_map.get(sel_id)
-                    if sel_item and isinstance(sel_item, ClipItem):
-                        selected_ids.append(sel_id)
-                        original_positions[sel_id] = sel_item._start_frame
-                        original_track_ids[sel_id] = sel_item._track_id
-                        current_track_ids[sel_id] = sel_item._track_id
+                    partner = self._timeline.get_reciprocal_linked_clip(member_id)
+                    if partner is not None:
+                        linked_ids.update((member_id, partner.clip_id))
+                        member_ids[partner.clip_id] = None
 
+            original_positions: dict[str, int] = {}
+            original_track_ids: dict[str, str] = {}
+            edge_offsets: dict[int, None] = {}
+            for member_id in member_ids:
+                member_item = self._items_map.get(member_id)
+                if isinstance(member_item, ClipItem):
+                    original_positions[member_id] = member_item._start_frame
+                    original_track_ids[member_id] = member_item._track_id
+                    offset = member_item._start_frame - item._start_frame
+                    edge_offsets[offset] = None
+                    edge_offsets[offset + member_item._duration_frames] = None
             self._current_drag_session = ClipDragSession(
                 primary_clip_id=clip_id,
-                linked_clip_ids=linked_ids,
-                selected_clip_ids=selected_ids,
+                linked_clip_ids=[cid for cid in original_positions if cid != clip_id and cid in linked_ids],
+                selected_clip_ids=[cid for cid in original_positions if cid != clip_id and cid not in linked_ids],
                 start_frame=item._start_frame,
                 original_positions=original_positions,
                 original_track_ids=original_track_ids,
-                current_track_ids=current_track_ids,
+                current_track_ids=dict(original_track_ids),
                 copy_mode=bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.AltModifier),
+                snap_edge_offsets=tuple(edge_offsets),
+                minimum_delta=-min(original_positions.values()),
             )
             self._configure_layout_engine()
             self._cache_drag_track_geometry(self._current_drag_session)
+            if not self._current_drag_session.copy_mode:
+                for marker in self._timeline.markers:
+                    if marker.clip_id in original_positions:
+                        self._current_drag_session.scoped_markers.setdefault(marker.clip_id, []).append(marker)
             # Alt-drag copy: create ghosts so originals stay in place.
             if self._current_drag_session.copy_mode:
                 self._create_alt_copy_ghosts(self._current_drag_session)
@@ -8783,34 +8934,11 @@ class TimelineView(QGraphicsView):
         # forcing a full viewport repaint here made pointer feedback lag.
         self._set_drag_render_mode(True)
 
-        # Apply snap if enabled (visual preview)
-        # 注意：_snap_frame 内部会检查 _snap_temporarily_disabled
         session = self._current_drag_session
-        if self._snap_enabled:
-            # SnapManager already maintains an indexed point set from the
-            # loaded timeline. Avoid rebuilding the legacy tuple on the first
-            # move; that scan made the beginning of a drag feel sticky.
-            if self._snap_manager is None and not session.snap_points:
-                session.snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-            # AUD-21402: SnapManager 路径必须显式排除自身，否则移动中的
-            # 片段把自身原始入/出点当作吸附点（微小拖拽被吸回原位）。
-            snapped_start, did_snap = self._snap_frame(
-                new_start, session.snap_points, exclude_source_ids={clip_id})
-            if did_snap:
-                new_start = snapped_start
-
-        # Compute delta from original position stored in session
-        orig_start = session.original_positions.get(clip_id, item._start_frame)
-        delta = new_start - orig_start
-
-        # Boundary constraint: prevent clips from moving before time 00:00
-        # Find the minimum original start position among all members
-        min_old_start = min(session.original_positions.values())
-        if delta < 0:
-            # When moving left, ensure the earliest clip stays at >= 0
-            max_negative_delta = -min_old_start
-            if delta < max_negative_delta:
-                delta = max_negative_delta
+        if session.primary_clip_id != clip_id:
+            return
+        session.pointer_target = (new_start, scene_y)
+        delta = self._snap_clip_drag_delta(session, new_start)
 
         # Use item._media_type which is correctly set based on track type
         # (clips on audio tracks always have _media_type="audio", even if the asset is video+audio)
@@ -8819,73 +8947,17 @@ class TimelineView(QGraphicsView):
 
         # Get current target track based on Y coordinate
         target_track_id = self._resolve_drag_target_track(clip_id, track_id, scene_y, clip_track_type)
+        track_changed = target_track_id != session.current_track_ids[clip_id]
         session.current_track_ids[clip_id] = target_track_id
         item._drag_target_track_id = target_track_id if target_track_id != track_id else ""
 
-        # Keep the whole drag group in sync with the primary's track change so
-        # box-selected / linked clips follow to the target track (applies to
-        # both normal moves and Alt-drag copies). When the primary returns to
-        # its original track, every member snaps back to its own track.
-        if len(session.original_positions) > 1:
-            if target_track_id.startswith("__new_"):
-                # Auto-create zone. Keep ordinary same-type selections on
-                # their original lanes, but resolve a linked A/V partner by
-                # the same visual offset in the opposite direction. If that
-                # destination is outside the current stack, carry a matching
-                # create-zone pseudo target into the commit phase.
-                primary_ids = self._visual_track_ids(clip_track_type)
-                primary_index = (
-                    primary_ids.index(track_id)
-                    if track_id in primary_ids
-                    else 0
-                )
-                virtual_target_index = (
-                    -1
-                    if target_track_id == "__new_video_track_above__"
-                    else len(primary_ids)
-                )
-                visual_offset = virtual_target_index - primary_index
-                linked_ids = set(session.linked_clip_ids)
-                for cid in session.original_positions:
-                    if cid == clip_id:
-                        continue
-                    orig_tid = session.original_track_ids.get(cid, "")
-                    member_track = (
-                        self._timeline.get_track_by_id(orig_tid)
-                        if orig_tid and not orig_tid.startswith("__new_")
-                        else None
-                    )
-                    if member_track is None:
-                        continue
-                    if cid not in linked_ids or member_track.track_type == clip_track_type:
-                        session.current_track_ids[cid] = orig_tid
-                        continue
+        if track_changed and len(session.original_positions) > 1:
+            self._propagate_track_change_to_group(session, track_id, target_track_id)
 
-                    member_ids = self._visual_track_ids(member_track.track_type)
-                    if orig_tid not in member_ids:
-                        session.current_track_ids[cid] = orig_tid
-                        continue
-                    member_index = member_ids.index(orig_tid)
-                    desired_index = member_index - visual_offset
-                    if 0 <= desired_index < len(member_ids):
-                        session.current_track_ids[cid] = member_ids[desired_index]
-                    elif member_track.track_type == "audio" and desired_index >= len(member_ids):
-                        session.current_track_ids[cid] = "__new_audio_track_below__"
-                    elif member_track.track_type == "video" and desired_index < 0:
-                        session.current_track_ids[cid] = "__new_video_track_above__"
-                    else:
-                        session.current_track_ids[cid] = orig_tid
-            elif target_track_id != track_id:
-                self._propagate_track_change_to_group(
-                    session, clip_id, track_id, target_track_id
-                )
-            else:
-                for cid in list(session.current_track_ids):
-                    if cid == clip_id:
-                        continue
-                    session.current_track_ids[cid] = session.original_track_ids.get(
-                        cid, session.current_track_ids[cid]
-                    )
+        preview_key = (delta, target_track_id)
+        if session.last_preview_key == preview_key:
+            return
+        session.last_preview_key = preview_key
 
         # P3: Build MoveGroup with all members
         members: list[MoveGroupMember] = []
@@ -8899,13 +8971,6 @@ class TimelineView(QGraphicsView):
                 new_start=old_s + delta,
                 new_track_id=target_tid if target_tid != orig_tid else "",
             ))
-        preview_key = (
-            delta,
-            tuple((m.clip_id, m.new_start, m.new_track_id or m.track_id) for m in members),
-        )
-        if session.last_preview_key == preview_key:
-            return
-        session.last_preview_key = preview_key
         session.move_group = MoveGroup(
             primary_clip_id=clip_id,
             members=tuple(members),
@@ -8949,6 +9014,7 @@ class TimelineView(QGraphicsView):
             if display_track_id.startswith("__new_"):
                 m_type = "video" if m_item._media_type in ("video", "image", "comp_clip", "motion_graphic") else "audio"
                 m_y = self._compute_new_track_preview_y(display_track_id, m_type)
+                m_item.set_track_height(int(EDIT_SIZES[f"track_h_{m_type}"]))
             else:
                 m_y = self._layout_engine.track_top(display_track_id)
                 m_item.set_track_height(self._layout_engine.track_height(display_track_id))
@@ -8957,24 +9023,75 @@ class TimelineView(QGraphicsView):
                 m_y = 0.0
             m_item.setPos(m_x, m_y)
             m_item.update()
-            preview_track_id = (
-                display_track_id
-                if not display_track_id.startswith("__new_")
-                else member.track_id
-            )
             self._preview_scoped_marker_move(
-                member.clip_id,
-                member.old_start,
-                member.new_start,
-                preview_track_id,
+                session.scoped_markers.get(member.clip_id, ()), delta, m_y,
             )
 
         if not session.copy_mode:
-            self._preview_drag_crossfades(session.move_group.members)
+            self._preview_drag_crossfades(session, session.move_group.members)
 
         # setPos() and update() already invalidate the old/new item bounds.
         # Avoid viewport().update() here: it repaints the entire timeline for
         # every mouse event and defeats the local-update policy above.
+
+    def _snap_clip_drag_delta(self, session: ClipDragSession, pointer_start: int) -> int:
+        """Align the closest moving edge while preserving every member's offset."""
+        delta = max(session.minimum_delta, pointer_start - session.start_frame)
+        if not self._snap_enabled or pointer_start == session.start_frame:
+            if self._snap_indicator:
+                self._snap_indicator.hide_indicator()
+            return delta
+
+        if session.snap_excluded_ids is None:
+            moving_ids = set(session.original_positions)
+            session.snap_excluded_ids = moving_ids.copy()
+            if not session.copy_mode:
+                session.snap_excluded_ids.update(
+                    marker.marker_id for markers in session.scoped_markers.values() for marker in markers
+                )
+                for track_id in set(session.original_track_ids.values()):
+                    track = self._timeline.get_track_by_id(track_id)
+                    if track is not None:
+                        for transition in track.transitions:
+                            owners = {transition.left_clip_id, transition.right_clip_id} - {None, ""}
+                            if owners and owners <= moving_ids:
+                                session.snap_excluded_ids.add(transition.transition_id)
+        excluded_ids = session.snap_excluded_ids
+        if self._snap_manager is None and session.snap_points is None:
+            session.snap_points = self._get_snap_points(exclude_source_ids=excluded_ids)
+        best: tuple[int, int] | None = None
+        best_point = None
+        for offset in session.snap_edge_offsets:
+            edge = session.start_frame + delta + offset
+            if self._snap_manager is not None:
+                point = self._snap_manager.find_nearest(
+                    edge, self._pixels_per_frame, exclude_source_ids=excluded_ids,
+                )
+                if point is None:
+                    continue
+                snapped = point.frame
+            else:
+                point = None
+                snapped, found = self._snap_frame(
+                    edge, session.snap_points or (), show_indicator=False,
+                )
+                if not found:
+                    continue
+            adjustment = snapped - edge
+            if delta + adjustment < session.minimum_delta:
+                continue
+            if best is None or abs(adjustment) < abs(best[0]):
+                best = (adjustment, snapped)
+                best_point = point
+                if adjustment == 0:
+                    break
+
+        if best is None:
+            if self._snap_indicator:
+                self._snap_indicator.hide_indicator()
+            return delta
+        self._show_snap_indicator(best[1], best_point)
+        return delta + best[0]
 
     def _clear_drag_crossfades(self) -> None:
         for rect, *_ in self._drag_crossfades:
@@ -8991,7 +9108,9 @@ class TimelineView(QGraphicsView):
                 item.set_preview_overlap_fade_ends(None)
         self._drag_crossfade_clip_ids.clear()
 
-    def _preview_drag_crossfades(self, members: tuple[MoveGroupMember, ...]) -> None:
+    def _preview_drag_crossfades(
+        self, session: ClipDragSession, members: tuple[MoveGroupMember, ...],
+    ) -> None:
         if not self._moves_allow_crossfades(members):
             return
         self._clear_drag_crossfades()
@@ -9014,13 +9133,15 @@ class TimelineView(QGraphicsView):
         affected_ids: set[str] = set()
         for track_id in touched:
             track = self._timeline.get_track_by_id(track_id)
+            if track is None:
+                continue
             for transition in track.transitions:
                 pair = transition.left_clip_id, transition.right_clip_id
                 if not transition.is_overlap_crossfade:
                     continue
+                settings[pair] = transition
                 if moving_ids.intersection(pair):
                     affected_ids.update(pair)
-                    settings[pair] = transition
                     item = self._items_map.get(transition.transition_id)
                     if isinstance(item, TransitionItem):
                         item.set_overlap_preview_hidden(True)
@@ -9033,9 +9154,30 @@ class TimelineView(QGraphicsView):
             track = self._timeline.get_track_by_id(track_id)
             if track is None or track.is_locked:
                 continue
-            current = [clip for clip in track.clips if clip.clip_id not in moving_ids]
+            if track_id not in session.audio_drag_neighbors:
+                stationary = tuple(sorted(
+                    (clip for clip in track.clips if clip.clip_id not in moving_ids),
+                    key=lambda clip: clip.timeline_start,
+                ))
+                coverage = tuple(accumulate((clip.timeline_end for clip in stationary), max))
+                session.audio_drag_neighbors[track_id] = stationary, coverage
+            stationary, coverage = session.audio_drag_neighbors[track_id]
+            nearby: dict[str, ClipInstance] = {}
+            for clip in moved:
+                first = bisect_right(coverage, clip.timeline_start)
+                last = bisect_left(stationary, clip.timeline_end, key=lambda other: other.timeline_start)
+                # Include adjacent clips so a moved clip cannot cover an
+                # existing two-clip crossfade without detecting the triple.
+                nearby.update((other.clip_id, other) for other in
+                              stationary[max(0, first - 2):last + 1])
+            nearby_ids = nearby.keys() | {clip.clip_id for clip in moved}
+            cropped_pairs = tuple(
+                pair for pair, transition in settings.items()
+                if pair[0] in nearby_ids and pair[1] in nearby_ids
+                and "source_envelope" in transition.params
+            )
             try:
-                pairs = audio_overlap_pairs(current + moved)
+                pairs = audio_overlap_pairs((*nearby.values(), *moved), cropped_pairs=cropped_pairs)
             except AudioOverlapError:
                 continue
             for left, right in pairs:
@@ -9133,6 +9275,11 @@ class TimelineView(QGraphicsView):
                 video_track_ids = {track_id for track_id, _top, _bottom in cached_bounds}
             if not cached_bounds:
                 return original_track_id
+            if hit_track_id in video_track_ids:
+                return hit_track_id
+            for tid, top, bottom in cached_bounds:
+                if top <= scene_y < bottom:
+                    return tid
             top_video_top = cached_bounds[0][1]
             max_video_track_height = max(
                 bottom - top for _track_id, top, bottom in cached_bounds
@@ -9149,10 +9296,6 @@ class TimelineView(QGraphicsView):
                 if nearest_distance <= max_video_track_height * 1.5
                 else None
             )
-            if nearest and nearest in video_track_ids:
-                if nearest_entry[1] <= scene_y < nearest_entry[2]:
-                    return nearest
-
             # Check if dragging above video track area (create new track)
             if hit_area in ("ruler", "empty") and scene_y < self._layout_engine.area_layout().video_area.top():
                 return "__new_video_track_above__"
@@ -9185,6 +9328,11 @@ class TimelineView(QGraphicsView):
                 audio_track_ids = {track_id for track_id, _top, _bottom in cached_bounds}
             if not cached_bounds:
                 return original_track_id
+            if hit_track_id in audio_track_ids:
+                return hit_track_id
+            for tid, top, bottom in cached_bounds:
+                if top <= scene_y < bottom:
+                    return tid
             bottom_audio_bottom = cached_bounds[-1][2]
             max_audio_track_height = max(
                 bottom - top for _track_id, top, bottom in cached_bounds
@@ -9201,10 +9349,6 @@ class TimelineView(QGraphicsView):
                 if nearest_distance <= max_audio_track_height * 1.5
                 else None
             )
-            if nearest and nearest in audio_track_ids:
-                if nearest_entry[1] <= scene_y < nearest_entry[2]:
-                    return nearest
-
             # Check if dragging below audio track area (create new track)
             audio_area = self._layout_engine.area_layout().audio_area
             if hit_area == "empty" and scene_y > audio_area.bottom():
@@ -9229,79 +9373,59 @@ class TimelineView(QGraphicsView):
         return [track.track_id for track in tracks]
 
     def _propagate_track_change_to_group(
-        self,
-        session,
-        primary_clip_id: str,
-        primary_track_id: str,
-        target_track_id: str,
+        self, session: ClipDragSession, primary_track_id: str, target_track_id: str,
     ) -> None:
-        """Apply the primary clip's track change to the rest of the drag group.
-
-        Same-type selected clips follow the primary clip by the same visual
-        offset. A linked clip on the other media type follows the opposite
-        visual offset because the track stacks face opposite directions:
-        video V1/V2/V3 are laid out bottom-to-top, while audio A1/A2/A3 are
-        laid out top-to-bottom. Therefore moving video up one lane moves its
-        linked audio down one lane, preserving the A/V relationship.
-
-        Members whose shifted index would fall outside the available tracks
-        stay on their original track.
-        """
-        if self._timeline is None:
+        """Keep the group on corresponding lanes in the opposing A/V stacks."""
+        track_ids = {kind: self._visual_track_ids(kind) for kind in ("video", "audio")}
+        primary_type = "video" if primary_track_id in track_ids["video"] else "audio"
+        primary_ids = track_ids[primary_type]
+        if primary_track_id not in primary_ids:
             return
-        target_track = self._timeline.get_track_by_id(target_track_id)
-        primary_track = self._timeline.get_track_by_id(primary_track_id)
-        if target_track is None or primary_track is None:
-            return
-        if target_track.track_type != primary_track.track_type:
-            return
-
-        primary_ids = self._visual_track_ids(target_track.track_type)
-        if primary_track_id not in primary_ids or target_track_id not in primary_ids:
-            return
-        visual_offset = primary_ids.index(target_track_id) - primary_ids.index(primary_track_id)
-        if visual_offset == 0:
-            return
+        creating = target_track_id.startswith("__new_")
+        if creating:
+            target_index = -1 if primary_type == "video" else len(primary_ids)
+        else:
+            target_index = primary_ids.index(target_track_id)
+        visual_offset = target_index - primary_ids.index(primary_track_id)
 
         linked_ids = set(session.linked_clip_ids)
-        for cid in session.original_positions:
-            if cid == primary_clip_id:
+        for cid, original in session.original_track_ids.items():
+            if cid == session.primary_clip_id:
                 continue
-            orig_tid = session.original_track_ids.get(cid, "")
-            if not orig_tid or orig_tid.startswith("__new_"):
+            kind = "video" if original in track_ids["video"] else "audio"
+            ids = track_ids[kind]
+            if original not in ids:
                 continue
-            member_track = self._timeline.get_track_by_id(orig_tid)
-            if member_track is None or member_track.track_type not in ("video", "audio"):
-                continue
-            member_ids = self._visual_track_ids(member_track.track_type)
-            if orig_tid not in member_ids:
-                continue
-            member_visual_offset = visual_offset
-            if (
-                cid in linked_ids
-                and member_track.track_type != primary_track.track_type
-            ):
-                member_visual_offset = -visual_offset
-            new_idx = member_ids.index(orig_tid) + member_visual_offset
-            if 0 <= new_idx < len(member_ids):
-                session.current_track_ids[cid] = member_ids[new_idx]
-            else:
-                # A linked partner may also need a newly-created edge track:
-                # audio grows downward, video grows upward.
-                if (
-                    cid in linked_ids
-                    and member_track.track_type == "audio"
-                    and new_idx >= len(member_ids)
-                ):
-                    session.current_track_ids[cid] = "__new_audio_track_below__"
-                elif (
-                    cid in linked_ids
-                    and member_track.track_type == "video"
-                    and new_idx < 0
-                ):
-                    session.current_track_ids[cid] = "__new_video_track_above__"
-                else:
-                    session.current_track_ids[cid] = orig_tid
+            paired = kind != primary_type and cid in linked_ids
+            offset = -visual_offset if paired else visual_offset
+            if creating and kind != primary_type and not paired:
+                offset = 0
+            index = ids.index(original) + offset
+            destination = original
+            if 0 <= index < len(ids):
+                destination = ids[index]
+            elif kind == primary_type or paired:
+                if kind == "video" and index < 0:
+                    destination = self._new_drag_track_id("video", -index)
+                elif kind == "audio" and index >= len(ids):
+                    destination = self._new_drag_track_id("audio", index - len(ids) + 1)
+            session.current_track_ids[cid] = destination
+
+    @staticmethod
+    def _new_drag_track_id(track_type: str, offset: int) -> str:
+        edge = "__new_video_track_above__" if track_type == "video" else "__new_audio_track_below__"
+        return f"{edge}:{offset}" if offset > 1 else edge
+
+    def _new_drag_track_slots(self, targets: Iterable[str]) -> Iterable[tuple[str, str]]:
+        """List auto-created lanes from the existing stack outward."""
+        depths = {"video": 0, "audio": 0}
+        for target in targets:
+            edge, _, suffix = target.partition(":")
+            kind = "video" if edge == "__new_video_track_above__" else "audio"
+            depths[kind] = max(depths[kind], int(suffix or 1))
+        for kind, depth in depths.items():
+            for offset in range(1, depth + 1):
+                yield kind, self._new_drag_track_id(kind, offset)
 
     def _compute_new_track_preview_y(self, pseudo_track_id: str, clip_track_type: str) -> float:
         """P5: Calculate preview Y position for a clip being dragged to a new track.
@@ -9309,11 +9433,14 @@ class TimelineView(QGraphicsView):
         Places the clip above all existing video tracks or below all audio tracks,
         with appropriate spacing so the user sees where the new track will be created.
         """
-        from src.features.edit.ui.timeline_layout import TRACK_GAP, DEFAULT_VIDEO_TRACK_HEIGHT
+        from src.features.edit.ui.timeline_layout import TRACK_GAP
         if self._timeline is None:
             return 0.0
 
         self._configure_layout_engine()
+        _, _, suffix = pseudo_track_id.partition(":")
+        offset = int(suffix or 1)
+        height = EDIT_SIZES[f"track_h_{clip_track_type}"]
 
         if "above" in pseudo_track_id:
             # New video track above top video track
@@ -9321,7 +9448,7 @@ class TimelineView(QGraphicsView):
             if video_tracks:
                 top_track = video_tracks[-1]
                 top_rect = self._layout_engine.track_rect(top_track.track_id)
-                return top_rect.top() - DEFAULT_VIDEO_TRACK_HEIGHT - TRACK_GAP
+                return top_rect.top() - offset * (height + TRACK_GAP)
             return self._layout_engine.area_layout().video_area.top()
 
         elif "below" in pseudo_track_id:
@@ -9330,7 +9457,7 @@ class TimelineView(QGraphicsView):
             if audio_tracks:
                 bottom_track = audio_tracks[-1]
                 bottom_rect = self._layout_engine.track_rect(bottom_track.track_id)
-                return bottom_rect.bottom() + TRACK_GAP
+                return bottom_rect.bottom() + TRACK_GAP + (offset - 1) * (height + TRACK_GAP)
             return self._layout_engine.area_layout().audio_area.top()
 
         return 0.0
@@ -9377,43 +9504,41 @@ class TimelineView(QGraphicsView):
         cleaned up, even on early returns or command failure.
         """
         drag_session = self._current_drag_session
+        if drag_session is not None and drag_session.primary_clip_id != clip_id:
+            return
+        original_timeline = self._timeline
         try:
             self._on_drag_finished_impl(
                 clip_id, track_id, old_start, new_start, new_track_id
             )
         except AudioOverlapError:
-            self._current_drag_session = None
-            ids = drag_session.original_positions if drag_session is not None else (clip_id,)
-            for moved_id in ids:
-                self._revert_trim_visuals_to_model(moved_id, include_linked=False)
-                model_clip = self._timeline.get_clip_by_id(moved_id)
-                item = self._items_map.get(moved_id)
-                if model_clip is not None and isinstance(item, ClipItem):
-                    item.setPos(self._layout_engine.frame_to_x(model_clip.timeline_start),
-                                self._layout_engine.track_top(model_clip.track_id))
-            self._layout_track_items()
             self.status_message_requested.emit(I18N.tr(
                 "timeline.overlap.invalid",
                 "Crossfades need a tail-to-head overlap between two audio clips.",
             ))
+        except ValueError as exc:
+            self.status_message_requested.emit(str(exc))
         finally:
-            # P5c: Always clear drag session and ghosts, even on exceptions or early returns.
-            # In copy mode the real items' _start_frame mirrored the ghost
-            # preview during the drag; originals never move, so restore them
-            # here no matter which exit path was taken.
-            session = self._current_drag_session
-            if session is not None and session.copy_mode:
-                for cid, orig_s in session.original_positions.items():
-                    real_item = self._items_map.get(cid)
-                    if real_item and isinstance(real_item, ClipItem):
-                        real_item._start_frame = orig_s
-                        real_item._drag_target_track_id = ""
+            if drag_session is not None and self._timeline is original_timeline:
+                self._restore_clip_move_preview(drag_session)
             self._clear_drag_crossfades()
             self._clear_alt_copy_ghosts()
-            if self._current_drag_session is not None:
-                self._current_drag_session = None
+            self._current_drag_session = None
             self._restore_drag_cache_modes(drag_session)
             self._sync_marker_items_to_timeline()
+
+    def _restore_clip_move_preview(self, session: ClipDragSession) -> None:
+        for clip_id, start in session.original_positions.items():
+            item = self._items_map.get(clip_id)
+            if isinstance(item, ClipItem):
+                track_id = session.original_track_ids[clip_id]
+                item._start_frame = start
+                item._drag_target_track_id = ""
+                item.set_track_height(self._layout_engine.track_height(track_id))
+                item.setPos(
+                    self._layout_engine.frame_to_x(start),
+                    self._layout_engine.track_top(track_id),
+                )
 
     def _restore_drag_cache_modes(
         self,
@@ -9470,308 +9595,145 @@ class TimelineView(QGraphicsView):
         if self._timeline is None or self._updating:
             return
 
-        # P3: Only process primary clip - linked/selected clips are handled as part of the group
-        if self._current_drag_session is not None:
-            if clip_id != self._current_drag_session.primary_clip_id:
-                logger.debug(f"Skipping non-primary clip drag_finished: {clip_id}")
-                return
-
-        # Hide snap indicator after drag finishes
         if self._snap_indicator:
             self._snap_indicator.hide_indicator()
 
-        # Apply snap if enabled (final position)
-        if self._snap_enabled:
-            snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-            # AUD-21402: SnapManager 路径显式排除自身（见 _on_clip_moved_impl）
-            new_start, _ = self._snap_frame(
-                new_start, snap_points, show_indicator=False,
-                exclude_source_ids={clip_id})
-
-        # Alt-drag copy mode: create copies instead of moving
-        is_copy_mode = (self._current_drag_session is not None
-                        and self._current_drag_session.copy_mode)
-        if is_copy_mode:
-            # Ghost-drag data sync: real items' _start_frame mirrored the
-            # preview during the drag so the release signal would fire.
-            # Restore them now — originals never actually move in copy mode.
-            for cid, orig_s in self._current_drag_session.original_positions.items():
-                real_item = self._items_map.get(cid)
-                if real_item and isinstance(real_item, ClipItem):
-                    real_item._start_frame = orig_s
-                    real_item._drag_target_track_id = ""
+        session = self._current_drag_session
+        group = session.move_group if session is not None else None
+        if session is not None and session.copy_mode:
+            if group is not None:
+                new_start = session.start_frame + group.delta_frames
+            self._restore_clip_move_preview(session)
             self._handle_copy_drag_finished(clip_id, track_id, old_start, new_start)
             return
 
-        # P3: Use MoveGroup from drag session if available
-        group = None
-        if self._current_drag_session is not None:
-            group = self._current_drag_session.move_group
-
-        # P4: Resolve actual target track from ClipDragSession (may override signal parameter)
-        actual_target_track = new_track_id
-        if self._current_drag_session is not None:
-            session_target = self._current_drag_session.current_track_ids.get(clip_id)
-            if session_target:
-                actual_target_track = session_target
-
-        # P4: Check for cross-track move
-        needs_new_track = actual_target_track.startswith("__new_")
-        has_track_change = actual_target_track != track_id and not needs_new_track
-        has_paired_create_zone = bool(
-            group is not None
-            and any(
-                member.new_track_id.startswith("__new_")
-                for member in group.members
-                if member.new_track_id
-            )
-        )
-
-        if has_track_change and not has_paired_create_zone:
-            # Cross-track move onto an existing track. Create-zone moves are
-            # handled by the MoveGroup branch below so linked partners keep
-            # their paired create-zone target as well.
-            # The live preview already calculated the complete target-track
-            # mapping (including the opposite visual offset for linked A/V).
-            # Rebuild the release group from that mapping instead of adding
-            # only the primary clip plus a same-track linked fallback; the
-            # latter made the linked audio jump back as soon as the mouse was
-            # released.
-            if self._current_drag_session is not None:
-                session = self._current_drag_session
-                orig_start = session.original_positions.get(clip_id, old_start)
-                delta = new_start - orig_start
-                members = []
-                for cid, old_s in session.original_positions.items():
-                    orig_tid = session.original_track_ids.get(cid, track_id)
-                    target_tid = session.current_track_ids.get(cid, orig_tid)
-                    members.append(MoveGroupMember(
-                        clip_id=cid,
-                        track_id=orig_tid,
-                        old_start=old_s,
-                        new_start=old_s + delta,
-                        new_track_id=(
-                            target_tid if target_tid != orig_tid else ""
-                        ),
-                    ))
-            else:
-                members = [
-                    MoveGroupMember(
-                        clip_id=clip_id,
-                        track_id=track_id,
-                        old_start=old_start,
-                        new_start=new_start,
-                        new_track_id=actual_target_track,
-                    )
-                ]
-                clip = self._timeline.get_clip_by_id(clip_id)
-                linked_clip = self._get_reciprocal_linked_clip(clip)
-                if linked_clip is not None and self._effective_linked_selection():
-                    members.append(MoveGroupMember(
-                        clip_id=linked_clip.clip_id,
-                        track_id=linked_clip.track_id,
-                        old_start=linked_clip.timeline_start,
-                        new_start=linked_clip.timeline_start + (new_start - old_start),
-                    ))
-            overwrite_group = MoveGroup(
-                primary_clip_id=clip_id,
-                members=tuple(members),
-                delta_frames=new_start - old_start,
-            )
-            if not self._validate_move_group(overwrite_group, allow_overwrite=True):
-                logger.warning(f"Overwrite move rejected: group validation failed for {clip_id}")
-                return
-            self._current_drag_session = None
-            self._execute_command(
-                self._create_overwrite_move_command(
-                    overwrite_group.members,
-                    label="Move clips across tracks with overwrite",
+        if group is None:
+            # Direct drops do not have a live preview to commit.
+            if self._snap_enabled:
+                new_start, _ = self._snap_frame(
+                    new_start, self._get_snap_points(exclude_clip_id=clip_id),
+                    show_indicator=False, exclude_source_ids={clip_id},
                 )
-            )
+            delta = new_start - old_start
+            members = [MoveGroupMember(clip_id, track_id, old_start, new_start, new_track_id)]
+            clip = self._timeline.get_clip_by_id(clip_id)
+            partner = self._get_reciprocal_linked_clip(clip)
+            if partner is not None and self._effective_linked_selection():
+                members.append(MoveGroupMember(
+                    partner.clip_id, partner.track_id, partner.timeline_start,
+                    partner.timeline_start + delta,
+                ))
+            group = MoveGroup(clip_id, tuple(members), delta)
+
+        if group.delta_frames == 0 and not group.has_track_change:
+            return
+        self._current_drag_session = None
+        self._commit_move_group(group)
+
+    def _commit_move_group(self, group: MoveGroup) -> None:
+        """Commit a pointer or keyboard move using the same track constraints."""
+        if not self._validate_move_group(group, allow_overwrite=True):
+            self.status_message_requested.emit(I18N.tr(
+                "timeline.move.group_blocked",
+                "The selected clips cannot move to this position. Check the track locks and overlaps.",
+            ))
             return
 
-        elif group is not None and len(group.members) > 0:
-            # Recompute members with snapped new_start
-            orig_start = self._current_drag_session.original_positions.get(
-                clip_id, old_start
-            )
-            delta = new_start - orig_start
-            members: list[MoveGroupMember] = []
-            for cid, old_s in self._current_drag_session.original_positions.items():
-                orig_tid = self._current_drag_session.original_track_ids.get(cid, track_id)
-                target_tid = self._current_drag_session.current_track_ids.get(cid, orig_tid)
-                members.append(MoveGroupMember(
-                    clip_id=cid,
-                    track_id=orig_tid,
-                    old_start=old_s,
-                    new_start=old_s + delta,
-                    new_track_id=target_tid if target_tid != orig_tid else "",
-                ))
-            group = MoveGroup(
-                primary_clip_id=clip_id,
-                members=tuple(members),
-                delta_frames=delta,
-            )
-
-            # Atomic validation: if ANY member is invalid, reject ALL
-            if not self._validate_move_group(group, allow_overwrite=True):
-                logger.warning(f"Move rejected: group validation failed for {clip_id}")
-                # Revert all members to original positions
-                for member in group.members:
-                    m_item = self._items_map.get(member.clip_id)
-                    if m_item and isinstance(m_item, ClipItem):
-                        m_item._start_frame = member.old_start
-                        m_x = self._layout_engine.frame_to_x(member.old_start)
-                        m_y = self._layout_engine.track_top(member.track_id)
-                        m_item.setPos(m_x, m_y)
-                        m_item._update_geometry()
-                        m_item.update()
-                return
-
-            # Check if position actually changed
-            if delta == 0 and not group.has_track_change:
-                return
-
-            # P4: Handle track changes in group
-            if group.has_track_change:
-                # Build commands for track changes
-                commands = []
-                overwrite_members: list[MoveGroupMember] = []
-                for member in group.members:
-                    if member.new_track_id and member.new_track_id != member.track_id:
-                        # Cross-track move needed
-                        # Check if the target is a pseudo "create zone" or an existing track
-                        if member.new_track_id.startswith("__new_"):
-                            # Create new track and move
-                            source_track = self._timeline.get_track_by_id(member.track_id) if self._timeline else None
-                            track_type = source_track.track_type if source_track else "video"
-                            position = "above" if track_type == "video" else "below"
-
-                            cmd = MoveClipToTrackCommand.create_for_new_track(
-                                source_track_id=member.track_id,
-                                clip_id=member.clip_id,
-                                target_track_type=track_type,
-                                new_track_position=position,
-                                new_start=member.new_start,
-                                old_start=member.old_start,
-                            )
-                            commands.append(cmd)
-                        else:
-                            overwrite_members.append(member)
-                    else:
-                        overwrite_members.append(member)
-
-                if overwrite_members:
-                    commands.append(
-                        self._create_overwrite_move_command(
-                            tuple(overwrite_members),
-                            label="Move clips with overwrite",
-                        )
-                    )
-
-                # P5: Clear drag session BEFORE executing command
-                self._current_drag_session = None
-
-                # Execute as single atomic MacroCommand
-                if len(commands) == 1:
-                    self._execute_command(commands[0])
-                else:
-                    macro = MacroCommand.create("Move clips (track change)", commands)
-                    self._execute_command(macro)
+        commands = []
+        overwrite_members: list[MoveGroupMember] = []
+        new_track_members: dict[str, list[MoveGroupMember]] = {}
+        for member in group.members:
+            if member.new_track_id.startswith("__new_"):
+                new_track_members.setdefault(member.new_track_id, []).append(member)
             else:
-                self._execute_command(
-                    self._create_overwrite_move_command(
-                        group.members,
-                        label="Move clips with overwrite",
-                    )
+                overwrite_members.append(member)
+        for track_type, target in self._new_drag_track_slots(new_track_members):
+            members = new_track_members.get(target, ())
+            if not members:
+                commands.append(AddTrackCommand.create(track_type, track_id=str(uuid.uuid4())))
+                continue
+            if len(members) > 1:
+                target_id = str(uuid.uuid4())
+                graphics = any(
+                    self._timeline.get_caption_graphic_binding_by_clip(member.clip_id)
+                    for member in members
                 )
+                commands.append(AddTrackCommand.create(
+                    track_type, track_id=target_id, track_role="graphics" if graphics else "standard",
+                ))
+                overwrite_members.extend(replace(member, new_track_id=target_id) for member in members)
+                continue
+            member = members[0]
+            commands.append(MoveClipToTrackCommand.create_for_new_track(
+                source_track_id=member.track_id,
+                clip_id=member.clip_id,
+                target_track_type=track_type,
+                new_track_position="above" if track_type == "video" else "below",
+                new_start=member.new_start,
+                old_start=member.old_start,
+            ))
+
+        if overwrite_members:
+            label = ("Move clips across tracks with overwrite" if group.has_track_change
+                     else "Move clips with overwrite")
+            commands.append(self._create_overwrite_move_command(overwrite_members, label=label))
+
+        command = commands[0] if len(commands) == 1 else MacroCommand.create("Move clips", commands)
+        self._execute_command(command)
+        if group.has_track_change:
+            self._rebind_selection_tracks()
+
+    def _nudge_selected_clips_between_tracks(self, *, up: bool) -> None:
+        sequence = self._timeline
+        if sequence is None or not self._interaction.is_idle:
+            return
+        selection = self._selection
+        selected = {
+            clip.clip_id: clip for clip_id in selection.selected_clip_ids
+            if (clip := sequence.get_clip_by_id(clip_id)) is not None
+        }
+        if not selected:
+            return
+        # Resolve moves the picture lanes for a mixed selection. Audio-only
+        # selections move within the audio stack without changing timing.
+        for kind, tracks in (("video", sequence.video_tracks), ("audio", sequence.audio_tracks)):
+            lane_indices = {track.track_id: index for index, track in enumerate(tracks)}
+            clips = [clip for clip in selected.values() if clip.track_id in lane_indices]
+            if clips:
+                break
         else:
-            # Fallback: no MoveGroup from drag session — build one from linked clips
-            if new_start == old_start and actual_target_track == track_id:
+            return
+        step = 1 if up == (kind == "video") else -1
+        members = []
+        for clip in clips:
+            target_index = lane_indices[clip.track_id] + step
+            if target_index < 0:
                 return
-
-            delta = new_start - old_start
-            members: list[MoveGroupMember] = [
-                MoveGroupMember(
-                    clip_id=clip_id,
-                    track_id=track_id,
-                    old_start=old_start,
-                    new_start=new_start,
-                    new_track_id=actual_target_track if actual_target_track != track_id else ""
-                )
-            ]
-
-            # Collect linked clip if applicable
-            clip = self._timeline.get_clip_by_id(clip_id)
-            linked_clip = self._get_reciprocal_linked_clip(clip)
-            if linked_clip is not None and self._effective_linked_selection():
-                members.append(MoveGroupMember(
-                    clip_id=linked_clip.clip_id,
-                    track_id=linked_clip.track_id,
-                    old_start=linked_clip.timeline_start,
-                    new_start=linked_clip.timeline_start + delta,
-                ))
-
-            fallback_group = MoveGroup(
-                primary_clip_id=clip_id,
-                members=tuple(members),
-                delta_frames=delta,
-            )
-
-            if not self._validate_move_group(fallback_group, allow_overwrite=True):
-                # Revert ALL members (including linked clips) to original positions
-                for member in fallback_group.members:
-                    m_item = self._items_map.get(member.clip_id)
-                    if m_item and isinstance(m_item, ClipItem):
-                        m_item._start_frame = member.old_start
-                        m_x = self._layout_engine.frame_to_x(member.old_start)
-                        m_y = self._layout_engine.track_top(member.track_id)
-                        m_item.setPos(m_x, m_y)
-                        m_item._update_geometry()
-                        m_item.update()
-                logger.warning(f"Move rejected: overlap detected at position {new_start}")
-                return
-
-            commands = []
-            overwrite_members: list[MoveGroupMember] = []
-            for member in fallback_group.members:
-                if member.new_track_id:
-                    # Cross-track move: check if existing track or create zone
-                    if member.new_track_id.startswith("__new_"):
-                        source_track = self._timeline.get_track_by_id(member.track_id) if self._timeline else None
-                        track_type = source_track.track_type if source_track else "video"
-                        position = "above" if track_type == "video" else "below"
-
-                        cmd = MoveClipToTrackCommand.create_for_new_track(
-                            source_track_id=member.track_id,
-                            clip_id=member.clip_id,
-                            target_track_type=track_type,
-                            new_track_position=position,
-                            new_start=member.new_start,
-                            old_start=member.old_start,
-                        )
-                        commands.append(cmd)
-                    else:
-                        overwrite_members.append(member)
-                else:
-                    overwrite_members.append(member)
-
-            if overwrite_members:
-                commands.append(
-                    self._create_overwrite_move_command(
-                        tuple(overwrite_members),
-                        label="Move linked clips with overwrite",
-                    )
-                )
-
-            # P5: Clear drag session BEFORE executing command
-            self._current_drag_session = None
-
-            if len(commands) == 1:
-                self._execute_command(commands[0])
-            else:
-                macro = MacroCommand.create("Move linked clips", commands)
-                self._execute_command(macro)
+            target_id = (tracks[target_index].track_id if target_index < len(tracks)
+                         else self._new_drag_track_id(kind, 1))
+            members.append(MoveGroupMember(
+                clip.clip_id, clip.track_id, clip.timeline_start, clip.timeline_start, target_id,
+            ))
+        try:
+            self._commit_move_group(MoveGroup(clips[0].clip_id, tuple(members), 0))
+        except ValueError as exc:
+            self.status_message_requested.emit(str(exc))
+            return
+        edited = self._timeline
+        if edited is None or edited is sequence or edited.timeline_id != sequence.timeline_id:
+            return
+        target = edited.get_clip_by_id(clips[0].clip_id)
+        if target is None:
+            return
+        area = self._layout_engine.area_layout()
+        rect, bar = ((area.video_area, self._video_v_scroll) if kind == "video"
+                     else (area.audio_area, self._audio_v_scroll))
+        top = self._layout_engine.track_top(target.track_id)
+        bottom = top + self._layout_engine.track_height(target.track_id)
+        if top < rect.top():
+            bar.setValue(bar.value() + math.floor(top - rect.top()))
+        elif bottom > rect.bottom():
+            bar.setValue(bar.value() + math.ceil(bottom - rect.bottom()))
 
     def _resolve_copy_start(
         self,
@@ -10087,19 +10049,17 @@ class TimelineView(QGraphicsView):
 
         # One command per pseudo track: creates that track and places every
         # copy headed there (V/A 双轨 = 两条子命令，同一宏 = 单步 undo).
-        if new_track_buckets:
-            for pseudo_id, bucket_clips in new_track_buckets.items():
-                nt_type = "video" if "video" in pseudo_id else "audio"
-                nt_position = "above" if "above" in pseudo_id else "below"
-                bindings = new_track_binding_commands.get(pseudo_id, [])
-                nt_role = "graphics" if bindings else "standard"
-                commands.insert(
-                    0,
-                    CopyClipsToNewTrackCommand.create(
-                        nt_type, nt_position, bucket_clips,
-                        track_role=nt_role),
-                )
-                commands[1:1] = bindings
+        for nt_type, pseudo_id in self._new_drag_track_slots(new_track_buckets):
+            bucket_clips = new_track_buckets.get(pseudo_id)
+            if not bucket_clips:
+                commands.append(AddTrackCommand.create(nt_type, track_id=str(uuid.uuid4())))
+                continue
+            bindings = new_track_binding_commands.get(pseudo_id, ())
+            commands.append(CopyClipsToNewTrackCommand.create(
+                nt_type, "above" if nt_type == "video" else "below", bucket_clips,
+                track_role="graphics" if bindings else "standard",
+            ))
+            commands.extend(bindings)
 
         if not commands:
             return
@@ -10132,90 +10092,10 @@ class TimelineView(QGraphicsView):
             self.project_changed.emit(self._project)
         logger.info(f"Alt-drag copy: {len(commands)} clips copied, delta={delta}")
 
-    def _on_clip_trim_left(self, clip_id: str, track_id: str, new_start: int) -> None:
-        """Handle left trim during drag (live preview only, with linked clip sync)."""
-        if self._timeline is None:
-            return
-        if self._is_track_locked(track_id):
-            return
-
-        # Check for Shift key to temporarily disable snap (参考 kdenlive)
-        modifiers = QApplication.keyboardModifiers()
-        self._snap_temporarily_disabled = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-
-        item = self._items_map.get(clip_id)
-        if not (item and isinstance(item, ClipItem)):
-            return
-
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return
-
-        # Apply snap if enabled (visual preview)
-        if self._snap_enabled:
-            snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-            # AUD-21402: SnapManager 路径显式排除自身，避免左/右修剪时
-            # 边缘吸附到本片段另一条边缘。
-            snapped_start, did_snap = self._snap_frame(
-                new_start, snap_points, exclude_source_ids={clip_id})
-            if did_snap:
-                new_start = snapped_start
-
-        # Boundary constraint: prevent trim from moving clip before time 00:00
-        if new_start < 0:
-            new_start = 0
-
-        # Always update clip item visual position (snapped or raw)
-        new_duration = clip.timeline_end - new_start
-        if new_duration > 0:
-            # Calculate delta for linked clip sync
-            delta = new_start - clip.timeline_start
-
-            item._start_frame = new_start
-            item._duration_frames = new_duration
-            # RI-07/R18：预览与 release 共用同一方向/速度/FPS 感知映射
-            #（此前 timeline delta 直接当源 delta，2x 拖中 190 释放跳 180）
-            pv_source_start, pv_source_duration = (
-                clip.with_left_edge_source_values(new_start)
-            )
-            item.update_trim_preview_source_range(
-                pv_source_start, pv_source_duration
-            )
-            item._update_geometry()
-            # Update X position for left trim (clip moves left/right)
-            self._configure_layout_engine()
-            x = self._layout_engine.frame_to_x(new_start)
-            item.setPos(x, item.y())
-            item.update()
-
-            # R07①：单边 trim 监视器（被修边真实帧 + 邻片/空位）
-            self._show_single_trim_monitor(clip, "left", new_start)
-
-            # Sync linked clip visual preview if applicable
-            if self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-                linked_item = self._items_map.get(clip.linked_clip_id)
-                linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-                if linked_item and linked_clip:
-                    # RI-02/R14：linked 伙伴被直接改写——登记，取消时重投影
-                    self._preview_affected_item_ids.add(linked_clip.clip_id)
-                    linked_new_start = linked_clip.timeline_start + delta
-                    linked_new_duration = linked_clip.timeline_end - linked_new_start
-                    if linked_new_duration > 0:
-                        linked_item._start_frame = linked_new_start
-                        linked_item._duration_frames = linked_new_duration
-                        # R18：linked 伙伴按自身速度/FPS 换算源区间
-                        lp_source_start, lp_source_duration = (
-                            linked_clip.with_left_edge_source_values(
-                                linked_new_start
-                            )
-                        )
-                        linked_item.update_trim_preview_source_range(
-                            lp_source_start, lp_source_duration
-                        )
-                        linked_item._update_geometry()
-                        linked_x = self._layout_engine.frame_to_x(linked_new_start)
-                        linked_item.setPos(linked_x, linked_item.y())
-                        linked_item.update()
+    def _on_clip_trim_left(
+        self, clip_id: str, track_id: str, new_start: int, bypass_snap: bool = False,
+    ) -> None:
+        self._preview_edge_trim(clip_id, track_id, "left", new_start, bypass_snap)
 
     def _motion_graphic_page_count(self, clip: ClipInstance) -> int:
         """Resolve the authored page count used by Shift-drag retiming."""
@@ -10326,521 +10206,164 @@ class TimelineView(QGraphicsView):
         )
         self._execute_command(command)
 
-    def _on_clip_trim_right(self, clip_id: str, track_id: str, new_duration: int) -> None:
-        """Handle right trim during drag (live preview only, with linked clip sync)."""
-        if self._timeline is None:
-            return
-        if self._is_track_locked(track_id):
-            return
+    def _on_clip_trim_right(
+        self, clip_id: str, track_id: str, new_duration: int, bypass_snap: bool = False,
+    ) -> None:
+        self._preview_edge_trim(clip_id, track_id, "right", new_duration, bypass_snap)
 
-        # Check for Shift key to temporarily disable snap (参考 kdenlive)
-        modifiers = QApplication.keyboardModifiers()
-        self._snap_temporarily_disabled = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+    def _edge_trim_drag(
+        self, clip_id: str, track_id: str, side: str,
+    ) -> _EdgeTrimDrag | None:
+        """Resolve the shared bounds and snap exclusions once per gesture."""
+        from src.features.edit.core.timeline_ops import numeric_trim_bounds
 
-        clip = self._timeline.get_clip_by_id(clip_id)
+        sequence = self._timeline
+        if sequence is None or self._updating:
+            return None
+        current = self._edge_trim
+        if (current is not None and current.sequence is sequence
+                and current.members[0].clip_id == clip_id and current.side == side):
+            return current
+        track = sequence.get_track_by_id(track_id)
+        clip = track.get_clip_by_id(clip_id) if track is not None else None
         if clip is None:
+            return None
+        partner = self._get_reciprocal_linked_clip(clip) if self._effective_linked_selection() else None
+        members = (clip, partner) if partner is not None else (clip,)
+        minimum, maximum = -(1 << 40), 1 << 40
+        excluded = {member.clip_id for member in members}
+        for member in members:
+            lane = sequence.get_track_by_id(member.track_id)
+            binding = sequence.get_caption_graphic_binding_by_clip(member.clip_id)
+            if lane.is_locked or (binding is not None and binding.sync_timing):
+                minimum = maximum = 0
+                break
+            lower, upper = numeric_trim_bounds(
+                lane, member, side, self._roll_clip_limit(member), allow_audio_overlap=True,
+            )
+            minimum, maximum = max(minimum, lower), min(maximum, upper)
+            excluded.update(
+                trans.transition_id for trans in lane.transitions
+                if member.clip_id in (trans.left_clip_id, trans.right_clip_id)
+            )
+        excluded.update(marker.marker_id for marker in sequence.markers if marker.clip_id in excluded)
+        drag = _EdgeTrimDrag(sequence, side, members, minimum, maximum, excluded)
+        if self._interaction.primary_clip_id == clip_id:
+            self._edge_trim = drag
+        return drag
+
+    @staticmethod
+    def _edge_trim_geometry(
+        clip: ClipInstance, side: str, delta: int,
+    ) -> tuple[int, int, int, int]:
+        if side == "left":
+            start = clip.timeline_start + delta
+            return start, clip.timeline_duration - delta, *clip.with_left_edge_source_values(start)
+        duration = clip.timeline_duration + delta
+        return clip.timeline_start, duration, *clip.with_right_edge_source_values(duration)
+
+    def _preview_edge_trim(
+        self, clip_id: str, track_id: str, side: str, target: int, bypass_snap: bool,
+    ) -> None:
+        if self._edge_trim is not None and self._edge_trim.sequence is not self._timeline:
+            self._cancel_current_interaction()
             return
-
-        item = self._items_map.get(clip_id)
-        if not (item and isinstance(item, ClipItem)):
+        drag = self._edge_trim_drag(clip_id, track_id, side)
+        if drag is None:
             return
-
-        # Apply snap if enabled (visual preview)
-        if self._snap_enabled:
-            # Snap the end frame (start + duration)
-            new_end = clip.timeline_start + new_duration
-            snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-            # AUD-21402: SnapManager 路径显式排除自身（见 _on_clip_moved_impl）
-            snapped_end, did_snap = self._snap_frame(
-                new_end, snap_points, exclude_source_ids={clip_id})
-            if did_snap:
-                new_duration = snapped_end - clip.timeline_start
-
-        # Always update clip item visual duration (snapped or raw)
-        if new_duration > 0:
-            # Calculate duration delta for linked clip sync
-            duration_delta = new_duration - clip.timeline_duration
-
-            item._duration_frames = new_duration
-            # RI-07/R18：预览与 release 共用同一映射（方向/速度/FPS）
-            pv_source_start, pv_source_duration = (
-                clip.with_right_edge_source_values(new_duration)
+        drag.pointer_target = target
+        drag.bypass_snap = bypass_snap
+        clip = drag.members[0]
+        boundary = clip.timeline_start if side == "left" else clip.timeline_end
+        pointer_frame = target if side == "left" else clip.timeline_start + target
+        delta = max(drag.minimum, min(drag.maximum, pointer_frame - boundary))
+        if self._snap_enabled and not bypass_snap and delta and pointer_frame == boundary + delta:
+            fallback = () if self._snap_manager else self._get_snap_points(
+                exclude_source_ids=drag.excluded_snap_ids)
+            snapped, _ = self._snap_frame(
+                pointer_frame, fallback, exclude_source_ids=drag.excluded_snap_ids,
             )
-            item.update_trim_preview_source_range(
-                pv_source_start, pv_source_duration
-            )
-            item._update_geometry()
-            item.update()
+            snapped_delta = snapped - boundary
+            if drag.minimum <= snapped_delta <= drag.maximum:
+                delta = snapped_delta
+            elif self._snap_indicator:
+                self._snap_indicator.hide_indicator()
+        elif self._snap_indicator:
+            self._snap_indicator.hide_indicator()
 
-            # Sync linked clip visual preview if applicable
-            if self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-                linked_item = self._items_map.get(clip.linked_clip_id)
-                linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-                if linked_item and linked_clip:
-                        # RI-02/R14：linked 伙伴被直接改写——登记，取消时重投影
-                        self._preview_affected_item_ids.add(linked_clip.clip_id)
-                        linked_new_duration = linked_clip.timeline_duration + duration_delta
-                        if linked_new_duration > 0:
-                            linked_item._duration_frames = linked_new_duration
-                            # R18：linked 伙伴按自身速度/FPS 换算
-                            rp_source_start, rp_source_duration = (
-                                linked_clip.with_right_edge_source_values(
-                                    linked_new_duration
-                                )
-                            )
-                            linked_item.update_trim_preview_source_range(
-                                rp_source_start, rp_source_duration
-                            )
-                            linked_item._update_geometry()
-                        linked_item.update()
-
-            # R07①：单边 trim 监视器（被修边真实帧 + 邻片/空位）
-            self._show_single_trim_monitor(
-                clip, "right", clip.timeline_start + new_duration)
-
-    def _revert_trim_visuals_to_model(self, clip_id: str,
-                                      include_linked: bool = True) -> None:
-        """N09/T3-01：把 trim 相关 Item 的几何/源区间归回 canonical 模型。
-
-        链接伙伴轨锁等领域拒绝发生时模型未被修改，Item 却已带着拖拽
-        预览；从当前（未变的）模型重投影主片与链接伙伴，不留假预览。
-        """
-        revert_ids = [clip_id]
-        if include_linked and self._timeline is not None:
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if (clip is not None and clip.linked_clip_id
-                    and self._get_reciprocal_linked_clip(clip) is not None
-                    and self._effective_linked_selection()):
-                revert_ids.append(clip.linked_clip_id)
-        for target_id in revert_ids:
-            model_clip = (self._timeline.get_clip_by_id(target_id)
-                          if self._timeline is not None else None)
-            item = self._items_map.get(target_id)
-            if item is None or not isinstance(item, ClipItem):
+        if delta == drag.delta:
+            return
+        drag.delta = delta
+        for member in drag.members:
+            item = self._items_map.get(member.clip_id)
+            if not isinstance(item, ClipItem):
                 continue
-            if model_clip is None:
-                continue
-            item._start_frame = model_clip.timeline_start
-            item._duration_frames = model_clip.timeline_duration
-            item.update_source_range(
-                model_clip.source_start,
-                self._get_clip_source_duration(target_id),
-            )
+            start, duration, source_start, source_duration = self._edge_trim_geometry(member, side, delta)
+            self._preview_affected_item_ids.add(member.clip_id)
+            if not item._trim_preview_active:
+                item.begin_trim_preview()
+            item._start_frame, item._duration_frames = start, duration
+            item.update_trim_preview_source_range(source_start, source_duration)
             item._update_geometry()
+            item.setPos(self._layout_engine.frame_to_x(start), item.y())
             item.update()
+        self._show_single_trim_monitor(clip, side, boundary + delta)
+
+    def _finish_edge_trim(self, clip_id: str, track_id: str, side: str, target: int) -> None:
+        drag = self._edge_trim
+        self._edge_trim = None
+        if self._snap_indicator:
+            self._snap_indicator.hide_indicator()
+        if drag is None:
+            drag = self._edge_trim_drag(clip_id, track_id, side)
+            self._edge_trim = None
+            if drag is not None:
+                clip = drag.members[0]
+                baseline = clip.timeline_start if side == "left" else clip.timeline_duration
+                drag.delta = max(drag.minimum, min(drag.maximum, target - baseline))
+        if drag is None:
+            self._reproject_preview_affected_items()
+            return
+        self._preview_affected_item_ids.update(member.clip_id for member in drag.members)
+        self._reproject_preview_affected_items()
+        if self._timeline is not drag.sequence or not drag.delta:
+            return
+        commands = []
+        for clip in drag.members:
+            start, duration, source_start, source_duration = self._edge_trim_geometry(clip, side, drag.delta)
+            if side == "left":
+                command = TrimClipCommand.create_left_trim(
+                    clip.track_id, clip.clip_id, start, source_start,
+                    old_start=clip.timeline_start, old_duration=clip.timeline_duration,
+                    old_source_start=clip.source_start, old_source_duration=clip.source_duration,
+                    new_source_duration=source_duration,
+                )
+            else:
+                command = TrimClipCommand.create_right_trim(
+                    clip.track_id, clip.clip_id, duration, source_duration,
+                    old_duration=clip.timeline_duration, old_source_duration=clip.source_duration,
+                    new_source_start=source_start,
+                )
+            commands.append(command)
+        try:
+            self._execute_command(
+                commands[0] if len(commands) == 1 else MacroCommand.create("Trim linked clips", commands)
+            )
+        except (TimelineOperationError, ValueError) as exc:
+            logger.warning("Trim rejected: %s", exc)
+            self.status_message_requested.emit(str(exc))
 
     def _on_trim_left_finished(
-        self,
-        clip_id: str,
-        track_id: str,
-        old_start: int,
-        old_duration: int,
-        old_source_start: int,
-        new_start: int,
-        new_source_start: int
+        self, clip_id: str, track_id: str, old_start: int, old_duration: int,
+        old_source_start: int, new_start: int, new_source_start: int,
     ) -> None:
-        """Handle left trim finished: create and execute TrimClipCommand (with linked clip sync)."""
-        if self._timeline is None or self._updating:
-            return
-
-        # Hide snap indicator after trim finishes
-        if self._snap_indicator:
-            self._snap_indicator.hide_indicator()
-
-        # Apply snap if enabled (final position)
-        if self._snap_enabled:
-            snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-            # AUD-21402: SnapManager 路径显式排除自身（见 _on_clip_moved_impl）
-            new_start, _ = self._snap_frame(
-                new_start, snap_points, show_indicator=False,
-                exclude_source_ids={clip_id})
-            # Recalculate source start based on snapped position
-            # C06/INT-12：经模型的方向/速度感知映射换算源区间——此前
-            # source += timeline_delta 把时间线帧当素材帧（2x 修 10 帧
-            # 只裁 10 源帧，应 20；snap 还会覆盖正确输入）
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip:
-                new_source_start, new_left_source_duration = (
-                    clip.with_left_edge_source_values(new_start)
-                )
-        else:
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip is not None:
-                new_source_start, new_left_source_duration = (
-                    clip.with_left_edge_source_values(new_start)
-                )
-            else:
-                new_left_source_duration = None
-
-        # Check trim constraints (cannot exceed source bounds)
-        if new_source_start < 0:
-            # Invalid trim: revert visual
-            item = self._items_map.get(clip_id)
-            if item and isinstance(item, ClipItem):
-                item._start_frame = old_start
-                item._duration_frames = old_duration
-                item.update_source_range(old_source_start, self._get_clip_source_duration(clip_id))
-                item._update_geometry()
-                item.update()
-            # Also revert linked clip if applicable
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-                linked_item = self._items_map.get(clip.linked_clip_id)
-                linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-                if linked_item and linked_clip:
-                    linked_item._start_frame = linked_clip.timeline_start
-                    linked_item._duration_frames = linked_clip.timeline_duration
-                    linked_item.update_source_range(
-                        linked_clip.source_start, linked_clip.source_duration
-                    )
-                    linked_item._update_geometry()
-                    linked_item.update()
-            logger.warning("Trim left rejected: would exceed source bounds")
-            return
-
-        # Check timeline boundary: cannot move before time 00:00
-        if new_start < 0:
-            # Invalid trim: revert visual
-            item = self._items_map.get(clip_id)
-            if item and isinstance(item, ClipItem):
-                item._start_frame = old_start
-                item._duration_frames = old_duration
-                item.update_source_range(old_source_start, self._get_clip_source_duration(clip_id))
-                item._update_geometry()
-                item.update()
-            # Also revert linked clip if applicable
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-                linked_item = self._items_map.get(clip.linked_clip_id)
-                linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-                if linked_item and linked_clip:
-                    linked_item._start_frame = linked_clip.timeline_start
-                    linked_item._duration_frames = linked_clip.timeline_duration
-                    linked_item.update_source_range(
-                        linked_clip.source_start, linked_clip.source_duration
-                    )
-                    linked_item._update_geometry()
-                    linked_item.update()
-            logger.warning("Trim left rejected: would move clip before time 00:00")
-            return
-
-        # Check for overlap with previous clip
-        if not self._validate_trim_left(clip_id, track_id, new_start):
-            # Invalid trim: revert visual
-            item = self._items_map.get(clip_id)
-            if item and isinstance(item, ClipItem):
-                item._start_frame = old_start
-                item._duration_frames = old_duration
-                item.update_source_range(old_source_start, self._get_clip_source_duration(clip_id))
-                item._update_geometry()
-                item.update()
-            # Also revert linked clip if applicable
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-                linked_item = self._items_map.get(clip.linked_clip_id)
-                linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-                if linked_item and linked_clip:
-                    linked_item._start_frame = linked_clip.timeline_start
-                    linked_item._duration_frames = linked_clip.timeline_duration
-                    linked_item.update_source_range(
-                        linked_clip.source_start, linked_clip.source_duration
-                    )
-                    linked_item._update_geometry()
-                    linked_item.update()
-            logger.warning("Trim left rejected: overlap with previous clip")
-            return
-
-        # Build commands (primary + linked clips if applicable)
-        commands = []
-        delta = new_start - old_start
-
-        # Primary clip trim command
-        cmd = TrimClipCommand.create_left_trim(
-            track_id=track_id,
-            clip_id=clip_id,
-            new_start=new_start,
-            new_source_start=new_source_start,
-            old_start=old_start,
-            old_source_start=old_source_start,
-            old_duration=old_duration,
-            old_source_duration=self._get_clip_source_duration(clip_id),
-            new_source_duration=new_left_source_duration,
-        )
-        commands.append(cmd)
-
-        # Sync linked clip if applicable
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-            linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-            linked_item = self._items_map.get(clip.linked_clip_id)
-            if linked_clip and linked_item:
-                # N09/T3-01：锁伙伴在组内预检——开放 V 链接锁 A 时整组
-                # 拒绝（链接组完整性），不再让宏在 apply 中途抛
-                # ValueError 且 release 后预览残留。
-                if self._is_track_locked(linked_clip.track_id):
-                    self._revert_trim_visuals_to_model(
-                        clip_id, include_linked=True)
-                    logger.warning(
-                        "Trim left rejected: linked track %s is locked",
-                        linked_clip.track_id)
-                    return
-                # C06：链接伙伴按自身 timebase（速度/fps/方向）换算源区间
-                linked_new_start = linked_clip.timeline_start + delta
-                (
-                    linked_new_source_start,
-                    linked_new_source_duration,
-                ) = linked_clip.with_left_edge_source_values(linked_new_start)
-                linked_old_start = linked_clip.timeline_start
-                linked_old_duration = linked_clip.timeline_duration
-                linked_old_source_start = linked_clip.source_start
-
-                # Validate linked clip trim constraints
-                if linked_new_source_start >= 0 and self._validate_trim_left(
-                    linked_clip.clip_id, linked_clip.track_id, linked_new_start
-                ):
-                    linked_cmd = TrimClipCommand.create_left_trim(
-                        track_id=linked_clip.track_id,
-                        clip_id=linked_clip.clip_id,
-                        new_start=linked_new_start,
-                        new_source_start=linked_new_source_start,
-                        old_start=linked_old_start,
-                        old_source_start=linked_old_source_start,
-                        old_duration=linked_old_duration,
-                        old_source_duration=self._get_clip_source_duration(linked_clip.clip_id),
-                        new_source_duration=linked_new_source_duration,
-                    )
-                    commands.append(linked_cmd)
-                else:
-                    # Linked clip trim invalid - revert primary and linked
-                    item = self._items_map.get(clip_id)
-                    if item and isinstance(item, ClipItem):
-                        item._start_frame = old_start
-                        item._duration_frames = old_duration
-                        item.update_source_range(old_source_start, self._get_clip_source_duration(clip_id))
-                        item._update_geometry()
-                        item.update()
-                    linked_item._start_frame = linked_clip.timeline_start
-                    linked_item._duration_frames = linked_clip.timeline_duration
-                    linked_item.update_source_range(
-                        linked_clip.source_start, linked_clip.source_duration
-                    )
-                    linked_item._update_geometry()
-                    linked_item.update()
-                    logger.warning("Trim left rejected: linked clip constraints invalid")
-                    return
-
-        # Execute as single atomic MacroCommand (one undo reverts all)
-        # N09/T3-01：领域拒绝（锁轨/校验 ValueError）在提交边界收敛，
-        # Item 从 canonical 恢复，不再冒未捕获异常。
-        try:
-            if len(commands) == 1:
-                self._execute_command(commands[0])
-            else:
-                macro = MacroCommand.create("Trim linked clips left", commands)
-                self._execute_command(macro)
-        except (TimelineOperationError, ValueError) as exc:
-            self._revert_trim_visuals_to_model(clip_id, include_linked=True)
-            logger.warning("Trim left rejected: %s", exc)
+        self._finish_edge_trim(clip_id, track_id, "left", new_start)
 
     def _on_trim_right_finished(
-        self,
-        clip_id: str,
-        track_id: str,
-        old_duration: int,
-        old_source_duration: int,
-        new_duration: int,
-        new_source_duration: int
+        self, clip_id: str, track_id: str, old_duration: int, old_source_duration: int,
+        new_duration: int, new_source_duration: int,
     ) -> None:
-        """Handle right trim finished: create and execute TrimClipCommand (with linked clip sync)."""
-        if self._timeline is None or self._updating:
-            return
-
-        # Hide snap indicator after trim finishes
-        if self._snap_indicator:
-            self._snap_indicator.hide_indicator()
-
-        # Apply snap if enabled (final position)
-        if self._snap_enabled:
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip:
-                new_end = clip.timeline_start + new_duration
-                snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-                # AUD-21402: SnapManager 路径显式排除自身（见 _on_clip_moved_impl）
-                snapped_end, _ = self._snap_frame(
-                    new_end, snap_points, show_indicator=False,
-                    exclude_source_ids={clip_id})
-                new_duration = snapped_end - clip.timeline_start
-                # Recalculate source range（C06/INT-12：模型映射）
-                new_source_start_r, new_source_duration = (
-                    clip.with_right_edge_source_values(new_duration)
-                )
-            else:
-                new_source_start_r = None
-        else:
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip is not None:
-                new_source_start_r, new_source_duration = (
-                    clip.with_right_edge_source_values(new_duration)
-                )
-            else:
-                new_source_start_r = None
-
-        # Check trim constraints (cannot exceed source bounds)
-        # C17：上界校验必须含 source_start——只比 duration<=max 会把非零
-        # In 点的右延长放到素材之外（总源 200、In100、延长 150：exclusive
-        # end 250 > 200 仍放行）。
-        item = self._items_map.get(clip_id)
-        if item and isinstance(item, ClipItem):
-            max_source = item._max_source_frames
-            check_start = (
-                new_source_start_r
-                if new_source_start_r is not None
-                else item._source_start
-            )
-            exceeds_source = (
-                max_source > 0
-                and (
-                    new_source_duration > max_source
-                    or check_start + new_source_duration > max_source
-                )
-            )
-            if exceeds_source:
-                # Invalid trim: revert visual
-                item._duration_frames = old_duration
-                item.update_source_range(item._source_start, old_source_duration)
-                item._update_geometry()
-                item.update()
-                # Also revert linked clip if applicable
-                clip = self._timeline.get_clip_by_id(clip_id)
-                if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-                    linked_item = self._items_map.get(clip.linked_clip_id)
-                    linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-                    if linked_item and linked_clip:
-                        linked_item._duration_frames = linked_clip.timeline_duration
-                        linked_item.update_source_range(
-                            linked_clip.source_start, linked_clip.source_duration
-                        )
-                        linked_item._update_geometry()
-                        linked_item.update()
-                logger.warning("Trim right rejected: would exceed source bounds")
-                return
-
-        # Check for overlap with next clip
-        if not self._validate_trim_right(clip_id, track_id, new_duration):
-            # Invalid trim: revert visual
-            item = self._items_map.get(clip_id)
-            if item and isinstance(item, ClipItem):
-                item._duration_frames = old_duration
-                item.update_source_range(item._source_start, old_source_duration)
-                item._update_geometry()
-                item.update()
-            # Also revert linked clip if applicable
-            clip = self._timeline.get_clip_by_id(clip_id)
-            if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-                linked_item = self._items_map.get(clip.linked_clip_id)
-                linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-                if linked_item and linked_clip:
-                    linked_item._duration_frames = linked_clip.timeline_duration
-                    linked_item.update_source_range(
-                        linked_clip.source_start, linked_clip.source_duration
-                    )
-                    linked_item._update_geometry()
-                    linked_item.update()
-            logger.warning("Trim right rejected: overlap with next clip")
-            return
-
-        # Build commands (primary + linked clips if applicable)
-        commands = []
-        duration_delta = new_duration - old_duration
-
-        # Primary clip trim command
-        clip_for_right = self._timeline.get_clip_by_id(clip_id)
-        if new_source_start_r is None and clip_for_right is not None:
-            new_source_start_r, _ = clip_for_right.with_right_edge_source_values(
-                new_duration
-            )
-        cmd = TrimClipCommand.create_right_trim(
-            track_id=track_id,
-            clip_id=clip_id,
-            new_duration=new_duration,
-            new_source_duration=new_source_duration,
-            old_duration=old_duration,
-            old_source_duration=old_source_duration,
-            new_source_start=new_source_start_r,
-        )
-        commands.append(cmd)
-
-        # Sync linked clip if applicable
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip and self._get_reciprocal_linked_clip(clip) is not None and self._effective_linked_selection():
-            linked_clip = self._timeline.get_clip_by_id(clip.linked_clip_id)
-            linked_item = self._items_map.get(clip.linked_clip_id)
-            if linked_clip and linked_item:
-                # N09/T3-01：锁伙伴组内预检，整组拒绝（同左侧 trim）。
-                if self._is_track_locked(linked_clip.track_id):
-                    self._revert_trim_visuals_to_model(
-                        clip_id, include_linked=True)
-                    logger.warning(
-                        "Trim right rejected: linked track %s is locked",
-                        linked_clip.track_id)
-                    return
-                # C06：链接伙伴按自身 timebase 换算源区间
-                linked_new_duration = linked_clip.timeline_duration + duration_delta
-                (
-                    linked_new_source_start,
-                    linked_new_source_duration,
-                ) = linked_clip.with_right_edge_source_values(linked_new_duration)
-                linked_old_duration = linked_clip.timeline_duration
-                linked_old_source_duration = linked_clip.source_duration
-
-                # Validate linked clip trim constraints
-                max_linked_source = linked_item._max_source_frames
-                linked_valid = (
-                    linked_new_duration > 0 and
-                    linked_new_source_duration > 0 and
-                    (max_linked_source <= 0 or linked_new_source_duration <= max_linked_source) and
-                    self._validate_trim_right(linked_clip.clip_id, linked_clip.track_id, linked_new_duration)
-                )
-
-                if linked_valid:
-                    linked_cmd = TrimClipCommand.create_right_trim(
-                        track_id=linked_clip.track_id,
-                        clip_id=linked_clip.clip_id,
-                        new_duration=linked_new_duration,
-                        new_source_duration=linked_new_source_duration,
-                        old_duration=linked_old_duration,
-                        old_source_duration=linked_old_source_duration,
-                        new_source_start=linked_new_source_start,
-                    )
-                    commands.append(linked_cmd)
-                else:
-                    # Linked clip trim invalid - revert primary and linked
-                    item = self._items_map.get(clip_id)
-                    if item and isinstance(item, ClipItem):
-                        item._duration_frames = old_duration
-                        item.update_source_range(item._source_start, old_source_duration)
-                        item._update_geometry()
-                        item.update()
-                    linked_item._duration_frames = linked_clip.timeline_duration
-                    linked_item.update_source_range(
-                        linked_clip.source_start, linked_clip.source_duration
-                    )
-                    linked_item._update_geometry()
-                    linked_item.update()
-                    logger.warning("Trim right rejected: linked clip constraints invalid")
-                    return
-
-        # Execute as single atomic MacroCommand (one undo reverts all)
-        # N09/T3-01：领域拒绝在提交边界收敛（同左侧 trim）。
-        try:
-            if len(commands) == 1:
-                self._execute_command(commands[0])
-            else:
-                macro = MacroCommand.create("Trim linked clips right", commands)
-                self._execute_command(macro)
-        except (TimelineOperationError, ValueError) as exc:
-            self._revert_trim_visuals_to_model(clip_id, include_linked=True)
-            logger.warning("Trim right rejected: %s", exc)
+        self._finish_edge_trim(clip_id, track_id, "right", new_duration)
 
     # ==================== Slip Handlers (P4.4) ====================
 
@@ -11014,11 +10537,12 @@ class TimelineView(QGraphicsView):
         if not isinstance(left_item, ClipItem) or not isinstance(right_item, ClipItem):
             return
 
-        from src.features.edit.core.linked_roll import linked_roll_pairs
+        from src.features.edit.core.linked_roll import linked_roll_bounds, linked_roll_pairs
         try:
             pairs = linked_roll_pairs(
                 self._timeline, left_clip_id, right_clip_id,
                 self._effective_linked_selection())
+            bounds = linked_roll_bounds(pairs, self._roll_clip_limit)
         except ValueError as exc:
             logger.warning("Roll rejected: %s", exc)
             self.status_message_requested.emit(str(exc))
@@ -11046,6 +10570,14 @@ class TimelineView(QGraphicsView):
             ),
             None,
         )
+        affected = {clip.clip_id for pair in pairs for clip in pair}
+        exclusion = affected | {
+            marker.marker_id for marker in self._timeline.markers if marker.clip_id in affected
+        } | {
+            transition.transition_id for track in self._timeline.all_tracks
+            for transition in track.transitions
+            if transition.left_clip_id in affected or transition.right_clip_id in affected
+        }
         self._roll_preview_state = {
             "left_clip_id": left_clip_id,
             "right_clip_id": right_clip_id,
@@ -11053,6 +10585,11 @@ class TimelineView(QGraphicsView):
             "right_item": right_item,
             "handle": handle,
             "delta": 0,
+            "sequence": self._timeline,
+            "pairs": pairs,
+            "bounds": bounds,
+            "snap_exclusion": exclusion,
+            "pointer_delta": None,
             "pair_ids": tuple((a.clip_id, b.clip_id) for a, b in pairs),
         }
 
@@ -11074,7 +10611,9 @@ class TimelineView(QGraphicsView):
         self._show_roll_trim_monitor(left_clip, right_clip, int(cut_frame), 0)
         self.trim_frame_preview_requested.emit(int(cut_frame))
 
-    def _on_roll_trim_dragged(self, delta_frames: int) -> None:
+    def _on_roll_trim_dragged(
+        self, delta_frames: int, bypass_snap: bool = False, *, snap: bool = True,
+    ) -> None:
         """
         Handle roll trim dragging: live preview of both clips.
 
@@ -11089,8 +10628,11 @@ class TimelineView(QGraphicsView):
         if state is None:
             return
 
-        left_clip = self._timeline.get_clip_by_id(state["left_clip_id"])
-        right_clip = self._timeline.get_clip_by_id(state["right_clip_id"])
+        if self._timeline is not state["sequence"]:
+            self._cancel_current_interaction()
+            return
+        pairs = state["pairs"]
+        left_clip, right_clip = pairs[0]
         left_item = state["left_item"]
         right_item = state["right_item"]
         if (
@@ -11101,39 +10643,31 @@ class TimelineView(QGraphicsView):
         ):
             return
 
-        # The domain bounds use each clip's own speed/FPS/direction and
-        # source window. Timeline ticks are not interchangeable source frames.
-        from src.features.edit.core.linked_roll import linked_roll_bounds, linked_roll_pairs
-        try:
-            pairs = linked_roll_pairs(
-                self._timeline, left_clip.clip_id, right_clip.clip_id,
-                self._effective_linked_selection())
-            min_delta, max_delta = linked_roll_bounds(pairs, self._roll_clip_limit)
-        except ValueError as exc:
-            logger.warning("Roll preview rejected: %s", exc)
-            self.status_message_requested.emit(str(exc))
-            self._restore_roll_preview()
-            self._roll_preview_state = None
-            self._hide_trim_monitor()
-            self._interaction.finish()
-            return
+        min_delta, max_delta = state["bounds"]
         clamped_delta = max(min_delta, min(max_delta, int(delta_frames)))
+        state["pointer_delta"] = (delta_frames, bypass_snap) if snap else None
+        cut_frame = state["cut_frame"]
+        if snap and not bypass_snap and self._snap_enabled and clamped_delta and clamped_delta == delta_frames:
+            frame, did_snap = self._snap_frame(
+                cut_frame + clamped_delta, (), exclude_source_ids=state["snap_exclusion"],
+            )
+            if did_snap and min_delta <= frame - cut_frame <= max_delta:
+                clamped_delta = frame - cut_frame
+            elif self._snap_indicator:
+                self._snap_indicator.hide_indicator()
+        elif self._snap_indicator:
+            self._snap_indicator.hide_indicator()
 
         handle = state.get("handle")
-        if handle is not None and clamped_delta != int(delta_frames):
+        if handle is not None:
             handle.set_preview_delta(clamped_delta)
+        if state["delta"] == clamped_delta:
+            return
         state["delta"] = clamped_delta
 
         # P1-04：Trim Monitor 跟随 + cut 邻近帧预览
-        self._show_roll_trim_monitor(left_clip, right_clip,
-                                     int(state.get("cut_frame",
-                                                   left_clip.timeline_start
-                                                   + left_clip.timeline_duration)),
-                                     clamped_delta)
-        self.trim_frame_preview_requested.emit(
-            int(state.get("cut_frame",
-                          left_clip.timeline_start + left_clip.timeline_duration))
-            + clamped_delta)
+        self._show_roll_trim_monitor(left_clip, right_clip, cut_frame, clamped_delta)
+        self.trim_frame_preview_requested.emit(cut_frame + clamped_delta)
 
         left_item._duration_frames = left_clip.timeline_duration + clamped_delta
         left_item.update_trim_preview_source_range(
@@ -11243,6 +10777,8 @@ class TimelineView(QGraphicsView):
             if self._roll_preview_state is not None:
                 self._restore_roll_preview()
                 self._roll_preview_state = None
+            if self._snap_indicator:
+                self._snap_indicator.hide_indicator()
             self._hide_trim_monitor()
             self._interaction.finish()
 
@@ -11258,6 +10794,8 @@ class TimelineView(QGraphicsView):
 
         state = self._roll_preview_state
         if state is not None:
+            if self._timeline is not state["sequence"]:
+                return
             delta_frames = int(state.get("delta", delta_frames))
             self._restore_roll_preview()
             self._roll_preview_state = None
@@ -11316,350 +10854,289 @@ class TimelineView(QGraphicsView):
 
     # ==================== Ripple Trim Handlers (P4.2) ====================
 
-    def _on_ripple_trim_left(
-        self,
-        clip_id: str,
-        track_id: str,
-        new_start: int
-    ) -> None:
-        """
-        Handle ripple trim left during drag (live preview).
+    def _build_ripple_trim_drag(
+        self, clip_id: str, track_id: str, side: str,
+    ) -> _RippleTrimDrag:
+        """Cache the source limits and the tracks affected by a ripple gesture."""
+        from src.features.edit.core.timeline_ops import ripple_trim_delta_bounds
 
-        Ripple trim left: clip's start changes, subsequent clips shift.
-        This is called during drag for live preview.
-        """
+        sequence = self._timeline
+        track = sequence.get_track_by_id(track_id) if sequence is not None else None
+        clip = track.get_clip_by_id(clip_id) if track is not None else None
+        if clip is None or track is None or sequence is None:
+            raise ValueError("Ripple trim clip is no longer on the timeline")
+        clips = [clip]
+        partner = sequence.get_reciprocal_linked_clip(clip)
+        if partner is not None and self._effective_linked_selection():
+            clips.append(partner)
+
+        members: list[_RippleTrimMember] = []
+        minimum_delta = -(1 << 31)
+        maximum_delta: int | None = None
+        member_follower_ids: set[str] = set()
+        for member in clips:
+            member_track = sequence.get_track_by_id(member.track_id)
+            if member_track is None or member_track.is_locked:
+                name = member_track.name if member_track is not None else member.track_id
+                raise ValueError(f"Ripple trim rejected: track '{name}' is locked")
+            limit = self._roll_clip_limit(member)
+            lo, hi = ripple_trim_delta_bounds(member_track, member, side, limit)
+            minimum_delta = max(minimum_delta, lo)
+            if hi is not None:
+                maximum_delta = min(maximum_delta, hi) if maximum_delta is not None else hi
+            followers = tuple(
+                follower for follower in member_track.clips
+                if (follower.timeline_start > member.timeline_start if side == "left"
+                    else follower.timeline_start >= member.timeline_end)
+            )
+            members.append(_RippleTrimMember(member, limit, followers))
+            member_follower_ids.update(follower.clip_id for follower in followers)
+
+        edited_tracks = {member.clip.track_id for member in members}
+        if partner is not None:
+            # Match the command's independent A/V behavior and avoid
+            # moving the linked partner's track through Auto Select.
+            edited_tracks.add(partner.track_id)
+        sync_lanes = []
+        sync_follower_indices: dict[str, tuple[int, int]] = {}
+        for lane in (*sequence.video_tracks, *sequence.audio_tracks):
+            if lane.track_id in edited_tracks or lane.is_locked or not lane.is_sync_locked:
+                continue
+            ordered = tuple(sorted(lane.clips, key=lambda follower: follower.timeline_start))
+            if not ordered:
+                continue
+            starts = tuple(follower.timeline_start for follower in ordered)
+            preceding_ends = (0, *accumulate((follower.timeline_end for follower in ordered), max))
+            sync_follower_indices.update(
+                (follower.clip_id, (len(sync_lanes), index))
+                for index, follower in enumerate(ordered)
+            )
+            sync_lanes.append(_RippleSyncLane(ordered, starts, preceding_ends))
+
+        snap_owners = {
+            marker.marker_id: (marker.clip_id,)
+            for marker in sequence.markers if marker.clip_id is not None
+        }
+        snap_owners.update(
+            (transition.transition_id, tuple(
+                owner for owner in (transition.left_clip_id, transition.right_clip_id)
+                if owner
+            ))
+            for lane in sequence.all_tracks for transition in lane.transitions
+            if not transition.is_overlap_crossfade
+        )
+        return _RippleTrimDrag(
+            sequence, self._interaction.session_id, side, tuple(members),
+            minimum_delta, maximum_delta, tuple(sync_lanes),
+            {member.clip.clip_id for member in members},
+            member_follower_ids, sync_follower_indices, snap_owners,
+        )
+
+    def _preview_ripple_trim(
+        self, clip_id: str, track_id: str, side: str, boundary: int, bypass_snap: bool,
+    ) -> None:
+        state = (InteractionState.RIPPLE_TRIMMING_LEFT if side == "left"
+                 else InteractionState.RIPPLE_TRIMMING_RIGHT)
+        if (self._timeline is None or self._updating or self._interaction.state != state
+                or self._interaction.primary_clip_id != clip_id):
+            return
+        try:
+            drag = self._ripple_trim_drag
+            if drag is None or drag.session_id != self._interaction.session_id:
+                drag = self._build_ripple_trim_drag(clip_id, track_id, side)
+                self._ripple_trim_drag = drag
+            if drag.sequence is not self._timeline:
+                raise ValueError("Timeline changed during ripple trim")
+            self._update_ripple_trim_preview(drag, boundary, bypass_snap)
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+            self._cancel_current_interaction()
+
+    def _update_ripple_trim_preview(
+        self, drag: _RippleTrimDrag, boundary: int, bypass_snap: bool,
+    ) -> None:
+        from src.features.edit.core.timeline_ops import (
+            ripple_trim_source_window, ripple_trim_sync_point, sync_lock_follower_delta,
+        )
+
+        drag.pointer_boundary, drag.bypass_snap = boundary, bypass_snap
+        primary, left = drag.members[0].clip, drag.side == "left"
+        original_edge = primary.timeline_start if left else primary.timeline_end
+        delta = max(drag.minimum_delta, boundary - original_edge)
+        if drag.maximum_delta is not None:
+            delta = min(drag.maximum_delta, delta)
+        snap = None
+        if delta and self._snap_enabled and not bypass_snap:
+            requested_delta = delta
+            lane_shifts: dict[tuple[int, int], tuple[int, int]] = {}
+
+            def stationary_point(point: SnapPoint) -> bool:
+                candidate_delta = point.frame - original_edge
+                if (candidate_delta < drag.minimum_delta or (
+                        drag.maximum_delta is not None and candidate_delta > drag.maximum_delta)):
+                    return False
+                if point.source_id is None:
+                    return True
+                # A point at the old edge must not turn its own planned
+                # movement into a zero-delta snap.
+                probe_delta = candidate_delta or requested_delta
+                for owner in drag.snap_owners.get(point.source_id, (point.source_id,)):
+                    if owner in drag.edited_ids:
+                        return False
+                    if (owner in drag.member_follower_ids
+                            and (not left or probe_delta > 0)):
+                        return False
+                    follower = drag.sync_follower_indices.get(owner)
+                    if follower is None:
+                        continue
+                    lane_index, index = follower
+                    key = (lane_index, probe_delta)
+                    if key not in lane_shifts:
+                        pivot, sync_delta = ripple_trim_sync_point(
+                            drag.side, original_edge, probe_delta
+                        )
+                        lane = drag.sync_lanes[lane_index]
+                        first = bisect_left(lane.starts, pivot)
+                        shift = (sync_lock_follower_delta(
+                            sync_delta, lane.starts[first], lane.preceding_ends[first]
+                        ) if first < len(lane.starts) else 0)
+                        lane_shifts[key] = first, shift
+                    first, shift = lane_shifts[key]
+                    if index >= first and shift:
+                        return False
+                return True
+
+            snap = self._snap_manager.find_nearest(
+                original_edge + delta, self._pixels_per_frame,
+                accepts_point=stationary_point,
+            )
+            if snap is not None:
+                delta = snap.frame - original_edge
+        if snap is not None:
+            self._show_snap_indicator(snap.frame, snap)
+        elif self._snap_indicator is not None:
+            self._snap_indicator.hide_indicator()
+        if delta == drag.delta:
+            return
+
+        drag.delta = delta
+        shifted: dict[str, ClipInstance] = {}
+        for member in drag.members:
+            clip = member.clip
+            item = self._items_map.get(clip.clip_id)
+            if isinstance(item, ClipItem):
+                edge = clip.timeline_start if left else clip.timeline_end
+                source = (ripple_trim_source_window(clip, drag.side, edge + delta)
+                          if delta else (clip.source_start, clip.source_duration))
+                item._start_frame = clip.timeline_start + (min(0, delta) if left else 0)
+                item._duration_frames = clip.timeline_duration + (-delta if left else delta)
+                self._preview_affected_item_ids.add(clip.clip_id)
+                if not item._trim_preview_active:
+                    item.begin_trim_preview()
+                item.update_trim_preview_source_range(*source)
+                item._update_geometry()
+                item.setPos(self._layout_engine.frame_to_x(item._start_frame), item.y())
+                item.update()
+            follower_delta = min(0, -delta) if left else delta
+            if follower_delta:
+                for follower in member.followers:
+                    self._project_ripple_follower(follower, follower_delta)
+                    shifted[follower.clip_id] = follower
+
+        pivot, sync_delta = ripple_trim_sync_point(drag.side, original_edge, delta)
+        if sync_delta:
+            for lane in drag.sync_lanes:
+                index = bisect_left(lane.starts, pivot)
+                if index == len(lane.clips):
+                    continue
+                lane_delta = sync_lock_follower_delta(
+                    sync_delta, lane.starts[index], lane.preceding_ends[index],
+                )
+                if lane_delta:
+                    for follower in lane.clips[index:]:
+                        self._project_ripple_follower(follower, lane_delta)
+                        shifted[follower.clip_id] = follower
+
+        for clip_id in drag.shifted_followers.keys() - shifted.keys():
+            self._project_ripple_follower(drag.shifted_followers[clip_id], 0)
+        drag.shifted_followers = shifted
+
+    def _project_ripple_follower(self, clip: ClipInstance, delta: int) -> None:
+        """Move only the existing graphics item; the project is unchanged."""
+        item = self._items_map.get(clip.clip_id)
+        new_start = clip.timeline_start + delta
+        if isinstance(item, ClipItem) and item._start_frame != new_start:
+            self._preview_affected_item_ids.add(clip.clip_id)
+            item._start_frame = new_start
+            item.setPos(self._layout_engine.frame_to_x(new_start), item.y())
+
+    def _finish_ripple_trim(
+        self, clip_id: str, track_id: str, side: str, old_boundary: int, new_boundary: int,
+    ) -> None:
+        """Apply the relative edit displayed by the preview as one command."""
         if self._timeline is None or self._updating:
             return
+        drag, self._ripple_trim_drag = self._ripple_trim_drag, None
+        self._reproject_preview_affected_items()
+        self._hide_trim_monitor()
+        if self._snap_indicator is not None:
+            self._snap_indicator.hide_indicator()
+        try:
+            if drag is None:
+                clip = self._timeline.get_clip_by_id(clip_id)
+                if clip is None or new_boundary < 0 or (
+                    side == "left" and new_boundary >= clip.timeline_end
+                ) or (side == "right" and new_boundary <= clip.timeline_start):
+                    return
+                drag = self._build_ripple_trim_drag(clip_id, track_id, side)
+                delta = new_boundary - old_boundary
+                if (delta < drag.minimum_delta or
+                        (drag.maximum_delta is not None and delta > drag.maximum_delta)):
+                    return
+            else:
+                if (drag.sequence is not self._timeline
+                        or drag.members[0].clip.clip_id != clip_id or drag.side != side):
+                    return
+                delta = drag.delta
+            if not delta:
+                return
 
-        # Live preview: update visual items
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return
+            commands = []
+            for index, member in enumerate(drag.members):
+                clip = member.clip
+                factory = (RippleTrimCommand.create_left_trim if side == "left"
+                           else RippleTrimCommand.create_right_trim)
+                endpoint = clip.timeline_start if side == "left" else clip.timeline_end
+                commands.append(factory(
+                    clip.track_id, clip.clip_id, endpoint + delta,
+                    original_clip=clip, affected_clips=member.followers,
+                    max_source_frames=member.max_source_frames, apply_sync_lock=index == 0,
+                ))
+            command = (commands[0] if len(commands) == 1
+                       else MacroCommand.create("Ripple trim linked clips", commands))
+            self._execute_command(command)
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
 
-        track = self._timeline.get_track_by_id(track_id)
-        if track is None:
-            return
-
-        # Calculate delta
-        delta = clip.timeline_start - new_start
-
-        item = self._items_map.get(clip_id)
-        if item and isinstance(item, ClipItem):
-            source_delta = int(delta * clip.effective_speed())
-            item.update_trim_preview_source_range(
-                clip.source_start - source_delta,
-                clip.source_duration + source_delta,
-            )
-
-        # Preview subsequent clips shifting
-        clips_after = [c for c in track.clips if c.timeline_start > clip.timeline_start]
-        for after_clip in clips_after:
-            after_item = self._items_map.get(after_clip.clip_id)
-            if after_item and isinstance(after_item, ClipItem):
-                # P1-04 审计修复：与命令语义一致——缩短（delta<0）时后续
-                # 左移收拢，延长时不动（旧预览方向反了，与提交结果跳变）
-                # RI-02/R14：跟随片段被直接改写——登记，取消时重投影
-                self._preview_affected_item_ids.add(after_clip.clip_id)
-                preview_start = after_clip.timeline_start + (delta if delta < 0 else 0)
-                after_item._start_frame = preview_start
-                after_item._update_geometry()
-                after_item.update()
-
-        logger.debug(f"Ripple trim left preview: clip {clip_id} new_start {new_start}")
+    def _on_ripple_trim_left(
+        self, clip_id: str, track_id: str, new_start: int, bypass_snap: bool,
+    ) -> None:
+        self._preview_ripple_trim(clip_id, track_id, "left", new_start, bypass_snap)
 
     def _on_ripple_trim_right(
-        self,
-        clip_id: str,
-        track_id: str,
-        new_end: int
+        self, clip_id: str, track_id: str, new_end: int, bypass_snap: bool,
     ) -> None:
-        """
-        Handle ripple trim right during drag (live preview).
-
-        Ripple trim right: clip's end changes, subsequent clips shift.
-        This is called during drag for live preview.
-        """
-        if self._timeline is None or self._updating:
-            return
-
-        # Live preview: update visual items
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return
-
-        track = self._timeline.get_track_by_id(track_id)
-        if track is None:
-            return
-
-        # Calculate delta
-        delta = new_end - clip.timeline_end
-
-        item = self._items_map.get(clip_id)
-        if item and isinstance(item, ClipItem):
-            source_delta = int(delta * clip.effective_speed())
-            item.update_trim_preview_source_range(
-                clip.source_start,
-                clip.source_duration + source_delta,
-            )
-
-        # Preview subsequent clips shifting
-        clips_after = [c for c in track.clips if c.timeline_start >= clip.timeline_end]
-        for after_clip in clips_after:
-            after_item = self._items_map.get(after_clip.clip_id)
-            if after_item and isinstance(after_item, ClipItem):
-                # Preview: shift by delta
-                # RI-02/R14：跟随片段被直接改写——登记，取消时重投影
-                self._preview_affected_item_ids.add(after_clip.clip_id)
-                preview_start = after_clip.timeline_start + delta
-                after_item._start_frame = preview_start
-                after_item._update_geometry()
-                after_item.update()
-
-        logger.debug(f"Ripple trim right preview: clip {clip_id} new_end {new_end}")
+        self._preview_ripple_trim(clip_id, track_id, "right", new_end, bypass_snap)
 
     def _on_ripple_trim_left_finished(
-        self,
-        clip_id: str,
-        track_id: str,
-        old_start: int,
-        new_start: int
+        self, clip_id: str, track_id: str, old_start: int, new_start: int,
     ) -> None:
-        """
-        Handle ripple trim left finished: create and execute RippleTrimCommand.
-
-        Ripple trim left operation:
-        - Clip's timeline_start changes to new_start
-        - All subsequent clips shift by the delta
-        - No gap is created
-        """
-        if self._timeline is None or self._updating:
-            return
-
-        # Restore subsequent clips visuals before command execution
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return
-
-        track = self._timeline.get_track_by_id(track_id)
-        if track is None:
-            return
-
-        clips_after = [c for c in track.clips if c.timeline_start > clip.timeline_start]
-        for after_clip in clips_after:
-            after_item = self._items_map.get(after_clip.clip_id)
-            if after_item and isinstance(after_item, ClipItem):
-                after_item._start_frame = after_clip.timeline_start
-                after_item._duration_frames = after_clip.timeline_duration
-                after_item._update_geometry()
-                after_item.update()
-
-        # Apply snap if enabled
-        if self._snap_enabled:
-            snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-            # AUD-21402: SnapManager 路径显式排除自身（见 _on_clip_moved_impl）
-            new_start, _ = self._snap_frame(
-                new_start, snap_points, show_indicator=False,
-                exclude_source_ids={clip_id})
-
-        if new_start == old_start:
-            return
-
-        # INT-01 防护：无效目标（负起点 / 与右端重合的零时长）在领域
-        # 边界直接拒绝并恢复预览，不进入命令路径。
-        if new_start < 0 or new_start >= clip.timeline_end:
-            logger.warning(
-                "Ripple trim left rejected for clip %s: invalid new_start %s "
-                "(end=%s)", clip_id, new_start, clip.timeline_end
-            )
-            return
-
-        # Get clip data for undo
-        affected_clips = tuple(
-            c for c in track.clips
-            if c.timeline_start > clip.timeline_start
-        )
-
-        # C08：A/V editing-unit 原子波纹。主片段有双向链接且伙伴轨未锁
-        # 时，伙伴同步波纹到相同新起点（第二条命令不重复 sync 跟随），
-        # 宏内任一边失败则整体不提交。
-        commands = [
-            RippleTrimCommand.create_left_trim(
-                track_id=track_id,
-                clip_id=clip_id,
-                new_start=new_start,
-                original_clip=clip,
-                affected_clips=affected_clips,
-            )
-        ]
-        linked = (
-            self._timeline.get_reciprocal_linked_clip(clip)
-            if self._effective_linked_selection()
-            else None
-        )
-        if linked is not None and not self._is_track_locked(linked.track_id):
-            if new_start < linked.timeline_end:
-                linked_track = self._timeline.get_track_by_id(linked.track_id)
-                linked_affected = tuple(
-                    c for c in (linked_track.clips if linked_track else ())
-                    if c.timeline_start > linked.timeline_start
-                )
-                commands.append(
-                    RippleTrimCommand.create_left_trim(
-                        track_id=linked.track_id,
-                        clip_id=linked.clip_id,
-                        new_start=new_start,
-                        original_clip=linked,
-                        affected_clips=linked_affected,
-                        apply_sync_lock=False,
-                    )
-                )
-            else:
-                logger.warning(
-                    "Linked ripple trim left rejected: new_start %s beyond "
-                    "linked clip %s end %s", new_start, linked.clip_id,
-                    linked.timeline_end,
-                )
-                self.status_message_requested.emit(
-                    self.tr("链接片段无法波纹到该位置，已取消整组操作")
-                )
-                return
-        elif linked is not None and self._is_track_locked(linked.track_id):
-            self.status_message_requested.emit(
-                self.tr("链接轨道已锁定，无法整组波纹修剪")
-            )
-            return
-
-        cmd = commands[0] if len(commands) == 1 else MacroCommand.create(
-            "Linked ripple trim left", commands
-        )
-        self._execute_command(cmd)
-
-        logger.debug(
-            f"Ripple trim left completed: clip {clip_id} "
-            f"start {old_start} -> {new_start}"
-        )
+        self._finish_ripple_trim(clip_id, track_id, "left", old_start, new_start)
 
     def _on_ripple_trim_right_finished(
-        self,
-        clip_id: str,
-        track_id: str,
-        old_end: int,
-        new_end: int
+        self, clip_id: str, track_id: str, old_end: int, new_end: int,
     ) -> None:
-        """
-        Handle ripple trim right finished: create and execute RippleTrimCommand.
-
-        Ripple trim right operation:
-        - Clip's timeline_end changes to new_end
-        - All subsequent clips shift by the delta
-        - No gap is created
-        """
-        if self._timeline is None or self._updating:
-            return
-
-        # Restore subsequent clips visuals before command execution
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return
-
-        track = self._timeline.get_track_by_id(track_id)
-        if track is None:
-            return
-
-        clips_after = [c for c in track.clips if c.timeline_start >= clip.timeline_end]
-        for after_clip in clips_after:
-            after_item = self._items_map.get(after_clip.clip_id)
-            if after_item and isinstance(after_item, ClipItem):
-                after_item._start_frame = after_clip.timeline_start
-                after_item._duration_frames = after_clip.timeline_duration
-                after_item._update_geometry()
-                after_item.update()
-
-        # Apply snap if enabled
-        if self._snap_enabled:
-            snap_points = self._get_snap_points(exclude_clip_id=clip_id)
-            # Snap the end frame
-            # AUD-21402: SnapManager 路径显式排除自身（见 _on_clip_moved_impl）
-            new_end, _ = self._snap_frame(
-                new_end, snap_points, show_indicator=False,
-                exclude_source_ids={clip_id})
-
-        if new_end == old_end:
-            return
-
-        # INT-01 防护：无效目标（不大于 start 的零/负时长）在领域边界
-        # 直接拒绝并恢复预览，不进入命令路径。
-        if new_end <= clip.timeline_start:
-            logger.warning(
-                "Ripple trim right rejected for clip %s: invalid new_end %s "
-                "(start=%s)", clip_id, new_end, clip.timeline_start
-            )
-            return
-
-        # Get clip data for undo
-        affected_clips = tuple(
-            c for c in track.clips
-            if c.timeline_start >= clip.timeline_end
-        )
-
-        # C08：A/V editing-unit 原子波纹（与 left 对称）：链接伙伴同缩/同
-        # 延到相同新终点，任一边无法满足时整组拒绝。
-        commands = [
-            RippleTrimCommand.create_right_trim(
-                track_id=track_id,
-                clip_id=clip_id,
-                new_end=new_end,
-                original_clip=clip,
-                affected_clips=affected_clips,
-            )
-        ]
-        linked = (
-            self._timeline.get_reciprocal_linked_clip(clip)
-            if self._effective_linked_selection()
-            else None
-        )
-        if linked is not None and not self._is_track_locked(linked.track_id):
-            if new_end > linked.timeline_start:
-                linked_track = self._timeline.get_track_by_id(linked.track_id)
-                linked_affected = tuple(
-                    c for c in (linked_track.clips if linked_track else ())
-                    if c.timeline_start >= linked.timeline_end
-                )
-                commands.append(
-                    RippleTrimCommand.create_right_trim(
-                        track_id=linked.track_id,
-                        clip_id=linked.clip_id,
-                        new_end=new_end,
-                        original_clip=linked,
-                        affected_clips=linked_affected,
-                        apply_sync_lock=False,
-                    )
-                )
-            else:
-                logger.warning(
-                    "Linked ripple trim right rejected: new_end %s not beyond "
-                    "linked clip %s start %s", new_end, linked.clip_id,
-                    linked.timeline_start,
-                )
-                self.status_message_requested.emit(
-                    self.tr("链接片段无法波纹到该位置，已取消整组操作")
-                )
-                return
-        elif linked is not None and self._is_track_locked(linked.track_id):
-            self.status_message_requested.emit(
-                self.tr("链接轨道已锁定，无法整组波纹修剪")
-            )
-            return
-
-        cmd = commands[0] if len(commands) == 1 else MacroCommand.create(
-            "Linked ripple trim right", commands
-        )
-        self._execute_command(cmd)
-
-        logger.debug(
-            f"Ripple trim right completed: clip {clip_id} "
-            f"end {old_end} -> {new_end}"
-        )
+        self._finish_ripple_trim(clip_id, track_id, "right", old_end, new_end)
 
     def _on_clip_delete(self, clip_id: str, track_id: str) -> None:
         """Handle clip delete request."""
@@ -11978,6 +11455,7 @@ class TimelineView(QGraphicsView):
         "rate_stretch_right": InteractionState.TRIMMING_RIGHT,
         "motion_graphic_duration": InteractionState.TRIMMING_RIGHT,
         "retime_stretch": InteractionState.TRIMMING_RIGHT,
+        "retime_point_move": InteractionState.DRAGGING_RETIME_POINT,
     }
 
     def _on_item_interaction_started(
@@ -12016,6 +11494,11 @@ class TimelineView(QGraphicsView):
     def _on_item_interaction_finished(self, clip_id: str) -> None:
         """ClipItem 正常 release：结束本片段启动的会话。"""
         if self._interaction.primary_clip_id == clip_id:
+            if self._edge_trim is not None:
+                self._edge_trim = None
+                self._reproject_preview_affected_items()
+                if self._snap_indicator:
+                    self._snap_indicator.hide_indicator()
             self._interaction.finish()
 
     def _reproject_preview_affected_items(self) -> None:
@@ -12037,7 +11520,9 @@ class TimelineView(QGraphicsView):
                 continue
             item._start_frame = clip.timeline_start
             item._duration_frames = clip.timeline_duration
-            item.update_source_range(clip.source_start, clip.source_duration)
+            if (item._source_start, item._source_duration) != (clip.source_start, clip.source_duration):
+                item.update_source_range(clip.source_start, clip.source_duration)
+            item.set_retime_presentation(clip.speed)
             item.end_trim_preview()
             item._update_geometry()
             item.setPos(
@@ -12055,34 +11540,21 @@ class TimelineView(QGraphicsView):
         INT-02：现在同样覆盖 ClipItem 自身驱动的拖拽/修剪——先取消 item
         的 grab/pending 并恢复其预览，release 因 drag_mode 已清空不再提交。
         """
+        self._stop_drag_scroll()
         if self._playhead_dragging:
             self._finish_playhead_drag(cancelled=True)
             return
+        self._edge_trim = None
+        self._ripple_trim_drag = None
         # P2-2: Restore all clips from ClipDragSession if present
         if self._current_drag_session is not None:
             # Clean up Alt-drag copy ghosts if present.
             self._clear_drag_crossfades()
             self._clear_alt_copy_ghosts()
-            for clip_id, orig_start in self._current_drag_session.original_positions.items():
-                item = self._items_map.get(clip_id)
-                if item and isinstance(item, ClipItem):
-                    item._start_frame = orig_start
-                    item._drag_target_track_id = ""  # P5: Reset track change tracking
-                    x = self._layout_engine.frame_to_x(orig_start)
-                    # Restore original track Y position
-                    orig_tid = self._current_drag_session.original_track_ids.get(clip_id, "")
-                    if orig_tid:
-                        y = self._layout_engine.track_top(orig_tid)
-                        item.set_track_height(self._layout_engine.track_height(orig_tid))
-                    else:
-                        y = item.y()
-                    item.setPos(x, y)
-                    item._update_geometry()
-                    item.set_drag_cache_mode(False)
-                    item.update()
+            self._restore_clip_move_preview(self._current_drag_session)
+            self._restore_drag_cache_modes(self._current_drag_session)
             self._current_drag_session = None
-            self._set_drag_render_mode(False)
-            self.viewport().update()
+            self._sync_marker_items_to_timeline()
 
         # Subtitle group drags preview geometry directly on SubtitleClipItems
         # because they use a dedicated interaction path.  Escape must restore
@@ -13293,18 +12765,85 @@ class TimelineView(QGraphicsView):
             return None  # 零变化：不入历史
         return speed, achievable, reason
 
+    def _on_rate_stretch_preview(
+        self, clip_id: str, track_id: str, edge: str, duration: int,
+        bypass_snap: bool,
+    ) -> None:
+        """Stretch the timeline span while preserving the source window."""
+        from src.features.edit.core.commands import ChangeClipSpeedCommand
+
+        timeline = self._timeline
+        if (timeline is None or self._position_lock_enabled
+                or self._is_track_locked(track_id)):
+            return
+        clip = timeline.get_clip_by_id(clip_id)
+        item = self._items_map.get(clip_id)
+        if clip is None or not isinstance(item, ClipItem):
+            return
+        anchor_end = edge == "left"
+        anchor = clip.timeline_end if anchor_end else clip.timeline_start
+        partner = self._get_reciprocal_linked_clip(clip)
+        if self._snap_enabled and not bypass_snap:
+            exclusion = {clip_id}
+            if partner is not None:
+                exclusion.add(partner.clip_id)
+            dragged_frame = anchor - duration if anchor_end else anchor + duration
+            fallback = () if self._snap_manager else self._get_snap_points(exclude_clip_id=clip_id)
+            snapped_frame, _ = self._snap_frame(
+                dragged_frame, fallback, show_indicator=False,
+                exclude_source_ids=exclusion,
+            )
+            duration = anchor - snapped_frame if anchor_end else snapped_frame - anchor
+        duration = max(1, min(anchor, duration) if anchor_end else duration)
+        item._retime_requested_duration = duration
+        if partner is not None and self._is_track_locked(partner.track_id):
+            return
+        params = self._retime_speed_params_for_clip(clip)
+        plan = self._plan_rate_stretch_speed(clip, duration) if duration != clip.timeline_duration else None
+        if plan is not None:
+            params = params.with_speed(plan[0])
+
+        members = (clip, partner) if partner is not None else (clip,)
+        geometry: list[tuple[ClipItem, int, int, float]] = []
+        for member in members:
+            member_item = self._items_map.get(member.clip_id)
+            if not isinstance(member_item, ClipItem):
+                continue
+            speed = self._retime_speed_params_for_clip(member).speed
+            start, length = member.timeline_start, member.timeline_duration
+            if plan is not None:
+                start, length = ChangeClipSpeedCommand.project_timing(
+                    timeline, member, params, anchor_end=anchor_end,
+                )
+                speed = params.speed
+            if start < 0:
+                self._reproject_preview_affected_items()
+                return
+            geometry.append((member_item, start, length, speed))
+
+        for member_item, start, length, speed in geometry:
+            if (member_item._start_frame, member_item._duration_frames, member_item._speed) != (start, length, speed):
+                self._preview_affected_item_ids.add(member_item.clip_id)
+                member_item._start_frame = start
+                member_item._duration_frames = length
+                member_item._speed = speed
+                member_item._update_geometry()
+                member_item.setPos(self._layout_engine.frame_to_x(start), member_item.y())
+                member_item.update()
+
     def _on_rate_stretch_finished(
         self, clip_id: str, track_id: str,
-        original_duration: int, new_duration: int,
+        original_duration: int, new_duration: int, edge: str = "right",
     ) -> None:
-        """B4/B18: 比例拉伸结束——时长变化换算为速度并提交既有速度命令。
+        """Commit a rate-stretch tool gesture with the opposite edge fixed."""
+        self._finish_rate_stretch(
+            clip_id, track_id, original_duration, new_duration, edge, "Rate stretch")
 
-        R04：速度由统一 planner 从权威源时基反解（不拿已舍入时长推
-        速）。非目标字段（reverse/preserve_pitch/插值等）经
-        ``params.with_speed`` 保留；复杂 curve/freeze/动画（含 linked
-        伙伴）预检不过时发高级请求并明确反馈，不降级执行；零变化
-        不入历史。
-        """
+    def _finish_rate_stretch(
+        self, clip_id: str, track_id: str, original_duration: int,
+        new_duration: int, edge: str, label: str,
+    ) -> None:
+        self._reproject_preview_affected_items()
         clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
         if (clip is None or new_duration <= 0
                 or new_duration == original_duration
@@ -13317,18 +12856,21 @@ class TimelineView(QGraphicsView):
             return
         speed, achievable, reason = plan
         if self._retime_controls_need_backend(clip):
-            self._request_advanced_retime(clip, "stretch", 0, {
+            value = {
                 "original_duration": original_duration,
                 "duration": new_duration,
                 "speed": speed,
                 "achievable_duration": achievable,
                 "clamped": reason,
-            })
+            }
+            if edge == "left":
+                value["anchor_end"] = True
+            self._request_advanced_retime(clip, "stretch", 0, value)
             return
         params = self._retime_speed_params_for_clip(clip)
         try:
             self._commit_retime_params(
-                clip, params.with_speed(speed), "Rate stretch")
+                clip, params.with_speed(speed), label, anchor_end=(edge == "left"))
         except (RuntimeError, ValueError) as exc:
             self.status_message_requested.emit(str(exc))
             return
@@ -13395,27 +12937,9 @@ class TimelineView(QGraphicsView):
     def _on_retime_stretch_finished(
         self, clip_id: str, track_id: str, original_duration: int, new_duration: int,
     ) -> None:
-        """R04：retime 顶部拉伸与比例拉伸共用统一 planner（权威源时基）。"""
-        clip = self._timeline.get_clip_by_id(clip_id) if self._timeline else None
-        if (clip is None or new_duration <= 0 or new_duration == original_duration
-                or clip.timeline_duration != original_duration
-                or self._position_lock_enabled or self._is_track_locked(track_id)):
-            return
-        plan = self._plan_rate_stretch_speed(clip, new_duration)
-        if plan is None:
-            return
-        speed, achievable, reason = plan
-        if self._retime_controls_need_backend(clip):
-            self._request_advanced_retime(clip, "stretch", 0, {
-                "original_duration": original_duration, "duration": new_duration,
-                "speed": speed, "achievable_duration": achievable,
-                "clamped": reason})
-            return
-        params = self._retime_speed_params_for_clip(clip)
-        try:
-            self._commit_retime_params(clip, params.with_speed(speed), "Change clip speed")
-        except (ValueError, RuntimeError) as exc:
-            self.status_message_requested.emit(str(exc))
+        """Commit a gesture on the retime strip with the input edge fixed."""
+        self._finish_rate_stretch(
+            clip_id, track_id, original_duration, new_duration, "right", "Change clip speed")
 
     def _on_fade_end_curve_requested(
         self, clip_id: str, track_id: str, end: str, curve: object,
@@ -13674,6 +13198,7 @@ class TimelineView(QGraphicsView):
 
     def _commit_retime_params(
         self, clip: ClipInstance, params: SpeedParams, label: str,
+        *, anchor_end: bool = False,
     ) -> None:
         """Commit retime data through the existing immutable command stack."""
         from src.features.edit.core.commands import ChangeClipSpeedCommand
@@ -13684,6 +13209,7 @@ class TimelineView(QGraphicsView):
             clip_id=clip.clip_id,
             track_id=clip.track_id,
             new_speed=params,
+            anchor_end=anchor_end,
         )
         self._execute_command(command)
 
@@ -13945,10 +13471,13 @@ class TimelineView(QGraphicsView):
             source_offset = clip.source_duration - 1 - physical_offset
         try:
             updated = params.with_speed_point(source_offset, clip.source_duration)
-        except ValueError:
+            if updated == params:
+                return
+            self._commit_retime_params(clip, updated, "Add speed point")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
             return
         self._retime_control_clip_ids.add(clip_id)
-        self._commit_retime_params(clip, updated, "Add speed point")
 
     def _on_retime_speed_points_clear_requested(self, clip_id: str, track_id: str) -> None:
         """Remove all speed-point boundaries without changing base speed."""
@@ -13958,11 +13487,13 @@ class TimelineView(QGraphicsView):
         clip = self._timeline.get_clip_by_id(clip_id)
         if clip is None:
             return
-        self._commit_retime_params(
-            clip,
-            self._retime_speed_params_for_clip(clip).without_speed_points(),
-            "Clear speed points",
-        )
+        params = self._retime_speed_params_for_clip(clip)
+        try:
+            updated = params.without_speed_points()
+            if updated != params:
+                self._commit_retime_params(clip, updated, "Clear speed points")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
 
     def _on_retime_segment_speed_requested(
         self, clip_id: str, track_id: str, source_offset: int, speed: float,
@@ -13977,10 +13508,13 @@ class TimelineView(QGraphicsView):
         params = self._retime_speed_params_for_clip(clip)
         try:
             updated = params.with_speed_point_speed(source_offset, speed)
-        except ValueError:
+            if updated == params:
+                return
+            self._commit_retime_params(clip, updated, f"Change retime segment to {speed * 100.0:.0f}%")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
             return
         self._retime_control_clip_ids.add(clip_id)
-        self._commit_retime_params(clip, updated, f"Change retime segment to {speed * 100.0:.0f}%")
 
     def _on_retime_point_easing_requested(
         self, clip_id: str, track_id: str, source_offset: int, easing: str,
@@ -13995,11 +13529,13 @@ class TimelineView(QGraphicsView):
         params = self._retime_speed_params_for_clip(clip)
         try:
             updated = params.with_point_easing(source_offset, easing)
-        except ValueError:
+            if updated == params:
+                return
+            self._commit_retime_params(clip, updated, f"Set speed ramp {easing} at {source_offset}")
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
             return
         self._retime_control_clip_ids.add(clip_id)
-        self._commit_retime_params(
-            clip, updated, f"Set speed ramp {easing} at {source_offset}")
 
     def _on_fade_in_preview(self, clip_id: str, track_id: str, new_fade_in: float) -> None:
         """Keep fade preview local while the pointer is moving.
@@ -14342,6 +13878,8 @@ class TimelineView(QGraphicsView):
         exclude_clip_id: Optional[str] = None,
         include_transitions: bool = True,
         include_markers: bool = True,
+        *,
+        exclude_source_ids: set[str] | None = None,
     ) -> tuple[int, ...]:
         """
         Get current snap points for timeline.
@@ -14372,7 +13910,8 @@ class TimelineView(QGraphicsView):
         for track in self._timeline.all_tracks:
             for clip in track.clips:
                 # Optionally exclude a specific clip (for moving clips)
-                if exclude_clip_id and clip.clip_id == exclude_clip_id:
+                if (clip.clip_id == exclude_clip_id
+                        or (exclude_source_ids and clip.clip_id in exclude_source_ids)):
                     continue
                 points.append(clip.timeline_start)
                 points.append(clip.timeline_end)
@@ -14380,7 +13919,8 @@ class TimelineView(QGraphicsView):
             # Transition boundaries
             if include_transitions:
                 for trans in track.transitions:
-                    if trans.is_overlap_crossfade:
+                    if (trans.is_overlap_crossfade
+                            or (exclude_source_ids and trans.transition_id in exclude_source_ids)):
                         continue
                     # Transition center frame
                     points.append(trans.center_frame)
@@ -14392,7 +13932,8 @@ class TimelineView(QGraphicsView):
         # Timeline markers
         if include_markers:
             for marker in self._timeline.markers:
-                points.append(marker.frame)
+                if not exclude_source_ids or marker.marker_id not in exclude_source_ids:
+                    points.append(marker.frame)
 
         return tuple(sorted(set(points)))
 
@@ -14431,41 +13972,18 @@ class TimelineView(QGraphicsView):
 
         # P0-D: Use SnapManager with pixel-based threshold for consistent zoom behavior
         if self._timeline is not None and self._snap_manager:
-            from src.features.edit.core.timeline_ops import SnapPointType
-            snapped_frame, did_snap = self._snap_manager.find_nearest_frame(
+            point = self._snap_manager.find_nearest(
                 frame,
                 self._pixels_per_frame,
                 exclude_types=exclude_types,
                 exclude_source_ids=exclude_source_ids,
             )
-
-            # Update snap indicator visibility
             if show_indicator and self._snap_indicator:
-                if did_snap:
-                    snap_point = self._snap_manager.find_nearest(
-                        frame,
-                        self._pixels_per_frame,
-                        exclude_types=exclude_types,
-                        exclude_source_ids=exclude_source_ids,
-                    )
-                    snap_type_label = ""
-                    if snap_point:
-                        type_labels = {
-                            SnapPointType.CLIP_START: "Cut",
-                            SnapPointType.CLIP_END: "Cut",
-                            SnapPointType.PLAYHEAD: "Playhead",
-                            SnapPointType.MARKER: "Marker",
-                            SnapPointType.SEQUENCE_START: "Start",
-                            SnapPointType.TRANSITION_START: "Transition",
-                            SnapPointType.TRANSITION_CENTER: "Transition",
-                            SnapPointType.TRANSITION_END: "Transition",
-                        }
-                        snap_type_label = type_labels.get(snap_point.type, "")
-                    self._snap_indicator.show_indicator(snapped_frame, snap_type_label)
+                if point is not None:
+                    self._show_snap_indicator(point.frame, point)
                 else:
                     self._snap_indicator.hide_indicator()
-
-            return (snapped_frame, did_snap)
+            return (point.frame, True) if point is not None else (frame, False)
 
         # Legacy fallback using frame-based threshold
         if not snap_points:
@@ -14495,6 +14013,21 @@ class TimelineView(QGraphicsView):
 
         return (snapped_frame, did_snap)
 
+    def _show_snap_indicator(self, frame: int, point: SnapPoint | None) -> None:
+        if self._snap_indicator is None:
+            return
+        labels = {
+            SnapPointType.CLIP_START: "Cut",
+            SnapPointType.CLIP_END: "Cut",
+            SnapPointType.PLAYHEAD: "Playhead",
+            SnapPointType.MARKER: "Marker",
+            SnapPointType.SEQUENCE_START: "Start",
+            SnapPointType.TRANSITION_START: "Transition",
+            SnapPointType.TRANSITION_CENTER: "Transition",
+            SnapPointType.TRANSITION_END: "Transition",
+        }
+        self._snap_indicator.show_indicator(frame, labels.get(point.type, "") if point else "")
+
     # ==================== Validation Helpers ====================
 
     def _validate_move_group(self, group: MoveGroup, *, allow_overwrite: bool = False) -> bool:
@@ -14519,6 +14052,9 @@ class TimelineView(QGraphicsView):
         # Group members by their TARGET track for overlap checking
         track_members: dict[str, list[MoveGroupMember]] = {}
         for m in group.members:
+            source = self._timeline.get_track_by_id(m.track_id)
+            if source is None or source.is_locked:
+                return False
             # Use target track if available, otherwise old track
             target_tid = m.new_track_id if m.new_track_id and m.new_track_id != m.track_id else m.track_id
             # Skip pseudo track IDs that don't exist yet
@@ -14564,8 +14100,11 @@ class TimelineView(QGraphicsView):
 
     def set_linked_selection_enabled(self, enabled: bool) -> None:
         """P3: Toggle linked selection. When on, dragging video moves linked audio."""
-        if (enabled != self._linked_selection_enabled and self._interaction.state in
-                {InteractionState.SLIPPING, InteractionState.SLIDING}):
+        if enabled != self._linked_selection_enabled and self._interaction.state in {
+            InteractionState.SLIPPING, InteractionState.SLIDING,
+            InteractionState.RIPPLE_TRIMMING_LEFT, InteractionState.RIPPLE_TRIMMING_RIGHT,
+            InteractionState.TRIMMING_LEFT, InteractionState.TRIMMING_RIGHT, InteractionState.ROLLING,
+        }:
             self._cancel_current_interaction()
         self._linked_selection_enabled = enabled
         self._independent_selection = False
@@ -14682,55 +14221,6 @@ class TimelineView(QGraphicsView):
             return False
         return True
 
-    def _validate_trim_left(
-        self,
-        clip_id: str,
-        track_id: str,
-        new_start: int
-    ) -> bool:
-        """
-        Validate that left trim won't overlap with previous clip.
-
-        Args:
-            clip_id: Clip to trim
-            track_id: Track containing clip
-            new_start: New timeline start position
-
-        Returns:
-            True if trim is valid, False if overlap detected
-        """
-        if self._timeline is None:
-            return False
-
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return False
-
-        track = self._timeline.get_track_by_id(track_id)
-        if track is None:
-            return False
-
-        if track.track_type == "audio":
-            return self._validate_audio_trim(track, clip, new_start, clip.timeline_end - new_start)
-
-        # Find previous clip
-        prev_clip = None
-        for other in track.clips:
-            if other.clip_id == clip_id:
-                continue
-            if other.timeline_end <= clip.timeline_start:
-                if prev_clip is None or other.timeline_end > prev_clip.timeline_end:
-                    prev_clip = other
-
-        if prev_clip is None:
-            return True  # No previous clip, always valid
-
-        # Check if new start would overlap
-        if new_start < prev_clip.timeline_end:
-            return False
-
-        return True
-
     def _validate_trim_right(
         self,
         clip_id: str,
@@ -14781,15 +14271,6 @@ class TimelineView(QGraphicsView):
             return False
 
         return True
-
-    def _get_clip_source_duration(self, clip_id: str) -> int:
-        """Get clip source duration from timeline."""
-        if self._timeline is None:
-            return 0
-        clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
-            return 0
-        return clip.source_duration
 
     def _move_selected_clips(
         self,
@@ -15264,7 +14745,10 @@ class TimelineView(QGraphicsView):
         self._corner_timecode_text = "00:00:00:00"
         self._corner_timecode_widget.setText("00:00:00:00")
         self._timeline_start_reset_pending = False
+        self._timeline_start_scroll_request_id += 1
+        self._zoom_fit_restore = None
         self._selection = TimelineSelection()
+        self._selection_visual_ids.clear()
         self._timeline_command_stacks.clear()
         self._timeline_history_snapshots.clear()
         self._project_transaction_sequences.clear()
@@ -15441,37 +14925,127 @@ class TimelineView(QGraphicsView):
         self._execute_command(cmd)
         logger.debug(f"Track {track_id} deleted")
 
-    def _on_add_track_requested(self, track_type: str, position: str, track_index: int) -> None:
-        """Handle add track request.
+    def _on_add_track_requested(
+        self, track_type: str, position: str, reference_track_id: str | None = None,
+    ) -> None:
+        self._add_requested_tracks(((track_type, 1, position, reference_track_id),))
 
-        The position index is resolved per-type (video tracks index among
-        video tracks, audio among audio, subtitle among subtitle), so adding
-        a subtitle track from a video track's context menu still works.
-        """
-        if self._timeline is None:
+    def _add_requested_tracks(
+        self, requests: Iterable[tuple[str, int, str, str | None]],
+    ) -> None:
+        """Insert tracks relative to stable track IDs in a single undo step."""
+        requests = tuple(request for request in requests if request[1] > 0)
+        if not requests:
             return
+        timeline = self._timeline
+        if timeline is None:
+            timeline = self._create_default_timeline()
+            if timeline is None:
+                return
+            self.load_timeline(timeline)
 
-        # Calculate position index relative to the target type's own track list
-        if track_type == "video":
-            type_count = len(self._timeline.video_tracks)
-        elif track_type == "audio":
-            type_count = len(self._timeline.audio_tracks)
-        else:  # subtitle
-            type_count = len(self._timeline.subtitle_tracks)
+        tracks_by_type = {
+            "video": timeline.video_tracks,
+            "audio": timeline.audio_tracks,
+            "subtitle": timeline.subtitle_tracks,
+        }
+        commands = []
+        for track_type, count, side, reference_track_id in requests:
+            tracks = tracks_by_type[track_type]
+            position = len(tracks)
+            for index, track in enumerate(tracks):
+                if track.track_id == reference_track_id:
+                    # Video is drawn in reverse model order, so above a video
+                    # track means inserting after it in the model tuple.
+                    insert_after = side == ("above" if track_type == "video" else "below")
+                    position = index + int(insert_after)
+                    break
+            commands.extend(
+                AddTrackCommand.create(track_type, position=position + offset, track_id=str(uuid.uuid4()))
+                for offset in range(count)
+            )
+        command = commands[0] if len(commands) == 1 else MacroCommand.create(
+            I18N.tr("timeline.track.add_tracks", "Add Tracks"), commands,
+        )
+        self._provisional_timeline = False
+        self._execute_command(command)
 
-        if position == "above":
-            # Clamp the requested index to the target type's range. For
-            # cross-type adds (e.g. subtitle from a video track context menu)
-            # the global track_index doesn't map directly, so we just append.
-            insert_position = max(0, min(track_index, type_count)) if track_index < type_count + len(self._timeline.video_tracks) + len(self._timeline.audio_tracks) else type_count
-            # Simpler + safer: append when the source track type differs
-            insert_position = min(insert_position, type_count)
-        else:  # below
-            insert_position = type_count
+    def _show_add_tracks_dialog(self, reference_track_id: str | None = None) -> None:
+        """Choose video and audio counts and choose each stack's insertion point."""
+        from PyQt6.QtWidgets import QComboBox, QDialog, QDialogButtonBox, QGridLayout, QSpinBox
 
-        cmd = AddTrackCommand.create(track_type, None, insert_position)
-        self._execute_command(cmd)
-        logger.debug(f"Added {track_type} track at position {insert_position}")
+        if self._audio_only:
+            track_types = ("audio",)
+        else:
+            track_types = ("video", "audio")
+        timeline = self._timeline
+        dialog = QDialog(self)
+        title = I18N.tr("timeline.track.add_tracks", "Add Tracks")
+        dialog.setWindowTitle(title)
+        layout = QGridLayout(dialog)
+        count_label = I18N.tr("timeline.track.number_of_tracks", "Number of tracks")
+        position_label = I18N.tr("timeline.track.insert_position", "Insert position")
+        layout.addWidget(QLabel(count_label, dialog), 0, 1)
+        layout.addWidget(QLabel(position_label, dialog), 0, 2)
+        controls: dict[str, tuple[QSpinBox, QComboBox]] = {}
+        for row, track_type in enumerate(track_types, start=1):
+            if track_type == "video":
+                label = I18N.tr("timeline.track.type_video", "Video Track")
+                tracks = timeline.video_tracks if timeline is not None else ()
+                ordered_tracks = reversed(tracks)
+                outer_side = "above"
+            else:
+                label = I18N.tr("timeline.track.type_audio", "Audio Track")
+                tracks = timeline.audio_tracks if timeline is not None else ()
+                ordered_tracks = iter(tracks)
+                outer_side = "below"
+
+            count = QSpinBox(dialog)
+            count.setMinimum(0)
+            count.setValue(1)
+            count.setAccessibleName(f"{label} · {count_label}")
+            positions = QComboBox(dialog)
+            positions.setAccessibleName(f"{label} · {position_label}")
+            default_track_id = tracks[-1].track_id if tracks else None
+            if any(track.track_id == reference_track_id for track in tracks):
+                default_track_id = reference_track_id
+            for track in ordered_tracks:
+                badge = f"{track_type[0].upper()}{track.index + 1}"
+                name = f"{badge} · {track.name}" if track.name and track.name != badge else badge
+                for side, text in (
+                    ("above", I18N.tr("timeline.track.above_track", "Above {track}", track=name)),
+                    ("below", I18N.tr("timeline.track.below_track", "Below {track}", track=name)),
+                ):
+                    positions.addItem(text, (side, track.track_id))
+                    if track.track_id == default_track_id and side == outer_side:
+                        positions.setCurrentIndex(positions.count() - 1)
+            if not tracks:
+                positions.addItem(I18N.tr("timeline.track.append_tracks", "End of stack"), (outer_side, None))
+                positions.setEnabled(False)
+            layout.addWidget(QLabel(label, dialog), row, 0)
+            layout.addWidget(count, row, 1)
+            layout.addWidget(positions, row, 2)
+            controls[track_type] = (count, positions)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel, parent=dialog)
+        submit = buttons.addButton(title, QDialogButtonBox.ButtonRole.AcceptRole)
+        submit.setDefault(True)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons, len(controls) + 1, 0, 1, 3)
+
+        def update_enabled(_value: int) -> None:
+            submit.setEnabled(any(count.value() for count, _positions in controls.values()))
+
+        for count, _positions in controls.values():
+            count.valueChanged.connect(update_enabled)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        requests = [
+            (track_type, count.value(), *positions.currentData())
+            for track_type, (count, positions) in controls.items()
+        ] if accepted else []
+        dialog.deleteLater()
+        self._add_requested_tracks(requests)
 
     def _show_empty_area_track_menu(self, global_pos: QPoint, scene_pos: QPointF) -> None:
         """P10.3: Show a 'create track' context menu when right-clicking the
@@ -15481,30 +15055,38 @@ class TimelineView(QGraphicsView):
         existing track to right-click on first.
         """
         from PyQt6.QtWidgets import QMenu
-        from src.shared.i18n.i18n import I18N
 
         menu = QMenu()
         add_v = menu.addAction(I18N.tr("timeline.track.type_video", "Add Video Track"))
         add_a = menu.addAction(I18N.tr("timeline.track.type_audio", "Add Audio Track"))
         add_s = menu.addAction(I18N.tr("timeline.track.type_subtitle", "Add Subtitle Track"))
+        add_tracks = menu.addAction(I18N.tr("timeline.track.add_tracks_menu", "Add Tracks…"))
         action = menu.exec(global_pos)
 
         if action == add_v:
-            self._on_add_track_requested("video", "below", len(self._timeline.video_tracks) if self._timeline else 0)
+            self._on_add_track_requested("video", "above")
         elif action == add_a:
-            self._on_add_track_requested("audio", "below", len(self._timeline.audio_tracks) if self._timeline else 0)
+            self._on_add_track_requested("audio", "below")
         elif action == add_s:
-            # Subtitle tracks append at the end of the subtitle group
-            sub_count = len(self._timeline.subtitle_tracks) if self._timeline else 0
-            cmd = AddTrackCommand.create("subtitle", None, sub_count)
-            self._execute_command(cmd)
+            self._on_add_track_requested("subtitle", "below")
+        elif action == add_tracks:
+            self._show_add_tracks_dialog()
 
     def _on_move_track_requested(self, track_id: str, direction: str) -> None:
         """Handle move track request."""
         if self._timeline is None:
             return
 
-        cmd = MoveTrackCommand.create(track_id, direction)
+        track = self._timeline.get_track_by_id(track_id)
+        if track is None:
+            return
+        # Commands store directions in model order. Video displays that
+        # order reversed, while audio and subtitle display it directly.
+        model_direction = direction
+        if track.track_type == "video":
+            model_direction = "down" if direction == "up" else "up"
+        label = I18N.tr(f"timeline.menu.move_{direction}", f"Move Track {direction.title()}")
+        cmd = replace(MoveTrackCommand.create(track_id, model_direction), label=label)
         self._execute_command(cmd)
         logger.debug(f"Track {track_id} moved {direction}")
 
@@ -16180,68 +15762,20 @@ class TimelineView(QGraphicsView):
     # ==================== Ruler Interaction ====================
 
     def _on_ruler_clicked(self, frame: int) -> None:
-        """Handle ruler click to set playhead position with snap support (P0-D).
-
-        When snap is enabled, the playhead will snap to the nearest clip edge,
-        marker, or sequence start. Hold Shift to temporarily disable snapping.
-
-        Args:
-            frame: Frame position from ruler click
-        """
-        # Reset dragging state (hide timecode label)
+        """Seek when the graphics ruler receives a direct click."""
         if self._playhead_item:
             self._playhead_item.set_dragging(False)
-
-        # P0-D: Apply snap (Shift temporarily disables)
-        from src.features.edit.core.timeline_ops import SnapPointType
-        shift_held = QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier
-        if self._snap_enabled and not shift_held and self._timeline is not None:
-            # Exclude playhead type when moving playhead (don't snap to self)
-            snapped_frame, did_snap = self._snap_frame(
-                frame,
-                tuple(),
-                show_indicator=True,
-                exclude_types={SnapPointType.PLAYHEAD}
-            )
-            if did_snap:
-                frame = snapped_frame
-        elif self._snap_indicator:
-            self._snap_indicator.hide_indicator()
-
-        self.set_playhead(frame)
+        bypass_snap = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
+        self.set_playhead(self._snap_scrub_frame(frame, bypass_snap))
         self._ensure_playhead_visible()
 
     def _on_ruler_dragged(self, frame: int) -> None:
-        """Handle ruler drag (scrubbing) to update playhead position with snap (P0-D).
-
-        When snap is enabled, the playhead will snap to the nearest clip edge.
-        Hold Shift to temporarily disable snapping.
-
-        Args:
-            frame: Frame position during scrub
-        """
-        # Set dragging state (show timecode label)
+        """Seek while the graphics ruler holds the pointer."""
         if self._playhead_item:
             self._playhead_item.set_dragging(True)
-
-        # P0-D: Apply snap during scrubbing (Shift temporarily disables)
-        from src.features.edit.core.timeline_ops import SnapPointType
-        shift_held = QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier
-        if self._snap_enabled and not shift_held and self._timeline is not None:
-            snapped_frame, did_snap = self._snap_frame(
-                frame,
-                tuple(),
-                show_indicator=True,
-                exclude_types={SnapPointType.PLAYHEAD}
-            )
-            if did_snap:
-                frame = snapped_frame
-        elif self._snap_indicator:
-            self._snap_indicator.hide_indicator()
-
-        self.set_playhead(frame)
-        # During scrubbing, follow playhead
-        self.center_on_playhead()
+        bypass_snap = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier)
+        self.set_playhead(self._snap_scrub_frame(frame, bypass_snap))
+        self._ensure_playhead_visible()
 
     def _on_ruler_scrub_finished(self) -> None:
         """Clear transient snap feedback once ruler scrubbing is complete."""
@@ -16272,7 +15806,25 @@ class TimelineView(QGraphicsView):
                     content_end = max(content_end, int(clip.timeline_end))
         return content_end
 
-    def zoom_fit_content(self, fill_ratio: float = CONTENT_FIT_FILL_RATIO) -> None:
+    def toggle_zoom_fit(self) -> None:
+        """Switch between the full edit and the previous zoom and scroll position."""
+        bar = self.horizontalScrollBar()
+        if self._zoom_fit_restore is not None:
+            zoom, scroll = self._zoom_fit_restore
+            self._zoom_fit_restore = None
+            self.set_zoom(zoom)
+            self._timeline_start_reset_pending = False
+            bar.setValue(scroll)
+            return
+
+        previous_view = (self._pixels_per_frame, bar.value())
+        self.zoom_fit_content(deferred_scroll=False)
+        if previous_view != (self._pixels_per_frame, bar.value()):
+            self._zoom_fit_restore = previous_view
+
+    def zoom_fit_content(
+        self, fill_ratio: float = CONTENT_FIT_FILL_RATIO, *, deferred_scroll: bool = True,
+    ) -> None:
         """Fit all timeline content to a percentage of the visible width.
 
         ``Shift+Z`` uses an 80% fill ratio, leaving room on both sides for
@@ -16292,7 +15844,7 @@ class TimelineView(QGraphicsView):
         target_zoom = max(MIN_ZOOM, min(MAX_ZOOM, target_zoom))
 
         self.set_zoom(target_zoom)
-        self.scroll_to_timeline_start(deferred=True)
+        self.scroll_to_timeline_start(deferred=deferred_scroll)
         logger.debug(
             "Zoom fit content: %.0f%% fill, end=%d frames, %.2f pixels/frame",
             ratio * 100.0,

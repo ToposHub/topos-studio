@@ -1187,6 +1187,7 @@ class ChangeClipSpeedCommand:
         clip_id: Target clip ID
         track_id: Track containing the clip
         new_speed: New speed value (SpeedParams or float)
+        anchor_end: Keep each edited clip's outgoing edge fixed.
         _old_speed: Previous speed (set on apply)
         _old_timeline_duration: Previous timeline_duration (set on apply)
     """
@@ -1214,6 +1215,76 @@ class ChangeClipSpeedCommand:
     # 缺少动画恢复路径。
     _before_animation: tuple | None = None
     _before_linked_animation: tuple | None = None
+    anchor_end: bool = False
+    _old_timeline_start: int | None = None
+    _old_linked_timeline_start: int | None = None
+    _before_markers: tuple[TimelineMarker, ...] | None = None
+
+    @staticmethod
+    def project_timing(
+        timeline: TimelineSequence, clip: ClipInstance, speed: SpeedParams,
+        *, anchor_end: bool = False,
+    ) -> tuple[int, int]:
+        """Project the new start and duration in the sequence timebase."""
+        from src.features.edit.core.timeline_ops import timeline_duration_for_source
+
+        duration = timeline_duration_for_source(
+            clip.source_duration, speed,
+            clip._source_fps_num, clip._source_fps_den,
+            clip._timeline_fps_num or getattr(timeline.fps, "num", None),
+            clip._timeline_fps_den or getattr(timeline.fps, "den", None),
+        )
+        start = clip.timeline_end - duration if anchor_end else clip.timeline_start
+        return start, duration
+
+    def _retimed_clip(
+        self, timeline: TimelineSequence, clip: ClipInstance, speed: SpeedParams,
+    ) -> ClipInstance:
+        start, duration = self.project_timing(
+            timeline, clip, speed, anchor_end=self.anchor_end
+        )
+        # Remap absolute animation keys around the old input edge before
+        # shifting them with that edge. The source interval stays intact.
+        updated = replace(
+            clip,
+            speed=speed,
+            timeline_duration=duration,
+            fade_in_duration=min(clip.fade_in_duration, duration),
+            fade_out_duration=min(clip.fade_out_duration, duration),
+        ).with_animation_time_remapped(clip.timeline_duration, duration)
+        if start != clip.timeline_start:
+            updated = updated.with_timeline_start(start).with_temporal_shift(
+                start - clip.timeline_start
+            )
+        return updated
+
+    @staticmethod
+    def _retime_scoped_markers(
+        markers: tuple[TimelineMarker, ...],
+        retimed_members: dict[str, tuple[ClipInstance, ClipInstance]],
+    ) -> tuple[TimelineMarker, ...]:
+        """Keep markers attached to their corresponding point in the span."""
+        from fractions import Fraction
+
+        updated: list[TimelineMarker] = []
+        for marker in markers:
+            timing = retimed_members.get(marker.clip_id or "")
+            if timing is not None:
+                before, after = timing
+                if (
+                    marker.track_id == before.track_id
+                    and before.timeline_start <= marker.frame < before.timeline_end
+                ):
+                    local = marker.frame - before.timeline_start
+                    scaled = round(Fraction(
+                        local * after.timeline_duration, before.timeline_duration
+                    ))
+                    marker = replace(
+                        marker,
+                        frame=min(after.timeline_start + scaled, after.timeline_end - 1),
+                    )
+            updated.append(marker)
+        return tuple(updated)
 
     def apply(self, timeline: Any) -> tuple:
         """Apply speed change."""
@@ -1242,64 +1313,18 @@ class ChangeClipSpeedCommand:
         before_animation = (
             _copy.deepcopy(clip.animated_params), _copy.deepcopy(clip.effects))
 
-        # Calculate new timeline_duration based on speed ratio
-        from src.features.edit.core.clip_params import SpeedParams
-
-        if isinstance(self.new_speed, SpeedParams):
-            new_speed_value = self.new_speed.speed
-        elif isinstance(self.new_speed, (int, float)):
-            new_speed_value = float(self.new_speed)
-        else:
-            new_speed_value = 1.0
-
-        new_params = (
-            self.new_speed
-            if isinstance(self.new_speed, SpeedParams)
-            else SpeedParams(speed=new_speed_value)
-        )
-        # A retime control can contain multiple constant-speed segments.  Its
-        # duration is therefore the sum of every segment, not source/speed.
-        # C07：fps 元数据可用时经统一 helper 换算（source_frames /
-        # source_fps / speed * timeline_fps），修正混合帧率下 30fps 源
-        # 2x 变速在 24fps 序列得到 60 帧而非 48 帧的漂移。
-        from src.features.edit.core.timeline_ops import timeline_duration_for_source
-
-        seq_fps = getattr(timeline, "fps", None)
-        seq_fps_num = seq_fps.num if hasattr(seq_fps, "num") else None
-        seq_fps_den = seq_fps.den if hasattr(seq_fps, "den") else 1
-        # C07：SpeedParams 原样传入（变速点走分段积分），数值速度归一为
-        # SpeedParams 由 helper 统一处理
-        new_timeline_duration = timeline_duration_for_source(
-            clip.source_duration,
-            new_params,
-            clip._source_fps_num,
-            clip._source_fps_den,
-            clip._timeline_fps_num or seq_fps_num,
-            clip._timeline_fps_den or seq_fps_den,
-        )
-
-        new_speed_params = (
-            self.new_speed if isinstance(self.new_speed, SpeedParams)
-            else SpeedParams(speed=new_speed_value)
-        )
+        new_speed_params = self.new_speed
+        if not isinstance(new_speed_params, SpeedParams):
+            new_speed_params = SpeedParams(speed=(
+                float(new_speed_params)
+                if isinstance(new_speed_params, (int, float)) else 1.0
+            ))
 
         # A valid A/V link is one editing unit.  Apply the same speed to both
         # members and keep their timeline duration calculation in lockstep.
         linked_clip = timeline.get_reciprocal_linked_clip(clip)
-        # R06：一步构造最终实例——with_speed_params 的中间时长是
-        # speed 域（无 fps），先钳到中间值再放大到 fps 域时长会把
-        # 介于两者之间的 fade 错误钳短。
-        new_clip = replace(
-            clip,
-            speed=new_speed_params,
-            timeline_duration=new_timeline_duration,
-            fade_in_duration=min(clip.fade_in_duration, new_timeline_duration),
-            fade_out_duration=min(clip.fade_out_duration, new_timeline_duration),
-        )
-        # F2.4：变速重锚——clip/effect 动画关键帧按新旧时长比例重映射，
-        # 此前留在原绝对帧位导致曲线与画面错位。
-        new_clip = new_clip.with_animation_time_remapped(
-            old_timeline_duration, new_timeline_duration)
+        new_clip = self._retimed_clip(timeline, clip, new_speed_params)
+        retimed_members = {clip.clip_id: (clip, new_clip)}
 
         new_track = track.with_clip_updated(new_clip)
         new_timeline = timeline.with_track_updated(new_track)
@@ -1321,33 +1346,21 @@ class ChangeClipSpeedCommand:
             before_linked_animation = (
                 _copy.deepcopy(linked_clip.animated_params),
                 _copy.deepcopy(linked_clip.effects))
-            linked_duration = timeline_duration_for_source(
-                linked_clip.source_duration,
-                new_params,
-                linked_clip._source_fps_num,
-                linked_clip._source_fps_den,
-                linked_clip._timeline_fps_num or seq_fps_num,
-                linked_clip._timeline_fps_den or seq_fps_den,
-            )
-            linked_updated = replace(
-                linked_clip,
-                speed=new_speed_params,
-                timeline_duration=linked_duration,
-                fade_in_duration=min(
-                    linked_clip.fade_in_duration, linked_duration
-                ),
-                fade_out_duration=min(
-                    linked_clip.fade_out_duration, linked_duration
-                ),
-            )
-            # F2.4：链接伙伴同步重锚动画关键帧（与主片同语义）
-            linked_updated = linked_updated.with_animation_time_remapped(
-                linked_old_duration, linked_duration)
+            linked_updated = self._retimed_clip(
+                timeline, linked_clip, new_speed_params)
             linked_track = new_timeline.get_track_by_id(linked_clip.track_id)
             if linked_track is not None:
                 new_timeline = new_timeline.with_track_updated(
                     linked_track.with_clip_updated(linked_updated)
                 )
+                retimed_members[linked_clip.clip_id] = (linked_clip, linked_updated)
+
+        before_markers = None
+        if self.anchor_end and timeline.markers:
+            markers = self._retime_scoped_markers(timeline.markers, retimed_members)
+            if markers != timeline.markers:
+                before_markers = timeline.markers
+                new_timeline = new_timeline._rebuild(markers=markers)
 
         updated_cmd = ChangeClipSpeedCommand(
             command_id=self.command_id,
@@ -1372,6 +1385,12 @@ class ChangeClipSpeedCommand:
             _before_linked_transitions=before_linked_transitions,
             _before_animation=before_animation,
             _before_linked_animation=before_linked_animation,
+            anchor_end=self.anchor_end,
+            _old_timeline_start=clip.timeline_start,
+            _old_linked_timeline_start=(
+                linked_clip.timeline_start if linked_clip is not None else None
+            ),
+            _before_markers=before_markers,
         )
         return new_timeline, updated_cmd
 
@@ -1396,6 +1415,8 @@ class ChangeClipSpeedCommand:
         new_clip = clip.with_speed_params(old_speed).with_timeline_duration(
             self._old_timeline_duration
         )
+        if self._old_timeline_start is not None:
+            new_clip = new_clip.with_timeline_start(self._old_timeline_start)
         # B17：动画直接还原 apply 前快照，禁止反算——高倍率压缩后的
         # 反向重映射不可逆（帧位四舍五入漂移），且快照含完整
         # clip/effect 关键帧、tangent/handles 与 effect 动画。旧命令
@@ -1439,6 +1460,9 @@ class ChangeClipSpeedCommand:
                 restored_linked = linked.with_speed_params(
                     linked_speed
                 ).with_timeline_duration(self._old_linked_timeline_duration)
+                if self._old_linked_timeline_start is not None:
+                    restored_linked = restored_linked.with_timeline_start(
+                        self._old_linked_timeline_start)
                 # B17：链接伙伴动画恢复——此前 undo 完全遗漏伙伴的
                 # 关键帧重映射还原，apply 压缩过的曲线永久停留在新 span
                 if self._before_linked_animation is not None:
@@ -1471,6 +1495,8 @@ class ChangeClipSpeedCommand:
                                     transitions=self._before_linked_transitions
                                 )
                             )
+        if self._before_markers is not None:
+            current = current._rebuild(markers=self._before_markers)
         return current
 
     @staticmethod

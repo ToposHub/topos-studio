@@ -22,9 +22,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from PyQt6.QtCore import QPointF
+
+if TYPE_CHECKING:
+    from src.features.edit.core.timeline_v2 import ClipInstance, TimelineMarker
 
 
 class InteractionState(Enum):
@@ -48,6 +51,7 @@ class InteractionState(Enum):
     ROLLING = auto()            # Roll trim
     DRAGGING_FADE_IN = auto()
     DRAGGING_FADE_OUT = auto()
+    DRAGGING_RETIME_POINT = auto()
     CONTEXT_MENU = auto()       # Context menu is open
 
 
@@ -114,8 +118,16 @@ class ClipDragSession:
     # P3: MoveGroup for atomic validation
     move_group: Optional[MoveGroup] = None
     # Hot-path cache for drag preview; avoids recomputing unchanged previews.
-    snap_points: tuple[int, ...] = ()
-    last_preview_key: tuple | None = None
+    snap_points: tuple[int, ...] | None = None
+    snap_edge_offsets: tuple[int, ...] = ()
+    snap_excluded_ids: set[str] | None = None
+    scoped_markers: dict[str, list[TimelineMarker]] = field(default_factory=dict)
+    minimum_delta: int = 0
+    pointer_target: tuple[int, float] | None = None
+    last_preview_key: tuple[int, str] | None = None
+    audio_drag_neighbors: dict[str, tuple[tuple[ClipInstance, ...], tuple[int, ...]]] = field(
+        default_factory=dict
+    )
     # Track hit geometry is stable for the lifetime of a drag. Caching it
     # avoids rebuilding ordered track lists and reading every QRectF on each
     # mouse-move event, which is especially noticeable when crossing lanes.
@@ -173,6 +185,7 @@ class InteractionSession:
             InteractionState.ROLLING,
             InteractionState.DRAGGING_FADE_IN,
             InteractionState.DRAGGING_FADE_OUT,
+            InteractionState.DRAGGING_RETIME_POINT,
         )
 
     def begin(self, state: InteractionState, start_pos: QPointF, **kwargs) -> None:

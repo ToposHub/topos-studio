@@ -50,7 +50,7 @@ def view(qtbot: Any) -> TimelineView:
     return widget
 
 
-@pytest.mark.parametrize("wheel", [False, True], ids=["slider", "command-wheel"])
+@pytest.mark.parametrize("wheel", [False, True], ids=["slider", "option-wheel"])
 def test_zoom_erases_old_playhead_in_empty_track_areas(view: TimelineView, wheel: bool) -> None:
     recorder = _PaintRegions(view.viewport())
     view.viewport().installEventFilter(recorder)
@@ -61,12 +61,13 @@ def test_zoom_erases_old_playhead_in_empty_track_areas(view: TimelineView, wheel
         old_x = view.mapFromScene(view._playhead_item.scenePos()).x()
         recorder.region = QRegion()
         if wheel:
-            # Qt maps macOS Command to ControlModifier. Anchor at frame zero
-            # so the scrollbar stays still and cannot mask a missing repaint.
+            # At frame zero the horizontal scrollbar cannot move left to
+            # preserve the playhead anchor on zoom-out. Both playhead strips
+            # must repaint even though the scrollbar remains stationary.
             event = QWheelEvent(
                 QPointF(TRACK_HEADER_WIDTH, 20), QPointF(TRACK_HEADER_WIDTH, 20),
-                QPoint(), QPoint(0, 120 if zoom > view._pixels_per_frame else -120),
-                Qt.MouseButton.NoButton, Qt.KeyboardModifier.ControlModifier,
+                QPoint(), QPoint(0, -120),
+                Qt.MouseButton.NoButton, Qt.KeyboardModifier.AltModifier,
                 Qt.ScrollPhase.NoScrollPhase, False,
             )
             QApplication.sendEvent(view.viewport(), event)

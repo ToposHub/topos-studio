@@ -53,12 +53,18 @@ def _linked_timeline() -> TimelineSequence:
 
 
 def _view_stub(timeline: TimelineSequence):
+    from src.features.edit.ui.timeline_view import TimelineView
+
     view = MagicMock()
     view._timeline = timeline
     view._updating = False
     view._snap_enabled = False
     view._linked_selection_enabled = True
     view._items_map = {}
+    view._ripple_trim_drag = None
+    view._roll_clip_limit.return_value = None
+    view._build_ripple_trim_drag = lambda *args: TimelineView._build_ripple_trim_drag(view, *args)
+    view._finish_ripple_trim = lambda *args: TimelineView._finish_ripple_trim(view, *args)
     view._is_track_locked = lambda track_id: any(
         t.is_locked and t.track_id == track_id for t in timeline.all_tracks
     )

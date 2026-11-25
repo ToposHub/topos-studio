@@ -290,6 +290,9 @@
       "dialogue_group_assign": "按场次归组",
       "dialogue_group_clear": "退出对话组"
     },
+    "move": {
+      "group_blocked": "无法将所选片段移到此处。请检查轨道锁定和片段重叠。"
+    },
     "track": {
       "sync_lock": "同步锁定",
       "sync_lock_tip": "开启：波纹/提取操作带动本轨；关闭：本轨保持位置"
@@ -552,6 +555,13 @@
     },
     "track": {
       "add_track_menu": "添加轨道",
+      "add_tracks_menu": "添加多条轨道…",
+      "add_tracks": "添加多条轨道",
+      "number_of_tracks": "轨道数量",
+      "insert_position": "插入位置",
+      "above_track": "在 {track} 上方",
+      "below_track": "在 {track} 下方",
+      "append_tracks": "轨道组末端",
       "add_above": "在上方添加",
       "add_below": "在下方添加",
       "type_video": "视频轨道",

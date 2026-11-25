@@ -690,6 +690,7 @@ class MoveClipToTrackCommand:
         source_track = timeline.get_track_by_id(self.source_track_id)
         if source_track is None:
             raise ValueError(f"Source track not found: {self.source_track_id}")
+        assert_track_editable(timeline, self.source_track_id, "Move clip")
 
         clip = source_track.get_clip_by_id(self.clip_id)
         if clip is None:
@@ -723,7 +724,7 @@ class MoveClipToTrackCommand:
             if bound_graphic is not None and self.target_track_type != "video":
                 raise ValueError("Caption graphic clips can only move to video tracks")
             # Create new track
-            track_id = str(uuid.uuid4())
+            track_id = self._created_track_id or str(uuid.uuid4())
             object.__setattr__(self, '_created_track_id', track_id)
 
             existing_count = len(
@@ -1565,6 +1566,8 @@ class MoveClipsOverwriteCommand:
 
         moving_ids = {str(move["clip_id"]) for move in self.moves}
         moving_clips: dict[str, ClipInstance] = {}
+        moved_clips: dict[str, ClipInstance] = {}
+        linked_pairs: set[tuple[str, str]] = set()
         target_ranges: dict[str, list[tuple[int, int]]] = {}
         overlap_additions: dict[str, list[ClipInstance]] = {}
 
@@ -1588,15 +1591,23 @@ class MoveClipsOverwriteCommand:
                 raise ValueError(
                     f"Cannot move {source_track.track_type} clip to {target_track.track_type} track"
                 )
+            _assert_caption_graphic_track_destination(timeline, clip_id, target_track)
 
             clip = source_track.get_clip_by_id(clip_id)
             if clip is None:
                 raise ValueError(f"Clip not found: {clip_id}")
             moving_clips[clip_id] = clip
+            moved = replace(
+                clip.with_temporal_shift(new_start - clip.timeline_start),
+                track_id=target_track_id,
+                timeline_start=new_start,
+            )
+            moved_clips[clip_id] = moved
+            partner = timeline.get_reciprocal_linked_clip(clip)
+            if partner is not None:
+                linked_pairs.add(tuple(sorted((clip_id, partner.clip_id))))
             if self.audio_crossfades and target_track.track_type == "audio":
-                overlap_additions.setdefault(target_track_id, []).append(
-                    replace(clip, track_id=target_track_id, timeline_start=new_start)
-                )
+                overlap_additions.setdefault(target_track_id, []).append(moved)
             else:
                 target_ranges.setdefault(target_track_id, []).append(
                     (new_start, new_start + clip.timeline_duration)
@@ -1656,16 +1667,11 @@ class MoveClipsOverwriteCommand:
             target_track_id = str(move["target_track_id"])
             new_start = max(0, int(move["new_start"]))
             clip = moving_clips[clip_id]
-            moved_clip = replace(
-                clip,
-                track_id=target_track_id,
-                timeline_start=new_start,
-            )
             track = working.get_track_by_id(target_track_id)
             if track is None:
                 raise ValueError(f"Target track not found while adding moved clip: {target_track_id}")
             if target_track_id not in overlap_additions:
-                working = working.with_track_updated(track.with_clip_added(moved_clip))
+                working = working.with_track_updated(track.with_clip_added(moved_clips[clip_id]))
 
             working = _move_scoped_markers_with_clip(
                 working,
@@ -1674,6 +1680,41 @@ class MoveClipsOverwriteCommand:
                 new_start,
                 target_track_id,
             )
+
+        moved_transitions: dict[str, list[TransitionInstance]] = {}
+        for track in timeline.all_tracks:
+            for transition in track.transitions:
+                if transition.is_overlap_crossfade:
+                    continue
+                owners = tuple(
+                    cid for cid in (transition.left_clip_id, transition.right_clip_id) if cid
+                )
+                if not owners or not all(cid in moved_clips for cid in owners):
+                    continue
+                target_id = moved_clips[owners[0]].track_id
+                if all(moved_clips[cid].track_id == target_id for cid in owners):
+                    moved_transitions.setdefault(target_id, []).append(
+                        replace(transition, track_id=target_id)
+                    )
+        for target_id, transitions in moved_transitions.items():
+            track = working.get_track_by_id(target_id)
+            working = working.with_track_updated(
+                replace(track, transitions=track.transitions + tuple(transitions)).reanchor_transitions()
+            )
+
+        # Removing the originals clears reciprocal links. Restore a surviving
+        # pair even when Linked Selection was off and only one side moved.
+        for first_id, second_id in linked_pairs:
+            first = working.get_clip_by_id(first_id)
+            second = working.get_clip_by_id(second_id)
+            if first is None or second is None or {first_id, second_id} & overwritten_clip_ids:
+                for member in (first, second):
+                    if member is not None and member.clip_id in moving_ids:
+                        working = working.with_clip_updated(member.with_linked_clip_id(None))
+                continue
+            for member, partner_id in ((first, second_id), (second, first_id)):
+                if member.linked_clip_id != partner_id:
+                    working = working.with_clip_updated(member.with_linked_clip_id(partner_id))
 
         updated_cmd = replace(self, _before_timeline=timeline)
         logger.debug(
@@ -4006,6 +4047,7 @@ class RippleTrimCommand:
     # R08：目标轨跟随片段的 scoped marker 现随波纹位移，undo 用快照还原
     _before_markers: tuple = None
     _before_transitions: tuple | None = None
+    max_source_frames: int | None = None
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         """
@@ -4036,7 +4078,9 @@ class RippleTrimCommand:
         ))
 
         # Import ripple trim operations
-        from src.features.edit.core.timeline_ops import ripple_trim_clip_left, ripple_trim_clip_right
+        from src.features.edit.core.timeline_ops import (
+            ripple_trim_clip_left, ripple_trim_clip_right, ripple_trim_sync_point,
+        )
 
         # Apply ripple trim
         if self.trim_side == "left":
@@ -4045,16 +4089,20 @@ class RippleTrimCommand:
             new_timeline = ripple_trim_clip_left(
                 timeline,
                 self.clip_id,
-                self.new_timeline_start
+                self.new_timeline_start,
+                self.max_source_frames,
             )
+            old_boundary, new_boundary = clip.timeline_start, self.new_timeline_start
         elif self.trim_side == "right":
             if self.new_timeline_end is None:
                 raise ValueError("new_timeline_end required for right ripple trim")
             new_timeline = ripple_trim_clip_right(
                 timeline,
                 self.clip_id,
-                self.new_timeline_end
+                self.new_timeline_end,
+                self.max_source_frames,
             )
+            old_boundary, new_boundary = clip.timeline_end, self.new_timeline_end
         else:
             raise ValueError(f"Invalid trim_side: {self.trim_side}")
 
@@ -4066,17 +4114,9 @@ class RippleTrimCommand:
         #   start >= E 按 (new_E - E) 位移。
         sync_lock_moves: tuple[dict[str, Any], ...] = ()
         if self.apply_sync_lock:
-            sync_delta = 0
-            sync_point = 0
-            if self.trim_side == "left":
-                assert self.new_timeline_start is not None
-                if self.new_timeline_start > clip.timeline_start:
-                    sync_delta = -(self.new_timeline_start - clip.timeline_start)
-                    sync_point = self.new_timeline_start
-            else:
-                assert self.new_timeline_end is not None
-                sync_delta = self.new_timeline_end - clip.timeline_end
-                sync_point = clip.timeline_end
+            sync_point, sync_delta = ripple_trim_sync_point(
+                self.trim_side, old_boundary, new_boundary - old_boundary
+            )
 
             if sync_delta != 0:
                 exclude = [self.track_id]
@@ -4179,6 +4219,8 @@ class RippleTrimCommand:
                                if self._before_markers is not None else None),
             "before_transitions": ([t.to_dict() for t in self._before_transitions]
                                    if self._before_transitions is not None else None),
+            **({"max_source_frames": self.max_source_frames}
+               if self.max_source_frames is not None else {}),
         }
 
     @staticmethod
@@ -4205,6 +4247,7 @@ class RippleTrimCommand:
                              if data.get("before_markers") is not None else None),
             _before_transitions=_transitions_from_dicts(data.get("before_transitions")),
             _sync_lock_moves=tuple(data.get("sync_lock_moves", [])),
+            max_source_frames=data.get("max_source_frames"),
         )
 
     @staticmethod
@@ -4215,6 +4258,7 @@ class RippleTrimCommand:
         original_clip: ClipInstance | None = None,
         affected_clips: tuple[ClipInstance, ...] | None = None,
         apply_sync_lock: bool = True,
+        max_source_frames: int | None = None,
     ) -> RippleTrimCommand:
         """Factory method for left ripple trim."""
         return RippleTrimCommand(
@@ -4227,6 +4271,7 @@ class RippleTrimCommand:
             _original_clip=original_clip,
             _affected_clips=affected_clips,
             apply_sync_lock=apply_sync_lock,
+            max_source_frames=max_source_frames,
         )
 
     @staticmethod
@@ -4237,6 +4282,7 @@ class RippleTrimCommand:
         original_clip: ClipInstance | None = None,
         affected_clips: tuple[ClipInstance, ...] | None = None,
         apply_sync_lock: bool = True,
+        max_source_frames: int | None = None,
     ) -> RippleTrimCommand:
         """Factory method for right ripple trim."""
         return RippleTrimCommand(
@@ -4249,6 +4295,7 @@ class RippleTrimCommand:
             _original_clip=original_clip,
             _affected_clips=affected_clips,
             apply_sync_lock=apply_sync_lock,
+            max_source_frames=max_source_frames,
         )
 
 

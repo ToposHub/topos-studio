@@ -502,6 +502,7 @@ class AddTrackCommand:
     position: int | None = None
     track_id: str | None = None
     _created_track_id: str | None = None
+    track_role: str = "standard"
 
     def apply(self, timeline: TimelineSequence) -> TimelineSequence:
         """Apply the command: add new track."""
@@ -537,6 +538,7 @@ class AddTrackCommand:
                     position=self.position,
                     track_id=self.track_id,
                     _created_track_id=None,
+                    track_role=self.track_role,
                 )
         existing_count = len(existing)
 
@@ -562,6 +564,7 @@ class AddTrackCommand:
             track_id=track_id,
             name=track_name,
             track_type=self.track_type,
+            track_role=self.track_role,
             index=position,
             color=next_track_color(
                 resolve_track_color(track.track_id, track.color)
@@ -600,6 +603,7 @@ class AddTrackCommand:
             position=position,
             track_id=self.track_id,
             _created_track_id=track_id,
+            track_role=self.track_role,
         )
         return new_timeline, updated_cmd
 
@@ -657,6 +661,7 @@ class AddTrackCommand:
             "position": self.position,
             "track_id": self.track_id,
             "created_track_id": self._created_track_id,
+            "track_role": self.track_role,
         }
 
     @staticmethod
@@ -669,6 +674,7 @@ class AddTrackCommand:
             position=data.get("position"),
             track_id=data.get("track_id"),
             _created_track_id=data.get("created_track_id"),
+            track_role=data.get("track_role", "standard"),
         )
 
     @staticmethod
@@ -677,6 +683,8 @@ class AddTrackCommand:
         name: str | None = None,
         position: int | None = None,
         track_id: str | None = None,
+        *,
+        track_role: str = "standard",
     ) -> AddTrackCommand:
         return AddTrackCommand(
             command_id=str(uuid.uuid4()),
@@ -685,6 +693,7 @@ class AddTrackCommand:
             name=name,
             position=position,
             track_id=track_id,
+            track_role=track_role,
         )
 
 

@@ -35,6 +35,7 @@ from src.features.edit.ui.timeline_items import (
     SUBTITLE_CLIP_BG,
     SUBTITLE_CLIP_BG_SELECTED,
     SUBTITLE_CLIP_TEXT_COLOR,
+    _visible_track_item_rect,
 )
 
 # Trim handle hit zone (pixels from each edge)
@@ -270,12 +271,21 @@ class SubtitleClipItem(QGraphicsObject):
         return QRectF(0.0, y, w, h)
 
     def shape(self) -> QPainterPath:
+        rect = self.boundingRect()
+        if self._drag_mode == "none":
+            rect = _visible_track_item_rect(self, rect, "subtitle")
         path = QPainterPath()
-        path.addRect(self.boundingRect())
+        if not rect.isEmpty():
+            path.addRect(rect)
         return path
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         rect = self.boundingRect()
+        if self._drag_mode == "none":
+            visible = _visible_track_item_rect(self, rect, "subtitle")
+            if visible.isEmpty():
+                return
+            painter.setClipRect(visible, Qt.ClipOperation.IntersectClip)
         radius = 3.0
 
         # Body color

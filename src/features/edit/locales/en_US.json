@@ -290,6 +290,9 @@
       "dialogue_group_assign": "Assign to Scene Group",
       "dialogue_group_clear": "Remove from Group"
     },
+    "move": {
+      "group_blocked": "The selected clips cannot move to this position. Check the track locks and overlaps."
+    },
     "track": {
       "sync_lock": "Sync Lock",
       "sync_lock_tip": "When enabled, ripple/extract operations move this track; when disabled, this track keeps its position"
@@ -552,6 +555,13 @@
     },
     "track": {
       "add_track_menu": "Add Track",
+      "add_tracks_menu": "Add Tracks…",
+      "add_tracks": "Add Tracks",
+      "number_of_tracks": "Number of tracks",
+      "insert_position": "Insert position",
+      "above_track": "Above {track}",
+      "below_track": "Below {track}",
+      "append_tracks": "End of stack",
       "add_above": "Add Above",
       "add_below": "Add Below",
       "type_video": "Video Track",

@@ -294,24 +294,24 @@ def test_r07_timeline_switch_invalidates(qtbot, monkeypatch):
 def test_r07_single_trim_left_monitor_with_neighbor(qtbot, monkeypatch):
     """单边左修：A 面板 = 被修片新入点首帧；B 面板 = 邻片在切点前帧。
 
-    A(0..100)、B(100..200，源起点 50 有左余量)；把 B 左修到 90：
-    cut=90，邻片 A 覆盖 89。
+    A(0..100)、B(110..210，源起点 50 有左余量)；把 B 左修到 100：
+    cut=100，邻片 A 覆盖 99。
     """
     a = _clip(clip_id="A", timeline_start=0, timeline_duration=100)
-    b = _clip(clip_id="B", timeline_start=100, timeline_duration=100,
+    b = _clip(clip_id="B", timeline_start=110, timeline_duration=100,
               source_start=50, source_duration=150)
     view = _view(qtbot, _timeline(a, b))
     monitor, provider = _install(view, monkeypatch)
     monitor.visible = True
 
-    view._on_clip_trim_left("B", "v1", 90)
+    view._on_clip_trim_left("B", "v1", 100)
 
     assert monitor.trim_calls, "single-edge trim must drive the monitor"
     (_lp, left_frame, _rp, right_frame, _gen, _rid) = provider.requests[-1]
     # A 面：B 的新首帧（新入点 = B 窗口 offset 0，源起点 50−10=40）
     assert left_frame == 40
-    # B 面：邻片 A 在 cut-1=89 帧处 → A 的 offset 89
-    assert right_frame == 89
+    # B 面：邻片 A 在 cut-1=99 帧处 → A 的 offset 99
+    assert right_frame == 99
 
 
 def test_r07_single_trim_right_monitor_gap_placeholder(qtbot, monkeypatch):

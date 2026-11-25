@@ -11,7 +11,7 @@ from PyQt6.QtTest import QTest
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
 from src.features.edit.ui.timeline_items import TimecodeRulerItem
 from src.features.edit.ui.timeline_panel import TimelinePanel
-from src.shared.ui.style_sheet import DARK_THEME
+from src.shared.ui.style_sheet import DARK_THEME, PANEL_SLIDER_STYLE
 
 pytestmark = pytest.mark.edit_ui
 
@@ -106,16 +106,21 @@ def test_track_header_hover_matches_resolve_controls(
     assert view.viewport().cursor().shape() == shape
 
 
-def test_zoom_slider_overrides_all_host_theme_subcontrols(panel: Any) -> None:
-    from PyQt6.QtWidgets import QStyle, QStyleOptionSlider
+def test_zoom_slider_inherits_shared_transparent_slider_subcontrols(panel: Any, qapp: Any) -> None:
+    from PyQt6.QtWidgets import QSlider, QStyle, QStyleOptionSlider
 
-    slider = panel.zoom_slider
-    option = QStyleOptionSlider()
-    slider.initStyleOption(option)
-    groove = slider.style().subControlRect(QStyle.ComplexControl.CC_Slider, option,
-                                           QStyle.SubControl.SC_SliderGroove, slider)
-    assert groove.height() == 3
-    style = slider.styleSheet()
-    assert 'QSlider::sub-page:horizontal' in style
-    assert 'QSlider::add-page:horizontal' in style
-    assert 'background: transparent' in style
+    def groove_height(slider: QSlider) -> int:
+        option = QStyleOptionSlider()
+        slider.initStyleOption(option)
+        return slider.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, option,
+            QStyle.SubControl.SC_SliderGroove, slider,
+        ).height()
+
+    reference = QSlider(Qt.Orientation.Horizontal)
+    reference.resize(panel.zoom_slider.size())
+    reference.setStyleSheet(PANEL_SLIDER_STYLE)
+    assert groove_height(panel.zoom_slider) == groove_height(reference) > 0
+    assert not panel.zoom_slider.styleSheet()
+    style = qapp.styleSheet()
+    assert "QSlider::sub-page, QSlider::add-page { background: transparent; border: none; }" in style

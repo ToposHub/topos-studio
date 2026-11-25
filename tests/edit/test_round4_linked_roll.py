@@ -57,6 +57,27 @@ def _drag(view: TimelineView, release: bool = True) -> None:
         QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=point+QPoint(30, 0))
 
 
+def test_numeric_in_trim_uses_its_own_bounds_with_reverse_media(qtbot: Any, monkeypatch: Any) -> None:
+    from src.features.edit.ui.trim_numeric_dialog import TrimNumericDialog
+
+    view = _view(qtbot, _sequence(speed=2.0, reverse=True))
+    original = view.get_timeline().get_clip_by_id("v1")
+    expected_source = original.with_left_edge_source_values(10)
+
+    def enter_in_trim(dialog: TrimNumericDialog) -> TrimNumericDialog.DialogCode:
+        assert dialog._bounds_for("in", "trim") == (0, 99)
+        assert dialog._bounds_for("out", "trim")[1] == 0
+        return TrimNumericDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(TrimNumericDialog, "exec", enter_in_trim)
+    monkeypatch.setattr(TrimNumericDialog, "values", lambda _: ("in", "trim", 10, False))
+    view._on_clip_numeric_trim_requested("v1", "v")
+    for clip_id in ("v1", "a1"):
+        clip = view.get_timeline().get_clip_by_id(clip_id)
+        assert (clip.timeline_start, clip.source_start, clip.source_duration) == (10, *expected_source)
+    assert len(view._command_stack._undo_stack) == 1
+
+
 @pytest.mark.parametrize("speed,reverse", [(1.0, False), (2.0, False), (0.5, True)])
 def test_linked_roll_preview_release_and_undo_share_all_four_clips(qtbot: Any, speed: float, reverse: bool) -> None:
     original = _sequence(speed, reverse)
@@ -89,6 +110,23 @@ def test_linked_roll_escape_restores_every_visual_without_history(qtbot: Any) ->
         clip = view._timeline.get_clip_by_id(cid)
         assert (item._start_frame, item._duration_frames) == (clip.timeline_start, clip.timeline_duration)
     assert not view._command_stack.can_undo()
+
+
+def test_linked_roll_snaps_to_marker_and_reprojects_on_n(qtbot: Any) -> None:
+    from src.features.edit.core.timeline_v2 import TimelineMarker
+
+    timeline = replace(_sequence(), markers=(TimelineMarker(marker_id="cue", frame=112),))
+    view = _view(qtbot, timeline)
+    view.set_snap_enabled(True)
+    _drag(view, release=False)
+    assert view._items_map["v1"]._duration_frames == view._items_map["a1"]._duration_frames == 112
+    QTest.keyClick(view, Qt.Key.Key_N)
+    assert view._items_map["v1"]._duration_frames == view._items_map["a1"]._duration_frames == 110
+    handle = next(h for h in view._roll_handles.values() if h.left_clip_id == "v1")
+    point = view.mapFromScene(handle.mapToScene(handle.boundingRect().center()))
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert view.get_timeline().get_clip_by_id("v1").timeline_end == 110
+    assert view.get_timeline().get_clip_by_id("a1").timeline_end == 110
 
 
 def test_locked_audio_rejects_video_roll_before_preview(qtbot: Any) -> None:

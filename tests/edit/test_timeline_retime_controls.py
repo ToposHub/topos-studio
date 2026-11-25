@@ -8,7 +8,8 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QMenu
 
 from src.features.edit.core.clip_params import SpeedParams
-from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineMarker, TimelineSequence
+from src.features.edit.ui.timeline_items import EditTool
 from src.features.edit.ui.timeline_view import TimelineView
 from src.shared.media.metadata import Rational
 
@@ -322,4 +323,126 @@ def test_clear_speed_point_rejection_reports_locked_partner_without_exception(qt
     view._on_retime_action_requested('c', 'v', 'clear_point', 100, None)
     assert errors
     assert view.get_timeline() == before
+    assert not view._command_stack._undo_stack
+
+
+@pytest.mark.parametrize("edge", ["left", "right"])
+def test_rate_stretch_keeps_opposite_edge_and_linked_source_windows(qtbot: Any, edge: str) -> None:
+    view = _view(qtbot)
+    timeline = view.get_timeline()
+    video = replace(timeline.video_tracks[0].clips[0], linked_clip_id="audio")
+    audio = replace(video, clip_id="audio", track_id="a", linked_clip_id="c")
+    view.load_timeline(replace(timeline,
+        video_tracks=(replace(timeline.video_tracks[0], clips=(video,)),),
+        audio_tracks=(EditTrack("a", "A1", "audio", 0, clips=(audio,)),),
+        markers=(
+            TimelineMarker("video_start", 50, clip_id="c", track_id="v"),
+            TimelineMarker("audio_middle", 100, clip_id="audio", track_id="a"),
+            TimelineMarker("stale_frame", 35, clip_id="c", track_id="v"),
+            TimelineMarker("stale_track", 80, clip_id="c", track_id="missing"),
+            TimelineMarker("ruler", 75),
+        )))
+    view._on_retime_controls_toggled("c", "v", False)
+    view.set_tool(EditTool.RATE_STRETCH)
+    view.set_snap_enabled(False)
+    before = view.get_timeline()
+    item = view._items_map["c"]
+    x = 4 if edge == "left" else item._width - 4
+    press = view.mapFromScene(item.mapToScene(QPointF(x, 30)))
+    release = press + QPoint(30 if edge == "left" else -30, 0)
+    expected_start = 60 if edge == "left" else 50
+
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+    QTest.mouseMove(view.viewport(), release, 10)
+    assert view.get_timeline() is before
+    for clip_id in ("c", "audio"):
+        preview = view._items_map[clip_id]
+        assert (preview._start_frame, preview._duration_frames) == (expected_start, 90)
+        assert (preview._source_start, preview._source_duration) == (100, 200)
+        assert preview._speed == pytest.approx(100 / 90)
+
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=release)
+    changed = view.get_timeline()
+    for clip_id in ("c", "audio"):
+        clip = changed.get_clip_by_id(clip_id)
+        assert (clip.timeline_start, clip.timeline_duration) == (expected_start, 90)
+        assert (clip.source_start, clip.source_duration) == (100, 200)
+    expected_marker_frames = (60, 105, 35, 80, 75) if edge == "left" else (50, 100, 35, 80, 75)
+    assert tuple(marker.frame for marker in changed.markers) == expected_marker_frames
+    assert view._marker_items["video_start"].frame == expected_marker_frames[0]
+    assert view._marker_items["audio_middle"].frame == expected_marker_frames[1]
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    assert view.get_timeline().get_clip_by_id("c") == before.get_clip_by_id("c")
+    assert view.get_timeline().get_clip_by_id("audio") == before.get_clip_by_id("audio")
+    assert view.get_timeline().markers == before.markers
+    assert view._marker_items["video_start"].frame == 50
+    assert view._marker_items["audio_middle"].frame == 100
+    view.redo()
+    assert view.get_timeline().get_clip_by_id("c") == changed.get_clip_by_id("c")
+    assert view.get_timeline().get_clip_by_id("audio") == changed.get_clip_by_id("audio")
+    assert view.get_timeline().markers == changed.markers
+    assert view._marker_items["video_start"].frame == expected_marker_frames[0]
+    assert view._marker_items["audio_middle"].frame == expected_marker_frames[1]
+
+
+@pytest.mark.parametrize("cancel", ["escape", "tool", "close"])
+def test_retime_point_gesture_cancels_before_late_release(qtbot: Any, cancel: str) -> None:
+    view = _view(qtbot, SpeedParams().with_speed_point(100, 200))
+    before = view.get_timeline()
+    item = view._items_map["c"]
+    handle = QPointF(item._retime_point_x_for_offset(100), item._track_height - 15)
+    press = view.mapFromScene(item.mapToScene(handle))
+    release = press + QPoint(30, 0)
+
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+    QTest.mouseMove(view.viewport(), release, 10)
+    assert view._interaction.is_dragging
+    assert item._retime_point_drag_offset != 100
+    if cancel == "escape":
+        QTest.keyClick(view, Qt.Key.Key_Escape)
+    elif cancel == "tool":
+        view.set_tool(EditTool.TRIM)
+    else:
+        view._on_retime_controls_toggled("c", "v", False)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=release)
+
+    assert view.get_timeline() is before
+    assert not view._command_stack._undo_stack
+    assert view._interaction.is_idle
+    assert item._retime_point_drag_offset is None
+    assert (item._start_frame, item._duration_frames, item._source_start) == (50, 100, 100)
+
+
+@pytest.mark.parametrize("action", ["add_point", "preset", "smooth"])
+def test_retime_menu_reports_locked_partner_without_mutation(
+    qtbot: Any, monkeypatch: pytest.MonkeyPatch, action: str,
+) -> None:
+    view = _view(qtbot, SpeedParams().with_speed_point(100, 200))
+    timeline = view.get_timeline()
+    video = replace(timeline.video_tracks[0].clips[0], linked_clip_id="audio")
+    audio = replace(video, clip_id="audio", track_id="a", linked_clip_id="c")
+    view.load_timeline(replace(timeline,
+        video_tracks=(replace(timeline.video_tracks[0], clips=(video,)),),
+        audio_tracks=(EditTrack("a", "A1", "audio", 0, clips=(audio,), is_locked=True),)))
+    view.set_playhead(75)
+    before = view.get_timeline()
+    errors: list[str] = []
+    view.status_message_requested.connect(errors.append)
+
+    def choose(menu: QMenu, _pos: QPoint) -> Any:
+        if action == "preset":
+            presets = next(entry.menu() for entry in menu.actions() if entry.menu() is not None)
+            return next(entry for entry in presets.actions() if entry.data() == ("preset", 2.0))
+        actions = [*menu.actions()]
+        for entry in menu.actions():
+            if entry.menu() is not None:
+                actions.extend(entry.menu().actions())
+        return next(entry for entry in actions if entry.objectName() == f"retime_{action}")
+
+    monkeypatch.setattr(QMenu, "exec", choose)
+    item = view._items_map["c"]
+    item._show_retime_segment_speed_menu(QPoint(10, 10), item._width * 0.75)
+    assert any("locked" in error for error in errors)
+    assert view.get_timeline() is before
     assert not view._command_stack._undo_stack

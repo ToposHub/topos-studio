@@ -34,7 +34,8 @@ Timeline Operations Module - Pure Functions for Timeline Editing (P3).
 
 from __future__ import annotations
 
-from typing import Optional, Dict, List, Set, Tuple, Any
+from bisect import bisect_left, bisect_right
+from typing import Optional, Dict, List, Set, Tuple, Any, Callable
 from dataclasses import dataclass, fields, replace
 from enum import Enum
 import uuid
@@ -609,6 +610,13 @@ def build_range_delete_commands(
 # ================================================================
 
 
+def sync_lock_follower_delta(delta: int, first_start: int, previous_end: int) -> int:
+    """Keep a leftward ripple from crossing the clip before the shifted group."""
+    if delta >= 0:
+        return delta
+    return max(delta, -max(0, first_start - previous_end))
+
+
 def shift_sync_lock_followers(
     sequence: TimelineSequence,
     exclude_track_ids: "List[str]",
@@ -669,8 +677,9 @@ def shift_sync_lock_followers(
                 ),
                 default=0,
             )
-            available = moved[0].timeline_start - previous_end
-            effective = max(delta, -available)
+            effective = sync_lock_follower_delta(
+                delta, moved[0].timeline_start, previous_end,
+            )
             if effective == 0:
                 continue
 
@@ -3075,10 +3084,143 @@ def get_slip_bounds(
 # ================================================================
 
 
+def ripple_trim_source_window(
+    clip: ClipInstance, side: str, boundary: int,
+) -> tuple[int, int]:
+    """Map the dragged boundary to its exact source window."""
+    if side == "right":
+        return clip.with_right_edge_source_values(boundary - clip.timeline_start)
+    if boundary <= clip.timeline_start:
+        return clip.with_left_edge_source_values(boundary)
+    cut_source = clip.timeline_to_source_frame(boundary)
+    kept_end = clip.source_start if clip.is_reverse_playback() else clip.source_end
+    lo, hi = sorted((cut_source, kept_end))
+    return lo, hi - lo + 1
+
+
+def ripple_trim_sync_point(side: str, old_boundary: int, delta: int) -> tuple[int, int]:
+    """Return the pivot and signed shift for Auto Select tracks and followers."""
+    if side == "left":
+        return old_boundary + max(0, delta), -max(0, delta)
+    return old_boundary, delta
+
+
+def _ripple_audio_layout_bounds(
+    track: EditTrack, clip: ClipInstance, side: str,
+) -> tuple[int, int | None]:
+    """Keep adjacent audio crossfades valid as the clip and its followers move."""
+    ordered = tuple(sorted(track.clips, key=lambda member: member.timeline_start))
+    edited = next(index for index, member in enumerate(ordered) if member.clip_id == clip.clip_id)
+    starts = tuple(member.timeline_start for member in ordered)
+    follower = (bisect_right(starts, clip.timeline_start) if side == "left"
+                else bisect_left(starts, clip.timeline_end))
+    # A pair or triple can only change next to the edited clip or across
+    # the first shifted boundary. All other clips translate together.
+    checked = {
+        index for index in (edited, edited + 1, edited + 2, follower, follower + 1)
+        if 1 <= index < len(ordered)
+    }
+    cropped_pairs = {
+        (transition.left_clip_id, transition.right_clip_id)
+        for transition in track.transitions
+        if transition.is_overlap_crossfade and "source_envelope" in transition.params
+    }
+
+    def feasible(duration_delta: int) -> bool:
+        def span(index: int) -> tuple[int, int]:
+            member = ordered[index]
+            if index == edited:
+                return member.timeline_start, member.timeline_end + duration_delta
+            offset = duration_delta if index >= follower else 0
+            return member.timeline_start + offset, member.timeline_end + offset
+
+        for index in checked:
+            left_start, left_end = span(index - 1)
+            right_start, right_end = span(index)
+            if right_start < left_start:
+                return False
+            if left_end <= right_start:
+                continue
+            pair = (ordered[index - 1].clip_id, ordered[index].clip_id)
+            if pair not in cropped_pairs and (left_start == right_start or left_end >= right_end):
+                return False
+            if index >= 2 and span(index - 2)[1] > right_start:
+                return False
+        return True
+
+    def available(direction: int, length: int) -> int:
+        lo, hi = 0, length
+        while lo < hi:
+            middle = (lo + hi + 1) // 2
+            if feasible(direction * middle):
+                lo = middle
+            else:
+                hi = middle - 1
+        return lo
+
+    shorten = available(-1, clip.timeline_duration - 1)
+    if side == "left":
+        return shorten, None
+    limit = max(0, (1 << 31) - 1 - clip.timeline_end)
+    return shorten, None if feasible(limit) else available(1, limit)
+
+
+def ripple_trim_delta_bounds(
+    track: EditTrack,
+    clip: ClipInstance,
+    side: str,
+    max_source_frames: int | None,
+) -> tuple[int, int | None]:
+    """Return the common mouse edit bounds in timeline frames for one member."""
+    shorten, layout_extension = (
+        _ripple_audio_layout_bounds(track, clip, side)
+        if track.track_type == "audio" and len(track.clips) > 1
+        else (clip.timeline_duration - 1, None)
+    )
+    boundary = clip.timeline_start if side == "left" else clip.timeline_end
+
+    def feasible(delta: int) -> bool:
+        start, length = ripple_trim_source_window(clip, side, boundary + delta)
+        return start >= 0 and (
+            max_source_frames is None or start + length <= max_source_frames
+        )
+
+    if side == "left":
+        previous, _ = track.get_adjacent_clips(clip.clip_id)
+        lo = min(0, (previous.timeline_end if previous else 0) - clip.timeline_start)
+        hi = 0
+        while lo < hi:
+            middle = (lo + hi) // 2
+            if feasible(middle):
+                hi = middle
+            else:
+                lo = middle + 1
+        return lo, shorten
+
+    if max_source_frames is None and not clip.is_reverse_playback():
+        return -shorten, layout_extension
+    # Find a finite bound in the timeline domain so reverse and mixed FPS
+    # consume the same source range in preview and at commit.
+    limit = max(0, (1 << 31) - 1 - boundary)
+    if layout_extension is not None:
+        limit = min(limit, layout_extension)
+    lo, hi = 0, min(1, limit)
+    while hi < limit and feasible(hi):
+        lo, hi = hi, min(hi * 2, limit)
+    while lo < hi:
+        middle = (lo + hi + 1) // 2
+        if feasible(middle):
+            lo = middle
+        else:
+            hi = middle - 1
+    return -shorten, lo
+
+
 def ripple_trim_clip_left(
     sequence: TimelineSequence,
     clip_id: str,
-    new_start_frame: int
+    new_start_frame: int,
+    max_source_frames: int | None = None,
 ) -> TimelineSequence:
     """
     Ripple trim clip from left edge.
@@ -3114,14 +3256,14 @@ def ripple_trim_clip_left(
     delta = clip.timeline_start - new_start_frame
 
     # Validate: new_start must not exceed clip end
-    if new_start_frame >= clip.timeline_end:
+    if not 0 <= new_start_frame < clip.timeline_end:
         raise TimelineOperationError(
             f"new_start_frame {new_start_frame} must be before clip end {clip.timeline_end}"
         )
 
     # Check for overlap with previous clip (when extending left)
     prev_clip, _ = track.get_adjacent_clips(clip_id)
-    if prev_clip is not None and new_start_frame < prev_clip.timeline_end:
+    if delta > 0 and prev_clip is not None and new_start_frame < prev_clip.timeline_end:
         raise TimelineOperationError(
             f"Ripple trim would overlap with previous clip {prev_clip.clip_id}"
         )
@@ -3130,28 +3272,9 @@ def ripple_trim_clip_left(
     # ``int(delta * effective_speed)`` 基速公式在反向片（左裁保留帧应从
     # 179 开头却得 199）与混合帧率（30→24 裁 20 应推进 25 却得 20）下
     # 全部错域。
-    if delta > 0:
-        # 延长：入点左移，走左缘 helper（反向片从源高端扩展）
-        new_source_start, new_source_duration = (
-            clip.with_left_edge_source_values(new_start_frame)
-        )
-    else:
-        # 缩短：等价删除头部 n = new_start_frame - timeline_start 个时间
-        # 线帧的内容；保留内容自 new_start_frame 起，保留窗口 = [该处源
-        # 帧, 原右缘]（方向由映射给出）
-        cut_source = clip.timeline_to_source_frame(new_start_frame)
-        # 保留边缘按播放方向：正向裁头保尾缘；反向裁头（时间线头部）
-        # 播放的是源低端，保 source_start 缘
-        from src.features.edit.core.clip_params import SpeedParams as _SP
-
-        plays_forward = not (
-            isinstance(clip.speed, _SP) and clip.speed.reverse)
-        # clip.source_end 已是含末帧（inclusive）
-        anchor_edge = (
-            clip.source_end if plays_forward else clip.source_start)
-        lo, hi = sorted((cut_source, anchor_edge))
-        new_source_start = lo
-        new_source_duration = hi - lo + 1
+    new_source_start, new_source_duration = ripple_trim_source_window(
+        clip, "left", new_start_frame
+    )
     new_timeline_duration = clip.timeline_duration + delta
 
     # Validate source range
@@ -3159,6 +3282,9 @@ def ripple_trim_clip_left(
         raise TimelineOperationError(
             "Ripple trim would exceed source start (negative source_start)"
         )
+    if (delta > 0 and max_source_frames is not None
+            and new_source_start + new_source_duration > max_source_frames):
+        raise TimelineOperationError("Ripple trim would exceed source material")
 
     # P1-04 审计修复：入点波纹的锚定语义（与波纹删除等价）：
     # - 缩短（delta<0，入点右移 n）：等价于波纹删除头部 n 帧——起点
@@ -3263,23 +3389,23 @@ def ripple_trim_clip_right(
     # 延长到旧窗口外——timeline_to_source_frame 对延长帧会抛越界）。
     # 旧 ``int(delta * effective_speed)`` 基速公式在反向/混合帧率/变速
     # 点下错域。
-    edge_source, edge_duration = clip.with_right_edge_source_values(
-        clip.timeline_duration + delta)
+    edge_source, edge_duration = ripple_trim_source_window(
+        clip, "right", new_end_frame)
     lo, hi = sorted((edge_source, edge_source + edge_duration - 1))
     new_source_duration = hi - lo + 1
     new_timeline_duration = clip.timeline_duration + delta
 
     # Validate source range
-    if new_source_duration <= 0:
+    if lo < 0 or new_source_duration <= 0:
         raise TimelineOperationError(
-            "Ripple trim would result in zero or negative duration"
+            "Ripple trim would exceed source start or result in an empty source window"
         )
 
     # AUD-18804：右延长时的素材上界校验（与左入点的 source_start < 0
     # 下界校验对称）。此前素材仅 100 帧、clip 已用满 100 帧时右延至 150
     # 帧仍被允许，下游按越界 source 帧取数读到素材外内容。
     if delta > 0 and max_source_frames is not None:
-        new_source_end = clip.source_start + new_source_duration
+        new_source_end = lo + new_source_duration
         if new_source_end > max_source_frames:
             raise TimelineOperationError(
                 f"Ripple trim would exceed source material "
@@ -3717,6 +3843,8 @@ class SnapManager:
         pixels_per_frame: float,
         exclude_types: Optional[Set[SnapPointType]] = None,
         exclude_source_ids: Optional[Set[str]] = None,
+        *,
+        accepts_point: Callable[[SnapPoint], bool] | None = None,
     ) -> Optional[SnapPoint]:
         """
         查找最近的吸附点。
@@ -3729,6 +3857,7 @@ class SnapManager:
             pixels_per_frame: 当前缩放比例（像素/帧）
             exclude_types: 要排除的吸附点类型集合
             exclude_source_ids: 要排除的剪辑/标记来源 ID 集合
+            accepts_point: Optional filter for a candidate's frame and source.
 
         Returns:
             最近吸附点的 SnapPoint，如果没有则返回 None
@@ -3761,6 +3890,7 @@ class SnapManager:
                 valid_points = [
                     p for p in points_at_frame
                     if p.type not in excluded and p.source_id not in excluded_sources
+                    and (accepts_point is None or accepts_point(p))
                 ]
 
                 if valid_points:
@@ -3968,6 +4098,8 @@ def numeric_trim_bounds(
     trim_side: str,
     max_source_frames: int | None = None,
     ripple: bool = False,
+    *,
+    allow_audio_overlap: bool = False,
 ) -> tuple[int, int]:
     """数值 trim 的合法 delta 范围（min_delta, max_delta）。
 
@@ -3982,26 +4114,60 @@ def numeric_trim_bounds(
       不受邻居限制。
     """
     duration = int(clip.timeline_duration)
-    head, tail = clip_handle_headroom(clip, max_source_frames)
-    prev_end, next_start = _neighbor_bounds(track, clip)
-
-    if trim_side == "left":
-        max_delta = duration - 1  # 至少留 1 帧
-        if ripple:
-            # 审计修复：入点左延长受前邻物理限制（ripple_trim_clip_left
-            # 的前邻重叠守卫），否则 apply 抛未捕获 TimelineOperationError
-            min_delta = -min(head, clip.timeline_start - prev_end)
-        else:
-            min_delta = -min(head, clip.timeline_start - prev_end)
-        return min_delta, max_delta
-    # right
-    min_delta = -(duration - 1)
+    source_end = clip.source_start + clip.source_duration
+    source_limit = max(source_end, max_source_frames or 0)
     if ripple:
-        max_delta = tail
+        minimum, maximum = ripple_trim_delta_bounds(track, clip, trim_side, source_limit)
+        # Passing a known limit above yields a finite range.
+        return minimum, maximum if maximum is not None else 0
+
+    # The audio model allows a tail-to-head overlap, but neither containment
+    # nor three simultaneous clips. Limit each side before the order changes.
+    min_delta, max_delta = 1 - duration, duration - 1
+    if allow_audio_overlap and track.track_type == "audio":
+        ordered = sorted(track.clips, key=lambda member: member.timeline_start)
+        index = next(i for i, member in enumerate(ordered) if member.clip_id == clip.clip_id)
+        prev_end, next_start = 0, 1 << 40
+        if index:
+            previous = ordered[index - 1]
+            prev_end = previous.timeline_start + 1
+            if previous.timeline_end > clip.timeline_start:
+                min_delta = max(min_delta, min(0, previous.timeline_end + 1 - clip.timeline_end))
+        if index > 1:
+            prev_end = max(prev_end, ordered[index - 2].timeline_end)
+        if index + 1 < len(ordered):
+            following = ordered[index + 1]
+            next_start = following.timeline_end - 1
+            if following.timeline_start < clip.timeline_end:
+                max_delta = min(max_delta, max(0, following.timeline_start - 1 - clip.timeline_start))
+        if index + 2 < len(ordered):
+            next_start = min(next_start, ordered[index + 2].timeline_start)
     else:
-        gap = max(0, next_start - (clip.timeline_start + duration))
-        max_delta = min(tail, gap)
-    return min_delta, max_delta
+        prev_end, next_start = _neighbor_bounds(track, clip)
+
+    def source_allows(extension: int) -> bool:
+        if trim_side == "left":
+            start, length = clip.with_left_edge_source_values(clip.timeline_start - extension)
+        else:
+            start, length = clip.with_right_edge_source_values(duration + extension)
+        return start >= 0 and length > 0 and start + length <= source_limit
+
+    # Map timeline ticks through the same speed, direction and FPS math used
+    # by the command. Source frames alone do not give a timeline bound.
+    if trim_side == "left":
+        extension_limit = max(0, clip.timeline_start - prev_end)
+    else:
+        extension_limit = max(0, next_start - clip.timeline_end)
+    low, high = 0, min(1, extension_limit)
+    while high < extension_limit and source_allows(high):
+        low, high = high, min(high * 2, extension_limit)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if source_allows(mid):
+            low = mid
+        else:
+            high = mid - 1
+    return (-low, max_delta) if trim_side == "left" else (min_delta, low)
 
 
 def build_numeric_trim_command(
@@ -4079,7 +4245,6 @@ def build_numeric_trim_command(
 
     if trim_side == "left":
         new_start = clip.timeline_start + clamped
-        new_source_start = clip.source_start + clamped
         if ripple:
             # affected_clips 语义与鼠标提交处一致（后续片段波纹平移）
             affected = tuple(
@@ -4087,17 +4252,19 @@ def build_numeric_trim_command(
             return (RippleTrimCommand.create_left_trim(
                 track_id, clip.clip_id, new_start,
                 original_clip=clip, affected_clips=affected,
-                apply_sync_lock=apply_sync_lock), clamped)
+                apply_sync_lock=apply_sync_lock,
+                max_source_frames=max_source_frames or None), clamped)
         # 审计修复：old_* 必传——TrimClipCommand.apply 不回填旧值，
         # 缺省时 undo 抛 "old values not stored" 且历史条目丢失
+        new_source_start, new_source_duration = clip.with_left_edge_source_values(new_start)
         return (TrimClipCommand.create_left_trim(
             track_id, clip.clip_id, new_start, new_source_start,
             old_start=clip.timeline_start,
             old_source_start=clip.source_start,
             old_duration=clip.timeline_duration,
-            old_source_duration=clip.source_duration), clamped)
+            old_source_duration=clip.source_duration,
+            new_source_duration=new_source_duration), clamped)
     new_end = clip.timeline_start + clip.timeline_duration + clamped
-    new_source_duration = clip.source_duration + clamped
     if ripple:
         # ripple 右缘工厂接受新结束帧（timeline_end），非时长
         affected = tuple(
@@ -4105,12 +4272,15 @@ def build_numeric_trim_command(
         return (RippleTrimCommand.create_right_trim(
             track_id, clip.clip_id, new_end,
             original_clip=clip, affected_clips=affected,
-            apply_sync_lock=apply_sync_lock), clamped)
+            apply_sync_lock=apply_sync_lock,
+            max_source_frames=max_source_frames or None), clamped)
     new_duration = clip.timeline_duration + clamped
+    new_source_start, new_source_duration = clip.with_right_edge_source_values(new_duration)
     return (TrimClipCommand.create_right_trim(
         track_id, clip.clip_id, new_duration, new_source_duration,
         old_duration=clip.timeline_duration,
-        old_source_duration=clip.source_duration), clamped)
+        old_source_duration=clip.source_duration,
+        new_source_start=new_source_start), clamped)
 
 
 def build_linked_numeric_trim_command(
@@ -4160,7 +4330,7 @@ def build_linked_numeric_trim_command(
         member_track = sequence.get_track_by_id(member_track_id)
         member_clip = (member_track.get_clip_by_id(member_clip_id)
                        if member_track is not None else None)
-        if member_clip is None:
+        if member_clip is None or member_track.is_locked:
             return None, 0
         ripple = mode == "ripple"
         lo, hi = numeric_trim_bounds(

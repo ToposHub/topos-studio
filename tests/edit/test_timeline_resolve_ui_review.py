@@ -10,8 +10,9 @@ from typing import Any
 
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtGui import QAction
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QDialog
+from PyQt6.QtWidgets import QApplication, QComboBox, QDialog, QDialogButtonBox, QMenu, QSpinBox
 
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
@@ -19,6 +20,7 @@ from src.features.edit.ui.change_clip_speed_dialog import ChangeClipSpeedDialog
 from src.features.edit.ui.timeline_items import ClipItem, EditTool
 from src.features.edit.ui.timeline_panel import TimelinePanel
 from src.features.edit.ui.timeline_view import TimelineView
+from src.shared.i18n.i18n import I18N
 from src.shared.media.metadata import Rational
 
 pytestmark = pytest.mark.edit_ui
@@ -274,6 +276,131 @@ def test_cross_track_move_preview_uses_destination_lane_height(qtbot: Any) -> No
     assert view.get_timeline().get_clip_by_id("vc").track_id == "v1"
     assert view._items_map["vc"]._track_height == view._layout_engine.track_height("v1")
     assert not view._command_stack._undo_stack
+
+
+@pytest.mark.parametrize(("track_type", "track_id", "side"), [
+    ("video", "v1", "above"),
+    ("video", "v1", "below"),
+    ("audio", "a1", "above"),
+    ("audio", "a1", "below"),
+])
+def test_add_track_menu_inserts_on_requested_visual_side(
+    qtbot: Any, monkeypatch: pytest.MonkeyPatch,
+    track_type: str, track_id: str, side: str,
+) -> None:
+    view = _view(qtbot)
+    original = view.get_timeline()
+    labels = (
+        I18N.tr("timeline.track.add_track_menu", "Add Track"),
+        I18N.tr(f"timeline.track.add_{side}", f"Add {side.title()}"),
+        I18N.tr(f"timeline.track.type_{track_type}", f"{track_type.title()} Track"),
+    )
+
+    def choose_add_track(menu: QMenu, _pos: QPoint) -> QAction:
+        add_menu = next(action.menu() for action in menu.actions() if action.text() == labels[0])
+        side_menu = next(action.menu() for action in add_menu.actions() if action.text() == labels[1])
+        return next(action for action in side_menu.actions() if action.text() == labels[2])
+
+    monkeypatch.setattr(QMenu, "exec", choose_add_track)
+    header = view._track_headers[track_id]
+    point = view.mapFromScene(header.mapToScene(QPointF(32, 22)))
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=point)
+
+    sequence = view.get_timeline()
+    track_ids = {track.track_id for track in original.all_tracks}
+    added_track, = (track for track in sequence.all_tracks if track.track_id not in track_ids)
+    assert added_track.track_type == track_type
+    added_y = view._layout_engine.track_top(added_track.track_id)
+    reference_y = view._layout_engine.track_top(track_id)
+    assert (added_y < reference_y) == (side == "above")
+    assert added_y != reference_y
+    view.undo()
+    assert view.get_timeline().all_tracks == original.all_tracks
+
+
+def test_add_tracks_dialog_batches_independent_video_and_audio_positions(
+    qtbot: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    view = _view(qtbot)
+    original = view.get_timeline()
+    published: list[TimelineSequence] = []
+    view.timeline_changed.connect(published.append)
+
+    def choose_add_tracks(menu: QMenu, _pos: QPoint) -> QAction:
+        label = I18N.tr("timeline.track.add_tracks_menu", "Add Tracks…")
+        return next(action for action in menu.actions() if action.text() == label)
+
+    def fill_dialog(dialog: QDialog) -> int:
+        video_count, audio_count = dialog.findChildren(QSpinBox)
+        video_position, audio_position = dialog.findChildren(QComboBox)
+        assert video_position.currentData() == ("above", "v1")
+        assert audio_position.currentData() == ("below", "a1")
+        submit = dialog.findChild(QDialogButtonBox).buttons()
+        add_button = next(button for button in submit if button.text() == dialog.windowTitle())
+        video_count.setValue(0)
+        audio_count.setValue(0)
+        assert not add_button.isEnabled()
+        video_count.setValue(2)
+        audio_count.setValue(3)
+        assert add_button.isEnabled()
+        for positions, target in ((video_position, ("below", "v1")), (audio_position, ("above", "a1"))):
+            positions.setCurrentIndex(next(i for i in range(positions.count()) if positions.itemData(i) == target))
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QMenu, "exec", choose_add_tracks)
+    monkeypatch.setattr(QDialog, "exec", fill_dialog)
+    header = view._track_headers["v1"]
+    point = view.mapFromScene(header.mapToScene(QPointF(32, 22)))
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=point)
+
+    sequence = view.get_timeline()
+    assert len(sequence.video_tracks) == 4
+    assert len(sequence.audio_tracks) == 4
+    assert [track.track_id for track in sequence.video_tracks[2:]] == ["v1", "v2"]
+    assert sequence.audio_tracks[-1].track_id == "a1"
+    assert sequence.get_clip_by_id("vc") == original.get_clip_by_id("vc")
+    assert sequence.get_clip_by_id("ac") == original.get_clip_by_id("ac")
+    assert published == [sequence]
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    assert view.get_timeline().all_tracks == original.all_tracks
+    view.redo()
+    assert view.get_timeline().all_tracks == sequence.all_tracks
+
+
+def test_cancel_add_tracks_keeps_provisional_timeline(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    view = TimelineView()
+    qtbot.addWidget(view)
+    sequence = view.show_provisional_timeline()
+    monkeypatch.setattr(QDialog, "exec", lambda _dialog: QDialog.DialogCode.Rejected)
+    view._show_add_tracks_dialog()
+    assert view.has_provisional_timeline()
+    assert view.get_timeline() is sequence
+    assert not view._command_stack.can_undo()
+
+
+@pytest.mark.parametrize(("track_id", "other_id", "direction"), [("v1", "v2", "up"), ("v2", "v1", "down")])
+def test_video_track_move_menu_uses_visual_direction(
+    qtbot: Any, monkeypatch: pytest.MonkeyPatch, track_id: str, other_id: str, direction: str,
+) -> None:
+    view = _view(qtbot)
+    original = view.get_timeline()
+
+    def choose_move_track(menu: QMenu, _pos: QPoint) -> QAction:
+        label = I18N.tr(f"timeline.menu.move_{direction}", f"Move Track {direction.title()}")
+        return next(action for action in menu.actions() if action.text() == label)
+
+    monkeypatch.setattr(QMenu, "exec", choose_move_track)
+    header = view._track_headers[track_id]
+    point = view.mapFromScene(header.mapToScene(QPointF(32, 22)))
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=point)
+
+    moved_y = view._layout_engine.track_top(track_id)
+    other_y = view._layout_engine.track_top(other_id)
+    assert (moved_y < other_y) == (direction == "up")
+    assert moved_y != other_y
+    view.undo()
+    assert view.get_timeline().all_tracks == original.all_tracks
 
 
 def test_linked_selection_keeps_clicked_primary_and_clip_marker_scope(qtbot: Any) -> None:

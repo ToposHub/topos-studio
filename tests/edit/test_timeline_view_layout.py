@@ -1209,8 +1209,9 @@ def test_drag_preview_reuses_snap_points_within_session(qapp, monkeypatch) -> No
     view._snap_manager = None
     calls = {"count": 0}
 
-    def fake_snap_points(exclude_clip_id=None):
+    def fake_snap_points(*, exclude_source_ids=None):
         calls["count"] += 1
+        assert exclude_source_ids == {"video-clip-1"}
         return (0, 24, 48)
 
     monkeypatch.setattr(view, "_get_snap_points", fake_snap_points)

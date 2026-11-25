@@ -1398,6 +1398,7 @@ class TimelinePanel(QWidget):
                 self._keyframe_tray.hide()
 
         self._toolbar_display_mode = mode
+        self.timeline_view.set_edit_wheel_controls(mode == "edit")
         self.zoom_slider.setFixedWidth(MIXER_ZOOM_SLIDER_WIDTH if mode == "mixer" else EDIT_ZOOM_SLIDER_WIDTH)
         if self._mixer_output_meter is not None:
             toolbar = self._tools_bar.parentWidget()
@@ -2574,7 +2575,7 @@ class TimelinePanel(QWidget):
 
         self._applying_slider_zoom = True
         try:
-            self.timeline_view.set_zoom(pixels_per_frame)
+            self.timeline_view.set_zoom_at_playhead(pixels_per_frame)
         finally:
             self._applying_slider_zoom = False
 

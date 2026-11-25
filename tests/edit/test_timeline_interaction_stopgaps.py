@@ -275,6 +275,8 @@ def test_ripple_right_guard_rejects_invalid_new_end(qtbot: Any) -> None:
     view._updating = False
     view._snap_enabled = False
     view._items_map = {}
+    view._ripple_trim_drag = None
+    view._finish_ripple_trim = lambda *args: TimelineView._finish_ripple_trim(view, *args)
     TimelineView._on_ripple_trim_right_finished(view, "c1", "v1", 100, 0)
     assert executed == []
 

@@ -82,6 +82,17 @@ class AreaLayout:
     subtitle_splitter_rect: QRectF = field(default_factory=QRectF)  # S/V splitter (P10.3)
     total_track_area: QRectF = field(default_factory=QRectF)
 
+    def visible_track_area(self, track_type: str) -> QRectF:
+        """Return the vertical editing region for a track type."""
+        if track_type == "audio":
+            return self.audio_area
+        if track_type == "subtitle":
+            return self.subtitle_area
+        area = QRectF(self.video_area)
+        if not self.subtitle_area.isEmpty():
+            area.setTop(max(area.top(), self.subtitle_splitter_rect.bottom()))
+        return area
+
 
 @dataclass
 class TimelineLayoutState:
@@ -530,8 +541,8 @@ class TimelineLayoutEngine:
         """
         Return ``(track_id, boundary_y, edge)`` if *scene_y* is near a track boundary.
 
-        Checks both top and bottom edges of every track.  The returned
-        *track_id* is the track whose edge is closest to *scene_y*.
+        Checks track edges within their visible lanes. The returned
+        *track_id* has the closest visible edge to *scene_y*.
 
         *edge* is ``"top"`` or ``"bottom"`` indicating which edge matched.
 
@@ -541,17 +552,15 @@ class TimelineLayoutEngine:
         th = threshold or self.TRACK_BOUNDARY_THRESHOLD
 
         best: Optional[Tuple[str, float, float, str]] = None  # (tid, boundary_y, dist, edge)
-        for tid, rect in self._track_rects.items():
-            # Check top edge
-            top_y = rect.top()
-            dist_top = abs(scene_y - top_y)
-            if dist_top <= th and (best is None or dist_top < best[2]):
-                best = (tid, float(top_y), dist_top, "top")
-            # Check bottom edge
-            bot_y = rect.bottom()
-            dist_bot = abs(scene_y - bot_y)
-            if dist_bot <= th and (best is None or dist_bot < best[2]):
-                best = (tid, float(bot_y), dist_bot, "bottom")
+        for track in self.all_ordered_tracks():
+            rect = self._track_rects[track.track_id]
+            region = self._area.visible_track_area(track.track_type)
+            for edge, y in (("top", rect.top()), ("bottom", rect.bottom())):
+                if not region.top() <= y <= region.bottom():
+                    continue
+                distance = abs(scene_y - y)
+                if distance <= th and (best is None or distance < best[2]):
+                    best = (track.track_id, y, distance, edge)
 
         if best is not None:
             return (best[0], best[1], best[3])
