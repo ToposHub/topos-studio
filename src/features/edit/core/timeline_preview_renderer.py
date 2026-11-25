@@ -10047,8 +10047,13 @@ class TimelinePreviewRenderer(QObject):
             frame = latest
         return self._dispatch_scrub_exact_render(int(frame))
 
-    def finish_scrub(self, frame: int) -> None:
-        """Leave scrub mode and request one exact frame for the release point."""
+    def cancel_scrub(self, frame: int) -> None:
+        """Retire a lost mouse gesture without decoding a hidden viewer frame."""
+        if self._scrub_active:
+            self.finish_scrub(frame, settle=False)
+
+    def finish_scrub(self, frame: int, *, settle: bool = True) -> None:
+        """Retire scrub work and refine the release point on a normal mouse-up."""
         frame = int(frame)
         self._scrub_active = False
         self._scrub_viewer_turn = None
@@ -10058,15 +10063,17 @@ class TimelinePreviewRenderer(QObject):
         self._scrub_latest_display_frame = frame
         self._scrub_input_velocity_fps = 0.0
         self._scrub_velocity_samples = 0
-        self._scrub_exact_frame = frame
-        self._scrub_finish_exact_frame = frame
+        self._scrub_exact_frame = frame if settle else None
+        self._scrub_finish_exact_frame = self._scrub_exact_frame
         self._scrub_exact_request_token += 1
         self._scrub_settled_timer_token += 1
         self._scrub_exact_pending_frame = None
         self._scrub_exact_in_flight_frame = None
         self._scrub_exact_timer_pending = False
         self._publish_interactive_scrub_state(frame, active=False)
-        self._invalidate_render_generation_for_scrub(frame, "finish")
+        self._invalidate_render_generation_for_scrub(frame, "finish" if settle else "cancel")
+        if not settle:
+            return
         playback_trace("renderer.scrub_finished_exact_request", frame=frame)
         self.request_render(frame)
         if self._preview_quality <= 0.0 and self._decode_target_size != _budget_constrained_size(

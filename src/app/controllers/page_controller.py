@@ -706,6 +706,10 @@ class PageManagementMixin:
                     controller.stop_playback()
                 except (AttributeError, RuntimeError) as exc:
                     logger.warning("leave_page_hook: failed to stop Color playback: %s", exc)
+            priority = getattr(getattr(self, "timeline_panel", None), "set_background_media_priority", None)
+            if callable(priority):
+                priority("color_playback", False)
+                priority("color_scrub", False, resume_delay_ms=250)
             # The Color timeline preview has its own render worker.  Stop it
             # before the viewport is reparented to another page so no queued
             # frame can paint into a disappearing native OpenGL widget.

@@ -1712,6 +1712,14 @@ class GridDelegate(QStyledItemDelegate):
         self.thumb_size = (100, 67)  # default: 100x67 (DaVinci compact)
         self._pending_thumbnails: set = set()
         self._pending_subclip_frames: dict[tuple[str, int], set[str]] = {}
+        self.thumb_provider.work_suspended_changed.connect(self._on_thumbnail_work_suspended)
+
+    def _on_thumbnail_work_suspended(self, suspended: bool) -> None:
+        if suspended:
+            self._pending_thumbnails.clear()
+            self._pending_subclip_frames.clear()
+        elif self.view is not None and self.view.isVisible():
+            self.view.viewport().update()
 
     def set_thumb_size(self, size: tuple[int, int]) -> None:
         """设置缩略图尺寸"""
@@ -2355,7 +2363,7 @@ class GridDelegate(QStyledItemDelegate):
             if cached_pixmap is not None:
                 self._draw_thumbnail(painter, rect, cached_pixmap)
                 return
-            if request is not None:
+            if request is not None and not self.thumb_provider.is_thumbnail_work_suspended:
                 frame_index, total_frames = request
                 key = (asset.path, frame_index)
                 self._pending_subclip_frames.setdefault(key, set()).add(asset.asset_id)
@@ -5007,6 +5015,11 @@ class MediaPoolPanel(QWidget):
         self._thumb_provider = ThumbnailProvider.instance()
         self._pending_timeline_frame_previews: dict[tuple[str, int], set[str]] = {}
         self._pending_timeline_image_previews: dict[str, set[str]] = {}
+        self._deferred_timeline_previews: set[str] = set()
+        self._visible_timeline_preview_retries: set[str] = set()
+        self._timeline_preview_retry_timer = QTimer(self)
+        self._timeline_preview_retry_timer.setSingleShot(True)
+        self._timeline_preview_retry_timer.timeout.connect(self._retry_visible_timeline_previews)
 
         # AUD-20209: path → 树节点索引（懒重建）。每张缩略图到达时按 path
         # O(1) 定位节点，取代每张到达即全树扫描的 O(n²) 模式。
@@ -5628,6 +5641,7 @@ class MediaPoolPanel(QWidget):
         self._thumb_provider.frame_thumbnail_ready.connect(
             self._on_timeline_preview_frame_ready
         )
+        self._thumb_provider.work_suspended_changed.connect(self._on_timeline_thumbnail_work_suspended)
 
     # ==================== Project Binding ====================
 
@@ -5653,6 +5667,8 @@ class MediaPoolPanel(QWidget):
             # a timeline card with the same ID in the new project.
             self._pending_timeline_frame_previews.clear()
             self._pending_timeline_image_previews.clear()
+            self._deferred_timeline_previews.clear()
+            self._visible_timeline_preview_retries.clear()
             # F-R07/R26：跨工程注销全部代理任务——旧工程的 completion/
             # error/探测回调不得写新工程模型或服务缓存。
             self._invalidate_all_proxy_jobs()
@@ -5874,6 +5890,8 @@ class MediaPoolPanel(QWidget):
         self._offline_status_signature = None
         self._pending_timeline_frame_previews.clear()
         self._pending_timeline_image_previews.clear()
+        self._deferred_timeline_previews.clear()
+        self._visible_timeline_preview_retries.clear()
         # F-R07/R26：清空工程同样注销全部代理任务与 pending 探测
         self._invalidate_all_proxy_jobs()
         # R04：关闭工程取消在场的收集/整理任务（回调守卫同一纪律）
@@ -7145,6 +7163,37 @@ class MediaPoolPanel(QWidget):
         key = (path, int(frame_index))
         for timeline_id in self._pending_timeline_frame_previews.pop(key, set()):
             self.asset_model.set_timeline_preview(timeline_id, pixmap)
+
+    def _on_timeline_thumbnail_work_suspended(self, suspended: bool) -> None:
+        if not suspended:
+            return  # The grid delegate repaints its viewport when work resumes.
+        self._timeline_preview_retry_timer.stop()
+        self._visible_timeline_preview_retries.clear()
+        for pending in (self._pending_timeline_image_previews, self._pending_timeline_frame_previews):
+            for timeline_ids in pending.values():
+                self._deferred_timeline_previews.update(timeline_ids)
+            pending.clear()
+
+    def retry_timeline_preview_when_idle(self, timeline_id: str) -> None:
+        """Queue a canceled preview when its card becomes visible again."""
+        if (timeline_id not in self._deferred_timeline_previews
+                or self._thumb_provider.is_thumbnail_work_suspended):
+            return
+        self._visible_timeline_preview_retries.add(timeline_id)
+        if not self._timeline_preview_retry_timer.isActive():
+            self._timeline_preview_retry_timer.start(0)
+
+    def _retry_visible_timeline_previews(self) -> None:
+        retries = self._visible_timeline_preview_retries.copy()
+        self._visible_timeline_preview_retries.clear()
+        if (self._project is None or not self.grid_view.isVisible()
+                or self._thumb_provider.is_thumbnail_work_suspended):
+            return
+        self._deferred_timeline_previews.difference_update(retries)
+        self._request_timeline_previews([
+            self._project.timelines[timeline_id]
+            for timeline_id in retries if timeline_id in self._project.timelines
+        ])
 
     # ==================== Grid Selection ====================
 
@@ -8784,8 +8833,13 @@ class MediaPoolPanel(QWidget):
         """Request visible timeline preview frames without blocking the UI."""
         if self._project is None or self.asset_model is None:
             return
+        if self._thumb_provider.is_thumbnail_work_suspended:
+            self._deferred_timeline_previews.update(timeline.timeline_id for timeline in timelines)
+            return
 
         for timeline in timelines:
+            if timeline.timeline_id in self._deferred_timeline_previews:
+                continue
             settings = dict(timeline.format_settings or {})
             asset_id = settings.get(MEDIA_POOL_PREVIEW_ASSET_ID_KEY)
             asset = (

@@ -158,9 +158,15 @@ class _ThumbnailSignalBridge(QObject):
     the GUI thread.
     """
 
-    thumbnail_done = pyqtSignal(str, object)       # path, QImage|None
-    frame_thumbnail_done = pyqtSignal(str, int, object)  # path, frame_idx, QImage|None
+    thumbnail_done = pyqtSignal(str, object)       # path, image result
+    frame_thumbnail_done = pyqtSignal(str, int, object)  # path, frame_idx, image result
     clip_thumbnails_done = pyqtSignal(str, object)       # request_key, ClipThumbnailSet
+
+
+@dataclass(frozen=True)
+class _ThumbnailResult:
+    epoch: object
+    image: QImage | None
 
 
 _bridge = _ThumbnailSignalBridge()
@@ -616,11 +622,23 @@ class ClipThumbnailCache:
 
 
 class ThumbnailRequest(QRunnable):
-    def __init__(self, path, callback, icon_size) -> None:
+    def __init__(
+        self, path: str, callback: Callable[..., None] | None, icon_size: int, *,
+        cancelled: Callable[[], bool] | None = None, result_epoch: object | None = None,
+    ) -> None:
         super().__init__()
         self.path = path
         self.callback = callback
         self.icon_size = icon_size
+        self._cancelled = cancelled
+        self._result_epoch = result_epoch
+
+    def _is_cancelled(self) -> bool:
+        return self._cancelled is not None and self._cancelled()
+
+    def _emit_result(self, image: QImage | None) -> None:
+        result = image if self._result_epoch is None else _ThumbnailResult(self._result_epoch, image)
+        _get_bridge().thumbnail_done.emit(self.path, result)
 
     def _get_cache_path(self, path):
         """Returns the cache path for a given file.
@@ -697,10 +715,14 @@ class ThumbnailRequest(QRunnable):
         return os.path.join(cache_dir, f"{hash_name}.webp")
 
     @pyqtSlot()
-    def run(self):
+    def run(self) -> None:
         try:
+            if self._is_cancelled():
+                return
             # 1. Try to load from .cache first (generated when saving .topos)
             cache_path = self._get_cache_path(self.path)
+            if self._is_cancelled():
+                return
             img_bgr = None
             if os.path.exists(cache_path):
                 # Use np.fromfile + imdecode to handle Unicode paths on Windows
@@ -708,10 +730,12 @@ class ThumbnailRequest(QRunnable):
                 img_bgr = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
             
             # 2. If no cache, load original and resize
-            if img_bgr is None:
+            if img_bgr is None and not self._is_cancelled():
                 # Fast load for thumbnail
                 img_bgr = self._load_fast_thumbnail(self.path)
-            
+
+            if self._is_cancelled():
+                return
             if img_bgr is not None:
                 # Orientation is already handled in _load_fast_thumbnail for relevant formats
                 # or not needed for cached images (which were saved with correct orientation)
@@ -736,12 +760,12 @@ class ThumbnailRequest(QRunnable):
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
-                _get_bridge().thumbnail_done.emit(self.path, scaled_img)
+                self._emit_result(scaled_img)
             else:
-                _get_bridge().thumbnail_done.emit(self.path, None)
+                self._emit_result(None)
         except Exception as e:
             logger.error(f"loading thumbnail for {self.path}: {e}")
-            _get_bridge().thumbnail_done.emit(self.path, None)
+            self._emit_result(None)
 
     def _load_fast_thumbnail(self, path):
         """Loads a small version of the image as quickly as possible."""
@@ -783,6 +807,8 @@ class ThumbnailRequest(QRunnable):
                         # 提取可能的失败类型，其余异常照常暴露给外层处理器。
                         logger.debug("RAW embedded thumbnail unavailable (%s), "
                                      "falling back to postprocess: %s", ext, exc)
+                        if self._is_cancelled():
+                            return None
                         # Fallback to half-size postprocess
                         img = raw.postprocess(use_camera_wb=True, half_size=True, no_auto_bright=True, bright=1.0)
                         img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
@@ -810,6 +836,8 @@ class ThumbnailRequest(QRunnable):
                 img_data = np.fromfile(path, dtype=np.uint8)
                 img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
             
+            if self._is_cancelled():
+                return None
             # Standard OpenCV imread does NOT handle EXIF orientation
             if ext in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.webp', '.heic', '.heif']:
                 if img is not None:
@@ -896,9 +924,11 @@ class ThumbnailRequest(QRunnable):
                 finally:
                     if probe_src is not None:
                         probe_src.close()
+                if self._is_cancelled():
+                    return None
                 rgb = read_topos_frame_rgb(path, target,
                                            target_size=decode_target)
-                if rgb is None:
+                if rgb is None or self._is_cancelled():
                     return None
                 frame = rgb[..., ::-1]  # RGB → BGR
                 h, w = frame.shape[:2]
@@ -912,9 +942,12 @@ class ThumbnailRequest(QRunnable):
 
             file_lock = _get_file_lock(path)
             with file_lock:
+                if self._is_cancelled():
+                    _cleanup_file_lock(path)
+                    return None
                 cap = _get_capture(path)
                 try:
-                    if not cap.isOpened():
+                    if self._is_cancelled() or not cap.isOpened():
                         return None
                     # Determine a representative frame index (10% in,
                     # clamped).
@@ -922,6 +955,8 @@ class ThumbnailRequest(QRunnable):
                     target = int(total * 0.1) if total > 0 else 0
                     if target > 0:
                         cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+                    if self._is_cancelled():
+                        return None
                     ret, frame = cap.read()
                 finally:
                     _return_capture(path, cap)
@@ -930,7 +965,7 @@ class ThumbnailRequest(QRunnable):
                     # 中调用覆盖所有退出路径；本线程仍持有锁直至 with 退出，
                     # 字典摘除后并发者会新建等价锁，互斥语义不受影响。
                     _cleanup_file_lock(path)
-            if not ret or frame is None:
+            if not ret or frame is None or self._is_cancelled():
                 return None
             # Downscale large frames to keep the thumbnail cache light.
             h, w = frame.shape[:2]
@@ -949,6 +984,7 @@ class ThumbnailRequest(QRunnable):
 class ThumbnailProvider(QObject):
     thumbnail_ready = pyqtSignal(str, QPixmap)
     frame_thumbnail_ready = pyqtSignal(str, int, QPixmap)  # path, frame_index, pixmap
+    work_suspended_changed = pyqtSignal(bool)
     # Phase 1.1: Clip thumbnail set signal
     clip_thumbnail_set_ready = pyqtSignal(str, object)  # request_key, ClipThumbnailSet
 
@@ -997,6 +1033,7 @@ class ThumbnailProvider(QObject):
         )  # Memory-aware per-frame pixmap cache
         self._pending_frame_pixmap_requests: set = set()  # Track pending keys
         self._playback_active: bool = False
+        self._media_result_epoch = object()
         self._thumbnail_generation: int = 0
         self._pending_clip_request_heights: dict[str, int] = {}
         self._clip_conversion_queue: OrderedDict[str, _PendingClipPixmapConversion] = OrderedDict()
@@ -1028,8 +1065,10 @@ class ThumbnailProvider(QObject):
 
         self._playback_active = active
         if not active:
+            self.work_suspended_changed.emit(False)
             return
 
+        epoch = self._media_result_epoch = object()
         self._thumbnail_generation += 1
         # Remove queued work immediately. Running workers see the generation
         # change between decoded frames and stop cooperatively.
@@ -1057,6 +1096,8 @@ class ThumbnailProvider(QObject):
                 ),
                 cache=cache,
             )
+        if self._playback_active and self._media_result_epoch is epoch:
+            self.work_suspended_changed.emit(True)
 
     def invalidate_pending_work(self) -> None:
         """Invalidate thumbnail jobs after a timeline model replacement."""
@@ -1100,8 +1141,6 @@ class ThumbnailProvider(QObject):
         return self._playback_active
 
     def get_thumbnail(self, path, icon_size=128):
-        if self._playback_active:
-            return None
         # 虚拟素材（topos:// scheme）没有磁盘文件，无法提取缩略图 —— 提前
         # 返回，避免 worker 抛 FileNotFoundError 并刷日志。这些素材的占位
         # 图由调用方（media_pool_panel）按 media_type 自行绘制。
@@ -1112,12 +1151,17 @@ class ThumbnailProvider(QObject):
         if cached:
             return cached
 
-        if path in self.pending_requests:
+        if self._playback_active or path in self.pending_requests:
             return None
 
         # Request background load
         self.pending_requests.add(path)
-        request = ThumbnailRequest(path, self._on_thumbnail_loaded, icon_size)
+        epoch = self._media_result_epoch
+        request = ThumbnailRequest(
+            path, self._on_thumbnail_loaded, icon_size,
+            cancelled=lambda: epoch is not self._media_result_epoch,
+            result_epoch=epoch,
+        )
         self.pool.start(request)
         return None
 
@@ -1147,9 +1191,6 @@ class ThumbnailProvider(QObject):
             icon_size: Desired thumbnail size
             asset_id: Optional asset identifier for improved cache key
         """
-        if self._playback_active:
-            return
-
         frame_pixmap_key = _make_frame_key(asset_id, path, frame_index, icon_size)
 
         # Check the per-frame pixmap cache first
@@ -1166,17 +1207,19 @@ class ThumbnailProvider(QObject):
             return
 
         # Check if request is already pending
-        if frame_pixmap_key in self._pending_frame_pixmap_requests:
+        if self._playback_active or frame_pixmap_key in self._pending_frame_pixmap_requests:
             return
         if legacy_key in self.pending_frame_requests:
             return
 
         self.pending_frame_requests.add(legacy_key)
         self._pending_frame_pixmap_requests.add(frame_pixmap_key)
+        epoch = self._media_result_epoch
         request = FrameThumbnailRequest(
             path, frame_index, total_frames, icon_size,
             self._on_frame_thumbnail_loaded,
-            cancelled=lambda generation=self._thumbnail_generation: self._request_cancelled(generation),
+            cancelled=lambda: epoch is not self._media_result_epoch,
+            result_epoch=epoch,
         )
         self.pool.start(request, -10)
 
@@ -1196,8 +1239,12 @@ class ThumbnailProvider(QObject):
         """
         return self.cache.get(path)
 
-    def _on_thumbnail_loaded(self, path: str, image: QImage | None) -> None:
+    def _on_thumbnail_loaded(self, path: str, image: QImage | _ThumbnailResult | None) -> None:
         """Main-thread callback: converts QImage to QPixmap and caches it."""
+        if isinstance(image, _ThumbnailResult):
+            if image.epoch is not self._media_result_epoch:
+                return
+            image = image.image
         if path in self.pending_requests:
             self.pending_requests.remove(path)
         if self._playback_active:
@@ -1210,8 +1257,14 @@ class ThumbnailProvider(QObject):
             # Handle failure - maybe a default icon?
             pass
 
-    def _on_frame_thumbnail_loaded(self, path: str, frame_index: int, image: QImage | None) -> None:
+    def _on_frame_thumbnail_loaded(
+        self, path: str, frame_index: int, image: QImage | _ThumbnailResult | None,
+    ) -> None:
         """Main-thread callback: converts QImage to QPixmap and caches it."""
+        if isinstance(image, _ThumbnailResult):
+            if image.epoch is not self._media_result_epoch:
+                return
+            image = image.image
         cache_key = (path, frame_index)
         if cache_key in self.pending_frame_requests:
             self.pending_frame_requests.discard(cache_key)
@@ -1281,9 +1334,6 @@ class ThumbnailProvider(QObject):
         cache = ClipThumbnailCache()
         request_key = request.get_cache_key()
 
-        if self._playback_active:
-            return
-
         # Skip thumbnail request if clip is too narrow
         if request.clip_width_px < self.MIN_CLIP_WIDTH_FOR_THUMBNAIL:
             logger.debug(f"Skipping thumbnails for narrow clip ({request.clip_width_px}px < {self.MIN_CLIP_WIDTH_FOR_THUMBNAIL}px)")
@@ -1296,6 +1346,9 @@ class ThumbnailProvider(QObject):
                 callback(request_key, cached)
             # Also emit signal for general listeners
             self.clip_thumbnail_set_ready.emit(request_key, cached)
+            return
+
+        if self._playback_active:
             return
 
         # Check if pending
@@ -1560,9 +1613,6 @@ class ThumbnailProvider(QObject):
             total_frames: Total frames in the video
             target_height: Target thumbnail height in pixels
         """
-        if self._playback_active:
-            return
-
         cache_key = _make_frame_key(asset_id, file_path, frame_number, target_height)
 
         # Check cache first
@@ -1572,7 +1622,7 @@ class ThumbnailProvider(QObject):
             return
 
         # Skip if already pending
-        if cache_key in self._pending_frame_pixmap_requests:
+        if self._playback_active or cache_key in self._pending_frame_pixmap_requests:
             return
 
         self._pending_frame_pixmap_requests.add(cache_key)
@@ -1580,6 +1630,7 @@ class ThumbnailProvider(QObject):
             file_path, frame_number, total_frames, target_height,
             self._on_frame_thumbnail_loaded,
             cancelled=lambda generation=self._thumbnail_generation: self._request_cancelled(generation),
+            result_epoch=self._media_result_epoch,
         )
         self.pool.start(request, -10)
 
@@ -1587,9 +1638,11 @@ class ThumbnailProvider(QObject):
 class FrameThumbnailRequest(QRunnable):
     """Async request to extract a specific frame from a video file."""
 
-    def __init__(self, path: str, frame_index: int, total_frames: int,
-                 icon_size: int, callback,
-                 cancelled: Optional[Callable[[], bool]] = None) -> None:
+    def __init__(
+        self, path: str, frame_index: int, total_frames: int, icon_size: int,
+        callback: Callable[..., None] | None,
+        cancelled: Callable[[], bool] | None = None, *, result_epoch: object | None = None,
+    ) -> None:
         super().__init__()
         self.path = path
         self.frame_index = frame_index
@@ -1597,20 +1650,28 @@ class FrameThumbnailRequest(QRunnable):
         self.icon_size = icon_size
         self.callback = callback
         self._cancelled = cancelled
+        self._result_epoch = result_epoch
+
+    def _is_cancelled(self) -> bool:
+        return self._cancelled is not None and self._cancelled()
+
+    def _emit_result(self, image: QImage | None) -> None:
+        result = image if self._result_epoch is None else _ThumbnailResult(self._result_epoch, image)
+        _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, result)
 
     @pyqtSlot()
     def run(self) -> None:
         """Extract the specified frame from the video."""
         try:
-            if self._cancelled is not None and self._cancelled():
-                _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, None)
+            if self._is_cancelled():
+                self._emit_result(None)
                 return
             ext = os.path.splitext(self.path)[1].lower()
 
             # Only support video files for frame extraction
             from src.shared.media.format_registry import VIDEO_EXTENSIONS
             if ext not in VIDEO_EXTENSIONS:
-                _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, None)
+                self._emit_result(None)
                 return
 
             # Topos 私有编码（TPIC）没有 OpenCV 解码器 —— 经 Topos 后端抽帧。
@@ -1619,11 +1680,12 @@ class FrameThumbnailRequest(QRunnable):
             if is_topos_movie(self.path):
                 from src.shared.media.topos_source import read_topos_frame_rgb
 
+                if self._is_cancelled():
+                    self._emit_result(None)
+                    return
                 img_rgb = read_topos_frame_rgb(self.path, self.frame_index)
-                if img_rgb is None:
-                    _get_bridge().frame_thumbnail_done.emit(
-                        self.path, self.frame_index, None
-                    )
+                if img_rgb is None or self._is_cancelled():
+                    self._emit_result(None)
                     return
                 h, w = img_rgb.shape[:2]
                 q_img = QImage(
@@ -1636,25 +1698,28 @@ class FrameThumbnailRequest(QRunnable):
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
-                _get_bridge().frame_thumbnail_done.emit(
-                    self.path, self.frame_index, scaled_img
-                )
+                self._emit_result(scaled_img)
                 return
 
             file_lock = _get_file_lock(self.path)
             with file_lock:
+                if self._is_cancelled():
+                    _cleanup_file_lock(self.path)
+                    self._emit_result(None)
+                    return
                 cap = _get_capture(self.path)
                 try:
-                    if not cap.isOpened():
-                        _get_bridge().frame_thumbnail_done.emit(
-                            self.path, self.frame_index, None
-                        )
+                    if self._is_cancelled() or not cap.isOpened():
+                        self._emit_result(None)
                         return
 
                     # Seek to the target frame
                     actual_frame = min(self.frame_index, self.total_frames - 1)
                     actual_frame = max(0, actual_frame)
                     cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
+                    if self._is_cancelled():
+                        self._emit_result(None)
+                        return
 
                     ret, frame = cap.read()
                 finally:
@@ -1662,12 +1727,8 @@ class FrameThumbnailRequest(QRunnable):
                     # AUD-35714：同上，防止 _cv_locks 无界增长
                     _cleanup_file_lock(self.path)
 
-            if not ret or frame is None:
-                _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, None)
-                return
-
-            if self._cancelled is not None and self._cancelled():
-                _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, None)
+            if not ret or frame is None or self._is_cancelled():
+                self._emit_result(None)
                 return
 
             # Convert BGR to RGB
@@ -1687,11 +1748,11 @@ class FrameThumbnailRequest(QRunnable):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, scaled_img)
+            self._emit_result(scaled_img)
 
         except Exception as e:
             logger.error(f"Frame extraction failed for {self.path} frame {self.frame_index}: {e}")
-            _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, None)
+            self._emit_result(None)
 
 
 # ================================================================
@@ -1941,6 +2002,8 @@ class ClipThumbnailWorker(QRunnable):
                         return []
                     actual_frame = max(0, min(frame_idx, total_frames - 1))
                     decoded = source.read_frame(actual_frame)
+                    if self._is_cancelled():
+                        return []
                     img_rgb = topos_frame_to_rgb(decoded) if decoded is not None else None
                     if img_rgb is None:
                         continue
@@ -1966,8 +2029,13 @@ class ClipThumbnailWorker(QRunnable):
         file_lock = _get_file_lock(path)
 
         with file_lock:
+            if self._is_cancelled():
+                _cleanup_file_lock(path)
+                return frames
             cap = _get_capture(path)
             try:
+                if self._is_cancelled():
+                    return frames
                 if not cap.isOpened():
                     logger.error(f"Failed to open video: {path}")
                     return frames
@@ -1994,6 +2062,8 @@ class ClipThumbnailWorker(QRunnable):
                     actual_frame = max(0, min(frame_idx, total_frames - 1))
                     cap.set(cv2.CAP_PROP_POS_FRAMES, actual_frame)
 
+                    if self._is_cancelled():
+                        return []
                     ret, frame = cap.read()
                     if not ret or frame is None:
                         continue

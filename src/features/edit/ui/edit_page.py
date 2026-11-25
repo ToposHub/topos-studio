@@ -232,6 +232,7 @@ class EditPage(QWidget):
     timeline_scrub_started = pyqtSignal(int)  # frame number
     timeline_scrub_frame_requested = pyqtSignal(int)  # frame number
     timeline_scrub_finished = pyqtSignal(int)  # frame number
+    timeline_scrub_cancelled = pyqtSignal(int)
     waveform_status_message = pyqtSignal(str, int)  # message, timeout_ms
     timeline_display_changed = pyqtSignal(object)  # visible monitor timebase
 
@@ -433,6 +434,8 @@ class EditPage(QWidget):
                     timeline_view.scrub_moved.connect(self._on_scrub_moved)
                 if hasattr(timeline_view, 'scrub_finished'):
                     timeline_view.scrub_finished.connect(self._on_scrub_finished)
+                if hasattr(timeline_view, 'scrub_cancelled'):
+                    timeline_view.scrub_cancelled.connect(self._on_scrub_cancelled)
                 # P1-04：trim 进行中的 cut 邻近帧预览（节目监视器显示，
                 # 不移动播放头——复用 scrub 渲染管线）
                 if hasattr(timeline_view, 'trim_frame_preview_requested'):
@@ -1284,10 +1287,16 @@ class EditPage(QWidget):
 
     def _finish_background_media_shutdown(self, resume_background: bool) -> None:
         if resume_background:
+            priority = getattr(self._timeline_panel, "set_background_media_priority", None)
+            if callable(priority):
+                priority("edit_scrub", False)
             self._set_thumbnail_playback(False)
             return
         # Terminal window shutdown must not use set_playback_active(False):
         # that would start queued decoders while their UI is being destroyed.
+        priority = getattr(self._timeline_panel, "set_background_media_priority", None)
+        if callable(priority):
+            priority("shutdown", True)
         from src.features.edit.core.audio_waveform import (
             WaveformExtractor, ClipEffectWaveformRenderer,
         )
@@ -2932,7 +2941,7 @@ class EditPage(QWidget):
         # same priority as playback: waveform decoding and thumbnail commits
         # must not compete with the real-time playhead preview.
         self._background_media_resume_token += 1
-        self._set_thumbnail_playback(True)
+        self._set_thumbnail_playback(True, owner="edit_scrub")
         self._scrub_active = True
         self._last_scrub_requested_frame = -1
         self._pending_scrub_request_frame = None
@@ -3039,7 +3048,10 @@ class EditPage(QWidget):
         self._request_scrub_audio_preview(frame)
         self.signal_hub.playhead_changed.emit(frame)
 
-    def _on_scrub_finished(self, frame: int) -> None:
+    def _on_scrub_cancelled(self, frame: int) -> None:
+        self._on_scrub_finished(frame, settle=False)
+
+    def _on_scrub_finished(self, frame: int, *, settle: bool = True) -> None:
         """Leave scrub mode and request one exact frame for the release point."""
         self._scrub_active = False
         self._last_scrub_requested_frame = -1
@@ -3056,9 +3068,11 @@ class EditPage(QWidget):
             timecode = self._frame_to_timecode(frame)
             self._program_viewer.set_timecode(timecode, self._fps)
 
-        self.timeline_scrub_finished.emit(frame)
-
-        self._prepare_or_seek_audio(frame)
+        if settle:
+            self.timeline_scrub_finished.emit(frame)
+            self._prepare_or_seek_audio(frame)
+        else:
+            self.timeline_scrub_cancelled.emit(frame)
         self._schedule_background_media_resume()
 
     def request_current_timeline_frame(self) -> None:
@@ -3264,8 +3278,12 @@ class EditPage(QWidget):
 
     # ==================== Playback Controls ====================
 
-    def _set_thumbnail_playback(self, active: bool) -> None:
+    def _set_thumbnail_playback(self, active: bool, *, owner: str = "playback") -> None:
         """Give playback priority over thumbnail and waveform background work."""
+        priority = getattr(self._timeline_panel, "set_background_media_priority", None)
+        if callable(priority):
+            priority(owner, active)
+            return
         if self._timeline_panel:
             get_view = getattr(self._timeline_panel, "get_timeline_view", None)
             tl_view = get_view() if callable(get_view) else None
@@ -3285,6 +3303,10 @@ class EditPage(QWidget):
 
     def _schedule_background_media_resume(self) -> None:
         """Resume background media work only after the scrub gesture settles."""
+        priority = getattr(self._timeline_panel, "set_background_media_priority", None)
+        if callable(priority):
+            priority("edit_scrub", False, resume_delay_ms=250)
+            return
         self._background_media_resume_token += 1
         token = self._background_media_resume_token
 

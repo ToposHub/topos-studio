@@ -206,7 +206,8 @@ class TimelinePanel(QWidget):
         # Timeline metadata
         self._fps: float = DEFAULT_FPS
         self._total_frames: int = 0
-        self._zoom_background_resume_token: int = 0
+        self._background_media_holds: set[str] = set()
+        self._background_media_timers: dict[str, QTimer] = {}
         # Slider motion can emit hundreds of values per second.  Keep the
         # latest value and apply it on the next display-sized interval instead
         # of rebuilding the entire QGraphicsScene for every pixel crossed.
@@ -674,6 +675,7 @@ class TimelinePanel(QWidget):
         self.timeline_view.timeline_duration_extended.connect(self.set_total_frames)
         self.timeline_view.scrub_started.connect(self._on_scrub_started)
         self.timeline_view.scrub_finished.connect(self._on_scrub_finished)
+        self.timeline_view.scrub_cancelled.connect(lambda frame: self._on_scrub_finished(frame, settle=False))
         self.timeline_view.tool_changed.connect(self._on_view_tool_changed)
         self.timeline_view.zoom_changed.connect(self._on_view_zoom_changed)
         self.timeline_view.snap_changed.connect(self._on_view_snap_changed)
@@ -2189,9 +2191,7 @@ class TimelinePanel(QWidget):
         # This is the authoritative path for transport-button, keyboard, and
         # JKL playback. Do not rely on the optional EditPage signal hub: that
         # left thumbnail decoding active during the first moments of playback.
-        self.timeline_view.set_playback_active_for_thumbnails(
-            state == PlaybackState.PLAYING.value
-        )
+        self.set_background_media_priority("playback", state == PlaybackState.PLAYING.value)
         if state == PlaybackState.PLAYING.value:
             self._playback_timer.start()
         elif state in (PlaybackState.PAUSED.value, PlaybackState.STOPPED.value):
@@ -2423,46 +2423,40 @@ class TimelinePanel(QWidget):
 
     # ==================== Zoom Management ====================
 
+    def set_background_media_priority(
+        self, owner: str, active: bool, *, resume_delay_ms: int = 0,
+    ) -> None:
+        """Pause timeline thumbnails and waveforms until the last interaction ends."""
+        timer = self._background_media_timers.get(owner)
+        if not active and resume_delay_ms and owner in self._background_media_holds:
+            if timer is None:
+                timer = QTimer(self)
+                timer.setSingleShot(True)
+                timer.timeout.connect(lambda: self.set_background_media_priority(owner, False))
+                self._background_media_timers[owner] = timer
+            timer.start(resume_delay_ms)
+            return
+        if timer is not None:
+            timer.stop()
+        was_suspended = bool(self._background_media_holds)
+        if active:
+            self._background_media_holds.add(owner)
+        else:
+            self._background_media_holds.discard(owner)
+        suspended = bool(self._background_media_holds)
+        if suspended == was_suspended:
+            return
+        from src.features.edit.core.audio_waveform import ClipEffectWaveformRenderer, WaveformExtractor
+
+        self.timeline_view.set_playback_active_for_thumbnails(suspended)
+        WaveformExtractor.instance().set_playback_active(suspended)
+        ClipEffectWaveformRenderer.instance().set_playback_active(suspended)
+        playback_trace("timeline.background_media_suspended", active=suspended, owner=owner)
+
     def _defer_background_media_work_for_zoom(self) -> None:
-        """Keep zoom gestures responsive by briefly pausing media background work."""
-        self._zoom_background_resume_token += 1
-        token = self._zoom_background_resume_token
-        self.timeline_view.set_playback_active_for_thumbnails(True)
-        try:
-            from src.features.edit.core.audio_waveform import (
-                WaveformExtractor, ClipEffectWaveformRenderer,
-            )
-            WaveformExtractor.instance().set_playback_active(True)
-            ClipEffectWaveformRenderer.instance().set_playback_active(True)
-        except Exception:
-            logger.debug("Failed to pause waveform work for timeline zoom", exc_info=True)
-
-        def resume_if_idle() -> None:
-            if token != self._zoom_background_resume_token:
-                return
-            if self._scrubbing_playhead or self._playback_controller.is_playing:
-                return
-            # N16：DeferredDelete 冲刷后 view 的 C++ 对象可能已销毁而本
-            # 回调（独立 QTimer）仍触发——访问前防御，已销毁即放弃恢复。
-            view = self.timeline_view
-            try:
-                view.set_playback_active_for_thumbnails(False)
-            except RuntimeError:
-                logger.debug(
-                    "timeline_view destroyed before zoom resume; skipping")
-                return
-            try:
-                from src.features.edit.core.audio_waveform import (
-                    WaveformExtractor, ClipEffectWaveformRenderer,
-                )
-                WaveformExtractor.instance().set_playback_active(False)
-                ClipEffectWaveformRenderer.instance().set_playback_active(False)
-            except Exception:
-                logger.debug("Failed to resume waveform work after timeline zoom", exc_info=True)
-
-        # Wheel/slider changes arrive in bursts. Wait until the final change
-        # rather than restarting PyAV/OpenCV work between every tiny step.
-        QTimer.singleShot(180, resume_if_idle)
+        """Keep thumbnail and waveform work idle through a burst of zoom events."""
+        self.set_background_media_priority("zoom", True)
+        self.set_background_media_priority("zoom", False, resume_delay_ms=180)
 
     @staticmethod
     def _last_clip_end_frame(timeline: Any) -> int:
@@ -2911,18 +2905,22 @@ class TimelinePanel(QWidget):
 
     def _on_scrub_started(self, frame: int) -> None:
         """Mark playhead dragging as scrub mode."""
+        # pause() emits the transport-state change synchronously.
+        self.set_background_media_priority("edit_scrub", True)
         self._scrubbing_playhead = True
         if self._playback_controller.is_playing:
             self._playback_controller.pause()
         playback_trace("timeline_panel.scrub_started", frame=frame)
 
-    def _on_scrub_finished(self, frame: int) -> None:
+    def _on_scrub_finished(self, frame: int, *, settle: bool = True) -> None:
         """Leave scrub mode and emit one final exact seek."""
         was_scrubbing = self._scrubbing_playhead
         self._scrubbing_playhead = False
         playback_trace("timeline_panel.scrub_finished", frame=frame)
         if was_scrubbing:
-            self.seek_requested.emit(frame)
+            if settle:
+                self.seek_requested.emit(frame)
+            self.set_background_media_priority("edit_scrub", False, resume_delay_ms=250)
 
     # ==================== Public API ====================
 

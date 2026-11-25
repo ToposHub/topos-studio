@@ -306,7 +306,11 @@ def test_shutdown_playback_pipeline_idempotent(main_window):
     _clean_main_window(mw)
     mw._pipeline_shutdown_done = False
     pause = Mock()
-    mw.timeline_panel = SimpleNamespace(
+    priority = Mock()
+    order: list[str] = []
+    priority.side_effect = lambda *_: order.append("hold")
+    pause.side_effect = lambda: order.append("pause")
+    mw.timeline_panel = SimpleNamespace(set_background_media_priority=priority,
         get_playback_controller=lambda: SimpleNamespace(is_playing=True, pause=pause))
     audio_shutdown = Mock()
     mw.edit_page = SimpleNamespace(shutdown_audio_playback=audio_shutdown)
@@ -319,6 +323,8 @@ def test_shutdown_playback_pipeline_idempotent(main_window):
     mw._shutdown_playback_pipeline()  # 第二次必须整体跳过
 
     pause.assert_called_once()
+    priority.assert_called_once_with("shutdown", True)
+    assert order == ["hold", "pause"]
     audio_shutdown.assert_called_once_with(resume_background=False)
     stop_playback.assert_called_once()
     preview_shutdown.assert_called_once()

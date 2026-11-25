@@ -34,6 +34,41 @@ def _make_controller(page: str = "Color"):
 
 
 class TestScrubSettleNonBlocking:
+    @pytest.mark.parametrize("timeline_preview", [False, True])
+    def test_color_pauses_background_work_before_seek_and_releases_after_page_change(
+        self, qapp, timeline_preview: bool,
+    ) -> None:
+        from src.features.edit.ui.timeline_panel import TimelinePanel
+
+        fc = _make_controller()
+        panel = fc.timeline_panel = TimelinePanel()
+        observed: list[bool] = []
+        view = panel.get_timeline_view()
+        on_seek = lambda *a, **kw: observed.append(view._thumb_provider.is_thumbnail_work_suspended)
+        if timeline_preview:
+            fc._color_timeline_playback_controller = panel.get_playback_controller
+            fc.on_video_seek = on_seek
+        else:
+            fc.video_controller.seek_to_frame.side_effect = on_seek
+        try:
+            fc.on_video_scrub_started(30)
+            assert observed == [True]
+            fc.current_page = "Edit"
+            fc.on_video_scrub_cancelled()
+            timer = panel._background_media_timers["color_scrub"]
+            assert timer.isActive()
+            # A new press before the idle interval expires cancels that release.
+            fc.current_page = "Color"
+            fc.on_video_scrub_started(28)
+            assert not timer.isActive()
+            fc.on_video_scrub_finished(24)
+            assert timer.isActive()
+            timer.timeout.emit()
+            assert not view._thumb_provider.is_thumbnail_work_suspended
+        finally:
+            panel.set_background_media_priority("color_scrub", False)
+            panel.deleteLater()
+
     def test_scope_freeze_precedes_timeline_pause_and_unfreezes_on_release(self):
         fc = _make_controller("Color")
         timeline = MagicMock()

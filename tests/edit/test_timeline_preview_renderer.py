@@ -4147,6 +4147,25 @@ class TestTimelinePreviewRenderer:
         finally:
             renderer.shutdown()
 
+    def test_cancel_scrub_retires_work_without_decoding_hidden_viewer(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ) -> None:
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence, frame_provider=mock_frame_provider,
+        )
+        try:
+            renderer.begin_scrub(10)
+            generation = renderer._generation_id
+            with patch.object(renderer, "request_render") as render:
+                renderer.cancel_scrub(18)
+                renderer.cancel_scrub(18)
+                render.assert_not_called()
+            assert renderer._generation_id == generation + 1
+            assert not renderer._scrub_active
+            assert renderer._scrub_finish_exact_frame is None
+        finally:
+            renderer.shutdown()
+
     def test_finish_scrub_requests_one_exact_frame(
         self,
         mock_project,

@@ -714,6 +714,8 @@ class WaveformExtractorWorker(QThread):
     def run(self) -> None:
         """Extract waveform from audio file."""
         try:
+            if self.isInterruptionRequested():
+                raise _WaveformExtractionDeferred()
             # Disk cache first: a previously extracted asset reloads in
             # milliseconds without touching PyAV at all.
             waveform = load_waveform_from_disk(
@@ -722,6 +724,8 @@ class WaveformExtractorWorker(QThread):
                 WaveformCache().cache_waveform(waveform)
                 self.waveform_ready.emit(self._asset_id, waveform)
                 return
+            if self.isInterruptionRequested():
+                raise _WaveformExtractionDeferred()
             waveform = self._extract_waveform()
             if self.isInterruptionRequested():
                 raise _WaveformExtractionDeferred()
@@ -756,6 +760,8 @@ class WaveformExtractorWorker(QThread):
         """
         import av
 
+        if self.isInterruptionRequested():
+            raise _WaveformExtractionDeferred()
         try:
             container = av.open(self._file_path)
         except Exception as e:
@@ -1272,6 +1278,8 @@ class ClipEffectWaveformWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                raise _WaveformExtractionDeferred()
             waveform = self._render_effect_waveform()
             if self.isInterruptionRequested():
                 raise _WaveformExtractionDeferred()
@@ -1291,6 +1299,8 @@ class ClipEffectWaveformWorker(QThread):
 
         from src.features.edit.core.audio_dsp import EffectChain
 
+        if self.isInterruptionRequested():
+            raise _WaveformExtractionDeferred()
         try:
             container = av.open(self._file_path)
         except Exception as e:
@@ -1327,6 +1337,8 @@ class ClipEffectWaveformWorker(QThread):
         end_s = self._start_seconds + self._duration_seconds
 
         try:
+            if self.isInterruptionRequested():
+                raise _WaveformExtractionDeferred()
             # Seek to the clip in-point; audio packets are all keyframes so the
             # landing point is within one frame of the request.
             try:
@@ -1351,6 +1363,8 @@ class ClipEffectWaveformWorker(QThread):
                 if not isinstance(resampled_frames, (list, tuple)):
                     resampled_frames = [resampled_frames]
                 for resampled in resampled_frames:
+                    if self.isInterruptionRequested():
+                        raise _WaveformExtractionDeferred()
                     samples = resampled.to_ndarray()
                     if samples.ndim != 2 or samples.shape[1] <= 0:
                         continue

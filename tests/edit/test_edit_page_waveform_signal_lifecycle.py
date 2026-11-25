@@ -25,6 +25,81 @@ import pytest
 pytestmark = pytest.mark.edit_ui
 
 
+def test_ruler_press_during_playback_keeps_background_jobs_paused_through_zoom(
+    qapp, monkeypatch,
+) -> None:
+    from src.features.edit.core.audio_waveform import ClipEffectWaveformRenderer, WaveformExtractor
+    from src.features.edit.ui.timeline_panel import TimelinePanel
+
+    panel = TimelinePanel()
+    source, effects = WaveformExtractor(), ClipEffectWaveformRenderer()
+    monkeypatch.setattr(WaveformExtractor, "_instance", source)
+    monkeypatch.setattr(ClipEffectWaveformRenderer, "_instance", effects)
+    changes: list[bool] = []
+    provider = panel.timeline_view._thumb_provider
+    provider.work_suspended_changed.connect(changes.append)
+    try:
+        transport = panel.get_playback_controller()
+        transport.set_timeline_duration(200)
+        transport.play()
+        assert transport.is_playing
+        panel._on_scrub_started(100)
+        assert not transport.is_playing
+        panel._defer_background_media_work_for_zoom()
+        panel._background_media_timers["zoom"].timeout.emit()
+        assert source._playback_active and effects._playback_active
+        assert changes == [True]
+        panel._on_scrub_finished(80)
+        assert panel._background_media_timers["edit_scrub"].isActive()
+        panel._background_media_timers["edit_scrub"].timeout.emit()
+        assert not source._playback_active and not effects._playback_active
+        assert changes == [True, False]
+    finally:
+        provider.work_suspended_changed.disconnect(changes.append)
+        for owner in ("playback", "zoom", "edit_scrub"):
+            panel.set_background_media_priority(owner, False)
+        panel.deleteLater()
+
+
+@pytest.mark.parametrize("interrupt", ["viewport_ungrab", "window_deactivate", "hide", "clear"])
+def test_lost_playhead_gesture_releases_background_priority_without_seeking(
+    qapp, interrupt: str,
+) -> None:
+    from PyQt6.QtCore import QCoreApplication, QEvent, QPointF
+    from src.features.edit.ui.edit_page import EditPage
+    from src.features.edit.ui.timeline_interaction import InteractionState
+    from src.features.edit.ui.timeline_panel import TimelinePanel
+
+    panel, page = TimelinePanel(), EditPage()
+    page.set_timeline_panel(panel)
+    view = panel.timeline_view
+    cancels: list[int] = []
+    exact: list[int] = []
+    page.timeline_scrub_cancelled.connect(cancels.append)
+    page.timeline_scrub_finished.connect(exact.append)
+    panel.seek_requested.connect(exact.append)
+    view._playhead_dragging = True
+    view._interaction.begin(InteractionState.DRAGGING_PLAYHEAD, QPointF())
+    view.scrub_started.emit(view._playhead_frame)
+    try:
+        if interrupt == "clear":
+            view.clear()
+        else:
+            receiver, event_type = {
+                "viewport_ungrab": (view.viewport(), QEvent.Type.UngrabMouse),
+                "window_deactivate": (view, QEvent.Type.WindowDeactivate),
+                "hide": (view, QEvent.Type.Hide),
+            }[interrupt]
+            QCoreApplication.sendEvent(receiver, QEvent(event_type))
+        assert cancels == [view._playhead_frame]
+        assert not exact and not view._playhead_dragging and not page._scrub_active
+        assert panel._background_media_timers["edit_scrub"].isActive()
+    finally:
+        panel.set_background_media_priority("edit_scrub", False)
+        page.deleteLater()
+        panel.deleteLater()
+
+
 def test_edit_page_destruction_disconnects_waveform_status(qapp) -> None:
     from PyQt6 import sip
 

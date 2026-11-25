@@ -14,9 +14,10 @@ import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
+from itertools import chain
 
 from PyQt6.QtCore import pyqtSignal, Qt, QPoint, QSettings, QTimer, QSize, QEvent, QObject, QRectF
-from PyQt6.QtGui import QShortcut, QKeySequence
+from PyQt6.QtGui import QShortcut, QKeySequence, QShowEvent
 from PyQt6.QtGui import QColor, QPainter, QPixmap, QResizeEvent, QPaintEvent, QMouseEvent, QPen, QWheelEvent, QLinearGradient, QPainterPath
 from PyQt6.QtWidgets import (
     QFrame,
@@ -1037,8 +1038,10 @@ class TimelineClipStrip(QWidget):
 
         # Single connection to provider signals (instead of per-card connections)
         provider = ThumbnailProvider.instance()
+        self._thumbnail_provider = provider
         provider.thumbnail_ready.connect(self._on_strip_thumbnail_ready)
         provider.frame_thumbnail_ready.connect(self._on_strip_frame_thumbnail_ready)
+        provider.work_suspended_changed.connect(self._on_thumbnail_work_suspended)
 
         # Clean up signal connections when this widget is destroyed
         self.destroyed.connect(self._cleanup_signal_connections)
@@ -1393,9 +1396,26 @@ class TimelineClipStrip(QWidget):
 
     # ---- Lazy thumbnail loading ----
 
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._cards:
+            self._thumbnail_debounce_timer.start(0)
+
     def _on_scroll_changed(self, _value: int) -> None:
         """Restart debounce timer on scroll; thumbnails load after it settles."""
         self._thumbnail_debounce_timer.start()
+
+    def _on_thumbnail_work_suspended(self, suspended: bool) -> None:
+        if suspended:
+            self._thumbnail_debounce_timer.stop()
+            for pending in (self._pending_image_cards, self._pending_frame_cards):
+                for cards in pending.values():
+                    for card in cards:
+                        if card._pixmap is None:
+                            card._thumbnail_requested = False
+                pending.clear()
+        elif self.isVisible() and self._cards:
+            self._thumbnail_debounce_timer.start(0)
 
     def _request_visible_thumbnails(self) -> None:
         """Request thumbnails only for cards in/near the visible scroll area.
@@ -1424,17 +1444,23 @@ class TimelineClipStrip(QWidget):
         prefetch_start = max(0, start_idx - 8)
         prefetch_end = min(len(self._cards) - 1, end_idx + 8)
 
-        # AUD-25700：一次请求只判定一次播放状态（显式标记 + 全局注册表）。
-        playback_active = self._playback_in_progress()
+        provider = self._thumbnail_provider
+        playback_active = (
+            provider.is_thumbnail_work_suspended is True or self._playback_in_progress()
+        )
 
-        for i in range(prefetch_start, prefetch_end + 1):
+        card_indices = chain(
+            range(start_idx, end_idx + 1),
+            range(start_idx - 1, prefetch_start - 1, -1),
+            range(end_idx + 1, prefetch_end + 1),
+        )
+        for i in card_indices:
             card = self._cards[i]
             if playback_active:
                 # During playback only consume cache, no new requests
                 if card._thumbnail_requested:
                     continue
                 # Allow cache-only resolution but skip network/decode
-                provider = ThumbnailProvider.instance()
                 if card._entry.media_type == "image":
                     cached = provider.get_cached_thumbnail(card._entry.asset_path, icon_size=144)
                     if cached:
@@ -1589,13 +1615,17 @@ class TimelineClipStrip(QWidget):
         """Disconnect from provider signals to prevent leaks on destruction."""
         self._thumbnail_debounce_timer.stop()
         self._geometry_update_timer.stop()
-        provider = ThumbnailProvider.instance()
+        provider = self._thumbnail_provider
         try:
             provider.thumbnail_ready.disconnect(self._on_strip_thumbnail_ready)
         except (TypeError, RuntimeError):
             pass
         try:
             provider.frame_thumbnail_ready.disconnect(self._on_strip_frame_thumbnail_ready)
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            provider.work_suspended_changed.disconnect(self._on_thumbnail_work_suspended)
         except (TypeError, RuntimeError):
             pass
 

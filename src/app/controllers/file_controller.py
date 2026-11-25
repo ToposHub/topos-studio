@@ -2889,6 +2889,8 @@ class FileOpsMixin:
             self.edit_page.timeline_scrub_finished.connect(
                 self.timeline_preview_renderer.finish_scrub
             )
+        if hasattr(self.edit_page, "timeline_scrub_cancelled") and hasattr(self.timeline_preview_renderer, "cancel_scrub"):
+            self.edit_page.timeline_scrub_cancelled.connect(self.timeline_preview_renderer.cancel_scrub)
 
         # Renderer.frame_ready -> ProgramViewerWidget.set_frame
         self.timeline_preview_renderer.frame_ready.connect(
@@ -3328,6 +3330,8 @@ class FileOpsMixin:
             connections.append((self.edit_page.timeline_scrub_frame_requested, renderer.request_scrub_preview))
         if hasattr(self.edit_page, 'timeline_scrub_finished') and hasattr(renderer, 'finish_scrub'):
             connections.append((self.edit_page.timeline_scrub_finished, renderer.finish_scrub))
+        if hasattr(self.edit_page, "timeline_scrub_cancelled") and hasattr(renderer, "cancel_scrub"):
+            connections.append((self.edit_page.timeline_scrub_cancelled, renderer.cancel_scrub))
 
         # Final-4: disconnect playback_mode_changed if it was connected.
         if (
@@ -6794,6 +6798,9 @@ class FileOpsMixin:
         tracks.  Gated on the Color timeline-clip context so Composite or
         Library usage of the shared video_controller never starts audio.
         """
+        priority = getattr(getattr(self, "timeline_panel", None), "set_background_media_priority", None)
+        if callable(priority) and (getattr(self, "current_page", None) == "Color" or not is_playing):
+            priority("color_playback", is_playing)
         context = self._active_color_timeline_clip_playback_context()
         if context is None:
             return
@@ -7244,6 +7251,9 @@ class FileOpsMixin:
 
     def on_video_scrub_started(self, frame_number: int) -> None:
         """Start low-latency viewport scrub preview for Color/Composite bars."""
+        priority = getattr(getattr(self, "timeline_panel", None), "set_background_media_priority", None)
+        if getattr(self, "current_page", None) == "Color" and callable(priority):
+            priority("color_scrub", True)
         scope_scrub = getattr(self, '_on_scope_scrub_state_changed', None)
         if callable(scope_scrub):
             scope_scrub(True)
@@ -7350,6 +7360,10 @@ class FileOpsMixin:
         self._end_viewport_scrub(settle=False)
 
     def _end_viewport_scrub(self, *, settle: bool) -> None:
+        priority = getattr(getattr(self, "timeline_panel", None), "set_background_media_priority", None)
+        if callable(priority):
+            # The cancel signal can arrive after the Color page is hidden.
+            priority("color_scrub", False, resume_delay_ms=250)
         scope_scrub = getattr(self, '_on_scope_scrub_state_changed', None)
         if callable(scope_scrub):
             scope_scrub(False)

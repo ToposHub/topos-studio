@@ -246,6 +246,80 @@ def test_timeline_card_accepts_async_preview_frame(qapp, tmp_path, monkeypatch) 
     assert not stored.isNull()
 
 
+def test_timeline_card_retries_cancelled_preview_only_when_visible(qapp, tmp_path, monkeypatch) -> None:
+    media_path = tmp_path / "preview-source.mp4"
+    media_path.write_bytes(b"placeholder")
+    project = EditProject.create("Deferred previews").import_asset(
+        path=str(media_path), media_type="video", metadata={"total_frames": 80, "fps": 25.0},
+    )
+    player_asset = project.get_asset_by_path(str(media_path))
+    assert player_asset is not None
+    timelines = {
+        f"timeline-{frame}": TimelineSequenceRef(
+            timeline_id=f"timeline-{frame}", name=f"Timeline {frame:02}",
+            format_settings={
+                MEDIA_POOL_PREVIEW_ASSET_ID_KEY: player_asset.asset_id,
+                MEDIA_POOL_PREVIEW_FRAME_KEY: frame,
+            },
+        )
+        for frame in range(17, 40)
+    }
+    project = replace(project, timelines=timelines, active_timeline_id="timeline-17")
+    panel = MediaPoolPanel()
+    panel.resize(550, 390)
+    panel.set_view_mode(ViewMode.GRID)
+    provider = panel._thumb_provider
+    frame_requests: list[int] = []
+
+    def record_frame_request(_path: str, frame: int, *_args: object, **_kwargs: object) -> None:
+        frame_requests.append(frame)
+
+    monkeypatch.setattr(provider, "get_thumbnail", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(provider, "get_frame_thumbnail", record_frame_request)
+    panel.show()
+
+    try:
+        panel.set_project(project)
+        panel._refresh_timer.stop()
+        panel._delayed_refresh()
+        qapp.processEvents()
+        model = panel.asset_model
+        view = panel.grid_view
+        first = next(model.index(row, 0) for row in range(model.rowCount())
+                     if model.index(row, 0).data(model.ITEM_ID_ROLE) == "timeline-17")
+        last = next(model.index(row, 0) for row in range(model.rowCount())
+                    if model.index(row, 0).data(model.ITEM_ID_ROLE) == "timeline-39")
+        view.scrollTo(first)
+        qapp.processEvents()
+        assert view.viewport().rect().intersects(view.visualRect(first))
+        assert not view.viewport().rect().intersects(view.visualRect(last))
+        assert {17, 39} <= set(frame_requests)
+
+        provider.set_playback_active(True)
+        assert not panel._pending_timeline_image_previews
+        assert not panel._pending_timeline_frame_previews
+        frame_requests.clear()
+        panel._populate_grid_view()
+        qapp.processEvents()
+        assert not frame_requests
+        assert not panel._pending_timeline_frame_previews
+
+        provider.set_playback_active(False)
+        QTest.qWait(30)
+        assert 17 in frame_requests
+        assert 39 not in frame_requests
+        view.scrollTo(last)
+        QTest.qWait(30)
+        assert 39 in frame_requests
+        preview = QPixmap(32, 18)
+        preview.fill(Qt.GlobalColor.green)
+        provider.frame_thumbnail_ready.emit(str(media_path), 39, preview)
+        assert last.data(model.TIMELINE_PREVIEW_ROLE).cacheKey() == preview.cacheKey()
+    finally:
+        provider.set_playback_active(False)
+        panel.close()
+
+
 def test_timeline_without_preview_source_uses_first_media_thumbnail(
     qapp, tmp_path, monkeypatch
 ) -> None:
