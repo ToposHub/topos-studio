@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -48,6 +49,7 @@ class _FakeInteractivePixelBufferSource:
         *,
         is_stale=None,
         deadline_at=None,
+        allow_seek: bool = True,
     ) -> _FakeDecodedFrame:
         self.calls.append((frame_index, is_stale, deadline_at))
         return _FakeDecodedFrame(frame_index)
@@ -596,6 +598,34 @@ def test_vt_planar_decode_keeps_hardware_frame_type() -> None:
     assert frame_type == "vt_planar"
 
 
+def test_idle_decode_has_no_cold_or_reverse_seek_path() -> None:
+    manager = EditGpuDecodeManager()
+    manager._get_disk_proxy_info = lambda _path: None
+    manager.warmup_source = lambda *args, **kwargs: pytest.fail('Idle cache fill opened a decoder')
+    asset = '/idle-window.mov'
+    size = (640, 360)
+    stream = 'clip-idle'
+    opts = dict(target_size=size, stream_key=stream, is_stale=lambda: False,
+                deadline_at=time.perf_counter() + 1.0)
+    assert manager.get_frame_background(asset, 38, **opts) == (None, 'interactive_stale')
+
+    source = _FakeInteractivePixelBufferSource()
+    source.current_frame = 40
+    spec = manager._resolve_preview_decode_source(asset, size)
+    key = manager._make_source_key(stream, spec)
+    manager._sources[key] = source
+    manager._source_types[key] = 'vt_pixel_buffer'
+    manager._source_cache[key] = (source, 'vt_pixel_buffer')
+    try:
+        assert manager.get_frame_background(asset, 38, **opts) == (None, 'interactive_stale')
+        assert source.calls == []
+        frame, route = manager.get_frame_background(asset, 42, **opts)
+        assert frame is not None and frame.frame_index == 42 and route == 'vt_pixel_buffer'
+        assert [call[0] for call in source.calls] == [42]
+    finally:
+        manager.close_all()
+
+
 def test_interactive_planar_catchup_uses_source_interactive_next_read() -> None:
     manager = EditGpuDecodeManager()
     source = _FakeInteractivePlanarSource(current_frame=10)
@@ -701,6 +731,17 @@ def test_interactive_source_selection_skips_busy_pool_source() -> None:
     assert selected_type == "vt_planar"
     assert manager._interactive_busy_sources.get(id(pool_free)) is pool_free
     manager._release_interactive_source(pool_free)
+
+
+def test_interactive_cursor_reuses_buffered_frame_before_forward_decode() -> None:
+    manager = EditGpuDecodeManager()
+    buffered = SimpleNamespace(current_frame=108, has_buffered_frame=lambda f: f == 100)
+    cursor = SimpleNamespace(current_frame=95)
+    source_key = ("clip", "/asset.mov", "/asset.mov", (1280, 720))
+    manager._interactive_source_pool[source_key] = [(cursor, "vt_pixel_buffer")]
+
+    assert manager._select_interactive_source(source_key, buffered, "vt_pixel_buffer", 100)[0] is buffered
+    assert manager._select_interactive_source(source_key, buffered, "vt_pixel_buffer", 101)[0] is cursor
 
 
 def test_vt_warmup_creates_interactive_source_pool() -> None:
@@ -1049,6 +1090,21 @@ def test_interactive_intra_planar_seeks_directly_even_for_small_forward_gap() ->
     assert source.read_frame_planar_calls == [15]  # 直接精确 seek
 
 
+def test_interactive_dnxhr_detects_intra_source_from_real_metadata() -> None:
+    from src.shared.media.ffmpeg_source import FFmpegMediaSource
+
+    path = Path(__file__).resolve().parents[1] / "test_videos" / "4K_DNxHR HQX 10bit.mov"
+    if not path.exists():
+        pytest.skip(f"missing test video: {path}")
+    manager = EditGpuDecodeManager()
+    with FFmpegMediaSource(str(path), target_size=(832, 468), preserve_planes=True) as source:
+        assert manager._interactive_should_prefer_seek(source, "planar", 5)
+        decoded = manager._read_source_frame_interactive(
+            source, "planar", 5, is_stale=None, deadline_at=None,
+        )
+        assert decoded is not None and decoded.frame_index == 5
+
+
 def test_interactive_gop_planar_keeps_sequential_catchup() -> None:
     """GOP planar 源保持顺序追赶（帧线程 AUTO 的 walk 吞吐仍有价值）。"""
     manager = EditGpuDecodeManager()
@@ -1164,6 +1220,23 @@ def test_paused_h264_display_reuses_non_playback_source_policy(
     manager.set_playback_active(True)
     manager.get_frame("/8bit.mp4", 1, (1792, 1008))
     assert policies == ["auto", "hw_or_ffmpeg"]
+
+
+def test_scrub_reuses_only_the_same_stream_hardware_playback_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, _ = _make_routed_manager(monkeypatch, True, codec="h264", pix_fmt="yuv420p")
+    path, size = "/8bit.mp4", (1920, 1080)
+    playback = manager._resolve_preview_decode_source(path, size, for_playback=True)
+    key = manager._make_source_key("clip-a", playback)
+    manager._source_types[key] = "vt_pixel_buffer"
+
+    reused = manager._resolve_stream_source(path, size, "clip-a")
+    assert manager._make_source_key("clip-a", reused) == key
+    assert manager._resolve_stream_source(path, size, "clip-b").vt_policy == "auto"
+
+    manager._source_types[key] = "planar"
+    assert manager._resolve_stream_source(path, size, "clip-a").vt_policy == "auto"
 
 
 def test_preposition_opens_the_playback_source_at_clip_entry_zero(

@@ -11,15 +11,10 @@ from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QMouseEvent, QPaintEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSlider, QWidget
 
-
-_DRAG_PROPERTY = "toposMonitorScrubberDrag"
-
-
-def _track_bounds(slider: QSlider) -> tuple[float, float]:
-    """Use the same inset for drawing and mouse-to-frame conversion."""
-    margin = 20.0 if slider.width() >= 240 else 12.0
-    left = min(margin, max(0.0, (slider.width() - 1.0) / 2.0))
-    return left, max(left, slider.width() - 1.0 - left)
+from src.shared.ui.widgets.scrubber_gesture import (
+    cancel_monitor_scrub, scrubber_mouse_move, scrubber_mouse_press,
+    scrubber_mouse_release, scrubber_track_bounds,
+)
 
 
 def _value_x(slider: QSlider, value: int, left: float, right: float) -> float:
@@ -32,14 +27,6 @@ def _value_x(slider: QSlider, value: int, left: float, right: float) -> float:
     return left + fraction * (right - left)
 
 
-def _mouse_value(slider: QSlider, x: float) -> int:
-    left, right = _track_bounds(slider)
-    fraction = max(0.0, min(1.0, (x - left) / (right - left))) if right > left else 0.0
-    if slider.invertedAppearance():
-        fraction = 1.0 - fraction
-    return slider.minimum() + round(fraction * (slider.maximum() - slider.minimum()))
-
-
 def _mark(slider: QSlider, name: str) -> int | None:
     value = getattr(slider, name, None)
     return value if isinstance(value, int) and not isinstance(value, bool) else None
@@ -50,7 +37,7 @@ def paint_monitor_scrubber(slider: QSlider) -> None:
     painter = QPainter(slider)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.fillRect(slider.rect(), QColor("#202024"))
-    left, right = _track_bounds(slider)
+    left, right = scrubber_track_bounds(slider)
     groove = QRectF(left, 11.0, max(0.0, right - left), 4.0)
     painter.setPen(QPen(QColor("#0c0c0f"), 1.0))
     painter.setBrush(QColor("#151518"))
@@ -94,57 +81,6 @@ def paint_monitor_scrubber(slider: QSlider) -> None:
     painter.drawPath(flag)
     painter.drawLine(QPointF(current_x, 10.0), QPointF(current_x, 17.0))
     painter.end()
-
-
-def cancel_monitor_scrub(slider: QSlider) -> None:
-    """End an interrupted drag once, including Qt's already-released path."""
-    slider.setProperty(_DRAG_PROPERTY, False)
-    if slider.isSliderDown():
-        slider.setSliderDown(False)
-
-
-def scrubber_mouse_press(slider: QSlider, event: QMouseEvent) -> bool:
-    """Start one direct seek gesture before delivering its first frame value."""
-    if not slider.isEnabled() or event.button() != Qt.MouseButton.LeftButton:
-        return False
-    if slider.orientation() != Qt.Orientation.Horizontal:
-        return False
-    if not slider.property(_DRAG_PROPERTY) or not slider.isSliderDown():
-        slider.setProperty(_DRAG_PROPERTY, True)
-        slider.setFocus(Qt.FocusReason.MouseFocusReason)
-        slider.setSliderDown(True)
-    slider.setValue(_mouse_value(slider, event.position().x()))
-    event.accept()
-    return True
-
-
-def scrubber_mouse_move(slider: QSlider, event: QMouseEvent) -> bool:
-    """Chase a held left-button gesture, retaining QSlider's signal behavior."""
-    if not slider.isEnabled() or not slider.property(_DRAG_PROPERTY):
-        return False
-    if not event.buttons() & Qt.MouseButton.LeftButton:
-        return False
-    slider.setValue(_mouse_value(slider, event.position().x()))
-    event.accept()
-    return True
-
-
-def scrubber_mouse_release(slider: QSlider, event: QMouseEvent) -> bool:
-    """Finalize the value before emitting the existing sliderReleased signal."""
-    if event.button() != Qt.MouseButton.LeftButton:
-        return False
-    if not slider.isEnabled():
-        was_dragging = bool(slider.property(_DRAG_PROPERTY) or slider.isSliderDown())
-        cancel_monitor_scrub(slider)
-        if was_dragging:
-            event.accept()
-        return was_dragging
-    if not slider.property(_DRAG_PROPERTY):
-        return False
-    slider.setValue(_mouse_value(slider, event.position().x()))
-    cancel_monitor_scrub(slider)
-    event.accept()
-    return True
 
 
 class MonitorScrubber(QSlider):

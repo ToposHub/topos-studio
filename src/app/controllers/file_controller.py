@@ -10,7 +10,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from copy import deepcopy
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import cv2
 import numpy as np
@@ -2873,7 +2873,7 @@ class FileOpsMixin:
             'begin_scrub',
         ):
             self.edit_page.timeline_scrub_started.connect(
-                self.timeline_preview_renderer.begin_scrub
+                self._begin_timeline_preview_scrub
             )
         if hasattr(self.edit_page, 'timeline_scrub_frame_requested') and hasattr(
             self.timeline_preview_renderer,
@@ -3323,7 +3323,7 @@ class FileOpsMixin:
             (self.program_viewer_widget.viewport_resized, self._on_program_viewer_viewport_resized),
         ]
         if hasattr(self.edit_page, 'timeline_scrub_started') and hasattr(renderer, 'begin_scrub'):
-            connections.append((self.edit_page.timeline_scrub_started, renderer.begin_scrub))
+            connections.append((self.edit_page.timeline_scrub_started, self._begin_timeline_preview_scrub))
         if hasattr(self.edit_page, 'timeline_scrub_frame_requested') and hasattr(renderer, 'request_scrub_preview'):
             connections.append((self.edit_page.timeline_scrub_frame_requested, renderer.request_scrub_preview))
         if hasattr(self.edit_page, 'timeline_scrub_finished') and hasattr(renderer, 'finish_scrub'):
@@ -3374,6 +3374,21 @@ class FileOpsMixin:
         # P1-01: 剪辑命令/工程变更后的单帧刷新是合法旁路，显式标注通道，
         # 与"无主播放帧"（审计违规）在 trace 中可区分。
         self.timeline_preview_renderer.request_render(frame, request_kind="refresh")
+
+    def _begin_timeline_preview_scrub(self, frame: int) -> None:
+        """Start scrubbing with the identity of the frame still on screen."""
+        renderer = self.timeline_preview_renderer
+        if renderer is None:
+            return
+        viewer_widget = self.program_viewer_widget
+        viewer = viewer_widget.get_viewer() if viewer_widget is not None else None
+        if viewer is None:
+            renderer.begin_scrub(frame)
+        else:
+            renderer.begin_scrub(
+                frame, painted_present_key=viewer.painted_present_key(),
+                viewer_turn=getattr(viewer, "retire_scrub_direction", None),
+            )
 
     def _on_timeline_preview_frame_ready(self, frame: int, result: object) -> None:
         """
@@ -5994,6 +6009,7 @@ class FileOpsMixin:
             (bar.scrub_started, self.on_video_scrub_started),
             (bar.scrub_moved, self.on_video_scrub_moved),
             (bar.scrub_finished, self.on_video_scrub_finished),
+            (bar.scrub_cancelled, self.on_video_scrub_cancelled),
             (bar.play_toggled, self.on_video_play_toggled),
             (bar.next_frame, self.on_video_next_frame),
             (bar.prev_frame, self.on_video_prev_frame),
@@ -7064,6 +7080,8 @@ class FileOpsMixin:
         """
         if getattr(self, "_cross_clip_advancing", False):
             return
+        if not getattr(getattr(self, "video_controller", None), "is_playing", False):
+            return
         context = self._active_color_timeline_clip_playback_context()
         if not context:
             return
@@ -7073,9 +7091,7 @@ class FileOpsMixin:
             if context.get("effective_source_start") is not None
             else getattr(clip, "source_start", 0) or 0
         )
-        # The wrap lands exactly on in_frame after a frame at/after out.  A
-        # plain user seek back to the start would not be preceded by an
-        # out-area frame, so this pair distinguishes a real wrap.
+        # A playback wrap lands on the in-frame immediately after the tail.
         last_frame = getattr(self, "_last_color_source_frame", None)
         source_duration = max(1, int(getattr(clip, "source_duration", 0) or 0))
         out_frame = source_start + source_duration - 1
@@ -7213,10 +7229,12 @@ class FileOpsMixin:
                 seek_kwargs = {"blocking": False}
                 if getattr(self, "current_page", None) == "Color":
                     seek_kwargs["allow_proxy_fallback"] = False
+                    seek_kwargs["scrub_reset"] = True
                 try:
                     self.video_controller.seek_to_frame(source_frame, **seek_kwargs)
                 except TypeError:
                     seek_kwargs.pop("allow_proxy_fallback", None)
+                    seek_kwargs.pop("scrub_reset", None)
                     self.video_controller.seek_to_frame(source_frame, **seek_kwargs)
                 self._poll_settle_exact_frame(int(frame_number))
                 self._schedule_video_denoise_window()
@@ -7235,15 +7253,26 @@ class FileOpsMixin:
                 color_timeline_controller.pause()
             self.on_video_seek(int(frame_number))
             return
+        if getattr(self, "current_page", None) == "Color":
+            # A pending clip-entry still must not reposition a new drag.
+            self._color_static_preview_token = int(getattr(self, "_color_static_preview_token", 0) or 0) + 1
         self._viewport_scrub_active = True
         self._viewport_scrub_pending_frame = None
         self._viewport_scrub_timer_pending = False
         self._viewport_scrub_last_emit_ms = 0.0
         self._viewport_scrub_settle_pending = False
+        self._viewport_scrub_hold_timer_pending = False
+        self._viewport_scrub_hold_exact = False
         # 新一轮拖拽从零速度开始，避免继承上一轮的隔行取帧步长。
         self._viewport_scrub_last_emit_frame = None
         self._viewport_scrub_last_emit_at_s = None
         self._viewport_scrub_velocity = 0.0
+        self._viewport_scrub_latest_source_target = None
+        self._viewport_scrub_direction = 0
+        self._viewport_scrub_origin = None
+        self._viewport_scrub_last_target = None
+        self._viewport_scrub_source_direction = 0
+        self._viewport_scrub_last_source_position = None
         # Invalidate a ready-frame poll left over from a previous drag.
         self._viewport_scrub_preview_token = int(
             getattr(self, "_viewport_scrub_preview_token", 0) or 0
@@ -7274,6 +7303,8 @@ class FileOpsMixin:
         if self._color_timeline_playback_controller() is not None:
             self.on_video_seek(int(frame_number))
             return
+        if getattr(self, "current_page", None) == "Color":
+            playback_trace("viewport.scrub_pointer", frame=int(frame_number))
         self._viewport_scrub_active = True
         self._viewport_scrub_pending_frame = int(frame_number)
         now_ms = time.monotonic() * 1000.0
@@ -7313,6 +7344,12 @@ class FileOpsMixin:
 
     def on_video_scrub_finished(self, _frame_number: int) -> None:
         """End scrub mode; seek_requested emitted by the bar performs exact seek."""
+        self._end_viewport_scrub(settle=True)
+
+    def on_video_scrub_cancelled(self) -> None:
+        self._end_viewport_scrub(settle=False)
+
+    def _end_viewport_scrub(self, *, settle: bool) -> None:
         scope_scrub = getattr(self, '_on_scope_scrub_state_changed', None)
         if callable(scope_scrub):
             scope_scrub(False)
@@ -7321,8 +7358,9 @@ class FileOpsMixin:
         self._viewport_scrub_active = False
         self._viewport_scrub_pending_frame = None
         self._viewport_scrub_timer_pending = False
+        self._viewport_scrub_hold_timer_pending = False
         # 松手后紧随的 seek_requested 走非阻塞精确上屏（见 on_video_seek）。
-        self._viewport_scrub_settle_pending = True
+        self._viewport_scrub_settle_pending = settle
         # Prevent a late async preview from overtaking the exact release seek.
         self._viewport_scrub_preview_token = int(
             getattr(self, "_viewport_scrub_preview_token", 0) or 0
@@ -7331,9 +7369,12 @@ class FileOpsMixin:
         self._viewport_scrub_drag_generation = int(
             getattr(self, "_viewport_scrub_drag_generation", 0) or 0
         ) + 1
+        self._viewport_scrub_pump_armed = False
 
-    def _poll_settle_exact_frame(self, local_frame: int) -> None:
-        """Present the exact master frame after a non-blocking scrub-release seek.
+    def _poll_settle_exact_frame(
+        self, local_frame: int, *, is_current: Callable[[], bool] | None = None,
+    ) -> None:
+        """Present the exact master frame after a non-blocking settle seek.
 
         与拖拽期间的 _poll_ready_viewport_scrub_frame 相同的"只取已就绪精确
         帧"策略，但生命周期独立于 _viewport_scrub_active（松手后仍需轮询），
@@ -7352,6 +7393,8 @@ class FileOpsMixin:
         def _present_when_ready() -> None:
             if token != getattr(self, "_viewport_scrub_preview_token", 0):
                 return
+            if is_current is not None and not is_current():
+                return
             if time.monotonic() * 1000.0 > deadline_ms:
                 return
             try:
@@ -7363,6 +7406,58 @@ class FileOpsMixin:
             QTimer.singleShot(12, _present_when_ready)
 
         QTimer.singleShot(0, _present_when_ready)
+
+    def _arm_color_scrub_hold_timer(self) -> None:
+        """Refine a quantized scrub target after the pointer stops moving."""
+        controller = self.video_controller
+        if (
+            getattr(self, "_viewport_scrub_hold_timer_pending", False)
+            or not getattr(controller, "supports_async_scrub_seek", False)
+        ):
+            return
+        self._viewport_scrub_hold_timer_pending = True
+        generation = getattr(self, "_viewport_scrub_drag_generation", 0)
+        clip_context = getattr(self, "_color_timeline_clip_playback_context", None)
+        path = getattr(self, "current_file_path", None)
+        hold_ms = 110
+
+        def _hold_context_is_current() -> bool:
+            return (
+                self._viewport_scrub_active
+                and getattr(self, "current_page", None) == "Color"
+                and self.video_controller is controller
+                and controller.supports_async_scrub_seek
+                and not controller.is_playing
+                and getattr(self, "_color_timeline_clip_playback_context", None) is clip_context
+                and getattr(self, "current_file_path", None) == path
+            )
+
+        def _finish_hold() -> None:
+            if generation != getattr(self, "_viewport_scrub_drag_generation", 0):
+                return
+            self._viewport_scrub_hold_timer_pending = False
+            if not _hold_context_is_current():
+                return
+            idle_ms = time.monotonic() * 1000.0 - self._viewport_scrub_last_emit_ms
+            if self._viewport_scrub_pending_frame is not None or idle_ms < hold_ms:
+                self._viewport_scrub_hold_timer_pending = True
+                QTimer.singleShot(max(8, int(hold_ms - idle_ms) + 1), _finish_hold)
+                return
+            frame = self._viewport_scrub_last_emit_frame
+            source_frame = self._color_local_frame_to_source_frame(frame)
+            if (
+                source_frame == self._viewport_scrub_latest_source_target
+                and source_frame == getattr(controller, "_last_submitted_video_frame_index", None)
+            ):
+                return
+            self._viewport_scrub_hold_exact = True
+            self._viewport_scrub_latest_source_target = source_frame
+            self._viewport_scrub_last_target = frame
+            self._viewport_scrub_preview_token += 1
+            controller.seek_to_frame(source_frame, blocking=False, allow_proxy_fallback=False, scrub_reset=True)
+            self._poll_settle_exact_frame(frame, is_current=_hold_context_is_current)
+
+        QTimer.singleShot(hold_ms, _finish_hold)
 
     def _emit_pending_viewport_scrub(self) -> None:
         frame = getattr(self, "_viewport_scrub_pending_frame", None)
@@ -7381,10 +7476,6 @@ class FileOpsMixin:
                 # 同步等 master 解码（长 GOP 4K 可卡 ~300ms）。只发异步 seek，
                 # 目标帧由静态预览轮询 / renderer 异步交付；松手后的精确 master
                 # 提升由 bar 的 seek_requested -> on_video_seek 完成。
-                # Each emitted target supersedes any still-polling older one.
-                self._viewport_scrub_preview_token = int(
-                    getattr(self, "_viewport_scrub_preview_token", 0) or 0
-                ) + 1
                 # 自适应隔行取帧：快速拖拽按 1x/2x/4x/8x/16x 步长量化 seek 目标，
                 # 让每次 master 解码都能上屏（否则追不上的解码完成后即被丢弃）。
                 # 慢拖步长为 1 逐帧；松手（settle）仍精确落在指针下方帧。
@@ -7397,6 +7488,8 @@ class FileOpsMixin:
 
                 last_frame = getattr(self, "_viewport_scrub_last_emit_frame", None)
                 last_at = getattr(self, "_viewport_scrub_last_emit_at_s", None)
+                if last_frame != frame:
+                    self._viewport_scrub_hold_exact = False
                 velocity = 0.0
                 if last_frame is not None and last_at is not None:
                     velocity = update_velocity(
@@ -7409,12 +7502,72 @@ class FileOpsMixin:
                 self._viewport_scrub_velocity = velocity
                 stride = display_stride(velocity, DEFAULT_DISPLAY_RATE_CAP)
                 target_frame = quantize_frame(int(frame), stride)
-                source_frame = self._color_local_frame_to_source_frame(target_frame)
-                # 拖拽期允许就绪帧即时反馈（含 proxy）：重编码格式的 master 在
-                # CPU 解码下太慢，只等精确 master 会让画面在拖拽中冻结。
-                # 松手路径（on_video_seek settle + _poll_settle_exact_frame）
-                # 仍以精确 master 帧收尾，调色落点始终是全画质。
-                seek_kwargs = {"blocking": False, "allow_proxy_fallback": True, "fast_scrub": True}
+                is_color = getattr(self, "current_page", None) == "Color"
+                directional_seek = {}
+                if is_color:
+                    delta = int(frame) - int(last_frame) if last_frame is not None else 0
+                    previous_direction = getattr(self, "_viewport_scrub_direction", 0)
+                    direction = (delta > 0) - (delta < 0) if delta else previous_direction
+                    if direction < 0:
+                        target_frame = -quantize_frame(-int(frame), stride)
+                    if last_frame is None or direction != previous_direction:
+                        previous_target = last_frame
+                    else:
+                        previous_target = getattr(self, "_viewport_scrub_last_target", None)
+                    if previous_target is not None and direction:
+                        pick = min if direction < 0 else max
+                        target_frame = pick(target_frame, previous_target)
+                    self._viewport_scrub_direction = direction
+                    self._viewport_scrub_last_target = target_frame
+
+                    raw_source = self._color_local_frame_to_source_frame(int(frame))
+                    previous_source = getattr(self, "_viewport_scrub_last_source_position", None)
+                    old_source_direction = getattr(self, "_viewport_scrub_source_direction", 0)
+                    source_direction = old_source_direction
+                    if previous_source is not None and raw_source != previous_source:
+                        source_direction = 1 if raw_source > previous_source else -1
+                    if previous_source is None or source_direction != old_source_direction:
+                        self._viewport_scrub_origin = raw_source if previous_source is None else previous_source
+                    self._viewport_scrub_last_source_position = raw_source
+                    self._viewport_scrub_source_direction = source_direction
+                    directional_seek = {
+                        "scrub_origin": self._viewport_scrub_origin,
+                        "scrub_direction": source_direction,
+                        "scrub_reset": previous_source is None or bool(
+                            old_source_direction and source_direction != old_source_direction
+                        ),
+                    }
+                else:
+                    raw_source = None
+                source_frame = (
+                    raw_source if raw_source is not None and target_frame == frame
+                    else self._color_local_frame_to_source_frame(target_frame)
+                )
+                if is_color and (source_frame - self._viewport_scrub_origin) * self._viewport_scrub_source_direction < 0:
+                    # A coarse bucket can straddle a variable-speed turn.
+                    source_frame = raw_source
+                if is_color and last_frame != frame and last_frame is not None:
+                    self._arm_color_scrub_hold_timer()
+                # The ready-frame pump stays active across repeated targets.
+                if (source_frame == getattr(self, "_viewport_scrub_latest_source_target", None)
+                        and not directional_seek.get("scrub_reset")):
+                    if is_color and callable(getattr(self.video_controller, "present_latest_ready_scrub_frame", None)):
+                        self._poll_ready_viewport_scrub_frame(int(frame))
+                    return
+                self._viewport_scrub_preview_token = int(
+                    getattr(self, "_viewport_scrub_preview_token", 0) or 0
+                ) + 1
+                playback_trace(
+                    "viewport.scrub_target", frame=int(frame), source_frame=source_frame,
+                    direction=directional_seek.get("scrub_direction", 0),
+                    origin=directional_seek.get("scrub_origin"), reset=bool(directional_seek.get("scrub_reset")),
+                )
+                seek_kwargs = {
+                    "blocking": False,
+                    "allow_proxy_fallback": not is_color,
+                    "fast_scrub": True,
+                    **directional_seek,
+                }
                 try:
                     self.video_controller.seek_to_frame(source_frame, **seek_kwargs)
                 except TypeError:
@@ -7422,6 +7575,9 @@ class FileOpsMixin:
                     # that do not expose the optional quality policy yet.
                     seek_kwargs.pop("fast_scrub", None)
                     seek_kwargs.pop("allow_proxy_fallback", None)
+                    seek_kwargs.pop("scrub_origin", None)
+                    seek_kwargs.pop("scrub_direction", None)
+                    seek_kwargs.pop("scrub_reset", None)
                     self.video_controller.seek_to_frame(source_frame, **seek_kwargs)
                 self._viewport_scrub_latest_source_target = int(source_frame)
                 self._poll_ready_viewport_scrub_frame(int(frame))
@@ -7450,19 +7606,32 @@ class FileOpsMixin:
                 return
             self._viewport_scrub_pump_armed = True
             generation = int(getattr(self, "_viewport_scrub_drag_generation", 0) or 0)
+            page = getattr(self, "current_page", None)
+            clip_context = getattr(self, "_color_timeline_clip_playback_context", None)
 
             def _pump_once() -> None:
+                if generation != getattr(self, "_viewport_scrub_drag_generation", None):
+                    return
                 if (
-                    generation != int(
-                        getattr(self, "_viewport_scrub_drag_generation", -1) or -1
-                    )
-                    or not getattr(self, "_viewport_scrub_active", False)
+                    not getattr(self, "_viewport_scrub_active", False)
+                    or getattr(self, "current_page", None) != page
+                    or self.video_controller is not video_controller
+                    or (page == "Color" and getattr(self, "_color_timeline_clip_playback_context", None) is not clip_context)
                 ):
+                    self._viewport_scrub_pump_armed = False
+                    return
+                if getattr(self, "_viewport_scrub_hold_exact", False):
                     self._viewport_scrub_pump_armed = False
                     return
                 target = int(getattr(self, "_viewport_scrub_latest_source_target", 0) or 0)
                 try:
-                    present_latest(target)
+                    if page == "Color":
+                        present_latest(
+                            target, scrub_origin=self._viewport_scrub_origin,
+                            scrub_direction=self._viewport_scrub_source_direction,
+                        )
+                    else:
+                        present_latest(target)
                 except (AttributeError, RuntimeError, TypeError) as exc:
                     logger.debug("Viewport scrub ready-frame pump failed: %s", exc)
                 QTimer.singleShot(12, _pump_once)
@@ -8055,6 +8224,7 @@ class FileOpsMixin:
                 self.canvas.video_control_bar.scrub_started.disconnect(self.on_video_scrub_started)
                 self.canvas.video_control_bar.scrub_moved.disconnect(self.on_video_scrub_moved)
                 self.canvas.video_control_bar.scrub_finished.disconnect(self.on_video_scrub_finished)
+                self.canvas.video_control_bar.scrub_cancelled.disconnect(self.on_video_scrub_cancelled)
                 self.canvas.video_control_bar.play_toggled.disconnect(self.on_video_play_toggled)
                 self.canvas.video_control_bar.next_frame.disconnect(self.on_video_next_frame)
                 self.canvas.video_control_bar.prev_frame.disconnect(self.on_video_prev_frame)

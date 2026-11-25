@@ -58,7 +58,7 @@ import logging
 import numpy as np
 import time
 import traceback
-from typing import Optional, Tuple, Dict, Any, List, Mapping
+from typing import Optional, Tuple, Dict, Any, List, Mapping, Callable
 from dataclasses import dataclass
 from enum import Enum
 from src.shared.media.color_decode import ColorConverter
@@ -106,6 +106,24 @@ from src.shared.media.performance_monitor import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _scrub_preview_range(
+    target: int, origin: int | None, direction: int, displayed: int | None,
+) -> tuple[int, int] | None:
+    if origin is None:
+        return None
+    first, last = sorted((origin, target))
+    if displayed is not None:
+        if direction > 0:
+            first = max(first, displayed + 1)
+        elif direction < 0:
+            last = min(last, displayed - 1)
+    return first, last
+
+
+def _take_scrub_preview(take: Callable[..., Any], target: int, frame_range: tuple[int, int] | None) -> Any:
+    return take(target) if frame_range is None else take(target, frame_range=frame_range)
 
 
 # =============================================================================
@@ -2481,6 +2499,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         # 只保存 DecodedFrame 引用和帧号，不复制 numpy 数组
         self._last_displayed_decoded_frame: Optional[Any] = None  # DecodedFrame 引用
         self._last_displayed_frame_index: Optional[int] = None  # 帧号
+        self._scrub_anchored: bool = False
+        self._scrub_prefetch_target: int | None = None
         self._last_submitted_render_params_generation: int = -1
 
     def _range_total_frames(self) -> int:
@@ -3778,9 +3798,9 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
 
             # 定时器驱动帧消费
             fps = self._coordinator.fps or 30.0
-            interval = int(1000 / fps) if fps > 0 else 33
-            interval = max(8, int(interval * 0.8))
-            self._play_timer.start(interval)
+            # Poll for a ready frame about once per display refresh. The
+            # playback clock still decides which source frame can be shown.
+            self._play_timer.start(self._coordinator_poll_interval_ms(fps))
 
         elif self._use_dual_path and self._playback_clock:
             # 向后兼容：使用旧架构（无 coordinator）
@@ -4018,6 +4038,9 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         blocking: Optional[bool] = None,
         allow_proxy_fallback: bool = True,
         fast_scrub: bool = False,
+        scrub_origin: int | None = None,
+        scrub_direction: int = 0,
+        scrub_reset: bool = False,
     ) -> None:
         """
         跳转到指定帧（P5.A 改造版）。
@@ -4043,6 +4066,9 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 generation，且允许显示"最新完成的 master 帧"作为过渡反馈。
                 逐代数丢弃会让所有慢于请求节奏的解码在入队时被丢——
                 快拖时画面完全冻结（真实 App 实测 249 次 seek 仅 1 帧显示）。
+            scrub_origin: Source frame at the start of the current drag direction.
+            scrub_direction: Sign of the current movement in source time.
+            scrub_reset: Invalidate work from the previous drag or direction.
         """
         if self._use_dual_path and self._coordinator:
             # P5.A: 使用 PlaybackCoordinator
@@ -4051,8 +4077,9 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             # 发起的 seek”（如同源片段跨边界推进）误判为暂停 seek，在 UI 线程
             # 同步解码 master 帧，造成可见卡顿。
             was_playing = bool(self.is_playing) or _is_any_engine_playing()
-            # 停止播放
-            self.stop_playback()
+            master_only_scrub = fast_scrub and blocking is False and not allow_proxy_fallback
+            if was_playing or not master_only_scrub:
+                self.stop_playback()
             # V-P0-01: 显式 blocking 优先；None 时维持原“按播放态推断”逻辑。
             if blocking is False:
                 blocking_seek = False
@@ -4066,13 +4093,21 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 # preview that may still be queued on the renderer thread.
                 self._begin_static_preview_generation()
                 self._mark_renderer_video_texture_pending()
+            elif scrub_reset:
+                self._begin_static_preview_generation()
+                self._set_static_preview_frame_hold(False)
+                self._scrub_prefetch_target = None
+                if scrub_origin is not None and not scrub_direction:
+                    # The previous drag may have ended far from this mouse press.
+                    self._scrub_anchored = self._last_displayed_frame_index == scrub_origin
 
             # 使用 coordinator seek（scrub 高频路径不翻 generation，否则慢于
             # 请求节奏的 master 解码在入队时全部被丢为过期帧——快拖冻结）。
             self._coordinator.seek_to_frame(
                 frame_number,
                 blocking=blocking_seek,
-                churn_generation=not (fast_scrub and not blocking_seek),
+                churn_generation=scrub_reset or not (fast_scrub and not blocking_seek),
+                prefetch_proxy=allow_proxy_fallback,
             )
 
             frame = None
@@ -4098,12 +4133,31 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 # V-P0-01 非阻塞 seek（scrub 等高频路径）：绝不同步等 master 解码，
                 # 但必须给用户即时视觉反馈——否则拖动过程中画面静止，只有松手才变。
                 # 1) 异步请求目标 master 帧（松手后/refine 时可用）。
+                frame_range = _scrub_preview_range(
+                    frame_number, scrub_origin, scrub_direction,
+                    self._last_displayed_frame_index if scrub_origin is not None and self._scrub_anchored else None,
+                )
+                can_present = frame_range is None or frame_range[0] <= frame_range[1]
                 request_master = getattr(self._coordinator, 'request_master_frame', None)
                 if callable(request_master):
-                    request_master(frame_number)
+                    if can_present:
+                        if scrub_origin is None or frame_number != self._scrub_prefetch_target:
+                            request_master(frame_number)
+                    elif self._scrub_prefetch_target is None:
+                        # While the pointer approaches the last shown frame, warm
+                        # only its first successor in the new direction. The
+                        # same presentation range still controls when it is used.
+                        candidate = frame_range[0] if scrub_direction > 0 else frame_range[1]
+                        source_total = self._coordinator.total_frames
+                        if (
+                            source_total is not None and self.in_frame <= candidate < source_total
+                            and (self.out_frame is None or candidate <= self.out_frame)
+                        ):
+                            self._scrub_prefetch_target = candidate
+                            request_master(candidate)
                 # 2) 非阻塞取"已就绪"的帧：优先精确 master（take_ready）。
                 take_master = getattr(self._coordinator, 'take_ready_master_frame', None)
-                if callable(take_master):
+                if callable(take_master) and scrub_origin is None:
                     candidate = take_master(frame_number)
                     if getattr(candidate, "frame_index", None) == frame_number:
                         frame = candidate
@@ -4111,12 +4165,12 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 #    中精确目标总在解码完成前移走，take_ready 永远 miss；没有
                 #    proxy 轨道时 proxy 兜底也是 None——两者皆空时画面完全
                 #    冻结。以解码速率步进显示最新完成帧（全分辨率）。
-                if frame is None and fast_scrub:
+                if frame is None and fast_scrub and can_present:
                     take_latest = getattr(
                         self._coordinator, 'take_latest_ready_master_frame', None
                     )
                     if callable(take_latest):
-                        frame = take_latest(frame_number)
+                        frame = _take_scrub_preview(take_latest, frame_number, frame_range)
                 # 4) 其余路径：当前 proxy/master（get_current_frame_data，不等待）。
                 if frame is None and allow_proxy_fallback:
                     current = self._coordinator.get_current_frame_data(is_master=False)
@@ -4124,17 +4178,31 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                         frame = current
 
             if frame is not None:
+                # Fast seeks may consume a completed frame for an earlier
+                # target. Keep that frame's identity for grading and the
+                # exact release check.
+                display_index = frame_number
+                if fast_scrub:
+                    display_index = int(getattr(frame, "frame_index", frame_number))
+                    if (
+                        master_only_scrub
+                        and not is_gpu_decoded_frame(frame)
+                        and getattr(self, "_last_displayed_frame_index", None) == display_index
+                    ):
+                        return
                 self._submit_decoded_frame_playback(
                     frame,
-                    frame_number,
+                    display_index,
                     quality=(
                         "master"
-                        if blocking_seek or not allow_proxy_fallback
+                        if blocking_seek or not (fast_scrub or allow_proxy_fallback)
                         else "proxy"
                     ),
                     reason="seek" if blocking_seek else "playback",
                     drop_if_stale=True,
                 )
+                if scrub_origin is not None and self._last_displayed_frame_index == display_index:
+                    self._scrub_anchored = True
                 if blocking_seek:
                     self._set_static_preview_frame_hold(False)
                     # An exact blocking seek presents the requested frame, so
@@ -4149,7 +4217,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 self.frame_changed.emit(frame_number)
             else:
                 self.current_frame = frame_number
-                self.frame_changed.emit(frame_number)
+                if not master_only_scrub:
+                    self.frame_changed.emit(frame_number)
 
         elif self._use_dual_path and self._source_manager:
             # 向后兼容：使用旧架构
@@ -4187,6 +4256,11 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             # 使用原有架构
             super().seek_to_frame(frame_number)
 
+    @property
+    def supports_async_scrub_seek(self) -> bool:
+        """Whether a nonblocking seek can deliver through the ready frame API."""
+        return bool(self._use_dual_path and self._coordinator)
+
     def present_ready_scrub_frame(self, frame_number: int) -> bool:
         """Present a just-decoded target frame during an interactive scrub.
 
@@ -4202,6 +4276,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
 
         frame_number = int(frame_number)
         if getattr(self, "_last_displayed_frame_index", None) == frame_number:
+            self._scrub_anchored = True
             return True
 
         take_master = getattr(self._coordinator, "take_ready_master_frame", None)
@@ -4230,9 +4305,13 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             )
         finally:
             self._force_source_resolution_submit = False
+        if getattr(self, "_last_displayed_frame_index", None) == frame_number:
+            self._scrub_anchored = True
         return True
 
-    def present_latest_ready_scrub_frame(self, target_frame: int) -> bool:
+    def present_latest_ready_scrub_frame(
+        self, target_frame: int, *, scrub_origin: int | None = None, scrub_direction: int = 0,
+    ) -> bool:
         """Present the newest completed master frame while scrubbing.
 
         精确帧等待（present_ready_scrub_frame）在拖拽事件快于解码时永远
@@ -4250,7 +4329,14 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             return False
 
         try:
-            frame = take_latest(int(target_frame))
+            frame_range = _scrub_preview_range(
+                int(target_frame), scrub_origin, scrub_direction,
+                self._last_displayed_frame_index if scrub_origin is not None and self._scrub_anchored else None,
+            )
+            if frame_range is not None and frame_range[0] > frame_range[1]:
+                # Keep the prepared frame queued until the pointer reaches it.
+                return False
+            frame = _take_scrub_preview(take_latest, int(target_frame), frame_range)
         except (AttributeError, RuntimeError, TypeError) as exc:
             logger.debug("Unable to consume latest ready scrub frame: %s", exc)
             return False
@@ -4259,6 +4345,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         if frame_index is None:
             return False
         if getattr(self, "_last_displayed_frame_index", None) == int(frame_index):
+            if scrub_origin is not None:
+                self._scrub_anchored = True
             return True
 
         self._force_source_resolution_submit = True
@@ -4272,6 +4360,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             )
         finally:
             self._force_source_resolution_submit = False
+        if scrub_origin is not None and self._last_displayed_frame_index == int(frame_index):
+            self._scrub_anchored = True
         return True
 
     def request_static_preview_frame(self, frame_number: int) -> bool:
@@ -4934,6 +5024,10 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             return self._playback_clock.get_state()
         return None
 
+    @staticmethod
+    def _coordinator_poll_interval_ms(effective_fps: float) -> int:
+        return max(8, int(800 / effective_fps)) if effective_fps > 50 else 16
+
     def set_playback_speed(self, speed: float) -> None:
         """
         设置播放速度。
@@ -4949,7 +5043,11 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             logger.warning(f"Ignoring invalid playback speed: {speed!r}")
             return
 
-        super().set_playback_speed(speed_value)
+        if self.is_playing and self._coordinator:
+            fps = self._coordinator.fps or 30.0
+            self._play_timer.setInterval(self._coordinator_poll_interval_ms(fps * speed_value))
+        else:
+            super().set_playback_speed(speed_value)
 
         if self._playback_clock:
             self._playback_clock.set_speed(speed_value)

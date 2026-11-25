@@ -165,6 +165,53 @@ def test_playhead_in_gap_falls_back_to_plain_switch(qapp) -> None:
     controller.canvas.cancel_active_tools.assert_called_once()
 
 
+@pytest.mark.parametrize(("playhead", "target"), [(0, 12), (80, 51)])
+def test_gap_with_one_video_opens_clip_at_nearest_frame(playhead: int, target: int) -> None:
+    project, asset_id = _project()
+    clip = _clip("only-video", asset_id, 12, 25)
+    timeline = _timeline((clip,), project.active_timeline_id)
+    controller = _SyncController(project, timeline, playhead)
+    controller.open_timeline_clip_in_color = MagicMock(return_value=True)
+
+    assert controller._switch_to_color_following_edit_playhead()
+    controller.open_timeline_clip_in_color.assert_called_once_with(timeline.timeline_id, clip.clip_id, target)
+
+
+@pytest.mark.parametrize("still_visible", [True, False])
+def test_gap_with_video_and_still_uses_only_visible_visual_clips(still_visible: bool) -> None:
+    project, video_id = _project()
+    project = project.import_asset(path="/tmp/still.png", media_type="image", metadata={})
+    still_id = next(asset_id for asset_id in project.assets if asset_id != video_id)
+    clip = _clip("video", video_id, 12, 25)
+    timeline = _timeline((clip,), project.active_timeline_id)
+    timeline = timeline.with_track_added(EditTrack(
+        track_id="v2", name="V2", track_type="video", index=1, is_visible=still_visible,
+    )).with_clip_added("v2", _clip("still", still_id, 60, 0))
+    controller = _SyncController(project, timeline, 0)
+    controller.open_timeline_clip_in_color = MagicMock(return_value=True)
+
+    assert controller._switch_to_color_following_edit_playhead() is not still_visible
+    if still_visible:
+        controller.open_timeline_clip_in_color.assert_not_called()
+    else:
+        controller.open_timeline_clip_in_color.assert_called_once_with(timeline.timeline_id, clip.clip_id, 12)
+
+
+@pytest.mark.parametrize("track_state", [{"is_enabled": False}, {"is_visible": False}, {"is_muted": True}])
+def test_gap_with_unrenderable_video_does_not_claim_color_entry(track_state: dict[str, bool]) -> None:
+    project, asset_id = _project()
+    clip = _clip("unrenderable-video", asset_id, 12, 25)
+    timeline = _timeline((), project.active_timeline_id)
+    timeline = timeline.with_track_added(EditTrack(
+        track_id="v2", name="V2", track_type="video", index=1, **track_state,
+    )).with_clip_added("v2", clip)
+    controller = _SyncController(project, timeline, 0)
+    controller.open_timeline_clip_in_color = MagicMock(return_value=True)
+
+    assert not controller._switch_to_color_following_edit_playhead()
+    controller.open_timeline_clip_in_color.assert_not_called()
+
+
 def test_contextual_entry_does_not_reenter_playhead_route(qapp) -> None:
     controller, _clips = _three_clip_controller(playhead=90)
     controller._contextual_page_switch_in_progress = True

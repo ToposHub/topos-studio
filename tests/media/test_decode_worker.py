@@ -484,6 +484,29 @@ class TestProxyDecodeWorker:
         pending = worker._pending_requests
         assert [request.frame_index for request in pending] == [5, 10, 11]
 
+    def test_prefetch_keeps_the_requested_current_playback_frame(self, mock_setup) -> None:
+        worker, _, _ = mock_setup
+        worker.request_frame(9, generation_id=1, reason=FrameRequestReason.PLAYBACK)
+        worker.request_frame(10, generation_id=1, reason=FrameRequestReason.PLAYBACK)
+
+        worker.request_prefetch(current_frame=10, lookahead=2, generation_id=1)
+
+        assert [request.frame_index for request in worker._pending_requests] == [10, 11, 12]
+
+    def test_playback_does_not_decode_a_frame_already_ready(self, mock_setup, monkeypatch) -> None:
+        worker, source, queue = mock_setup
+        frame = source.get_proxy_frame(10)
+        queue.enqueue(QueueEntry(frame=frame, decode_ms=0.0, source=FrameSource.PROXY,
+                                 can_drop=True, generation_id=0))
+        monkeypatch.setattr(source, 'get_proxy_frame', lambda _: pytest.fail('Decoded ready frame again'))
+
+        worker._process_request(VideoFrameRequest(
+            frame_index=10, is_master=False, generation_id=0,
+            priority=RequestPriority.PLAYBACK, reason=FrameRequestReason.PLAYBACK,
+        ))
+
+        assert queue.peek(frame_index=10).frame is frame
+
 
 # =============================================================================
 # MasterDecodeWorker Tests
@@ -595,6 +618,16 @@ class TestMasterDecodeWorker:
 
         # 检查 pending request
         assert worker._pending_master_request is not None
+
+    def test_return_to_inflight_master_frame_discards_intermediate_target(self, mock_setup) -> None:
+        worker, _, _ = mock_setup
+        worker.request_master_frame(50, 1, FrameRequestReason.SEEK)
+        assert worker.get_next_request().frame_index == 50
+        worker.request_master_frame(51, 1, FrameRequestReason.SEEK)
+
+        worker.request_master_frame(50, 1, FrameRequestReason.SEEK)
+
+        assert worker.get_next_request() is None
 
 
 # =============================================================================

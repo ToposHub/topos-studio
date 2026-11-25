@@ -2146,11 +2146,37 @@ class LayerOpsMixin:
         # texture. Scope analysis is submitted as a GPU demand against that
         # texture. There is deliberately no CPU snapshot/readback here:
         # realtime Color-page scopes must remain GPU-only.
-        need_scope = self._is_scope_panel_visible() or self._is_curves_panel_visible()
         is_playing = self._scope_playback_is_active()
-        if need_scope:
-            self._submit_gpu_scope_demand(is_playing=is_playing)
+        need_scope = self._is_scope_panel_visible() or (not is_playing and self._is_curves_panel_visible())
         self.on_render_finished(None, False)
+        if not need_scope:
+            return
+        if not is_playing:
+            self._submit_gpu_scope_demand(is_playing=False)
+            return
+        renderer = getattr(getattr(self, 'engine', None), 'renderer', None)
+        if renderer is None:
+            return
+        key = (id(renderer), int(getattr(renderer, '_video_generation_id', 0)))
+        if key == getattr(self, '_playback_scope_submit_key', None):
+            return
+        # The scope and viewport share the GL lock. Give the completed frame
+        # a chance to paint before submitting the next scope pass.
+        self._playback_scope_submit_key = key
+        QTimer.singleShot(8, lambda: self._submit_playback_scope_after_paint(key))
+
+    def _submit_playback_scope_after_paint(self, key: tuple[int, int]) -> None:
+        if key != self._playback_scope_submit_key:
+            return
+        self._playback_scope_submit_key = None
+        renderer = getattr(getattr(self, 'engine', None), 'renderer', None)
+        if (
+            renderer is not None
+            and key == (id(renderer), int(getattr(renderer, '_video_generation_id', 0)))
+            and getattr(renderer, 'video_texture_pending', False) is not True
+            and self._scope_playback_is_active()
+        ):
+            self._submit_gpu_scope_demand(is_playing=True)
 
     # ------------------------------------------------------------------
     # GPU scope demand management

@@ -36,11 +36,14 @@ from src.features.edit.core.timeline_v2 import (
 )
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.clip_params import TransformParams, CropParams
+from src.features.edit.core.edit_gpu_preview_renderer import ScrubSourceFrame
+from src.shared.gpu.present_frame import GpuPresentFrame
 from src.features.edit.core.timeline_preview_renderer import (
     PreviewFrameCache,
     PreviewRenderWorker,
     TimelinePreviewRenderer,
     AssetResolver,
+    _ScrubWorkerResult,
     create_timeline_preview_renderer,
 )
 from src.features.edit.core.edit_playback_controller import (
@@ -517,6 +520,21 @@ class TestPlaybackStaleFrameGuard:
         # 极端情况：暂停在199但旧渲染帧97
         controller.seek(199)
         assert self._is_stale(controller, 97) is True
+
+    def test_drag_after_playback_uses_scrub_freshness_instead_of_paused_tolerance(self):
+        controller = EditPlaybackController()
+        controller.set_timeline_duration(240)
+        controller.play()
+        controller.pause()
+        controller.seek(100)
+        shell = self._renderer_shell(controller)
+        shell._last_emitted_frame = 75
+
+        assert TimelinePreviewRenderer._is_playback_result_stale(shell, 90)
+        shell._scrub_active = True
+        assert not TimelinePreviewRenderer._is_playback_result_stale(shell, 90)
+        controller.play()
+        assert TimelinePreviewRenderer._should_emit_frame(shell, 60)
 
     def test_playing_keeps_first_completed_frame_even_if_late(self):
         controller = EditPlaybackController()
@@ -1475,6 +1493,38 @@ class TestPreviewRenderWorker:
 
         worker.stop()
 
+    def test_gpu_scrub_release_does_not_present_nearest_source_frame(
+        self, mock_frame_provider, simple_sequence,
+    ):
+        layer = TimelineRenderPlan(simple_sequence).get_frame_plan(0).layers[0]
+        resolver = Mock()
+        resolver.get_asset_type.return_value = "video"
+        resolver.get_asset_path.return_value = "/path/to/video.mp4"
+        decoded = SimpleNamespace(frame_index=layer.source_frame + 1, release=Mock())
+        decode_manager = Mock()
+        decode_manager.get_frame.return_value = decoded, "vt_pixel_buffer"
+        gpu_renderer = Mock()
+        worker = PreviewRenderWorker(
+            frame_provider=mock_frame_provider,
+            asset_resolver=resolver,
+            video_renderer=None,
+            timeline_sequence=simple_sequence,
+            viewport_size=(960, 540),
+            gpu_decode_manager=decode_manager,
+            gpu_renderer=gpu_renderer,
+        )
+
+        try:
+            ok, info = worker._try_gpu_render(
+                frame=0, layers=(layer,), transitions=(), generation_id=1,
+                task_meta={"scrub_settled": True},
+            )
+            assert not ok and info["fallback_reason"] == "inexact_source_frame"
+            decoded.release.assert_called_once()
+            gpu_renderer.submit.assert_not_called()
+        finally:
+            worker.stop()
+
     def test_gpu_scrub_settled_deadline_expands_budget(
         self,
         mock_frame_provider,
@@ -1700,6 +1750,39 @@ class TestPreviewRenderWorker:
         ) is False
 
         worker.stop()
+
+    def test_cancelled_gpu_scrub_skips_cpu_fallback(
+        self, mock_frame_provider, simple_sequence,
+    ) -> None:
+        plan = TimelineRenderPlan(simple_sequence).get_frame_plan(0)
+        resolver = Mock()
+        resolver.get_asset_type.return_value = "video"
+        resolver.get_asset_path.return_value = "/path/to/video.mp4"
+        worker = PreviewRenderWorker(
+            frame_provider=mock_frame_provider,
+            asset_resolver=resolver,
+            video_renderer=None,
+            timeline_sequence=simple_sequence,
+            viewport_size=(960, 540),
+            gpu_decode_manager=Mock(),
+            gpu_renderer=Mock(),
+        )
+        worker.set_generation_id(1)
+
+        def rejected_submit(*_args: object, **_kwargs: object) -> tuple[bool, dict[str, str]]:
+            worker.set_generation_id(2)
+            return False, {"fallback_reason": "gpu_renderer_queue_full"}
+
+        try:
+            with (
+                patch.object(worker, "_try_gpu_render", side_effect=rejected_submit) as gpu,
+                patch.object(worker, "_try_render_single_direct_preview_qimage") as cpu,
+            ):
+                worker._execute_render(0, plan, 1, task_meta={"request_kind": "scrub"})
+                gpu.assert_called_once()
+                cpu.assert_not_called()
+        finally:
+            worker.stop()
 
     def test_gpu_scrub_stale_decode_preserves_fallback_reason(
         self,
@@ -2778,13 +2861,13 @@ class TestTimelinePreviewRenderer:
 
         renderer.shutdown()
 
-    def test_gpu_scrub_preview_emits_exact_cpu_cache_but_still_schedules_gpu_render(
+    def test_gpu_scrub_preview_skips_exact_cpu_cache(
         self,
         mock_project,
         simple_sequence,
         mock_frame_provider,
     ):
-        """GPU scrub may show an exact cached frame, but it must still chase the GPU frame."""
+        """Hold the GPU presenter until the current GPU frame is ready."""
         renderer = TimelinePreviewRenderer(
             project=mock_project,
             sequence=simple_sequence,
@@ -2801,7 +2884,7 @@ class TestTimelinePreviewRenderer:
                 renderer.begin_scrub(10)
                 renderer.request_scrub_preview(12)
 
-        mock_signal.emit.assert_called_once_with(12, cached)
+        mock_signal.emit.assert_not_called()
         schedule_exact.assert_called_once_with(12)
 
         renderer.shutdown()
@@ -2822,6 +2905,7 @@ class TestTimelinePreviewRenderer:
         renderer._worker._gpu_decode_manager = Mock()
         renderer._worker._gpu_renderer = Mock()
         renderer.begin_scrub(12)
+        renderer._scrub_exact_pending_frame = 12
         renderer._cache.put(12, Mock())
 
         with patch.object(renderer, "_dispatch_scrub_exact_render", return_value=True) as dispatch_exact:
@@ -3139,6 +3223,7 @@ class TestTimelinePreviewRenderer:
         assert renderer._dispatch_scrub_exact_render(20) is True
         kwargs = renderer._worker.enqueue.call_args.kwargs
         assert kwargs.get("scrub_coarse") is True
+        renderer._scrub_last_real_frame = 20
 
         # A slow cadence (>40ms hysteresis) returns to exact decoding and
         # resumes prepositioning.
@@ -3211,7 +3296,7 @@ class TestTimelinePreviewRenderer:
         simple_sequence,
         mock_frame_provider,
     ):
-        """Fast forward scrub should move spare decode cursors ahead of the current frame."""
+        """Predictive decode waits until the first foreground frame is available."""
         renderer = TimelinePreviewRenderer(
             project=mock_project,
             sequence=simple_sequence,
@@ -3232,11 +3317,15 @@ class TestTimelinePreviewRenderer:
             with patch.object(renderer, "_schedule_scrub_settled_exact"):
                 renderer.begin_scrub(10)
                 renderer.request_scrub_preview(12)
+                gpu_decode_manager.preposition_interactive_frame.assert_not_called()
+                renderer._scrub_last_real_frame = 12
+                renderer._scrub_last_input_at = time.perf_counter() - 0.060
+                renderer.request_scrub_preview(13)
 
-        schedule_exact.assert_called_once_with(12)
+        assert [call.args[0] for call in schedule_exact.call_args_list] == [12, 13]
         gpu_decode_manager.preposition_interactive_frame.assert_called_with(
             "/path/to/video.mp4",
-            16,
+            17,
             target_size=(1920, 1080),
             stream_key="clip-001",
             deadline_ms=48.0,
@@ -3265,8 +3354,59 @@ class TestTimelinePreviewRenderer:
 
         renderer.shutdown()
 
+    def test_old_gpu_generation_cannot_release_new_same_frame(self, mock_project, simple_sequence,
+                                                            mock_frame_provider) -> None:
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence, frame_provider=mock_frame_provider,
+            viewport_size=(640, 360),
+        )
+        frame = 23
+        renderer._generation_id = 11
+        renderer._dispatched_generation_id = 11
+        renderer._pending_frame = frame
+        renderer._scrub_exact_in_flight_frame = frame
+        renderer._render_in_flight = True
+        renderer._in_flight_frame_ids[frame] = (72, 0)
+        try:
+            with patch.object(renderer, '_pop_pending_present_frame', return_value=None) as take:
+                renderer._on_gpu_frame_ready(frame, 10, 7, 640, 360)
+            take.assert_called_once_with(frame, 10)
+            assert renderer._pending_frame == frame
+            assert renderer._scrub_exact_in_flight_frame == frame
+            assert renderer._render_in_flight
+            assert renderer._in_flight_frame_ids[frame] == (72, 0)
+        finally:
+            renderer.shutdown()
+
+    def test_old_fenced_descriptor_is_retired_between_seek_and_dispatch(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ) -> None:
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence, frame_provider=mock_frame_provider,
+            viewport_size=(640, 360),
+        )
+        renderer._generation_id = 11
+        renderer._dispatched_generation_id = 10
+        renderer._late_realtime_present_key = (23, 10)
+        try:
+            with (
+                patch.object(renderer, '_ack_present_slot_safe') as ack,
+                patch.object(renderer, '_stash_pending_present_frame') as stash,
+            ):
+                renderer._on_present_frame_ready(SimpleNamespace(
+                    frame=23, generation_id=10, slot_id=7, lease_key=9,
+                ))
+            ack.assert_called_once_with(7, 9)
+            stash.assert_not_called()
+            renderer._clear_stale_pending_present_frames()
+            assert renderer._late_realtime_present_key is None
+        finally:
+            renderer.shutdown()
+
+    @pytest.mark.parametrize("frame", [0, 12])
     def test_submit_scrub_exact_render_queues_real_render(
         self,
+        frame,
         mock_project,
         simple_sequence,
         mock_frame_provider,
@@ -3280,14 +3420,17 @@ class TestTimelinePreviewRenderer:
         )
         renderer._worker.enqueue = Mock(return_value=True)
 
-        renderer.begin_scrub(12)
+        renderer.begin_scrub(frame)
+        # A late timer for a different position must consume the current
+        # pending target, including timeline frame zero.
+        renderer._scrub_exact_pending_frame = frame
         renderer._submit_scrub_exact_render(12, renderer._scrub_exact_request_token)
 
         renderer._worker.enqueue.assert_called_once()
-        assert renderer._worker.enqueue.call_args.args[0] == 12
+        assert renderer._worker.enqueue.call_args.args[0] == frame
         assert renderer._render_in_flight is True
-        assert renderer._pending_frame == 12
-        assert renderer._scrub_exact_in_flight_frame == 12
+        assert renderer._pending_frame == frame
+        assert renderer._scrub_exact_in_flight_frame == frame
         assert renderer._worker.enqueue.call_args.kwargs["decode_target_size"] == (1920, 1080)
 
         renderer.shutdown()
@@ -3308,11 +3451,81 @@ class TestTimelinePreviewRenderer:
         renderer._worker.enqueue = Mock(return_value=True)
 
         renderer.begin_scrub(12)
+        renderer._scrub_last_real_frame = 12
+        renderer._scrub_last_real_generation = renderer._generation_id
+        assert renderer._dispatch_scrub_exact_render(12) is False
         assert renderer._dispatch_scrub_exact_render(12, settled=True) is True
 
         assert renderer._worker.enqueue.call_args.kwargs["request_kind"] == "scrub"
         assert renderer._worker.enqueue.call_args.kwargs["scrub_settled"] is True
         renderer.shutdown()
+
+    def test_gpu_scrub_worker_takes_latest_without_processing_qt_events(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ) -> None:
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence,
+            frame_provider=mock_frame_provider, viewport_size=(1920, 1080),
+        )
+        started = threading.Event()
+        resume = threading.Event()
+        next_started = threading.Event()
+        decoded = []
+
+        def execute(frame: int, *args: object, **kwargs: object) -> None:
+            decoded.append(frame)
+            if frame == 12:
+                started.set()
+                resume.wait(2)
+            else:
+                next_started.set()
+
+        try:
+            with patch.object(renderer, "_has_gpu_preview_pipeline", return_value=True), \
+                    patch.object(renderer._worker, "_execute_render", side_effect=execute), \
+                    patch.object(renderer, "_update_scrub_input_cadence"), \
+                    patch.object(renderer, "_warmup_gpu_decode_sources"):
+                renderer.begin_scrub(12)
+                renderer.request_scrub_preview(12)
+                assert started.wait(2)
+                renderer.request_scrub_preview(13)
+                renderer.request_scrub_preview(14)
+                renderer.request_scrub_preview(14)
+                assert renderer._pending_frame is None
+                assert renderer._worker._queue.qsize() == 1
+                resume.set()
+                assert next_started.wait(2)
+                assert decoded == [12, 14]
+        finally:
+            resume.set()
+            renderer.shutdown()
+
+    def test_delayed_scrub_cpu_result_cannot_replace_exact_release(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ) -> None:
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence,
+            frame_provider=mock_frame_provider, viewport_size=(1920, 1080),
+        )
+        try:
+            renderer.begin_scrub(12)
+            old_generation = renderer._generation_id
+            with patch.object(renderer, "request_render") as request:
+                renderer.finish_scrub(12)
+            request.assert_called_once_with(12)
+            renderer._dispatched_generation_id = renderer._generation_id
+            renderer._pending_frame = 12
+            renderer._render_in_flight = True
+            with patch.object(renderer, "frame_ready") as ready, \
+                    patch.object(renderer, "_on_render_error") as error:
+                renderer._on_frame_rendered(12, _ScrubWorkerResult(old_generation, QImage()))
+                renderer._on_frame_rendered(12, _ScrubWorkerResult(old_generation, "decode", error=True))
+            ready.emit.assert_not_called()
+            error.assert_not_called()
+            assert renderer._pending_frame == 12
+            assert renderer._render_in_flight
+        finally:
+            renderer.shutdown()
 
     def test_gpu_scrub_exact_render_reuses_playback_decode_target(
         self,
@@ -3332,6 +3545,7 @@ class TestTimelinePreviewRenderer:
         renderer._worker.enqueue = Mock(return_value=True)
 
         renderer.begin_scrub(12)
+        renderer._scrub_exact_pending_frame = 12
         renderer._submit_scrub_exact_render(12, renderer._scrub_exact_request_token)
 
         renderer._worker.enqueue.assert_called_once()
@@ -3378,6 +3592,145 @@ class TestTimelinePreviewRenderer:
         assert renderer._can_emit_scrub_render_result(5) is True
 
         renderer.shutdown()
+
+    def test_reverse_scrub_rejects_fenced_result_with_bouncing_source_frame(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ):
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence, frame_provider=mock_frame_provider,
+            viewport_size=(1920, 1080),
+        )
+        try:
+            renderer.begin_scrub(200)
+            renderer._update_scrub_direction(189)
+            renderer._scrub_latest_frame = 182
+            renderer._scrub_latest_display_frame = 188
+            renderer._scrub_last_presentation = (192, (ScrubSourceFrame('h264', 'clip', 217, 206, 1),))
+            # Even the ready-result timeout and latest-target fast path must
+            # reject a picture moving in the opposite direction of the pointer.
+            renderer._scrub_last_real_frame_at = time.perf_counter() - 1
+            generation = renderer._generation_id
+            renderer._dispatched_generation_id = generation
+            present = GpuPresentFrame(7, 640, 360, 188, generation, 3, extra={
+                'scrub_request_token': renderer._scrub_request_serial,
+                'scrub_source_frames': (ScrubSourceFrame('h264', 'clip', 213, 213, 1),),
+            })
+            renderer._stash_pending_present_frame(188, generation, present)
+            with patch.object(renderer, '_ack_present_slot_safe') as acknowledge:
+                with patch.object(renderer, 'frame_ready') as signal:
+                    renderer._on_gpu_frame_ready(188, generation, 7, 640, 360)
+            acknowledge.assert_called_once_with(3, present.lease_key)
+            signal.emit.assert_not_called()
+            assert renderer._scrub_last_presentation[0] == 192
+            assert renderer._can_present_scrub_result(
+                188, renderer._scrub_request_serial, (ScrubSourceFrame('h264', 'clip', 213, 205, 1),),
+            )
+        finally:
+            renderer.shutdown()
+
+    def test_scrub_turn_clears_same_bucket_and_preserves_each_track_motion(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ):
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence, frame_provider=mock_frame_provider,
+            viewport_size=(1920, 1080),
+        )
+        try:
+            renderer.begin_scrub(112)
+            renderer._update_scrub_direction(108)
+            renderer._scrub_latest_frame = renderer._scrub_latest_display_frame = 106
+            renderer._scrub_last_presentation = (108, (
+                ScrubSourceFrame('top', 'asset1', 43, 42, 1),
+                ScrubSourceFrame('bottom', 'asset2', 20, 19, -1),
+            ))
+            improving = ScrubSourceFrame('top', 'asset1', 41, 40, 1)
+            assert not renderer._can_present_scrub_result(106, 1, (
+                improving, ScrubSourceFrame('bottom', 'asset2', 22, 18, -1),
+            ))
+            assert renderer._can_present_scrub_result(106, 1, (
+                improving, ScrubSourceFrame('bottom', 'asset2', 22, 21, -1),
+            ))
+            assert renderer._can_present_scrub_result(106, 1, (
+                improving, ScrubSourceFrame('bottom', 'different-angle', 5, 5, 1),
+            ))
+            renderer._record_scrub_presentation(107, ())
+            assert not renderer._can_present_scrub_result(106, 1, (
+                improving, ScrubSourceFrame('bottom', 'asset2', 22, 18, -1),
+            ))
+
+            old_token = renderer._scrub_request_serial
+            renderer._scrub_worker_queued_key = (renderer._generation_id, 108)
+            assert renderer._update_scrub_direction(110) == 1
+            renderer._scrub_latest_frame = renderer._scrub_latest_display_frame = 108
+            assert renderer._scrub_worker_queued_key is None
+            assert renderer._scrub_last_presentation[0] == 107
+            assert renderer._scrub_needs_direction_anchor
+            assert not renderer._can_present_scrub_result(108, old_token, settled=True)
+            assert renderer._can_present_scrub_result(108, old_token + 1, settled=True)
+            assert not renderer._can_present_scrub_result(108, old_token + 1, (
+                ScrubSourceFrame('top', 'asset1', 43, 50, 1),
+            ))
+            assert renderer._can_present_scrub_result(108, old_token + 1, (
+                ScrubSourceFrame('top', 'asset1', 43, 42, 1),
+            ))
+            assert not renderer._can_present_scrub_result(108, old_token + 1, (
+                ScrubSourceFrame('top', 'asset1', 43, 41, 1),
+            ))
+        finally:
+            renderer.shutdown()
+
+    def test_reverse_sweep_compares_first_result_to_last_painted_layers(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ):
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence, frame_provider=mock_frame_provider,
+            viewport_size=(1920, 1080),
+        )
+        painted = (178, (
+            ScrubSourceFrame('top', 'h264', 203, 203, 1),
+            ScrubSourceFrame('bottom', 'hevc', 250, 250, 1),
+        ))
+        viewer_turn = Mock(return_value=painted)
+        try:
+            renderer.begin_scrub(20, viewer_turn=viewer_turn)
+            renderer._update_scrub_direction(195)
+            # A newer composite was submitted to the viewer and never drawn.
+            renderer._record_scrub_presentation(193, (
+                ScrubSourceFrame('top', 'h264', 218, 218, 1),
+                ScrubSourceFrame('bottom', 'hevc', 272, 272, 1),
+            ))
+            token_floor = renderer._scrub_request_serial + 1
+            renderer._update_scrub_direction(192)
+            viewer_turn.assert_called_once_with(renderer._generation_id, token_floor)
+            assert renderer._scrub_last_presentation == painted
+            assert renderer._scrub_needs_direction_anchor
+            renderer._scrub_latest_frame = renderer._scrub_latest_display_frame = 192
+            assert not renderer._can_present_scrub_result(192, token_floor, (
+                ScrubSourceFrame('top', 'h264', 217, 217, 1),
+                ScrubSourceFrame('bottom', 'hevc', 272, 272, 1),
+            ))
+            assert not renderer._can_present_scrub_result(192, token_floor, (
+                ScrubSourceFrame('top', 'h264', 217, 202, 1),
+                ScrubSourceFrame('bottom', 'hevc', 272, 272, 1),
+            ))
+            assert renderer._can_present_scrub_result(192, token_floor, (
+                ScrubSourceFrame('top', 'h264', 217, 202, 1),
+                ScrubSourceFrame('bottom', 'hevc', 272, 248, 1),
+            ))
+            assert renderer._can_present_scrub_result(192, token_floor, (
+                ScrubSourceFrame('top', 'new-angle', 500, 500, 1),
+                ScrubSourceFrame('bottom', 'new-cut', 650, 650, 1),
+            ))
+            assert renderer._can_present_scrub_result(192, token_floor, settled=True)
+
+            renderer.finish_scrub(192)
+            renderer.begin_scrub(400)
+            assert renderer._scrub_last_presentation is None
+            assert renderer._can_present_scrub_result(400, renderer._scrub_request_serial, (
+                ScrubSourceFrame('top', 'h264', 425, 425, 1),
+            ))
+        finally:
+            renderer.shutdown()
 
     def test_stale_scrub_exact_result_dispatches_latest_pending_frame(
         self,
@@ -3499,9 +3852,12 @@ class TestTimelinePreviewRenderer:
         renderer._render_in_flight = True
         renderer._pending_frame = 143
 
-        renderer._on_worker_gpu_submitted_direct(143, renderer._generation_id)
+        renderer._scrub_last_dispatch_at = 10.0
+        with patch("src.features.edit.core.timeline_preview_renderer.time.monotonic", return_value=10.025):
+            renderer._on_worker_gpu_submitted_direct(143, renderer._generation_id)
 
         renderer._worker.enqueue.assert_not_called()
+        assert renderer._scrub_cycle_period_ema_s == pytest.approx(0.025)
         assert renderer._pending_frame is None
         assert renderer._scrub_exact_pending_frame == 142
         assert renderer._scrub_exact_in_flight_frame is None
@@ -3746,6 +4102,50 @@ class TestTimelinePreviewRenderer:
         assert renderer._worker._queue.qsize() == 0
 
         renderer.shutdown()
+
+    @pytest.mark.parametrize("anchor_status", ["painted", "different_key", "old_generation", "different_frame"])
+    def test_scrub_press_reuses_only_current_painted_frame(
+        self, mock_project, simple_sequence, mock_frame_provider, anchor_status,
+    ):
+        renderer = TimelinePreviewRenderer(
+            project=mock_project,
+            sequence=simple_sequence,
+            frame_provider=mock_frame_provider,
+            viewport_size=(1920, 1080),
+        )
+        key = object()
+        renderer._paused_present_key = (
+            renderer._generation_id - int(anchor_status == "old_generation"),
+            10 + int(anchor_status == "different_frame"),
+            object() if anchor_status == "different_key" else key,
+        )
+
+        try:
+            with (
+                patch.object(renderer, "_allow_scrub_placeholder_frames", return_value=False),
+                patch.object(renderer, "_schedule_scrub_exact_render") as exact,
+                patch.object(renderer, "_schedule_scrub_settled_exact") as settled,
+            ):
+                renderer.begin_scrub(10, painted_present_key=key)
+                renderer.request_scrub_preview(10)
+
+                if anchor_status == "painted":
+                    exact.assert_not_called()
+                    settled.assert_not_called()
+                    assert renderer._scrub_last_real_frame is None
+                    renderer.request_scrub_preview(11)
+                    exact.assert_called_once_with(11)
+                    settled.assert_called_once_with(11)
+                    renderer.request_scrub_preview(10)
+                    assert exact.call_args.args == (10,)
+                else:
+                    exact.assert_called_once_with(10)
+                    settled.assert_called_once_with(10)
+
+            renderer.finish_scrub(12)
+            assert renderer._scrub_exact_frame == 12
+        finally:
+            renderer.shutdown()
 
     def test_finish_scrub_requests_one_exact_frame(
         self,
@@ -4434,7 +4834,8 @@ class TestTimelinePreviewRenderer:
         warmups: list[tuple[str, object, object]] = []
 
         class FakeGpuDecodeManager:
-            def warmup_source(self, asset_path, target_size=None, stream_key=None):
+            def warmup_source(self, asset_path, target_size=None, stream_key=None, *, warm_interactive_pool=True):
+                assert not warm_interactive_pool
                 warmups.append((asset_path, target_size, stream_key))
 
         class FakeResolver:

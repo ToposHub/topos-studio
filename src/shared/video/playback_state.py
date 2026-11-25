@@ -629,7 +629,14 @@ class PlaybackCoordinator:
     # 帧控制
     # =============================================================================
 
-    def seek_to_frame(self, frame: int, *, blocking: bool = True, churn_generation: bool = True) -> bool:
+    def seek_to_frame(
+        self,
+        frame: int,
+        *,
+        blocking: bool = True,
+        churn_generation: bool = True,
+        prefetch_proxy: bool = True,
+    ) -> bool:
         """
         Seek 到指定帧。
 
@@ -640,6 +647,7 @@ class PlaybackCoordinator:
             churn_generation: False 时 seek 不递增 generation（scrub 高频
                 路径：翻代数会让慢于请求节奏的 master 解码在入队时全部
                 被丢为过期帧，画面冻结）。
+            prefetch_proxy: Queue proxy decode work for nonblocking seeks.
 
         Returns:
             True 表示成功 seek
@@ -651,7 +659,10 @@ class PlaybackCoordinator:
             return False
 
         result = session.seek_to_frame(
-            frame, blocking=blocking, churn_generation=churn_generation
+            frame,
+            blocking=blocking,
+            churn_generation=churn_generation,
+            prefetch_proxy=prefetch_proxy,
         )
 
         # 记录命令
@@ -854,7 +865,8 @@ class PlaybackCoordinator:
             return self._session.take_ready_master_frame(int(frame_index))
 
     def take_latest_ready_master_frame(
-        self, current_target: int, *, max_frame_distance: int = 96
+        self, current_target: int, *, max_frame_distance: int = 96,
+        frame_range: tuple[int, int] | None = None,
     ) -> Optional[Any]:
         """Return the newest completed master frame as scrub interim feedback."""
         with self._session_lock:
@@ -863,6 +875,8 @@ class PlaybackCoordinator:
             take = getattr(self._session, "take_latest_ready_master_frame", None)
             if not callable(take):
                 return None
+            if frame_range is not None:
+                return take(int(current_target), max_frame_distance=int(max_frame_distance), frame_range=frame_range)
             return take(int(current_target), max_frame_distance=int(max_frame_distance))
 
     # =============================================================================

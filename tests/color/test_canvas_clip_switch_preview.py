@@ -36,12 +36,59 @@ def test_busy_gl_still_retries_paint_without_input(qtbot, monkeypatch) -> None:
     painter = Mock()
 
     canvas.drawBackground(painter, QRectF())
-    assert canvas._still_present_retry.isActive()
+    assert canvas._present_retry.isActive()
     qtbot.waitUntil(lambda: nudge.called)
 
     canvas.drawBackground(painter, QRectF())
-    assert not canvas._still_present_retry.isActive()
+    assert not canvas._present_retry.isActive()
     assert draw.call_count == 2
+    canvas.engine = None
+
+
+def test_busy_gl_video_retries_once_per_front_revision(qtbot, monkeypatch) -> None:
+    canvas = Canvas()
+    qtbot.addWidget(canvas)
+    renderer = SimpleNamespace(video_texture_pending=False, current_front_tex_id=42, _video_generation_id=5)
+    canvas.engine = SimpleNamespace(renderer=renderer, _is_video_mode=True, scope_source_revision=2,
+                                    _draw_background_tex_id=Mock(return_value=False))
+    canvas.video_control_bar.is_playing = True
+    monkeypatch.setattr(canvas, 'isVisible', lambda: True)
+    nudge = Mock()
+    monkeypatch.setattr(canvas.viewport(), 'update', nudge)
+    painter = Mock()
+
+    canvas.drawBackground(painter, QRectF())
+    qtbot.waitUntil(lambda: nudge.called)
+    canvas.drawBackground(painter, QRectF())
+    assert not canvas._present_retry.isActive()
+
+    canvas.engine.scope_source_revision = 3
+    canvas.drawBackground(painter, QRectF())
+    assert canvas._present_retry.isActive()
+    renderer._video_generation_id += 1
+    qtbot.waitUntil(lambda: not canvas._present_retry.isActive())
+    assert nudge.call_count == 1
+    canvas.engine = None
+
+
+def test_first_blit_of_new_clip_replaces_pending_video_retry(qtbot, monkeypatch) -> None:
+    canvas = Canvas()
+    qtbot.addWidget(canvas)
+    renderer = SimpleNamespace(video_texture_pending=False, current_front_tex_id=42, _video_generation_id=5)
+    canvas.engine = SimpleNamespace(renderer=renderer, _is_video_mode=True, scope_source_revision=3,
+                                    _draw_background_tex_id=Mock(return_value=False))
+    monkeypatch.setattr(canvas, 'isVisible', lambda: True)
+    nudge = Mock()
+    monkeypatch.setattr(canvas.viewport(), 'update', nudge)
+    painter = Mock()
+
+    canvas.drawBackground(painter, QRectF())
+    assert canvas._present_retry.isActive()
+    renderer._video_generation_id = 6
+    canvas.engine.scope_source_revision = 4
+    canvas.drawBackground(painter, QRectF())
+    qtbot.waitUntil(lambda: nudge.called)
+    assert canvas._video_present_retry_key == (id(renderer), 6, 4)
     canvas.engine = None
 
 

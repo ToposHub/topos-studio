@@ -296,6 +296,15 @@ def _rgba_render_target(ctx: Any, size: tuple[int, int], dtype: str) -> tuple[An
     return framebuffer, texture
 
 
+@dataclass(frozen=True, slots=True)
+class ScrubSourceFrame:
+    clip_id: str
+    asset_path: str
+    requested: int
+    decoded: int
+    direction: int
+
+
 @dataclass
 class EditRenderTask:
     """Single render task for the GPU preview renderer."""
@@ -343,6 +352,8 @@ class EditRenderTask:
     output_transform: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None = None
     aces: ProjectAcesSettings | None = None
     luminance: VideoSignalLuminance | None = None
+    scrub_settled: bool = False
+    scrub_source_frames: tuple[ScrubSourceFrame, ...] = ()
 
     def __post_init__(self) -> None:
         if self.adjustment_layers is None:
@@ -858,7 +869,7 @@ class EditGpuPreviewRenderer(QThread):
         # 合成快照（seek 快速路径数据源）：UI 线程 arm_frame_snapshot()
         # 布防 → 渲染线程在下一个合成帧 finalize 时做 1/4 分辨率 readback
         # → snapshot_ready 信号回填 CPU 帧缓存。播放热路径不布防，零成本。
-        self._snapshot_armed: bool = False
+        self._snapshot_generation: int | None = None
         self._snapshot_tex = None
         self._snapshot_fbo = None
         self._snapshot_program = None
@@ -2910,8 +2921,7 @@ class EditGpuPreviewRenderer(QThread):
                 self._release_previous_frames()
                 return
             # 合成快照（seek 快速路径）：UI 线程布防后捕获本帧
-            if self._snapshot_armed:
-                self._snapshot_armed = False
+            if self._take_frame_snapshot_request(task.generation_id):
                 self._capture_frame_snapshot(
                     final_tex, w, h, task.frame, task.generation_id,
                     kind="seek_snapshot",
@@ -2927,6 +2937,9 @@ class EditGpuPreviewRenderer(QThread):
                 width=w,
                 height=h,
                 track_count=track_count,
+                scrub_request_token=task.scrub_request_token,
+                scrub_settled=task.scrub_settled,
+                scrub_source_frames=task.scrub_source_frames,
                 **timing,
             )
 
@@ -5576,12 +5589,18 @@ void main() {
         return target, texture
 
     def arm_frame_snapshot(self) -> None:
-        """UI 线程布防：下一帧合成完成后做一次快照 readback。
+        """Request one paused-seek snapshot from the current render generation."""
+        with self._submit_lock:
+            self._snapshot_generation = self._generation_id
 
-        只在暂停态 seek / scrub settle 前布防；连续布防只对下一帧生效，
-        播放中每帧都布防会 reintroduce 同步 readback 成本——调用方自律。
-        """
-        self._snapshot_armed = True
+    def _take_frame_snapshot_request(self, generation: int) -> bool:
+        if getattr(self, "_snapshot_generation", None) != generation:
+            return False
+        with self._submit_lock:
+            if self._snapshot_generation != generation:
+                return False
+            self._snapshot_generation = None
+            return True
 
     def _capture_frame_snapshot(
         self, final_tex, w: int, h: int, frame: int, generation_id: int,
@@ -5702,6 +5721,9 @@ void main() {
         track_count: int,
         metal: bool = False,
         metal_gpu_ms: float | None = None,
+        scrub_request_token: int | None = None,
+        scrub_settled: bool = False,
+        scrub_source_frames: tuple[ScrubSourceFrame, ...] = (),
     ) -> Optional[GpuPresentFrame]:
         """
         Composite 完成后：插入 GL fence，标记 slot READY，构造 GpuPresentFrame。
@@ -5728,6 +5750,12 @@ void main() {
             "gpu_query_deferred": not metal and not gpu_time_unavailable,
             "render_backend": "metal" if metal else "opengl",
         }
+        if scrub_request_token is not None:
+            gpu_extra.update(
+                scrub_request_token=scrub_request_token,
+                scrub_settled=scrub_settled,
+                scrub_source_frames=scrub_source_frames,
+            )
 
         if lease is None or not self._present_pool_registered:
             # present pool 未启用（旧路径或测试），构造无 fence 的 descriptor
@@ -6182,6 +6210,12 @@ void main() {
 
     def _try_native_metal_preview(self, task: EditRenderTask, width: int, height: int) -> bool:
         """Take an eligible frame to the native viewport.  ``True``: settled here."""
+        # Keep one presentation surface for the full gesture. Under scrub
+        # pressure the CAMetalLayer path alternates with fenced GL presents;
+        # raising the layer while its next drawable is pending can flash.
+        # The Metal render passes remain eligible for the fenced output.
+        if task.request_kind == "scrub" or task.scrub_settled:
+            return False
         producer = self.__dict__.get("_native_producer")
         request_attach = (producer is None and self.__dict__.get("_native_viewport_deferred", False)
                           and not self._native_attach_requested and self._native_detach_done is None)
@@ -6192,7 +6226,8 @@ void main() {
         if self.__dict__.get("_native_stalled"):
             return False
         if (getattr(self, "_effect_hdr", False) or task.background
-                or task.cached_composite or getattr(self, "_snapshot_armed", False)):
+                or task.cached_composite
+                or getattr(self, "_snapshot_generation", None) == task.generation_id):
             return False
         with self._native_viewport_lock:
             port = self._native_port

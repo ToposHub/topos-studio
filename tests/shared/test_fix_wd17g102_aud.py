@@ -838,7 +838,7 @@ class _ReentrantFakeSession:
         self._reenter()
         return True
 
-    def seek_to_frame(self, frame, *, blocking=True, churn_generation=True) -> bool:
+    def seek_to_frame(self, frame, *, blocking=True, churn_generation=True, prefetch_proxy=True) -> bool:
         self._reenter()
         return True
 

@@ -623,6 +623,9 @@ class BaseDecodeWorker:
                 if r.reason != FrameRequestReason.PLAYBACK:
                     # 非 playback 请求（seek/scrub/composite/export）保留
                     kept_requests.append(r)
+                elif r.frame_index == current_frame and r.generation_id == generation_id:
+                    # The playback clock also requests its missing current frame.
+                    kept_requests.append(r)
                 elif r.frame_index in new_prefetch_frames:
                     # 新窗口内的 playback 请求保留（避免重复添加）
                     new_prefetch_frames.discard(r.frame_index)
@@ -923,6 +926,12 @@ class ProxyDecodeWorker(BaseDecodeWorker):
             self._stats.update_drop()
             return
 
+        if request.reason == FrameRequestReason.PLAYBACK:
+            ready = self._frame_queue.peek(is_master=False, frame_index=frame_index)
+            if ready is not None and ready.generation_id == generation_id:
+                self._stats.update_dedup()
+                return
+
         start_time = time.perf_counter()
 
         try:
@@ -1104,17 +1113,6 @@ class MasterDecodeWorker(BaseDecodeWorker):
         # 更新 generation
         self.update_generation(generation_id)
 
-        # 检查帧是否正在解码中（避免重复解码）。
-        # V-P0-04: 用 (generation, frame) 作 key。
-        with self._request_lock:
-            if (generation_id, frame_index) in self._decoding_frames:
-                logger.debug(
-                    f"[{self._name}] Skipping master request for frame {frame_index}: "
-                    f"already decoding (gen={generation_id})"
-                )
-                self._stats.update_dedup()
-                return
-
         # master 请求有最高优先级
         priority = RequestPriority.SEEK  # SEEK = 50, 高优先级
 
@@ -1128,6 +1126,17 @@ class MasterDecodeWorker(BaseDecodeWorker):
 
         # 设置为优先请求
         with self._master_request_lock:
+            with self._request_lock:
+                in_flight = (generation_id, frame_index) in self._decoding_frames
+            if in_flight:
+                # On a return to the in-flight target, supersede the
+                # intermediate pending request without decoding twice.
+                pending = self._pending_master_request
+                if pending is not None and pending.generation_id <= generation_id:
+                    self._pending_master_request = None
+                    self._stats.update_drop()
+                self._stats.update_dedup()
+                return
             # 清除旧的 master 请求
             if self._pending_master_request is not None:
                 old_gen = self._pending_master_request.generation_id

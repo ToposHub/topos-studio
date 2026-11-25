@@ -462,6 +462,7 @@ class VideoSession:
                     proxy_config=proxy_config,
                     viewport_size=self._viewport_size,
                     enable_planar_proxy=True,
+                    interactive_scrub=True,
                 )
 
                 # 打开源
@@ -728,7 +729,14 @@ class VideoSession:
     # 帧控制
     # =============================================================================
 
-    def seek_to_frame(self, frame: int, *, blocking: bool = True, churn_generation: bool = True) -> bool:
+    def seek_to_frame(
+        self,
+        frame: int,
+        *,
+        blocking: bool = True,
+        churn_generation: bool = True,
+        prefetch_proxy: bool = True,
+    ) -> bool:
         """
         Seek 到指定帧。
 
@@ -743,6 +751,7 @@ class VideoSession:
                 在入队时全部按"过期代数"被丢弃——队列永远为空，画面冻结在
                 拖拽前的帧上。拖拽期保持代数稳定，完成的帧才能入队显示；
                 松手后的精确 seek（settle）恢复默认翻代数以取得干净状态。
+            prefetch_proxy: Queue proxy decode work after a nonblocking seek.
 
         Returns:
             True 表示成功 seek
@@ -798,7 +807,7 @@ class VideoSession:
         if blocking:
             # S0.C: 使用 blocking 方法获取目标 master 帧
             master_frame = self.get_master_frame_blocking(frame, timeout_ms=300)
-        else:
+        elif prefetch_proxy:
             self._request_current_proxy_frame_if_missing(frame)
             if self._worker_manager is not None:
                 self._worker_manager.update_clock_position(frame)
@@ -831,13 +840,12 @@ class VideoSession:
         # S0.C: 第一版不自动恢复播放，保持 PAUSED/READY 状态
         # 如果之前在播放，变为 PAUSED；否则恢复原状态
         with self._state_lock:
-            if was_playing:
-                self._state = PlaybackState.PAUSED
-            else:
-                self._state = old_state
+            final_state = PlaybackState.PAUSED if was_playing else old_state
+            self._state = final_state
 
         # V-P0-11: 在 _state_lock 外通知。
-        self._notify_state_change()
+        if blocking or churn_generation or prefetch_proxy or final_state != old_state:
+            self._notify_state_change()
 
         return True
 
@@ -1156,6 +1164,7 @@ class VideoSession:
         current_target: int,
         *,
         max_frame_distance: int = 96,
+        frame_range: tuple[int, int] | None = None,
     ) -> Optional[DecodedFrame]:
         """Return the newest completed master frame as scrub interim feedback.
 
@@ -1165,6 +1174,14 @@ class VideoSession:
         """
         if self._frame_queue is None:
             return None
+        if frame_range is not None:
+            first = max(frame_range[0], current_target - max_frame_distance)
+            last = min(frame_range[1], current_target + max_frame_distance)
+            entry = self._frame_queue.take_master_for_scrub(current_target, first, last)
+            if entry is None:
+                return None
+            self._current_master_frame = entry.frame
+            return entry.frame
         newest = None
         while True:
             entry = self._frame_queue.dequeue(is_master=True)

@@ -62,6 +62,13 @@ class _CMTime(_ctypes.Structure):
     ]
 
 
+def _packet_pts_refcon(pts: int | None) -> int | None:
+    """Encode signed PTS in an opaque pointer, reserving null for missing PTS."""
+    if pts is None or not -0x7FFFFFFFFFFFFFFF <= pts <= 0x7FFFFFFFFFFFFFFF:
+        return None
+    return 2 * pts + 1 if pts >= 0 else -2 * pts
+
+
 class _VTCallbackRecord(_ctypes.Structure):
     """VTDecompressionOutputCallbackRecord (callback + refCon)."""
     _fields_ = [
@@ -90,8 +97,17 @@ _VT_LIB = None       # VideoToolbox.framework
 _CV_LIB = None       # CoreVideo.framework
 _CM_LIB = None       # CoreMedia.framework
 _CF_LIB = None       # CoreFoundation.framework
+_IOSurfaceGetAllocSize = None
 
 if _MACOS_AVAILABLE:
+    try:
+        _iosurface = _ctypes.CDLL('/System/Library/Frameworks/IOSurface.framework/IOSurface')
+        _IOSurfaceGetAllocSize = _iosurface.IOSurfaceGetAllocSize
+        _IOSurfaceGetAllocSize.restype = _ctypes.c_size_t
+        _IOSurfaceGetAllocSize.argtypes = [_ctypes.c_void_p]
+    except (OSError, AttributeError):
+        _IOSurfaceGetAllocSize = None
+
     try:
         _VT_LIB = _ctypes.cdll.LoadLibrary(
             '/System/Library/Frameworks/VideoToolbox.framework/VideoToolbox'
@@ -136,6 +152,8 @@ if _MACOS_AVAILABLE:
         _CV_LIB.CVPixelBufferRelease.argtypes = [_ctypes.c_void_p]
         _CV_LIB.CVPixelBufferGetIOSurface.restype = _ctypes.c_void_p
         _CV_LIB.CVPixelBufferGetIOSurface.argtypes = [_ctypes.c_void_p]
+        _CV_LIB.CVPixelBufferGetDataSize.restype = _ctypes.c_size_t
+        _CV_LIB.CVPixelBufferGetDataSize.argtypes = [_ctypes.c_void_p]
         _CV_LIB.CVPixelBufferGetWidth.restype = _ctypes.c_int
         _CV_LIB.CVPixelBufferGetWidth.argtypes = [_ctypes.c_void_p]
         _CV_LIB.CVPixelBufferGetHeight.restype = _ctypes.c_int
@@ -704,6 +722,7 @@ class VtSession:
         # Both are released together in flush/destroy.
         self._pending_decode_refs: list = []
         self._pending_decode_bufs: list = []
+        self._scrub_async_sample_count = 0
 
     @property
     def is_created(self) -> bool:
@@ -788,6 +807,7 @@ class VtSession:
         self._codec = codec_lower
         self._codec_tag = codec_tag
         self._frame_index = 0
+        self._scrub_async_sample_count = 0
 
         try:
             result = self._create_session_impl(
@@ -1074,14 +1094,17 @@ class VtSession:
         # AUD-35303：frameRefCon 携带提交侧透传的 pts（见
         # _submit_packet_raw）。sample buffer 无 timing 信息时，这是该帧
         # 唯一的时间戳来源；为空再退回回调 CMTime。
-        refcon_pts: int | None = None
-        if frameRefCon is not None and int(frameRefCon) != 0:
-            refcon_pts = int(frameRefCon)
-        cmtime_pts = int(pts.value) if pts is not None and pts.value is not None else None
+        decoded_pts = None
+        if frameRefCon:
+            encoded = int(frameRefCon) - 1
+            decoded_pts = (encoded >> 1) ^ -(encoded & 1)
+        elif pts is not None and pts.timescale > 0 and (pts.flags & 0x1D) == 1:
+            # CMTime's numeric test excludes invalid, indefinite and infinite time.
+            decoded_pts = int(pts.value)
 
         context.output_queue.put_pixel_buffer(
             pixel_buffer=imageBuffer,  # raw pointer — PyObjC CF functions accept int pointers
-            pts=refcon_pts if refcon_pts is not None else cmtime_pts,
+            pts=decoded_pts,
             frame_index=frame_index,
             width=context.width,
             height=context.height,
@@ -1577,11 +1600,11 @@ class VtSession:
             return None
 
         try:
+            self.drain_scrub_outputs()
+            self._drain_pending_decode_refs()
             result = self._decode_packet_impl(packet_data, pts, is_keyframe)
             if result is not None:
                 self._frame_index += 1
-            # 顺序解码路径不会经过 flush()，按阈值周期性释放 CFRetain 引用
-            self._drain_pending_decode_refs()
             return result
         except Exception as e:
             logger.error(f"VtSession: decode_packet failed: {e}")
@@ -1626,19 +1649,24 @@ class VtSession:
             self._pending_decode_refs.clear()
             self._pending_decode_bufs.clear()
             return
-        try:
-            if self._ctypes_session is not None and self._ctypes_session.value:
-                if _VT_LIB is not None:
-                    _VT_LIB.VTDecompressionSessionWaitForAsynchronousFrames(self._ctypes_session)
-            elif self._session is not None and _PYOBJC_AVAILABLE:
-                VTDecompressionSessionWaitForAsynchronousFrames(self._session)
-            else:
-                return
-            self._release_pending_decode_refs()
-        except Exception as e:
-            logger.warning(f"VtSession: drain pending decode refs error: {e}")
+        self._wait_for_pending_decode()
 
-    def _submit_packet_raw(self, packet_data: bytes, pts: int | None = None) -> bool:
+    def _wait_for_pending_decode(self) -> None:
+        """Release submitted sample backing only after VideoToolbox drains it."""
+        if self._ctypes_session is not None and self._ctypes_session.value and _VT_LIB is not None:
+            status = _VT_LIB.VTDecompressionSessionWaitForAsynchronousFrames(self._ctypes_session)
+        elif self._session is not None and _PYOBJC_AVAILABLE:
+            status = VTDecompressionSessionWaitForAsynchronousFrames(self._session)
+        else:
+            return
+        if status != 0:
+            raise RuntimeError(f"VideoToolbox could not drain async frames (OSStatus {status})")
+        self._release_pending_decode_refs()
+        self._scrub_async_sample_count = 0
+
+    def _submit_packet_raw(
+        self, packet_data: bytes, pts: int | None = None, *, decode_flags: int = 0,
+    ) -> bool:
         """
         Submit a compressed packet to VT without draining the output queue.
 
@@ -1648,9 +1676,7 @@ class VtSession:
 
         Args:
             packet_data: 压缩码流 bytes
-            pts: 展示时间戳。非负时经 sourceFrameRefCon 透传，VT 在该帧
-                输出回调中原样返回（AUD-35303），异步取帧路径因此保住
-                demuxer 时间戳；None/负值时不传（沿用 CMTime 缺省）。
+            pts: 展示时间戳，经 sourceFrameRefCon 随对应帧的回调带回。
 
         Returns:
             True if the packet was submitted to VT successfully.
@@ -1728,13 +1754,11 @@ class VtSession:
             # AUD-35303：sourceFrameRefCon 透传 pts。该 sample buffer 不带
             # timing 信息（numSampleTimingEntries=0），回调的 CMTime 为缺省
             # 值；refCon 是唯一能把提交侧时间戳带到输出帧的通道。
-            frame_ref_con = None
-            if pts is not None and 0 <= int(pts) <= 0x7FFFFFFFFFFFFFFF:
-                frame_ref_con = _ctypes.c_void_p(int(pts))
+            frame_ref_con = _ctypes.c_void_p(_packet_pts_refcon(pts))
             err = _VT_LIB.VTDecompressionSessionDecodeFrame(
                 self._ctypes_session,                   # session
                 _ctypes.c_void_p(sample_buf_ptr),       # sampleBuffer
-                0,                                      # decodeFlags
+                decode_flags,                           # decodeFlags
                 frame_ref_con,                          # sourceFrameRefCon
                 None,                                   # infoFlagsOut
             )
@@ -1749,6 +1773,38 @@ class VtSession:
             import traceback
             traceback.print_exc()
             return False
+
+    def decode_scrub_packet(
+        self, packet_data: bytes, pts: int | None, *, reference_only: bool,
+        async_output: bool = False,
+    ) -> VtDecodedPixelBuffer | None:
+        """Submit a scrub sample and return an available output, if any."""
+        if not self.is_created:
+            return None
+        do_not_output_frame = 1 << 1  # kVTDecodeFrame_DoNotOutputFrame
+        flags = do_not_output_frame if reference_only else 0
+        async_sample = (reference_only or async_output) and self._codec in ('h264', 'hevc', 'h265')
+        if self._scrub_async_sample_count and (
+            not async_sample or self._scrub_async_sample_count >= 7
+        ):
+            self._wait_for_pending_decode()
+        if async_sample:
+            # Short bursts limit work left behind by a deadline or reversal.
+            flags |= 1 << 0  # kVTDecodeFrame_EnableAsynchronousDecompression
+        self._drain_pending_decode_refs()
+        submitted = self._submit_packet_raw(packet_data, pts, decode_flags=flags)
+        if submitted and async_sample:
+            self._scrub_async_sample_count += 1
+        if not submitted:
+            return None
+        # The target and nearby frames still complete synchronously. Older
+        # optional output can arrive at any point through the callback queue.
+        return self.get_decoded_frame(timeout=0.0)
+
+    def drain_scrub_outputs(self) -> None:
+        """Complete in-flight scrub samples while preserving their queued output."""
+        if self._scrub_async_sample_count:
+            self._wait_for_pending_decode()
 
     def _decode_packet_impl(self, packet_data: bytes, pts: int | None, is_keyframe: bool) -> VtDecodedPixelBuffer | None:
         """
@@ -1765,11 +1821,9 @@ class VtSession:
             logger.debug(f"VtSession: no decoded frame available for pts={pts}")
             return None
 
-        # The ctypes callback receives CoreMedia timing, but the sample buffer
-        # created in this path does not currently carry explicit timing data.
-        # Preserve the packet PTS supplied by the demuxer so callers can map the
-        # returned pixel buffer back to the real timeline frame after seeks.
-        if pts is not None:
+        # A delayed callback owns its own PTS. Use the submitted sample's
+        # timestamp only when the returned callback has no timestamp.
+        if decoded.pts is None and pts is not None:
             decoded.pts = pts
 
         if not decoded.is_iosurface_backed:
@@ -1811,6 +1865,8 @@ class VtSession:
         try:
             # AUD-35303：pts 必须随包透传，否则异步取帧路径（get_decoded_frame）
             # 拿到的帧全部没有时间戳，seek 后无法映射回时间线帧。
+            self.drain_scrub_outputs()
+            self._drain_pending_decode_refs()
             return self._submit_packet_raw(packet_data, pts)
         except Exception as e:
             logger.error(f"VtSession: submit_packet failed: {e}")
@@ -1847,24 +1903,31 @@ class VtSession:
 
         self._output_queue.release_pixel_buffer(decoded)
 
+    def retain_decoded_frame(self, decoded: VtDecodedPixelBuffer) -> bool:
+        """Retain the native frame for an additional consumer."""
+        pixel_buffer = decoded.pixel_buffer
+        if self._output_queue is None or _CV_LIB is None or not isinstance(pixel_buffer, int):
+            return False
+        return bool(_CV_LIB.CVPixelBufferRetain(_ctypes.c_void_p(pixel_buffer)))
+
+    def decoded_frame_data_size(self, decoded: VtDecodedPixelBuffer) -> int:
+        """Query the allocated planar buffer size without mapping the pixels."""
+        pixel_buffer = decoded.pixel_buffer
+        if _CV_LIB is None or not isinstance(pixel_buffer, int) or not pixel_buffer:
+            return 0
+        pointer = _ctypes.c_void_p(pixel_buffer)
+        if _IOSurfaceGetAllocSize is not None:
+            surface = _CV_LIB.CVPixelBufferGetIOSurface(pointer)
+            if surface:
+                return int(_IOSurfaceGetAllocSize(surface))
+        return int(_CV_LIB.CVPixelBufferGetDataSize(pointer))
+
     def flush(self) -> None:
         """
         刷新解码器，等待所有异步帧完成。
         """
         if not self._destroyed:
-            try:
-                # ctypes session path
-                if self._ctypes_session is not None and self._ctypes_session.value:
-                    if _VT_LIB is not None:
-                        _VT_LIB.VTDecompressionSessionWaitForAsynchronousFrames(self._ctypes_session)
-                # PyObjC fallback
-                elif self._session is not None and _PYOBJC_AVAILABLE:
-                    VTDecompressionSessionWaitForAsynchronousFrames(self._session)
-                # 等待成功后 VT 不再持有任何已提交 sample buffer，
-                # 安全释放 CFRetain 引用（seek 路径每次都会走到这里）
-                self._release_pending_decode_refs()
-            except Exception as e:
-                logger.warning(f"VtSession: flush error: {e}")
+            self._wait_for_pending_decode()
 
         # 清空输出队列
         if self._output_queue is not None:
@@ -1874,11 +1937,11 @@ class VtSession:
         """销毁 VT session"""
         if not self._destroyed:
             try:
-                # Step 1: Wait for all async frames to complete
-                if self._ctypes_session is not None and self._ctypes_session.value:
-                    if _VT_LIB is not None:
-                        _VT_LIB.VTDecompressionSessionWaitForAsynchronousFrames(self._ctypes_session)
+                self._wait_for_pending_decode()
+            except (RuntimeError, OSError) as error:
+                logger.warning("VtSession: async drain before invalidation failed: %s", error)
 
+            try:
                 # Step 2: Invalidate + CFRelease ctypes session
                 if self._ctypes_session is not None and self._ctypes_session.value:
                     if _VT_LIB is not None:
@@ -1898,12 +1961,11 @@ class VtSession:
             except Exception as e:
                 logger.warning(f"VtSession: destroy error: {e}")
 
-            # Step 4: Release pending decode refs.
-            # Step 1 已 WaitForAsynchronousFrames（VT 不再持有任何 sample
-            # buffer），且内存块与引用配对保活，此时 CFRetain 可安全平衡
-            # 释放——旧实现只 clear 不释放是为了规避当时"内存块只保活最新
-            # 一个"造成的悬垂 dealloc 崩溃，根因已修复。
+            # Invalidation also stops callbacks if the wait above returned
+            # an OSStatus failure.
             self._release_pending_decode_refs()
+            if self._output_queue is not None:
+                self._output_queue.clear()
 
             # Step 5: Clear callback references only after native invalidation.
             # The refCon wrapper owns the per-session output queue and must stay

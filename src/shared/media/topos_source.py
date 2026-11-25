@@ -68,6 +68,7 @@ from .color_metadata import (
     map_color_space,
     map_color_transfer,
 )
+from .mov_atoms import find_mov_atom, iter_mov_atoms
 from .color_decode import (
     ToposColorMetadataError,
     ToposColorSemantics,
@@ -182,55 +183,25 @@ def check_topos_codec_available() -> bool:
         return False
 
 
-def _iter_atoms(buf: bytes, start: int, end: int):
-    """遍历 [start, end) 内的 MOV 兄弟 atom，yield (type4cc, body_start, body_end)。
-
-    防御性解析（P0-06）：任何非法 size（< 头长、越界、截断）立即终止遍历，
-    绝不抛异常——探测函数只允许返回 True/False。
-    """
-    off = start
-    while off + 8 <= end:
-        size = int.from_bytes(buf[off:off + 4], 'big')
-        hdr = 8
-        if size == 1:  # 64 位 largesize 形式
-            if off + 16 > end:
-                return
-            size = int.from_bytes(buf[off + 8:off + 16], 'big')
-            hdr = 16
-        elif size == 0:  # size 到容器末尾
-            size = end - off
-        if size < hdr or off + size > end:
-            return
-        yield buf[off + 4:off + 8], off + hdr, off + size
-        off += size
-
-
-def _find_atom(buf: bytes, start: int, end: int, type4: bytes):
-    for t, s, e in _iter_atoms(buf, start, end):
-        if t == type4:
-            return s, e
-    return None
-
-
 def _stsd_first_entry_is_tpic(buf: bytes, moov_body: int, moov_end: int) -> bool:
     """moov → trak → mdia → minf → stbl → stsd，首个 sample entry 是否 'TPIC'。
 
     只有 stsd 的 sample entry 4CC 才算数——moov 内任何其它位置出现 'TPIC'
     文本（元数据/注释/free atom）都不命中（P0-06：消灭裸子串误判）。
     """
-    for t, s, e in _iter_atoms(buf, moov_body, moov_end):
+    for t, s, e in iter_mov_atoms(buf, moov_body, moov_end):
         if t != b'trak':
             continue
-        mdia = _find_atom(buf, s, e, b'mdia')
+        mdia = find_mov_atom(buf, s, e, b'mdia')
         if mdia is None:
             continue
-        minf = _find_atom(buf, mdia[0], mdia[1], b'minf')
+        minf = find_mov_atom(buf, mdia[0], mdia[1], b'minf')
         if minf is None:
             continue
-        stbl = _find_atom(buf, minf[0], minf[1], b'stbl')
+        stbl = find_mov_atom(buf, minf[0], minf[1], b'stbl')
         if stbl is None:
             continue
-        stsd = _find_atom(buf, stbl[0], stbl[1], b'stsd')
+        stsd = find_mov_atom(buf, stbl[0], stbl[1], b'stsd')
         if stsd is None:
             continue
         ss, se = stsd

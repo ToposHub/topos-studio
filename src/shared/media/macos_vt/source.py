@@ -22,10 +22,13 @@ import ctypes
 import logging
 import threading
 import time
-from dataclasses import dataclass, field
+from collections import OrderedDict
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Callable
 
 import numpy as np
+
+from .packet_demux import H264ScrubGop, ScrubMediaIdentity
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     from .vt_session import VtDecodedPixelBuffer
@@ -119,6 +122,9 @@ class VtPixelBufferFrame:
     color_primaries: object | None = None
     color_transfer: object | None = None
     decode_path: str = DecodePath.MACOS_VT_IOSURFACE_ZERO_COPY.value
+    _release_decoded: Callable[[object], None] | None = field(default=None, repr=False)
+    _retain_decoded: Callable[[object], bool] | None = field(default=None, repr=False)
+    _decoded_data_size: Callable[[object], int] | None = field(default=None, repr=False)
     _released: bool = field(default=False, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
@@ -126,13 +132,162 @@ class VtPixelBufferFrame:
     def pixel_buffer(self) -> object | None:
         return getattr(self.decoded, "pixel_buffer", None)
 
+    def acquire_lease(self) -> VtPixelBufferFrame | None:
+        """Retain an independent wrapper for another consumer of this pixel buffer."""
+        with self._lock:
+            if self._released or self._retain_decoded is None or self._release_decoded is None:
+                return None
+            return replace(self) if self._retain_decoded(self.decoded) else None
+
+    def allocated_bytes(self) -> int:
+        """Return the originating session's native allocation size, when available."""
+        with self._lock:
+            if self._released or self._decoded_data_size is None:
+                return 0
+            return self._decoded_data_size(self.decoded)
+
     def release(self) -> None:
         """Release the retained CVPixelBuffer exactly once."""
         with self._lock:
             if self._released:
                 return
             self._released = True
-        self.source.release_pixel_buffer_frame(self)
+        if self._release_decoded is not None:
+            self._release_decoded(self.decoded)
+        else:
+            self.source.release_pixel_buffer_frame(self)
+
+
+class _ScrubRewindBuffer:
+    """Own optional past frames across VideoToolbox cursors under byte limits."""
+
+    def __init__(self, total_limit: int, source_limit: int, *, preview_limit: int = 0) -> None:
+        self._total_limit = total_limit
+        self._source_limit = source_limit
+        self._preview_limit = min(total_limit, preview_limit)
+        self._lock = threading.Lock()
+        self._frames: OrderedDict[tuple[object, int], tuple[VtPixelBufferFrame, int]] = OrderedDict()
+        self._source_bytes: dict[object, int] = {}
+        self._preview_owners: set[object] = set()
+        self._held_bytes = 0
+
+    def _remove(self, key: tuple[object, int]) -> VtPixelBufferFrame:
+        frame, size = self._frames.pop(key)
+        source = key[0]
+        remaining = self._source_bytes[source] - size
+        if remaining:
+            self._source_bytes[source] = remaining
+        else:
+            del self._source_bytes[source]
+        self._held_bytes -= size
+        return frame
+
+    def store(self, frame: VtPixelBufferFrame, size: int) -> bool:
+        """Transfer a decoded frame to the buffer if it fits."""
+        if not 0 < size <= min(self._source_limit, self._total_limit):
+            return False
+        source = frame.source
+        key = (source, frame.frame_index)
+        evicted = []
+        with self._lock:
+            if key in self._frames:
+                return False
+            while self._source_bytes.get(source, 0) + size > self._source_limit:
+                oldest = min(entry for owner, entry in self._frames if owner is source)
+                if oldest >= frame.frame_index:
+                    break
+                evicted.append(self._remove((source, oldest)))
+            fits = self._source_bytes.get(source, 0) + size <= self._source_limit
+            if fits:
+                while self._held_bytes + size > self._total_limit:
+                    oldest = next((entry for entry in self._frames if entry[0] not in self._preview_owners), None)
+                    if oldest is None:
+                        fits = False
+                        break
+                    evicted.append(self._remove(oldest))
+                if fits:
+                    self._insert(key, frame, size)
+        for old in evicted:
+            old.release()
+        return fits
+
+    def _insert(self, key: tuple[object, int], frame: VtPixelBufferFrame, size: int) -> None:
+        self._frames[key] = frame, size
+        self._source_bytes[key[0]] = self._source_bytes.get(key[0], 0) + size
+        self._held_bytes += size
+
+    def store_preview(
+        self, owner: object, frame: VtPixelBufferFrame, size: int, *, head: int, reverse: bool,
+    ) -> bool:
+        """Hold an exact scrub frame independently of its decoder cursor."""
+        if not 0 < size <= self._preview_limit:
+            return False
+        key = owner, frame.frame_index
+        evicted = []
+        with self._lock:
+            if key in self._frames:
+                return False
+            if reverse:
+                obsolete = [item for item in self._frames if item[0] is owner and item[1] > head + 2]
+                evicted.extend(self._remove(item) for item in obsolete)
+            while self._source_bytes.get(owner, 0) + size > self._preview_limit:
+                indices = (index for found, index in self._frames if found is owner)
+                victim = min(indices)
+                if reverse and abs(victim - head) < abs(frame.frame_index - head):
+                    break
+                evicted.append(self._remove((owner, victim)))
+
+            fits = self._source_bytes.get(owner, 0) + size <= self._preview_limit
+            while fits and sum(self._source_bytes.get(key, 0) for key in self._preview_owners) + size > self._preview_limit:
+                oldest = next((item for item in self._frames
+                               if item[0] in self._preview_owners and item[0] is not owner), None)
+                if oldest is None:
+                    fits = False
+                else:
+                    evicted.append(self._remove(oldest))
+            while fits and self._held_bytes + size > self._total_limit:
+                oldest = next((item for item in self._frames if item[0] not in self._preview_owners), None)
+                if oldest is None:
+                    fits = False
+                else:
+                    evicted.append(self._remove(oldest))
+            if fits:
+                self._preview_owners.add(owner)
+                self._insert(key, frame, size)
+        for old in evicted:
+            old.release()
+        return fits
+
+    def borrow_preview(self, owner: object, frame: int) -> VtPixelBufferFrame | None:
+        """Give the renderer a lease it can keep after the gesture exits."""
+        with self._lock:
+            entry = self._frames.get((owner, frame))
+            return entry[0].acquire_lease() if entry is not None else None
+
+    def usage(self, owner: object) -> tuple[int, int]:
+        with self._lock:
+            return self._source_bytes.get(owner, 0), self._held_bytes
+
+    def contains(self, source: MacOSVtZeroCopySource, frame: int) -> bool:
+        with self._lock:
+            return (source, frame) in self._frames
+
+    def take(self, source: MacOSVtZeroCopySource, frame: int) -> VtPixelBufferFrame | None:
+        """Transfer the cache's lease to the caller and refund its bytes."""
+        key = (source, frame)
+        with self._lock:
+            return self._remove(key) if key in self._frames else None
+
+    def discard(self, source: object, *, before: int | None = None) -> None:
+        with self._lock:
+            if before is None:
+                self._preview_owners.discard(source)
+            if source not in self._source_bytes:
+                return
+            keys = [key for key in self._frames if key[0] is source and (before is None or key[1] < before)]
+            evicted = [self._remove(key) for key in keys]
+        for frame in evicted:
+            frame.release()
 
 
 class MacOSVtZeroCopySource:
@@ -156,6 +311,19 @@ class MacOSVtZeroCopySource:
     # 正常 B 帧重排窗口 ≤ ~8 帧，16 是异常 GOP 结构的硬上限兜底。
     _REORDER_KEEP_BEHIND = 2
     _REORDER_BUFFER_MAX = 16
+    _SCRUB_KEEP_BEHIND = 8
+    _SCRUB_REWIND_FRAMES = 20
+    # Large buffers are expensive to output during a seek. On the 4K P010
+    # source, adding that output lengthens the gap to the foreground frame.
+    _SCRUB_REWIND_MAX_FRAME_BYTES = 16 * 1024 * 1024
+    _scrub_rewind_buffer = _ScrubRewindBuffer(384 << 20, 224 << 20, preview_limit=300 << 20)
+    _SCRUB_RECENT_FRAMES = 6
+    _SCRUB_RECENT_BYTES = 96 * 1024 * 1024
+    _SCRUB_HISTORY_TOTAL_BYTES = 320 * 1024 * 1024
+    _scrub_history_budget_lock = threading.Lock()
+    _scrub_history_bytes_in_use = 0
+    _COARSE_FORWARD_STEPS = 3
+    _COARSE_FORWARD_BUDGET_S = 0.040
 
     def __init__(self) -> None:
         self._demuxer = None
@@ -167,9 +335,15 @@ class MacOSVtZeroCopySource:
         self._is_open: bool = False
         self._fallback_reason: str | None = None
         self._zero_copy_available: bool = False
+        self._hardware_required = False
         self._time_base_num: int = 1
         self._time_base_den: int = 30
         self._reorder_buffer: dict[int, VtPixelBufferFrame] = {}
+        self._scrub_recent_frames: dict[int, tuple[VtPixelBufferFrame, int]] = {}
+        self._scrub_frame_bytes = 0
+        self._scrub_suppressed_through = -1
+        self._last_coarse_target: int | None = None
+        self._coarse_forward = False
         # 流级色彩标记回退值（VT 解码帧本身不携带色彩元数据）。
         # 默认与调色页一致：bt709 / limited；open() 时按容器标记覆盖。
         self._stream_color_matrix: str = "bt709"
@@ -282,6 +456,7 @@ class MacOSVtZeroCopySource:
 
         self._is_open = True
         self._zero_copy_available = require_zero_copy
+        self._hardware_required = require_hardware
         self._current_frame = 0
 
         logger.info(
@@ -294,6 +469,7 @@ class MacOSVtZeroCopySource:
     def close(self) -> None:
         """关闭源"""
         self._clear_reorder_buffer()
+        self._trim_scrub_history(0)
         if self._vt_session is not None:
             self._vt_session.destroy()
             self._vt_session = None
@@ -307,7 +483,11 @@ class MacOSVtZeroCopySource:
             self._metal_bridge.destroy()
             self._metal_bridge = None
         self._is_open = False
+        self._hardware_required = False
         self._info = None
+        self._last_coarse_target = None
+        self._coarse_forward = False
+        self._scrub_frame_bytes = 0
         self._time_base_num = 1
         self._time_base_den = 30
         logger.info("MacOSVtZeroCopySource: closed")
@@ -368,6 +548,8 @@ class MacOSVtZeroCopySource:
 
     def _clear_reorder_buffer(self) -> None:
         """Release decoded frames waiting for presentation-order output."""
+        self._scrub_suppressed_through = -1
+        self._scrub_rewind_buffer.discard(self)
         if not self._reorder_buffer:
             return
         pending = list(self._reorder_buffer.values())
@@ -390,20 +572,13 @@ class MacOSVtZeroCopySource:
         self._reorder_buffer[frame.frame_index] = frame
         self._prune_reorder_buffer(target_frame)
 
-    def _prune_reorder_buffer(self, target_frame: int) -> None:
+    def _prune_reorder_buffer(self, target_frame: int, *, keep_behind: int = _REORDER_KEEP_BEHIND) -> None:
         """Evict reorder entries that can never be popped again.
 
-        Entries leave this buffer only via exact frame hit or the ±2
-        nearest deadline fallback; anything below ``target_frame - 2`` is
-        dead for the current walk and for every later forward walk, since
-        a backward jump takes the seek path which clears the whole buffer.
-        Without eviction, mid-speed forward drags that never seek strand
-        one 4K CVPixelBuffer (~12MB IOSurface, kernel-accounted) per
-        aborted walk until the next seek — that accumulation is what made
-        scrubbing degrade the longer a clip was used. A hard cap backstops
-        pathological GOP structures.
+        Keep the small reverse scrub window and the pending presentation-order
+        frames. The hard cap also bounds memory for unusual reorder depths.
         """
-        floor = target_frame - self._REORDER_KEEP_BEHIND
+        floor = target_frame - keep_behind
         if floor > 0:
             for idx in [i for i in self._reorder_buffer if i < floor]:
                 try:
@@ -416,12 +591,71 @@ class MacOSVtZeroCopySource:
                 self._reorder_buffer.pop(oldest).release()
             except Exception:
                 pass
+        self._trim_scrub_history(self._SCRUB_RECENT_FRAMES)
+
+    def _trim_scrub_history(self, max_frames: int) -> None:
+        limit = min(max_frames, self._REORDER_BUFFER_MAX - len(self._reorder_buffer))
+        while len(self._scrub_recent_frames) > limit:
+            oldest = next(iter(self._scrub_recent_frames))
+            frame, size = self._scrub_recent_frames.pop(oldest)
+            try:
+                frame.release()
+            finally:
+                with MacOSVtZeroCopySource._scrub_history_budget_lock:
+                    MacOSVtZeroCopySource._scrub_history_bytes_in_use -= size
+
+    def _remember_scrub_frame(self, frame: VtPixelBufferFrame) -> None:
+        if getattr(self._info, 'codec_name', '') not in ('h264', 'hevc', 'h265'):
+            return
+        if frame.frame_index in self._scrub_recent_frames:
+            return
+        frame_data_size = getattr(self._vt_session, 'decoded_frame_data_size', None)
+        frame_bytes = (
+            frame_data_size(frame.decoded) if callable(frame_data_size)
+            else frame.width * frame.height * (6 if frame.bit_depth > 8 else 3) // 2
+        )
+        if frame_bytes > 0:
+            self._scrub_frame_bytes = frame_bytes
+        if not 0 < frame_bytes <= self._SCRUB_RECENT_BYTES:
+            return
+        retain = getattr(self._vt_session, 'retain_decoded_frame', None)
+        if not callable(retain):
+            return
+        limit = min(self._SCRUB_RECENT_FRAMES, self._SCRUB_RECENT_BYTES // frame_bytes,
+                    self._REORDER_BUFFER_MAX - len(self._reorder_buffer))
+        if limit <= 0:
+            return
+        history_frame = replace(frame)
+        self._trim_scrub_history(limit - 1)
+        with MacOSVtZeroCopySource._scrub_history_budget_lock:
+            total = MacOSVtZeroCopySource._scrub_history_bytes_in_use + frame_bytes
+            if total <= self._SCRUB_HISTORY_TOTAL_BYTES and retain(frame.decoded):
+                self._scrub_recent_frames[frame.frame_index] = history_frame, frame_bytes
+                MacOSVtZeroCopySource._scrub_history_bytes_in_use = total
+
+    def _read_recent_scrub_frame(self, frame_index: int) -> VtPixelBufferFrame | None:
+        saved = self._scrub_recent_frames.get(frame_index)
+        if saved is None:
+            return None
+        frame, _size = saved
+        retain = getattr(self._vt_session, 'retain_decoded_frame', None)
+        lease = replace(frame)
+        if callable(retain) and retain(frame.decoded):
+            return lease
+        return None
 
     def _pop_buffered_frame(self, frame_index: int) -> VtPixelBufferFrame | None:
         frame = self._reorder_buffer.pop(frame_index, None)
+        if frame is None:
+            frame = self._scrub_rewind_buffer.take(self, frame_index)
         if frame is not None:
             self._current_frame = max(self._current_frame, frame.frame_index + 1)
         return frame
+
+    def has_buffered_frame(self, frame_index: int) -> bool:
+        """Report an exact, already decoded frame when selecting a cursor."""
+        return (frame_index in self._reorder_buffer or frame_index in self._scrub_recent_frames
+                or self._scrub_rewind_buffer.contains(self, frame_index))
 
     def _pop_nearest_buffered_frame(
         self,
@@ -457,6 +691,9 @@ class MacOSVtZeroCopySource:
         is_stale: Callable[[], bool] | None = None,
         deadline_at: float | None = None,
         deadline_nearest_max_distance: int | None = None,
+        interactive: bool = False,
+        short_forward: bool = False,
+        rewind: bool = False,
     ) -> VtPixelBufferFrame | None:
         """
         Decode compressed packets into a presentation-order reorder buffer.
@@ -468,11 +705,32 @@ class MacOSVtZeroCopySource:
         """
         exact = self._pop_buffered_frame(target_frame)
         if exact is not None:
+            if interactive:
+                self._remember_scrub_frame(exact)
             return exact
 
         # 顺序追帧前先清掉不可能再被命中的残留条目（deadline 中止留下的
         # 近邻候选帧等），避免不 seek 的持续向前拖拽无限滞留。
-        self._prune_reorder_buffer(target_frame)
+        native_scrub = interactive and callable(getattr(self._vt_session, "decode_scrub_packet", None))
+        keep_behind = self._SCRUB_KEEP_BEHIND if native_scrub else self._REORDER_KEEP_BEHIND
+        output_behind = self._REORDER_KEEP_BEHIND if short_forward else keep_behind
+        frame_data_size = getattr(self._vt_session, 'decoded_frame_data_size', None)
+        codec = getattr(self._info, 'codec_name', '')
+        extend_rewind = (
+            native_scrub and rewind and callable(frame_data_size)
+            and 0 < self._scrub_frame_bytes <= self._SCRUB_REWIND_MAX_FRAME_BYTES
+            and codec in ('h264', 'hevc', 'h265')
+        )
+        if extend_rewind:
+            output_behind = self._SCRUB_REWIND_FRAMES
+        optional_output = (
+            # On H.264 the whole walk benefits from asynchronous submission.
+            # The target still waits for the previous bounded burst.
+            {'async_before': target_frame if codec == 'h264' else target_frame - keep_behind}
+            if output_behind > keep_behind else {}
+        )
+        self._scrub_rewind_buffer.discard(self, before=target_frame - self._SCRUB_REWIND_FRAMES)
+        self._prune_reorder_buffer(target_frame, keep_behind=keep_behind)
 
         decoded_count = 0
         while decoded_count < max_decode_frames:
@@ -482,30 +740,42 @@ class MacOSVtZeroCopySource:
                     f"target={target_frame}, decoded={decoded_count}"
                 )
                 return None
-            if deadline_at is not None and time.perf_counter() >= deadline_at:
-                nearest = (
-                    self._pop_nearest_buffered_frame(
-                        target_frame,
-                        max_distance=deadline_nearest_max_distance,
-                    )
-                    if allow_nearest
-                    else None
+            expired = deadline_at is not None and time.perf_counter() >= deadline_at
+            if native_scrub:
+                # Collect already ready callbacks even after the deadline.
+                # The packet feeder will not submit more once time runs out.
+                decoded = self._read_next_decoded_pixel_buffer(
+                    discard_before=target_frame - output_behind,
+                    is_stale=is_stale,
+                    deadline_at=deadline_at,
+                    **optional_output,
                 )
-                logger.debug(
-                    "MacOSVtZeroCopySource: interactive decode deadline "
-                    f"target={target_frame}, decoded={decoded_count}, "
-                    f"nearest={getattr(nearest, 'frame_index', None)}"
-                )
-                return nearest
-            decoded = self._read_next_decoded_pixel_buffer()
+            elif not expired:
+                decoded = self._read_next_decoded_pixel_buffer()
+            else:
+                decoded = None
             if decoded is None:
                 break
             decoded_count += 1
             frame = self._make_pixel_buffer_frame(decoded)
             if frame.frame_index == target_frame:
                 self._current_frame = max(self._current_frame, frame.frame_index + 1)
+                if interactive:
+                    self._remember_scrub_frame(frame)
                 return frame
-            if (
+            if extend_rewind and frame.frame_index < target_frame - keep_behind:
+                size = frame_data_size(decoded)
+                if (frame.frame_index < target_frame - output_behind
+                        or size > self._SCRUB_REWIND_MAX_FRAME_BYTES
+                        or not self._scrub_rewind_buffer.store(frame, size)):
+                    frame.release()
+            elif native_scrub:
+                if frame.frame_index in self._reorder_buffer:
+                    frame.release()
+                else:
+                    self._reorder_buffer[frame.frame_index] = frame
+                    self._prune_reorder_buffer(target_frame, keep_behind=keep_behind)
+            elif (
                 deadline_at is not None
                 and deadline_nearest_max_distance is not None
                 and frame.frame_index < target_frame
@@ -518,13 +788,116 @@ class MacOSVtZeroCopySource:
                     self._reorder_buffer[frame.frame_index] = frame
             else:
                 self._buffer_decoded_frame(frame, target_frame)
-            exact = self._pop_buffered_frame(target_frame)
-            if exact is not None:
-                return exact
 
         if allow_nearest:
+            if deadline_at is not None:
+                if is_stale is not None and is_stale():
+                    return None
+                return self._pop_nearest_buffered_frame(
+                    target_frame, max_distance=deadline_nearest_max_distance,
+                )
             return self._pop_nearest_buffered_frame(target_frame)
         return None
+
+    def supports_h264_scrub_gops(self) -> bool:
+        """Cheap eligibility check on a cursor which already opened its index."""
+        return bool(self._is_open and self._demuxer is not None and self._info is not None
+                    and self._info.bit_depth == 8
+                    and 0 < self._info.width * self._info.height * 3 // 2 <= self._SCRUB_REWIND_MAX_FRAME_BYTES
+                    and self._demuxer.supports_h264_scrub_gops())
+
+    @property
+    def scrub_media_identity(self) -> ScrubMediaIdentity | None:
+        return self._demuxer.scrub_media_identity if self._demuxer is not None else None
+
+    def h264_scrub_frame_matches(self, frame: VtPixelBufferFrame) -> bool:
+        """Check that the retained frame has the stream's exact callback PTS."""
+        return bool(frame.source is self and self.supports_h264_scrub_gops()
+                    and self._demuxer.h264_scrub_pts_matches(frame.frame_index, frame.pts))
+
+    def previous_h264_scrub_gop(self, head_frame: int) -> H264ScrubGop | None:
+        """Locate the previous candidate GOP on this cursor's own sample index."""
+        if not self.supports_h264_scrub_gops():
+            return None
+        return self._demuxer.previous_h264_scrub_gop(head_frame)
+
+    def decode_h264_scrub_gop(
+        self,
+        gop: H264ScrubGop,
+        *,
+        first_output_frame: int,
+        stop_output_frame: int,
+        is_stale: Callable[[], bool],
+        deadline_at: float,
+        sink: Callable[[VtPixelBufferFrame, int], bool],
+    ) -> int:
+        """Prewarm exact surfaces on an exclusively owned hardware cursor.
+
+        The sink owns an accepted lease. Reference samples before the output
+        interval are decoded with surface output suppressed. The deadline stops
+        packet submission while the last bounded VideoToolbox burst drains.
+        This moves the spare demuxer independently of the foreground cursor.
+        """
+        session, demuxer = self._vt_session, self._demuxer
+        if (not self._hardware_required or session is None or not self.supports_h264_scrub_gops()
+                or not gop.first_frame <= first_output_frame < stop_output_frame <= gop.stop_frame
+                or is_stale() or time.perf_counter() >= deadline_at):
+            return 0
+
+        pending_outputs: set[int] = set()
+        accepted = 0
+
+        def publish(decoded: VtDecodedPixelBuffer) -> None:
+            nonlocal accepted
+            frame_index = gop.frame_for_pts(decoded.pts)
+            if frame_index is None or frame_index not in pending_outputs or is_stale():
+                session.release_decoded_frame(decoded)
+                return
+            pending_outputs.remove(frame_index)
+            frame = None
+            transferred = False
+            try:
+                decoded.frame_index = frame_index
+                decoded.time_seconds = self._pts_to_seconds(decoded.pts)
+                frame = self._make_pixel_buffer_frame(decoded)
+                size = frame.allocated_bytes()
+                if 0 < size <= self._SCRUB_REWIND_MAX_FRAME_BYTES:
+                    transferred = sink(frame, size)
+                    if transferred:
+                        accepted += 1
+            finally:
+                if not transferred:
+                    if frame is None:
+                        session.release_decoded_frame(decoded)
+                    else:
+                        frame.release()
+
+        session.flush()
+        self._clear_reorder_buffer()
+        packets = demuxer.h264_scrub_gop_packets(gop, stop_output_frame)
+        drained = False
+        try:
+            while not is_stale() and time.perf_counter() < deadline_at:
+                packet = next(packets, None)
+                if packet is None or is_stale() or time.perf_counter() >= deadline_at:
+                    break
+                keep = packet.frame_index >= first_output_frame
+                if keep:
+                    pending_outputs.add(packet.frame_index)
+                decoded = session.decode_scrub_packet(
+                    packet.data, packet.pts, reference_only=not keep, async_output=keep,
+                )
+                if decoded is not None:
+                    publish(decoded)
+            session.drain_scrub_outputs()
+            while (decoded := session.get_decoded_frame(timeout=0.0)) is not None:
+                publish(decoded)
+            drained = True
+        finally:
+            packets.close()
+            if not drained:
+                session.flush()
+        return accepted
 
     def read_frame_pixel_buffer_interactive(
         self,
@@ -534,15 +907,13 @@ class MacOSVtZeroCopySource:
         deadline_at: float | None = None,
         prefer_seek: bool = False,
         coarse: bool = False,
+        allow_seek: bool = True,
     ) -> VtPixelBufferFrame | None:
         """Read a frame for interactive scrub, aborting when superseded.
 
-        ``coarse`` is the fast-shuttle mode used while the playhead is being
-        dragged quickly: instead of walking the whole gap to the exact target
-        (one VT frame per step, easily 40-100ms for long GOPs), it seeks to
-        the keyframe at/before the target and decodes a single presentable
-        frame. The viewer keeps moving at seek+1-frame cost; the exact frame
-        is produced once the drag slows down or settles.
+        Fast shuttling can reuse a forward decoder cursor within a GOP. A
+        short walk can show genuine motion between keyframes. Longer jumps
+        still anchor to a keyframe so the decoder can catch up quickly.
         """
         if not self._is_open:
             return None
@@ -551,7 +922,23 @@ class MacOSVtZeroCopySource:
         if deadline_at is not None and time.perf_counter() >= deadline_at:
             return None
 
-        if frame_index == self._current_frame:
+        previous_coarse_target = self._last_coarse_target
+        self._last_coarse_target = frame_index if coarse else None
+        if not coarse or previous_coarse_target is None:
+            self._coarse_forward = False
+        elif frame_index != previous_coarse_target:
+            self._coarse_forward = frame_index > previous_coarse_target
+        buffered = self._pop_buffered_frame(frame_index)
+        if buffered is not None:
+            self._remember_scrub_frame(buffered)
+            return buffered
+        recent = self._read_recent_scrub_frame(frame_index)
+        if recent is not None:
+            # A rewind hit must leave the live decode cursor where it was.
+            return recent
+
+        suppressed = frame_index <= self._scrub_suppressed_through
+        if frame_index == self._current_frame and not suppressed:
             return self._decode_until_present_frame(
                 self._current_frame,
                 is_stale=is_stale,
@@ -559,18 +946,39 @@ class MacOSVtZeroCopySource:
                 # Keep interactive fallback within two frames of the target;
                 # a 12-frame approximation is visibly inaccurate during drag.
                 deadline_nearest_max_distance=2,
+                interactive=True,
+                short_forward=True,
             )
 
-        max_forward_without_seek = 120
+        gap = frame_index - self._current_frame
+        estimate_seek_frames = getattr(self._demuxer, 'estimate_seek_frames', None)
+        seek_frames = estimate_seek_frames(frame_index) if gap > 2 and callable(estimate_seek_frames) else None
         if (
             coarse
+            and allow_seek
             and self._demuxer is not None
-            and abs(frame_index - self._current_frame) > 2
+            and abs(gap) > 2
         ):
-            # In coarse (fast-drag) mode even a short exact walk is a bad
-            # trade: each sequential VT decode costs ~15-20ms, so an 8-frame
-            # walk already blows the display budget. Only a cursor already
-            # sitting on the target (gap <= 2) takes the sequential path.
+            if (
+                not suppressed
+                and seek_frames is not None
+                and 0 < gap < seek_frames
+                and self._coarse_forward
+            ):
+                # Stay in the current GOP during a forward sweep. Limit the
+                # walk so chasing a rapidly moving target can't starve the
+                # next request or repeatedly jump back to the same IDR.
+                stop = time.perf_counter() + self._COARSE_FORWARD_BUDGET_S
+                target = min(frame_index, self._current_frame + self._COARSE_FORWARD_STEPS - 1)
+                return self._decode_until_present_frame(
+                    target,
+                    max_decode_frames=5,
+                    is_stale=is_stale,
+                    deadline_at=min(stop, deadline_at) if deadline_at is not None else stop,
+                    deadline_nearest_max_distance=2,
+                    interactive=True,
+                    short_forward=True,
+                )
             try:
                 if is_stale is not None and is_stale():
                     return None
@@ -597,20 +1005,24 @@ class MacOSVtZeroCopySource:
                 )
                 return None
 
+        if seek_frames is not None:
+            prefer_seek = prefer_seek or seek_frames + 3 < gap
+
         if (
             not prefer_seek
-            and
-            frame_index > self._current_frame
-            and frame_index - self._current_frame <= max_forward_without_seek
+            and not suppressed
+            and 0 < gap <= 120
         ):
             return self._decode_until_present_frame(
                 frame_index,
                 is_stale=is_stale,
                 deadline_at=deadline_at,
                 deadline_nearest_max_distance=2,
+                interactive=True,
+                short_forward=gap <= 6,
             )
 
-        if self._demuxer is not None:
+        if allow_seek and self._demuxer is not None:
             try:
                 if is_stale is not None and is_stale():
                     return None
@@ -627,6 +1039,8 @@ class MacOSVtZeroCopySource:
                     is_stale=is_stale,
                     deadline_at=deadline_at,
                     deadline_nearest_max_distance=2,
+                    interactive=True,
+                    rewind=gap < 0 and not coarse,
                 )
             except Exception as e:
                 logger.warning(
@@ -640,8 +1054,13 @@ class MacOSVtZeroCopySource:
     # 包属正常），单次取帧最多喂这么多个包仍无输出才放弃（重排深度罕见
     # 超过 16，32 已是宽裕上界；同时防止坏流下的无界 stall）。
     _MAX_DECODE_PACKETS_PER_READ = 32
+    _MAX_SCRUB_PACKETS_PER_READ = 500
 
-    def _read_next_decoded_pixel_buffer(self) -> "VtDecodedPixelBuffer | None":
+    def _read_next_decoded_pixel_buffer(
+        self, *, discard_before: int | None = None,
+        async_before: int | None = None,
+        is_stale: Callable[[], bool] | None = None, deadline_at: float | None = None,
+    ) -> "VtDecodedPixelBuffer | None":
         """
         Decode the next VT frame without touching OpenGL.
 
@@ -664,22 +1083,56 @@ class MacOSVtZeroCopySource:
         if self._vt_session is None:
             return None
 
+        # Drain an interrupted rewind before consuming the next regular
+        # packet. Buffered callbacks retain the PTS of their own sample.
+        if discard_before is None:
+            drain_scrub_outputs = getattr(self._vt_session, 'drain_scrub_outputs', None)
+            if callable(drain_scrub_outputs):
+                drain_scrub_outputs()
+
         # 1) 上一包提交后的延迟输出（重排/解码器延迟的产物）
         pending = self._vt_session.get_decoded_frame(timeout=0.0)
         if pending is not None:
             return self._finalize_decoded_pixel_buffer(pending, packet_pts=None)
 
         # 2) 有界预算内喂包；"暂无输出" != EOF
-        for pkt in self._demuxer.packets(
-            max_packets=self._MAX_DECODE_PACKETS_PER_READ
-        ):
+        max_packets = (
+            self._MAX_SCRUB_PACKETS_PER_READ if discard_before is not None
+            else self._MAX_DECODE_PACKETS_PER_READ
+        )
+        packets = iter(self._demuxer.packets(max_packets=max_packets))
+        disposable_sample = getattr(self._demuxer, 'is_disposable_hevc_sample', None)
+        while True:
+            if (is_stale is not None and is_stale()) or (
+                deadline_at is not None and time.perf_counter() >= deadline_at
+            ):
+                return None
+            pkt = next(packets, None)
+            if pkt is None:
+                break
             if self._vt_session is None:
                 return None
-            decoded = self._vt_session.decode_packet(
-                packet_data=pkt.data,
-                pts=pkt.pts,
-                is_keyframe=pkt.is_keyframe,
-            )
+            if discard_before is not None:
+                packet_frame = self._pts_to_frame(pkt.pts)
+                reference_only = packet_frame is not None and packet_frame < discard_before
+                if reference_only:
+                    self._scrub_suppressed_through = max(self._scrub_suppressed_through, packet_frame)
+                    if callable(disposable_sample) and disposable_sample(pkt):
+                        continue
+                decoded = self._vt_session.decode_scrub_packet(
+                    pkt.data, pkt.pts,
+                    reference_only=reference_only,
+                    **({'async_output': True} if (
+                        not reference_only and async_before is not None
+                        and packet_frame is not None and packet_frame < async_before
+                    ) else {}),
+                )
+            else:
+                decoded = self._vt_session.decode_packet(
+                    packet_data=pkt.data,
+                    pts=pkt.pts,
+                    is_keyframe=pkt.is_keyframe,
+                )
             if decoded is not None and decoded.pixel_buffer is not None:
                 return self._finalize_decoded_pixel_buffer(
                     decoded, packet_pts=pkt.pts
@@ -688,7 +1141,7 @@ class MacOSVtZeroCopySource:
             # 有 decoded 无 pixel_buffer：无表面可交付，同样继续
 
         # 3) demuxer 耗尽：终态排空，等待在飞异步帧落地并取回
-        tail = self._vt_session.get_decoded_frame(timeout=0.2)
+        tail = self._vt_session.get_decoded_frame(timeout=0.0 if discard_before is not None else 0.2)
         if tail is not None:
             return self._finalize_decoded_pixel_buffer(tail, packet_pts=None)
         return None
@@ -741,6 +1194,9 @@ class MacOSVtZeroCopySource:
             color_matrix=normalize_color_matrix(raw_matrix),
             color_primaries=raw_primaries,
             color_transfer=raw_transfer,
+            _release_decoded=getattr(self._vt_session, 'release_decoded_frame', None),
+            _retain_decoded=getattr(self._vt_session, 'retain_decoded_frame', None),
+            _decoded_data_size=getattr(self._vt_session, 'decoded_frame_data_size', None),
         )
 
     def read_next_pixel_buffer(self) -> VtPixelBufferFrame | None:
@@ -1015,7 +1471,8 @@ class MacOSVtZeroCopySource:
             return None
 
         # 如果请求当前帧，直接顺序读取
-        if frame_index == self._current_frame:
+        suppressed = frame_index <= self._scrub_suppressed_through
+        if frame_index == self._current_frame and not suppressed:
             return self.read_next_pixel_buffer()
 
         # 前瞻预取/历史追帧留在 reorder 缓冲里的帧：游标已越过目标时
@@ -1027,7 +1484,8 @@ class MacOSVtZeroCopySource:
 
         max_forward_without_seek = 120
         if (
-            frame_index > self._current_frame
+            not suppressed
+            and frame_index > self._current_frame
             and frame_index - self._current_frame <= max_forward_without_seek
         ):
             return self._decode_until_present_frame(frame_index)

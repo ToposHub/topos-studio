@@ -1332,6 +1332,7 @@ class TestP4ADecodedVideoUpload:
         renderer.ctx = MagicMock()
         renderer.ctx.texture = MagicMock(return_value=mock_texture)
         renderer.reference_pyramid_textures = []
+        renderer._reference_follows_source = False
         renderer.pyramid_textures = []
         renderer.tiles = []
         renderer.current_video_texture = MagicMock()
@@ -2404,3 +2405,24 @@ class TestRenderVideoFrameGraphIdentity:
                               'color_graph_source_frame': 8},
             'drop_if_stale': True})
         assert renderer._do_render.call_count == before
+
+    def test_reversal_during_upload_does_not_render_the_old_sweep(self) -> None:
+        renderer = self._renderer()
+        upload = renderer._do_upload_video_planes.return_value
+
+        def advance_during_upload(*_args, **_kwargs):
+            renderer._video_generation_id = 5
+            return upload
+
+        renderer._do_upload_video_planes.side_effect = advance_during_upload
+        renderer._do_render_video_frame({
+            'decoded_frame': self._nv12_frame(7), 'frame_index': 7, 'generation_id': 4,
+            'render_params': {'viewport_size': (8, 4), 'layers': []},
+        })
+        renderer._do_render.assert_not_called()
+
+        renderer._do_render_video_frame({
+            'decoded_frame': self._nv12_frame(8), 'frame_index': 8, 'generation_id': 5,
+            'render_params': {'viewport_size': (8, 4), 'layers': []},
+        })
+        assert renderer._do_render.call_args.args[0]['video_generation'] == 5

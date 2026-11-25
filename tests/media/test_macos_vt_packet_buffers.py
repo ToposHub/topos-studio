@@ -12,8 +12,121 @@ from typing import Iterator
 
 import pytest
 
-from src.shared.media.macos_vt.packet_demux import PacketDemuxer
+from src.shared.media.macos_vt.packet_demux import CompressedPacket, PacketDemuxer, VideoStreamInfo
 from src.shared.media.macos_vt import vt_session
+
+
+def test_destroy_releases_pending_outputs_and_preserves_external_lease(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = vt_session.VtSession()
+    session._output_queue = vt_session.VtDecodeOutputQueue()
+    released = []
+    monkeypatch.setattr(vt_session, '_CV_LIB', SimpleNamespace(
+        CVPixelBufferRelease=lambda pointer: released.append(pointer.value),
+    ))
+    pending = vt_session.VtDecodedPixelBuffer(1, 0, 0.0, 1920, 1080)
+    external = vt_session.VtDecodedPixelBuffer(2, 1, 0.04, 1920, 1080)
+    session._output_queue._queue.put_nowait(pending)
+    session.destroy()
+    assert released == [1]
+    session.release_decoded_frame(external)
+    assert released == [1, 2]
+
+
+def test_regular_decode_keeps_the_timestamp_from_an_earlier_callback(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = vt_session.VtSession()
+    older = vt_session.VtDecodedPixelBuffer(1, 36, 0.0, 1920, 1080, is_iosurface_backed=True)
+    session._output_queue = vt_session.VtDecodeOutputQueue()
+    session._output_queue._queue.put_nowait(older)
+    monkeypatch.setattr(session, '_submit_packet_raw', lambda data, pts: True)
+    result = session._decode_packet_impl(b'frame', 51, False)
+    assert result is older and older.pts == 36
+
+
+@pytest.mark.parametrize(("codec", "expected"), [
+    ("h264", [3] * 7 + ["wait", 3, 3, "wait", 0, 3, 1, "wait", 0]),
+    ("hevc", [3] * 7 + ["wait", 3, 3, "wait", 0, 3, 1, "wait", 0]),
+    ("prores", [2] * 9 + [0, 2, 0, 0]),
+])
+def test_scrub_batches_reference_packets_and_optional_rewind_output(
+    monkeypatch: pytest.MonkeyPatch, codec: str, expected: list[int | str],
+) -> None:
+    session = vt_session.VtSession()
+    monkeypatch.setattr(vt_session.VtSession, "is_created", property(lambda _: True))
+    session._codec = codec
+    submitted = []
+
+    def submit(data: bytes, pts: int, *, decode_flags: int) -> bool:
+        submitted.append(decode_flags)
+        return True
+
+    def wait() -> None:
+        submitted.append("wait")
+        session._scrub_async_sample_count = 0
+
+    monkeypatch.setattr(session, "_submit_packet_raw", submit)
+    monkeypatch.setattr(session, "_wait_for_pending_decode", wait)
+    for pts, reference_only in enumerate([True] * 9 + [False, True]):
+        session.decode_scrub_packet(b"packet", pts, reference_only=reference_only)
+    session.decode_scrub_packet(b"packet", 11, reference_only=False, async_output=True)
+    session.decode_scrub_packet(b"packet", 12, reference_only=False)
+    assert submitted == expected
+
+
+def test_failed_native_wait_preserves_compressed_backing(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = vt_session.VtSession()
+    session._ctypes_session = ctypes.c_void_p(1)
+    session._scrub_async_sample_count = 7
+    session._pending_decode_refs.append(ctypes.c_void_p(2))
+    session._pending_decode_bufs.append(b"compressed")
+    status = -12903
+    freed = []
+    monkeypatch.setattr(vt_session, "_VT_LIB", SimpleNamespace(
+        VTDecompressionSessionWaitForAsynchronousFrames=lambda _: status,
+    ))
+    monkeypatch.setattr(vt_session, "_CF_LIB", SimpleNamespace(CFRelease=freed.append))
+    try:
+        with pytest.raises(RuntimeError, match="OSStatus -12903"):
+            session.flush()
+        assert len(session._pending_decode_refs) == 1
+        assert session._pending_decode_bufs == [b"compressed"]
+        assert session._scrub_async_sample_count == 7
+        assert freed == []
+        status = 0
+        session.flush()
+        assert session._pending_decode_refs == []
+        assert session._pending_decode_bufs == []
+        assert session._scrub_async_sample_count == 0
+        assert [ref.value for ref in freed] == [2]
+    finally:
+        session._ctypes_session = None
+
+
+def test_failed_pending_drain_does_not_submit_another_packet(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = vt_session.VtSession()
+    monkeypatch.setattr(vt_session, "_PYOBJC_AVAILABLE", True)
+    monkeypatch.setattr(vt_session.VtSession, "is_created", property(lambda _: True))
+    submitted = []
+
+    def submit(data: bytes, pts: int, *, decode_flags: int = 0) -> bool:
+        submitted.append(pts)
+        return False
+
+    def fail_wait() -> None:
+        raise RuntimeError("test drain failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(session, "_submit_packet_raw", submit)
+        patch.setattr(session, "_wait_for_pending_decode", fail_wait)
+        session._pending_decode_bufs = [b"sample"] * 128
+        session._pending_decode_refs = [ctypes.c_void_p()] * 128
+        assert session.decode_packet(b"frame", 1) is None
+        assert session.submit_packet(b"frame", 2) is False
+        with pytest.raises(RuntimeError, match="test drain failure"):
+            session.decode_scrub_packet(b"frame", 3, reference_only=True)
+        assert submitted == []
+        assert len(session._pending_decode_bufs) == len(session._pending_decode_refs) == 128
+        session._pending_decode_refs.clear()
+        session._pending_decode_bufs.clear()
 
 
 class _Packet:
@@ -73,6 +186,52 @@ def test_demux_invalid_nonempty_buffer_keeps_diagnostic_and_next_sample(
     assert "nonempty packet has no buffer pointer" in caplog.text
 
 
+def test_hevc_skip_requires_only_complete_disposable_slices() -> None:
+    demuxer = PacketDemuxer()
+    demuxer._hevc_nal_length_size = 4
+    trail_n = b'\x00\x00\x00\x03\x00\x01\x80'
+    sei = b'\x00\x00\x00\x03\x4e\x01\x80'
+    trail_r = b'\x00\x00\x00\x03\x02\x01\x80'
+
+    def disposable(data: bytes, *, keyframe: bool = False) -> bool:
+        return demuxer.is_disposable_hevc_sample(CompressedPacket(data, 1, 1, 1, keyframe))
+
+    assert disposable(trail_n + trail_n)
+    assert not disposable(trail_n, keyframe=True)
+    assert not disposable(trail_n + sei)
+    assert not disposable(trail_n + trail_r)
+    assert not disposable(trail_n[:-1])
+    assert not disposable(trail_n + b'\x00')
+    assert not disposable(b'\x00\x00\x00\x03\x00\x02\x80')
+
+
+def test_hevc_skip_requires_one_fixed_unlayered_sample_entry(tmp_path: Path) -> None:
+    config = bytes([1, 2] + [0] * 19 + [0x0f, 0])  # Main 10, one temporal layer.
+    demuxer = PacketDemuxer()
+    demuxer._info = VideoStreamInfo(codec_tag='hvc1', extradata=config)
+
+    def box(name: bytes, body: bytes) -> bytes:
+        return (len(body) + 8).to_bytes(4, 'big') + name + body
+
+    def movie(entries: list[bytes]) -> bytes:
+        stsd = box(b'stsd', b'\x00' * 4 + len(entries).to_bytes(4, 'big') + b''.join(entries))
+        hdlr = box(b'hdlr', b'\x00' * 8 + b'vide')
+        return box(b'moov', box(b'trak', box(b'mdia', hdlr + box(b'minf', box(b'stbl', stsd)))))
+
+    entry = box(b'hvc1', b'\x00' * 78 + box(b'hvcC', config))
+    layered = box(b'hvc1', b'\x00' * 78 + box(b'hvcC', config) + box(b'lhvC', b'layer'))
+    path = tmp_path / 'test.mov'
+    path.write_bytes(movie([entry]))
+    assert demuxer._single_layer_hevc_nal_length_size(str(path)) == 4
+    path.write_bytes(movie([entry, layered]))
+    assert demuxer._single_layer_hevc_nal_length_size(str(path)) == 0
+    path.write_bytes(movie([layered]))
+    assert demuxer._single_layer_hevc_nal_length_size(str(path)) == 0
+    demuxer._info.extradata = config[:21] + b'\x17\x00'  # More than one temporal layer.
+    path.write_bytes(movie([entry]))
+    assert demuxer._single_layer_hevc_nal_length_size(str(path)) == 0
+
+
 def test_empty_submit_never_calls_coremedia(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vt_session, "_PYOBJC_AVAILABLE", True)
     session = vt_session.VtSession()
@@ -128,7 +287,7 @@ def test_nonempty_sample_retains_python_backing_until_decode_finishes(
         assert block_args[4] is None
         assert block_args[6] == len(data)
         assert record.retained == [1234]
-        assert record.submitted[0][3].value == 42
+        assert record.submitted[0][3].value == vt_session._packet_pts_refcon(42)
         gc.collect()
         assert bytes(session._pending_decode_bufs[0])[:len(data)] == data
         session._release_pending_decode_refs()
@@ -174,6 +333,8 @@ def test_native_coremedia_accepts_nonempty_python_owned_buffer() -> None:
 def test_real_h264_demux_excludes_repeated_eof_marker() -> None:
     pytest.importorskip("av")
     path = Path(__file__).resolve().parents[1] / "test_videos" / "测试素材01.mov"
+    if not path.exists():
+        path = path.with_name("4K_H264.mov")
     if not path.exists():
         pytest.skip("H.264 media fixture is unavailable")
     demuxer = PacketDemuxer()

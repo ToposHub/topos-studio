@@ -597,6 +597,24 @@ class ReadyFrameQueue:
             else:
                 return self._dequeue_proxy(frame_index)
 
+    def take_master_for_scrub(
+        self, target: int, first: int, last: int,
+    ) -> Optional[QueueEntry]:
+        """Take the ready master frame closest to the target within this sweep."""
+        with self._lock:
+            queue, self._master_queue = self._master_queue, []
+            chosen = min(
+                (entry for entry in queue if first <= entry.frame_index <= last),
+                key=lambda entry: abs(entry.frame_index - target),
+                default=None,
+            )
+            discarded = [entry for entry in queue if entry is not chosen]
+            self._stats["master_dequeued"] += int(chosen is not None)
+            self._stats["master_dropped"] += len(discarded)
+        for entry in discarded:
+            _defer_release_gpu_frame(entry.frame)
+        return chosen
+
     def _dequeue_proxy(self, frame_index: Optional[int]) -> Optional[QueueEntry]:
         """
         取 proxy 帧（内部方法，不加锁）。

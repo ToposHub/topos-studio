@@ -300,6 +300,99 @@ class TestFFmpegMediaSourceSeek:
             assert abs(frame.frame_index - middle_frame) <= 1, \
                 f"Expected frame {middle_frame}, got {frame.frame_index}"
 
+    def test_nearby_forward_seek_reuses_open_gop_iterator(
+        self, gop_video_path: Optional[str], monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        if gop_video_path is None:
+            pytest.skip("No GOP codec test video available")
+
+        with FFmpegMediaSource(gop_video_path) as source:
+            assert source.read_next_frame().frame_index == 0
+
+            def reject_reseek(_frame: int) -> None:
+                pytest.fail("A short forward seek should reuse the open decoder")
+
+            monkeypatch.setattr(source, "_seek_gop", reject_reseek)
+            assert source.read_frame(5).frame_index == 5
+            assert source.read_next_frame().frame_index == 6
+
+    def test_recent_planar_seek_frame_remains_exact_without_moving_cursor(
+        self, gop_video_path: Optional[str],
+    ) -> None:
+        import numpy as np
+
+        if gop_video_path is None:
+            pytest.skip('No GOP codec test video available')
+        with FFmpegMediaSource(gop_video_path, preserve_planes=True) as source:
+            if source.metadata.codec_name != 'h264' or source.metadata.pixel_format != 'yuv420p':
+                pytest.skip('H.264 4:2:0 sample required')
+            if (source.metadata.total_frames or 0) <= 55:
+                pytest.skip('Sample needs at least 56 frames')
+            source._scrub_seek_frame_limit = 8
+            reference = source.read_frame(19)
+            source.read_frame(55)
+            source.read_frame(23)
+            cursor = source.current_frame
+            recent = source.read_recent_scrub_frame(19)
+            assert recent is not None and recent.frame_index == 19 and recent.pts == reference.pts
+            for actual, exact in zip(recent.planes, reference.planes, strict=True):
+                assert np.array_equal(actual, exact)
+            assert source.current_frame == cursor
+            assert source.read_next_frame().frame_index == cursor
+
+    def test_reverse_history_keeps_walked_gop_prefix_at_exact_pts(
+        self, gop_video_path: Optional[str],
+    ) -> None:
+        import numpy as np
+
+        if gop_video_path is None:
+            pytest.skip('No GOP codec test video available')
+        with FFmpegMediaSource(gop_video_path, preserve_planes=True) as source:
+            index = source.warm_gop_index()
+            if source.metadata.codec_name != 'h264' or index is None:
+                pytest.skip('An indexed H.264 clip is required')
+            pair = next(((a, b) for a, b in zip(index.keyframe_frames, index.keyframe_frames[1:])
+                         if 12 <= b - a <= 25), None)
+            if pair is None:
+                pytest.skip('This clip has no suitable keyframe interval')
+            first, end = pair
+            exact = source.read_frame(first + 1)
+            source.read_frame(end)
+            source._scrub_seek_frame_limit = 9
+            source.read_recent_scrub_frame(end)
+            assert source.read_recent_scrub_frame(end - 1) is None
+            source.read_frame(end - 1)
+            cursor = source.current_frame
+            for target in range(end - 2, first, -1):
+                recent = source.read_recent_scrub_frame(target)
+                assert recent is not None and recent.frame_index == target
+            assert recent.pts == exact.pts and source.current_frame == cursor
+            for actual, expected in zip(recent.planes, exact.planes, strict=True):
+                np.testing.assert_array_equal(actual, expected)
+
+    def test_reverse_history_counts_padding_and_contracts_on_direction_change(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from types import SimpleNamespace
+
+        source = FFmpegMediaSource('memory')
+        source._is_open = source._is_planar_mode = True
+        source._scrub_seek_frame_limit = 9
+        monkeypatch.setattr(source, '_frame_to_pts', int)
+        source.read_recent_scrub_frame(51)
+        source.read_recent_scrub_frame(50)
+        for index in range(35):
+            frame = SimpleNamespace(pts=index, is_corrupt=False,
+                                    planes=(SimpleNamespace(buffer_size=16 << 20),))
+            source._remember_scrub_seek_frame(index, frame)
+        assert list(source._scrub_seek_frames) == list(range(15, 35))
+        source.read_recent_scrub_frame(60)
+        assert list(source._scrub_seek_frames) == list(range(28, 35))
+        source._scrub_seek_frame_limit = 0
+        source._scrub_reverse_window = True
+        source._trim_scrub_history()
+        assert not source._scrub_seek_frames
+
     def test_seek_to_last_frame(self, gop_video_path: Optional[str]) -> None:
         """测试 seek 到最后一帧"""
         if gop_video_path is None:

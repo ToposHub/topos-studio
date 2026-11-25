@@ -917,17 +917,21 @@ class ApplyColorGraphCommand:
             id_mapping = dict(result.id_mapping)
             object.__setattr__(self, "_new_graph", new_graph.to_dict())
             object.__setattr__(self, "_id_mapping", id_mapping)
-        return self._apply_snapshot(project, stack, new_graph, id_mapping)
+        return self._apply_snapshot(
+            project, stack, new_graph, id_mapping, previous_graph=graph)
 
     def _apply_snapshot(self, project: EditProject, stack,
-                        new_graph, id_mapping: dict) -> EditProject:
+                        new_graph, id_mapping: dict, *,
+                        previous_graph: Any | None = None) -> EditProject:
         from src.shared.project.color_graph import GraphSchemaError
         errors = new_graph.validate()
         if errors:
             raise GraphCommandConflict(
                 "service_rejected", f"目标图非法: {errors[0]}",
                 diagnostics=errors)
-        old_graph = stack.color_graph
+        # A graphless stack already has an editable migration projection.
+        # Capture it for undo, just as a buffered grading gesture does.
+        old_graph = previous_graph if previous_graph is not None else stack.color_graph
         if old_graph is not None and self._old_graph is None:
             object.__setattr__(self, "_old_graph", old_graph.to_dict())
         new_project = project.update_color_stack(

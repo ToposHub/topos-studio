@@ -2969,10 +2969,9 @@ class EditPage(QWidget):
     def _emit_scrub_frame_request(self, frame: int, *, source: str) -> None:
         """Coalesce high-frequency scrub signals into latest-only preview requests."""
         frame = int(frame)
-        if (
-            self._last_scrub_requested_frame == frame
-            or self._pending_scrub_request_frame == frame
-        ):
+        if self._last_scrub_requested_frame == frame:
+            self._pending_scrub_request_frame = None
+        if frame in (self._last_scrub_requested_frame, self._pending_scrub_request_frame):
             playback_trace(
                 "edit_page.timeline_scrub_frame_requested_dedup",
                 frame=frame,
@@ -3009,9 +3008,9 @@ class EditPage(QWidget):
 
     def _flush_pending_scrub_frame(self, token: int) -> None:
         """Emit the latest coalesced scrub frame from the UI thread."""
-        self._scrub_request_timer_pending = False
         if token != self._scrub_request_timer_token or not self._scrub_active:
             return
+        self._scrub_request_timer_pending = False
         frame = self._pending_scrub_request_frame
         self._pending_scrub_request_frame = None
         if frame is None:

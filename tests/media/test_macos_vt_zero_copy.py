@@ -158,13 +158,20 @@ class TestVtSession:
         with VtSession() as session:
             assert session is not None
 
-    def test_ctypes_callback_uses_own_session_refcon(self) -> None:
+    @pytest.mark.parametrize(('packet_pts', 'timing_flags', 'expected_pts'), [
+        (None, 1, 99), (None, 0, None), (None, 5, None),
+        (-30, 0, -30), (0, 0, 0), (123, 0, 123),
+    ])
+    def test_ctypes_callback_uses_own_session_refcon(
+        self, packet_pts: int | None, timing_flags: int, expected_pts: int | None,
+    ) -> None:
         """A second VT session must never steal the first session's output."""
         import ctypes
 
         from src.shared.media.macos_vt.vt_session import (
             _CMTime,
             _CtypesCallbackContext,
+            _packet_pts_refcon,
         )
 
         received: list[dict] = []
@@ -180,17 +187,17 @@ class TestVtSession:
 
         VtSession._on_ctypes_decoded(
             refcon,
-            None,
+            _packet_pts_refcon(packet_pts),
             0,
             0,
             1234,
-            _CMTime(99, 1000, 0, 0),
+            _CMTime(99, 1000, timing_flags, 0),
             _CMTime(0, 0, 0, 0),
         )
 
         assert received == [{
             'pixel_buffer': 1234,
-            'pts': 99,
+            'pts': expected_pts,
             'frame_index': 1,
             'width': 1920,
             'height': 1080,

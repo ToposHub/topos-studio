@@ -13,11 +13,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
 import pytest
 
 pytest.importorskip("PyQt6")
+
+if TYPE_CHECKING:
+    from PyQt6.QtWidgets import QApplication
+    from pytestqt.qtbot import QtBot
 
 from src.app.controllers.color_graph_controller import (
     ColorGraphAppHost,
@@ -119,6 +125,107 @@ class TestClipHydration:
         # 迁移视图（未建图）：工程仍无 color_graph
         assert project.color_stacks[fresh_id].color_graph is None
         assert h.host._stack_graph(fresh_id) is None
+
+    @pytest.fixture
+    def fresh_clip_harness(self, qapp: QApplication, qtbot: QtBot) -> tuple[_Harness, str]:
+        from src.app.controllers.edit_controller import _CreateStampedColorStackCommand
+
+        command = _CreateStampedColorStackCommand.create(
+            asset_id="a1",
+            name="Clip_c1",
+            stamp_fields={
+                "timeline_id": "t1",
+                "clip_id": "c1",
+                "scope": "clip_local",
+                "source_kind": "timeline_clip",
+            },
+        )
+        project = command.apply(EditProject.create(name="single clip"))
+        stack_id = command.created_stack_id
+        assert stack_id is not None
+        h = _Harness(qapp, project)
+        qtbot.addWidget(h.panel)
+        h.panel.resize(640, 280)
+        h.panel.show()
+        h.host.on_clip_stack_loaded(stack_id)
+        qapp.processEvents()
+        return h, stack_id
+
+    def test_new_clip_stack_shows_editable_first_node(
+        self, fresh_clip_harness: tuple[_Harness, str],
+    ) -> None:
+        from src.features.color.ui.node_editor_state import NodeKind
+
+        h, stack_id = fresh_clip_harness
+        node_id = h.host.active_grade_node_id()
+        assert node_id
+        card = h.panel.view.cards[node_id]
+        assert card.isVisible()
+        assert card.node.kind == NodeKind.CORRECTOR
+        assert card.node.number == 1
+        assert h.panel.view.viewport().rect().contains(
+            h.panel.view.mapFromScene(card.sceneBoundingRect().center())
+        )
+        assert len(h.panel.view.links) == 2
+        assert h.holder["project"].color_stacks[stack_id].color_graph is None
+
+        h.host.begin_grade_gesture("first")
+        assert h.host.submit_grade_change(node_id, "exposure", 1.0, "first")
+        assert h.host.end_grade_gesture()
+        updated = h.holder["project"].color_stacks[stack_id].color_graph
+        assert updated is not None
+        edited = next(node for node in updated.nodes if node.node_id == node_id)
+        assert edited.params["grade"]["exposure"] == 1.0
+        assert h.host.undo()
+        assert h.host.active_grade_node_id() == node_id
+        assert h.host.panel_grade_params()["exposure"] == 0
+        assert h.host.redo()
+        assert h.host.active_grade_node_id() == node_id
+        assert h.host.panel_grade_params()["exposure"] == 1.0
+
+    def test_first_lut_on_new_clip_node_can_be_undone(
+        self, fresh_clip_harness: tuple[_Harness, str], tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from src.shared.color import lut_resource_registry
+
+        h, stack_id = fresh_clip_harness
+        node_id = h.host.active_grade_node_id()
+        assert node_id
+        assert h.holder["project"].color_stacks[stack_id].color_graph is None
+        session = lut_resource_registry.LutResourceSession(str(tmp_path / "staging"))
+        monkeypatch.setattr(lut_resource_registry, "_SESSION", session)
+        lut = tmp_path / "identity.cube"
+        lut.write_text("LUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n")
+        entry = session.import_files([str(lut)])[0].entry
+        assert entry is not None
+
+        assert h.host.submit_panel_action("set_lut", {"node_id": node_id, "lut_ref": entry.uri})
+        assert h.panel.view.cards[node_id].node.node_options["lut_path"] == entry.uri
+        assert h.host.undo()
+        assert "lut_path" not in h.panel.view.cards[node_id].node.node_options
+        assert h.host.redo()
+        assert h.panel.view.cards[node_id].node.node_options["lut_path"] == entry.uri
+
+    def test_first_delete_of_new_clip_node_can_be_undone(
+        self, fresh_clip_harness: tuple[_Harness, str], qtbot: QtBot,
+    ) -> None:
+        from PyQt6.QtCore import Qt
+
+        h, stack_id = fresh_clip_harness
+        node_id = h.host.active_grade_node_id()
+        assert node_id
+        assert h.holder["project"].color_stacks[stack_id].color_graph is None
+
+        qtbot.keyClick(h.panel.view, Qt.Key.Key_Delete)
+        assert node_id not in h.panel.view.cards
+        assert len(h.panel.view.links) == 1
+        assert h.host.undo()
+        assert node_id in h.panel.view.cards
+        assert len(h.panel.view.links) == 2
+        assert h.host.redo()
+        assert node_id not in h.panel.view.cards
+        assert len(h.panel.view.links) == 1
 
     def test_first_edit_creates_graph_via_command(self, harness):
         """无图栈首次编辑：ApplyColorGraphCommand 自动迁移建图。"""
