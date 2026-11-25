@@ -6618,7 +6618,8 @@ class FileOpsMixin:
         from src.shared.color.desktop_video_color import USE_DISPLAY_ICC, sdr_display_preset
         from src.shared.color.hdr_video_signal import hdr_input_descriptor, hdr_monitor_space, project_hdr_settings
         from src.shared.color.project_video_signal import (
-            aces_input_descriptor, aces_monitor_space, project_aces_settings, video_signal_spaces,
+            aces_input_descriptor, aces_monitor_space, legacy_video_timeline_space,
+            project_aces_settings, video_signal_spaces,
         )
         from src.shared.color.video_signal_gl import can_render_video_signal_gl
 
@@ -6630,6 +6631,7 @@ class FileOpsMixin:
         project = getattr(self, "_current_edit_project", None)
         settings = getattr(project, "color_management", None) if active else None
         spaces = video_signal_spaces(settings)
+        working_space = spaces[0] if spaces is not None else None
         aces = project_aces_settings(settings)
         hdr = project_hdr_settings(settings)
         input_space = None
@@ -6655,6 +6657,18 @@ class FileOpsMixin:
             changed = setter(spaces, hdr=hdr, input_space=input_space)
         else:
             changed = setter(spaces)
+        set_base_grade_space = getattr(engine, "set_base_grade_legacy_video_space", None)
+        if callable(set_base_grade_space):
+            legacy = legacy_video_timeline_space(settings) if active and working_space is None else None
+            changed = set_base_grade_space(legacy) or changed
+        set_x_grade_space = getattr(engine, "set_x_grade_working_space", None)
+        if callable(set_x_grade_space):
+            changed = set_x_grade_space(working_space) or changed
+        x_grade_panel = getattr(self, "x_grade_panel", None)
+        if x_grade_panel is not None:
+            from src.features.color.core.x_grade_domain import x_grade_working_supported
+
+            x_grade_panel.set_working_supported(x_grade_working_supported(working_space))
         configure = getattr(getattr(self, "canvas", None), "set_video_display", None)
         if callable(configure):
             preset = sdr_display_preset(hdr_monitor_space(spaces[1], hdr)) if spaces is not None else None

@@ -248,6 +248,9 @@ class LayerOpsMixin:
         # D2：旧 LutPanel 实例已删除——LUT 状态展示在 ColorLutBrowser
         # （R03 ack 水合）与节点 LUT 菜单（N04），不再经图层回填
         self.warper_panel.load_layer_state(layer)
+        x_grade = getattr(self, "x_grade_panel", None)
+        if x_grade is not None:
+            x_grade.load_layer_state(layer)
         if layer.mask_shapes:
             s = layer.mask_shapes[-1]
             if isinstance(s, MaskGroup):
@@ -2825,6 +2828,12 @@ class LayerOpsMixin:
             return version
         return 0
 
+    @staticmethod
+    def _patch_touches_legacy_primaries(patch: dict[str, Any]) -> bool:
+        from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
+
+        return not BASE_GRADE_DEFAULTS.keys() >= patch.keys()
+
     def _begin_legacy_primary_grade(self, patch: dict[str, Any]) -> None:
         """Persist the displayed profile before the first real legacy-engine edit."""
         panel = getattr(self, "grading_panel", None)
@@ -2957,7 +2966,8 @@ class LayerOpsMixin:
                 return
         if self.engine.get_current_image() is None:
             return
-        self._begin_legacy_primary_grade(patch)
+        if self._patch_touches_legacy_primaries(patch):
+            self._begin_legacy_primary_grade(patch)
         self.engine.update_grading_params(patch)
         self._maybe_record_grade_keyframes_extended(patch)
         self._invalidate_video_render_params_if_playing()
@@ -2987,7 +2997,8 @@ class LayerOpsMixin:
                 node_id, name, patch_value, self._graph_gesture_tid) or accepted
         if not accepted:
             return True
-        version = self._pending_primary_calibration(current)
+        version = (self._pending_primary_calibration(current)
+                   if self._patch_touches_legacy_primaries(patch) else 0)
         if version and not graph_host.submit_grade_change(
                 node_id, PRIMARY_CALIBRATION_VERSION_KEY, version, self._graph_gesture_tid):
             graph_host.cancel_grade_gesture()
@@ -3416,6 +3427,13 @@ class LayerOpsMixin:
         """WarperPanel.command_requested → 命令服务(失败仅诊断,不抛出)。"""
         from src.features.color.adapters.warper_command_adapter import WARPER_PALETTE_GESTURES
 
+        if command.get("action") == "x_grade_edit" and not getattr(self.engine, "x_grade_working_supported", True):
+            payload = command.get("payload") or {}
+            if payload.get("phase") != "cancel" and not payload.get("reset"):
+                from src.features.color.core.x_grade_domain import X_GRADE_WORKING_MESSAGE
+
+                self.x_grade_panel.notice_requested.emit(I18N.tr("x_grade.working_only", X_GRADE_WORKING_MESSAGE))
+                return
         calibrated = command.get("action") in WARPER_PALETTE_GESTURES
         if calibrated:
             timer = getattr(self, "_warper_flush_timer", None)
@@ -3447,7 +3465,15 @@ class LayerOpsMixin:
         finally:
             self._calibrated_warper_route = None
         phase = command.get("payload", {}).get("phase")
-        if not result.get("ok") and calibrated:
+        if command.get("action") == "x_grade_edit":
+            panel = self.x_grade_panel
+            if layer is not None and (not result.get("ok") or phase != "update"):
+                panel.load_layer_state(layer, force=not result.get("ok"))
+                if not result.get("ok"):
+                    panel.notice_requested.emit(I18N.tr("x_grade.rejected", "Could not apply X Grade to this corrector."))
+            elif layer is None and not result.get("ok"):
+                panel.clear_target()
+        elif not result.get("ok") and calibrated:
             if layer is not None:
                 self.warper_panel.load_layer_state(layer)
         elif result.get("dirty") and phase != "update":
@@ -3471,6 +3497,9 @@ class LayerOpsMixin:
         adapter = getattr(self, "_warper_command_adapter_obj", None)
         if adapter is not None:
             adapter.cancel()
+        x_grade = getattr(self, "x_grade_panel", None)
+        if x_grade is not None:
+            x_grade.cancel_edit()
         self._warper_graph_draft = None
 
     def on_blur_sharpen_changed(self, params: dict[str, Any]) -> None:

@@ -23,12 +23,14 @@ from src.features.color.core.shader_nodes import (COMMON_DEFINITIONS, GRADING_SN
     WARPER_SPACE_SNIPPET)
 from src.features.color.core.warper_color import (
     RESOLVE_HS709_RESPONSE_SPACES, WARPER_CHROMA709_SPACE, WARPER_PREPARED_SPACES,
+    WARPER_X_GRADE_SPACE,
 )
 from src.features.color.core.hsl_curve_calibration import VALID_HSL_LUT_SHAPES
 from src.features.color.core.plugin_manager import get_plugin_manager
 from src.features.color.core.composition_uniforms import (
     build_composition_uniform_manifest,
 )
+from src.features.color.core.base_grade_runtime import base_grade_glsl_source, base_grade_shader_call
 from src.features.color.core.mist import MIST_GLSL
 from src.features.shared.effects.effect_spec import EffectSpec, PluginBinding, ShaderKind
 
@@ -374,6 +376,7 @@ class ShaderPipeline:
         plugins: Iterable[PluginBinding] | None = None,
         *,
         has_primary_calibration: bool = False,
+        has_base_grade: bool = False,
         request_id: Any = None,
         layer_id: Any = None,
     ) -> "moderngl.Program | None":
@@ -419,7 +422,7 @@ class ShaderPipeline:
              binding.enabled, _binding_structural_params(binding))
             for binding in bindings
         ) if bindings else ()
-        key = (has_curves, has_warper, warper_space if has_warper else 0, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, has_primary_calibration, plugin_key)
+        key = (has_curves, has_warper, warper_space if has_warper else 0, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, has_primary_calibration, has_base_grade, plugin_key)
         if key in self.comp_cache:
             # AUD-0831：LRU 命中刷新新旧顺序
             self.comp_cache.move_to_end(key)
@@ -434,11 +437,13 @@ class ShaderPipeline:
             has_warper=has_warper, has_lut3d=has_lut3d,
             warper_space=warper_space,
             grain_enabled=grain_enabled, has_primary_calibration=has_primary_calibration,
+            has_base_grade=has_base_grade,
             bindings=bindings)
 
         calibrated_warper = has_warper and warper_space in WARPER_PREPARED_SPACES
         response_warper = has_warper and warper_space in RESOLVE_HS709_RESPONSE_SPACES
         chroma_warper = has_warper and warper_space == WARPER_CHROMA709_SPACE
+        x_grade = has_warper and warper_space == WARPER_X_GRADE_SPACE
         shader_code = [
             "#version 330",
             *uniform_manifest.declarations("header"),
@@ -450,7 +455,7 @@ class ShaderPipeline:
             MIXER_SNIPPET,
             LUT3D_SNIPPET,
             WARPER_SNIPPET,
-            WARPER_SPACE_SNIPPET if (has_warper and warper_space and not calibrated_warper) else "",
+            WARPER_SPACE_SNIPPET if (has_warper and warper_space and (not calibrated_warper or x_grade)) else "",
             BLEND_MODES_SNIPPET,
             BLUR_SHARPEN_SNIPPET,  # Must be before FILM_GRAIN_SNIPPET (declares u_tex_size)
             MIST_GLSL,
@@ -464,12 +469,19 @@ class ShaderPipeline:
                 RESOLVE_HS709_SNIPPET, RESOLVE_HS709_V2_SNIPPET, WARPER_CHROMA709_SNIPPET,
             )
 
-            if chroma_warper:
+            if x_grade:
+                from src.features.color.core.x_grade_shader import GLSL_X_GRADE
+
+                shader_code.extend((WARPER_CHROMA709_SNIPPET, RESOLVE_HS709_SNIPPET,
+                                    RESOLVE_HS709_V2_SNIPPET, GLSL_X_GRADE))
+            elif chroma_warper:
                 shader_code.append(WARPER_CHROMA709_SNIPPET)
             else:
                 shader_code.append(RESOLVE_HS709_V2_SNIPPET if response_warper else RESOLVE_HS709_SNIPPET)
         if has_primary_calibration:
             shader_code.append(_PRIMARY_CALIBRATION_GLSL)
+        if has_base_grade:
+            shader_code.append(base_grade_glsl_source())
         if has_curves_soft_clip:
             shader_code.append(CURVES_SOFT_CLIP_CALIBRATION_SNIPPET)
             shader_code += uniform_manifest.declarations("curves_soft_clip")
@@ -596,6 +608,9 @@ class ShaderPipeline:
             shader_code.append("    vec3 primary_input = graded;")
             shader_code.append("    if (u_primary_calibration_enabled) { graded = apply_primary_calibration(graded, u_primary_calibration_tex); }")
         shader_code.append(f"    graded = apply_grading(graded, {primary_input}, u_lift, u_gamma, u_gain, u_exposure, u_temp, u_tint, u_contrast, u_saturation, u_vibrance, u_shadow, u_highlights, u_mid_detail, u_sharpness, u_hue_shift, u_lift_saturation, u_gamma_saturation, u_gain_saturation, u_pivot, u_offset, u_log_shadow, u_log_midtone, u_log_highlight, u_log_offset, u_log_low_range, u_log_high_range, u_lum_mix);")
+        if has_base_grade:
+            grade_call = base_grade_shader_call("graded", "u_rec709_calibration_encoded")
+            shader_code.append(f"    graded = {grade_call};")
 
         if has_curves: shader_code.append("    graded = apply_curves(graded, u_curves_tex);")
         if has_hsl_curve: shader_code.append("    graded = apply_hsl_curve(graded, u_hsl_curve_tex);")
@@ -615,7 +630,9 @@ class ShaderPipeline:
                 "    }")
         if has_mixer:
             shader_code.append("    graded = apply_mixer(graded, u_red_p, u_orange_p, u_yellow_p, u_green_p, u_aqua_p, u_blue_p, u_purple_p, u_magenta_p);")
-        if chroma_warper:
+        if x_grade:
+            shader_code.append("    graded = apply_x_grade(graded, u_warper_tex);")
+        elif chroma_warper:
             shader_code.append("    graded = apply_warper_chroma709(graded, u_warper_tex);")
         elif response_warper:
             shader_code.append("    graded = apply_resolve_hs709_v2(graded, u_warper_tex);")

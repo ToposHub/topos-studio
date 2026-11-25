@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Mapping
 
 import numpy as np
@@ -87,10 +88,9 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
         payload = dict(payload)
         lut_ref = payload.pop("active_lut_path", None)
         payload.pop("lut_intensity", None)
-        # HS legacy 与校准网格可点态烘焙，CL/CW 仍需明确拒绝。
+        # Authored chroma and X Grade controls are pointwise as well as HS grids.
         if _pointwise_warper(payload) is None and _has_warper(payload):
-            errors.append(f"{candidate.node_id}: warper 不在点态表达域"
-                          "（仅支持两分量 HS 与三分量 709 HS 网格）")
+            errors.append(f"{candidate.node_id}: warper 不在点态表达域")
         else:
             payload.pop("warper_params", None)
             payload.pop("warper_space", None)
@@ -120,7 +120,7 @@ def _has_warper(payload: Mapping[str, Any]) -> bool:
 def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | None:
     """可点态表达的 warper → (offsets ndarray, space int);否则 None。"""
     from src.features.color.core.warper_color import (
-        RESOLVE_HS709_SPACES, WARPER_CHROMA709_SPACE, WARPER_PREPARED_SPACES,
+        RESOLVE_HS709_SPACES, WARPER_CHROMA709_SPACE, WARPER_PACKED_SPACES, WARPER_PREPARED_SPACES,
     )
     from src.features.color.core.warper_state import (
         HS_GRID_NAME,
@@ -128,7 +128,9 @@ def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | No
         WarperStateV2,
         renderable_projection,
     )
-    if payload.get("warper_params") is not None:
+    raw_state = payload.get("warper_state")
+    has_x_grade = isinstance(raw_state, Mapping) and raw_state.get("x_grade") is not None
+    if payload.get("warper_params") is not None and not has_x_grade:
         try:
             offsets = np.asarray(payload["warper_params"], dtype=np.float32)
             space = int(payload.get("warper_space", 0) or 0)
@@ -138,21 +140,23 @@ def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | No
             components = 3 if space in WARPER_PREPARED_SPACES else 2
             if (offsets.ndim == 3 and offsets.shape[2] == components
                     and offsets.shape[0] >= 2
-                    and (offsets.shape[1] == 1 if space == WARPER_CHROMA709_SPACE else offsets.shape[1] >= 2)
+                    and (offsets.shape[1] == 1 if space in WARPER_PACKED_SPACES else offsets.shape[1] >= 2)
                     and np.isfinite(offsets).all()):
                 return offsets, space
         return None
-    raw_state = payload.get("warper_state")
     if isinstance(raw_state, Mapping):
         try:
             state = WarperStateV2.from_dict(raw_state)
+            if "x_grade" in state._extra_fields:
+                return None
             offsets, space = renderable_projection(state)
         except WarperStateError:
             return None
         if offsets is None and space in RESOLVE_HS709_SPACES:
             # Enabling 709 or creating pins alone is exportable identity.
             offsets = state.grids[HS_GRID_NAME].offsets
-        if offsets is None and space == WARPER_CHROMA709_SPACE:
+        if offsets is None and (space == WARPER_CHROMA709_SPACE or (
+                state.x_grade is not None and not state.x_grade.strokes and replace(state, x_grade=None).is_identity())):
             return np.zeros((2, 2, 2), dtype=np.float32), 0
         return (offsets, space) if offsets is not None else None
     return None

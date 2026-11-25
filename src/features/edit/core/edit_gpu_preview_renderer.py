@@ -4852,12 +4852,15 @@ class EditGpuPreviewRenderer(QThread):
     @staticmethod
     def _grade_params_to_uniforms(grade: dict) -> dict:
         """Translate persisted ColorStack controls to shader-ready uniforms."""
+        from src.features.color.core.base_grade import base_grade_active
         from src.features.color.core.primary_calibration import grade_uses_calibration
         from src.features.color.core.the_decompiler import GradingMath
 
         if grade_uses_calibration(grade):
             raise ValueError("Measured primary calibration requires the color graph or CPU compositor")
         params = dict((grade or {}).get('grading_params', {}) or {})
+        if base_grade_active(params):
+            raise ValueError("Base Grade requires the color graph or CPU compositor")
 
         def scalar(name: str) -> float:
             try:

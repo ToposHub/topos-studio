@@ -758,6 +758,14 @@ class DeliverControllerMixin:
     def perform_lut_export(self, settings) -> None:
         """执行LUT导出"""
         from src.features.color.core.lut_exporter import LutExporter
+        from src.shared.color.project_video_signal import timeline_uses_rec709_gamma24
+
+        blocker = getattr(self.engine, "x_grade_output_blocker", None)
+        reason = blocker() if callable(blocker) else None
+        if isinstance(reason, str) and reason:
+            QMessageBox.critical(self, "LUT Export Error", I18N.tr(
+                "x_grade.working_only", "X Grade requires linear Rec.709 or Rec.709 Gamma 2.4."))
+            return
 
         path = settings["path"]
         lut_format = settings.get("lut_format", "cube")
@@ -818,6 +826,7 @@ class DeliverControllerMixin:
                 QApplication.processEvents()
 
             # 执行导出（应用所有可见图层效果）
+            working_signal = getattr(self.engine, "_base_grade_working_signal", None)
             exporter.export_lut(
                 visible_layers,
                 path,
@@ -826,7 +835,10 @@ class DeliverControllerMixin:
                 title=lut_title,
                 on_finished=on_finished,
                 on_error=on_error,
-                on_progress=on_progress
+                on_progress=on_progress,
+                base_grade_signal=working_signal() if callable(working_signal) else None,
+                base_grade_encoded_input=timeline_uses_rec709_gamma24(
+                    self.engine.__dict__.get("_project_viewer_signal")),
             )
 
             self.progress_bar.hide()

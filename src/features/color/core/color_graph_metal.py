@@ -29,6 +29,9 @@ from typing import Any, Callable, Mapping
 
 import numpy as np
 
+from src.features.color.core.base_grade_runtime import (
+    BASE_GRADE_SIGNAL_VECTORS, BASE_GRADE_UNIFORMS, metal_graph_base_grade_source,
+)
 from src.features.color.core.color_graph_compiler import (
     ColorGraphRenderPlan,
     RenderPass,
@@ -40,7 +43,7 @@ from src.features.color.core.color_graph_cpu import (
 from src.features.color.core.curves_calibration import is_calibrated_curves_lut
 from src.shared.gpu.metal.context import MetalComputeContext
 from src.shared.gpu.metal.kernels_color import (
-    METAL_GRAPH_OPS_MSL,
+    build_metal_graph_ops_msl,
     build_metal_graph_warper_msl,
     curves_lut_to_flat_buffer,
     make_graph_grading_params,
@@ -118,6 +121,10 @@ def graph_grading_params_for_layer(
         mask_mode=1 if has_mask else 0,
         has_curves=curves is not None,
         calibrated_curves=curves is not None and is_calibrated_curves_lut(np.asarray(curves)),
+        base_grade=tuple(component for name, _ in BASE_GRADE_UNIFORMS for component in values.get(name, ())),
+        base_grade_encoded=values["u_rec709_calibration_encoded"],
+        base_grade_transfer=values.get("u_base_grade_transfer", -1),
+        base_grade_signal=tuple(component for name in BASE_GRADE_SIGNAL_VECTORS for component in values.get(name, ())),
     )
 
 
@@ -136,7 +143,7 @@ class MetalDeliveryCorrector:
 
 
 def serial_metal_delivery_grade(
-    graph: ColorGraphData, width: int, height: int,
+    graph: ColorGraphData, width: int, height: int, *, rec709_calibration_encoded: bool = False,
 ) -> tuple[MetalDeliveryCorrector, ...] | None:
     """Resolve static legacy primary and LUT nodes for the direct pixel path.
 
@@ -167,6 +174,8 @@ def serial_metal_delivery_grade(
                 or production_layer_domain_errors(layer, backend="metal")):
             return None
         reference, strength = node_lut_projection(resources)
+        if rec709_calibration_encoded:
+            layer = {**layer, "_rec709_calibration_encoded": True}
         operations.append(MetalDeliveryCorrector(
             (reference, strength) if reference is not None else None,
             graph_grading_params_for_layer(layer, width, height),
@@ -670,7 +679,8 @@ class ColorGraphMetalExecutor:
             import Metal
 
             from src.features.color.core.warper_color import (
-                RESOLVE_HS709_RESPONSE_SPACES, WARPER_CHROMA709_SPACE, prepare_resolve_hs709_texture,
+                RESOLVE_HS709_RESPONSE_SPACES, WARPER_CHROMA709_SPACE, WARPER_X_GRADE_SPACE,
+                prepare_resolve_hs709_texture,
             )
 
             space = layer["warper_space"]
@@ -680,7 +690,9 @@ class ColorGraphMetalExecutor:
             rgba[..., :3] = sampled
             warper_tex = self.ctx.create_texture_from_numpy(
                 rgba, Metal.MTLPixelFormatRGBA32Float, columns, rows)
-            if space == WARPER_CHROMA709_SPACE:
+            if space == WARPER_X_GRADE_SPACE:
+                kernel_name = "graph_grading_x_grade"
+            elif space == WARPER_CHROMA709_SPACE:
                 kernel_name = "graph_grading_chroma709"
             else:
                 kernel_name = "graph_grading_709_v2" if space in RESOLVE_HS709_RESPONSE_SPACES else "graph_grading_709"
@@ -727,8 +739,10 @@ class ColorGraphMetalExecutor:
                   size: tuple[int, int], *, textures: dict[int, Any] | None = None) -> None:
         kernel = self._kernels.get(kernel_name)
         if kernel is None:
-            source = METAL_GRAPH_OPS_MSL
-            if kernel_name in ("graph_grading_709", "graph_grading_709_v2", "graph_grading_chroma709"):
+            extension = metal_graph_base_grade_source()
+            source = build_metal_graph_ops_msl(extension)
+            if kernel_name in ("graph_grading_709", "graph_grading_709_v2", "graph_grading_chroma709",
+                               "graph_grading_x_grade"):
                 from src.features.color.core.shader_nodes_msl import (
                     MSL_HSV_FUNCS, MSL_RESOLVE_HS709, MSL_RESOLVE_HS709_V2,
                     MSL_WARPER_CHROMA709,
@@ -736,12 +750,20 @@ class ColorGraphMetalExecutor:
 
                 v2 = kernel_name == "graph_grading_709_v2"
                 chroma = kernel_name == "graph_grading_chroma709"
+                x_grade = kernel_name == "graph_grading_x_grade"
                 warper_code = {
                     "graph_grading_709": MSL_RESOLVE_HS709,
                     "graph_grading_709_v2": MSL_RESOLVE_HS709_V2,
                     "graph_grading_chroma709": MSL_WARPER_CHROMA709,
-                }[kernel_name]
-                source = build_metal_graph_warper_msl(MSL_HSV_FUNCS + warper_code, v2=v2, chroma=chroma)
+                }
+                if x_grade:
+                    from src.features.color.core.x_grade_shader import MSL_X_GRADE
+
+                    warper_code[kernel_name] = (MSL_WARPER_CHROMA709 + MSL_RESOLVE_HS709
+                                                + MSL_RESOLVE_HS709_V2 + MSL_X_GRADE)
+                source = build_metal_graph_warper_msl(MSL_HSV_FUNCS + warper_code[kernel_name], v2=v2,
+                                                      chroma=chroma, x_grade=x_grade,
+                                                      grading_extension=extension)
             kernel = self.ctx.compile_kernel(kernel_name, source)
             self._kernels[kernel_name] = kernel
         self.ctx.dispatch(kernel, buffers=buffers,

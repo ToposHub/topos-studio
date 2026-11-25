@@ -631,22 +631,29 @@ float3 msl_apply_warper(float3 color, texture2d<float> warper_tex,
 """
 
 MSL_WARPER_CHROMA709 = """
-inline float3 msl_apply_warper_chroma709(float3 color, texture2d<float> field, bool encoded_input) {
+inline float3 msl_apply_warper_chroma709_region(float3 color, texture2d<float> field,
+                                               bool encoded_input, float2 dims, float2 origin) {
     if (!all(isfinite(color))) return color;
     constexpr sampler response_sampler(coord::normalized, address::clamp_to_edge, filter::linear);
     float3 sdr = clamp(color, 0.0, 1.0);
     float3 encoded = encoded_input ? sdr : pow(sdr, float3(1.0 / 2.4));
-    float2 dims = float2(field.get_width(), field.get_height());
     float3 index = encoded * (dims.x - 1.0);
-    float2 uv = (index.rg + 0.5) / dims;
+    float2 uv = origin + index.rg + 0.5;
     float first = floor(index.b);
     float second = min(first + 1.0, dims.x - 1.0);
-    float3 delta = mix(field.sample(response_sampler, uv + float2(0.0, first / dims.x)).rgb,
-                       field.sample(response_sampler, uv + float2(0.0, second / dims.x)).rgb, index.b - first);
+    float2 image_dims = float2(field.get_width(), field.get_height());
+    float3 delta = mix(field.sample(response_sampler, (uv + float2(0.0, first * dims.x)) / image_dims).rgb,
+                       field.sample(response_sampler, (uv + float2(0.0, second * dims.x)) / image_dims).rgb,
+                       index.b - first);
     if (all(delta == 0.0)) return color;
     float3 mapped = max(encoded + delta, 0.0);
     float3 adjusted = encoded_input ? mapped : pow(mapped, float3(2.4));
     return adjusted + (color - sdr);
+}
+
+inline float3 msl_apply_warper_chroma709(float3 color, texture2d<float> field, bool encoded_input) {
+    return msl_apply_warper_chroma709_region(color, field, encoded_input,
+                                            float2(field.get_width(), field.get_height()), float2(0.0));
 }
 """
 
@@ -657,7 +664,8 @@ float3 msl_hs709_basis(float hue) {
     return clamp(abs(phase * 6.0 - 3.0) - 1.0, 0.0, 1.0);
 }
 
-float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh, bool encoded_input) {
+float3 msl_apply_resolve_hs709_region(float3 color, texture2d<float> mesh, bool encoded_input,
+                                    int2 size, uint2 origin) {
     float gamma = encoded_input ? 1.0 : 2.4;
     float3 work = pow(max(color, 0.0), float3(1.605 / gamma));
     float3 hsv = msl_rgb2hsv(work);
@@ -668,7 +676,6 @@ float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh, bool encoded
     float hue = hsv.x;
     float radius = min(0.876 * chroma / pow(max(peak, 1e-10), 1.074), 1.0);
     float neutral_fade = min(radius * 1.755, 1.0);
-    int2 size = int2(mesh.get_width(), mesh.get_height());
     float cols = float(size.x);
     float angular = hue * cols;
     float angular_base = floor(angular);
@@ -684,8 +691,8 @@ float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh, bool encoded
         float separation = angular - angular_base - float(side);
         float distance = abs(separation);
         if (distance >= 1.084) continue;
-        float3 lower = mesh.read(uint2(column, row)).rgb;
-        float3 upper = mesh.read(uint2(column, next_row)).rgb;
+        float3 lower = mesh.read(uint2(column, row) + origin).rgb;
+        float3 upper = mesh.read(uint2(column, next_row) + origin).rgb;
         float3 delta = mix(lower, upper, blend);
         saturation += delta.y * pow(max(1.0 - distance / 0.819, 0.0), 1.225);
         lightness += delta.z * pow(max(1.0 - distance / 1.084, 0.0), 1.2);
@@ -711,6 +718,11 @@ float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh, bool encoded
     warped *= exp(1.981 * lightness * neutral_fade);
     return pow(max(warped, 0.0), float3(gamma / 1.605)) + min(color, 0.0);
 }
+
+float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh, bool encoded_input) {
+    return msl_apply_resolve_hs709_region(color, mesh, encoded_input,
+                                          int2(mesh.get_width(), mesh.get_height()), uint2(0u));
+}
 """
 
 
@@ -721,21 +733,22 @@ float3 msl_hs709_response_tile(texture2d<float> field, uint2 base, uint2 next, f
     return mix(a, b, weight.y);
 }
 
-float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field, bool encoded_input) {
+float3 msl_apply_resolve_hs709_v2_region(float3 color, texture2d<float> field, bool encoded_input,
+                                       uint2 size, uint2 origin) {
     float3 positive = max(color, 0.0);
     float3 code = encoded_input ? positive : pow(positive, float3(1.0 / 2.4));
     float3 hsv = msl_rgb2hsv(code);
     if (hsv.y <= 1e-8) return color;
 
     const uint levels = 8u;
-    uint rows = field.get_height() / levels;
-    uint2 extent = uint2(field.get_width() - 1u, rows - 1u);
+    uint rows = size.y / levels;
+    uint2 extent = uint2(size.x - 1u, rows - 1u);
     float2 cell = float2(hsv.x, clamp(hsv.y, 0.0, 1.0)) * float2(extent);
     uint2 base = uint2(cell);
     uint2 next = min(base + 1u, extent);
     float plane = clamp((hsv.z - 0.21875) / 0.65625, 0.0, 1.0) * float(levels - 1u);
-    uint2 lower = uint2(0u, uint(plane) * rows);
-    uint2 upper = uint2(0u, min(uint(plane) + 1u, levels - 1u) * rows);
+    uint2 lower = origin + uint2(0u, uint(plane) * rows);
+    uint2 upper = origin + uint2(0u, min(uint(plane) + 1u, levels - 1u) * rows);
     // Float32 hardware filtering is optional across Metal device families.
     float3 first = msl_hs709_response_tile(field, base + lower, next + lower, fract(cell));
     float3 second = msl_hs709_response_tile(field, base + upper, next + upper, fract(cell));
@@ -743,6 +756,11 @@ float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field, bool enc
     if (all(delta == float3(0.0))) return color;
     float3 mapped = max(code + hsv.z * delta, 0.0);
     return (encoded_input ? mapped : pow(mapped, float3(2.4))) + min(color, 0.0);
+}
+
+float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field, bool encoded_input) {
+    return msl_apply_resolve_hs709_v2_region(color, field, encoded_input,
+                                             uint2(field.get_width(), field.get_height()), uint2(0u));
 }
 """
 

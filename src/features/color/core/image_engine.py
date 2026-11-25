@@ -61,6 +61,10 @@ from src.features.color.core.window_rasterizer import WindowRasterizer
 from src.features.color.core.curves_soft_clip import (
     curves_soft_clip_is_identity,
 )
+from src.features.color.core.x_grade_domain import (
+    X_GRADE_WORKING_MESSAGE, active_x_grade_node, bypass_x_grade,
+    x_grade_preview_graph, x_grade_working_supported,
+)
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 
 if TYPE_CHECKING:
@@ -116,7 +120,7 @@ def _copy_array_like(value: Any) -> Any:
     return value
 
 
-def _layer_render_data(layer: Layer) -> Dict[str, Any]:
+def _layer_render_data(layer: Layer, *, x_grade_supported: bool = True) -> Dict[str, Any]:
     """Build the immutable layer DTO consumed by the render thread.
 
     Keep this conversion in one place.  The preview and ColorOutput paths used
@@ -162,6 +166,8 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
     csc = layer.curves_soft_clip
     if not curves_soft_clip_is_identity(csc):
         data["curves_soft_clip"] = copy.deepcopy(csc)
+    if not x_grade_supported:
+        bypass_x_grade(data)
     return data
 
 
@@ -524,7 +530,37 @@ class ImageEngine(QObject, WindowRasterizer):
 
     def snapshot_render_layers(self) -> list[dict[str, Any]]:
         """Capture the current grade and the IDs of its uploaded render resources."""
-        return [_layer_render_data(layer) for layer in self.layers]
+        supported = self.x_grade_working_supported
+        return [_layer_render_data(layer, x_grade_supported=supported) for layer in self.layers]
+
+    @property
+    def x_grade_working_supported(self) -> bool:
+        spaces = self.__dict__.get("_project_viewer_signal")
+        space = self.__dict__.get("_x_grade_working_space", spaces[0] if spaces is not None else None)
+        return x_grade_working_supported(space)
+
+    def set_x_grade_working_space(self, space: "ColorSpaceDescriptor | None") -> bool:
+        """Track the working signal even if the viewer cannot display its output."""
+        previous = self.x_grade_working_supported
+        self._x_grade_working_space = space
+        changed = previous != self.x_grade_working_supported
+        if changed:
+            self._active_graph_snapshot_cache = None
+        return changed
+
+    def x_grade_output_blocker(self, *, through_layer: int | None = None) -> str | None:
+        if self.x_grade_working_supported:
+            return None
+        from src.features.color.core.warper_color import WARPER_X_GRADE_SPACE
+
+        graph = self.active_color_graph
+        if through_layer is None and graph is not None and active_x_grade_node(graph) is not None:
+            return X_GRADE_WORKING_MESSAGE
+        layers = self.layers if through_layer is None else self.layers[:through_layer + 1]
+        if any(layer.visible and layer.warper_space == WARPER_X_GRADE_SPACE and layer.warper_params is not None
+               for layer in layers):
+            return X_GRADE_WORKING_MESSAGE
+        return None
 
     def request_color_output(
         self, max_proxy_dim=None, update_masks=True, target="composite",
@@ -894,15 +930,20 @@ class ImageEngine(QObject, WindowRasterizer):
         graph, patch = preview if preview is not None else (self.active_color_graph, None)
         if graph is None:
             return None
-        cache = getattr(self, '_active_graph_snapshot_cache', None)
-        if cache is not None:
-            return cache
         from src.features.color.core.color_graph_snapshot import freeze_graph
+        from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
         from src.shared.color.project_video_signal import timeline_uses_rec709_gamma24
 
+        signal = self._base_grade_working_signal()
+        cache = getattr(self, '_active_graph_snapshot_cache', None)
+        if cache is not None and cache.working_color_context.get(BASE_GRADE_SIGNAL_KEY) == signal:
+            return cache
+        graph = x_grade_preview_graph(graph, supported=self.x_grade_working_supported)
         context = dict(graph.working_color_context)
         context["rec709_calibration_encoded"] = timeline_uses_rec709_gamma24(
             self.__dict__.get('_project_viewer_signal'))
+        if signal:
+            context[BASE_GRADE_SIGNAL_KEY] = signal
         snapshot = freeze_graph(
             graph,
             session_id=self.active_color_graph_stack_id,
@@ -959,10 +1000,14 @@ class ImageEngine(QObject, WindowRasterizer):
         ``TOPOS_COLOR_GRAPH_RENDER`` 开启后 front/color output 切图执行。
         """
         spaces = self.__dict__.get('_project_viewer_signal')
+        from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
+
         if spaces is not None:
             from src.shared.color.project_video_signal import timeline_uses_rec709_gamma24
 
             render_params['rec709_calibration_encoded'] = timeline_uses_rec709_gamma24(spaces)
+        if signal := self._base_grade_working_signal():
+            render_params[BASE_GRADE_SIGNAL_KEY] = signal
         aces = self.__dict__.get('_project_viewer_aces')
         hdr = self.__dict__.get('_project_viewer_hdr')
         if spaces is not None and (spaces[0] != spaces[1] or aces is not None or hdr is not None):
@@ -1003,6 +1048,38 @@ class ImageEngine(QObject, WindowRasterizer):
             if (execute or self.__dict__.get('_active_graph_requires_execution', False)
                     or self.__dict__.get('_color_graph_preview') is not None):
                 render_params['color_graph_execute'] = True
+
+    def _base_grade_working_signal(self) -> dict[str, Any] | None:
+        from src.features.color.core.base_grade_runtime import base_grade_working_signal
+
+        spaces = self.__dict__.get('_project_viewer_signal')
+        hdr = self.__dict__.get('_project_viewer_hdr')
+        if spaces:
+            return base_grade_working_signal(spaces[0], hdr.luminance if hdr else None)
+        if (self.__dict__.get("current_raw_params") or {}).get("enabled", False):
+            return None
+        return self._base_grade_source_signal()
+
+    def _base_grade_source_signal(self) -> dict[str, Any] | None:
+        from src.features.color.core.base_grade_runtime import base_grade_working_signal
+        from src.shared.color.color_space_descriptor import SRGB_IMAGE
+        from src.shared.color.project_video_signal import legacy_video_timeline_space
+
+        if self.__dict__.get("_is_video_mode"):
+            space = self.__dict__.get("_base_grade_legacy_video_space") or legacy_video_timeline_space()
+            return base_grade_working_signal(space, explicit_rec709=True)
+        path = str(self.__dict__.get("current_file_path") or "")
+        if self.__dict__.get("is_current_image_srgb") and not path.lower().endswith((".exr", ".hdr")):
+            return base_grade_working_signal(SRGB_IMAGE)
+        return None
+
+    def set_base_grade_legacy_video_space(self, space: "ColorSpaceDescriptor | None") -> bool:
+        """Keep the old video encoding available even without a managed viewer transform."""
+        if space == self.__dict__.get("_base_grade_legacy_video_space"):
+            return False
+        self._base_grade_legacy_video_space = space
+        self._active_graph_snapshot_cache = None
+        return True
 
     @property
     def color_graph_render_enabled(self) -> bool:
@@ -3008,6 +3085,10 @@ class ImageEngine(QObject, WindowRasterizer):
                                      call-sites to indicate a user-driven grading
                                      parameter change.
         """
+        if is_full_res and (blocker := self.x_grade_output_blocker()):
+            logger.warning("Full-resolution rendering blocked: %s", blocker)
+            self.error_occurred.emit(blocker)
+            return None
         # P0-COL-04：渲染前校验 baked 前缀摘要，下层已变更的冻结层自动解冻，
         # 保证「bake = 到该层为止的完整栈前缀」语义始终成立。
         self._validate_baked_prefixes()
@@ -3239,11 +3320,6 @@ class ImageEngine(QObject, WindowRasterizer):
             # 由执行器按 target 用 f4 dtype，复杂图 fail-closed 不回退）
             self._attach_color_graph_params(
                 render_params, execute=self.color_graph_render_enabled)
-            sample = self.__dict__.get('warper_input_request')
-            if sample is not None and not is_full_res and render_reason != 'playback':
-                target = sample()
-                if target is not None:
-                    render_params['warper_sample'] = target
             if is_full_res:
                 # CPU-side colour conversion is deliberately limited to
                 # preparing immutable data.  All GL work and the readback are
@@ -3293,6 +3369,11 @@ class ImageEngine(QObject, WindowRasterizer):
                     h, w = self.img_full_original.shape[:2]
                     render_params['grade_set_preview_key'] = self.grade_set_preview_key
                     render_params['photo_size'] = (w, h)
+                sample = self.__dict__.get('warper_input_request')
+                if sample is not None and render_reason != 'playback':
+                    target = sample()
+                    if target is not None:
+                        render_params['warper_sample'] = target
                 self.renderer.submit(RenderCommand.RENDER_FRAME, render_params)
             return render_params['render_request_id']
 
@@ -3555,6 +3636,10 @@ class ImageEngine(QObject, WindowRasterizer):
             temp_vao.render(moderngl.TRIANGLE_STRIP)
             temp_vao.release()
 
+            from src.features.color.core.base_grade_runtime import base_grade_signal_uniform_values
+
+            base_grade_signal = (self._base_grade_source_signal()
+                                 if is_effectively_srgb and not curr.get("enabled", False) else None)
             # Render each layer sequentially
             visible_count = 0
             for i, layer in enumerate(self.layers):
@@ -3643,6 +3728,8 @@ class ImageEngine(QObject, WindowRasterizer):
                             prog_comp, layer, temporary_textures=texture_garbage),
                         bindings=layer_plugins,
                     )
+                    if base_grade_signal and "u_base_grade_global" in values:
+                        values.update(base_grade_signal_uniform_values(base_grade_signal))
                     upload_composition_uniforms(prog_comp, values)
 
                     # Bind auxiliary textures
@@ -4988,6 +5075,10 @@ class ImageEngine(QObject, WindowRasterizer):
         if not (0 <= layer_index < len(self.layers)):
             return
 
+        if blocker := self.x_grade_output_blocker(through_layer=layer_index):
+            self.error_occurred.emit(blocker)
+            return
+
         layer = self.layers[layer_index]
 
         # Don't bake if already baked
@@ -5024,7 +5115,7 @@ class ImageEngine(QObject, WindowRasterizer):
         # baked 纹理当作前缀替换语义消费，若只烘单层，冻结后下方图层效果
         # 全部丢失。stack_prefix 携带 0..layer_index 的完整 DTO（与渲染
         # 线程消费的格式一致），prefix_digest 供渲染入口做失效校验。
-        stack_prefix = [_layer_render_data(l)
+        stack_prefix = [_layer_render_data(l, x_grade_supported=self.x_grade_working_supported)
                         for l in self.layers[:layer_index + 1]]
         prefix_digest = self._compute_prefix_digest(stack_prefix)
         self._pending_bake_digests[layer.id] = prefix_digest
@@ -5032,11 +5123,14 @@ class ImageEngine(QObject, WindowRasterizer):
         # 代数失配，迟到的完成信号被丢弃
         bake_gen = self._bake_generation.get(layer.id, 0) + 1
         self._bake_generation[layer.id] = bake_gen
+        from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
+
         self.renderer.submit(RenderCommand.BAKE_LAYER, {
             'layer': layer_snapshot,
             'layer_id': layer.id,
             'stack_prefix': stack_prefix,
             'prefix_digest': prefix_digest,
+            BASE_GRADE_SIGNAL_KEY: self._base_grade_source_signal(),
             'source_size': self.img_full_original.shape[:2][::-1] if self.img_full_original is not None else (0, 0),
             'full_res_image': full_res_image  # Full-resolution image data for GPU upload
         })
@@ -5138,7 +5232,8 @@ class ImageEngine(QObject, WindowRasterizer):
                 # 处理，不误伤——下次 bake 会建立台账。
                 continue
             current = self._compute_prefix_digest(
-                [_layer_render_data(l) for l in self.layers[:j + 1]])
+                [_layer_render_data(l, x_grade_supported=self.x_grade_working_supported)
+                 for l in self.layers[:j + 1]])
             if current != recorded:
                 stale_ids.append(layer.id)
         for layer_id in stale_ids:

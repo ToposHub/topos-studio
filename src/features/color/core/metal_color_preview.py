@@ -99,7 +99,7 @@ class ColorMetalPreview:
         cancelled: Callable[[], bool],
         display: tuple[int, int, int] | None,
         scope_output: bool = False,
-        input_sample: tuple[str, Callable[[np.ndarray], None]] | None = None,
+        input_sample: tuple[str, Callable[[np.ndarray, Mapping[str, Any] | None], None]] | None = None,
     ) -> bool:
         """Return success only after the compatible GL texture is complete."""
         self._sequence += 1
@@ -112,10 +112,13 @@ class ColorMetalPreview:
                 self.fallback("graph_plan: " + ", ".join(outcome.diagnostics))
                 return False
 
+            from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
+
             provider = graph_node_layer_provider(
                 snapshot.graph, frame=source_frame, preview_grade=snapshot.preview_grade,
                 rec709_calibration_encoded=bool(
-                    snapshot.working_color_context.get("rec709_calibration_encoded")))
+                    snapshot.working_color_context.get("rec709_calibration_encoded")),
+                base_grade_signal=snapshot.working_color_context.get(BASE_GRADE_SIGNAL_KEY))
             # GL maps full-image windows to the current ROI, while the Metal
             # executor rasterizes normalized windows in its target texture.
             for render_pass in outcome.plan.passes:
@@ -142,7 +145,10 @@ class ColorMetalPreview:
             sample_kwargs = {}
             if input_sample is not None:
                 node_id, accept = input_sample
-                sample_kwargs["input_sample"] = (node_id, lambda texture: self._sample_warper(texture, accept))
+                layer = provider(node_id)
+                sample_kwargs["input_sample"] = (
+                    node_id, lambda texture: self._sample_warper(texture, lambda rgb: accept(rgb, layer)),
+                )
             result = self._executor.execute_plan(
                 outcome.plan, source_texture, request_id=request_id,
                 source_size=(width, height),

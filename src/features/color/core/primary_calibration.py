@@ -254,12 +254,15 @@ def grade_uses_calibration(layer: Any) -> bool:
 
 def ungraded_primary_params(params: Mapping[str, Any]) -> bool:
     """Recognize neutral, unversioned grades without rewriting older values."""
+    from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
     from src.features.color.core.layer import DEFAULT_EXTENDED_GRADING_PARAMS
 
     defaults = DEFAULT_EXTENDED_GRADING_PARAMS
     if isinstance(params.get(PRIMARY_CALIBRATION_VERSION_KEY), bool):
         return False
     for key, value in params.items():
+        if key in BASE_GRADE_DEFAULTS:
+            continue
         if isinstance(value, (tuple, list)):
             if tuple(value) != defaults.get(key, (0, 0, 0)):
                 return False

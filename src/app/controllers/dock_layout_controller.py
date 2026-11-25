@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Callable, Literal
 
 from PyQt6.QtCore import Qt, QByteArray, QTimer
 from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import (QDockWidget, QHBoxLayout, QInputDialog, QLabel,
+from PyQt6.QtWidgets import (QDockWidget, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
                              QMenu, QMessageBox, QSizePolicy, QTabWidget,
                              QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget, QApplication)
 
@@ -60,8 +60,9 @@ _EDIT_TIMELINE_DOCK_MIGRATION_DELAY_MS = 50
 _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY = "color_grading_dock_layout_version"
 _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION = 3
 COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS = 450
+_BASE_GRADE_DOCK_NAME = "dockBaseGrade"
 _COLOR_TOOL_DOCK_NAMES = frozenset({
-    "dockDenoise", "dockDeblur", "dockGrading", "dockCurves",
+    "dockDenoise", "dockDeblur", "dockGrading", _BASE_GRADE_DOCK_NAME, "dockCurves",
     "dockColorMapping", "dockMixer", "dockBlurSharpen", "dockGrain", "dockMasks",
     "dockQualifier", "dockRaw", "dockAnalysis", "dockCrop",
     "dockTracker", "dockColorKeyframes",
@@ -78,6 +79,30 @@ _MIXER_PROPERTIES_LAYOUT_MIGRATION_KEY = "mixer_properties_layout_version"
 
 # 浮动 dock 标题栏高度（与原生窗口标题栏接近）
 _FLOATING_TITLEBAR_HEIGHT = 28
+
+
+def restore_workspace_dock_state(window: QMainWindow, state: QByteArray, page: str) -> bool:
+    """Restore Qt geometry and place Base Grade in older Color layouts."""
+    if not window.restoreState(state):
+        return False
+    base_grade = getattr(window, "dock_base_grade", None)
+    if page != "Color" or base_grade is None:
+        return True
+    # Qt saves object names as big-endian QStrings. Only insert the dock if
+    # the snapshot predates it, leaving a saved close or float state intact.
+    if _BASE_GRADE_DOCK_NAME.encode("utf-16-be") in bytes(state):
+        return True
+    grading = window.dock_grading
+    anchor = window.dock_raw if grading.isFloating() else grading
+    base_grade.hide()
+    base_grade.setFloating(False)
+    if not anchor.isFloating() and window.dockWidgetArea(anchor) != Qt.DockWidgetArea.NoDockWidgetArea:
+        if base_grade not in window.tabifiedDockWidgets(anchor):
+            window.tabifyDockWidget(anchor, base_grade)
+    else:
+        window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, base_grade)
+    base_grade.show()
+    return True
 
 
 class FloatingDockTitleBar(QWidget):
@@ -330,7 +355,15 @@ class DockLayoutMixin:
 
         self.dock_grading = create_custom_dock(I18N.tr("panel.color_wheel", "Color Wheel"), self.grading_panel, "dockGrading")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grading)
-
+        base_grade = self.grading_panel.base_grade_panel
+        self.dock_base_grade = create_custom_dock(
+            I18N.tr("base_grade.title", "Base Grade"), base_grade, _BASE_GRADE_DOCK_NAME
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_base_grade)
+        self.dock_base_grade.visibilityChanged.connect(
+            lambda visible: base_grade.finish_edit(commit=True) if not visible else None
+        )
+        self.dock_base_grade.hide()
 
         self.dock_curves = create_custom_dock(I18N.tr("panel.curves", "Curves"), self.curves_panel, "dockCurves")
         self.dock_curves.setMinimumWidth(420)
@@ -346,9 +379,12 @@ class DockLayoutMixin:
             self.warper_panel,
             # Retain the serialized identity so saved Color Mapping layouts
             # restore Warper's exact tab position, hidden/floating state and
-            # geometry. This dock directly owns Warper; no combined UI remains.
+            # geometry.
             "dockColorMapping",
         )
+        set_dock_tool_visible = getattr(self.warper_panel, "set_dock_tool_visible", None)
+        if callable(set_dock_tool_visible):
+            self.dock_warper.visibilityChanged.connect(set_dock_tool_visible)
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea,
             self.dock_warper,
@@ -1231,7 +1267,7 @@ class DockLayoutMixin:
         self.all_docks = [
             self.dock_viewport, self.dock_library, self.dock_files, self.dock_info,
             self.dock_layers, self.dock_denoise, self.dock_deblur,
-            self.dock_grading, self.dock_curves, self.dock_warper, self.dock_mixer,
+            self.dock_grading, self.dock_base_grade, self.dock_curves, self.dock_warper, self.dock_mixer,
             self.dock_audio_mixer, self.dock_effects, self.dock_grain,
             self.dock_masks, self.dock_qualifier, self.dock_lut,
             self.dock_raw, self.dock_analysis, self.dock_export,
@@ -2161,7 +2197,7 @@ class DockLayoutMixin:
             if self.dock_color_timeline_clips:
                 self.dock_color_timeline_clips.setVisible(False)
 
-            self.restoreState(self.page_layouts[self.current_page])
+            restore_workspace_dock_state(self, self.page_layouts[self.current_page], self.current_page)
             # force=True 与硬编码分支一致：首次启动必须走完整页面激活路径
             # （dock 可见性、enter_page_hook / on_enter）。switch_to_page 会先
             # 把当前（出厂）排列快照进 page_layouts 再原样恢复，播种不会破坏。
@@ -2368,7 +2404,7 @@ class DockLayoutMixin:
         if self.current_page in saved_page_layouts:
             # restore_layout_state applies the established page after geometry.
             return
-        self.restoreState(self.page_layouts[self.current_page])
+        restore_workspace_dock_state(self, self.page_layouts[self.current_page], self.current_page)
         # force=True so that when the app opens directly on a page (e.g.
         # Composite), switch_to_page runs the full activation path — restoring
         # dock visibility, installing the correct Properties panel widget, and
@@ -2516,7 +2552,7 @@ class DockLayoutMixin:
 
             if profile and profile.qt_state_hex:
                 state = QByteArray.fromHex(profile.qt_state_hex.encode())
-                if self.restoreState(state):
+                if restore_workspace_dock_state(self, state, page_id):
                     return True
                 logger.debug("LayoutStore restoreState failed for %s/%s", profile_mode, page_id)
         except Exception as exc:
@@ -3456,6 +3492,7 @@ class DockLayoutMixin:
 
         # Bottom Area Distribution
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grading)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_base_grade)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_denoise)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_deblur)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_curves)
@@ -3471,6 +3508,7 @@ class DockLayoutMixin:
         # Tabify Bottom Tools
         self.tabifyDockWidget(self.dock_denoise, self.dock_deblur)
         self.tabifyDockWidget(self.dock_deblur, self.dock_grading)
+        self.tabifyDockWidget(self.dock_grading, self.dock_base_grade)
         self.tabifyDockWidget(self.dock_grading, self.dock_curves)
         self.tabifyDockWidget(self.dock_curves, self.dock_warper)
         self.tabifyDockWidget(self.dock_warper, self.dock_mixer)
@@ -3521,7 +3559,8 @@ class DockLayoutMixin:
         grade_sets = getattr(self, "dock_grade_sets", None)
         resources = tuple(dock for dock in (
             grade_sets, self.dock_presets, self.dock_lut, self.dock_plugin) if dock is not None)
-        primary = (self.dock_raw, self.dock_grading, self.dock_denoise, self.dock_deblur)
+        primary = (self.dock_raw, self.dock_grading, self.dock_base_grade,
+                   self.dock_denoise, self.dock_deblur)
         secondary = (self.dock_curves, self.dock_warper, self.dock_mixer,
                      self.dock_qualifier, self.dock_masks, self.dock_effects)
         analysis = (self.dock_analysis, self.dock_grain)
@@ -3589,7 +3628,7 @@ class DockLayoutMixin:
 
         # 立即应用当前页面的布局
         if self.current_page in self.page_layouts:
-            self.restoreState(self.page_layouts[self.current_page])
+            restore_workspace_dock_state(self, self.page_layouts[self.current_page], self.current_page)
 
     # ------------------------------------------------------------------
     # save_layout_dialog
@@ -3683,7 +3722,7 @@ class DockLayoutMixin:
         if geom and state:
             self.restoreGeometry(QByteArray.fromHex(geom.encode()))
             self._ensure_window_on_screen(self)
-            self.restoreState(QByteArray.fromHex(state.encode()))
+            restore_workspace_dock_state(self, QByteArray.fromHex(state.encode()), self.current_page)
             # 恢复所有页面的布局状态
             if panel_states:
                 self._apply_all_page_layouts(panel_states)
@@ -3964,7 +4003,9 @@ class DockLayoutMixin:
         if factory_geom and factory_state:
             self.restoreGeometry(QByteArray.fromHex(factory_geom.encode()))
             self._ensure_window_on_screen(self)
-            restored = self.restoreState(QByteArray.fromHex(factory_state.encode()))
+            restored = restore_workspace_dock_state(
+                self, QByteArray.fromHex(factory_state.encode()), self.current_page
+            )
 
         if restored:
             if (
@@ -4114,14 +4155,16 @@ class DockLayoutMixin:
                 # uses the shared dock_properties with its own panel.
                 if self.dock_properties is not None and self.edit_properties_panel is not None:
                     self.dock_properties.setWidget(self.edit_properties_panel)
-                self.restoreState(self.page_layouts[self.current_page])
+                restore_workspace_dock_state(self, self.page_layouts[self.current_page], self.current_page)
             else:
                 # No per-page layout saved — fall back to global window_state
                 last_state = self.config_manager.get("window_state")
                 if not last_state:
                     last_state = self.db.get_setting("last_state")
                 if last_state:
-                    self.restoreState(QByteArray.fromHex(last_state.encode()))
+                    restore_workspace_dock_state(
+                        self, QByteArray.fromHex(last_state.encode()), self.current_page
+                    )
 
         # Sync floating docks and update titlebars
         self._sync_floating_docks()
@@ -4294,6 +4337,11 @@ class DockLayoutMixin:
         (Edit feature disabled at startup).
         """
         color_active = self.current_page == "Color"
+        base_grade = getattr(self, "dock_base_grade", None)
+        if base_grade is not None:
+            base_grade.toggleViewAction().setEnabled(color_active)
+            if not color_active:
+                base_grade.hide()
         for attr in ("files_panel", "library_panel"):
             set_active = getattr(getattr(self, attr, None), "set_color_workspace_active", None)
             if callable(set_active):

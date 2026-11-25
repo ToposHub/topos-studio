@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 import numpy as np
 
+from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
+
 if TYPE_CHECKING:
     from src.shared.color.lut_loader import LoadedLut
 
@@ -528,6 +530,7 @@ def apply_layer_grading_cpu(
     detail_samples: np.ndarray | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Evaluate the primary grade stage for CPU rendering and pointwise bake."""
+    from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY, apply_base_grade_working
     from src.features.color.core.composition_uniforms import composition_uniform_values
     from src.features.color.core.primary_calibration import (
         apply_calibration_grid, calibrated_grade_inputs,
@@ -546,8 +549,14 @@ def apply_layer_grading_cpu(
                 color, grid, encoded_input=bool(layer.get("_rec709_calibration_encoded")))
     values = composition_uniform_values(
         dict(layer), width=width, height=height, grading_params_override=legacy_params)
-    return apply_grading_uniforms_cpu(
-        color, values, source_color=source_color, detail_samples=detail_samples), values
+    color = apply_grading_uniforms_cpu(
+        color, values, source_color=source_color, detail_samples=detail_samples)
+    grading = layer.get("grading_params")
+    if isinstance(grading, Mapping):
+        color = apply_base_grade_working(
+            color, grading, encoded_input=values["u_rec709_calibration_encoded"],
+            signal=layer.get(BASE_GRADE_SIGNAL_KEY))
+    return color, values
 
 
 def apply_curves_cpu(
@@ -606,6 +615,7 @@ CPU_GRADING_BASIC_KEYS = frozenset({
     "offset", "pivot", "log_shadow", "log_midtone", "log_highlight",
     "log_offset", "log_low_range", "log_high_range", "lum_mix",
     "primary_calibration_version",
+    *BASE_GRADE_DEFAULTS,
 })
 
 #: GL composition 忽略的别名死键（Layer 默认 dict 携带；CPU 同样忽略，
@@ -762,7 +772,7 @@ def _load_graph_lut(path: Path, file_revision: tuple[int, ...]) -> LoadedLut:
 
 def calibrated_warper_offsets(layer: Mapping[str, Any]) -> np.ndarray | None:
     """Return the calibrated HS texture payload, if active."""
-    from src.features.color.core.warper_color import WARPER_CHROMA709_SPACE, WARPER_PREPARED_SPACES
+    from src.features.color.core.warper_color import WARPER_PACKED_SPACES, WARPER_PREPARED_SPACES
 
     data = layer.get("warper_params")
     space = layer.get("warper_space")
@@ -770,7 +780,7 @@ def calibrated_warper_offsets(layer: Mapping[str, Any]) -> np.ndarray | None:
         return None
     offsets = np.asarray(data, dtype=np.float32)
     if (offsets.ndim != 3 or offsets.shape[2] != 3 or offsets.shape[0] < 2
-            or (offsets.shape[1] != 1 if space == WARPER_CHROMA709_SPACE else offsets.shape[1] < 2)):
+            or (offsets.shape[1] != 1 if space in WARPER_PACKED_SPACES else offsets.shape[1] < 2)):
         raise ValueError("Invalid 709 Color Warper grid shape")
     if not np.isfinite(offsets).all():
         raise ValueError("Invalid 709 Color Warper grid values")
@@ -799,26 +809,9 @@ def _apply_lut3d_cpu(graded: np.ndarray, path: str,
     return blend_node_lut_strength(graded, sampled, strength).astype(_F32)
 
 
-def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
-                                mask: np.ndarray | None = None,
-                                *, width: int = 0, height: int = 0
-                                ) -> np.ndarray:
-    """生产域 Corrector CPU oracle（GL executor 同一参数路径）。
-
-    参数提取复用 ``composition_uniform_values``（与 GL uniform 同源），
-    数学逐条移植 GRADING/CURVES SNIPPET；epilogue 为 composition main
-    的 ``mix(input, blend(input, graded), mask*opacity)``（Normal）。
-    基础域外参数经 :func:`production_layer_domain_errors` 显式拒绝
-    （qualifier/窗口空间域由调用方供 ``mask`` 时放行——N02 run_plan_cpu
-    已用 keyer/combine 的 CPU 移植显式求值）。
-    """
-    errors = production_layer_domain_errors(
-        layer, spatial_mask_supplied=mask is not None, backend="cpu")
-    if errors:
-        raise UnsupportedNode("; ".join(errors))
-    h, w = image.shape[:2]
-    src = np.ascontiguousarray(image, dtype=_F32)
-    input_rgb = src[..., :3]
+def _corrector_before_warper_cpu(
+    input_rgb: np.ndarray, layer: Mapping[str, Any], *, width: int, height: int,
+) -> tuple[np.ndarray, Mapping[str, Any]]:
     color = input_rgb
     effects = layer.get("effects_params")
     if isinstance(effects, Mapping):
@@ -827,7 +820,7 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
             color = apply_mist_cpu(color, spread, amount, calibrated=mist_is_calibrated(effects))
     encoded = bool(layer.get("_rec709_calibration_encoded"))
     graded, values = apply_layer_grading_cpu(
-        color, layer, width=width or w, height=height or h,
+        color, layer, width=width, height=height,
         detail_samples=None if color is input_rgb else input_rgb)
     lut = layer.get("curves_lut")
     if lut is not None:
@@ -876,6 +869,47 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         mixer = {channel: values[f"u_{channel}_p"] for channel in _MIXER_CHANNELS}
         if ShaderPipeline.has_active_mixer_params(mixer):
             graded = GradingMath.apply_mixer(graded, mixer).astype(_F32)
+    return graded, values
+
+
+def x_grade_input_rgb(pixels: np.ndarray, layer: Mapping[str, Any], *, encoded_input: bool) -> np.ndarray:
+    """Evaluate the stages upstream of X Grade on a small viewer sample."""
+    from src.features.color.core.x_grade_render import sample_base_warper
+
+    layer = {**layer, "_rec709_calibration_encoded": encoded_input}
+    h, w = pixels.shape[:2]
+    color, _ = _corrector_before_warper_cpu(pixels, layer, width=w, height=h)
+    offsets = layer.get("warper_params")
+    if offsets is not None:
+        color = sample_base_warper(
+            color, np.asarray(offsets, dtype=np.float32), int(layer.get("warper_space") or 0),
+            encoded_input=encoded_input,
+        )
+    return color
+
+
+def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
+                                mask: np.ndarray | None = None,
+                                *, width: int = 0, height: int = 0
+                                ) -> np.ndarray:
+    """生产域 Corrector CPU oracle（GL executor 同一参数路径）。
+
+    参数提取复用 ``composition_uniform_values``（与 GL uniform 同源），
+    数学逐条移植 GRADING/CURVES SNIPPET；epilogue 为 composition main
+    的 ``mix(input, blend(input, graded), mask*opacity)``（Normal）。
+    基础域外参数经 :func:`production_layer_domain_errors` 显式拒绝
+    （qualifier/窗口空间域由调用方供 ``mask`` 时放行——N02 run_plan_cpu
+    已用 keyer/combine 的 CPU 移植显式求值）。
+    """
+    errors = production_layer_domain_errors(
+        layer, spatial_mask_supplied=mask is not None, backend="cpu")
+    if errors:
+        raise UnsupportedNode("; ".join(errors))
+    h, w = image.shape[:2]
+    src = np.ascontiguousarray(image, dtype=_F32)
+    input_rgb = src[..., :3]
+    graded, values = _corrector_before_warper_cpu(input_rgb, layer, width=width or w, height=height or h)
+    encoded = bool(layer.get("_rec709_calibration_encoded"))
     warper = calibrated_warper_offsets(layer)
     if warper is not None:
         from src.features.color.core.warper_color import (
@@ -1187,6 +1221,7 @@ def run_graph_frame_cpu(
     *,
     plan_cache: dict | None = None,
     rec709_calibration_encoded: bool = False,
+    base_grade_signal: Mapping[str, Any] | None = None,
     pre_chain: Sequence[Mapping[str, Any]] = (),
     post_chain: Sequence[Mapping[str, Any]] = (),
 ) -> np.ndarray:
@@ -1236,7 +1271,8 @@ def run_graph_frame_cpu(
             if extra.get("_unsupported_advanced"):
                 raise UnsupportedNode("Advanced Color chain segment requires full graph execution")
             graded = GradingMath.apply_grading(
-                buf[..., :3], dict(extra), rec709_calibration_encoded=rec709_calibration_encoded)
+                buf[..., :3], dict(extra), rec709_calibration_encoded=rec709_calibration_encoded,
+                base_grade_signal=base_grade_signal)
             buf = buf.copy()
             buf[..., :3] = graded
         return buf
@@ -1249,7 +1285,7 @@ def run_graph_frame_cpu(
                          cache=plan_cache)
     provider = graph_node_layer_provider(
         snapshot.graph, frame=int(source_frame),
-        rec709_calibration_encoded=rec709_calibration_encoded)
+        rec709_calibration_encoded=rec709_calibration_encoded, base_grade_signal=base_grade_signal)
     execution = run_plan_cpu(
         plan, work,
         params_of=lambda render_pass: provider(render_pass.node_id) or {})

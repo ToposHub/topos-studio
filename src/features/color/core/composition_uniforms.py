@@ -43,6 +43,11 @@ import math
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from src.features.color.core.base_grade import base_grade_active
+from src.features.color.core.base_grade_runtime import (
+    BASE_GRADE_SIGNAL_KEY, BASE_GRADE_SIGNAL_UNIFORMS, BASE_GRADE_UNIFORMS,
+    base_grade_signal_uniform_values, base_grade_uniform_values,
+)
 from src.features.color.core.layer import Layer
 from src.features.color.core.curves_soft_clip import soft_clip_calibration_version
 from src.features.color.core.mist import mist_is_calibrated, mist_render_params
@@ -279,6 +284,7 @@ def build_composition_uniform_manifest(
     warper_space: int = 0,
     grain_enabled: bool = False,
     has_primary_calibration: bool = False,
+    has_base_grade: bool = False,
     bindings: Sequence[PluginBinding] = (),
 ) -> CompositionUniformManifest:
     """组装 composition 管线的完整 uniform manifest。
@@ -339,6 +345,9 @@ def build_composition_uniform_manifest(
     decls.append(UniformDecl(name="u_rec709_calibration_encoded", glsl_type="bool",
                              section="header"))
     decls.append(UniformDecl(name="u_mist_calibrated", glsl_type="bool", section="header"))
+    if has_base_grade:
+        decls.extend(UniformDecl(name=name, glsl_type=glsl_type)
+                     for name, glsl_type in (*BASE_GRADE_UNIFORMS, *BASE_GRADE_SIGNAL_UNIFORMS))
     return CompositionUniformManifest(_layout(decls), warper_space=warper_space if has_warper else 0)
 
 
@@ -513,6 +522,9 @@ def composition_uniform_values(
     values["u_log_low_range"] = _get_scalar(p, "log_low_range", 0.333)
     values["u_log_high_range"] = _get_scalar(p, "log_high_range", 0.550)
     values["u_lum_mix"] = min(max(_get_scalar(p, "lum_mix", 100.0), 0.0), 100.0)
+    if base_grade_active(p):
+        values.update(base_grade_uniform_values(p))
+        values.update(base_grade_signal_uniform_values(_layer_get(layer, BASE_GRADE_SIGNAL_KEY)))
 
     m = _layer_get(layer, "mixer_params")
     if not isinstance(m, Mapping):

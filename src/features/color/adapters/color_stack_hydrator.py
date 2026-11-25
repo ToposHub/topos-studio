@@ -438,9 +438,10 @@ class ColorStackHydrator:
         self._apply_curves_to_panel(stack, panels.get("curves_panel"), payload)
         self._apply_curves_palette_to_panel(stack, panels.get("curves_palette"), payload)
         self._apply_hsl_to_panel(stack, panels.get("hsl_panel"), payload)
-        warper = panels.get("warper_panel")
-        if warper is not None and warper_layer is not None:
-            warper.load_layer_state(warper_layer)
+        if warper_layer is not None:
+            for key in ("warper_panel", "x_grade_panel"):
+                if (panel := panels.get(key)) is not None:
+                    panel.load_layer_state(warper_layer)
         self._apply_mixer_to_panel(stack, panels.get("mixer_panel"))
         self._apply_effects_to_panel(stack, panels.get("effects_panel"), grading_payload)
         self._apply_lut_to_panel(stack, panels.get("lut_panel"))
@@ -640,7 +641,8 @@ class ColorStackHydrator:
     ) -> None:
         """Apply *stack* to both engine and panels, then trigger render."""
         self.apply_stack_to_engine(stack, engine)
-        warper_layer = engine.get_active_layer() if engine is not None and "warper_panel" in panels else None
+        warper_layer = (engine.get_active_layer()
+                        if engine is not None and {"warper_panel", "x_grade_panel"}.intersection(panels) else None)
         self.apply_stack_to_panels(stack, panels, warper_layer=warper_layer)
         if engine and hasattr(engine, "render_pipeline"):
             engine.render_pipeline()

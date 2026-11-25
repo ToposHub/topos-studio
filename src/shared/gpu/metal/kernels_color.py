@@ -646,6 +646,11 @@ struct GraphGradingParams {
     float opacity;
     uint32_t mask_mode;   // 0 = 无 matte（k = opacity）；1 = matte buffer
     uint32_t has_curves;  // 0 = bypass, 1 = absolute RGB, 2 = calibrated YRGB
+    uint32_t base_grade_enabled;
+    uint32_t base_grade_encoded;
+    int32_t base_grade_transfer;
+    float base_grade[31];
+    float base_grade_signal[21];
 };
 """
 
@@ -1036,6 +1041,9 @@ static inline float3 graph_grading_after_detail(
                          (100.0 - p.lum_mix) / 100.0);
         }
     }
+#ifdef TOPOS_GRAPH_BASE_GRADE
+    color = graph_apply_base_grade(color, p);
+#endif
     return color;
 }
 
@@ -1148,37 +1156,40 @@ kernel void graph_grading(
 }
 """
 
-# 点态校色库接在调用方的 Metal 标准库与 namespace 声明之后。
-METAL_POINTWISE_GRADING_MSL = (
-    _GRAPH_GRADING_PARAMS_MSL
-    + _GRAPH_HSV_MSL
-    + _GRAPH_APPLY_GRADING_MSL
-    + _GRAPH_APPLY_CURVES_MSL
-)
+def build_metal_pointwise_grading_msl(grading_extension: str = "") -> str:
+    """Build the pointwise grading library after the caller's Metal header."""
+    return (_GRAPH_GRADING_PARAMS_MSL + grading_extension + _GRAPH_HSV_MSL
+            + _GRAPH_APPLY_GRADING_MSL + _GRAPH_APPLY_CURVES_MSL)
+
+
+METAL_POINTWISE_GRADING_MSL = build_metal_pointwise_grading_msl()
 
 # 保持完整图 kernel 的源码和定义顺序。
-_METAL_GRAPH_COMMON_MSL = (
-    _GRAPH_SIZE_PARAMS_MSL
-    + _GRAPH_GRADING_PARAMS_MSL
-    + _GRAPH_COPY_MIX_MSL
-    + _GRAPH_HSV_MSL
-    + _GRAPH_NODE_OPS_MSL
-    + _GRAPH_APPLY_GRADING_MSL
-    + _GRAPH_APPLY_CURVES_MSL
-)
-
-METAL_GRAPH_OPS_MSL = _METAL_GRAPH_COMMON_MSL + _GRAPH_GRADING_KERNEL_MSL
+def _metal_graph_common_msl(grading_extension: str) -> str:
+    return (_GRAPH_SIZE_PARAMS_MSL + _GRAPH_GRADING_PARAMS_MSL + grading_extension
+            + _GRAPH_COPY_MIX_MSL + _GRAPH_HSV_MSL + _GRAPH_NODE_OPS_MSL
+            + _GRAPH_APPLY_GRADING_MSL + _GRAPH_APPLY_CURVES_MSL)
 
 
-def build_metal_graph_warper_msl(warper_code: str, *, v2: bool = False, chroma: bool = False) -> str:
+def build_metal_graph_ops_msl(grading_extension: str = "") -> str:
+    return _metal_graph_common_msl(grading_extension) + _GRAPH_GRADING_KERNEL_MSL
+
+
+METAL_GRAPH_OPS_MSL = build_metal_graph_ops_msl()
+
+
+def build_metal_graph_warper_msl(warper_code: str, *, v2: bool = False, chroma: bool = False,
+                               x_grade: bool = False, grading_extension: str = "") -> str:
     """Compile calibrated Warper with its own texture-binding variant."""
     suffix = "_v2" if v2 else ""
     kernel = "graph_grading_chroma709" if chroma else f"graph_grading_709{suffix}"
     apply = "msl_apply_warper_chroma709" if chroma else f"msl_apply_resolve_hs709{suffix}"
+    if x_grade:
+        kernel, apply = "graph_grading_x_grade", "msl_apply_x_grade"
     return ("#define TOPOS_GRAPH_WARPER_709\n"
             f"#define graph_grading {kernel}\n"
             f"#define TOPOS_GRAPH_WARPER_APPLY {apply}\n"
-            + _METAL_GRAPH_COMMON_MSL + warper_code + _GRAPH_GRADING_KERNEL_MSL)
+            + _metal_graph_common_msl(grading_extension) + warper_code + _GRAPH_GRADING_KERNEL_MSL)
 
 # GraphSizeParams / GraphGradingParams 的 numpy 布局（4 字节字段紧排）
 GRAPH_SIZE_PARAMS_DTYPE = np.dtype([
@@ -1206,6 +1217,10 @@ GRAPH_GRADING_PARAMS_DTYPE = np.dtype([
     ("lum_mix", "<f4"),
     ("opacity", "<f4"),
     ("mask_mode", "<u4"), ("has_curves", "<u4"),
+    ("base_grade_enabled", "<u4"), ("base_grade_encoded", "<u4"),
+    ("base_grade_transfer", "<i4"),
+    ("base_grade", "<f4", (31,)),
+    ("base_grade_signal", "<f4", (21,)),
 ])
 
 
@@ -1235,6 +1250,10 @@ def make_graph_grading_params(
     log_low_range: float = 0.333,
     log_high_range: float = 0.550,
     lum_mix: float = 100.0,
+    base_grade: tuple[float, ...] = (),
+    base_grade_encoded: bool = False,
+    base_grade_transfer: int = -1,
+    base_grade_signal: tuple[float, ...] = (),
 ) -> np.ndarray:
     """打包 MSL ``GraphGradingParams``（字段与 struct 逐一对齐）。"""
     scalars = [exposure, temp, tint, contrast, saturation, vibrance, shadow,
@@ -1268,6 +1287,17 @@ def make_graph_grading_params(
     params["opacity"] = float(opacity)
     params["mask_mode"] = int(mask_mode)
     params["has_curves"] = 2 if calibrated_curves else int(has_curves)
+    if base_grade:
+        if len(base_grade) != 31 or not all(np.isfinite(value) for value in base_grade):
+            raise ValueError("Base Grade requires 31 finite values")
+        params["base_grade"] = base_grade
+        params["base_grade_enabled"] = 1
+        params["base_grade_encoded"] = int(base_grade_encoded)
+        params["base_grade_transfer"] = int(base_grade_transfer)
+        if base_grade_transfer >= 0:
+            if len(base_grade_signal) != 21 or not all(np.isfinite(value) for value in base_grade_signal):
+                raise ValueError("Base Grade working signal requires 21 finite values")
+            params["base_grade_signal"] = base_grade_signal
     return params
 
 

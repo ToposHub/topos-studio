@@ -205,6 +205,13 @@ resolution_readbacks` 在命令循环里轮询，fence 就绪后 emit）；PBO �
   （if u_sc_enabled）→ mixer → warper → 3D LUT → 插件 `process_P{i}` →
   blend_mode → `mix(color, blended, mask * u_opacity)` → film grain → 输出
   `vec4(color, tex_color.a)`。
+- Base Grade 与色轮并列停靠，标题栏图标切换影调区间，响应曲线随面板宽度自动显隐。
+  Base Grade 使用当前 Corrector 的 `grading_params`，标量字段以
+  `base_grade_` 开头，旧工程缺少字段时使用中性参数，现有关键帧和撤销机制继续处理这些标量。
+  Base Grade 在一级调色之后、曲线之前执行，随后与该节点的限定器、蒙版和不透明度一同合成。
+  CPU、OpenGL 和 Metal 使用相同的曝光与影调区间响应。参数非中性时按工作域转换至线性
+  Rec.709 执行，再恢复到节点输入域。LUT 导出沿用采样域的同一转换。
+  [Baselight TIFF 对照](../validation/baselight_base_grade_calibration.md)
 - 色彩扭曲器保存各面板的控制数据和算法版本。色相–饱和度与色度–亮度可以叠加，
   色度扭曲使用自己的笔画和固定点。执行 DTO 根据当前模式派生控制载荷，CPU、OpenGL
   和 Metal 在既有 warper 阶段采样同一响应纹理。查看器暂停取样在 Corrector 的
@@ -215,6 +222,15 @@ resolution_readbacks` 在命令循环里轮询，fence 就绪后 emit）；PBO �
   Warper 手势的逐步预览只提交到调色合并队列，松手再提交节点的完整状态。
   同一节点和视频帧内的采样刷新保留已有分布，新的已确认样本一次性替换旧分布。
   [色彩扭曲器实测](../validation/resolve_warper_calibration.md)
+- X Grade 在 `warper_state.x_grade` 按子 schema 版本 1 保存有序颜色笔画、保护点和中性保护。
+  UI 通过色彩扭曲器的模式图标切换，色度图的弧形底图独立于 Rec.709 取色坐标并适配横向面板。
+  可见且启用取色的模式独占查看器取色手势，
+  切换或隐藏工具时会取消预览并清除取色标记。
+  旧工程可以省略该字段。渲染线程将颜色位移与曝光档位求解为共享响应纹理，
+  供 OpenGL、Metal 和 CPU 采样。X Grade 在同一校色节点内接在原有色彩扭曲器之后，
+  与它共用渲染纹理槽位。工作域为线性 Rec.709 或 Rec.709 Gamma 2.4。
+  亮度分区采用对数采样，曝光乘数作用于场景线性数据并保留超白信号。
+  点态 LUT 导出从同一响应求值。[Baselight 手感和 TIFF 对照](../validation/baselight_x_grade_calibration.md)
 - 雾化在现有 `effects_params` 中保存 `mist_enabled`、`mist_radius`（0–1）和
   `mist_mix`（0–100）。旧工程缺字段时关闭，打开后默认半径 0、Mixer 33。
   片段级 OpenGL、Metal 纹理预览和 CPU 视频交付使用相同的扩散采样权重。

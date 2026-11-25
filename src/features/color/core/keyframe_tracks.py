@@ -34,6 +34,8 @@ import math
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Tuple
 
+from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
+
 # ---------------------------------------------------------------------------
 # 键型与动态属性
 # ---------------------------------------------------------------------------
@@ -327,6 +329,7 @@ GRADE_TRACK_FIELDS: Tuple[TrackFieldSpec, ...] = (
     TrackFieldSpec("log_low_range", "scalar"),
     TrackFieldSpec("log_high_range", "scalar"),
     TrackFieldSpec("lum_mix", "scalar"),
+    *(TrackFieldSpec(name, "scalar") for name in BASE_GRADE_DEFAULTS),
 )
 
 #: 窗口域（mask.<shape_id>.<field>）。points/grad_points（点集）与离散

@@ -34,6 +34,10 @@ _IDENTITY_WHEELS = ("lift", "gamma", "gain")
 
 def _params_active(params: dict) -> bool:
     """基础调色参数是否偏离恒等（与快照 basic_active 判定同口径）。"""
+    from src.features.color.core.base_grade import base_grade_active
+
+    if base_grade_active(params):
+        return True
     for name in _IDENTITY_SCALARS:
         try:
             if abs(float(params.get(name, 0.0) or 0.0)) > 1e-6:

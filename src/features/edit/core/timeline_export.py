@@ -70,6 +70,10 @@ from typing import (
 
 from src.features.edit.core.proxy_policy import export_source_path
 from src.features.edit.core.audio_playback import unpack_send
+from src.features.color.core.base_grade import base_grade_active
+from src.features.color.core.base_grade_runtime import (
+    base_grade_graph_signal, base_grade_timeline_space, base_grade_working_signal,
+)
 from src.features.color.core.curves_soft_clip import (
     curves_edit_is_default,
     curves_soft_clip_is_identity,
@@ -8496,7 +8500,9 @@ class TimelineExporter:
                     return unsupported
                 correctors = ()
             else:
-                correctors = serial_metal_delivery_grade(graph, width, height)
+                correctors = serial_metal_delivery_grade(
+                    graph, width, height, rec709_calibration_encoded=timeline_uses_rec709_gamma24(
+                        getattr(self, "_export_video_signal_spaces", None)))
                 # Keep variants small and bound the number of bound textures
                 # in two-sided transitions on older Mac GPUs.
                 if not correctors or len(correctors) > 4:
@@ -11989,6 +11995,8 @@ class TimelineExporter:
             raise ValueError("Midtone Detail outside the color graph requires the CPU compositor")
         if any(grade_uses_calibration({"grading_params": extra}) for extra in chain_extras):
             raise ValueError("Measured color chain requires the CPU compositor")
+        if any(base_grade_active(extra) for extra in chain_extras):
+            raise ValueError("Base Grade in a color-chain segment requires the CPU compositor")
         main = grade_params_to_uniforms(grading_params)
         # M05（S08）/F4.1：链段作为 grade pass 序列返回，渲染端按序逐段
         # 过 shader（mid FBO 乒乓）——pre 段在主栈**之前**，trim/post 段
@@ -12086,6 +12094,7 @@ class TimelineExporter:
             timeline_id = getattr(timeline, "timeline_id", None) or getattr(clip, "timeline_id", "")
             extras = chain_extra_params(project, str(timeline_id), clip, exclude_timeline=exclude_timeline)
             if any(extra.get("mid_detail") or grade_uses_calibration({"grading_params": extra})
+                   or base_grade_active(extra)
                    for extra in extras):
                 return {"grading_params": {}, "chain_extra_params": extras}
             return None
@@ -12165,7 +12174,7 @@ class TimelineExporter:
             except (TypeError, ValueError):
                 return value != default
 
-        basic_active = grade_uses_calibration(stack) or any(
+        basic_active = grade_uses_calibration(stack) or base_grade_active(grading_params) or any(
             changed(grading_params.get(name, default), default)
             for name, default in {**wheel_defaults, **scalar_defaults}.items()
         )
@@ -12555,7 +12564,27 @@ class TimelineExporter:
         project = self._project
         stacks = getattr(project, "color_stacks", {}) if project is not None else {}
         stack = stacks.get(stack_id)
-        return stack_primary_execution_graph(stack)
+        graph = stack_primary_execution_graph(stack)
+        if graph is not None:
+            from src.features.color.core.x_grade_domain import (
+                X_GRADE_WORKING_MESSAGE, active_x_grade_node, x_grade_working_supported,
+            )
+
+            settings = getattr(project, "color_management", None)
+            spaces = getattr(self, "_export_video_signal_spaces", None)
+            if spaces is None:
+                spaces = video_signal_spaces(settings)
+            if spaces and not x_grade_working_supported(spaces[0]):
+                node_id = active_x_grade_node(graph)
+                if node_id is not None:
+                    raise ExportGradeDegradedError(
+                        f"Clip {getattr(layer, 'clip_id', '?')}, corrector {node_id}: {X_GRADE_WORKING_MESSAGE}")
+            hdr = getattr(self, "_hdr_export", None) or project_hdr_settings(settings)
+            grade_space = base_grade_timeline_space(
+                spaces[0] if spaces else None, settings, project, getattr(layer, "asset_id", None))
+            graph = base_grade_graph_signal(
+                graph, grade_space, hdr.luminance if hdr else None, explicit_rec709=spaces is None)
+        return graph
 
     def _apply_color_graph_cpu(
         self,
@@ -12607,11 +12636,16 @@ class TimelineExporter:
         allow_degraded = bool(getattr(self, "allow_degraded_grade", False))
         source_frame = int(getattr(layer, "source_frame", 0) or 0)
         try:
+            spaces = getattr(self, "_export_video_signal_spaces", None)
+            if spaces is None:
+                spaces = video_signal_spaces(getattr(project, "color_management", None))
+            base_grade_extras = any(base_grade_active(extra) for extra in extras)
+            signal = self._base_grade_chain_signal(layer, spaces) if base_grade_extras else None
             return run_graph_frame_cpu(
                 graph, frame_data, source_frame,
                 plan_cache=getattr(self, "_graph_plan_cache", None),
-                rec709_calibration_encoded=timeline_uses_rec709_gamma24(
-                    getattr(self, "_export_video_signal_spaces", None)),
+                rec709_calibration_encoded=timeline_uses_rec709_gamma24(spaces),
+                base_grade_signal=signal,
                 pre_chain=pre, post_chain=after)
         except (UnsupportedNode, GraphCompileError) as exc:
             if not allow_degraded:
@@ -12887,26 +12921,33 @@ class TimelineExporter:
                 e for e in extras if e.get("_chain_segment") == "pre"]
             after_entries = [
                 e for e in extras if e.get("_chain_segment") != "pre"]
-            encoded = timeline_uses_rec709_gamma24(getattr(self, "_export_video_signal_spaces", None))
+            spaces = getattr(self, "_export_video_signal_spaces", None)
+            base_grade_on = base_grade_active(grading_params) or any(base_grade_active(extra) for extra in extras)
+            if spaces is None and base_grade_on:
+                project = getattr(self, "_project", None)
+                spaces = video_signal_spaces(getattr(project, "color_management", None))
+            encoded = timeline_uses_rec709_gamma24(spaces)
+            signal = self._base_grade_chain_signal(layer, spaces) if base_grade_on else None
 
             def _apply_entries(buf, entries):
                 for extra in entries:
                     if extra.get("_unsupported_advanced", False):
                         from src.features.color.core.primary_calibration import grade_uses_calibration
 
-                        if grade_uses_calibration({"grading_params": extra}):
-                            raise ExportGradeDegradedError("Measured color chain segment has unsupported advanced operations")
+                        if grade_uses_calibration({"grading_params": extra}) or base_grade_active(extra):
+                            raise ExportGradeDegradedError("Color chain segment has unsupported advanced operations")
                         logger.warning(
                             "Export color chain: clip %s 链段含 curves/LUT"
                             " 等高级操作，primary 导出跳过该段",
                             layer.clip_id)
                         continue
-                    buf = GradingMath.apply_grading(buf, extra, rec709_calibration_encoded=encoded)
+                    buf = GradingMath.apply_grading(
+                        buf, extra, rec709_calibration_encoded=encoded, base_grade_signal=signal)
                 return buf
 
             graded = _apply_entries(rgb, pre_entries)
             graded = GradingMath.apply_grading(
-                graded, grading_params, rec709_calibration_encoded=encoded)
+                graded, grading_params, rec709_calibration_encoded=encoded, base_grade_signal=signal)
             # M05.2b：RGB 曲线（GPU 合成序中 curves 在主 grade 之后，
             # 见 shader_compiler build_composition_shader 的段序）
             curves_data = grade.get("curves_data")
@@ -13031,6 +13072,17 @@ class TimelineExporter:
                 f"color grade failed for clip {layer.clip_id}: {error}"
             ) from error
 
+    def _base_grade_chain_signal(
+        self, layer: "ClipLayerInfo", spaces: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None,
+    ) -> dict[str, Any] | None:
+        project = getattr(self, "_project", None)
+        settings = getattr(project, "color_management", None)
+        hdr = getattr(self, "_hdr_export", None) or project_hdr_settings(settings)
+        grade_space = base_grade_timeline_space(
+            spaces[0] if spaces else None, settings, project, getattr(layer, "asset_id", None))
+        return base_grade_working_signal(
+            grade_space, hdr.luminance if hdr else None, explicit_rec709=spaces is None)
+
     def _get_independent_grade_lut(
         self,
         grading_params: Dict[str, Any],
@@ -13047,7 +13099,7 @@ class TimelineExporter:
         import numpy as np
         from src.features.color.core.primary_calibration import grade_uses_calibration
 
-        if grade_uses_calibration({"grading_params": grading_params}):
+        if grade_uses_calibration({"grading_params": grading_params}) or base_grade_active(grading_params):
             return None
 
         coupled_controls = ("highlights", "vibrance", "hue_shift", "saturation", "mid_detail")

@@ -34,7 +34,7 @@ from src.features.color.core.composition_uniforms import (
 )
 from src.features.color.core.mist import MIST_MSL
 from src.features.color.core.warper_color import (
-    RESOLVE_HS709_RESPONSE_SPACES, RESOLVE_HS709_SPACE, WARPER_CHROMA709_SPACE,
+    RESOLVE_HS709_RESPONSE_SPACES, RESOLVE_HS709_SPACE, WARPER_CHROMA709_SPACE, WARPER_X_GRADE_SPACE,
 )
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
@@ -221,6 +221,12 @@ def emit_composition_msl(
         parts.append(MSL_HSV_FUNCS)
     if "grading" in active_effects:
         parts += [MSL_GRADING_HELPERS, MSL_GRADING]
+    has_base_grade = ("grading" in active_effects
+                      and manifest.decl("u_base_grade_global") is not None)
+    if has_base_grade:
+        from src.features.color.core.base_grade_runtime import base_grade_msl_source
+
+        parts.append(base_grade_msl_source())
     if "curves" in active_effects or "hsl_curve" in active_effects:
         parts += [MSL_CURVES_HELPERS, MSL_CURVES]
     if "lut3d" in active_effects:
@@ -228,7 +234,16 @@ def emit_composition_msl(
     if "mixer" in active_effects:
         parts.append(MSL_MIXER)
     if "warper" in active_effects:
-        if manifest.warper_space == WARPER_CHROMA709_SPACE:
+        if manifest.warper_space == WARPER_X_GRADE_SPACE:
+            from src.features.color.core.shader_nodes_msl import (
+                MSL_RESOLVE_HS709, MSL_RESOLVE_HS709_V2, MSL_WARPER_CHROMA709,
+            )
+            from src.features.color.core.x_grade_shader import MSL_X_GRADE
+
+            parts.extend((MSL_WARPER_CHROMA709, MSL_RESOLVE_HS709, MSL_RESOLVE_HS709_V2, MSL_X_GRADE))
+            pipeline_calls = {**_PIPELINE_CALLS,
+                              "warper": "color = msl_apply_x_grade(color, u_warper_tex, params.u_rec709_calibration_encoded != 0u);"}
+        elif manifest.warper_space == WARPER_CHROMA709_SPACE:
             from src.features.color.core.shader_nodes_msl import MSL_WARPER_CHROMA709
 
             parts.append(MSL_WARPER_CHROMA709)
@@ -271,6 +286,12 @@ def emit_composition_msl(
     signature = ",\n                                   ".join(args)
     # blend_modes 语义在 main 尾部（matte 采样 + blend/mix），film_grain
     # 在 mix 之后（GL main 末位）；其余效果按 composition 顺序发射调用。
+    if has_base_grade:
+        from src.features.color.core.base_grade_runtime import base_grade_shader_call
+
+        call = base_grade_shader_call(
+            "color", "params.u_rec709_calibration_encoded != 0u", metal_layout="composition")
+        pipeline_calls = {**pipeline_calls, "grading": f"{pipeline_calls['grading']}\n    color = {call};"}
     body_lines = [f"    {pipeline_calls[e]}" for e in active_effects
                   if e in pipeline_calls]
     if "blend_modes" in active_effects:

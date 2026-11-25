@@ -1,8 +1,9 @@
 import numpy as np
 import os
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
+from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY, apply_base_grade_working
 from src.features.color.core.primary_calibration import grade_uses_calibration
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,7 @@ class GradingMath:
     @staticmethod
     def apply_grading(
         color: np.ndarray, params: Dict[str, Any], *, rec709_calibration_encoded: bool = False,
+        base_grade_signal: Mapping[str, Any] | None = None,
     ) -> np.ndarray:
         """
         NumPy implementation of apply_grading snippet from shader_nodes.py
@@ -210,6 +212,8 @@ class GradingMath:
             from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
 
             layer["_rec709_calibration_encoded"] = rec709_calibration_encoded
+            if base_grade_signal:
+                layer[BASE_GRADE_SIGNAL_KEY] = base_grade_signal
             height, width = frame_shape[:2] if frame_shape is not None else (1, 1)
             return apply_layer_grading_cpu(color, layer, width=width, height=height)[0]
         mid_detail = float(params.get("mid_detail") or 0.0)
@@ -390,6 +394,8 @@ class GradingMath:
             blend = dt.type((100.0 - lum_mix) / 100.0)
             res *= (dt.type(1.0) + blend * (ratio - dt.type(1.0)))[..., np.newaxis]
 
+        res = apply_base_grade_working(
+            res, params, encoded_input=rec709_calibration_encoded, signal=base_grade_signal)
         return res if frame_shape is None else res.reshape(frame_shape)
 
     @staticmethod

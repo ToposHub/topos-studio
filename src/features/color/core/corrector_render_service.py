@@ -66,6 +66,7 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
     失败路径由调用方记录诊断并**阻断依赖锥**（不 continue 丢层——
     导出侧硬门在 B13，此处先给出显式返回值）。
     """
+    from src.features.color.core.base_grade import base_grade_active
     from src.features.color.core.curves_soft_clip import (
         curves_soft_clip_is_identity,
     )
@@ -112,6 +113,7 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
         has_mixer=has_mixer, has_curves_soft_clip=has_curves_soft_clip,
         plugins=plugin_bindings or None,
         has_primary_calibration=grade_uses_calibration(layer),
+        has_base_grade=base_grade_active(_get("grading_params") or {}),
         request_id=request_id, layer_id=layer_id,
     )
     if program is None:

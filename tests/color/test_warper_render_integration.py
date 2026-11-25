@@ -6,6 +6,7 @@ GPU 部分在真实 GL 上下文编译生产 ShaderPipeline(无 GL 环境 skip);
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -20,7 +21,10 @@ from src.features.color.core.warper_state import (
     WARPER_SCHEMA_VERSION,
     CURRENT_ALGORITHM,
     WarperGrid,
+    WarperPinPoint,
     WarperStateV2,
+    WarperStroke,
+    XGradeState,
     describe_warper_capabilities,
     legacy_from_ndarray,
     renderable_projection,
@@ -200,8 +204,9 @@ def test_v2_variant_renders_fixture_grid_consistently_with_cpu() -> None:
     quad.release(); vao.release()
 
 
-@pytest.fixture(params=[3, 4, 5, "chroma_luma", "chroma_warp"],
-                ids=["709-v1", "709-v2", "709-v3", "chroma-luma", "chroma-warp"])
+@pytest.fixture(params=[3, 4, 5, "chroma_luma", "chroma_warp", "x_grade", "combined_x_grade"],
+                ids=["709-v1", "709-v2", "709-v3", "chroma-luma", "chroma-warp",
+                     "x-grade", "combined-x-grade"])
 def calibrated_graph_case(request: pytest.FixtureRequest) -> tuple:
     from src.shared.project.color_graph import ColorEdgeData, ColorGraphData, ColorNodeData, NodeType
 
@@ -212,8 +217,21 @@ def calibrated_graph_case(request: pytest.FixtureRequest) -> tuple:
     offsets = np.zeros((6, 8, 3), np.float32)
     offsets[1:5, (0, 4, 7), :] = (0.06, -0.08, 0.09)
     space = request.param
-    if isinstance(space, str):
-        from src.features.color.core.warper_state import CHROMA709_ALGORITHM, WarperStroke
+    if space in ("x_grade", "combined_x_grade"):
+        from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHM_V3
+
+        source = tuple(colors[0, 0, :3] ** (1.0 / 2.4))
+        target = tuple(np.array((0.72, 0.26, 0.13)) ** (1.0 / 2.4))
+        stroke = WarperStroke("red", "normal", source, target,
+                              {"chroma_range": 0.06, "exposure": 0.8, "x_zone": "light"})
+        base = _hsp_state()
+        if space == "combined_x_grade":
+            grid = WarperGrid.identity("hs", 6, 8, ("dh", "ds", "dl")).with_offsets(offsets)
+            base = replace(base, algorithm_version=RESOLVE_HS_ALGORITHM_V3, grids={"hs": grid})
+        state = replace(base, x_grade=XGradeState(strokes=(stroke,)))
+        offsets, space = renderable_projection(state)
+    elif isinstance(space, str):
+        from src.features.color.core.warper_state import CHROMA709_ALGORITHM
 
         if space == "chroma_luma":
             grid = WarperGrid.identity("grid1", 7, 7, ("dc", "dl"))
@@ -343,3 +361,174 @@ def test_calibrated_warper_metal_compute_matches_cpu(calibrated_graph_case: tupl
         np.testing.assert_allclose(result.output, expected, atol=2e-3, rtol=2e-3)
     finally:
         executor.release_revision(result.request_id)
+
+
+def test_x_grade_controls_round_trip_and_protect_neutral_and_pins() -> None:
+    from src.features.color.core.warper_chroma709 import chroma_warp_position
+    from src.features.color.core.warper_color import apply_resolve_hs709
+
+    color = np.array((0.70, 0.18, 0.10), np.float32)
+    red = tuple(chroma_warp_position(color ** (1.0 / 2.4)))
+    stroke = WarperStroke("red", "normal", tuple(color), tuple(color),
+                          {"exposure": 1.0, "chroma_range": 0.10}, (red, red))
+    base = _hsp_state()
+    authored = replace(base, x_grade=XGradeState(strokes=(stroke,)))
+    layer = Layer("x-grade")
+    layer.warper_state = authored
+    restored = Layer.from_dict(layer.to_dict(None))
+    assert restored.warper_state.x_grade == authored.copy().x_grade
+    assert restored.warper_params is not None
+    colors = np.stack((color, color * 8.0, (0.40, 0.40, 0.40), (0.08, 0.18, 0.72))).astype(np.float32)
+    result = apply_resolve_hs709(colors, restored.warper_params, restored.warper_space)
+    np.testing.assert_allclose(result[:2], colors[:2] * 2.0, rtol=0.05)
+    assert result[2, 0] > colors[2, 0]
+    np.testing.assert_array_equal(result[2], np.full(3, result[2, 0], dtype=np.float32))
+
+    pinned = XGradeState(strokes=(stroke,), pin_points=(WarperPinPoint("skin", red),))
+    records, space = renderable_projection(replace(base, x_grade=pinned))
+    np.testing.assert_array_equal(apply_resolve_hs709(colors, records, space)[:2], colors[:2])
+
+
+def test_x_grade_small_exposure_stays_closer_to_the_selected_color() -> None:
+    from src.features.color.core.warper_chroma709 import chroma_warp_position
+    from src.features.color.core.warper_color import apply_resolve_hs709
+
+    green = (0.22, 0.55, 0.18)
+    point = tuple(chroma_warp_position(np.asarray(green)))
+    rgb = np.asarray((green, (0.30, 0.55, 0.24)), dtype=np.float32) ** 2.4
+
+    def response(stops: float) -> np.ndarray:
+        stroke = WarperStroke("green", "normal", green, green, {"chroma_range": 0.04, "exposure": stops},
+                              (point, point))
+        state = replace(_hsp_state(), x_grade=XGradeState(strokes=(stroke,)))
+        offsets, space = renderable_projection(state)
+        return np.log2(apply_resolve_hs709(rgb, offsets, space) / rgb) / stops
+
+    small, full = response(0.65), response(1.0)
+    np.testing.assert_allclose(small[0], full[0], atol=0.01)
+    assert np.all(small[1] < full[1])
+
+
+def test_x_grade_outward_stroke_rolls_off_near_the_gamut_boundary() -> None:
+    from src.features.color.core.warper_chroma709 import chroma_warp_color, chroma_warp_position
+    from src.features.color.core.warper_color import apply_resolve_hs709
+
+    green = np.array((0.22, 0.55, 0.18))
+    start = chroma_warp_position(green)
+    end = start + (-0.007, 0.045)
+    neutral = chroma_warp_position(np.ones(3))
+    neighbor = chroma_warp_color((start + neutral) * 0.5) * 0.5
+    encoded = np.stack((green, neighbor, (0.55, 0.55, 0.55))).astype(np.float32)
+    stroke = WarperStroke("green", "normal", tuple(green), tuple(green), {"chroma_range": 0.07},
+                          (tuple(start), tuple(end)))
+    state = replace(_hsp_state(), x_grade=XGradeState(strokes=(stroke,)))
+    records, space = renderable_projection(state)
+    result = apply_resolve_hs709(encoded ** 2.4, records, space) ** (1.0 / 2.4)
+    error = np.max(np.abs(result - encoded), axis=1)
+    assert 0.0 < error[0] < error[1]
+    np.testing.assert_allclose(result[2], encoded[2], atol=1e-6)
+
+
+def test_x_grade_long_outward_drag_keeps_moving_on_the_gamut_edge() -> None:
+    from src.features.color.core.warper_chroma709 import chroma_warp_position
+    from src.features.color.core.warper_color import apply_resolve_hs709_texture, prepare_resolve_hs709_texture
+    from src.features.color.core.x_grade_domain import X_GRADE_SCOPE_AXES
+
+    green = (0.22, 0.55, 0.18)
+    start = chroma_warp_position(np.asarray(green))
+    encoded = np.array((green, (0.42, 0.42, 0.42), (0.62, 0.28, 0.20)), dtype=np.float32)
+    inverse = np.linalg.inv(X_GRADE_SCOPE_AXES)
+
+    def render(distance: float, *, pinned: bool = False) -> np.ndarray:
+        end = start + np.array((0.0, -distance / 900.0)) @ inverse
+        stroke = WarperStroke("green", "normal", green, green, {"chroma_range": 0.04},
+                              (tuple(start), tuple(end)))
+        pins = (WarperPinPoint("green-pin", tuple(start)),) if pinned else ()
+        grade = XGradeState(strokes=(stroke,), pin_points=pins)
+        records, space = renderable_projection(replace(_hsp_state(), x_grade=grade))
+        atlas = prepare_resolve_hs709_texture(records, space)
+        return apply_resolve_hs709_texture(encoded, atlas, space, encoded_input=True)
+
+    before = render(65.0)
+    long = render(130.0)
+    longer = render(131.0)
+    assert 0.0 <= long[0, 0] < 0.01
+    assert long[0, 2] > before[0, 2] + 0.04
+    assert longer[0, 2] > long[0, 2]
+    np.testing.assert_allclose(longer, long, atol=0.003)
+    np.testing.assert_array_equal(long[1:], encoded[1:])
+    np.testing.assert_array_equal(render(130.0, pinned=True), encoded)
+
+
+def test_x_grade_picker_uses_primary_and_warper_without_applying_x_grade() -> None:
+    from src.features.color.core.color_graph_cpu import x_grade_input_rgb
+    from src.features.color.core.warper_color import WARPER_X_GRADE_SPACE
+    from src.features.color.core.x_grade_render import pack_x_grade
+
+    rgb = np.array([[[0.62, 0.29, 0.11]]], dtype=np.float32)
+    offsets = np.zeros((6, 6, 2), dtype=np.float32)
+    offsets[..., 0] = 0.25
+    stroke = WarperStroke("warm", "normal", (0.62, 0.29, 0.11), (0.62, 0.29, 0.11),
+                          {"exposure": 3.0}, ((0.30, 0.40), (0.30, 0.40)))
+    packed = pack_x_grade(XGradeState(strokes=(stroke,)), offsets, 0)
+    primary = {"grading_params": {"hue_shift": 45.0}}
+    base = {"warper_params": offsets, "warper_space": 0}
+    visible = x_grade_input_rgb(rgb, {**primary, **base}, encoded_input=True)
+    picked = x_grade_input_rgb(rgb, {**primary, "warper_params": packed,
+                                    "warper_space": WARPER_X_GRADE_SPACE}, encoded_input=True)
+    np.testing.assert_array_equal(picked, visible)
+    assert np.max(np.abs(visible - x_grade_input_rgb(rgb, primary, encoded_input=True))) > 0.10
+    assert np.max(np.abs(visible - x_grade_input_rgb(rgb, base, encoded_input=True))) > 0.01
+
+
+@pytest.mark.parametrize("zone", ["dim", "light"])
+def test_x_grade_exposure_zones_fade_out_on_the_opposite_side(zone: str) -> None:
+    from src.features.color.core.warper_chroma709 import chroma_warp_position
+    from src.features.color.core.warper_color import apply_resolve_hs709
+
+    color = np.array((0.70, 0.18, 0.10), np.float32)
+    red = tuple(chroma_warp_position(color ** (1.0 / 2.4)))
+    stroke = WarperStroke("red", "normal", tuple(color), tuple(color),
+                          {"exposure": 1.0, "chroma_range": 0.10, "x_zone": zone,
+                           "pivot": 0.54, "x_falloff": 0.3}, (red, red))
+    state = replace(_hsp_state(), x_grade=XGradeState(strokes=(stroke,)))
+    records, space = renderable_projection(state)
+    colors = np.stack((color * 0.03, color * 8.0))
+    processed = apply_resolve_hs709(colors, records, space)
+    active, inactive = (0, 1) if zone == "dim" else (1, 0)
+    np.testing.assert_array_equal(processed[inactive], colors[inactive])
+    np.testing.assert_allclose(processed[active], colors[active] * 2.0, rtol=0.04)
+
+
+def test_x_grade_only_pins_have_pointwise_identity() -> None:
+    from src.features.color.core.graph_lut_export import _pointwise_warper
+    from src.features.color.core.warper_state import CHROMA709_ALGORITHM
+
+    state = WarperStateV2(WARPER_SCHEMA_VERSION, CHROMA709_ALGORITHM, "chroma_luma", "hsp", 0.0,
+                          {name: WarperGrid.identity(name, 6, 6, ("dc", "dl")) for name in ("grid1", "grid2")},
+                          x_grade=XGradeState(pin_points=(WarperPinPoint("a", (0.2, 0.2)),)))
+    assert renderable_projection(state) == (None, 0)
+    offsets, space = _pointwise_warper({"warper_state": state.to_dict()})
+    assert space == 0 and not offsets.any()
+
+
+@pytest.mark.parametrize("raw", [{"schema_version": 999, "future": [1, 2]}, {"schema_version": 1, "pins": "invalid"}])
+def test_unreadable_x_grade_preserves_base_warper_and_raw_payload(raw: dict) -> None:
+    from src.features.color.core.graph_lut_export import _pointwise_warper
+    from src.features.color.core.warper_color import WARPER_X_GRADE_SPACE
+
+    base = _hsp_state()
+    grid = base.grids["hs"]
+    active = replace(base, grids={"hs": grid.with_offsets(np.full_like(grid.offsets, 0.12))})
+    payload = active.to_dict()
+    payload["x_grade"] = raw
+    layer = Layer.from_dict({"name": "future", "warper_state": payload,
+                             "warper_space": WARPER_X_GRADE_SPACE,
+                             "warper_params": np.ones((5, 1, 3), dtype=np.float32).tolist()})
+    assert layer.warper_state is not None and layer.warper_state.x_grade is None
+    assert layer.warper_state_unparsed is None
+    np.testing.assert_array_equal(layer.warper_params, active.grids["hs"].offsets)
+    assert layer.warper_space == 2
+    assert layer.to_dict(None)["warper_state"]["x_grade"] == raw
+    assert layer.warper_state.replacing_mode(base).to_dict()["x_grade"] == raw
+    assert _pointwise_warper(layer.to_dict(None)) is None

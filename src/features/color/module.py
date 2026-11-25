@@ -352,6 +352,16 @@ class ColorModule:
             default_visible=True,
         ))
         panel_registry.register(PanelDescriptor(
+            panel_id="color.base_grade",
+            title_key="base_grade.title",
+            fallback_title="Base Grade",
+            feature_id="color",
+            category="Color",
+            page_ids=("Color",),
+            dock_attr="dock_base_grade",
+            order=110,
+        ))
+        panel_registry.register(PanelDescriptor(
             panel_id="color.curves",
             title_key="panel.curves",
             fallback_title="Curves",

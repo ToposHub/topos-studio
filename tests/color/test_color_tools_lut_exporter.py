@@ -12,6 +12,10 @@ import numpy as np
 import sys
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pytestqt.qtbot import QtBot
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
@@ -336,6 +340,42 @@ class TestExporterStructure:
 
         assert 'hsl_curve_lut' in params
         assert np.array_equal(params['hsl_curve_lut'], hsl_curve_lut)
+
+
+@pytest.mark.skipif(not HAS_EXPORTER, reason="Requires LUT exporter")
+@pytest.mark.parametrize(("space", "primary_version"), [
+    (None, 0), ("rec709-g24", 0), ("rec709-g24", 2), ("srgb", 0),
+])
+def test_base_grade_lut_samples_the_authored_signal(
+    qtbot: "QtBot", tmp_path: Path, space: str | None, primary_version: int,
+) -> None:
+    from src.features.color.core.base_grade_runtime import base_grade_working_signal
+    from src.features.color.core.layer import Layer
+    from src.shared.color.color_space_descriptor import LINEAR_SCENE, descriptor_for_space_preset
+    from src.shared.color.color_transform_provider import BuiltinColorProvider
+    from src.shared.color.lut_loader import load_lut
+
+    layer = Layer("Base Grade")
+    layer.grading_params.update(
+        base_grade_balance_exposure=1.0, primary_calibration_version=primary_version,
+    )
+    descriptor = descriptor_for_space_preset(space) if space else LINEAR_SCENE
+    point = np.full(3, 0.25, dtype=np.float32)
+    provider = BuiltinColorProvider()
+    linear = provider.transform_signal(point, descriptor, LINEAR_SCENE)
+    expected = provider.transform_signal(2.0 * linear, LINEAR_SCENE, descriptor)
+
+    output = tmp_path / "base-grade.cube"
+    exporter = LUTExporter()
+    try:
+        with qtbot.waitSignal(exporter.worker.finished, timeout=10000):
+            exporter.export_lut(
+                [layer], str(output), size=17, base_grade_signal=base_grade_working_signal(descriptor),
+                base_grade_encoded_input=space == "rec709-g24",
+            )
+        np.testing.assert_allclose(load_lut(str(output)).table[4, 4, 4], expected, atol=1e-6)
+    finally:
+        exporter.cleanup()
 
 
 ROOT = Path(__file__).resolve().parents[2]

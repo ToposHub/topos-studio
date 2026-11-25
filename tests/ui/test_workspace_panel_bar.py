@@ -75,6 +75,29 @@ def _edit_window(qtbot, config: _Config) -> tuple[_Window, WorkspacePanelBar]:
     return window, window.create_panel_bar("Edit")
 
 
+def test_grading_tools_keep_color_wheel_and_base_grade_tabs_available(qtbot: QtBot) -> None:
+    window = _Window(_Config())
+    qtbot.addWidget(window)
+    bottom = Qt.DockWidgetArea.BottomDockWidgetArea
+    wheels = window.add_panel("dock_grading", bottom)
+    base_grade = window.add_panel("dock_base_grade", bottom)
+    raw = window.add_panel("dock_raw", bottom)
+    window.tabifyDockWidget(wheels, base_grade)
+    window.tabifyDockWidget(wheels, raw)
+    bar = window.create_panel_bar("Color")
+    bar.compact_default_color_tools()
+    window.show()
+
+    for expected in (base_grade, raw, wheels):
+        selected = next(action for action in bar._tools_menu.actions()
+                        if action.text() == expected.windowTitle())
+        selected.trigger()
+        qtbot.waitUntil(lambda: not expected.visibleRegion().isEmpty())
+        assert not wheels.isHidden()
+        assert not base_grade.isHidden()
+        assert base_grade in window.tabifiedDockWidgets(wheels)
+
+
 def test_library_pool_toggle_switches_layout_and_imports_into_the_live_project(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path,
 ) -> None:

@@ -57,8 +57,11 @@ from src.features.color.core.shader_nodes_msl import (
 )
 from src.features.color.core.warper_color import (
     RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE, RESOLVE_HS709_V3_SPACE, WARPER_CHROMA709_SPACE,
+    WARPER_X_GRADE_SPACE,
 )
-from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
+from src.features.color.core.x_grade_shader import MSL_X_GRADE
+from src.features.color.core.base_grade_runtime import metal_graph_base_grade_source
+from src.shared.gpu.metal.kernels_color import build_metal_pointwise_grading_msl
 
 _MSL_HEADER = """#include <metal_stdlib>
 using namespace metal;
@@ -314,7 +317,9 @@ kernel void tg_corrector(
             float3(x.mixer[21], x.mixer[22], x.mixer[23]));
     }
     if (x.has_warper != 0u) {
-        if (x.warper_space == tg_warper_chroma709) {
+        if (x.warper_space == tg_warper_x_grade) {
+            color = msl_apply_x_grade(color, warper_tex, encoded_input);
+        } else if (x.warper_space == tg_warper_chroma709) {
             color = msl_apply_warper_chroma709(color, warper_tex, encoded_input);
         } else if (x.warper_space == tg_warper_hs709_v2 || x.warper_space == tg_warper_hs709_v3) {
             color = msl_apply_resolve_hs709_v2(color, warper_tex, encoded_input);
@@ -576,7 +581,7 @@ kernel void tg_parallel_mix(
 #: 完整纹理图 kernel 源（compile_kernel 的 MSL 源参数）
 METAL_TEX_GRAPH_OPS_MSL = (
     _MSL_HEADER
-    + METAL_POINTWISE_GRADING_MSL      # GraphGradingParams + grading/curves 数学
+    + build_metal_pointwise_grading_msl(metal_graph_base_grade_source())
     + MSL_HSV_FUNCS
     + MSL_CURVES_HELPERS
     + MSL_CURVES                       # msl_apply_hsl_curves（纹理采样）
@@ -587,6 +592,7 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + MSL_WARPER_CHROMA709
     + MSL_RESOLVE_HS709
     + MSL_RESOLVE_HS709_V2
+    + MSL_X_GRADE
     + MSL_SOFT_CLIP_HELPERS
     + MSL_SOFT_CLIP
     + MSL_CURVES_SOFT_CLIP
@@ -598,6 +604,7 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + f"constant int tg_warper_hs709_v2 = {RESOLVE_HS709_V2_SPACE};\n"
     + f"constant int tg_warper_hs709_v3 = {RESOLVE_HS709_V3_SPACE};\n"
     + f"constant int tg_warper_chroma709 = {WARPER_CHROMA709_SPACE};\n"
+    + f"constant int tg_warper_x_grade = {WARPER_X_GRADE_SPACE};\n"
     + _TEX_GRAPH_KERNELS_MSL
 )
 

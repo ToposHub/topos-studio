@@ -214,6 +214,7 @@ def graph_node_layer_provider(
     *,
     preview_grade: Mapping[str, Mapping[str, Any]] | None = None,
     rec709_calibration_encoded: bool = False,
+    base_grade_signal: Mapping[str, Any] | None = None,
 ) -> Callable[[str], Mapping[str, Any] | None]:
     """``layer_param_provider`` 工厂：node_id → 合并后的 Layer DTO。
 
@@ -227,17 +228,26 @@ def graph_node_layer_provider(
     KF-06：未参与求值的节点（恒定/无轨道）仍返回完整合并 base 参数
     （此前返回 None，执行器回退 plan 内嵌 params 会丢 legacy 域）。
     """
+    from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
     from src.features.color.core.color_node_color_space import node_color_is_identity
+    from src.features.color.core.x_grade_domain import X_GRADE_WORKING_KEY, bypass_x_grade
 
     payloads: dict[str, dict[str, Any] | None] = {}
+    x_grade_supported = graph.working_color_context.get(X_GRADE_WORKING_KEY) is not False
+    signal = base_grade_signal or graph.working_color_context.get(BASE_GRADE_SIGNAL_KEY)
     for node in _iter_corrector_nodes(graph):
         payload = node_layer_payload(node)
-        if payload is not None and rec709_calibration_encoded:
+        if payload is not None and not x_grade_supported:
+            bypass_x_grade(payload)
+        if payload is not None and (rec709_calibration_encoded or signal):
             color = node.params.get("color")
             if not isinstance(color, Mapping) or node_color_is_identity(
                 color.get("color_space"), color.get("gamma"),
             ):
-                payload["_rec709_calibration_encoded"] = True
+                if rec709_calibration_encoded:
+                    payload["_rec709_calibration_encoded"] = True
+                if signal:
+                    payload[BASE_GRADE_SIGNAL_KEY] = signal
         payloads[node.node_id] = payload
     evaluated: dict[str, dict[str, Any] | None] | None = None
     if frame is not None:

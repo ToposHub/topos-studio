@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -290,6 +290,8 @@ class WarperCommandService:
         if operation == "replace_state":
             raw = payload.get("state") if isinstance(payload, dict) else None
             state = WarperStateV2.from_dict(raw) if isinstance(raw, dict) else None
+            if state is None and working is None and payload.get("preserve_legacy"):
+                return _NO_CHANGE
             return state
 
         if operation == "activate_mode":
@@ -303,11 +305,12 @@ class WarperCommandService:
             elif mode == "chroma_luma":
                 grids["grid1"] = WarperGrid.identity("grid1", 6, 6, ("dc", "dl"))
                 grids["grid2"] = WarperGrid.identity("grid2", 6, 6, ("dc", "dl"))
-            return WarperStateV2(
+            selected = WarperStateV2(
                 schema_version=WARPER_SCHEMA_VERSION, algorithm_version=CURRENT_ALGORITHM,
                 mode=mode, color_space=space,
                 axis_angle=working.axis_angle if working is not None else 0.0,
                 grids=grids)
+            return working.replacing_mode(selected) if working is not None else selected
 
         if working is None:
             # 除 replace/activate 外的操作需要已存在状态
@@ -393,12 +396,7 @@ class WarperCommandService:
                 raise WarperStateError("corrupt_payload", "add_stroke 需要 stroke 载荷")
             if working.mode != "chroma_warp":
                 raise WarperStateError("invalid_mode", "笔画只属于 chroma_warp 模式")
-            return WarperStateV2(
-                schema_version=working.schema_version, algorithm_version=working.algorithm_version,
-                mode=working.mode, color_space=working.color_space, axis_angle=working.axis_angle,
-                grids=working.grids, strokes=working.strokes + (stroke,),
-                pin_points=working.pin_points,
-                _extra_fields=copy.deepcopy(working._extra_fields))
+            return replace(working, strokes=working.strokes + (stroke,))
 
         if operation == "delete_objects":
             stroke_ids = set(payload.get("stroke_ids") or ())
@@ -407,11 +405,7 @@ class WarperCommandService:
             pins = tuple(p for p in working.pin_points if p.pin_id not in pin_ids)
             if len(strokes) == len(working.strokes) and len(pins) == len(working.pin_points):
                 return _NO_CHANGE
-            return WarperStateV2(
-                schema_version=working.schema_version, algorithm_version=working.algorithm_version,
-                mode=working.mode, color_space=working.color_space, axis_angle=working.axis_angle,
-                grids=working.grids, strokes=strokes, pin_points=pins,
-                _extra_fields=copy.deepcopy(working._extra_fields))
+            return replace(working, strokes=strokes, pin_points=pins)
 
         if operation == "set_stroke_params":
             stroke_id = payload.get("stroke_id")
@@ -426,11 +420,7 @@ class WarperCommandService:
                 params=merged, path=matches[0].path,
                 _extra_fields=copy.deepcopy(matches[0]._extra_fields))
             strokes = tuple(updated if s.stroke_id == stroke_id else s for s in working.strokes)
-            return WarperStateV2(
-                schema_version=working.schema_version, algorithm_version=working.algorithm_version,
-                mode=working.mode, color_space=working.color_space, axis_angle=working.axis_angle,
-                grids=working.grids, strokes=strokes, pin_points=working.pin_points,
-                _extra_fields=copy.deepcopy(working._extra_fields))
+            return replace(working, strokes=strokes)
 
         if operation == "set_pin_params":
             pin_id = payload.get("pin_id")
@@ -443,22 +433,14 @@ class WarperCommandService:
                 pin_id=matches[0].pin_id, position=matches[0].position, params=merged,
                 _extra_fields=copy.deepcopy(matches[0]._extra_fields))
             pins = tuple(updated if p.pin_id == pin_id else p for p in working.pin_points)
-            return WarperStateV2(
-                schema_version=working.schema_version, algorithm_version=working.algorithm_version,
-                mode=working.mode, color_space=working.color_space, axis_angle=working.axis_angle,
-                grids=working.grids, strokes=working.strokes, pin_points=pins,
-                _extra_fields=copy.deepcopy(working._extra_fields))
+            return replace(working, pin_points=pins)
 
         if operation == "set_state_params":
             updates = payload or {}
             axis = updates.get("axis_angle", working.axis_angle)
             if axis == working.axis_angle:
                 return _NO_CHANGE
-            return WarperStateV2(
-                schema_version=working.schema_version, algorithm_version=working.algorithm_version,
-                mode=working.mode, color_space=working.color_space, axis_angle=float(axis),
-                grids=working.grids, strokes=working.strokes, pin_points=working.pin_points,
-                _extra_fields=copy.deepcopy(working._extra_fields))
+            return replace(working, axis_angle=float(axis))
 
         if operation == "reset":
             scope = payload.get("scope", "all") if isinstance(payload, dict) else "all"
@@ -470,7 +452,8 @@ class WarperCommandService:
                     mode=working.mode, color_space=working.color_space, axis_angle=0.0,
                     grids={name: WarperGrid.identity(g.name, g.rows, g.cols, g.semantics)
                            for name, g in working.grids.items()},
-                    strokes=(), pin_points=())
+                    strokes=(), pin_points=(), x_grade=working.x_grade,
+                    _extra_fields={key: value for key, value in working._extra_fields.items() if key == "x_grade"})
             if scope == "pins":
                 if all(not g.pins for g in working.grids.values()) and not working.pin_points:
                     return _NO_CHANGE
@@ -479,11 +462,7 @@ class WarperCommandService:
                                           offsets=g.offsets, pins=(),
                                           _extra_fields=copy.deepcopy(g._extra_fields))
                          for name, g in working.grids.items()}
-                return WarperStateV2(
-                    schema_version=working.schema_version, algorithm_version=working.algorithm_version,
-                    mode=working.mode, color_space=working.color_space, axis_angle=working.axis_angle,
-                    grids=grids, strokes=working.strokes, pin_points=(),
-                    _extra_fields=copy.deepcopy(working._extra_fields))
+                return replace(working, grids=grids, pin_points=())
             raise WarperStateError("invalid_param", f"reset scope {scope!r} 未知")
 
         raise WarperStateError("unknown_operation", operation)  # pragma: no cover - 上面已过滤

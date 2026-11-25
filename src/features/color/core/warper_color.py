@@ -57,7 +57,9 @@ RESOLVE_HS709_V3_SPACE = 5
 RESOLVE_HS709_RESPONSE_SPACES = (RESOLVE_HS709_V2_SPACE, RESOLVE_HS709_V3_SPACE)
 RESOLVE_HS709_SPACES = (RESOLVE_HS709_SPACE, *RESOLVE_HS709_RESPONSE_SPACES)
 WARPER_CHROMA709_SPACE = 6
-WARPER_PREPARED_SPACES = (*RESOLVE_HS709_SPACES, WARPER_CHROMA709_SPACE)
+WARPER_X_GRADE_SPACE = 8
+WARPER_PACKED_SPACES = (WARPER_CHROMA709_SPACE, WARPER_X_GRADE_SPACE)
+WARPER_PREPARED_SPACES = (*RESOLVE_HS709_SPACES, *WARPER_PACKED_SPACES)
 
 #: HSP 感知权重(经典 NTSC 系数;冻结于测试,改动即破坏 round-trip 语义)。
 HSP_WEIGHTS = (0.299, 0.587, 0.114)
@@ -292,6 +294,10 @@ def prepare_resolve_hs709_texture(offsets: np.ndarray, space: int = RESOLVE_HS70
     rows, cols, components = offsets.shape
     if components != 3 or rows < 1 or cols < 1:
         raise ValueError("709 Hue–Saturation requires a nonempty three-channel mesh")
+    if space == WARPER_X_GRADE_SPACE:
+        from src.features.color.core.x_grade_render import prepare_x_grade_texture
+
+        return prepare_x_grade_texture(offsets)
     if space == WARPER_CHROMA709_SPACE:
         from src.features.color.core.warper_chroma_texture import prepare_chroma_texture
 
@@ -329,6 +335,10 @@ def apply_resolve_hs709_texture(
     rgb: np.ndarray, texture: np.ndarray, space: int, *, encoded_input: bool = False,
 ) -> np.ndarray:
     """Sample a prepared response. CPU delivery can reuse the texture across blocks."""
+    if space == WARPER_X_GRADE_SPACE:
+        from src.features.color.core.x_grade_render import apply_x_grade_texture
+
+        return apply_x_grade_texture(rgb, texture, encoded_input=encoded_input)
     if space == WARPER_CHROMA709_SPACE:
         from src.features.color.core.warper_chroma_texture import apply_chroma_texture
 

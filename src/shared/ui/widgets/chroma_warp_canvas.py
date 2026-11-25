@@ -85,11 +85,11 @@ class ChromaWarpCanvas(QWidget):
 
     def cancel_gesture(self) -> None:
         self._preview_timer.stop()
-        if self._drag_backup is not None and self.selected is not None:
+        if self._has_drag_change() and self.selected is not None:
             kind, index = self.selected
-            if kind == "pin":
+            if kind == "pin" and self._drag_backup is not None:
                 self.pins[index]["position"] = self._drag_backup
-            elif self._stroke_backup is not None:
+            elif kind == "stroke" and self._stroke_backup is not None:
                 self.strokes[index]["path"] = self._stroke_backup
             self.ui_edited.emit()
         self._drawing.clear()
@@ -152,10 +152,7 @@ class ChromaWarpCanvas(QWidget):
             self._background = QImage(rgb.data, 512, 512, 512 * 3, QImage.Format.Format_RGB888).copy()
         return self._background
 
-    def paintEvent(self, event: QPaintEvent) -> None:
-        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.fillRect(self.rect(), QColor(C.BG_PANEL))
-        rect = self.plot_rect()
+    def _paint_field(self, p: QPainter, rect: QRectF) -> None:
         path = QPainterPath(self._screen([0.10, 0.95]))
         path.cubicTo(self._screen([0.04, 0.65]), self._screen([0.05, 0.18]), self._screen([0.25, 0.04]))
         path.cubicTo(self._screen([0.53, 0.12]), self._screen([0.88, 0.37]), self._screen([0.95, 0.55]))
@@ -168,6 +165,12 @@ class ChromaWarpCanvas(QWidget):
         outside.addRect(rect)
         outside = outside.subtracted(path)
         p.fillPath(outside, QColor(0, 0, 0, 170))
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.fillRect(self.rect(), QColor(C.BG_PANEL))
+        rect = self.plot_rect()
+        self._paint_field(p, rect)
         p.save(); p.setClipRect(rect)
         if self.show_grid:
             p.setPen(QPen(QColor(0, 0, 0, 60), 0.6))
@@ -177,9 +180,7 @@ class ChromaWarpCanvas(QWidget):
             p.drawLine(rect.topLeft(), rect.bottomRight()); p.drawLine(rect.topRight(), rect.bottomLeft())
         if self.show_density and self.density_image is not None:
             p.drawImage(rect, self.density_image)
-        p.setPen(QPen(QColor(235, 235, 240, 105), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawEllipse(self._screen(self.white_point), 6, 6)
+        self._paint_neutral(p)
         for i, stroke in enumerate(self.strokes):
             selected = self.selected == ("stroke", i)
             points = stroke["path"]
@@ -188,7 +189,7 @@ class ChromaWarpCanvas(QWidget):
                 self._paint_range(p, points[0], float(stroke["parameters"]["chroma_range"]), end=end)
             self._paint_stroke(p, points, selected)
         if self._drawing:
-            end = self._drawing[-1] if self.tool == "stroke" else None
+            end = self._drawing[-1] if self.tool != "point_stroke" else None
             self._paint_range(p, self._drawing[0], float(self.parameters["chroma_range"]), end=end)
             self._paint_stroke(p, self._drawing, True)
         for i, pin in enumerate(self.pins):
@@ -199,12 +200,20 @@ class ChromaWarpCanvas(QWidget):
             p.setBrush(QColor(C.BG_PANEL))
             p.drawEllipse(self._screen(pin["position"]), 3.5, 3.5)
         if self.viewer_sample is not None:
-            sample = self._screen(self.viewer_sample.tolist())
-            p.setPen(QPen(QColor("#fff2ae"), 1))
-            p.drawLine(sample - QPointF(4, 0), sample + QPointF(4, 0))
-            p.drawLine(sample - QPointF(0, 4), sample + QPointF(0, 4))
+            self._paint_viewer_sample(p, self.viewer_sample)
         p.restore()
         p.end()
+
+    def _paint_viewer_sample(self, painter: QPainter, point: np.ndarray) -> None:
+        sample = self._screen(point.tolist())
+        painter.setPen(QPen(QColor("#fff2ae"), 1))
+        painter.drawLine(sample - QPointF(4, 0), sample + QPointF(4, 0))
+        painter.drawLine(sample - QPointF(0, 4), sample + QPointF(0, 4))
+
+    def _paint_neutral(self, painter: QPainter) -> None:
+        painter.setPen(QPen(QColor(235, 235, 240, 105), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(self._screen(self.white_point), 6, 6)
 
     def _paint_range(
         self, painter: QPainter, center: list[float], chroma_range: float,
@@ -232,6 +241,10 @@ class ChromaWarpCanvas(QWidget):
             return 0.0
         return self.plot_rect().width() * (
             chroma_range if pin else _STROKE_RANGE_BASE + _STROKE_RANGE_SCALE * chroma_range)
+
+    def _inside_range(self, distance: QPointF, chroma_range: float) -> bool:
+        radius = self._range_radius(chroma_range)
+        return distance.x() ** 2 + distance.y() ** 2 < radius ** 2
 
     def _paint_stroke(self, p: QPainter, points: list[list[float]], selected: bool) -> None:
         start, end = self._screen(points[0]), self._screen(points[-1])
@@ -297,7 +310,6 @@ class ChromaWarpCanvas(QWidget):
         for i in reversed(range(len(self.strokes))):
             points = [self._screen(p) for p in self.strokes[i]["path"]]
             stroke = self.strokes[i]
-            radius = self._range_radius(float(stroke["parameters"]["chroma_range"]))
             if points[0] == points[-1]:
                 if (points[0] - point).manhattanLength() < 12:
                     return ("stroke", i), "body"
@@ -313,7 +325,7 @@ class ChromaWarpCanvas(QWidget):
             if length2 and distance.manhattanLength() < 8:
                 return ("stroke", i), "body"
             if (influence is None and stroke["mode"] == "stroke"
-                    and distance.x() ** 2 + distance.y() ** 2 < radius ** 2):
+                    and self._inside_range(distance, float(stroke["parameters"]["chroma_range"]))):
                 influence = ("stroke", i), "influence"
         return influence
 
@@ -443,6 +455,9 @@ class ChromaWarpCanvas(QWidget):
         self._move_plot_edit(self._normalized(position))
         if finish:
             self._finish_plot_edit()
+
+    def viewer_delta(self, delta: QPointF) -> QPointF:
+        return delta
 
     def focusOutEvent(self, event: QFocusEvent) -> None:
         self.cancel_gesture()

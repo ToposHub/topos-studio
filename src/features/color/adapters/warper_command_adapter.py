@@ -32,10 +32,13 @@ from typing import Any
 import numpy as np
 
 from src.features.color.core.layer import Layer
+from src.features.color.core.warper_color import WARPER_SPACE_INDEX
 from src.features.color.core.warper_commands import WarperCommandResult, WarperCommandService
 from src.features.color.core.warper_state import (
     CL_GRID_NAMES,
+    CURRENT_ALGORITHM,
     HS_GRID_NAME,
+    LEGACY_ALGORITHM,
     RESOLVE_HS_ALGORITHMS,
     RESOLVE_HS_ALGORITHM,
     RESOLVE_HS_ALGORITHM_V2,
@@ -46,8 +49,10 @@ from src.features.color.core.warper_state import (
     WarperPin,
     WarperStateError,
     WarperStateV2,
+    XGradeState,
     legacy_from_ndarray,
     make_point_id,
+    resolve_hs_render_space,
 )
 
 __all__ = ["WarperCommandAdapter"]
@@ -72,8 +77,7 @@ _COMPONENT_SEMANTICS = {"hue": "dh", "sat": "ds", "luma": "dl", "chroma": "dc"}
 CONTINUOUS_ACTIONS = frozenset({"axis_angle"})
 
 _GRID_BY_INDEX = {0: CL_GRID_NAMES[0], 1: CL_GRID_NAMES[1]}
-_CALIBRATED_SIGNATURE = ("replace_state", "calibrated_mesh")
-WARPER_PALETTE_GESTURES = frozenset({"calibrated_mesh", "palette_edit"})
+WARPER_PALETTE_GESTURES = frozenset({"calibrated_mesh", "palette_edit", "x_grade_edit"})
 
 
 def _legacy_published(command: Mapping[str, Any]) -> bool:
@@ -144,7 +148,7 @@ class WarperCommandAdapter:
         if action in WARPER_PALETTE_GESTURES:
             calibrated_phase = (command.get("payload") or {}).get("phase")
             if calibrated_phase in {"commit", "cancel"}:
-                return self._finish_calibrated(calibrated_phase, layer)
+                return self._finish_calibrated(calibrated_phase, layer, action)
             if calibrated_phase not in {"update", "atomic"}:
                 return {"ok": False, "reason": "invalid_mesh_phase", "handled": True,
                         "revision": self._service.revision(layer), "dirty": False}
@@ -159,14 +163,14 @@ class WarperCommandAdapter:
                     "revision": None, "dirty": False}
 
         continuous = action in CONTINUOUS_ACTIONS or calibrated_phase == "update"
-        signature = _CALIBRATED_SIGNATURE if calibrated_phase else (operation, self._target_key(payload))
+        signature = (operation, action) if calibrated_phase else (operation, self._target_key(payload))
         if continuous and signature == self._open_signature:
             # 同一手势的后续 update
             request = self._request("update", operation, payload, layer,
                                     gesture_id=self._open_gesture_id)
             result = self._service.handle(request, layer)
             if calibrated_phase and not result.ok:
-                self._finish_calibrated("cancel", layer)
+                self._finish_calibrated("cancel", layer, action)
         else:
             self.flush()  # 不同签名:先收口旧手势,保证一次手势一次 undo
             gesture_id = f"warper-{next(self._gesture_ids)}"
@@ -202,8 +206,8 @@ class WarperCommandAdapter:
 
     # ---- 内部 ----
 
-    def _finish_calibrated(self, phase: str, layer: Layer) -> dict[str, Any]:
-        result = self._finish_open(phase) if self._open_signature == _CALIBRATED_SIGNATURE else None
+    def _finish_calibrated(self, phase: str, layer: Layer, action: str) -> dict[str, Any]:
+        result = self._finish_open(phase) if self._open_signature == ("replace_state", action) else None
         if result is None:
             return {"ok": True, "reason": "no_mesh_edit", "handled": False,
                     "revision": self._service.revision(layer), "dirty": False}
@@ -261,11 +265,50 @@ class WarperCommandAdapter:
     def _target_key(payload: Mapping[str, Any]) -> str:
         return str(payload.get("grid") or payload.get("scope") or "")
 
+    @staticmethod
+    def _x_grade_base(layer: Layer, *, with_legacy: bool = True) -> WarperStateV2:
+        """Wrap a raw legacy mesh without changing its renderer or coordinates."""
+        raw = layer.warper_params if with_legacy else None
+        if raw is None:
+            from src.features.color.core.warper_state import empty_x_grade_carrier
+
+            return empty_x_grade_carrier()
+        space = layer.warper_space
+        legacy = next((name for name, index in WARPER_SPACE_INDEX.items() if index == space), None)
+        calibrated = next((version for version in RESOLVE_HS_ALGORITHMS if resolve_hs_render_space(version) == space), None)
+        semantics = ("dh", "ds", "dl") if calibrated is not None else ("dh", "ds")
+        if (legacy is None and calibrated is None) or raw.ndim != 3 or raw.shape[2] != len(semantics):
+            raise WarperStateError("unsupported_targeting", "The legacy Warper response needs versioned controls")
+        rows, columns, _ = raw.shape
+        grid = WarperGrid.identity(HS_GRID_NAME, rows, columns, semantics).with_offsets(raw)
+        algorithm = calibrated or (LEGACY_ALGORITHM if legacy == "hsv" else CURRENT_ALGORITHM)
+        return WarperStateV2(WARPER_SCHEMA_VERSION, algorithm, "hue_saturation", legacy or "hsp", 0.0,
+                             {HS_GRID_NAME: grid})
+
     def _translate(self, action: str, command: Mapping[str, Any],
                    layer: Layer) -> tuple[str | None, dict[str, Any]]:
         payload_in = command.get("payload") or {}
         state = command.get("state") or {}
         mode = command.get("mode")
+
+        if action == "x_grade_edit":
+            state = layer.warper_state
+            if layer.warper_state_unparsed is not None or (state is not None and "x_grade" in state._extra_fields):
+                raise WarperStateError("schema_unsupported", "The layer has unreadable Warper controls")
+            grade = XGradeState.from_dict(payload_in.get("state"))
+            if not grade.strokes and not grade.pin_points and grade.protect_neutral and not grade._extra_fields:
+                grade = None
+            if grade is not None:
+                state = replace(state or self._x_grade_base(layer), x_grade=grade)
+            elif state is not None:
+                from src.features.color.core.warper_state import is_empty_x_grade_carrier
+
+                if is_empty_x_grade_carrier(state):
+                    return "replace_state", {"state": None}
+                state = replace(state, x_grade=None)
+            else:
+                return "replace_state", {"state": None, "preserve_legacy": True}
+            return "replace_state", {"state": state.to_dict()}
 
         if action in WARPER_PALETTE_GESTURES:
             previous = layer.warper_state
@@ -291,6 +334,11 @@ class WarperCommandAdapter:
                 state = self._calibrated_state(payload_in, layer) if payload_in.get("enabled") else None
             if state is not None and previous is not None:
                 state = previous.replacing_mode(state)
+            elif state is None and previous is not None and (
+                    previous.x_grade is not None or "x_grade" in previous._extra_fields):
+                identity = self._x_grade_base(layer, with_legacy=False)
+                state = previous.replacing_mode(identity)
+                state = replace(state, other_modes=())
             return "replace_state", {"state": state.to_dict() if state is not None else None}
 
         if action == "resolution":
@@ -346,6 +394,11 @@ class WarperCommandAdapter:
             return "reset", {"scope": "all"}
 
         if action == "reset_all":
+            previous = layer.warper_state
+            if previous is not None and (previous.x_grade is not None or "x_grade" in previous._extra_fields):
+                identity = self._x_grade_base(layer, with_legacy=False)
+                state = replace(previous.replacing_mode(identity), other_modes=())
+                return "replace_state", {"state": state.to_dict()}
             return "replace_state", {"state": None}
 
         return None, {}

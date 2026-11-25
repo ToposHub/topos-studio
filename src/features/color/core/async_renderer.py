@@ -54,7 +54,7 @@ import logging
 import threading
 from contextlib import ExitStack
 from enum import Enum
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Mapping, Optional, Tuple, List
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QOffscreenSurface, QOpenGLContext
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
@@ -1741,20 +1741,36 @@ class AsyncRenderer(QThread):
             (texture for texture in self.tex_pair
              if texture is not None and texture.glo == self.current_front_tex_id), None)
 
-    def _warper_sample_gl(self, texture: moderngl.Texture, params: dict) -> None:
+    def _warper_sample_gl(
+        self, texture: moderngl.Texture, params: dict, layer: Mapping[str, Any] | None = None,
+    ) -> None:
         try:
             w, h = texture.size
             scale = min(1.0, 320.0 / max(w, h))
             size = max(1, round(w * scale)), max(1, round(h * scale))
             pixels = self._read_scaled_texture(texture, size, dtype="f4")
             rgb = np.frombuffer(pixels, dtype=np.float32).reshape(size[1], size[0], 3)
-            self._publish_warper_sample(params, np.ascontiguousarray(rgb[::-1]))
+            self._publish_warper_sample(params, np.ascontiguousarray(rgb[::-1]), layer)
         except (AttributeError, RuntimeError, ValueError, moderngl.Error):
             logger.debug("Could not sample the Color Warper input", exc_info=True)
 
-    def _publish_warper_sample(self, params: dict, pixels: np.ndarray) -> None:
-        self.warper_input_ready.emit((params["warper_sample"], params.get("scene_visible_rect"),
-                                      bool(params.get("rec709_calibration_encoded")), pixels))
+    def _publish_warper_sample(
+        self, params: dict, pixels: np.ndarray, layer: Mapping[str, Any] | None = None,
+    ) -> None:
+        request = params["warper_sample"]
+        rect = params.get("scene_visible_rect")
+        encoded = bool(params.get("rec709_calibration_encoded"))
+        # One readback serves both panels, with a separate cache key per stage.
+        self.warper_input_ready.emit((request[:3], rect, encoded, pixels))
+        if len(request) == 4:
+            if layer is not None:
+                from src.features.color.core.color_graph_cpu import x_grade_input_rgb
+
+                try:
+                    pixels = x_grade_input_rgb(pixels, layer, encoded_input=encoded)
+                except (KeyError, RuntimeError, TypeError, ValueError):
+                    logger.debug("Could not evaluate X Grade picker input", exc_info=True)
+            self.warper_input_ready.emit(((*request[3], "x_grade"), rect, encoded, pixels))
 
     def _read_scaled_texture(
         self, texture: moderngl.Texture, size: tuple[int, int], *, dtype: str,
@@ -2203,8 +2219,22 @@ class AsyncRenderer(QThread):
             # front/composite/scope 维持 f2）
             graph_dtype = ("f4" if str(params.get('color_output_target')
                                        or '') == 'full_res' else "f2")
+            from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
+
+            provider = graph_node_layer_provider(
+                snapshot.graph,
+                frame=params.get('color_graph_source_frame'),
+                preview_grade=snapshot.preview_grade,
+                rec709_calibration_encoded=bool(snapshot.working_color_context.get("rec709_calibration_encoded")),
+                base_grade_signal=snapshot.working_color_context.get(BASE_GRADE_SIGNAL_KEY),
+            )
             sample = params.get("warper_sample") if not params.get("color_output_mode") else None
-            sample_kwargs = {"input_sample": (sample[0], lambda texture: self._warper_sample_gl(texture, params))} if sample else {}
+            sample_kwargs = {}
+            if sample:
+                sample_layer = provider(sample[0]) if len(sample) == 4 else None
+                sample_kwargs["input_sample"] = (
+                    sample[0], lambda texture: self._warper_sample_gl(texture, params, sample_layer),
+                )
             result = executor.execute_plan(
                 plan, raw_view_tex,
                 request_id=request_id,
@@ -2213,12 +2243,7 @@ class AsyncRenderer(QThread):
                 if is_cancelled is not None else None,
                 # N10：帧感知 provider（带轨道节点逐帧求值；无轨道
                 # 节点与帧无关）
-                layer_param_provider=graph_node_layer_provider(
-                    snapshot.graph,
-                    frame=params.get('color_graph_source_frame'),
-                    preview_grade=snapshot.preview_grade,
-                    rec709_calibration_encoded=bool(
-                        snapshot.working_color_context.get("rec709_calibration_encoded"))),
+                layer_param_provider=provider,
                 render_quad=self._render_quad,
                 bind_aux=lambda prog, layer:
                     self._bind_aux_textures_single_layer(prog, layer),
@@ -3419,7 +3444,11 @@ class AsyncRenderer(QThread):
                                  surface.generation)
             from src.features.color.core.color_graph_metal import MetalGraphCancelled
             try:
-                sample_kwargs = {"input_sample": (warper_sample[0], lambda rgb: self._publish_warper_sample(params, rgb))} if warper_sample else {}
+                sample_kwargs = {}
+                if warper_sample:
+                    sample_kwargs["input_sample"] = (
+                        warper_sample[0], lambda rgb, layer: self._publish_warper_sample(params, rgb, layer),
+                    )
                 metal_grade = metal_preview.grade(
                     params["color_graph_snapshot"],
                     params.get("color_graph_source_frame"),
@@ -3446,9 +3475,14 @@ class AsyncRenderer(QThread):
                 # 图输出接管 comp 结果；grain/防抖/输出阶段照常消费
                 current_source_tex = graph_out_tex
                 layers = ()  # 跳过旧 layers 循环
+        from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
+
+        base_grade_signal = params.get(BASE_GRADE_SIGNAL_KEY)
         for i, layer in enumerate(layers):
             if params.get('rec709_calibration_encoded'):
                 layer = {**layer, "_rec709_calibration_encoded": True}
+            if base_grade_signal:
+                layer = {**layer, BASE_GRADE_SIGNAL_KEY: base_grade_signal}
             if is_cancelled():
                 logger.info("Render request cancelled before layer %s", i)
                 return False
@@ -3460,7 +3494,7 @@ class AsyncRenderer(QThread):
                 continue
 
             if is_active and warper_sample:
-                self._warper_sample_gl(current_source_tex, params)
+                self._warper_sample_gl(current_source_tex, params, layer)
 
             if full_res_request_id:
                 self._emit_full_resolution_progress(
@@ -7603,6 +7637,8 @@ class AsyncRenderer(QThread):
             current_src_tex = source_tex
             current_src_fbo = None  # (source_tex 是外部纹理，无配对 FBO)
 
+            from src.features.color.core.base_grade import base_grade_active
+            from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
             from src.features.color.core.primary_calibration import grade_uses_calibration
             from src.features.color.core.shader_compiler import (
                 plugin_bindings_from_instances,
@@ -7611,7 +7647,10 @@ class AsyncRenderer(QThread):
             # P0-COL-04：逐层渲染完整栈前缀（可见层），语义与预览循环一致：
             # 普通层走 composition pass；前缀内已冻结层按「前缀替换」直通；
             # 有 AI 结果纹理的层以 AI 输出为本层输入（P0-COL-03）。
+            base_grade_signal = data.get(BASE_GRADE_SIGNAL_KEY)
             for prefix_layer in prefix_layers:
+                if base_grade_signal and isinstance(prefix_layer, dict):
+                    prefix_layer = {**prefix_layer, BASE_GRADE_SIGNAL_KEY: base_grade_signal}
                 if self._cancel_requested():
                     logger.info("Bake request cancelled before prefix layer")
                     return
@@ -7676,6 +7715,8 @@ class AsyncRenderer(QThread):
                     pl_warper_space = int(
                         (prefix_layer.get('warper_space', 0) if pl_is_dict
                          else getattr(prefix_layer, 'warper_space', 0)) or 0)
+                    grading = (prefix_layer.get("grading_params") if pl_is_dict
+                               else getattr(prefix_layer, "grading_params", None))
                     prog = self.pipeline.build_composition_shader(
                         has_curves=has_curves,
                         has_warper=has_warper,
@@ -7689,6 +7730,7 @@ class AsyncRenderer(QThread):
                         has_curves_soft_clip=has_curves_soft_clip,
                         plugins=layer_plugins,
                         has_primary_calibration=grade_uses_calibration(prefix_layer),
+                        has_base_grade=base_grade_active(grading or {}),
                         request_id=render_request_id,
                         layer_id=pl_id,
                     )

@@ -80,6 +80,10 @@ from typing import Optional, Dict, Any, Tuple, List, Callable, TYPE_CHECKING
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QMutex, QTimer
 from PyQt6.QtGui import QImage, QOpenGLContext, QOffscreenSurface
 
+from src.features.color.core.base_grade import base_grade_active
+from src.features.color.core.base_grade_runtime import (
+    base_grade_graph_signal, base_grade_timeline_space, base_grade_working_signal,
+)
 from src.features.color.core.curves_soft_clip import (
     curves_edit_is_default,
     curves_soft_clip_is_identity,
@@ -112,7 +116,7 @@ from src.features.edit.core.reverse_scrub import ScrubClipRange
 from src.features.edit.core.project import EditProject
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.crop_cpu import apply_crop_cpu, crop_is_identity
-from src.shared.color.color_space_descriptor import LINEAR_SCENE
+from src.shared.color.color_space_descriptor import LINEAR_SCENE, ColorSpaceDescriptor
 from src.shared.color.hdr_video_signal import hdr_input_descriptor, hdr_monitor_space, project_hdr_settings
 from src.shared.color.project_video_signal import (
     aces_input_bgr, aces_input_descriptor, aces_monitor_space, aces_timeline_black, normalized_video_bgr,
@@ -2453,6 +2457,9 @@ class PreviewRenderWorker(QThread):
             if any(grade_uses_calibration({"grading_params": extra})
                    for extra in chain_extras):
                 trace_info["fallback_reason"] = "measured_color_chain_cpu_compositor"
+                return False, trace_info
+            if any(base_grade_active(extra) for extra in chain_extras):
+                trace_info["fallback_reason"] = "base_grade_color_chain_cpu_compositor"
                 return False, trace_info
             if isinstance(op, ApplyAdjustment):
                 adjustment_layers.append((layer, op.effects, preview_grade))
@@ -5278,7 +5285,7 @@ class PreviewRenderWorker(QThread):
                                     exclude_timeline=exclude_timeline)
         measured_extras = any(grade_uses_calibration({"grading_params": extra}) for extra in extras)
         if stack is None:
-            if measured_extras or any(extra.get("mid_detail") for extra in extras):
+            if measured_extras or any(extra.get("mid_detail") or base_grade_active(extra) for extra in extras):
                 return {"grading_params": {}, "chain_extra_params": extras}
             return None
 
@@ -5314,7 +5321,7 @@ class PreviewRenderWorker(QThread):
             except (TypeError, ValueError):
                 return value != default
 
-        basic_active = any(
+        basic_active = base_grade_active(grading_params) or any(
             changed(grading_params.get(name, default), default)
             for name, default in {**wheel_defaults, **scalar_defaults}.items()
         )
@@ -5370,6 +5377,7 @@ class PreviewRenderWorker(QThread):
 
         graph = stack_primary_execution_graph(stack)
         if graph is not None:
+            graph = self._preview_grade_working_graph(graph, layer)
             return {"stack_id": str(stack_id), "color_graph": graph,
                     "source_frame": int(getattr(layer, "source_frame", 0)),
                     "rec709_calibration_encoded": timeline_uses_rec709_gamma24(
@@ -5661,7 +5669,21 @@ class PreviewRenderWorker(QThread):
             if self._asset_resolver is not None else None
         stacks = getattr(project, "color_stacks", {}) if project is not None else {}
         stack = stacks.get(stack_id)
-        return stack_primary_execution_graph(stack)
+        graph = stack_primary_execution_graph(stack)
+        return self._preview_grade_working_graph(graph, layer) if graph is not None else None
+
+    def _preview_grade_working_graph(self, graph: Any, layer: ClipLayerInfo) -> Any:
+        from src.features.color.core.x_grade_domain import x_grade_preview_graph, x_grade_working_supported
+
+        settings = self._preview_color_settings()
+        spaces = video_signal_spaces(settings)
+        space = spaces[0] if spaces else None
+        hdr = project_hdr_settings(settings)
+        graph = x_grade_preview_graph(graph, supported=x_grade_working_supported(space))
+        project = getattr(getattr(self, "_asset_resolver", None), "_project", None)
+        grade_space = base_grade_timeline_space(space, settings, project, getattr(layer, "asset_id", None))
+        return base_grade_graph_signal(
+            graph, grade_space, hdr.luminance if hdr else None, explicit_rec709=spaces is None)
 
     def _apply_preview_color_graph_cpu(
         self,
@@ -5706,11 +5728,15 @@ class PreviewRenderWorker(QThread):
         pre = [e for e in extras if e.get("_chain_segment") == "pre"]
         after = [e for e in extras if e.get("_chain_segment") != "pre"]
         try:
+            settings = self._preview_color_settings()
+            spaces = video_signal_spaces(settings)
+            base_grade_extras = any(base_grade_active(extra) for extra in extras)
+            signal = self._base_grade_chain_signal(layer, settings, spaces) if base_grade_extras else None
             return run_graph_frame_cpu(
                 graph, frame_data,
                 int(getattr(layer, "source_frame", 0) or 0),
-                rec709_calibration_encoded=timeline_uses_rec709_gamma24(
-                    video_signal_spaces(self._preview_color_settings())),
+                rec709_calibration_encoded=timeline_uses_rec709_gamma24(spaces),
+                base_grade_signal=signal,
                 pre_chain=pre, post_chain=after)
         except (UnsupportedNode, GraphCompileError) as exc:
             logger.warning(
@@ -5778,22 +5804,27 @@ class PreviewRenderWorker(QThread):
             integer_input = np.issubdtype(frame_data.dtype, np.integer)
             max_value = float(np.iinfo(frame_data.dtype).max) if integer_input else 1.0
             rgb = frame_data[..., :3][..., ::-1].astype(np.float32) / max_value
-            encoded = timeline_uses_rec709_gamma24(video_signal_spaces(self._preview_color_settings()))
+            settings = self._preview_color_settings()
+            spaces = video_signal_spaces(settings)
+            encoded = timeline_uses_rec709_gamma24(spaces)
+            base_grade_on = base_grade_active(grading_params) or any(base_grade_active(extra) for extra in extras)
+            signal = self._base_grade_chain_signal(layer, settings, spaces) if base_grade_on else None
             # M05（S08）：链段按 _chain_segment 分侧——pre 段在主栈之前，
             # trim/post 段在主栈之后（pre→main→trim→post；未标记载荷按
             # 主栈之后处理，与旧行为一致）。
             def _apply_chain_entries(buf, entries):
                 for extra in entries:
                     measured_entry = grade_uses_calibration({"grading_params": extra})
+                    base_grade_entry = base_grade_active(extra)
                     if extra.get("_unsupported_advanced", False):
-                        if measured_entry:
-                            raise RuntimeError("Measured color chain segment has unsupported advanced operations")
+                        if measured_entry or base_grade_entry:
+                            raise RuntimeError("Color chain segment has unsupported advanced operations")
                         logger.warning(
                             "Edit preview color chain: clip %s 链段含 curves/"
                             "LUT 等高级操作，primary 预览跳过该段（成片渲染"
                             "路径不受影响）", layer.clip_id)
                         continue
-                    if measured_entry or any(
+                    if measured_entry or base_grade_entry or any(
                            abs(float(extra.get(name, 0.0) or 0.0)) > 1e-6
                            for name in ("exposure", "temp", "tint", "contrast",
                                         "shadow", "highlights", "saturation",
@@ -5801,13 +5832,14 @@ class PreviewRenderWorker(QThread):
                                         "hue_shift")) or any(
                             any(abs(float(v)) > 1e-6 for v in extra.get(w, ()))
                             for w in ("lift", "gamma", "gain")):
-                        buf = GradingMath.apply_grading(buf, extra, rec709_calibration_encoded=encoded)
+                        buf = GradingMath.apply_grading(
+                            buf, extra, rec709_calibration_encoded=encoded, base_grade_signal=signal)
                 return buf
 
             graded = _apply_chain_entries(
                 rgb, [e for e in extras if e.get("_chain_segment") == "pre"])
             graded = GradingMath.apply_grading(
-                graded, grading_params, rec709_calibration_encoded=encoded)
+                graded, grading_params, rec709_calibration_encoded=encoded, base_grade_signal=signal)
             # F4.1: 调色链段（pre_group → trim → post_group）顺序应用。
             # 非线性参数无代数合并，顺序执行即精确组合；高级标记段
             # （curves/LUT）在 primary 域不可表示——跳过并告警（与
@@ -6697,6 +6729,17 @@ class PreviewRenderWorker(QThread):
         project = getattr(resolver, "_project", None)
         settings = getattr(project, "color_management", None)
         return settings if isinstance(settings, Mapping) else None
+
+    def _base_grade_chain_signal(
+        self, layer: ClipLayerInfo, settings: Mapping[str, Any] | None,
+        spaces: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None,
+    ) -> dict[str, Any] | None:
+        project = getattr(getattr(self, "_asset_resolver", None), "_project", None)
+        hdr = project_hdr_settings(settings)
+        grade_space = base_grade_timeline_space(
+            spaces[0] if spaces else None, settings, project, getattr(layer, "asset_id", None))
+        return base_grade_working_signal(
+            grade_space, hdr.luminance if hdr else None, explicit_rec709=spaces is None)
 
     def cleanup_clips(self) -> None:
         """清理所有打开的 clip"""

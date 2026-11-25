@@ -1873,7 +1873,7 @@ class ColorGraphAppHost:
                 if handle is not None:
                     aligned = self.align_engine_active_layer(handle.node_id)
                 warper_layer = None
-                if "warper_panel" in panels:
+                if {"warper_panel", "x_grade_panel"}.intersection(panels):
                     if aligned:
                         warper_layer = engine.get_active_layer()
                     elif payload is not None:

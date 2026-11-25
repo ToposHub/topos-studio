@@ -10,8 +10,8 @@ Color Wheel Module - ColorWheel widget and GradingPanel (original visual design)
 - 单轮为"光学内凹双环"：极细外环（Master 亮度弧 + 环拖拽）+ 高饱和彩环
   + 低饱和度色相内盘 + 十字准星控制点。
 - 底部为金属滚花拨轮（KnurledJogWheel，相对式拖拽，不吸附）。
-- 面板四模式：色轮（Lift/Gamma/Gain/Offset）/ Color Bars / Log 色轮
-  （Shadow/Midtone/Highlight/Offset）/ 色调饱和度。
+- 面板下方标签可在色轮与 Base Grade 间切换。色轮标签包含
+  色轮（Lift/Gamma/Gain/Offset）/ Color Bars / Log 色轮 / 色调饱和度。
 
 状态模型与信号契约保持不变：
 - 色轮内部仍为 (hue, sat, brightness)，加性轮（Offset / Log 四轮）经
@@ -24,7 +24,7 @@ Color Wheel Module - ColorWheel widget and GradingPanel (original visual design)
 import colorsys
 import math
 from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from PyQt6.QtWidgets import (QWidget, QToolButton, QPushButton, QHBoxLayout,
                              QVBoxLayout, QStackedWidget, QSizePolicy, QLabel,
                              QFrame)
@@ -37,6 +37,7 @@ from src.shared.assets.icon_manager import icon_add, icon_delete, icon_circle
 from src.shared.ui.widgets.drag_value import DragValue, drag_speed_per_pixel
 from src.shared.ui.style_sheet import C
 from src.shared.i18n.i18n import I18N
+from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
 from src.features.color.core.composition_uniforms import (
     params_to_offset_rgb, params_to_rgb, offset_chroma_scale, offset_master_scale,
 )
@@ -55,6 +56,9 @@ from src.features.color.ui.panel_chrome import (
     PARAMETER_BAR_BOTTOM_MARGIN, PARAMETER_BAR_HEIGHT, create_panel_header, header_button_color,
     style_header_button, style_reset_button,
 )
+
+if TYPE_CHECKING:
+    from src.features.color.ui.base_grade_panel import _BaseGradeWheel
 
 
 # ============================================================================
@@ -206,10 +210,10 @@ class _GradingValue(DragValue):
             return
         super().mouseReleaseEvent(event)
 
-    def cancel_drag(self) -> None:
+    def cancel_drag(self, *, end_on_release: bool = True) -> None:
         """Keep the gesture boundary while discarding the old pointer baseline."""
         if self._dragging:
-            self._cancelled_drag = self._drag_engaged
+            self._cancelled_drag = self._drag_engaged and end_on_release
             self._dragging = self._drag_engaged = False
             self._value_label.setStyleSheet(self._normal_value_style)
 
@@ -376,6 +380,11 @@ class KnurledJogWheel(QWidget):
             self._phase = phase
             self.update()
 
+    def cancel_drag(self) -> None:
+        if self._dragging:
+            self._dragging = False
+            self.update()
+
     def enterEvent(self, event: Any) -> None:
         self._hovered = True
         self.update()
@@ -502,10 +511,8 @@ class _WheelCanvas(QWidget):
 
     _RING_WIDTH = 4.0
     _HUE_RING_FRACTION = 0.09
-    # 外环角向拖拽的亮度灵敏度（弧度 → brightness）：一整圈 ≈ ±1.43
-    _RING_SENSITIVITY = 2.0 / (2.0 * math.pi * 1.4)
 
-    def __init__(self, wheel: "ColorWheel") -> None:
+    def __init__(self, wheel: "ColorWheel | _BaseGradeWheel") -> None:
         super().__init__(wheel)
         self._wheel = wheel
         self.dragging_knob = False
@@ -526,6 +533,10 @@ class _WheelCanvas(QWidget):
 
     def _inner_radius(self, outer_radius: float) -> float:
         return max(1.0, outer_radius - self._RING_WIDTH)
+
+    def cancel_drag(self) -> None:
+        self.dragging_knob = False
+        self.dragging_ring = False
 
     def _hue_gradient(self, center: QPointF) -> QConicalGradient:
         gradient = QConicalGradient(center, self._wheel.rotation_degrees)
@@ -549,8 +560,6 @@ class _WheelCanvas(QWidget):
         center, outer_r = self._geometry()
         inner_r = self._inner_radius(outer_r)
         disk_r = inner_r * (1.0 - self._HUE_RING_FRACTION)
-        self._wheel._cached_center = center
-        self._wheel._cached_radius = outer_r
 
         # 1. 极细精密外环凹槽（Master 亮度弧所在环带）
         painter.setPen(QPen(QColor("#505663" if self._hovered else "#343842"), 0.75))
@@ -665,11 +674,7 @@ class _WheelCanvas(QWidget):
             while delta_angle < -math.pi:
                 delta_angle += 2.0 * math.pi
             self._last_ring_angle = angle
-            wheel = self._wheel
-            if wheel._measured_response:
-                wheel._on_jog_delta(delta_angle * inner_r)
-            else:
-                wheel._set_brightness(wheel.brightness + delta_angle * self._RING_SENSITIVITY)
+            self._wheel._drag_master_ring(delta_angle, inner_r)
             event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -732,6 +737,7 @@ class ColorWheel(QWidget):
     changed = pyqtSignal(float, float, float)
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
+    _RING_SENSITIVITY = 2.0 / (2.0 * math.pi * 1.4)
 
     def __init__(
         self,
@@ -862,10 +868,6 @@ class ColorWheel(QWidget):
 
         self.knob_pos = QPointF(0, 0)  # Relative to center, normalized -1 to 1
         self.dragging_knob: bool = False
-
-        # 缓存几何参数，避免重复计算
-        self._cached_radius: float = 0.0
-        self._cached_center: QPointF = QPointF(0, 0)
 
         # === 信号节流机制 ===
         self._update_timer = QTimer(self)
@@ -1079,6 +1081,12 @@ class ColorWheel(QWidget):
         if dx and not self._updating_brightness:
             self._change_master(self._master_value() + dx * self._master_rate)
 
+    def _drag_master_ring(self, angle: float, radius: float) -> None:
+        if self._measured_response:
+            self._on_jog_delta(angle * radius)
+        else:
+            self._set_brightness(self.brightness + angle * self._RING_SENSITIVITY)
+
     def _on_brightness_drag_changed(self, val: float) -> None:
         """亮度数值变化，更新状态并合并高频信号。"""
         if not self._updating_brightness and self.math != "add":
@@ -1208,6 +1216,7 @@ class ModeTabButton(QPushButton):
         self.setCheckable(True)
         style_header_button(self, width=36)
         self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip)
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
@@ -1242,6 +1251,15 @@ class ModeTabButton(QPushButton):
             painter.setFont(font)
             painter.drawText(QRectF(cx - 4.0, cy + 1.0, 11.0, 6.0),
                              Qt.AlignmentFlag.AlignCenter, "LOG")
+        elif self.mode_key in ("dim_light", "dark_bright"):
+            # Inner tonal ranges versus the two ends of the tonal scale.
+            extreme = self.mode_key == "dark_bright"
+            painter.drawLine(QPointF(cx - 7.5, cy + 4.5), QPointF(cx + 7.5, cy + 4.5))
+            spread = 6.5 if extreme else 3.5
+            for dx, height in ((-spread, 9.0 if extreme else 5.0),
+                               (0.0, 2.5 if extreme else 8.0),
+                               (spread, 9.0 if extreme else 5.0)):
+                painter.drawLine(QPointF(cx + dx, cy + 4.5 - height), QPointF(cx + dx, cy + 4.5))
         else:  # tonal：三条影调带（暗/中/亮）
             painter.setPen(QPen(col, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             for dy in (-4.5, 0.0, 4.5):
@@ -1267,7 +1285,7 @@ def _h_divider() -> QFrame:
 
 
 # ============================================================================
-# 完整调色面板（四模式：色轮 / Color Bars / Log 色轮 / 色调饱和度）
+# 完整调色面板（色轮 / Color Bars / Log 色轮 / 色调饱和度 / Base Grade）
 # ============================================================================
 
 class GradingPanel(QWidget):
@@ -1303,9 +1321,10 @@ class GradingPanel(QWidget):
     keyframe_snapshot_requested = pyqtSignal()
     keyframe_remove_requested = pyqtSignal()
 
-    # 扩展参数键（单一权威 = layer.DEFAULT_EXTENDED_GRADING_PARAMS 的键序，
-    # 与 layer_controller._GRADING_EXTENDED_KEYS 一致）
-    _EXTENDED_KEYS = tuple(DEFAULT_EXTENDED_GRADING_PARAMS.keys())
+    # Primary edits emit the original complete parameter group. Base Grade
+    # emits its own changed keys through the same controller entry point.
+    _EXTENDED_KEYS = tuple(key for key in DEFAULT_EXTENDED_GRADING_PARAMS
+                           if key not in BASE_GRADE_DEFAULTS)
 
     def __init__(self, parent: Optional[QWidget] = None, *,
                  use_measured_primaries: Callable[[], bool] | None = None) -> None:
@@ -1341,6 +1360,7 @@ class GradingPanel(QWidget):
         self.refresh_primary_calibration()
 
     def _init_ui(self) -> None:
+        from src.features.color.ui.base_grade_panel import BaseGradePanel
         from src.features.color.ui.color_bars_panel import ColorBarsPanel
 
         layout = QVBoxLayout()
@@ -1635,6 +1655,14 @@ class GradingPanel(QWidget):
         self.tonal_saturation_panel.interaction_ended.connect(
             self.interaction_ended.emit)
         self.mode_stack.addWidget(self.tonal_saturation_panel)
+
+        # The app docks this widget independently. Keep one parameter and
+        # interaction facade for both primary-grading tools.
+        self.base_grade_panel = BaseGradePanel()
+        self.base_grade_panel.changed.connect(self.grading_extended_changed.emit)
+        self.base_grade_panel.interaction_started.connect(self.interaction_started.emit)
+        self.base_grade_panel.interaction_ended.connect(self.interaction_ended.emit)
+
         mode_layout = QHBoxLayout()
         mode_layout.setContentsMargins(6, 0, 6, 0)
         mode_layout.addWidget(self.mode_stack)
@@ -1687,7 +1715,7 @@ class GradingPanel(QWidget):
         return super().eventFilter(watched, event)
 
     def _switch_mode(self, mode: str) -> None:
-        """切换 色轮 / Color Bars / Log / 色调饱和度 页。"""
+        """Switch the primary tool page and synchronize the header icons."""
         page_index = {"wheels": MODE_WHEELS, "bars": MODE_BARS,
                       "log": MODE_LOG, "tonal": MODE_TONAL}[mode]
         for key, btn in self._mode_buttons.items():
@@ -1714,9 +1742,8 @@ class GradingPanel(QWidget):
             self.bottom_bar_stack.setVisible(True)
             self._h_line_mid.setVisible(True)
             self._h_line_bottom.setVisible(True)
-        else:  # 色调饱和度：上下参数条与该页无关，隐藏腾出空间
-            self.mode_title.setText(
-                I18N.tr("panel.tonal_saturation", "色调饱和度"))
+        else:
+            self.mode_title.setText(I18N.tr("panel.tonal_saturation", "色调饱和度"))
             self.top_bar_stack.setVisible(False)
             self.bottom_bar_stack.setVisible(False)
             self._h_line_mid.setVisible(False)
@@ -1800,7 +1827,7 @@ class GradingPanel(QWidget):
         """节流定时器回调：发射扩展参数 dict（Offset / pivot / Log / LumMix）。"""
         if self._syncing_ui:
             return
-        self.grading_extended_changed.emit(self.get_extended_params())
+        self.grading_extended_changed.emit(self._get_primary_extended_params())
 
     def _on_param_changed(self) -> None:
         """乘性三轮变化 → 基础 13 参信号。"""
@@ -1811,7 +1838,10 @@ class GradingPanel(QWidget):
         self._emit_grading_extended()
 
     def get_extended_params(self) -> dict[str, Any]:
-        """当前扩展参数快照（与 grading_extended_changed payload 一致）。"""
+        """Snapshot all extended grading controls for persistence."""
+        return {**self._get_primary_extended_params(), **self.base_grade_panel.get_params()}
+
+    def _get_primary_extended_params(self) -> dict[str, Any]:
         return {
             PRIMARY_CALIBRATION_VERSION_KEY: self._calibration_version,
             "offset": (self.offset_wheel.hue, self.offset_wheel.sat,
@@ -1912,6 +1942,7 @@ class GradingPanel(QWidget):
                       self.log_offset_wheel):
             wheel.flush_pending_changes()
         self.color_bars_panel.flush_pending_changes()
+        self.base_grade_panel.flush_pending_changes()
         if self._grading_update_timer.isActive():
             self._grading_update_timer.stop()
             self._emit_grading_changed()
@@ -1927,6 +1958,7 @@ class GradingPanel(QWidget):
                       self.log_midtone_wheel, self.log_highlight_wheel,
                       self.log_offset_wheel):
             wheel.set_rotation_degrees(rotation_degrees)
+        self.base_grade_panel.set_rotation_degrees(self.lift_wheel.rotation_degrees)
 
     def set_wheel_params(
         self,
@@ -2085,10 +2117,14 @@ class GradingPanel(QWidget):
                 finally:
                     row.blockSignals(False)
 
+        base_grade = {key: value for key, value in params.items() if key.startswith("base_grade_")}
+        if base_grade:
+            self.base_grade_panel.set_params(base_grade)
+
         self._syncing_ui = False
 
         if emit:
-            self._emit_grading_extended()
+            self.grading_extended_changed.emit(self.get_extended_params())
 
     def reset_all(self) -> None:
         self._syncing_ui = True
@@ -2121,11 +2157,12 @@ class GradingPanel(QWidget):
             row.blockSignals(False)
 
         self._exposure_value = 0.0
+        self.base_grade_panel.set_params(BASE_GRADE_DEFAULTS)
 
         self._syncing_ui = False
 
         self._emit_grading_changed()
-        self._emit_grading_extended()
+        self.grading_extended_changed.emit(self.get_extended_params())
         self.reset_clicked.emit()
 
     def set_tonal_saturation(self, lift_sat: float, gamma_sat: float,
@@ -2169,6 +2206,8 @@ class GradingPanel(QWidget):
     @current_stack_id.setter
     def current_stack_id(self, stack_id: str | None) -> None:
         """设置当前关联的调色栈 ID。"""
+        if stack_id != self._current_stack_id:
+            self.base_grade_panel.finish_edit(commit=False)
         self._current_stack_id = stack_id
         for rows in self._scalar_rows.values():
             for row in rows:

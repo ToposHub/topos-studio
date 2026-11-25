@@ -842,21 +842,25 @@ vec3 apply_3dlut(vec3 color, sampler3D lut_tex, float intensity) {
 """
 
 WARPER_CHROMA709_SNIPPET = """
-vec3 apply_warper_chroma709(vec3 color, sampler2D field) {
+vec3 apply_warper_chroma709_region(vec3 color, sampler2D field, vec2 dims, vec2 origin) {
     if (any(isnan(color)) || any(isinf(color))) return color;
     vec3 sdr = clamp(color, 0.0, 1.0);
     vec3 encoded = u_rec709_calibration_encoded ? sdr : pow(sdr, vec3(1.0 / 2.4));
-    vec2 dims = vec2(textureSize(field, 0));
     vec3 index = encoded * (dims.x - 1.0);
-    vec2 uv = (index.rg + 0.5) / dims;
+    vec2 uv = origin + index.rg + 0.5;
     float first = floor(index.b);
     float second = min(first + 1.0, dims.x - 1.0);
-    vec3 delta = mix(texture(field, uv + vec2(0.0, first / dims.x)).rgb,
-                     texture(field, uv + vec2(0.0, second / dims.x)).rgb, index.b - first);
+    vec2 texture_dims = vec2(textureSize(field, 0));
+    vec3 delta = mix(texture(field, (uv + vec2(0.0, first * dims.x)) / texture_dims).rgb,
+                     texture(field, (uv + vec2(0.0, second * dims.x)) / texture_dims).rgb, index.b - first);
     if (all(equal(delta, vec3(0.0)))) return color;
     vec3 mapped = max(encoded + delta, 0.0);
     vec3 adjusted = u_rec709_calibration_encoded ? mapped : pow(mapped, vec3(2.4));
     return adjusted + (color - sdr);
+}
+
+vec3 apply_warper_chroma709(vec3 color, sampler2D field) {
+    return apply_warper_chroma709_region(color, field, vec2(textureSize(field, 0)), vec2(0.0));
 }
 """
 
@@ -930,7 +934,7 @@ vec3 cw_hsp2rgb(vec3 c) {
     return base * (c.z / max(p0, 1e-10));
 }
 
-vec3 apply_warper_v2(vec3 color, sampler2D warper_tex, int space) {
+vec3 apply_warper_v2_region(vec3 color, sampler2D warper_tex, int space, vec2 dims, vec2 origin) {
     vec3 sign_c = sign(color);
     vec3 mag = abs(color);
     // HSL 声明域:非灰 mx+mn>=2(L>=1 超亮)无连续定义 → 旁路(与 CPU 一致)
@@ -943,7 +947,8 @@ vec3 apply_warper_v2(vec3 color, sampler2D warper_tex, int space) {
                 : (space == 2) ? cw_rgb2hsp(mag)
                 : rgb2hsv(mag);
     if (coords.y < 0.02) return color;
-    vec2 delta = texture(warper_tex, vec2(coords.x, coords.y)).rg;
+    vec2 sample_position = clamp(coords.xy * dims, vec2(0.5), dims - 0.5) + origin;
+    vec2 delta = texture(warper_tex, sample_position / vec2(textureSize(warper_tex, 0))).rg;
     float fade = smoothstep(0.02, 0.15, coords.y);
     float out_h = fract(coords.x + delta.x * fade);
     float out_s = clamp(coords.y + delta.y * fade, 0.0, 1.0);
@@ -952,6 +957,10 @@ vec3 apply_warper_v2(vec3 color, sampler2D warper_tex, int space) {
                  : (space == 2) ? cw_hsp2rgb(warped)
                  : hsv2rgb(warped);
     return sign_c * rgb_out;
+}
+
+vec3 apply_warper_v2(vec3 color, sampler2D warper_tex, int space) {
+    return apply_warper_v2_region(color, warper_tex, space, vec2(textureSize(warper_tex, 0)), vec2(0.0));
 }
 """
 
@@ -1321,7 +1330,7 @@ vec3 hs709_basis(float hue) {
     return clamp(abs(phase * 6.0 - 3.0) - 1.0, 0.0, 1.0);
 }
 
-vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
+vec3 apply_resolve_hs709_region(vec3 color, sampler2D mesh, ivec2 size, ivec2 origin) {
     float gamma = u_rec709_calibration_encoded ? 1.0 : 2.4;
     vec3 work = pow(max(color, 0.0), vec3(1.605 / gamma));
     vec3 hsv = rgb2hsv(work);
@@ -1332,7 +1341,6 @@ vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
     float hue = hsv.x;
     float radius = min(0.876 * chroma / pow(max(peak, 1e-10), 1.074), 1.0);
     float neutral_fade = min(radius * 1.755, 1.0);
-    ivec2 size = textureSize(mesh, 0);
     float cols = float(size.x);
     float angular = hue * cols;
     float angular_base = floor(angular);
@@ -1348,8 +1356,8 @@ vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
         float separation = angular - angular_base - float(side);
         float distance = abs(separation);
         if (distance >= 1.084) continue;
-        vec3 lower = texelFetch(mesh, ivec2(column, row), 0).rgb;
-        vec3 upper = texelFetch(mesh, ivec2(column, next_row), 0).rgb;
+        vec3 lower = texelFetch(mesh, ivec2(column, row) + origin, 0).rgb;
+        vec3 upper = texelFetch(mesh, ivec2(column, next_row) + origin, 0).rgb;
         vec3 delta = mix(lower, upper, blend);
         saturation += delta.y * pow(max(1.0 - distance / 0.819, 0.0), 1.225);
         lightness += delta.z * pow(max(1.0 - distance / 1.084, 0.0), 1.2);
@@ -1375,11 +1383,15 @@ vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
     warped *= exp(1.981 * lightness * neutral_fade);
     return pow(max(warped, 0.0), vec3(gamma / 1.605)) + min(color, 0.0);
 }
+
+vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
+    return apply_resolve_hs709_region(color, mesh, textureSize(mesh, 0), ivec2(0));
+}
 """
 
 
 RESOLVE_HS709_V2_SNIPPET = """
-vec3 apply_resolve_hs709_v2(vec3 color, sampler2D field) {
+vec3 apply_resolve_hs709_v2_region(vec3 color, sampler2D field, vec2 size, vec2 origin) {
     vec3 positive = max(color, 0.0);
     vec3 code = u_rec709_calibration_encoded ? positive : pow(positive, vec3(1.0 / 2.4));
     vec3 hsv = rgb2hsv(code);
@@ -1387,17 +1399,21 @@ vec3 apply_resolve_hs709_v2(vec3 color, sampler2D field) {
 
     // Eight peak samples, each a bilinear hue/saturation tile.
     const float levels = 8.0;
-    vec2 size = vec2(textureSize(field, 0));
     float rows = size.y / levels;
     float plane = clamp((hsv.z - 0.21875) / 0.65625, 0.0, 1.0) * (levels - 1.0);
     float lower = floor(plane);
-    vec2 uv = (vec2(hsv.x, clamp(hsv.y, 0.0, 1.0))
-            * vec2(size.x - 1.0, rows - 1.0) + 0.5) / size;
-    vec3 first = texture(field, uv + vec2(0.0, lower / levels)).rgb;
-    vec3 second = texture(field, uv + vec2(0.0, min(lower + 1.0, levels - 1.0) / levels)).rgb;
+    vec2 uv = origin + vec2(hsv.x, clamp(hsv.y, 0.0, 1.0))
+            * vec2(size.x - 1.0, rows - 1.0) + 0.5;
+    vec2 texture_dims = vec2(textureSize(field, 0));
+    vec3 first = texture(field, (uv + vec2(0.0, lower * rows)) / texture_dims).rgb;
+    vec3 second = texture(field, (uv + vec2(0.0, min(lower + 1.0, levels - 1.0) * rows)) / texture_dims).rgb;
     vec3 delta = mix(first, second, fract(plane));
     if (all(equal(delta, vec3(0.0)))) return color;
     vec3 mapped = max(code + hsv.z * delta, 0.0);
     return (u_rec709_calibration_encoded ? mapped : pow(mapped, vec3(2.4))) + min(color, 0.0);
+}
+
+vec3 apply_resolve_hs709_v2(vec3 color, sampler2D field) {
+    return apply_resolve_hs709_v2_region(color, field, vec2(textureSize(field, 0)), vec2(0.0));
 }
 """

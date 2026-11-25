@@ -237,6 +237,11 @@ def _video_signal_space(
     })
 
 
+def legacy_video_timeline_space(settings: Mapping[str, Any] | None = None) -> ColorSpaceDescriptor:
+    """Interpret legacy decoded RGB using the original preview color settings."""
+    return _video_signal_space(settings or {}, LEGACY_SPACE, "preview")
+
+
 def encode_timeline_linear_bgr(
     frame: np.ndarray, destination: ColorSpaceDescriptor,
     *, luminance: VideoSignalLuminance | None = None, legacy: bool = False,

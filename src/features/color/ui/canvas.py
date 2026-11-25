@@ -4786,6 +4786,20 @@ class Canvas(QGraphicsView):
         self._current_guide_id = guide_id
         self.viewport().update()
 
+    def accepts_warper_picker(self) -> bool:
+        return not (
+            self._space_pressed or self._is_panning or self.is_dragging_split or self.is_drawing
+            or self.is_picking or self.brush_mode_active or self.sam_mode_active
+            or self.inspector_mode_active or self.curves_picker_mode or self.hsl_picker_mode
+        )
+
+    def accepts_warper_picker_at(self, position: QPointF) -> bool:
+        return not self._over_split_handle(position.x())
+
+    def _over_split_handle(self, x: float) -> bool:
+        return (self.engine is not None and self.engine.split_view_active
+                and abs(x - self.engine.split_position * self.viewport().width()) < 10)
+
     def set_tool_mode(self, mode) -> None:
         """Switch between different tool modes."""
         # Reset all tool states
@@ -4882,7 +4896,6 @@ class Canvas(QGraphicsView):
         if self.engine and self.engine.split_view_active:
             pos = event.pos()
             view_w = self.viewport().width()
-            split_px = self.engine.split_position * view_w
             
             if self.is_dragging_split:
                 new_pos = max(0.0, min(1.0, pos.x() / view_w))
@@ -4892,7 +4905,7 @@ class Canvas(QGraphicsView):
                 return
             
             # Change cursor when hovering over split line
-            if abs(pos.x() - split_px) < 10:
+            if self._over_split_handle(pos.x()):
                 self.viewport().setCursor(Qt.CursorShape.SplitHCursor)
             else:
                 if not self.is_drawing:
@@ -5052,12 +5065,9 @@ class Canvas(QGraphicsView):
             return
 
         # Handle Split View Wipe Drag Start
-        if self.engine and self.engine.split_view_active:
-            pos = event.pos()
-            split_px = self.engine.split_position * self.viewport().width()
-            if abs(pos.x() - split_px) < 10:
-                self.is_dragging_split = True
-                return
+        if self._over_split_handle(event.pos().x()):
+            self.is_dragging_split = True
+            return
 
         # 1. Handle Shift + Drag for Box Selection (User requested Shift+Drag to box select)
         if event.button() == Qt.MouseButton.LeftButton and (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):

@@ -19,7 +19,7 @@ from src.features.color.core.warper_state import (
     LEGACY_ALGORITHM, RESOLVE_HS_ALGORITHMS,
     RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2, RESOLVE_HS_ALGORITHM_V3,
     WARPER_SCHEMA_VERSION, WarperGrid, WarperPin, WarperPinPoint, WarperStateV2,
-    WarperStroke, legacy_from_ndarray, make_point_id, resample_grid,
+    WarperStroke, is_empty_x_grade_carrier, legacy_from_ndarray, make_point_id, resample_grid,
 )
 from src.features.color.ui.panel_chrome import (
     PARAMETER_BAR_BOTTOM_MARGIN, PARAMETER_BAR_HEIGHT, PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
@@ -37,6 +37,7 @@ from src.shared.ui.widgets.warper_icons import warper_icon
 
 if TYPE_CHECKING:
     from src.features.color.core.layer import Layer
+    from src.features.color.ui.x_grade_panel import XGradePanel
 
 MODES = ("chroma_warp", "hue_saturation", "chroma_luma")
 MODE_LABELS = {"chroma_warp": "Chroma Warp", "hue_saturation": "Hue - Saturation", "chroma_luma": "Chroma - Luma"}
@@ -55,6 +56,8 @@ class _PaletteStack(QStackedWidget):
 
 
 class WarperPanel(QWidget):
+    palette_title = "Color Warper"
+    _consume_viewer_hover = False
     warper_changed = pyqtSignal(object)
     interaction_started = pyqtSignal()
     interaction_ended = pyqtSignal()
@@ -81,10 +84,14 @@ class WarperPanel(QWidget):
         self._viewer_refresh: Callable[[], None] | None = None
         self._viewer_overlay_changed: Callable[[], None] | None = None
         self._viewer_available: Callable[[], bool] | None = None
+        self._viewer_position_available: Callable[[QPointF], bool] | None = None
         self._viewer_request: tuple | None = None
         self._viewer_received: tuple | None = None
         self._viewer_input: tuple | None = None
         self._viewer_drag: tuple[QPointF, QPointF, WarperCanvas | ChromaWarpCanvas] | None = None
+        self._viewer_hover_position: QPointF | None = None
+        self._dock_tool_visible = True
+        self._x_grade_panel: XGradePanel | None = None
         self._isolation: PointKey | None = None
         self._isolation_item: QGraphicsPixmapItem | None = None
         self._dialog: QDialog | None = None
@@ -112,7 +119,10 @@ class WarperPanel(QWidget):
         self._host_layout.addWidget(self.surface)
         self._build_header(layout)
 
-        body = QHBoxLayout()
+        self._body_stack = _PaletteStack()
+        self._warper_body = QWidget()
+        body = QHBoxLayout(self._warper_body)
+        body.setContentsMargins(0, 0, 0, 0)
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(0)
         left = QWidget()
@@ -146,7 +156,8 @@ class WarperPanel(QWidget):
         self._build_footer(left_layout)
         body.addWidget(left, 1)
         self._build_tools(body)
-        layout.addLayout(body, 1)
+        self._body_stack.addWidget(self._warper_body)
+        layout.addWidget(self._body_stack, 1)
         self.expanded_placeholder = QPushButton(tr("show_expanded", "Show Color Warper"))
         self.expanded_placeholder.clicked.connect(self._raise_expanded)
         self.expanded_placeholder.hide()
@@ -161,33 +172,29 @@ class WarperPanel(QWidget):
         self.title = QLabel()
         self.title.setStyleSheet(SECTION_TITLE_STYLE)
         top.addWidget(self.title, 1)
-        group = QButtonGroup(self)
-        group.setExclusive(True)
+        self._header_layout = top
+        self._mode_group = QButtonGroup(self)
         self.mode_buttons: dict[str, QToolButton] = {}
         for mode, icon in zip(MODES, ("chroma", "hs", "cl")):
-            button = tool_button(icon, tr(mode, MODE_LABELS[mode]), True)
-            button.setObjectName(f"warper_mode_{mode}")
-            style_header_button(button, width=32)
-            button.setIconSize(QSize(18, 18))
-            button.setStyleSheet(button.styleSheet() +
-                                 "QToolButton:checked { background: #393b42; border-radius: 3px; }")
-            group.addButton(button)
-            button.setChecked(mode == self.mode)
-            button.clicked.connect(lambda checked=False, mode=mode: self._select_mode(mode))
-            top.addWidget(button)
-            self.mode_buttons[mode] = button
-        self.picker_button = tool_button("picker", tr("viewer_picker", "Pick and drag colors in the viewer"), True)
-        style_header_button(self.picker_button, width=32)
-        self.picker_button.toggled.connect(self._viewer_picker_toggled)
-        self.picker_button.hide()
-        top.addWidget(self.picker_button)
+            self._add_mode_button(mode, icon, tr(mode, MODE_LABELS[mode]))
         self.expand_button = tool_button("expand", tr("expand", "Expand"))
         style_header_button(self.expand_button, width=32)
         self.expand_button.clicked.connect(self.toggle_expanded)
         top.addWidget(self.expand_button)
+        self._header_action_stack = _PaletteStack()
+        top.addWidget(self._header_action_stack)
+        self._warper_header_actions = QWidget()
+        actions = QHBoxLayout(self._warper_header_actions)
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(2)
+        self.picker_button = tool_button("picker", tr("viewer_picker", "Pick and drag colors in the viewer"), True)
+        style_header_button(self.picker_button, width=32)
+        self.picker_button.toggled.connect(self._viewer_picker_toggled)
+        self.picker_button.hide()
+        actions.addWidget(self.picker_button)
         self.reset_btn = reset_button(tr("reset_all", "Reset All"), global_reset=True)
         self.reset_btn.clicked.connect(self.on_reset)
-        top.addWidget(self.reset_btn)
+        actions.addWidget(self.reset_btn)
         self.options_button = tool_button("more", tr("options", "Options"))
         style_header_button(self.options_button, width=32)
         self.options_menu = QMenu(self.options_button)
@@ -209,8 +216,32 @@ class WarperPanel(QWidget):
         self.options_menu.addAction(tr("reset_selection", "Reset Selection / Pins"), lambda: self._mesh_action("reset_selection"))
         self.options_button.setMenu(self.options_menu)
         self.options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        top.addWidget(self.options_button)
+        actions.addWidget(self.options_button)
+        self._header_action_stack.addWidget(self._warper_header_actions)
         layout.addWidget(header)
+
+    def _add_mode_button(self, mode: str, icon: str, label: str) -> None:
+        button = tool_button(icon, label, True)
+        button.setObjectName(f"warper_mode_{mode}")
+        button.setAccessibleName(label)
+        style_header_button(button, width=32)
+        button.setIconSize(QSize(18, 18))
+        button.setStyleSheet(button.styleSheet() +
+                             "QToolButton:checked { background: #393b42; border-radius: 3px; }")
+        self._mode_group.addButton(button)
+        button.setChecked(mode == self.mode)
+        button.clicked.connect(lambda _checked: self._select_mode(mode))
+        self._header_layout.insertWidget(1 + len(self.mode_buttons), button)
+        self.mode_buttons[mode] = button
+
+    def add_x_grade_mode(self, panel: XGradePanel) -> None:
+        self._x_grade_panel = panel
+        self._add_mode_button("x_grade", "x_grade", panel.palette_title)
+        self._header_action_stack.addWidget(panel.embed_in_warper(self))
+        self._body_stack.addWidget(panel)
+
+    def _is_x_grade_mode(self) -> bool:
+        return self._x_grade_panel is not None and self._body_stack.currentWidget() is self._x_grade_panel
 
     @staticmethod
     def _combo(items: list[str], width: int) -> ChevronComboBox:
@@ -335,6 +366,23 @@ class WarperPanel(QWidget):
         return self.canvases[self.mode]
 
     def _select_mode(self, mode: str) -> None:
+        if mode == "x_grade":
+            panel = self._x_grade_panel
+            if panel is not None and not self._is_x_grade_mode():
+                self._suspend_viewer_tool()
+                self.active_canvas().cancel_gesture()
+                self._end_palette_value()
+                self._body_stack.setCurrentWidget(panel)
+                self._header_action_stack.setCurrentWidget(panel.viewer_controls)
+                self.mode_buttons[mode].setChecked(True)
+                self.title.setText(f"{self.palette_title} - {panel.palette_title}")
+                panel.arm_viewer_picker()
+            return
+        if self._is_x_grade_mode():
+            self._body_stack.setCurrentWidget(self._warper_body)
+            self._header_action_stack.setCurrentWidget(self._warper_header_actions)
+            self._viewer_received = None
+            QTimer.singleShot(0, self._request_viewer_refresh)
         previous = self.mode
         self.set_mode(mode)
         if (self._saved_warper is not None
@@ -356,14 +404,16 @@ class WarperPanel(QWidget):
         self.mode = mode
         self._updating = True
         try:
-            self.mode_buttons[mode].setChecked(True)
+            if not self._is_x_grade_mode():
+                self.mode_buttons[mode].setChecked(True)
             self.canvas_stack.setCurrentWidget(self.canvases[mode])
             self.tools_stack.setCurrentWidget(self.tools[mode])
             self.tools_stack.updateGeometry()
             scrollbar_width = self.tools_scroll.verticalScrollBar().sizeHint().width()
             content_width = self.tools[mode].minimumSizeHint().width()
             self.tools_scroll.setFixedWidth(max(_TOOLS_SIDEBAR_WIDTH, content_width + scrollbar_width))
-            self.title.setText(f"Color Warper - {tr(mode, MODE_LABELS[mode])}")
+            if not self._is_x_grade_mode():
+                self.title.setText(f"Color Warper - {tr(mode, MODE_LABELS[mode])}")
             self.footer.setVisible(mode != "chroma_warp")
             rectangular = mode == "chroma_luma"
             self.axis_label.setVisible(rectangular)
@@ -405,13 +455,22 @@ class WarperPanel(QWidget):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self.surface and event.type() == QEvent.Type.Resize and hasattr(self, "_axis_group"):
             self._adapt_footer()
-        if watched is self._viewer_viewport and self.isVisible() and self.picker_button.isChecked():
-            if event.type() in (QEvent.Type.UngrabMouse, QEvent.Type.WindowDeactivate):
+        if watched is self._viewer_viewport and self.picker_button.isChecked():
+            available = self._viewer_tool_visible() and (
+                self._viewer_available is None or self._viewer_available())
+            if (available and self._viewer_drag is None and self._viewer_position_available is not None
+                    and isinstance(event, QMouseEvent)
+                    and event.type() in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress)):
+                available = self._viewer_position_available(event.position())
+            if not available or event.type() in (QEvent.Type.UngrabMouse, QEvent.Type.WindowDeactivate):
                 self._cancel_viewer_drag()
-            if event.type() == QEvent.Type.Leave:
-                self.active_canvas().set_viewer_sample(None)
-            if isinstance(event, QMouseEvent) and self._viewer_mouse(event):
-                return True
+                self._clear_viewer_hover()
+            elif event.type() == QEvent.Type.Leave:
+                self._clear_viewer_hover()
+            elif event.type() == QEvent.Type.Enter or isinstance(event, QMouseEvent):
+                self._set_picker_cursor(True)
+                if isinstance(event, QMouseEvent) and self._viewer_mouse(event):
+                    return True
         return super().eventFilter(watched, event)
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -421,14 +480,44 @@ class WarperPanel(QWidget):
             QTimer.singleShot(0, self._request_viewer_refresh)
 
     def hideEvent(self, event: QHideEvent) -> None:
-        self._cancel_viewer_drag()
-        self.active_canvas().cancel_gesture()
-        self._isolate_colors(None)
-        self.active_canvas().set_viewer_sample(None)
+        if not self._viewer_surface_visible():
+            self._suspend_viewer_tool()
+            self.active_canvas().cancel_gesture()
         super().hideEvent(event)
+
+    def _viewer_surface_visible(self) -> bool:
+        return self.surface.isVisible() and (
+            self._dock_tool_visible or (self._dialog is not None and self._dialog.isVisible()))
+
+    def _viewer_tool_visible(self) -> bool:
+        return self._viewer_surface_visible() and self.isEnabled() and not self._is_x_grade_mode()
+
+    def set_dock_tool_visible(self, visible: bool) -> None:
+        self._dock_tool_visible = visible
+        if not visible and (self._dialog is None or not self._dialog.isVisible()):
+            self._suspend_viewer_tool()
+            if self._x_grade_panel is not None:
+                self._x_grade_panel.suspend_viewer_picker()
+        elif visible and self._is_x_grade_mode():
+            self._x_grade_panel.arm_viewer_picker()
+
+    def _suspend_viewer_tool(self) -> None:
+        self.picker_button.setChecked(False)
+        self._cancel_viewer_drag()
+        self._clear_viewer_hover()
+        self._isolate_colors(None)
+
+    def _clear_viewer_hover(self) -> None:
+        self._viewer_hover_position = None
+        self.active_canvas().set_viewer_sample(None)
+        self._set_picker_cursor(False)
+
+    def _set_picker_cursor(self, active: bool) -> None:
+        """Specialized pickers may override the viewport cursor while armed."""
 
     def bind_viewer(self, viewer: QGraphicsView, refresh: Callable[[], None], *,
                     available: Callable[[], bool] | None = None,
+                    position_available: Callable[[QPointF], bool] | None = None,
                     overlay_changed: Callable[[], None] | None = None) -> None:
         self._viewer = viewer
         self._viewer_viewport = viewer.viewport()
@@ -436,6 +525,7 @@ class WarperPanel(QWidget):
         self._viewer_refresh = refresh
         self._viewer_overlay_changed = overlay_changed
         self._viewer_available = available
+        self._viewer_position_available = position_available
         self._viewer_viewport.installEventFilter(self)
         viewer.destroyed.connect(self._forget_viewer)
         self.picker_button.show()
@@ -446,6 +536,7 @@ class WarperPanel(QWidget):
         self._viewer_refresh = None
         self._viewer_overlay_changed = None
         self._viewer_available = None
+        self._viewer_position_available = None
         self._isolation_item = None
         self._isolation = None
         self._cancel_viewer_drag()
@@ -457,11 +548,11 @@ class WarperPanel(QWidget):
             canvas.cancel_gesture()
 
     def _request_viewer_refresh(self) -> None:
-        if self._viewer_refresh is not None and self.isVisible():
+        if self._viewer_refresh is not None and self._viewer_tool_visible():
             self._viewer_refresh()
 
     def request_viewer_input(self, node_id: str, source: tuple, *, revision: tuple = ()) -> tuple | None:
-        if not self.isVisible() or not (self.density_action.isChecked() or self.picker_button.isChecked()
+        if not self._viewer_tool_visible() or not (self.density_action.isChecked() or self.picker_button.isChecked()
                                         or self._isolation is not None):
             return None
         target = (node_id, source, revision)
@@ -485,20 +576,26 @@ class WarperPanel(QWidget):
 
     def accept_viewer_input(self, sample: tuple) -> None:
         request, rect, encoded, rgb = sample
-        if request != self._viewer_request or request == self._viewer_received or rect is None:
+        if (not self._viewer_tool_visible() or request != self._viewer_request
+                or request == self._viewer_received or rect is None):
             return
         self._viewer_received = request
         self._viewer_input = rect, encoded, rgb
         self._refresh_density()
+        if self.picker_button.isChecked() and self._viewer_hover_position is not None and self._viewer_drag is None:
+            self.active_canvas().set_viewer_sample(self._viewer_plot_point(self._viewer_hover_position))
         if self._isolation is not None:
             self._paint_isolation()
 
     def _viewer_picker_toggled(self, enabled: bool) -> None:
         if not enabled:
-            self.active_canvas().set_viewer_sample(None)
+            self._clear_viewer_hover()
             self._cancel_viewer_drag()
-        if enabled and self._viewer_input is None and self._viewer_refresh is not None:
-            self._viewer_refresh()
+        elif self._viewer_tool_visible():
+            if self._viewer_viewport is not None and self._viewer_viewport.underMouse():
+                self._set_picker_cursor(True)
+            if self._viewer_input is None or self._viewer_received != self._viewer_request:
+                self._request_viewer_refresh()
 
     def _plot_positions(self, rgb: np.ndarray, encoded: bool) -> np.ndarray:
         from src.features.color.core.warper_density import warper_plot_positions
@@ -564,9 +661,6 @@ class WarperPanel(QWidget):
                 self._viewer_overlay_changed()
 
     def _viewer_mouse(self, event: QMouseEvent) -> bool:
-        if self._viewer_available is not None and not self._viewer_available():
-            self._cancel_viewer_drag()
-            return False
         if self._viewer_drag is not None and event.type() in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonRelease):
             origin, plot, canvas = self._viewer_drag
             finishing = event.type() == QEvent.Type.MouseButtonRelease
@@ -576,38 +670,47 @@ class WarperPanel(QWidget):
             if not finishing or event.button() == Qt.MouseButton.LeftButton:
                 if finishing:
                     self._viewer_drag = None
-                canvas.move_viewer_drag(plot + event.position() - origin, finish=finishing)
+                    self._viewer_hover_position = event.position()
+                delta = event.position() - origin
+                if isinstance(canvas, ChromaWarpCanvas):
+                    delta = canvas.viewer_delta(delta)
+                canvas.move_viewer_drag(plot + delta, finish=finishing)
                 return True
         click = event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton
         hover = event.type() == QEvent.Type.MouseMove and event.buttons() == Qt.MouseButton.NoButton
         if not (click or hover) or self._viewer is None:
             return False
         canvas = self.active_canvas()
-        if self._viewer_input is None or self._viewer_received != self._viewer_request:
-            canvas.set_viewer_sample(None)
-            return False
-        (left, top, width, height), encoded, rgb = self._viewer_input
-        point = self._viewer.mapToScene(event.position().toPoint())
-        if width <= 0 or height <= 0 or not self._viewer.sceneRect().contains(point):
-            canvas.set_viewer_sample(None)
-            return False
-        x, y = (point.x() - left) / width, (point.y() - top) / height
-        if not 0 <= x < 1 or not 0 <= y < 1:
-            canvas.set_viewer_sample(None)
-            return False
-        pixel = rgb[int(y * rgb.shape[0]), int(x * rgb.shape[1])]
-        if not np.isfinite(pixel).all():
-            return False
-        points = self._plot_positions(pixel[None, :], encoded)[0]
-        index = canvas.active_grid if isinstance(canvas, WarperCanvas) else 0
-        if hover:
-            canvas.set_viewer_sample(points[index])
-            return False
+        self._viewer_hover_position = event.position()
+        point = self._viewer_plot_point(event.position())
+        canvas.set_viewer_sample(point)
+        if hover or point is None:
+            return self._consume_viewer_hover and hover
         pin = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-        origin = canvas.begin_viewer_drag(points[index], pin=pin)
+        origin = canvas.begin_viewer_drag(point, pin=pin)
         if origin is not None:
             self._viewer_drag = event.position(), origin, canvas
         return True
+
+    def _viewer_plot_point(self, position: QPointF) -> np.ndarray | None:
+        if self._viewer is None:
+            return None
+        if self._viewer_input is None or self._viewer_received != self._viewer_request:
+            return None
+        (left, top, width, height), encoded, rgb = self._viewer_input
+        point = self._viewer.mapToScene(position.toPoint())
+        if width <= 0 or height <= 0 or not self._viewer.sceneRect().contains(point):
+            return None
+        x, y = (point.x() - left) / width, (point.y() - top) / height
+        if not 0 <= x < 1 or not 0 <= y < 1:
+            return None
+        pixel = rgb[int(y * rgb.shape[0]), int(x * rgb.shape[1])]
+        if not np.isfinite(pixel).all():
+            return None
+        points = self._plot_positions(pixel[None, :], encoded)[0]
+        canvas = self.active_canvas()
+        index = canvas.active_grid if isinstance(canvas, WarperCanvas) else 0
+        return points[index]
 
     def _adapt_footer(self) -> None:
         if not hasattr(self, "tools_scroll"):
@@ -1160,6 +1263,10 @@ class WarperPanel(QWidget):
         """Hydrate saved palettes without emitting grading commands."""
         if state is None:
             return False
+        if is_empty_x_grade_carrier(state):
+            self.set_params(None, target_id=target_id)
+            self._load_chroma_modes(None)
+            return True
         hs = state.for_mode("hue_saturation")
         same_target = target_id is not None and target_id == getattr(self, "_warper_target_id", None)
         if not same_target:
@@ -1346,7 +1453,7 @@ class WarperPanel(QWidget):
             self.collapse_expanded()
             return
         dialog = QDialog(self.window())
-        dialog.setWindowTitle("Color Warper")
+        dialog.setWindowTitle(self.palette_title)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setMinimumSize(700, 400)
         dialog.resize(1122, 648)

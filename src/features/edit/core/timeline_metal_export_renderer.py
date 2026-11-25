@@ -245,8 +245,9 @@ def _nv12_delivery_shader(operations: tuple[tuple[str, ...], ...]) -> tuple[str,
     ))
     helpers = ""
     if has_primary:
-        from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
-        helpers = METAL_POINTWISE_GRADING_MSL
+        from src.features.color.core.base_grade_runtime import metal_graph_base_grade_source
+        from src.shared.gpu.metal.kernels_color import build_metal_pointwise_grading_msl
+        helpers = build_metal_pointwise_grading_msl(metal_graph_base_grade_source())
         arguments.append("constant GraphGradingParams *grades [[buffer(1)]]")
     signature = f"kernel void {name}(\n" + ",\n    ".join(arguments) + ",\n"
     return name, _NV12_DELIVERY_MSL + helpers + signature + _NV12_DELIVERY_BODY.replace(

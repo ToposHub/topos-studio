@@ -44,6 +44,7 @@ __all__ = [
     "WarperGrid",
     "WarperStroke",
     "WarperPinPoint",
+    "XGradeState",
     "WarperStateV2",
     "WarperCapabilities",
     "WarperCommandRequest",
@@ -487,6 +488,67 @@ class WarperPinPoint:
 
 
 @dataclass(frozen=True)
+class XGradeState:
+    """Independent, versioned color ranges attached to the corrector."""
+
+    strokes: tuple[WarperStroke, ...] = ()
+    pin_points: tuple[WarperPinPoint, ...] = ()
+    protect_neutral: bool = True
+    _extra_fields: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.protect_neutral, bool):
+            raise WarperStateError("invalid_param", "X Grade neutral protection must be boolean")
+        if len(self.strokes) > MAX_STROKES or len(self.pin_points) > MAX_PINS:
+            raise WarperStateError("size_exceeded", "Too many X Grade controls")
+        if len({stroke.stroke_id for stroke in self.strokes}) != len(self.strokes):
+            raise WarperStateError("invalid_id", "Duplicate X Grade stroke ID")
+        if len({pin.pin_id for pin in self.pin_points}) != len(self.pin_points):
+            raise WarperStateError("invalid_id", "Duplicate X Grade pin ID")
+        if any(len(point) != 2 or not all(0.0 <= value <= 1.0 for value in point)
+               for stroke in self.strokes for point in stroke.path):
+            raise WarperStateError("invalid_array", "X Grade paths must be inside the plot")
+        for stroke in self.strokes:
+            params = stroke.params or {}
+            if params.get("x_zone", "master") not in ("master", "dim", "light"):
+                raise WarperStateError("invalid_param", "Unknown X Grade zone")
+            falloff = params.get("x_falloff", 0.5)
+            if not isinstance(falloff, (float, int)) or not 0.0 <= falloff <= 1.0:
+                raise WarperStateError("invalid_param", "X Grade falloff must be in [0, 1]")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **copy.deepcopy(self._extra_fields),
+            "schema_version": 1,
+            "strokes": [stroke.to_dict() for stroke in self.strokes],
+            "pins": [pin.to_dict() for pin in self.pin_points],
+            "protect_neutral": self.protect_neutral,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> XGradeState:
+        if not isinstance(data, Mapping):
+            raise WarperStateError("corrupt_payload", "X Grade needs a mapping")
+        if data.get("schema_version") != 1:
+            raise WarperStateError("schema_unsupported", "Unsupported X Grade schema")
+        strokes, pins = data.get("strokes", ()), data.get("pins", ())
+        if not isinstance(strokes, (list, tuple)) or not isinstance(pins, (list, tuple)):
+            raise WarperStateError("corrupt_payload", "X Grade controls must be arrays")
+        if len(strokes) > MAX_STROKES or len(pins) > MAX_PINS:
+            raise WarperStateError("size_exceeded", "Too many X Grade controls")
+        known = {"schema_version", "strokes", "pins", "protect_neutral"}
+        try:
+            return cls(tuple(WarperStroke.from_dict(stroke) for stroke in strokes),
+                       tuple(WarperPinPoint.from_dict(pin) for pin in pins),
+                       data.get("protect_neutral", True),
+                       {key: copy.deepcopy(value) for key, value in data.items() if key not in known})
+        except (ValueError, TypeError) as exc:
+            if isinstance(exc, WarperStateError):
+                raise
+            raise WarperStateError("corrupt_payload", "Invalid X Grade controls") from exc
+
+
+@dataclass(frozen=True)
 class WarperStateV2:
     """Warper 调色状态的版本化领域模型。
 
@@ -509,9 +571,10 @@ class WarperStateV2:
     _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
     other_modes: tuple[WarperStateV2, ...] = ()
     white_point: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    x_grade: XGradeState | None = None
 
     _KNOWN_KEYS = ("schema_version", "algorithm_version", "mode", "color_space",
-                   "axis_angle", "grids", "strokes", "pins", "other_modes", "white_point")
+                   "axis_angle", "grids", "strokes", "pins", "other_modes", "white_point", "x_grade")
 
     def __post_init__(self) -> None:
         if self.mode not in SUPPORTED_MODES:
@@ -558,7 +621,9 @@ class WarperStateV2:
         if self.algorithm_version == HS_SPACES709_ALGORITHM and self.mode != "hue_saturation":
             raise WarperStateError("invalid_mode", "Hue–Saturation color spaces require a Hue–Saturation grid")
         modes = {self.mode, *(state.mode for state in self.other_modes)}
-        if len(modes) != len(self.other_modes) + 1 or any(state.other_modes for state in self.other_modes):
+        if len(modes) != len(self.other_modes) + 1 or any(
+                state.other_modes or state.x_grade is not None or "x_grade" in state._extra_fields
+                for state in self.other_modes):
             raise WarperStateError("invalid_mode", "Warper modes must be unique and flat")
         if len(self.strokes) > MAX_STROKES:
             raise WarperStateError("size_exceeded", f"strokes 超过 {MAX_STROKES}")
@@ -589,6 +654,8 @@ class WarperStateV2:
         if any(self.white_point):
             data["white_point"] = list(self.white_point)
         data.update(copy.deepcopy(self._extra_fields))
+        if self.x_grade is not None:
+            data["x_grade"] = self.x_grade.to_dict()
         return data
 
     @classmethod
@@ -634,6 +701,15 @@ class WarperStateV2:
         white_point = data.get("white_point", (0.0, 0.0, 0.0))
         if not isinstance(white_point, (list, tuple)):
             raise WarperStateError("invalid_param", "Invalid Hue–Saturation white point")
+        x_grade = None
+        raw_x_grade = data.get("x_grade")
+        if raw_x_grade is not None:
+            try:
+                x_grade = XGradeState.from_dict(raw_x_grade)
+            except WarperStateError:
+                # The independent component can be newer than the rest of
+                # the corrector. Preserve it without using stale render data.
+                extras["x_grade"] = copy.deepcopy(raw_x_grade)
         return cls(
             schema_version=version,
             algorithm_version=str(data.get("algorithm_version", CURRENT_ALGORITHM)),
@@ -646,6 +722,7 @@ class WarperStateV2:
             _extra_fields=extras,
             other_modes=tuple(cls.from_dict(item) for item in other_modes_raw),
             white_point=tuple(white_point),
+            x_grade=x_grade,
         )
 
     # ---- 派生 ----
@@ -665,13 +742,19 @@ class WarperStateV2:
 
     def replacing_mode(self, state: WarperStateV2) -> WarperStateV2:
         """Use the edited palette and retain the other palettes' controls."""
-        saved = tuple(replace(previous, other_modes=()) for previous in (self, *self.other_modes)
-                      if previous.mode != state.mode)
-        return replace(state, other_modes=tuple(sorted(saved, key=lambda item: item.mode)))
+        saved = tuple(replace(previous, other_modes=(), x_grade=None,
+                              _extra_fields={key: value for key, value in previous._extra_fields.items()
+                                             if key != "x_grade"})
+                      for previous in (self, *self.other_modes) if previous.mode != state.mode)
+        extras = dict(state._extra_fields)
+        if "x_grade" in self._extra_fields:
+            extras["x_grade"] = copy.deepcopy(self._extra_fields["x_grade"])
+        return replace(state, other_modes=tuple(sorted(saved, key=lambda item: item.mode)),
+                       x_grade=self.x_grade, _extra_fields=extras)
 
     def is_identity(self) -> bool:
         """全部网格零位移、无笔画/Pin 时为恒等(可安全丢弃不参与渲染)。"""
-        if self.strokes or self.pin_points or any(self.white_point):
+        if self.strokes or self.pin_points or any(self.white_point) or self.x_grade is not None:
             return False
         return all(not grid.offsets.any() for grid in self.grids.values())
 
@@ -742,9 +825,10 @@ def derives_warper_projection(state: WarperStateV2 | Mapping[str, Any]) -> bool:
     versions = (*RESOLVE_HS_ALGORITHMS, CHROMA709_ALGORITHM, HS_SPACES709_ALGORITHM)
     if isinstance(state, WarperStateV2):
         grid = state.grids.get(HS_GRID_NAME)
-        return bool(state.other_modes or state.algorithm_version in versions or any(state.white_point)
+        return bool(state.other_modes or state.x_grade is not None or "x_grade" in state._extra_fields
+                    or state.algorithm_version in versions or any(state.white_point)
                     or (grid is not None and has_hue_pin_constraints(grid)))
-    if state.get("other_modes") or state.get("algorithm_version") in versions or state.get("white_point"):
+    if state.get("other_modes") or state.get("x_grade") is not None or state.get("algorithm_version") in versions or state.get("white_point"):
         return True
     grids = state.get("grids")
     grid = grids.get(HS_GRID_NAME) if isinstance(grids, Mapping) else None
@@ -753,10 +837,35 @@ def derives_warper_projection(state: WarperStateV2 | Mapping[str, Any]) -> bool:
         isinstance(pin, Mapping) and pin.get("affects_response") is True for pin in pins)
 
 
+def empty_x_grade_carrier() -> WarperStateV2:
+    """Versioned storage for X Grade on a layer without Color Warper controls."""
+    grid = WarperGrid.identity(HS_GRID_NAME, 6, 6, ("dh", "ds"))
+    return WarperStateV2(WARPER_SCHEMA_VERSION, LEGACY_ALGORITHM, "hue_saturation", "hsv", 0.0,
+                         {HS_GRID_NAME: grid}, _extra_fields={"x_grade_only": True})
+
+
+def is_empty_x_grade_carrier(state: WarperStateV2) -> bool:
+    return state._extra_fields.get("x_grade_only") is True and (
+        replace(state, x_grade=None).to_dict() == empty_x_grade_carrier().to_dict()
+    )
+
+
 def renderable_projection(state: WarperStateV2 | None) -> tuple[np.ndarray | None, int]:
-    """Project a legacy two-channel or calibrated three-channel HS mesh for rendering."""
+    """Project authored controls for the renderer, with X Grade after the Warper."""
     if state is None:
         return None, 0
+    x_grade = state.x_grade
+    base = replace(state, x_grade=None) if x_grade is not None else state
+    offsets, space = (None, 0) if is_empty_x_grade_carrier(base) else _warper_projection(base)
+    if x_grade is None or not x_grade.strokes:
+        return offsets, space
+    from src.features.color.core.warper_color import WARPER_X_GRADE_SPACE
+    from src.features.color.core.x_grade_render import pack_x_grade
+
+    return pack_x_grade(x_grade, offsets, space), WARPER_X_GRADE_SPACE
+
+
+def _warper_projection(state: WarperStateV2) -> tuple[np.ndarray | None, int]:
     chroma = None if state.mode == "chroma_warp" else state.for_mode("chroma_luma")
     if chroma is not None and (chroma.algorithm_version != CHROMA709_ALGORITHM or chroma.is_identity()):
         chroma = None
@@ -824,12 +933,14 @@ def describe_warper_capabilities(
     legacy: np.ndarray | None = None,
     revision: int | None = None,
 ) -> WarperCapabilities:
-    """当前后端只有 legacy HSV GLSL/MSL 路径;新空间/模式如实报 unimplemented。"""
+    """Describe the renderable correction for the current corrector."""
     supported = SUPPORTED_MODES
     if state is None:
         if legacy is not None:
             return WarperCapabilities(True, "ok", supported, "legacy_hsv_glsl", revision)
         return WarperCapabilities(True, "bypass", supported, "none", revision)
+    if state.x_grade is not None and state.x_grade.strokes:
+        return WarperCapabilities(True, "ok", supported, "x_grade", revision)
     if state.algorithm_version == LEGACY_ALGORITHM:
         return WarperCapabilities(True, "ok", supported, "legacy_hsv_glsl", revision)
     offsets, space = renderable_projection(state)

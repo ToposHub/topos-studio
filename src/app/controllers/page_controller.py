@@ -42,7 +42,10 @@ from typing import Optional, Any, Callable
 
 from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 
-from src.app.controllers.dock_layout_controller import COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS
+from src.app.controllers.dock_layout_controller import (
+    COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS,
+    restore_workspace_dock_state,
+)
 from src.shared.diagnostics import flash_diag as _flash_diag
 
 logger = logging.getLogger(__name__)
@@ -419,6 +422,9 @@ class PageManagementMixin:
             if callable(close_lightbox):
                 close_lightbox()
         if from_page == "Color" and page_name != from_page:
+            base_grade = getattr(self, "dock_base_grade", None)
+            if base_grade is not None:
+                base_grade.widget().finish_edit(commit=True)
             previews = getattr(self, "_grade_set_previews", None)
             if previews is not None:
                 previews.leave_page()
@@ -457,7 +463,7 @@ class PageManagementMixin:
             restored_from_store = self._restore_layout_from_store(page_name)
 
         if not restored_from_store and page_name in self.page_layouts:
-            self.restoreState(self.page_layouts[page_name])
+            restore_workspace_dock_state(self, self.page_layouts[page_name], page_name)
         elif not restored_from_store:
             # New page without saved layout - save current state as its layout
             self.page_layouts[page_name] = self.saveState()
@@ -3482,6 +3488,8 @@ class PageManagementMixin:
             panels["hsl_panel"] = self.hsl_curves_panel
         if getattr(self, "warper_panel", None):
             panels["warper_panel"] = self.warper_panel
+        if getattr(self, "x_grade_panel", None):
+            panels["x_grade_panel"] = self.x_grade_panel
         if hasattr(self, 'mixer_panel') and self.mixer_panel:
             panels["mixer_panel"] = self.mixer_panel
         if getattr(self, "effects_panel", None):

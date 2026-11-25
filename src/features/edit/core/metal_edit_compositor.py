@@ -244,7 +244,8 @@ def _grade_plan(
     from src.features.color.core.color_graph_metal import serial_metal_delivery_grade
 
     try:
-        nodes = serial_metal_delivery_grade(graph, *size)
+        nodes = serial_metal_delivery_grade(
+            graph, *size, rec709_calibration_encoded=bool(grade.get("rec709_calibration_encoded")))
     except (TypeError, ValueError, OverflowError):
         return _refuse("grade_unsupported")
     if not nodes or any(node.primary is None or node.lut is not None for node in nodes):

@@ -1295,6 +1295,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         from src.features.color.ui.mixer_panel import MixerPanel
         from src.app.ui.audio_mixer import AudioMixerPanel
         from src.features.color.ui.warper_panel import WarperPanel
+        from src.features.color.ui.x_grade_panel import XGradePanel
         from src.features.color.ui.blur_sharpen_panel import BlurSharpenPanel
         from src.features.color.ui.film_grain_panel import FilmGrainPanel
         from src.features.color.ui.mask_panel import MaskPanel
@@ -1421,6 +1422,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             use_measured_curves=self._use_measured_rec709_grading,
         )
         self.warper_panel = WarperPanel(use_measured_warper=self._use_measured_rec709_grading)
+        self.x_grade_panel = XGradePanel()
+        self.warper_panel.add_x_grade_mode(self.x_grade_panel)
         self.mixer_panel = MixerPanel()
         self.effects_panel = BlurSharpenPanel()
         self.film_grain_panel = FilmGrainPanel()
@@ -2113,22 +2116,33 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         identity = graph.active_grade_node_identity() if graph is not None else ""
         layer = self.engine.get_active_layer()
         revision = self.engine.__dict__
-        return self.warper_panel.request_viewer_input(
-            node_id, (identity, layer.id if layer is not None else "", revision.get("_source_epoch"),
-                      revision.get("current_grade_frame")),
-            revision=(self.engine.color_graph_revision, tuple(self.engine.visible_rect)))
+        source = (identity, layer.id if layer is not None else "", revision.get("_source_epoch"),
+                  revision.get("current_grade_frame"))
+        render_revision = (self.engine.color_graph_revision, tuple(self.engine.visible_rect))
+        warper = self.warper_panel.request_viewer_input(node_id, source, revision=render_revision)
+        x_grade = self.x_grade_panel.request_viewer_input(
+            node_id, source, revision=(*render_revision, self.engine.grade_set_preview_key),
+        )
+        return (node_id, source, render_revision, x_grade) if x_grade is not None else warper
+
+    def _warper_viewer_available(self) -> bool:
+        return (self.current_page == "Color" and not self._is_video_playing()
+                and self.canvas.accepts_warper_picker())
 
     def setup_connections(self):
         self.canvas.file_open_requested.connect(self._open_media_path)
         self.engine.frame_ready.connect(self.on_frame_ready)
         self.engine.scope_snapshot_ready.connect(self.on_scope_snapshot_ready)
-        self.engine.warper_input_ready.connect(self.warper_panel.accept_viewer_input)
         self.engine.warper_input_request = self._warper_input_request
-        self.warper_panel.bind_viewer(
-            self.canvas, lambda: self.engine.render_pipeline(render_reason="viewport_refresh"),
-            available=lambda: not self._is_video_playing(),
-            overlay_changed=self.canvas._sync_color_metal_host,
-        )
+        for panel, other in ((self.warper_panel, self.x_grade_panel), (self.x_grade_panel, self.warper_panel)):
+            self.engine.warper_input_ready.connect(panel.accept_viewer_input)
+            panel.bind_viewer(
+                self.canvas, lambda: self.engine.render_pipeline(render_reason="viewport_refresh"),
+                available=self._warper_viewer_available,
+                position_available=self.canvas.accepts_warper_picker_at,
+                overlay_changed=self.canvas._sync_color_metal_host,
+            )
+            panel.picker_button.toggled.connect(lambda enabled, peer=other: enabled and peer.picker_button.setChecked(False))
         # Native GPU scope descriptor (no CPU pixel readback).
         if hasattr(self.engine, 'gpu_scope_ready'):
             self.engine.gpu_scope_ready.connect(self.on_gpu_scope_ready)
@@ -2227,6 +2241,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.warper_panel.interaction_ended.connect(self.on_interaction_ended)
         # CW-B02: 版本化 warper 命令通道(与 legacy warper_changed 互斥去重)
         self.warper_panel.command_requested.connect(self.on_warper_command_requested)
+        self.x_grade_panel.command_requested.connect(self.on_warper_command_requested)
+        self.x_grade_panel.notice_requested.connect(lambda message: self.statusBar().showMessage(message, 4500))
         self.effects_panel.effects_changed.connect(self.on_blur_sharpen_changed)
         self.effects_panel.interaction_started.connect(self.on_interaction_started)
         self.effects_panel.interaction_ended.connect(self.on_interaction_ended)

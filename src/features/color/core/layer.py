@@ -30,6 +30,7 @@ except ModuleNotFoundError:
     HAS_SCIPY = False
 
 from src.features.color.core.window_softness import normalize_edge_softness
+from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS, base_grade_active
 from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
 from src.features.color.core.curves_calibration import (
     CURVES_CALIBRATION_VERSION_KEY,
@@ -520,7 +521,7 @@ _DEFAULT_QUALIFIER_PARAMS: Dict[str, Any] = {
 }
 
 
-# 一级校色扩展参数的默认值（Offset 加性轮 / pivot / Log 四轮 / Lum Mix）。
+# 一级校色扩展参数的默认值（Offset 加性轮 / pivot / Log 四轮 / Lum Mix / Base Grade）。
 # `__init__` 与 `reset_params` 的默认表尾部即引用此处；image_engine 的
 # 扩展参数补丁白名单也以此为准（非扩展键一律拒绝）。
 DEFAULT_EXTENDED_GRADING_PARAMS: Dict[str, Any] = {
@@ -534,6 +535,7 @@ DEFAULT_EXTENDED_GRADING_PARAMS: Dict[str, Any] = {
     "log_low_range": 0.333,
     "log_high_range": 0.550,
     "lum_mix": 100,
+    **BASE_GRADE_DEFAULTS,
 }
 
 
@@ -1154,6 +1156,8 @@ class Layer:
         if self.grading_params.get("log_low_range", 0.333) != 0.333:
             return True
         if self.grading_params.get("log_high_range", 0.550) != 0.550:
+            return True
+        if base_grade_active(self.grading_params):
             return True
 
         # 检查曲线数据 - 只有当有实际的曲线数据时才认为有调色

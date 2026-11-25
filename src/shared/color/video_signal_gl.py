@@ -35,7 +35,9 @@ uniform mat3 topos_video_gamut;
 uniform bool topos_video_rgc;
 uniform mat3 topos_video_compressed_gamut;
 uniform vec3 topos_video_luminance;
+"""
 
+VIDEO_SIGNAL_TRANSFER_GLSL = """
 const vec3 topos_video_hlg_weights = vec3(0.2627, 0.6780, 0.0593);
 const float topos_video_pq_m1 = 0.1593017578125;
 const float topos_video_pq_m2 = 78.84375;
@@ -47,7 +49,7 @@ vec3 topos_video_signed_power(vec3 rgb, float exponent) {
     return sign(rgb) * pow(abs(rgb), vec3(exponent));
 }
 
-vec3 topos_video_decode(vec3 rgb, int transfer) {
+vec3 topos_video_decode(vec3 rgb, int transfer, vec3 luminance) {
     if (transfer == 1) {
         return topos_video_signed_power(rgb, 2.4);
     }
@@ -80,15 +82,15 @@ vec3 topos_video_decode(vec3 rgb, int transfer) {
     if (transfer == 10) {
         vec3 v = pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / topos_video_pq_m2));
         vec3 ratio = max(v - topos_video_pq_c1, 0.0) / (topos_video_pq_c2 - topos_video_pq_c3 * v);
-        return pow(ratio, vec3(1.0 / topos_video_pq_m1)) * (10000.0 / topos_video_luminance.x);
+        return pow(ratio, vec3(1.0 / topos_video_pq_m1)) * (10000.0 / luminance.x);
     }
     if (transfer == 11) {
         vec3 code = max(rgb, 0.0);
         vec3 scene = mix((exp((code - 0.55991073) / 0.17883277) + 0.28466892) / 12.0,
                          code * code / 3.0, lessThanEqual(code, vec3(0.5)));
         float y = dot(scene, topos_video_hlg_weights);
-        float gain = y > 0.0 ? pow(y, topos_video_luminance.z - 1.0) : 0.0;
-        return scene * gain * (topos_video_luminance.y / topos_video_luminance.x);
+        float gain = y > 0.0 ? pow(y, luminance.z - 1.0) : 0.0;
+        return scene * gain * (luminance.y / luminance.x);
     }
     if (transfer == 12) {
         return mix(exp2(rgb / 0.07329248 - 7.0) - 0.0075, rgb / 10.44426855,
@@ -97,7 +99,7 @@ vec3 topos_video_decode(vec3 rgb, int transfer) {
     return rgb;
 }
 
-vec3 topos_video_encode(vec3 rgb, int transfer) {
+vec3 topos_video_encode(vec3 rgb, int transfer, vec3 luminance) {
     if (transfer == 1) {
         return topos_video_signed_power(rgb, 1.0 / 2.4);
     }
@@ -127,16 +129,16 @@ vec3 topos_video_encode(vec3 rgb, int transfer) {
                    lessThanEqual(rgb, vec3(0.0078125)));
     }
     if (transfer == 10) {
-        vec3 v = pow(clamp(rgb * (topos_video_luminance.x / 10000.0), 0.0, 1.0),
+        vec3 v = pow(clamp(rgb * (luminance.x / 10000.0), 0.0, 1.0),
                      vec3(topos_video_pq_m1));
         vec3 pq = pow((topos_video_pq_c1 + topos_video_pq_c2 * v) /
                       (1.0 + topos_video_pq_c3 * v), vec3(topos_video_pq_m2));
         return mix(pq, vec3(0.0), lessThanEqual(rgb, vec3(0.0)));
     }
     if (transfer == 11) {
-        vec3 display = max(rgb * (topos_video_luminance.x / topos_video_luminance.y), 0.0);
+        vec3 display = max(rgb * (luminance.x / luminance.y), 0.0);
         float y = dot(display, topos_video_hlg_weights);
-        float gain = y > 0.0 ? pow(y, 1.0 / topos_video_luminance.z - 1.0) : 0.0;
+        float gain = y > 0.0 ? pow(y, 1.0 / luminance.z - 1.0) : 0.0;
         vec3 scene = display * gain;
         return mix(0.17883277 * log(max(12.0 * scene - 0.28466892, 1e-10)) + 0.55991073,
                    sqrt(3.0 * scene), lessThanEqual(scene, vec3(1.0 / 12.0)));
@@ -147,7 +149,9 @@ vec3 topos_video_encode(vec3 rgb, int transfer) {
     }
     return rgb;
 }
+"""
 
+VIDEO_SIGNAL_GLSL += VIDEO_SIGNAL_TRANSFER_GLSL + """
 vec3 topos_aces_reference_compression(vec3 ap1) {
     float achromatic = max(ap1.r, max(ap1.g, ap1.b));
     if (achromatic == 0.0) return ap1;
@@ -162,14 +166,27 @@ vec3 topos_aces_reference_compression(vec3 ap1) {
 }
 
 vec3 topos_convert_video_signal(vec3 rgb) {
-    vec3 linear_rgb = topos_video_decode(rgb, topos_video_src_transfer);
+    vec3 linear_rgb = topos_video_decode(rgb, topos_video_src_transfer, topos_video_luminance);
     linear_rgb = topos_video_gamut * linear_rgb;
     if (topos_video_rgc) {
         linear_rgb = topos_video_compressed_gamut * topos_aces_reference_compression(linear_rgb);
     }
-    return topos_video_encode(linear_rgb, topos_video_dst_transfer);
+    return topos_video_encode(linear_rgb, topos_video_dst_transfer, topos_video_luminance);
 }
 """
+
+# Scalar/vector arithmetic is shared. GLSL's boolean mix and explicit relational
+# built-ins map to Metal select and vector comparison overloads.
+VIDEO_SIGNAL_TRANSFER_MSL = (
+    "\nstatic inline bool3 topos_less_equal(float3 a, float3 b) { return a <= b; }\n"
+    "static inline bool3 topos_less(float3 a, float3 b) { return a < b; }\n"
+    + VIDEO_SIGNAL_TRANSFER_GLSL.replace("vec3", "float3")
+    .replace("const ", "constant ")
+    .replace("\nfloat3 topos_video_", "\nstatic inline float3 topos_video_")
+    .replace("lessThanEqual(", "topos_less_equal(")
+    .replace("lessThan(", "topos_less(")
+    .replace("mix(", "select(")
+)
 
 
 def can_render_video_signal_gl(source: ColorSpaceDescriptor, destination: ColorSpaceDescriptor) -> bool:

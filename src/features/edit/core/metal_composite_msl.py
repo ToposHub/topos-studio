@@ -26,14 +26,15 @@ orientation, so the kernels only ever see image coordinates.
 
 from __future__ import annotations
 
+from src.features.color.core.base_grade_runtime import metal_graph_base_grade_source
 from src.features.color.core.shader_nodes_msl import MSL_LUT3D
-from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
+from src.shared.gpu.metal.kernels_color import build_metal_pointwise_grading_msl
 
 
 EDIT_PRIMARY_GRADE_MSL = """
 #include <metal_stdlib>
 using namespace metal;
-""" + METAL_POINTWISE_GRADING_MSL + """
+""" + build_metal_pointwise_grading_msl(metal_graph_base_grade_source()) + """
 
 // Edit feeds the GL Color graph a quantized RGBA8 track. Only the final
 // Color graph output goes back to RGBA8, after all float32 Correctors.
