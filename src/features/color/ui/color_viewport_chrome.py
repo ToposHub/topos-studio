@@ -64,7 +64,7 @@ def _button(
         button.setStyleSheet(_TRANSPORT_BUTTON_STYLE)
     button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     button.setAccessibleName(label)
-    button.setToolTip(label if enabled else label + " — " + I18N.tr("viewport.unavailable", "此版本暂不支持"))
+    button.setToolTip(label)
     button.setEnabled(enabled)
     return button
 
@@ -174,13 +174,12 @@ class ColorViewportChrome(QObject):
         toolbar.split_btn.setToolTip(I18N.tr("viewport.image_wipe", "Image Wipe"))
         self._adopt_header(left, toolbar.split_btn, "image_wipe")
         self.split_screen_button = _button(
-            self.header_left, "split_screen", I18N.tr("viewport.split_screen", "Split Screen"), header=True,
+            self.header_left, "split_screen", I18N.tr("gallery.split_screen", "Split Screen"), header=True,
         )
-        self.split_screen_button.setToolTip(I18N.tr("gallery.split_setup", "Set Up Gallery Split Screen…"))
         self.split_screen_button.clicked.connect(
             lambda: self.gallery_compare_requested.emit("split"))
         left.addWidget(self.split_screen_button)
-        toolbar.mask_btn.setToolTip(I18N.tr("viewport.highlight", "Highlight (Shift+H)"))
+        toolbar.mask_btn.setToolTip(I18N.tr("viewport.mask", "Highlight"))
         self._adopt_header(left, toolbar.mask_btn, "highlight")
         layout.addWidget(self.header_left)
         layout.addStretch(1)
@@ -283,10 +282,10 @@ class ColorViewportChrome(QObject):
         supported = self.toolbar._focus_mode_host() is not None
         self.enhanced_button.setEnabled(supported)
         self.toolbar.focus_act.setEnabled(supported)
-        self.enhanced_button.setToolTip(
-            self.enhanced_button.accessibleName() if supported else
-            self.enhanced_button.accessibleName() + " — " + I18N.tr("viewport.unavailable", "此版本暂不支持"))
-        self.toolbar.focus_act.setToolTip(self.enhanced_button.toolTip())
+        label = self.enhanced_button.accessibleName()
+        reason = "" if supported else I18N.tr("viewport.unavailable", "此版本暂不支持")
+        self.enhanced_button.setAccessibleDescription(reason)
+        self.toolbar.focus_act.setToolTip(f"{label} — {reason}" if reason else label)
 
     # ── CV-B05：Power Window overlay 开关（真实后端：set_overlay_visible）──
 
@@ -316,8 +315,7 @@ class ColorViewportChrome(QObject):
         if cap is None:
             return
         button.setEnabled(bool(cap.supported))
-        label = button.accessibleName() or button.toolTip()
-        button.setToolTip(self._cap_tooltip(label, cap))
+        button.setAccessibleDescription((cap.reason or "") if not cap.supported else "")
         is_checkable = getattr(button, "isCheckable", None)
         if (callable(is_checkable) and is_checkable()
                 and cap.checked is not None):
@@ -344,7 +342,7 @@ class ColorViewportChrome(QObject):
             caps_by_action: Mapping[str, ColorViewerCapability]) -> None:
         """Apply ``{action: ColorViewerCapability}`` to registered controls.
 
-        CV-B01 契约：只做回填（enabled/tooltip/checked），不发命令；
+        CV-B01 契约：只做回填（enabled/checked 和禁用原因），不发命令；
         checked 一律经 blockSignals 状态锁，旧回填不触发二次 toggle。
         """
         def cap(key: str) -> Optional[ColorViewerCapability]:
@@ -458,6 +456,18 @@ class ColorViewportChrome(QObject):
 
     def _prepare_transport(self) -> None:
         bar = self.transport
+        bar.slider.setAccessibleName(I18N.tr("video.playback_position", "Playback Position"))
+        bar.slider.setToolTip("")
+        for button, label in (
+            (bar.btn_first, I18N.tr("video.first_frame", "First Frame")),
+            (bar.btn_prev, I18N.tr("video.prev_frame", "Previous Frame")),
+            (bar.btn_play, I18N.tr("video.play_pause", "Play/Pause")),
+            (bar.btn_next, I18N.tr("video.next_frame", "Next Frame")),
+            (bar.btn_last, I18N.tr("video.last_frame", "Last Frame")),
+            (bar.btn_loop, I18N.tr("video.loop", "Loop")),
+        ):
+            button.setAccessibleName(label)
+            button.setToolTip(label)
         self.row = bar.findChild(QWidget, "videoControlRow")
         row_layout = self.row.layout()
         for index in range(row_layout.count()):
@@ -518,7 +528,6 @@ class ColorViewportChrome(QObject):
         for button in (bar.btn_first, bar.btn_prev, bar.btn_play, bar.btn_next, bar.btn_last, bar.btn_loop):
             self._center_layout.addWidget(button)
             button.show()
-            button.setAccessibleName(button.toolTip())
         self._right_layout.addWidget(bar.timecode_label)
         bar.timecode_label.setStyleSheet("color: #d6d6d9; background: transparent; border: 0; font-size: 11px; font-weight: 600; padding: 0;")
         bar.timecode_label.show()

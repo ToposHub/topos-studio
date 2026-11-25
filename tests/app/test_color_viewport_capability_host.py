@@ -14,6 +14,7 @@ from src.app.controllers.color_viewport_capability_host import (
 )
 from src.features.color.ui.canvas import Canvas, VideoControlBar, ViewportMenuBar
 from src.features.color.ui.color_viewport_chrome import ColorViewportChrome
+from src.shared.i18n.i18n import I18N
 
 
 class _CanvasHost(QGraphicsView):
@@ -108,6 +109,37 @@ def test_image_media_enables_grading_but_not_transport(host) -> None:
     assert chrome.toolbar.capture_still_act.isEnabled()
     assert not chrome.transport.btn_play.isEnabled()
     assert not chrome.transport.btn_loop.isEnabled()
+
+
+def test_transport_hover_tips_stay_short_across_capability_refreshes(host) -> None:
+    chrome = host._chrome
+    bar = chrome.transport
+    buttons = (
+        (bar.btn_first, I18N.tr("video.first_frame", "First Frame")),
+        (bar.btn_prev, I18N.tr("video.prev_frame", "Previous Frame")),
+        (bar.btn_play, I18N.tr("video.play_pause", "Play/Pause")),
+        (bar.btn_next, I18N.tr("video.next_frame", "Next Frame")),
+        (bar.btn_last, I18N.tr("video.last_frame", "Last Frame")),
+        (bar.btn_loop, I18N.tr("video.loop", "Loop")),
+        (chrome.power_window_button, chrome.power_window_button.accessibleName()),
+        (chrome.unmix_button, chrome.unmix_button.accessibleName()),
+        (chrome.mute_button, chrome.mute_button.accessibleName()),
+    )
+
+    _open_image(host._window)
+    for _ in range(3):
+        host.refresh()
+        assert not bar.slider.isEnabled()
+        assert not bar.slider.toolTip()
+        assert all(button.toolTip() == name for button, name in buttons)
+    assert bar.slider.accessibleDescription() == host.last_capabilities["transport.scrub"].reason
+
+    _open_video(host._window)
+    host.refresh()
+    assert bar.slider.isEnabled()
+    assert not bar.slider.toolTip()
+    assert not bar.slider.accessibleDescription()
+    assert all(button.toolTip() == name for button, name in buttons)
 
 
 def test_video_media_enables_transport_and_backfills_loop(host) -> None:

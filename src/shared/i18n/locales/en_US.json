@@ -2960,6 +2960,7 @@
     "store_snapshot_b": "Store Snapshot to B\tCtrl+Shift+B"
   },
   "video": {
+    "playback_position": "Playback Position",
     "first_frame": "First Frame",
     "prev_frame": "Previous Frame",
     "play_pause": "Play/Pause",

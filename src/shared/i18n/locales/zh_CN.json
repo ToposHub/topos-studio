@@ -2960,6 +2960,7 @@
     "store_snapshot_b": "存储快照到 B\tCtrl+Shift+B"
   },
   "video": {
+    "playback_position": "播放位置",
     "first_frame": "第一帧",
     "prev_frame": "上一帧",
     "play_pause": "播放/暂停",
