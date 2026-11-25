@@ -144,7 +144,7 @@ def test_video_only_actual_export_completes_without_strict_expansion(tmp_path, m
     encoder = Mock(supports_audio=True, hw_fallback_reason="")
     exporter._create_encoder = Mock(return_value=encoder)
     exporter._create_encoder_config = Mock(return_value=SimpleNamespace(
-        codec="h264", pix_fmt="yuv420p", has_alpha=False))
+        codec="h264", pix_fmt="yuv420p", has_alpha=False, color_metadata=None))
     exporter._resolve_export_color_metadata = Mock(return_value=None)
     exporter._pipeline_eligible = Mock(return_value=False)
     exporter._render_frame = Mock(return_value=np.zeros((2, 2, 3), dtype=np.uint8))

@@ -290,9 +290,25 @@ class TestTakingAFrame:
         source = _VtFrame()
         task = _task(source)
         task.background, task.cached_composite = background, cached
-        native._snapshot_armed = snapshot
+        native._snapshot_generation = task.generation_id if snapshot else None
         assert native._try_native_metal_preview(task, 960, 540) is False
         assert native._native_producer.rendered == []
+
+    def test_snapshot_for_cancelled_seek_does_not_divert_new_frame(self, native) -> None:
+        task = _task(_VtFrame())
+        native._snapshot_generation = task.generation_id - 1
+
+        assert native._try_native_metal_preview(task, 960, 540)
+
+    @pytest.mark.parametrize("request_kind,scrub_settled", [("scrub", False), ("", True)])
+    def test_scrub_keeps_fenced_viewer_surface(self, native, request_kind, scrub_settled) -> None:
+        source = _VtFrame()
+        task = _task(source)
+        task.request_kind = request_kind
+        task.scrub_settled = scrub_settled
+
+        assert not native._try_native_metal_preview(task, 960, 540)
+        assert task.layers[0]["vt_pixel_buffer"] is source and source.releases == 0
 
     def test_ineligible_frame_is_left_to_the_gl_path(self, native) -> None:
         source = _VtFrame()

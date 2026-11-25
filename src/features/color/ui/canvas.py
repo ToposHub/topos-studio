@@ -2978,6 +2978,7 @@ class VideoControlBar(QFrame):
     scrub_started = pyqtSignal(int)
     scrub_moved = pyqtSignal(int)
     scrub_finished = pyqtSignal(int)
+    scrub_cancelled = pyqtSignal()
     play_toggled = pyqtSignal()
     next_frame = pyqtSignal()
     prev_frame = pyqtSignal()
@@ -3498,11 +3499,27 @@ class VideoControlBar(QFrame):
             slider.setValue(value)
             slider.blockSignals(was_blocked)
 
+    def cancel_color_scrub(self) -> None:
+        """End an interrupted Color gesture without seeking a newly active page."""
+        if not self._slider_dragging or not self.slider.property("colorMonitorScrubber"):
+            return
+        from src.shared.ui.widgets.scrubber_gesture import cancel_monitor_scrub
+
+        self._slider_dragging = False
+        blocked = self.slider.blockSignals(True)
+        try:
+            cancel_monitor_scrub(self.slider)
+        finally:
+            self.slider.blockSignals(blocked)
+        self.scrub_cancelled.emit()
+
     def _on_slider_pressed(self) -> None:
         """Handle slider pressed."""
         self._slider_dragging = True
         slider = self._active_slider()
         self._sync_slider_values(slider.value(), slider)
+        if slider.property("colorMonitorScrubber"):
+            self.set_current_frame(slider.value())
         self.scrub_started.emit(slider.value())
 
     def _on_slider_released(self) -> None:
@@ -4061,10 +4078,11 @@ class Canvas(QGraphicsView):
         # P4-2 SAFETY: Flag to detect render_pipeline calls during drawBackground
         # If render_pipeline is called while this flag is True, it's a bug
         self._in_draw_background = False
-        self._still_present_retry = QTimer(self)
-        self._still_present_retry.setSingleShot(True)
-        self._still_present_retry.setInterval(16)
-        self._still_present_retry.timeout.connect(self._retry_still_paint)
+        self._present_retry = QTimer(self)
+        self._present_retry.setSingleShot(True)
+        self._present_retry.timeout.connect(self._retry_front_paint)
+        self._video_present_retry_key: tuple[int, int, int] | None = None
+        self._video_present_retry_attempts = 0
         
         self.gl_viewport = GLCanvasViewport()
         self.setViewport(self.gl_viewport)
@@ -6792,11 +6810,43 @@ class Canvas(QGraphicsView):
         """
         return not bool(getattr(renderer, "video_texture_pending", False))
 
-    def _retry_still_paint(self) -> None:
+    def _retry_front_paint(self) -> None:
         engine = self.engine
-        if self.isVisible() and engine and engine.renderer and not getattr(engine, "_is_video_mode", False):
-            self.scene.invalidate(self.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer)
-            self.viewport().update()
+        if not self.isVisible() or engine is None or engine.renderer is None:
+            return
+        if getattr(engine, '_is_video_mode', False):
+            renderer = engine.renderer
+            key = self._video_present_retry_key
+            if (
+                key is None
+                or key[:2] != (id(renderer), getattr(renderer, '_video_generation_id', 0))
+                or not self._should_present_renderer_front_texture(renderer)
+            ):
+                return
+        self.scene.invalidate(self.scene.sceneRect(), QGraphicsScene.SceneLayer.BackgroundLayer)
+        self.viewport().update()
+
+    def _schedule_front_paint_retry(self) -> None:
+        if not getattr(self.engine, '_is_video_mode', False):
+            if not self._present_retry.isActive():
+                self._present_retry.start(16)
+            return
+        renderer = self.engine.renderer
+        key = (id(renderer), getattr(renderer, '_video_generation_id', 0), self.engine.scope_source_revision)
+        previous = self._video_present_retry_key
+        if key == previous:
+            # Paused video may get no subsequent frame-ready notification to
+            # replace a failed paint. Give that exact frame a bounded window.
+            playing = getattr(getattr(self, 'video_control_bar', None), 'is_playing', False)
+            if (not playing and self._video_present_retry_attempts < 3
+                    and not self._present_retry.isActive()):
+                self._video_present_retry_attempts += 1
+                self._present_retry.start(11)
+            return
+        self._video_present_retry_key = key
+        self._video_present_retry_attempts = 1
+        if previous is None or previous[:2] != key[:2] or not self._present_retry.isActive():
+            self._present_retry.start(11)
 
     def drawBackground(self, painter, rect) -> None:
         # P4-2 SAFETY: drawBackground 必须只使用已完成的 front texture
@@ -6840,15 +6890,14 @@ class Canvas(QGraphicsView):
                         desktop_display=self._display_color,
                     )
                     if did_draw:
-                        if self._still_present_retry.isActive():
-                            self._still_present_retry.stop()
+                        if self._present_retry.isActive():
+                            self._present_retry.stop()
                         _diag_blit_tex = int(tex_id)
                         self._record_presented_preview_frame()
-                    elif (not getattr(self.engine, "_is_video_mode", False)
-                          and not self._still_present_retry.isActive()):
-                        # Scopes can hold the shared GL lock after frame_ready.
-                        # Retry displaying that frame even when no input arrives.
-                        self._still_present_retry.start()
+                    else:
+                        # A failed blit can share its frame with a scope pass.
+                        # Retry the published front without regrading it.
+                        self._schedule_front_paint_retry()
                 else:
                     _diag_pending = bool(getattr(renderer, 'video_texture_pending', False))
                 painter.endNativePainting()

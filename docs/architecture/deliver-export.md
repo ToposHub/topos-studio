@@ -273,6 +273,11 @@ degradations（T-P1-70，只记日志不可审计是不被接受的）。
 - **Windows NVENC H.264**：编码器通过 NVENC 私有选项传递 Baseline、Main
   或 High。UHD 的最终 Profile 为 High 且 VBR 目标码率至少 50 Mbps 时
   默认用 P4，调用方显式预设优先。打开实际编码会话失败时回退到软件编码。
+- **HEVC Main10 软件编码**：实际选中 libx265 10-bit 时，普通交付和硬编回退
+  都在独立进程中完成编码。子进程先初始化共享内存，避免父进程在容量不足时崩溃。
+  视频平面和主音轨分批复用该缓冲，父进程等到当前批次被消费后才覆盖。确认帧数、
+  容器收尾和子进程正常退出后，才发布成片。
+  用户取消或子进程崩溃时清理暂存，保留同名旧成片。
 - **CPU 回退**（`_gpu_render_composite` 返回 None）：自适应跳过（主机可见
   单层轻量帧，GPU 往返不划算）、alpha 交付、GPU 不适用 clip、headless
   上下文已失败（本导出内永久）等场景走 `_apply_clip_effects_cpu` +

@@ -69,11 +69,13 @@ import math
 import numpy as np
 import queue
 import os
+import sys
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from collections import OrderedDict
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Optional, Dict, Any, Tuple, List, Callable, TYPE_CHECKING
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QMutex, QTimer
 from PyQt6.QtGui import QImage, QOpenGLContext, QOffscreenSurface
@@ -106,6 +108,7 @@ from src.features.edit.core.transition_effects import (
     apply_transition_effect,
 )
 from src.features.edit.core.timeline_v2 import TimelineSequence
+from src.features.edit.core.reverse_scrub import ScrubClipRange
 from src.features.edit.core.project import EditProject
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.core.crop_cpu import apply_crop_cpu, crop_is_identity
@@ -124,6 +127,7 @@ if TYPE_CHECKING:
     # 仅供类型注解使用；运行时由 MG 分支按需延迟导入，避免跨 feature
     # 的模块级依赖。
     from src.features.teaching_animation.core.contracts import RenderContext
+    from src.features.edit.core.edit_gpu_preview_renderer import ScrubSourceFrame
     from src.features.edit.core.realtime_playback.task_priority import FrameTaskPriority
 
 
@@ -554,6 +558,14 @@ class _GuardedPreviewSource:
             pass
 
 
+@dataclass(frozen=True, slots=True)
+class _ScrubWorkerResult:
+    generation: int
+    result: Any
+    error: bool = False
+    request_token: int | None = None
+
+
 class PreviewRenderWorker(QThread):
     """
     后台预览渲染线程。
@@ -645,6 +657,9 @@ class PreviewRenderWorker(QThread):
         self._interactive_scrub_active: bool = False
         self._interactive_scrub_token: int = 0
         self._interactive_scrub_frame: int = -1
+        self._scrub_result_generation: int | None = None
+        self._scrub_result_token: int | None = None
+        self._scrub_service_period_s: float | None = None
         # Scrub is latest-only: once the mouse moves, an old random seek must
         # release the worker quickly so the newest target can be decoded.
         self._interactive_scrub_decode_deadline_ms: float = 160.0
@@ -884,6 +899,12 @@ class PreviewRenderWorker(QThread):
                     self._queue.task_done()
                     continue
 
+                queued_scrub = bool(task_meta.get("queued_scrub"))
+                if queued_scrub and not self._is_current_queued_scrub_frame(frame):
+                    playback_trace("worker.drop_superseded_scrub_before_execute", frame=frame, generation=generation_id)
+                    self._queue.task_done()
+                    continue
+
                 if self._is_abandoned_interactive_scrub_task(frame, task_meta):
                     self._emit_interactive_scrub_drop(
                         frame,
@@ -910,6 +931,9 @@ class PreviewRenderWorker(QThread):
                 )
                 self._active_decode_target_size = decode_target_size
                 self._current_task_background = bool(task_meta.get("background"))
+                if task_meta.get("request_kind") == "scrub" or task_meta.get("scrub_settled"):
+                    self._scrub_result_generation = generation_id
+                    self._scrub_result_token = task_meta.get("scrub_request_token")
                 try:
                     self._execute_render(
                         frame,
@@ -919,11 +943,17 @@ class PreviewRenderWorker(QThread):
                         source_decisions_by_clip=source_decisions_by_clip,
                         task_meta=task_meta,
                     )
+                except Exception as error:
+                    if self._scrub_result_generation is None:
+                        raise
+                    logger.exception("Scrub render failed for frame %s", frame)
+                    self._emit_worker_result(frame, str(error), error=True)
                 finally:
                     self._active_decode_target_size = None
                     self._current_task_background = False
-
-                self._queue.task_done()
+                    self._scrub_result_generation = None
+                    self._scrub_result_token = None
+                    self._queue.task_done()
 
             except queue.Empty:
                 continue
@@ -972,6 +1002,7 @@ class PreviewRenderWorker(QThread):
         request_started_at: Optional[float] = None,
         scrub_settled: bool = False,
         scrub_coarse: bool = False,
+        queued_scrub: bool = False,
         trace_id: int = 0,
         deadline_ns: int = 0,
         dispatch_channel: str = "",
@@ -1028,6 +1059,8 @@ class PreviewRenderWorker(QThread):
             task_meta["scrub_settled"] = True
         if scrub_coarse:
             task_meta["scrub_coarse"] = True
+        if queued_scrub:
+            task_meta["queued_scrub"] = True
 
         # P1-02: 显式任务优先级协议（scrub_latest > playhead > prefetch >
         # cache_fill > thumbnail > export）。优先级随 task_meta 全链路携带
@@ -1206,6 +1239,21 @@ class PreviewRenderWorker(QThread):
             self._interactive_scrub_token = int(token)
             self._interactive_scrub_frame = int(frame)
 
+    def _is_current_queued_scrub_frame(self, frame: int) -> bool:
+        with self._interactive_scrub_lock:
+            return self._interactive_scrub_active and frame == self._interactive_scrub_frame
+
+    def _note_scrub_service_time(self, generation: int, period_s: float) -> None:
+        with self._interactive_scrub_lock:
+            if generation != self._generation_id or not self._interactive_scrub_active:
+                return
+            before = self._scrub_service_period_s
+            self._scrub_service_period_s = period_s if before is None else before * 0.7 + period_s * 0.3
+
+    def scrub_service_period_s(self) -> float | None:
+        with self._interactive_scrub_lock:
+            return self._scrub_service_period_s
+
     def _is_stale_interactive_scrub_task(
         self,
         task_meta: Optional[Dict[str, Any]],
@@ -1260,6 +1308,7 @@ class PreviewRenderWorker(QThread):
         stream_key: Optional[str],
         task_meta: Optional[Dict[str, Any]],
         timeline_frame: Optional[int] = None,
+        visible_layers: int = 1,
     ) -> float:
         """Return an absolute deadline for the current latest scrub decode."""
         deadline_ms = float(self._interactive_scrub_decode_deadline_ms)
@@ -1294,6 +1343,11 @@ class PreviewRenderWorker(QThread):
         if scrub_settled:
             deadline_ms = min(220.0, max(120.0, deadline_ms * 1.75))
         else:
+            if (visible_layers >= 3 and not (task_meta or {}).get('scrub_coarse')
+                    and 100.0 <= deadline_ms < 160.0):
+                # One layer timing out discards the entire composite. UHD
+                # reference walks need a little longer when sharing hardware.
+                deadline_ms = 160.0
             # Only shrink the budget when the playhead is far past this
             # target. A merely-superseded task still deserves its full
             # deadline so its nearly-complete decode can be displayed.
@@ -1333,14 +1387,23 @@ class PreviewRenderWorker(QThread):
             task_token=(task_meta or {}).get("scrub_request_token", ""),
         )
         if generation_id == self._generation_id:
-            self.frame_rendered.emit(
-                int(frame),
-                {
-                    "scrub_stale_drop": True,
-                    "reason": reason,
-                    "scrub_request_token": (task_meta or {}).get("scrub_request_token"),
-                },
-            )
+            result = {
+                "scrub_stale_drop": True,
+                "reason": reason,
+                "scrub_request_token": (task_meta or {}).get("scrub_request_token"),
+            }
+            self.frame_rendered.emit(int(frame), _ScrubWorkerResult(generation_id, result))
+
+    def _emit_worker_result(self, frame: int, result: Any, *, error: bool = False) -> None:
+        generation = self._scrub_result_generation
+        if generation is not None:
+            self.frame_rendered.emit(frame, _ScrubWorkerResult(
+                generation, result, error, self._scrub_result_token,
+            ))
+        elif error:
+            self.render_error.emit(frame, result)
+        else:
+            self.frame_rendered.emit(frame, result)
 
     def set_gpu_submitted_callback(
         self,
@@ -1537,21 +1600,23 @@ class PreviewRenderWorker(QThread):
             self.__dict__.get("_budget_size_cap"), scale, base_w, base_h)
 
     def set_budget_size_cap(self, cap: Optional[Tuple[int, int]]) -> None:
-        """R03：设置监看域临时预算上限（None 解除；同值 no-op）。
-
-        与用户预览质量偏好分离：不触碰 ``_preview_quality``。上限变化
-        时作废排队/在飞任务（旧目标尺寸已过期）。
-        """
+        """Apply the temporary monitor size cap to future worker requests."""
         normalized = (None if cap is None else
                       (max(1, int(cap[0])), max(1, int(cap[1]))))
         if normalized == self.__dict__.get("_budget_size_cap"):
             return
         self._budget_size_cap = normalized
-        self._clear_direct_preview_sources()
 
     def set_generation_id(self, gen_id: int) -> None:
         """设置 generation ID（用于判断任务是否过期）"""
-        self._generation_id = gen_id
+        if gen_id == self._generation_id:
+            return
+        with self._interactive_scrub_lock:
+            self._generation_id = gen_id
+            self._scrub_service_period_s = None
+        cancel = getattr(getattr(self, '_gpu_decode_manager', None), 'cancel_interactive_preposition', None)
+        if callable(cancel):
+            cancel()
 
     # ================================================================
     # 内部方法
@@ -1636,7 +1701,7 @@ class PreviewRenderWorker(QThread):
             if generation_id == self._generation_id:
                 playback_trace("worker.execute_no_content_emit", frame=frame, generation=generation_id)
                 if not self._current_task_background:
-                    self.frame_rendered.emit(frame, None)
+                    self._emit_worker_result(frame, None)
             return
 
         try:
@@ -1656,7 +1721,7 @@ class PreviewRenderWorker(QThread):
                 if generation_id == self._generation_id:
                     playback_trace("worker.execute_no_layers_emit", frame=frame, generation=generation_id)
                     if not self._current_task_background:
-                        self.frame_rendered.emit(frame, None)
+                        self._emit_worker_result(frame, None)
                 return
 
             # Detect missing source files before either the GPU or CPU path.
@@ -1711,7 +1776,9 @@ class PreviewRenderWorker(QThread):
                         # 单飞状态机（_notify_gpu_submitted_direct 会释放
                         # pending/in-flight 记账，只有交互任务能调）。
                         return  # GPU 渲染成功，直接返回
-                    if task_meta.get("request_kind") == "scrub":
+                    if task_meta.get("queued_scrub"):
+                        self._note_scrub_service_time(generation_id, trace.total_ms / 1000.0)
+                    elif task_meta.get("request_kind") == "scrub":
                         self._notify_gpu_submitted_direct(int(frame), int(generation_id))
                         self.gpu_submitted.emit(int(frame), int(generation_id))
                     else:
@@ -1733,6 +1800,12 @@ class PreviewRenderWorker(QThread):
                     trace.decode_ms = float(
                         gpu_trace_info.get('decode_ms', 0.0) or 0.0
                     )
+                    if self._current_task_background:
+                        trace.render_path = 'background_yield'
+                        trace.total_ms = (time.perf_counter() - t0) * 1000
+                        self._record_frame_trace(trace)
+                        self.background_frame_ready.emit(frame, generation_id, None)
+                        return
                     if trace.fallback_reason == 'interactive_scrub_stale':
                         trace.render_path = 'scrub_stale_drop'
                         trace.total_ms = (time.perf_counter() - t0) * 1000
@@ -1766,7 +1839,7 @@ class PreviewRenderWorker(QThread):
                             elapsed_ms=trace.total_ms,
                         )
                         if generation_id == self._generation_id and not self._current_task_background:
-                            self.frame_rendered.emit(frame, None)
+                            self._emit_worker_result(frame, None)
                         return
 
             if self._is_abandoned_interactive_scrub_task(frame, task_meta):
@@ -1779,6 +1852,18 @@ class PreviewRenderWorker(QThread):
                     generation_id,
                     task_meta,
                     "abandoned_far_before_cpu_fallback",
+                )
+                return
+
+            # A newer seek can arrive while GPU decode is running. Its
+            # rejected submit must not fall back to decoding the same stale
+            # frame on the CPU ahead of the new playhead request.
+            if generation_id != self._generation_id or self._stop_flag:
+                playback_trace(
+                    "worker.cpu_skip_stale_generation",
+                    frame=frame,
+                    task_generation=generation_id,
+                    worker_generation=self._generation_id,
                 )
                 return
 
@@ -1851,12 +1936,13 @@ class PreviewRenderWorker(QThread):
                     from src.features.edit.core.composite_failure_policy import CompositeFailurePolicy
                     policy = CompositeFailurePolicy.for_edit_preview(self._last_comp_error)
                     if generation_id == self._generation_id and not self._current_task_background:
-                        self.render_error.emit(
+                        self._emit_worker_result(
                             frame,
                             f"composite_error:{policy['message']}:{policy['show_ghost']}",
+                            error=True,
                         )
                 elif generation_id == self._generation_id and not self._current_task_background:
-                    self.render_error.emit(frame, "Failed to composite layers")
+                    self._emit_worker_result(frame, "Failed to composite layers", error=True)
                 trace.fallback_reason = 'composite_failed'
                 trace.total_ms = (time.perf_counter() - t0) * 1000
                 self._record_frame_trace(trace)
@@ -1913,7 +1999,7 @@ class PreviewRenderWorker(QThread):
             trace.total_ms = (time.perf_counter() - t0) * 1000
             self._record_frame_trace(trace)
             if generation_id == self._generation_id and not self._current_task_background:
-                self.render_error.emit(frame, str(e))
+                self._emit_worker_result(frame, str(e), error=True)
 
     def _offline_media_for_layers(
         self,
@@ -2074,7 +2160,7 @@ class PreviewRenderWorker(QThread):
         Returns:
             (success, trace_info) tuple.
         """
-        from src.features.edit.core.edit_gpu_preview_renderer import EditRenderTask
+        from src.features.edit.core.edit_gpu_preview_renderer import EditRenderTask, ScrubSourceFrame
         from src.features.color.core.primary_calibration import grade_uses_calibration
         from src.shared.media.gpu_frame import safe_release_gpu_frame
 
@@ -2098,6 +2184,9 @@ class PreviewRenderWorker(QThread):
             and can_render_video_signal_gl(LINEAR_SCENE, timeline_space)
         )
         task_meta = task_meta or {}
+        background = bool(task_meta.get('background'))
+        background_deadline = time.perf_counter() + 0.032 if background else 0.0
+        background_read = getattr(self._gpu_decode_manager, 'get_frame_background', None)
 
         # F2.8：变速插值 GPU 门控（与导出 GPU 路径同语义，预览/成片一致）
         requires_cpu = self._retime_interp_requires_cpu(layers, frame)
@@ -2580,7 +2669,43 @@ class PreviewRenderWorker(QThread):
                     "gpu" if scheduler_handle.payload_type == "gpu_texture"
                     else "planar"
                 )
+            elif background:
+                if not callable(background_read):
+                    return {'ok': False, 'fallback_reason': 'background_decode_unavailable', 'layer': layer}
+                decoded_frame, frame_type = background_read(
+                    asset_path,
+                    source_frame,
+                    target_size=self._decode_target_size,
+                    stream_key=decode_stream_key,
+                    is_stale=lambda: (
+                        generation_id != self._generation_id
+                        or self._stop_flag
+                        or self._interactive_scrub_active
+                        or self._playback_active
+                    ),
+                    deadline_at=background_deadline,
+                )
             elif is_interactive_scrub and hasattr(self._gpu_decode_manager, "get_frame_interactive"):
+                scrub_options = {}
+                if (
+                    sys.platform == 'darwin' and len(layers) == 1 and not transitions
+                    and not task_meta.get('scrub_settled') and not task_meta.get('scrub_coarse')
+                    and isinstance(layer, ClipLayerInfo) and not layer.is_in_transition
+                    and not layer.composite_id
+                    and callable(getattr(type(self._gpu_decode_manager), 'update_reverse_scrub_playhead', None))
+                ):
+                    clip = layer.clip
+                    start = clip.timeline_start
+                    if (
+                        clip.freeze_source_frame is None and not clip.is_reverse_playback()
+                        and not getattr(clip.speed, 'is_variable_speed', False)
+                        and clip.source_frames_per_timeline_frame() == 1
+                        and clip.source_duration >= clip.timeline_duration
+                        and source_frame == clip.source_start + frame - start
+                    ):
+                        scrub_options['scrub_clip'] = ScrubClipRange(
+                            generation_id, clip.clip_id, start, clip.timeline_end, clip.source_start,
+                        )
                 deadline_at = self._interactive_scrub_deadline_at(
                     asset_path=asset_path,
                     source_frame=source_frame,
@@ -2588,6 +2713,7 @@ class PreviewRenderWorker(QThread):
                     stream_key=decode_stream_key,
                     task_meta=task_meta,
                     timeline_frame=frame,
+                    visible_layers=len(layers),
                 )
                 decoded_frame, frame_type = self._gpu_decode_manager.get_frame_interactive(
                     asset_path,
@@ -2605,6 +2731,7 @@ class PreviewRenderWorker(QThread):
                     ),
                     deadline_at=deadline_at,
                     coarse=bool(task_meta.get("scrub_coarse", False)),
+                    **scrub_options,
                 )
             elif decision is not None and hasattr(self._gpu_decode_manager, "get_frame_with_policy"):
                 decoded_frame, frame_type = self._gpu_decode_manager.get_frame_with_policy(
@@ -2621,6 +2748,20 @@ class PreviewRenderWorker(QThread):
                     target_size=self._decode_target_size,
                     stream_key=decode_stream_key,
                 )
+
+            if (
+                decoded_frame is not None
+                and (background or task_meta.get('scrub_settled'))
+                and getattr(decoded_frame, 'frame_index', None) != source_frame
+            ):
+                release_decoded_resource(decoded_frame)
+                return {
+                    'ok': False,
+                    'fallback_reason': (
+                        'interactive_scrub_stale' if is_interactive_scrub else 'inexact_source_frame'
+                    ),
+                    'layer': layer,
+                }
 
             if decoded_frame is None:
                 if frame_type == 'interactive_stale':
@@ -2694,6 +2835,17 @@ class PreviewRenderWorker(QThread):
                 # grade. Without this key the crop silently no-ops in preview.
                 'crop': getattr(layer, 'crop', None),
             }
+            actual_source = getattr(decoded_frame, 'frame_index', None)
+            if is_interactive_scrub and clip_id and isinstance(actual_source, int):
+                clip = getattr(layer, 'clip', None)
+                is_reverse = getattr(clip, 'is_reverse_playback', None)
+                if isinstance(getattr(clip, 'freeze_source_frame', None), int):
+                    source_direction = 0
+                else:
+                    source_direction = -1 if callable(is_reverse) and is_reverse() else 1
+                track_info['scrub_source_frame'] = ScrubSourceFrame(
+                    str(clip_id), asset_path, source_frame, actual_source, source_direction,
+                )
             if aces is not None:
                 source = aces_input_descriptor(aces, asset_path, media_type="video")
                 track_info["input_signal"] = (source, timeline_space)
@@ -2894,6 +3046,11 @@ class PreviewRenderWorker(QThread):
             output_fbo_size=self._viewport_size,
             coordinate_size=self._get_sequence_resolution(),
             request_kind=str(task_meta.get("request_kind", "") or ""),
+            scrub_settled=bool(task_meta.get("scrub_settled")),
+            scrub_source_frames=tuple(
+                sample for layer_result in gpu_layers
+                if (sample := layer_result.get('track_info', {}).get('scrub_source_frame')) is not None
+            ),
             scrub_request_token=(
                 int(task_meta["scrub_request_token"])
                 if task_meta.get("scrub_request_token") is not None
@@ -2901,8 +3058,9 @@ class PreviewRenderWorker(QThread):
             ),
             deadline_ns=int(task_meta.get("deadline_ns", 0) or 0),
             background=bool(task_meta.get("background")),
-            # P3.2：非实时任务合成后把结果存入 GPU 复合纹理缓存。
-            cacheable=not realtime_now,
+            # Interactive decoders can return a nearby source frame. Only
+            # exact renders can populate the cache keyed by timeline frame.
+            cacheable=not realtime_now and task_meta.get("request_kind") != "scrub",
             # Adjustment Clip operations — effects/Transform are applied at
             # their z-position and Opacity is mixed into the lower result by
             # the GPU renderer. Carried as (ClipLayerInfo, effects_tuple).
@@ -6444,7 +6602,7 @@ class PreviewRenderWorker(QThread):
             logger.error(f"QImage render error: {e}")
             playback_trace("worker.cpu_qimage_error", frame=frame, generation=generation_id, error=e)
             if generation_id == self._generation_id and not self._current_task_background:
-                self.render_error.emit(frame, str(e))
+                self._emit_worker_result(frame, str(e), error=True)
 
     def _render_frame_qimage(self, frame: int, qimage: QImage, generation_id: int) -> None:
         """Emit an already-built QImage if the render generation is still current."""
@@ -6467,7 +6625,7 @@ class PreviewRenderWorker(QThread):
                 width=qimage.width(),
                 height=qimage.height(),
             )
-            self.frame_rendered.emit(frame, qimage)
+            self._emit_worker_result(frame, qimage)
 
     def _numpy_to_qimage(self, frame_data: np.ndarray) -> QImage:
         """
@@ -6830,6 +6988,7 @@ class TimelinePreviewRenderer(QObject):
             thread_name_prefix="TimelineProxyPrebuffer",
         )
         self._prebuffer_lock = threading.Lock()
+        self._prebuffer_stopping = False
         self._prebuffer_active_key: tuple[int, int, int] | None = None
         self._prebuffer_completed_keys: set[tuple[int, int, int]] = set()
         # The prefetch window is intentionally bounded. The effective depth
@@ -6849,7 +7008,9 @@ class TimelinePreviewRenderer(QObject):
         # to their entry frame so boundary frames decode sequentially.
         self._preposition_scan_interval_frames: int = 4
         self._preposition_scan_counter: int = 0
-        self._preposition_scheduled_keys: set[tuple[int, str, str, int, bool]] = set()
+        self._preposition_scheduled_keys: set[
+            tuple[int, str, str, int, bool, tuple[int, int], bool]
+        ] = set()
 
         # Scrub preview mode. A drag uses a separate 720p decode target and a
         # coalescing single-flight queue. New positions replace only pending
@@ -6864,6 +7025,7 @@ class TimelinePreviewRenderer(QObject):
         self._scrub_exact_request_token: int = 0
         self._scrub_exact_pending_frame: int | None = None
         self._scrub_exact_in_flight_frame: int | None = None
+        self._scrub_worker_queued_key: tuple[int, int] | None = None
         self._scrub_exact_timer_pending: bool = False
         self._scrub_settled_timer_token: int = 0
         # 播放头停顿后的精确补帧延迟：越短“松手后画面追上播放头”越快。
@@ -6876,8 +7038,16 @@ class TimelinePreviewRenderer(QObject):
         self._SCRUB_RELEASE_WATCHDOG_S: float = 1.0
         self._scrub_exact_scheduled_at: float = 0.0
         self._scrub_last_real_frame: int | None = None
+        self._scrub_last_real_generation: int | None = None
+        self._paused_present_key: tuple[int, int, object] | None = None
+        self._paused_present_invalid_generation: int | None = None
+        self._scrub_painted_anchor: tuple[int, int] | None = None
         self._scrub_last_input_frame: int = -1
         self._scrub_direction: int = 0
+        self._scrub_direction_token_floor = 0
+        self._scrub_needs_direction_anchor = False
+        self._scrub_viewer_turn: Callable[[int, int], tuple[int, tuple[ScrubSourceFrame, ...]] | None] | None = None
+        self._scrub_last_presentation: tuple[int, tuple[ScrubSourceFrame, ...]] | None = None
         self._scrub_preposition_horizon_frames: int = 4
         self._scrub_request_serial: int = 0
         self._scrub_latest_request_started_at: float = 0.0
@@ -6898,7 +7068,6 @@ class TimelinePreviewRenderer(QObject):
         # EMA of the completed decode-cycle period; 1/period is the display
         # rate the pipeline can actually sustain (per codec / machine).
         self._scrub_cycle_period_ema_s: float | None = None
-        self._scrub_last_cycle_release_at: float | None = None
 
         # 单调帧守卫：防止异步渲染乱序导致画面前后帧来回跳（jitter）。
         # 记录已发射到 viewer 的最大帧号；比该值更旧的渲染结果直接丢弃。
@@ -7351,8 +7520,7 @@ class TimelinePreviewRenderer(QObject):
 
         与 :meth:`set_preview_quality`（用户菜单持久选择）严格分离：预算
         只在有效缩放上做"不高于"约束，解除后用户偏好原样生效，本方法
-        绝不写 ``_preview_quality``。上限变化时作废排队/在飞任务与按
-        target_size 冻结的解码 source，并重渲当前帧。
+        绝不写 ``_preview_quality``。上限变化时作废旧尺寸的预览并重渲当前帧。
         """
         normalized = (None if cap is None else
                       (max(1, int(cap[0])), max(1, int(cap[1]))))
@@ -7365,13 +7533,11 @@ class TimelinePreviewRenderer(QObject):
             normalized, self._preview_quality,
         )
         self._invalidate_preview_frame_caches()
-        self._clear_prebuffer_state()
         if self._worker:
             self._worker.set_budget_size_cap(normalized)
-            if getattr(self._worker, "_gpu_decode_manager", None):
-                self._worker._gpu_decode_manager.invalidate_all_sources()
-        self._reset_emitted_frame_guard()
-        self._render_in_flight = False
+        # Decoder caches already include the target size in their keys.
+        # A viewport budget change must not join the decoder threads here.
+        self._invalidate_render_generation_for_quality("monitor_budget")
         self._schedule_current_frame_warmup()
 
     def preview_quality_preference(self) -> float:
@@ -7705,7 +7871,7 @@ class TimelinePreviewRenderer(QObject):
             return
 
         # Generation / monotonic 守卫：丢弃 stale present frame。
-        if generation_id != self._dispatched_generation_id:
+        if generation_id != self._generation_id or generation_id != self._dispatched_generation_id:
             playback_trace(
                 "renderer.present_drop_generation",
                 frame=frame, generation=generation_id,
@@ -7989,6 +8155,7 @@ class TimelinePreviewRenderer(QObject):
         防止上一代 generation 的 GpuPresentFrame 在 _on_gpu_frame_ready
         里被 pop 出来当成新帧显示（stale frame 泄漏 → 闪现旧画面）。
         """
+        self._late_realtime_present_key = None
         pending = getattr(self, "_pending_present_frames", None)
         if not pending:
             return
@@ -8004,6 +8171,8 @@ class TimelinePreviewRenderer(QObject):
 
     def shutdown(self) -> None:
         """关闭渲染器"""
+        self._prebuffer_stopping = True
+        self._scrub_viewer_turn = None
         self._clear_offline_media_diagnostics()
         # P1-01: engine 与 renderer 同生命周期——不主动 shutdown 会留下
         # 采样/信号连接（泄漏审计 P6-03：关闭工程后归零）。
@@ -8097,6 +8266,7 @@ class TimelinePreviewRenderer(QObject):
     # A completed scrub seek can be a little behind the mouse, but it must be
     # close enough to act as a live frame rather than a misleading old image.
     _SCRUB_RESULT_MAX_LAG_FRAMES: int = 6
+    _SCRUB_COARSE_MIN_VELOCITY: float = 100.0
 
     def _reset_emitted_frame_guard(self) -> None:
         """
@@ -8138,6 +8308,8 @@ class TimelinePreviewRenderer(QObject):
         Returns:
             True 表示应该发射此帧
         """
+        if getattr(self, '_scrub_active', False):
+            return True
         # BUG FIX: 非播放状态（暂停、逐帧步进）时绕过单调守卫。
         # 单调守卫是为防止播放期间异步渲染乱序导致画面抖动，
         # 但暂停/逐帧时每次只请求一帧，不存在乱序问题。
@@ -8235,6 +8407,11 @@ class TimelinePreviewRenderer(QObject):
         stale results (e.g. frame 97 when playhead is at 199) causes visible
         jump-back before the next play session starts.
         """
+        # After playing, the controller stays PAUSED during a drag. The
+        # scrub direction/generation guards already validate these frames;
+        # the paused seek tolerance would discard almost every completed one.
+        if getattr(self, '_scrub_active', False):
+            return False
         controller = self._playback_controller
         if controller is None:
             return False
@@ -9257,8 +9434,15 @@ class TimelinePreviewRenderer(QObject):
             generation=self._generation_id,
         )
 
-    def begin_scrub(self, frame: int) -> None:
+    def begin_scrub(
+        self, frame: int, *, painted_present_key: object | None = None,
+        viewer_turn: Callable[[int, int], tuple[int, tuple[ScrubSourceFrame, ...]] | None] | None = None,
+    ) -> None:
         """Enter lightweight scrub mode and invalidate old exact renders."""
+        keep_painted_anchor = (
+            painted_present_key is not None
+            and self._paused_present_key == (self._generation_id, int(frame), painted_present_key)
+        )
         self._scrub_active = True
         self._scrub_latest_frame = int(frame)
         self._scrub_start_frame = int(frame)
@@ -9280,6 +9464,11 @@ class TimelinePreviewRenderer(QObject):
         self._scrub_last_real_frame_at = None
         self._scrub_last_input_frame = int(frame)
         self._scrub_direction = 0
+        self._scrub_direction_token_floor = 0
+        self._scrub_needs_direction_anchor = False
+        self._scrub_viewer_turn = viewer_turn
+        self._scrub_last_presentation = None
+        self._scrub_reverse_prefetched_at: int | None = None
         self._scrub_input_fast = False
         # None so the first request after begin can never measure a bogus
         # ~0ms interval and spuriously enter fast mode.
@@ -9287,84 +9476,44 @@ class TimelinePreviewRenderer(QObject):
         self._scrub_input_velocity_fps = 0.0
         self._scrub_velocity_samples = 0
         self._scrub_latest_display_frame = int(frame)
-        self._scrub_last_cycle_release_at = None
+        self._scrub_cycle_period_ema_s = None
         self._begin_scrub_request_latency(int(frame))
         self.notify_playback_state(False)
         self._invalidate_render_generation_for_scrub(int(frame), "begin")
-        # 播放后拖拽变慢的根治点：播放把全部解码游标聚到停止点，拖拽
-        # 起点离游标团远时前期全是关键帧锚定解码（实测首段解码 p90 劣化
-        # 2-3 倍）。拖拽开始时同步发起"起点预热"（后台线程执行解码）：
-        # sticky 预置位不被后续请求级预置位的 token 递增打断，deadline
-        # 放宽到 400ms（默认 48ms 走不完远端锚定路）——此前每次新输入
-        # 都会作废上一个预置位，克隆永远走不到拖拽起点，这正是
-        # "播放后第一次拖拽慢、第二次快"的直接原因。
-        self._prewarm_scrub_origin_cursors()
+        self._scrub_painted_anchor = (self._generation_id, int(frame)) if keep_painted_anchor else None
         playback_trace("renderer.scrub_started", frame=frame)
-
-    def _prewarm_scrub_origin_cursors(self) -> None:
-        """拖拽开始时把池克隆预热到拖拽起点（sticky + 宽 deadline）。"""
-        if self._worker is None:
-            return
-        frame = int(
-            getattr(self, "_scrub_latest_display_frame", None)
-            or getattr(self, "_scrub_start_frame", 0)
-            or 0
-        )
-        try:
-            plan = self._compute_frame_plan(frame)
-        except Exception as e:
-            logger.debug(f"scrub origin prewarm plan failed at {frame}: {e}")
-            return
-        layers = getattr(plan, "layers", None)
-        if not layers:
-            return
-        # P3.4 多层限制：预置位 = 每层 2 个后台解码。N 层时间线上它与首帧
-        # 的 N 路精确解码波叠加（实测 4 层时 = 12 个并发 4K VT 会话），硬件
-        # 解码器被打饱和后每路慢 4-5 倍、首帧 680ms。多层时只预热最上层
-        # （叠层对齐时最上层即当前视觉主体），把并发压回硬件容量内。
-        layer_count = len(layers)
-        if layer_count > 2:
-            from dataclasses import replace as _dc_replace
-            try:
-                plan = _dc_replace(plan, layers=layers[-1:])
-            except Exception:
-                pass  # 非 dataclass 场景保持原计划（预热多层的代价可接受）
-            playback_trace(
-                "renderer.scrub_origin_prewarm_top_layer_only",
-                frame=frame,
-                layers=layer_count,
-            )
-        target_size = self._scrub_render_decode_target_size()
-        # 两个克隆分别压在起点与前向 horizon；sticky 保证它们在请求级
-        # 预置位持续 token 递增下仍能走完。
-        self._preposition_interactive_scrub_sources(
-            plan, timeline_frame=frame, direction=0, target_size=target_size,
-            deadline_ms=400.0, sticky=True,
-        )
-        self._preposition_interactive_scrub_sources(
-            plan, timeline_frame=frame, direction=1, target_size=target_size,
-            deadline_ms=400.0, sticky=True,
-        )
-        playback_trace("renderer.scrub_origin_prewarm", frame=frame)
 
     def _update_scrub_direction(self, frame: int) -> int:
         """Update and return the current drag direction for predictive prepositioning."""
         frame = int(frame)
         previous = int(getattr(self, "_scrub_last_input_frame", frame))
-        if frame > previous:
-            self._scrub_direction = 1
-        elif frame < previous:
-            self._scrub_direction = -1
+        old_direction = int(getattr(self, "_scrub_direction", 0))
+        direction = (frame > previous) - (frame < previous) if frame != previous else old_direction
+        if old_direction and direction != old_direction:
+            # Queued results from the old sweep can land at the same quantized
+            # timeline frame after a reversal, but contain a different picture.
+            self._scrub_direction_token_floor = int(getattr(self, "_scrub_request_serial", 0)) + 1
+            self._scrub_needs_direction_anchor = True
+            viewer_turn = getattr(self, "_scrub_viewer_turn", None)
+            if viewer_turn is not None:
+                try:
+                    self._scrub_last_presentation = viewer_turn(
+                        self._generation_id, self._scrub_direction_token_floor,
+                    )
+                except RuntimeError:
+                    # The viewport may have been destroyed during a page change.
+                    self._scrub_viewer_turn = None
+            self._scrub_worker_queued_key = None
+            self._scrub_last_real_generation = None
+        self._scrub_direction = direction
         self._scrub_last_input_frame = frame
-        return int(getattr(self, "_scrub_direction", 0))
+        return direction
 
     def _update_scrub_input_cadence(self, frame: int | None = None, previous_frame: int | None = None) -> None:
         """Track how fast scrub inputs arrive; toggle fast-drag mode.
 
-        Fast mode switches scrub dispatches to coarse keyframe-anchored
-        decoding so the viewer keeps moving; slow mode returns to exact
-        decoding. Also smooths the input velocity (frames/sec) that drives
-        the adaptive display stride.
+        Input cadence controls prepositioning and the display stride. Coarse
+        keyframe decoding also requires sufficient actual playhead movement.
 
         快拖判定不只看输入间隔（<24ms）：页面往返/主线程拥堵会把真实快拖
         的输入间隔拉到 24-40ms 死区，导致快模式永不开启——步长失效且每次
@@ -9414,6 +9563,9 @@ class TimelinePreviewRenderer(QObject):
     def _scrub_sustainable_display_rate(self) -> float:
         """Display rate the current codec/machine can sustain while scrubbing."""
         period = self._scrub_cycle_period_ema_s
+        queued = self._scrub_worker_queued_key
+        if queued is not None and queued[0] == self._generation_id:
+            period = self._worker.scrub_service_period_s()
         if period is None or period <= 0.0:
             from src.shared.video.scrub_stride import DEFAULT_DISPLAY_RATE_CAP
 
@@ -9430,6 +9582,11 @@ class TimelinePreviewRenderer(QObject):
             return 1
         from src.shared.video.scrub_stride import display_stride
 
+        # At normal scrub speeds let the latest-only worker take short
+        # sequential steps. A large bucket creates the costly GOP walks it
+        # was intended to avoid when the estimated display rate falls.
+        if self._scrub_input_velocity_fps <= self._SCRUB_COARSE_MIN_VELOCITY:
+            return 1
         return display_stride(
             self._scrub_input_velocity_fps,
             self._scrub_sustainable_display_rate(),
@@ -9472,6 +9629,21 @@ class TimelinePreviewRenderer(QObject):
         self._playhead_frame = frame
         self._playhead_mutex.unlock()
 
+        worker = getattr(self, '_worker', None)
+        manager = getattr(worker, '_gpu_decode_manager', None)
+        update_reverse = getattr(type(manager), 'update_reverse_scrub_playhead', None)
+        reverse_window_active = callable(update_reverse) and update_reverse(
+            manager, self._generation_id, frame, scrub_direction, self._scrub_input_velocity_fps,
+            enabled=(
+                sys.platform == 'darwin' and len(getattr(self._sequence, 'video_tracks', ())) == 1
+                and self._should_bypass_scrub_cpu_cache()
+            ),
+        )
+        if getattr(self, "_scrub_painted_anchor", None) == (self._generation_id, frame):
+            playback_trace("renderer.scrub_keep_painted_anchor", frame=frame)
+            return
+        self._scrub_painted_anchor = None
+
         self._invalidate_stale_scrub_exact_for_latest(display_frame)
         playback_trace(
             "renderer.scrub_preview_request",
@@ -9480,17 +9652,13 @@ class TimelinePreviewRenderer(QObject):
             stride=self._scrub_display_stride(),
         )
 
-        has_gpu_preview = self._has_gpu_preview_pipeline()
-        cached = self._cache.get(display_frame)
-        if cached is not None:
-            playback_trace("renderer.scrub_preview_cache_exact", frame=display_frame)
-            self.frame_ready.emit(display_frame, cached)
-            if not has_gpu_preview:
-                return
-            playback_trace("renderer.scrub_preview_cache_exact_provisional_gpu", frame=display_frame)
-
         allow_placeholders = self._allow_scrub_placeholder_frames()
         if allow_placeholders:
+            cached = self._cache.get(display_frame)
+            if cached is not None:
+                playback_trace("renderer.scrub_preview_cache_exact", frame=display_frame)
+                self.frame_ready.emit(display_frame, cached)
+                return
             # A nearby still is only an interim image. Keep the radius tight
             # so a fast drag never appears to show a frame from a different
             # moment in the clip while the exact GPU request is in flight.
@@ -9502,32 +9670,56 @@ class TimelinePreviewRenderer(QObject):
                 self._schedule_scrub_settled_exact(frame)
                 return
 
-        try:
-            plan = self._compute_frame_plan(display_frame)
-        except Exception as e:
-            logger.debug(f"Scrub preview plan failed for frame={display_frame}: {e}")
-            return
-
-        if allow_placeholders:
-            self._emit_cached_placeholder_frame(
-                display_frame,
-                plan,
-                allow_async_request=True,
-                replace_pending_async=True,
-                allow_generic_thumbnail=False,
-            )
-        if not self._scrub_input_fast:
-            # Preposition a spare VT cursor toward the predicted next frame.
-            # Skipped during fast drags: the prediction horizon (a few frames)
-            # is meaningless when the playhead moves tens of frames per
-            # cycle, and the background preposition decode contends for the
-            # per-stream decode lock with the display decode.
-            self._preposition_interactive_scrub_sources(
-                plan,
-                timeline_frame=display_frame,
-                direction=scrub_direction,
-                target_size=self._scrub_render_decode_target_size(),
-            )
+        predictive_reverse = (
+            not reverse_window_active and scrub_direction < 0
+            and len(getattr(self._sequence, 'video_tracks', ())) == 1
+            and self._scrub_input_velocity_fps <= self._SCRUB_COARSE_MIN_VELOCITY
+            and getattr(self, '_scrub_last_real_frame', None) is not None
+        )
+        if scrub_direction >= 0:
+            self._scrub_reverse_prefetched_at = None
+        if allow_placeholders or predictive_reverse or (
+            not reverse_window_active and not self._scrub_input_fast
+            and getattr(self, "_scrub_last_real_frame", None) is not None
+        ):
+            try:
+                plan = self._compute_frame_plan(display_frame)
+            except Exception as e:
+                logger.debug(f"Scrub preview plan failed for frame={display_frame}: {e}")
+                return
+            if allow_placeholders:
+                self._emit_cached_placeholder_frame(
+                    display_frame,
+                    plan,
+                    allow_async_request=True,
+                    replace_pending_async=True,
+                    allow_generic_thumbnail=False,
+                )
+            layers = len(getattr(plan, 'layers', ()) or ())
+            if predictive_reverse and layers == 1:
+                last_prefetch = self._scrub_reverse_prefetched_at
+                if last_prefetch is None or last_prefetch - display_frame >= 8:
+                    # A reverse seek walks forward from its keyframe. Give
+                    # one spare cursor time to decode ahead of the gesture.
+                    self._scrub_reverse_prefetched_at = display_frame
+                    self._preposition_interactive_scrub_sources(
+                        plan, timeline_frame=display_frame, direction=-1,
+                        target_size=self._scrub_render_decode_target_size(),
+                        deadline_ms=96.0, sticky=True, horizon_frames=8,
+                    )
+            elif (
+                not self._scrub_input_fast
+                and getattr(self, '_scrub_last_real_frame', None) is not None
+                and layers <= 2
+            ):
+                # Give the first visible frame the full decoder capacity.
+                # Speculation runs only on small composites after that frame.
+                self._preposition_interactive_scrub_sources(
+                    plan,
+                    timeline_frame=display_frame,
+                    direction=scrub_direction,
+                    target_size=self._scrub_render_decode_target_size(),
+                )
         self._schedule_scrub_exact_render(display_frame)
         self._schedule_scrub_settled_exact(frame)
 
@@ -9536,6 +9728,17 @@ class TimelinePreviewRenderer(QObject):
         if not self._scrub_active:
             return
         frame = int(frame)
+        if self._should_bypass_scrub_cpu_cache():
+            # Prepare on Qt, but let the decode worker take the latest queued
+            # plan as soon as it finishes the current task. The worker queue
+            # and the GPU queue each replace only work that has not started.
+            self._scrub_exact_pending_frame = None
+            key = (self._generation_id, frame)
+            if key != self._scrub_worker_queued_key:
+                if self._dispatch_scrub_exact_render(frame, queued_scrub=True):
+                    self._scrub_worker_queued_key = key
+            return
+
         self._scrub_exact_pending_frame = frame
         now = time.monotonic()
         if self._render_in_flight:
@@ -9556,6 +9759,10 @@ class TimelinePreviewRenderer(QObject):
                 self._render_in_flight = False
                 self._scrub_exact_in_flight_frame = None
             else:
+                if getattr(self, '_scrub_exact_in_flight_frame', None) == frame:
+                    # Pointer events in the same quantized bucket share the
+                    # work already running for this display target.
+                    self._scrub_exact_pending_frame = None
                 playback_trace("renderer.scrub_exact_defer_busy", frame=frame)
                 return
         if self._scrub_exact_timer_pending:
@@ -9597,23 +9804,19 @@ class TimelinePreviewRenderer(QObject):
     def _submit_scrub_exact_render(self, frame: int, token: int) -> None:
         """Submit the newest coalesced scrub frame without waiting for mouse-up."""
         frame = int(frame)
-        self._scrub_exact_timer_pending = False
         if not self._scrub_active:
             playback_trace("renderer.scrub_exact_drop_inactive", frame=frame)
             return
         if token != self._scrub_exact_request_token:
             playback_trace("renderer.scrub_exact_drop_token", frame=frame, token=token)
             return
+        self._scrub_exact_timer_pending = False
 
-        # The timer captures an old frame by design. Always consume the newest
-        # requested position when it fires (quantized display target).
-        frame = int(
-            self._scrub_exact_pending_frame
-            or (self._scrub_latest_display_frame
-                if self._scrub_latest_display_frame is not None
-                else self._scrub_latest_frame)
-        )
+        pending = self._scrub_exact_pending_frame
+        if pending is None:
+            return
         self._scrub_exact_pending_frame = None
+        frame = int(pending)
 
         bypass_cpu_cache = self._should_bypass_scrub_cpu_cache()
         cached = None if bypass_cpu_cache else self._cache.get(frame)
@@ -9666,6 +9869,9 @@ class TimelinePreviewRenderer(QObject):
                 token=token,
             )
             return
+        if self._should_bypass_scrub_cpu_cache():
+            self._dispatch_scrub_exact_render(frame, settled=True, queued_scrub=True)
+            return
         if self._render_in_flight:
             playback_trace("renderer.scrub_settled_exact_defer_busy", frame=frame, token=token)
             QTimer.singleShot(
@@ -9675,7 +9881,9 @@ class TimelinePreviewRenderer(QObject):
             return
         self._dispatch_scrub_exact_render(frame, settled=True)
 
-    def _dispatch_scrub_exact_render(self, frame: int, *, settled: bool = False) -> bool:
+    def _dispatch_scrub_exact_render(
+        self, frame: int, *, settled: bool = False, queued_scrub: bool = False,
+    ) -> bool:
         """Queue one exact render at the active preview target."""
         frame = int(frame)
         if not self._scrub_active:
@@ -9688,6 +9896,19 @@ class TimelinePreviewRenderer(QObject):
         # Live dispatches chase the stride-quantized display target; the
         # settled repair after the drag stops always targets the true frame.
         if frame != target and not (settled and frame == int(self._scrub_latest_frame)):
+            return False
+        coarse = (
+            self._scrub_input_fast
+            and self._scrub_input_velocity_fps > self._SCRUB_COARSE_MIN_VELOCITY
+            and not settled
+            and not getattr(self, "_scrub_needs_direction_anchor", False)
+        )
+        if (
+            not settled
+            and not coarse
+            and frame == self._scrub_last_real_frame
+            and self._scrub_last_real_generation == self._generation_id
+        ):
             return False
 
         try:
@@ -9708,29 +9929,24 @@ class TimelinePreviewRenderer(QObject):
         while len(started) > 32:
             started.pop(next(iter(started)))
         self._publish_interactive_scrub_state(frame, active=True)
-        self._warmup_gpu_decode_sources(plan, target_size=decode_target_size)
-        self._prime_current_frame_prefetch(plan, target_size=decode_target_size)
-        # 快照布防只在松手收尾（settled）时触发：实时拖拽流每帧都做
-        # 同步 readback 会拖住渲染线程（实测拖拽 fps 下降）；settle 帧
-        # 是用户要"停在那里看"的帧，回填缓存价值最大。
-        if settled:
-            self._arm_snapshot_for_next_gpu_frame()
-
-        with self._scrub_release_lock:
-            self._pending_mutex.lock()
-            self._pending_frame = frame
-            self._queued_frame = None
-            self._pending_layer_count = layer_count
-            self._pending_mutex.unlock()
-            self._render_in_flight = True
-            self._scrub_exact_in_flight_frame = frame
-        self._scrub_last_dispatch_at = time.monotonic()
-
+        self._warmup_gpu_decode_sources(
+            plan, target_size=decode_target_size, warm_interactive_pool=layer_count <= 2,
+        )
         if self._worker is None:
-            with self._scrub_release_lock:
-                self._render_in_flight = False
-                self._scrub_exact_in_flight_frame = None
             return False
+
+        # The replaceable GPU path leaves the legacy in-flight slot alone.
+        # It still belongs to the CPU compatibility path and to exact seeks.
+        if not queued_scrub:
+            with self._scrub_release_lock:
+                self._pending_mutex.lock()
+                self._pending_frame = frame
+                self._queued_frame = None
+                self._pending_layer_count = layer_count
+                self._pending_mutex.unlock()
+                self._render_in_flight = True
+                self._scrub_exact_in_flight_frame = frame
+            self._scrub_last_dispatch_at = time.monotonic()
 
         # P1-01: scrub 派发经 engine 外壳入口（trace id 分配 + telemetry），
         # renderer 的单飞/token 状态机不动；engine 未就绪时退回直连。
@@ -9743,8 +9959,11 @@ class TimelinePreviewRenderer(QObject):
             "decode_target_size": decode_target_size,
             "scrub_request_token": scrub_request_token,
             "scrub_settled": bool(settled),
-            "scrub_coarse": bool(self._scrub_input_fast) and not settled,
+            # A 60 Hz pointer can still advance by just one frame per event.
+            # Keep the sequential decoder in that case.
+            "scrub_coarse": coarse,
             "request_started_at": request_started_at,
+            "queued_scrub": queued_scrub,
         }
         use_engine = (
             engine is not None and hasattr(engine, "request_scrub_present")
@@ -9767,14 +9986,15 @@ class TimelinePreviewRenderer(QObject):
             )
             return True
 
-        with self._scrub_release_lock:
-            self._pending_mutex.lock()
-            if self._pending_frame == frame:
-                self._pending_frame = None
-                self._pending_layer_count = 0
-            self._pending_mutex.unlock()
-            self._render_in_flight = False
-            self._scrub_exact_in_flight_frame = None
+        if not queued_scrub:
+            with self._scrub_release_lock:
+                self._pending_mutex.lock()
+                if self._pending_frame == frame:
+                    self._pending_frame = None
+                    self._pending_layer_count = 0
+                self._pending_mutex.unlock()
+                self._render_in_flight = False
+                self._scrub_exact_in_flight_frame = None
         playback_trace("renderer.scrub_exact_worker_rejected", frame=frame)
         return False
 
@@ -9812,6 +10032,7 @@ class TimelinePreviewRenderer(QObject):
             scrub_coarse=bool(payload.get("scrub_coarse")),
             trace_id=int(trace_id or 0),
             dispatch_channel="scrub",
+            **({"queued_scrub": True} if payload.get("queued_scrub") else {}),
         )
         return queued
 
@@ -9832,28 +10053,39 @@ class TimelinePreviewRenderer(QObject):
             frame = latest
         return self._dispatch_scrub_exact_render(int(frame))
 
-    def finish_scrub(self, frame: int) -> None:
-        """Leave scrub mode and request one exact frame for the release point."""
+    def cancel_scrub(self, frame: int) -> None:
+        """Retire a lost mouse gesture without decoding a hidden viewer frame."""
+        if self._scrub_active:
+            self.finish_scrub(frame, settle=False)
+
+    def finish_scrub(self, frame: int, *, settle: bool = True) -> None:
+        """Retire scrub work and refine the release point on a normal mouse-up."""
         frame = int(frame)
         self._scrub_active = False
+        self._scrub_viewer_turn = None
         self._scrub_latest_frame = frame
         # Release always lands exact: drop any stride quantization so the
         # final frame under the pointer is decoded, not the grid position.
         self._scrub_latest_display_frame = frame
         self._scrub_input_velocity_fps = 0.0
         self._scrub_velocity_samples = 0
-        self._scrub_exact_frame = frame
-        self._scrub_finish_exact_frame = frame
+        self._scrub_exact_frame = frame if settle else None
+        self._scrub_finish_exact_frame = self._scrub_exact_frame
         self._scrub_exact_request_token += 1
         self._scrub_settled_timer_token += 1
         self._scrub_exact_pending_frame = None
         self._scrub_exact_in_flight_frame = None
         self._scrub_exact_timer_pending = False
         self._publish_interactive_scrub_state(frame, active=False)
-        self._invalidate_render_generation_for_scrub(frame, "finish")
+        self._invalidate_render_generation_for_scrub(frame, "finish" if settle else "cancel")
+        if not settle:
+            return
         playback_trace("renderer.scrub_finished_exact_request", frame=frame)
         self.request_render(frame)
-        self._schedule_full_quality_refresh()
+        if self._preview_quality <= 0.0 and self._decode_target_size != _budget_constrained_size(
+            self._budget_size_cap, self._full_decode_target_size(),
+        ):
+            self._schedule_full_quality_refresh()
 
     def _is_scrub_finish_exact_request(self, frame: int) -> bool:
         """Return whether this frame is the no-placeholder exact pass after mouse-up."""
@@ -10423,14 +10655,12 @@ class TimelinePreviewRenderer(QObject):
         # This starts av.open() + codec probe early so the worker thread
         # finds the source already cached when it processes the render task.
         self._prime_current_frame_prefetch(plan, target_size=decode_target_size)
-        # 播放中不预热交互池：每条 clip 的 2 个额外 VT 会话会长期持有，
-        # 多轨时挤占核显有限的硬解实例（scrub 首次使用时本就会懒加载）。
-        # 暂停态保持原行为，为接下来的拖拽准备好池。
+        # Preserve hardware decode capacity for playback and wide composites.
         self._warmup_gpu_decode_sources(
             plan,
             target_size=decode_target_size,
             for_playback=is_currently_playing,
-            warm_interactive_pool=not is_currently_playing,
+            warm_interactive_pool=not is_currently_playing and layer_count <= 2,
         )
         # Keep the initial playback window resident while the timeline is
         # paused. This makes pressing Play consume the same exact-frame ring
@@ -10441,7 +10671,8 @@ class TimelinePreviewRenderer(QObject):
         # 暂停态布防合成快照：本帧渲染完成后以 1/4 分辨率回填 CPU 帧缓存，
         # 供后续 seek 的"最近帧先显/精确命中"使用。
         if not is_currently_playing:
-            self._arm_snapshot_for_next_gpu_frame()
+            if not suppress_scrub_finish_placeholder:
+                self._arm_snapshot_for_next_gpu_frame()
             # P3.1：暂停态静默后预缓冲播放头邻域（±N 帧进缓存）。
             if not self._scrub_active:
                 self._schedule_idle_prebuffer(frame)
@@ -10491,6 +10722,7 @@ class TimelinePreviewRenderer(QObject):
                 trace_id=trace_id,
                 deadline_ns=frame_deadline_ns,
                 request_kind=request_kind,
+                scrub_settled=suppress_scrub_finish_placeholder,
                 dispatch_channel=channel or "direct",
             )
             if queued:
@@ -10664,6 +10896,7 @@ class TimelinePreviewRenderer(QObject):
         target_size: Optional[Tuple[int, int]] = None,
         deadline_ms: float = 48.0,
         sticky: bool = False,
+        horizon_frames: Optional[int] = None,
     ) -> None:
         """Move spare VT cursors toward the newest scrub source frames."""
         gpu_dm = getattr(self._worker, '_gpu_decode_manager', None) if self._worker else None
@@ -10676,6 +10909,7 @@ class TimelinePreviewRenderer(QObject):
         preposition_frame = self._scrub_preposition_timeline_frame(
             timeline_frame,
             direction,
+            horizon_frames=horizon_frames,
         )
         preposition_plan = plan
         if preposition_frame is not None and timeline_frame is not None:
@@ -10737,11 +10971,12 @@ class TimelinePreviewRenderer(QObject):
         self,
         timeline_frame: Optional[int],
         direction: int,
+        *, horizon_frames: Optional[int] = None,
     ) -> Optional[int]:
         """Return the timeline frame whose source cursor should be warmed for scrub."""
         if timeline_frame is None or int(direction) == 0:
             return int(timeline_frame) if timeline_frame is not None else None
-        horizon = max(1, int(getattr(self, "_scrub_preposition_horizon_frames", 4)))
+        horizon = max(1, int(horizon_frames or getattr(self, "_scrub_preposition_horizon_frames", 4)))
         target = int(timeline_frame) + (1 if direction > 0 else -1) * horizon
         duration = int(getattr(self._sequence, "duration_frames", 0) or 0)
         if duration > 0:
@@ -10844,6 +11079,9 @@ class TimelinePreviewRenderer(QObject):
         step: int,
         generation_id: int,
         anchor_plan: Any | None = None,
+        *,
+        cut_lookahead_frames: int | None = None,
+        win_h264_entries: Dict[tuple[str, str, str], int] | None = None,
     ) -> Dict[tuple[str, str, str], List[int]]:
         """
         Build source-frame prefetch jobs for the upcoming playback window.
@@ -10858,8 +11096,13 @@ class TimelinePreviewRenderer(QObject):
         duration = self._playback_prebuffer_duration()
         jobs: Dict[tuple[str, str, str], List[int]] = {}
         lookahead = self._adaptive_playback_prefetch_depth()
+        anchor_jobs: set[tuple[str, str, str]] = set()
 
-        for offset in range(0, lookahead + 1):
+        for offset in range(max(lookahead, cut_lookahead_frames or 0) + 1):
+            if offset > lookahead and len(jobs) > len(anchor_jobs):
+                # The regular window already found a cut, or the extended
+                # window found its first one. Don't open later clip sessions.
+                break
             timeline_frame = int(anchor_frame) + step * offset
             if timeline_frame < 0:
                 break
@@ -10898,10 +11141,19 @@ class TimelinePreviewRenderer(QObject):
                     or ""
                 )
                 source_frame = int(getattr(layer, "source_frame", 0) or 0)
-                jobs.setdefault(
-                    (asset_path, str(asset_id), decode_stream_key),
-                    [],
-                ).append(source_frame)
+                job_key = (asset_path, str(asset_id), decode_stream_key)
+                if offset > lookahead:
+                    if job_key in anchor_jobs:
+                        continue
+                    if win_h264_entries is not None:
+                        metadata = self._asset_resolver.get_asset_metadata(asset_id) or {}
+                        codec = str(metadata.get("codec") or metadata.get("codec_name") or "")
+                        if codec.lower() != "h264":
+                            continue
+                        win_h264_entries.setdefault(job_key, timeline_frame)
+                jobs.setdefault(job_key, []).append(source_frame)
+            if offset == 0:
+                anchor_jobs = set(jobs)
 
         return jobs
 
@@ -10928,10 +11180,8 @@ class TimelinePreviewRenderer(QObject):
         the same stream, and the wait is productive because the background
         decode-forward is exactly the work the display read needs.
         """
-        # Throttle window scans: one scan every few presented frames keeps
-        # the 16-frame lookahead covered without recomputing frame plans on
-        # every single presented frame.  The first call of a session scans
-        # immediately.
+        # Scan every few frames instead of recomputing the window at every
+        # presentation. The first call of a session scans immediately.
         self._preposition_scan_counter += 1
         if (self._preposition_scan_counter - 1) % self._preposition_scan_interval_frames:
             return
@@ -10949,7 +11199,7 @@ class TimelinePreviewRenderer(QObject):
             return
         if allow_idle and self._scrub_active:
             return
-        if self._worker is None:
+        if self._worker is None or self._prebuffer_stopping:
             return
 
         step = self._playback_prebuffer_step()
@@ -11019,18 +11269,32 @@ class TimelinePreviewRenderer(QObject):
     ) -> None:
         """Background task that prepositions upcoming clip decode streams."""
         try:
-            if generation_id != self._generation_id or self._worker is None:
+            def _stale() -> bool:
+                return (self._prebuffer_stopping or generation_id != self._generation_id
+                        or self._worker is None)
+
+            if _stale():
                 self._prebuffer_stats["dropped"] += 1
                 return
             gpu_dm = getattr(self._worker, '_gpu_decode_manager', None)
             if gpu_dm is None or not hasattr(gpu_dm, 'preposition_stream_frame'):
                 return
 
+            for_playback = self._is_controller_playing()
+            win_cut_entries: Dict[tuple[str, str, str], int] | None = (
+                {} if sys.platform == "win32" and for_playback and step == 1 else None
+            )
             jobs = self._collect_playback_prebuffer_jobs(
                 frame,
                 step,
                 generation_id,
                 anchor_plan=plan,
+                # Long-GOP clip entry can take several frame periods while
+                # the decoder opens and advances from the preceding keyframe.
+                cut_lookahead_frames=(12 if for_playback and (
+                    sys.platform == "darwin" or win_cut_entries is not None
+                ) else None),
+                win_h264_entries=win_cut_entries,
             )
             if not jobs:
                 return
@@ -11039,44 +11303,56 @@ class TimelinePreviewRenderer(QObject):
             # prepositioning them would fight the live cursor for nothing.
             active_streams = self._active_playback_stream_keys(frame, plan)
 
-            def _stale() -> bool:
-                return generation_id != self._generation_id or self._worker is None
-
+            target_size = self._auto2k_decode_target_size()
             prepositioned = 0
             for (asset_path, asset_id, decode_stream_key), source_frames in jobs.items():
-                if generation_id != self._generation_id or self._worker is None:
+                if _stale():
                     return
                 if not source_frames:
                     continue
                 if (asset_path, decode_stream_key) in active_streams:
                     continue
-                # Forward playback enters a clip at its lowest upcoming source
-                # frame; backward playback at the highest one.
-                entry = min(source_frames) if step >= 0 else max(source_frames)
+                # Jobs are collected in timeline playback order, including
+                # reverse or retimed clips where source frames need not ascend.
+                entry = source_frames[0]
                 schedule_key = (
                     generation_id,
                     asset_path,
                     decode_stream_key,
                     int(entry),
                     step >= 0,
+                    target_size,
+                    for_playback,
                 )
                 with self._prebuffer_lock:
                     if schedule_key in self._preposition_scheduled_keys:
                         continue
-                    self._preposition_scheduled_keys.add(schedule_key)
-                    if len(self._preposition_scheduled_keys) > 512:
-                        self._preposition_scheduled_keys = set(
-                            list(self._preposition_scheduled_keys)[-256:]
-                        )
+                cut_at = (win_cut_entries or {}).get((asset_path, asset_id, decode_stream_key))
+
+                def _entry_expired(cut_frame: int | None = cut_at) -> bool:
+                    return _stale() or (cut_frame is not None and (
+                        not self._is_controller_playing()
+                        or self._playback_prebuffer_step() != step
+                        or self._playback_controller.current_frame >= cut_frame
+                    ))
+
                 try:
                     if gpu_dm.preposition_stream_frame(
                         asset_path,
                         int(entry),
-                        target_size=self._auto2k_decode_target_size(),
+                        target_size=target_size,
                         stream_key=decode_stream_key,
-                        is_stale=_stale,
+                        for_playback=for_playback,
+                        is_stale=_entry_expired,
                     ):
                         prepositioned += 1
+                        with self._prebuffer_lock:
+                            if not _stale():
+                                self._preposition_scheduled_keys.add(schedule_key)
+                                if len(self._preposition_scheduled_keys) > 512:
+                                    self._preposition_scheduled_keys = set(
+                                        list(self._preposition_scheduled_keys)[-256:]
+                                    )
                 except Exception as e:
                     logger.debug(
                         f"TimelinePreviewRenderer: playback stream preposition "
@@ -11181,6 +11457,7 @@ class TimelinePreviewRenderer(QObject):
                     asset_path,
                     target_size=self._auto2k_decode_target_size(),
                     stream_key=stream_key,
+                    warm_interactive_pool=False,
                 )
                 warmed += 1
                 if warmed >= max_sources:
@@ -11346,6 +11623,9 @@ class TimelinePreviewRenderer(QObject):
         """
         self._sequence = sequence
         self._render_plan = None
+        # In-flight GPU results still have this generation. They cannot certify
+        # that the displayed frame contains the changed transform or effects.
+        self._paused_present_invalid_generation = self._generation_id
         # Invalidate the CPU frame cache — without this, request_render hits
         # the cached pre-drag frame and returns early, so the transform edit
         # is never re-rendered (the preview appears frozen).
@@ -11745,19 +12025,16 @@ class TimelinePreviewRenderer(QObject):
                 released = pending_matches
             if released:
                 self._render_in_flight = False
-                # Track the completed decode-cycle period: its inverse is the
-                # display rate the pipeline sustains, which drives the
-                # adaptive scrub stride (slow codecs step harder).
-                now = time.perf_counter()
-                last_release = self._scrub_last_cycle_release_at
-                if last_release is not None:
-                    cycle_s = now - last_release
+                if self._scrub_active and self._scrub_last_dispatch_at > 0.0:
+                    # Estimate decoder capacity from the in-flight request.
+                    # Time waiting for the pointer to enter a new quantized
+                    # bucket is not decode time and inflates the next stride.
+                    cycle_s = time.monotonic() - self._scrub_last_dispatch_at
                     if 0.0 < cycle_s < 2.0:
                         previous = self._scrub_cycle_period_ema_s
                         self._scrub_cycle_period_ema_s = (
                             cycle_s if previous is None else previous * 0.7 + cycle_s * 0.3
                         )
-                self._scrub_last_cycle_release_at = now
 
         if not self._scrub_active:
             trace_stage = "renderer.gpu_submitted_playback_release"
@@ -11841,6 +12118,60 @@ class TimelinePreviewRenderer(QObject):
             return False
         return frame == latest
 
+    def _can_present_scrub_result(
+        self,
+        frame: int,
+        token: int | None,
+        source_frames: tuple[ScrubSourceFrame, ...] = (),
+        *,
+        settled: bool = False,
+    ) -> bool:
+        """Enforce forward progress within the current direction of the gesture."""
+        if token is not None and token < getattr(self, "_scrub_direction_token_floor", 0):
+            return False
+        if settled and frame == self._scrub_latest_frame:
+            return True
+        if any(sample.direction == 0 and sample.decoded != sample.requested for sample in source_frames):
+            return False
+        last = getattr(self, "_scrub_last_presentation", None)
+        direction = getattr(self, "_scrub_direction", 0)
+        first_in_direction = getattr(self, "_scrub_needs_direction_anchor", False)
+        last_frame, last_sources = last if last is not None else (frame, ())
+        if direction:
+            if not first_in_direction and (frame - last_frame) * direction < 0:
+                return False
+            by_clip = {(old.clip_id, old.asset_path): old for old in last_sources}
+            for sample in source_frames:
+                old = by_clip.get((sample.clip_id, sample.asset_path))
+                expected = direction * sample.direction
+                if first_in_direction:
+                    # The requested frame may still be beyond the picture
+                    # we last painted before the turn. Establish a nearby
+                    # anchor on the side of the new sweep in that case.
+                    lead_from = sample.requested
+                    if old is not None and (lead_from - old.decoded) * expected < 0:
+                        lead_from = old.decoded
+                    if (sample.decoded - lead_from) * expected > 2:
+                        return False
+                if old is None:
+                    continue
+                if not first_in_direction and sample.requested != old.requested:
+                    expected = sample.requested - old.requested
+                if expected * (sample.decoded - old.decoded) < 0:
+                    return False
+            if frame == last_frame and source_frames and source_frames == last_sources:
+                return False
+        return self._can_emit_scrub_render_result(frame)
+
+    def _record_scrub_presentation(self, frame: int, source_frames: tuple[ScrubSourceFrame, ...]) -> None:
+        """Advance timeline progress and keep the last observed source frames."""
+        if source_frames:
+            self._scrub_needs_direction_anchor = False
+        previous = self._scrub_last_presentation
+        if not source_frames and previous is not None:
+            source_frames = previous[1]
+        self._scrub_last_presentation = int(frame), source_frames
+
     def _on_frame_rendered(self, frame: int, result: Any) -> None:
         """
         帧渲染完成回调。
@@ -11852,6 +12183,19 @@ class TimelinePreviewRenderer(QObject):
             frame: 帧号
             result: 渲染结果（QImage 或 texture_id）
         """
+        scrub_token = None
+        if isinstance(result, _ScrubWorkerResult):
+            if result.generation != self._generation_id:
+                return
+            scrub_token = result.request_token
+            if result.error:
+                if scrub_token is not None and scrub_token < getattr(self, "_scrub_direction_token_floor", 0):
+                    self._drop_scrub_render_result(frame, "old_direction_error")
+                    return
+                if not self._scrub_active or frame in (self._scrub_latest_display_frame, self._scrub_latest_frame):
+                    self._on_render_error(frame, result.result)
+                return
+            result = result.result
         if isinstance(result, dict) and result.get("scrub_stale_drop"):
             self._drop_scrub_render_result(
                 frame,
@@ -11864,7 +12208,7 @@ class TimelinePreviewRenderer(QObject):
             self._drop_scrub_render_result(frame, "finish_non_final")
             return
 
-        if self._scrub_active and not self._can_emit_scrub_render_result(frame):
+        if self._scrub_active and not self._can_present_scrub_result(frame, scrub_token):
             self._drop_scrub_render_result(frame, "active_too_far_behind")
             return
 
@@ -12008,7 +12352,9 @@ class TimelinePreviewRenderer(QObject):
 
         self._mark_frame_emitted(frame)
         if self._scrub_active:
+            self._record_scrub_presentation(frame, ())
             self._scrub_last_real_frame = int(frame)
+            self._scrub_last_real_generation = self._generation_id
             self._scrub_last_real_frame_at = time.perf_counter()
         if scrub_exact_frame is not None and int(frame) == int(scrub_exact_frame):
             self._scrub_exact_frame = None
@@ -12105,6 +12451,9 @@ class TimelinePreviewRenderer(QObject):
         """
         self._cache.clear()
         self._snapshot_frame_keys.clear()
+        self._scrub_worker_queued_key = None
+        self._paused_present_key = None
+        self._scrub_painted_anchor = None
         gpu_renderer = getattr(self, "_gpu_renderer", None)
         invalidate = getattr(gpu_renderer, "invalidate_composite_cache", None)
         if callable(invalidate):
@@ -12472,9 +12821,12 @@ class TimelinePreviewRenderer(QObject):
         # P0-02: 消费本帧在飞身份 (trace_id, deadline_ns)，供下方 guard-drop
         # trace 归因；本调用是每个 GPU 结果的终点（成功或某种 drop），
         # 无论走哪条分支都取走，避免在飞字典滞留旧帧。
-        frame_trace_id, frame_deadline_ns = self._take_in_flight_frame_ids(frame)
+        current_generation = generation == self._generation_id
+        frame_trace_id, frame_deadline_ns = (
+            self._take_in_flight_frame_ids(frame) if current_generation else (0, 0)
+        )
         late_key = getattr(self, "_late_realtime_present_key", None)
-        if late_key is not None and late_key != (int(frame), int(generation)):
+        if current_generation and late_key is not None and late_key != (int(frame), int(generation)):
             # A newer GPU result supersedes any unmatched descriptor from the
             # previous frame; it must never be presented late.
             self._late_realtime_present_key = None
@@ -12512,6 +12864,10 @@ class TimelinePreviewRenderer(QObject):
                 deadline_ns=frame_deadline_ns,
             )
             get_trace_collector().record(trace)
+            if self._dispatched_generation_id == self._generation_id:
+                # A delayed completion owns only its old presentation lease.
+                # The current generation may already be decoding this frame.
+                return
             self._render_in_flight = False
             self._pending_mutex.lock()
             self._pending_frame = None
@@ -12541,18 +12897,25 @@ class TimelinePreviewRenderer(QObject):
             self._drop_scrub_render_result(frame, "gpu_finish_non_final")
             return
 
-        if self._scrub_active and not self._can_emit_scrub_render_result(frame):
-            stale_present = self._pop_pending_present_frame(frame, generation)
-            if stale_present is not None:
+        present_frame = self._pop_pending_present_frame(frame, generation)
+        extra = getattr(present_frame, "extra", {}) or {}
+        scrub_sources = extra.get("scrub_source_frames", ())
+        if self._scrub_active and not self._can_present_scrub_result(
+            frame, extra.get("scrub_request_token"), scrub_sources,
+            settled=bool(extra.get("scrub_settled")),
+        ):
+            if present_frame is not None:
                 self._ack_present_slot_safe(
-                    getattr(stale_present, "slot_id", -1),
-                    getattr(stale_present, "lease_key", None))
+                    getattr(present_frame, "slot_id", -1),
+                    getattr(present_frame, "lease_key", None))
             playback_trace(
                 "renderer.gpu_result_drop_active_scrub_too_far_behind",
                 frame=frame,
                 latest=self._scrub_latest_frame,
                 generation=generation,
                 tex_id=tex_id,
+                scrub_token=extra.get("scrub_request_token"),
+                source_frames=tuple((sample.requested, sample.decoded) for sample in scrub_sources),
             )
             self._drop_scrub_render_result(frame, "gpu_active_too_far_behind")
             return
@@ -12562,7 +12925,6 @@ class TimelinePreviewRenderer(QObject):
         # monotonic / advance logic, but the actual Viewer payload must keep
         # fence + slot ack metadata. Falling back to a naked texture tuple is
         # only for old renderers/tests that do not emit present_frame_ready.
-        present_frame = self._pop_pending_present_frame(frame, generation)
         if present_frame is not None:
             ack_cb = self._make_present_ack_callback(present_frame)
             result = {
@@ -12794,7 +13156,9 @@ class TimelinePreviewRenderer(QObject):
 
         self._mark_frame_emitted(frame)
         if self._scrub_active:
+            self._record_scrub_presentation(frame, scrub_sources)
             self._scrub_last_real_frame = int(frame)
+            self._scrub_last_real_generation = generation
             self._scrub_last_real_frame_at = time.perf_counter()
         if scrub_exact_frame is not None and int(frame) == int(scrub_exact_frame):
             self._scrub_exact_frame = None
@@ -12907,7 +13271,23 @@ class TimelinePreviewRenderer(QObject):
         # Emit to ProgramViewer (same path as CPU results)
         playback_trace("renderer.gpu_frame_ready_emit", frame=frame, tex_id=tex_id, width=width, height=height)
         if self._scrub_active:
+            playback_trace(
+                "renderer.scrub_source_present", frame=frame,
+                direction=self._scrub_direction, scrub_token=extra.get("scrub_request_token"),
+                source_frames=tuple((sample.clip_id, sample.requested, sample.decoded) for sample in scrub_sources),
+            )
             self._trace_scrub_frame_ready_latency(frame, "gpu")
+        lease_key = getattr(present_frame, 'lease_key', None)
+        self._paused_present_key = (
+            (generation, frame, lease_key)
+            if (
+                lease_key is not None
+                and generation != self._paused_present_invalid_generation
+                and not self._scrub_active
+                and not self._is_controller_playing()
+            )
+            else None
+        )
         self.frame_ready.emit(frame, result)
         self._schedule_playback_prebuffer(frame)
 

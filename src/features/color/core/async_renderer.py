@@ -3407,7 +3407,8 @@ class AsyncRenderer(QThread):
                     and self._color_metal_display_allowed(params)
                     and surface.is_usable()):
                 metal_display = (self._color_metal_front_serial,
-                                 self._video_generation_id, surface.generation)
+                                 cmd_video_gen if cmd_video_gen is not None else self._video_generation_id,
+                                 surface.generation)
             from src.features.color.core.color_graph_metal import MetalGraphCancelled
             try:
                 sample_kwargs = {"input_sample": (warper_sample[0], lambda rgb: self._publish_warper_sample(params, rgb))} if warper_sample else {}
@@ -3697,7 +3698,6 @@ class AsyncRenderer(QThread):
             # 当前非 ColorOutput 模式使用持久化纹理，无需释放
 
             front_idx = self.write_idx
-            self.write_idx = 1 - self.write_idx
             # Static image preview should publish only completed frames, matching
             # the older Color branch behavior. Video playback keeps the non-blocking
             # sync mode for throughput.
@@ -3729,11 +3729,6 @@ class AsyncRenderer(QThread):
                 self.ctx.finish()
                 self._finish_call_count += 1
                 front_render_complete = True
-                if force_finish:
-                    # Consumed: only the first playback frame after a clip
-                    # switch needs the finish; afterwards the double-buffer
-                    # pipeline is warm again.
-                    self._force_finish_next_publish = False
             else:
                 # Video playback and paused-video grading use a double-buffered
                 # FBO and publish without glFinish().  Waiting here turns every
@@ -3741,6 +3736,16 @@ class AsyncRenderer(QThread):
                 # behind the pointer.
                 front_render_complete = self._sync_gpu()
 
+            # A scrub reversal can arrive after upload or during the grade.
+            # Keep the current front texture until the new sweep publishes.
+            if (
+                cmd_video_gen is not None and (has_video_texture or has_video_planes)
+                and cmd_video_gen < int(self.__dict__.get('_video_generation_id', 0) or 0)
+            ):
+                return False
+            if force_finish:
+                self._force_finish_next_publish = False
+            self.write_idx = 1 - front_idx
             self.current_front_tex_id = self.tex_pair[front_idx].glo
             self.current_front_size = (w, h)
             self.debug_last_front_tex_id = self.current_front_tex_id
@@ -6374,6 +6379,10 @@ class AsyncRenderer(QThread):
             # otherwise the UI context can sample its previous FBO contents.
             render_params = dict(render_params)
             render_params['render_reason'] = 'static_preview'
+        if drop_if_stale and 'generation_id' in data:
+            if generation_id < self._video_generation_id:
+                return
+            render_params['video_generation'] = generation_id
         # A fresh texture has been uploaded; clear the clip-switch pending flag
         # so subsequent RENDER_FRAME commands may reuse this texture again.
         # If this is the first playback frame after a clip switch, the
@@ -6391,6 +6400,8 @@ class AsyncRenderer(QThread):
         render_params = self._apply_task_frame_identity(render_params,
                                                         frame_index)
         self._do_render(render_params, allow_during_playback=True)
+        if drop_if_stale and generation_id < self._video_generation_id:
+            return
         self.debug_last_rendered_video_frame_index = int(frame_index)
         if data.get('reason') == 'seek' or not drop_if_stale:
             logger.debug(
@@ -6578,6 +6589,8 @@ class AsyncRenderer(QThread):
             gen=int(generation_id),
             vgen=_diag_vgen_gpu,
         )
+        if drop_if_stale and generation_id < self._video_generation_id:
+            return
         # Mirror _do_render_video_frame: the first playback frame after a clip
         # switch must finish before publish, otherwise the double-buffer slot
         # (untouched since the previous clip) is blitted with stale contents.
@@ -6588,7 +6601,11 @@ class AsyncRenderer(QThread):
         self.video_texture_pending = False
         render_params = self._apply_task_frame_identity(render_params,
                                                         frame_index)
+        if drop_if_stale and 'generation_id' in data:
+            render_params['video_generation'] = generation_id
         self._do_render(render_params, allow_during_playback=True)
+        if drop_if_stale and generation_id < self._video_generation_id:
+            return
         self.debug_last_rendered_video_frame_index = int(frame_index)
         if data.get('reason') == 'seek' or not drop_if_stale:
             logger.debug(

@@ -130,7 +130,10 @@ def test_active_multiview_scopes_share_a_smaller_five_hz_budget(mode: str, playi
     host.scope_panel.demand_state.return_value['mode'] = mode
     host.engine.is_interacting = not playing
     host.video_controller = SimpleNamespace(is_playing=playing)
-    with patch('src.app.controllers.layer_controller.time.monotonic', side_effect=(2.0, 2.1, 2.2)):
+    with (
+        patch('src.app.controllers.layer_controller.time.monotonic', side_effect=(2.0, 2.1, 2.2)),
+        patch('src.app.controllers.layer_controller.QTimer.singleShot', side_effect=lambda _, call: call()),
+    ):
         for _ in range(3):
             host.on_frame_ready(42)
     assert host.engine.request_gpu_scope.call_count == 2
@@ -149,7 +152,10 @@ def test_active_single_scopes_keep_playback_quality_and_ten_hz(mode: str, playin
     host.scope_panel.demand_state.return_value['mode'] = mode
     host.engine.is_interacting = not playing
     host.video_controller = SimpleNamespace(is_playing=playing)
-    with patch('src.app.controllers.layer_controller.time.monotonic', side_effect=(2.0, 2.1)):
+    with (
+        patch('src.app.controllers.layer_controller.time.monotonic', side_effect=(2.0, 2.1)),
+        patch('src.app.controllers.layer_controller.QTimer.singleShot', side_effect=lambda _, call: call()),
+    ):
         host.on_frame_ready(42)
         host.on_frame_ready(42)
     assert host.engine.request_gpu_scope.call_count == 2
@@ -203,7 +209,8 @@ def test_playback_uses_gpu_scope_without_cpu_snapshot() -> None:
     host.video_controller = MagicMock()
     host.video_controller.is_playing = True
 
-    host.on_frame_ready(42)
+    with patch('src.app.controllers.layer_controller.QTimer.singleShot', side_effect=lambda _, call: call()):
+        host.on_frame_ready(42)
 
     host.engine.request_scope_snapshot.assert_not_called()
     host.engine.request_gpu_scope.assert_called_once()
@@ -292,8 +299,34 @@ def test_playback_keeps_standalone_scope_but_excludes_curves_overlay() -> None:
     host = _ScopeRefreshHost()
     _show_curves(host)
     host.video_controller = SimpleNamespace(is_playing=True)
-    host.on_frame_ready(42)
+    with patch('src.app.controllers.layer_controller.QTimer.singleShot') as timer:
+        host.on_frame_ready(42)
+        host.on_frame_ready(43)
+        assert host.finished == [(None, False), (None, False)]
+        host.engine.request_gpu_scope.assert_not_called()
+        timer.assert_called_once()
+        timer.call_args.args[1]()
     assert host.engine.request_gpu_scope.call_args.args[0].histogram_overlay is False
+
+
+def test_delayed_scope_yields_to_replacement_clip() -> None:
+    host = _ScopeRefreshHost()
+    host.video_controller = SimpleNamespace(is_playing=True)
+    renderer = host.engine.renderer
+    renderer._video_generation_id = 3
+    renderer.video_texture_pending = False
+    with patch('src.app.controllers.layer_controller.QTimer.singleShot') as timer:
+        host.on_frame_ready(42)
+        old_run = timer.call_args.args[1]
+        renderer._video_generation_id = 4
+        renderer.video_texture_pending = True
+        old_run()
+        host.engine.request_gpu_scope.assert_not_called()
+
+        renderer.video_texture_pending = False
+        host.on_frame_ready(43)
+        timer.call_args.args[1]()
+    host.engine.request_gpu_scope.assert_called_once()
 
 
 def test_pause_refreshes_curves_and_cancels_inflight_demand_on_play() -> None:

@@ -15,7 +15,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtCore import QCoreApplication
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -24,11 +23,6 @@ from src.shared.gpu.present_frame import (
     OutputSlotPool,
     SlotState,
 )
-
-
-@pytest.fixture(scope="module")
-def qapp():
-    return QCoreApplication.instance() or QCoreApplication([])
 
 
 def _make_present(slot_id: int = 0, fence_ns: int = 999, frame: int = 10, generation_id: int = 1) -> GpuPresentFrame:
@@ -154,6 +148,52 @@ class TestPresentFrameFenceAck:
         if present.has_fence and present.fence_ns != 0:
             viewer._gl_fence_wait_fn(present.fence_ns)
         assert fence_calls == [777]
+
+    def test_failed_fence_preserves_previous_texture_and_acknowledges_lease(self, qapp) -> None:
+        from src.features.edit.ui.program_viewer import ProgramViewer
+
+        viewer = ProgramViewer.__new__(ProgramViewer)
+        viewer._pending_present_frame = _make_present(slot_id=3, fence_ns=777)
+        viewer._pending_present_ack = MagicMock()
+        ack = viewer._pending_present_ack
+        viewer._pending_present_trace_id = 0
+        viewer._gl_fence_wait_fn = MagicMock(side_effect=RuntimeError("missing sync"))
+        viewer._shared_tex_id = 101
+        viewer._shared_tex_width = 1920
+        viewer._shared_tex_height = 1080
+        viewer._current_tex_id = 200
+
+        viewer._copy_shared_texture_to_display()
+
+        viewer._gl_fence_wait_fn.assert_called_once_with(777)
+        ack.assert_called_once_with(3)
+        assert viewer._current_tex_id == 200
+        assert viewer._shared_tex_id is None
+        assert viewer._pending_present_frame is None
+
+    def test_texture_preparation_failure_releases_the_pending_lease(self, qapp, monkeypatch) -> None:
+        from src.features.edit.ui import program_viewer
+
+        viewer = program_viewer.ProgramViewer.__new__(program_viewer.ProgramViewer)
+        viewer._pending_present_frame = _make_present(slot_id=3, fence_ns=0)
+        viewer._pending_present_ack = MagicMock()
+        ack = viewer._pending_present_ack
+        viewer._pending_present_trace_id = 0
+        viewer._shared_tex_id = 101
+        viewer._shared_tex_width = 1920
+        viewer._shared_tex_height = 1080
+        viewer._current_tex_id = 200
+        viewer.defaultFramebufferObject = MagicMock(return_value=4)
+        gl = MagicMock()
+        gl.glTexParameteri.side_effect = RuntimeError("texture preparation failed")
+        monkeypatch.setattr(program_viewer, "_gl", gl)
+
+        with pytest.raises(RuntimeError, match="texture preparation failed"):
+            viewer._copy_shared_texture_to_display()
+
+        ack.assert_called_once_with(3)
+        assert viewer._shared_tex_id is None
+        assert viewer._pending_present_frame is None
 
     def test_ack_callback_fires_after_blit(self, qapp) -> None:
         """blit 完成后 ack callback 应被调用（释放 renderer slot）。"""

@@ -49,6 +49,130 @@ class _IsolatedBridge(QObject):
     clip_thumbnails_done = pyqtSignal(str, object)
 
 
+def test_pause_during_seek_skips_native_read(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.shared.media import thumbnail_provider as thumbnails
+    from src.shared.media import topos_source
+
+    paused = threading.Event()
+    cap = MagicMock()
+    cap.isOpened.return_value = True
+    cap.get.return_value = 100
+    cap.set.side_effect = lambda *_args: paused.set()
+    return_capture = MagicMock()
+    path = "/tmp/thumb-pause-video.mp4"
+    monkeypatch.setattr(topos_source, "is_topos_movie", lambda _path: False)
+    monkeypatch.setattr(thumbnails, "_get_capture", lambda _path: cap)
+    monkeypatch.setattr(thumbnails, "_return_capture", return_capture)
+    monkeypatch.setattr(thumbnails, "_bridge", _IsolatedBridge())
+
+    poster = thumbnails.ThumbnailRequest(path, None, 128, cancelled=paused.is_set)
+    assert poster._load_video_poster_frame(path) is None
+    paused.clear()
+
+    frame = thumbnails.FrameThumbnailRequest(
+        path, 10, 100, 48, None, cancelled=paused.is_set,
+    )
+    frame.run()
+
+    assert cap.set.call_count == 2
+    cap.read.assert_not_called()
+    assert return_capture.call_count == 2
+
+
+def test_thumbnail_pause_delivers_caches_and_ignores_superseded_results(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.shared.media import thumbnail_provider as thumbnails
+
+    monkeypatch.setattr(thumbnails, "_bridge", _IsolatedBridge())
+    provider = thumbnails.ThumbnailProvider()
+    pool = MagicMock()
+    monkeypatch.setattr(provider, "pool", pool)
+    cached_path = "/tmp/thumb-already-cached.jpg"
+    new_path = "/tmp/thumb-requeued.mp4"
+    image = QImage(8, 8, QImage.Format.Format_RGB888)
+    pixmap = QPixmap.fromImage(image)
+    provider.cache.put(cached_path, pixmap)
+    provider.frame_cache.put((cached_path, 2), pixmap)
+    provider.get_thumbnail(new_path)
+    provider.get_frame_thumbnail(new_path, 10, 100)
+    old_poster, old_frame = [call.args[0] for call in pool.start.call_args_list]
+
+    states: list[tuple[bool, bool, bool, bool]] = []
+    frames: list[tuple[str, int]] = []
+    provider.work_suspended_changed.connect(lambda suspended: states.append((
+        suspended, provider.is_thumbnail_work_suspended,
+        bool(provider.pending_requests), bool(provider.pending_frame_requests),
+    )))
+    provider.frame_thumbnail_ready.connect(lambda path, idx, _pixmap: frames.append((path, idx)))
+
+    provider.set_playback_active(True)
+    provider.set_playback_active(True)
+    pool.clear.assert_called_once()
+    assert provider.get_thumbnail(cached_path) is pixmap
+    provider.get_frame_thumbnail(cached_path, 2, 100)
+    assert frames == [(cached_path, 2)]
+    provider.get_thumbnail(new_path)
+    provider.get_frame_thumbnail(new_path, 10, 100)
+    assert pool.start.call_count == 2
+
+    provider.set_playback_active(False)
+    provider.set_playback_active(False)
+    assert states == [(True, True, False, False), (False, False, False, False)]
+    provider.get_thumbnail(new_path)
+    provider.get_frame_thumbnail(new_path, 10, 100)
+    new_poster, new_frame = [call.args[0] for call in pool.start.call_args_list[2:]]
+
+    old_poster._emit_result(image)
+    old_frame._emit_result(None)
+    assert provider.pending_requests == {new_path}
+    assert provider.pending_frame_requests == {(new_path, 10)}
+    assert provider.get_cached_thumbnail(new_path) is None
+
+    new_poster._emit_result(image)
+    new_frame._emit_result(image)
+    assert not provider.pending_requests
+    assert not provider.pending_frame_requests
+    assert provider.get_cached_thumbnail(new_path) is not None
+    assert frames == [(cached_path, 2), (new_path, 10)]
+
+
+def test_timeline_reset_preserves_pending_media_card_frames(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.shared.media import thumbnail_provider as thumbnails
+    from src.shared.media import topos_source
+
+    monkeypatch.setattr(thumbnails, "_bridge", _IsolatedBridge())
+    monkeypatch.setattr(topos_source, "is_topos_movie", lambda _path: False)
+    provider = thumbnails.ThumbnailProvider()
+    pool = MagicMock()
+    monkeypatch.setattr(provider, "pool", pool)
+    cap = MagicMock()
+    cap.isOpened.return_value = True
+    cap.read.return_value = True, _make_test_image_bgr()
+    capture = MagicMock(return_value=cap)
+    monkeypatch.setattr(thumbnails, "_get_capture", capture)
+    monkeypatch.setattr(thumbnails, "_return_capture", lambda *_args: None)
+    path = "/tmp/thumb-timeline-replaced.mp4"
+    ready: list[tuple[str, int]] = []
+    provider.frame_thumbnail_ready.connect(lambda path, index, _pixmap: ready.append((path, index)))
+
+    provider.get_frame_thumbnail(path, 10, 100, asset_id="card")
+    provider.request_frame_pixmap_async("timeline", path, 20, 100)
+    media_request, timeline_request = [call.args[0] for call in pool.start.call_args_list]
+    provider.invalidate_pending_work()
+    timeline_request.run()
+    media_request.run()
+
+    capture.assert_called_once_with(path)
+    assert ready == [(path, 10)]
+    assert provider.get_cached_frame_pixmap("card", 10, 256, path=path) is not None
+    assert provider.get_cached_frame_pixmap("timeline", 20, 48, path=path) is None
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------

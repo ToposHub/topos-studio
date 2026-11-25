@@ -208,14 +208,13 @@ def fence_to_int(fence) -> int:
 
 def _int_to_sync(fence_ns: int):
     """Rebuild the GLsync argument PyOpenGL expects from the int form."""
-    import ctypes
     if not fence_ns:
         return 0
     try:
-        from OpenGL._opaque import GLsync_pointer
-        return ctypes.cast(ctypes.c_void_p(fence_ns), GLsync_pointer)
-    except Exception:
+        from OpenGL.raw.GL._types import GLsync
+    except ImportError:
         return ctypes.c_void_p(fence_ns)
+    return ctypes.cast(ctypes.c_void_p(fence_ns), GLsync)
 
 
 def wait_fence(fence_ns: int, timeout_ns: int = 0) -> bool:
@@ -244,8 +243,10 @@ def wait_fence(fence_ns: int, timeout_ns: int = 0) -> bool:
         from OpenGL.GL import glClientWaitSync
         glClientWaitSync(sync, 0, int(timeout_ns))
         return True
-    from OpenGL.GL import GL_TIMEOUT_IGNORED, glWaitSync
-    glWaitSync(sync, 0, GL_TIMEOUT_IGNORED)
+    from OpenGL.GL import glWaitSync
+    # PyOpenGL can expose a different bit pattern on macOS. GL waits expect
+    # the full unsigned 64-bit GL_TIMEOUT_IGNORED value.
+    glWaitSync(sync, 0, 0xFFFFFFFFFFFFFFFF)
     return True
 
 

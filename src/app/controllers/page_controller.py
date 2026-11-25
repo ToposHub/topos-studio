@@ -706,6 +706,10 @@ class PageManagementMixin:
                     controller.stop_playback()
                 except (AttributeError, RuntimeError) as exc:
                     logger.warning("leave_page_hook: failed to stop Color playback: %s", exc)
+            priority = getattr(getattr(self, "timeline_panel", None), "set_background_media_priority", None)
+            if callable(priority):
+                priority("color_playback", False)
+                priority("color_scrub", False, resume_delay_ms=250)
             # The Color timeline preview has its own render worker.  Stop it
             # before the viewport is reparented to another page so no queued
             # frame can paint into a disappearing native OpenGL widget.
@@ -3613,7 +3617,26 @@ class PageManagementMixin:
         # 条路径在多层视频轨重叠时打开不同 clip。
         clip = self._topmost_enabled_video_clip_at(timeline, playhead)
         if clip is None:
-            return False
+            # A single video has an unambiguous Color target even when the
+            # Edit playhead is in the gap before or after it.
+            from src.features.edit.core.timeline_render_plan import is_track_renderable
+
+            has_solo = any(track.is_solo for track in timeline.all_tracks)
+            for track in timeline.video_tracks:
+                if not is_track_renderable(track, has_solo):
+                    continue
+                for candidate in track.clips:
+                    asset = project.assets.get(candidate.asset_id)
+                    if not candidate.is_enabled or asset is None or not (
+                        asset.is_video or asset.is_image or self._is_aces_still_sequence(asset)
+                    ):
+                        continue
+                    if clip is not None or not asset.is_video:
+                        return False
+                    clip = candidate
+            if clip is None:
+                return False
+            playhead = min(max(playhead, clip.timeline_start), clip.timeline_end - 1)
 
         asset = project.assets.get(clip.asset_id)
         if asset is None or not (asset.is_video or asset.is_image or self._is_aces_still_sequence(asset)):

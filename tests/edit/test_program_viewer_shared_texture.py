@@ -1,5 +1,38 @@
 from __future__ import annotations
 
+from unittest.mock import Mock
+
+
+def test_lease_identifies_only_a_successfully_drawn_texture(qapp, monkeypatch) -> None:
+    from src.features.edit.ui import program_viewer
+
+    viewer = program_viewer.ProgramViewer()
+    key = object()
+    viewer._gl_initialized = True
+    viewer._current_tex_id = 7
+    viewer._prog = 1
+    viewer._copied_present_key = key
+    monkeypatch.setattr(viewer, "isVisible", lambda: True)
+    monkeypatch.setattr(viewer, "_native_layer_covers", lambda: False)
+    monkeypatch.setattr(viewer, "_reset_copy_gl_state", Mock())
+    monkeypatch.setattr(viewer, "_paint_overlays", Mock())
+    monkeypatch.setattr(program_viewer, "_gl", Mock())
+    draw = Mock(return_value=True)
+    monkeypatch.setattr(viewer, "_render_texture", draw)
+
+    assert viewer.painted_present_key() is None
+    viewer._paintGL_impl()
+    assert viewer.painted_present_key() is key
+
+    draw.return_value = False
+    viewer._paintGL_impl()
+    assert viewer.painted_present_key() is None
+
+    viewer.set_texture(9, 1920, 1080)
+    draw.return_value = True
+    viewer._paintGL_impl()
+    assert viewer.painted_present_key() is None
+
 
 def test_reused_shared_texture_id_still_repaints(qapp) -> None:
     """A reused GPU texture slot can contain a newer playback frame."""
@@ -20,6 +53,49 @@ def test_reused_shared_texture_id_still_repaints(qapp) -> None:
     viewer.set_shared_texture(7, 1920, 1080)
 
     assert viewer.update_calls > first_update_count
+
+
+def test_direction_turn_releases_only_unpainted_old_scrub_slot(qapp, monkeypatch) -> None:
+    from src.features.edit.core.edit_gpu_preview_renderer import ScrubSourceFrame
+    from src.features.edit.ui import program_viewer
+    from src.shared.gpu.present_frame import GpuPresentFrame
+
+    viewer = program_viewer.ProgramViewer()
+    frames = (ScrubSourceFrame('top', 'clip', 207, 203, 1),)
+    already_drawn = GpuPresentFrame(8, 640, 360, 178, 4, 2, extra={
+        'scrub_request_token': 10,
+        'scrub_source_frames': frames,
+    })
+    old_pending = GpuPresentFrame(9, 640, 360, 192, 4, 3, extra={'scrub_request_token': 11})
+    viewer._gl_initialized = True
+    viewer._current_tex_id = 7
+    viewer._prog = 1
+    monkeypatch.setattr(viewer, '_native_layer_covers', lambda: False)
+    monkeypatch.setattr(viewer, '_reset_copy_gl_state', Mock())
+    monkeypatch.setattr(viewer, '_paint_overlays', Mock())
+    monkeypatch.setattr(viewer, 'defaultFramebufferObject', lambda: 0)
+    monkeypatch.setattr(program_viewer, '_gl', Mock())
+    monkeypatch.setattr(viewer, '_render_texture', Mock(return_value=True))
+    drawn_ack = Mock()
+    viewer.set_present_frame(already_drawn, ack_cb=drawn_ack)
+    viewer._paintGL_impl()
+    drawn_ack.assert_called_once_with(2)
+    ack = Mock()
+    viewer.set_present_frame(old_pending, ack_cb=ack)
+    viewer._current_frame_index = 192
+
+    assert viewer.retire_scrub_direction(4, 12) == (178, frames)
+    ack.assert_called_once_with(3)
+    assert viewer._pending_present_frame is None and viewer._shared_tex_id is None
+    assert viewer._current_tex_id == 7 and viewer._current_frame_index == 178
+
+    next_frame = GpuPresentFrame(10, 640, 360, 177, 4, 4, extra={'scrub_request_token': 12})
+    ack.reset_mock()
+    viewer.set_present_frame(next_frame, ack_cb=ack)
+    assert viewer.retire_scrub_direction(4, 12) == (178, frames)
+    assert viewer._pending_present_frame is next_frame
+    ack.assert_not_called()
+    viewer._ack_pending_present_without_display()
 
 
 def test_no_clip_state_preserves_existing_frame(qapp) -> None:

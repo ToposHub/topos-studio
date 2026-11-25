@@ -47,8 +47,13 @@ import logging
 import math
 import numpy as np
 import time
-from typing import Optional, Tuple, Dict, Any, Callable, Union
+from typing import Optional, Tuple, Dict, Any, Callable, Union, TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from src.features.edit.core.edit_gpu_preview_renderer import ScrubSourceFrame
+    from src.shared.gpu.present_frame import GpuPresentFrame
+
+from OpenGL.error import Error as OpenGLError
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QHBoxLayout, QVBoxLayout, QToolButton,
@@ -900,6 +905,10 @@ class ProgramViewer(QOpenGLWidget):
         # _pending_present_ack: blit 完成后调用的 ack 回调（释放 renderer slot）。
         # _gl_fence_wait_fn: 注入的 fence wait 函数（测试用 mock；生产用 glWaitSync）。
         self._pending_present_frame: Optional[object] = None
+        self._copied_present_key: object | None = None
+        self._painted_present_key: object | None = None
+        self._copied_scrub_present: Optional["GpuPresentFrame"] = None
+        self._painted_scrub_present: Optional["GpuPresentFrame"] = None
         self._pending_present_ack: Optional[callable] = None
         self._gl_fence_wait_fn: Optional[callable] = None
 
@@ -1212,6 +1221,7 @@ class ProgramViewer(QOpenGLWidget):
         self._pending_qimage = None
         self._shared_tex_id = None
         self._current_tex_is_gl_oriented = False
+        self._copied_scrub_present = None
 
         # 清除错误状态
         self._error_state = "none"
@@ -1234,6 +1244,10 @@ class ProgramViewer(QOpenGLWidget):
         if self._current_tex_id is not None:
             self._pending_tex_delete = self._current_tex_id
         self._current_tex_id = None
+        self._copied_present_key = None
+        self._painted_present_key = None
+        self._copied_scrub_present = None
+        self._painted_scrub_present = None
         self._shared_tex_id = None
         self._current_tex_is_gl_oriented = False
 
@@ -1341,6 +1355,7 @@ class ProgramViewer(QOpenGLWidget):
             exit_gui_gl_stack()
 
     def _paintGL_impl(self) -> None:
+        self._painted_present_key = None
         if not self._gl_initialized:
             return
         if self._native_layer_covers():
@@ -1375,6 +1390,7 @@ class ProgramViewer(QOpenGLWidget):
         # CPU fallback: upload pending QImage to texture.
         pending = self._pending_qimage
         if pending is not None and not pending.isNull():
+            self._copied_present_key = None
             self._set_frame_from_qimage(pending)
 
         # Clear background
@@ -1392,8 +1408,9 @@ class ProgramViewer(QOpenGLWidget):
             display_rect = self._calculate_display_rect()
 
             # Render video texture if available
-            if self._current_tex_id is not None and self._prog:
-                self._render_texture(display_rect)
+            if self._current_tex_id is not None and self._prog and self._render_texture(display_rect):
+                self._painted_present_key = getattr(self, "_copied_present_key", None)
+                self._painted_scrub_present = getattr(self, "_copied_scrub_present", None)
                 # A0.1：可观测呈现（paint 事件内 _render_texture 之后）。
                 # 这是 paint 级观测点，不是物理屏幕扫描时间（无平台
                 # vsync 反馈，不得如此解读）；present_ms 由 annotate 用
@@ -1563,21 +1580,22 @@ class ProgramViewer(QOpenGLWidget):
                 self._prog, b'u_texture')
         return self._tex_uniform_loc
 
-    def _render_texture(self, display_rect: Tuple[float, float, float, float]) -> None:
-        """Render video texture to display rectangle."""
+    def _render_texture(self, display_rect: Tuple[float, float, float, float]) -> bool:
+        """Draw the video texture and report whether a draw was issued."""
         x, y, w, h = display_rect
 
         # Validate texture ID before use — shared textures may become invalid
         # if the render thread deleted them or shared context creation failed.
         tex_id = self._current_tex_id
         if tex_id is None or tex_id == 0:
-            return
+            return False
         if not _gl.glIsTexture(tex_id):
             logger.warning(f"ProgramViewer: texture ID {tex_id} is invalid, clearing")
             self._current_tex_id = None
+            self._copied_present_key = None
             self._shared_tex_id = None
             self._current_tex_is_gl_oriented = False
-            return
+            return False
 
         # GPU FBO textures have GL orientation (y=0 = bottom of image).
         # CPU-uploaded QImages are flipped by glTexImage2D (y=0 = top of image),
@@ -1620,9 +1638,9 @@ class ProgramViewer(QOpenGLWidget):
             try:
                 self._initializeGL_impl()
             except Exception:  # noqa: BLE001 — 重建失败跳过本帧
-                return
+                return False
             if not _gl.glIsProgram(self._prog):
-                return
+                return False
 
         # Update VBO (use glBufferData like SourceViewer does).
         # AUD-20405: quad 内容每帧都变 → 用 GL_STREAM_DRAW 提示驱动走
@@ -1650,6 +1668,7 @@ class ProgramViewer(QOpenGLWidget):
         _gl.glBindVertexArray(0)
         _gl.glUseProgram(0)
         _gl.glBindTexture(GL_TEXTURE_2D, 0)
+        return True
 
     def _draw_guides_overlay(self, painter: Optional[QPainter] = None) -> None:
         """Draw the active aspect-ratio or safe-area guide over the frame.
@@ -1849,6 +1868,9 @@ class ProgramViewer(QOpenGLWidget):
         """
         self._ack_pending_present_without_display()
         self._current_tex_id = tex_id
+        self._copied_present_key = None
+        self._painted_present_key = None
+        self._copied_scrub_present = None
         self._tex_width = width
         self._tex_height = height
         self._shared_tex_id = None  # Clear shared texture
@@ -1884,6 +1906,8 @@ class ProgramViewer(QOpenGLWidget):
         # paintGL copies the shared render-thread texture into a viewer-owned
         # texture, so later renderer pool reuse cannot mutate the visible image.
         self._shared_tex_id = tex_id
+        self._copied_present_key = None
+        self._painted_present_key = None
         self._shared_tex_width = width
         self._shared_tex_height = height
         self._pending_qimage = None  # Clear CPU path
@@ -1935,6 +1959,8 @@ class ProgramViewer(QOpenGLWidget):
         self._ack_pending_present_without_display(status="superseded")
 
         # Queue present frame + ack for paintGL
+        self._copied_present_key = None
+        self._painted_present_key = None
         self._pending_present_frame = present_frame
         self._pending_present_ack = ack_cb
         self._pending_present_trace_id = int(trace_id or 0)
@@ -1963,7 +1989,39 @@ class ProgramViewer(QOpenGLWidget):
         _annotate_present_path(trace_id, "gl_viewer")
         self.update()
 
-    def set_fence_wait_function(self, wait_fn: Optional[callable]) -> None:
+    def painted_present_key(self) -> object | None:
+        """Identify a fenced frame already drawn in this viewer."""
+        if (
+            self._gl_initialized and self._current_tex_id is not None and self._shared_tex_id is None
+            and self._pending_qimage is None and self._error_state == "none"
+            and not self._offline_media
+            and self.isVisible() and not self._native_layer_covers()
+        ):
+            return self._painted_present_key
+        return None
+
+    def retire_scrub_direction(
+        self, generation: int, token_floor: int,
+    ) -> "tuple[int, tuple[ScrubSourceFrame, ...]] | None":
+        """Cancel an unpainted old-direction slot and report the last drawn picture."""
+        painted = self._painted_scrub_present
+        anchor = painted if painted is not None and painted.generation_id == generation else None
+        pending = self._pending_present_frame
+        if pending is not None and pending.generation_id == generation:
+            token = pending.extra.get("scrub_request_token")
+            if isinstance(token, int) and token < token_floor:
+                # The queued producer texture has never been copied. Retain
+                # the viewer-owned display texture and return only this lease.
+                self._shared_tex_id = None
+                self._ack_pending_present_without_display()
+                if anchor is not None:
+                    self._current_frame_index = anchor.frame
+                    self._copied_present_key = self._painted_present_key = anchor.lease_key
+        if anchor is None:
+            return None
+        return anchor.frame, anchor.extra.get("scrub_source_frames", ())
+
+    def set_fence_wait_function(self, wait_fn: Callable[[int], bool | None] | None) -> None:
         """注入 fence wait 函数（生产用 glWaitSync，测试用 mock）。"""
         self._gl_fence_wait_fn = wait_fn
 
@@ -2023,6 +2081,7 @@ class ProgramViewer(QOpenGLWidget):
         前 glWaitSync 等待 renderer 写完；blit 后触发 ack 释放 renderer slot。
         """
         source_tex = self._shared_tex_id
+        self._shared_tex_id = None
         width = self._shared_tex_width
         height = self._shared_tex_height
         if source_tex is None or source_tex == 0 or width <= 0 or height <= 0:
@@ -2034,119 +2093,93 @@ class ProgramViewer(QOpenGLWidget):
         # 这替代了 renderer 端的 glFinish()——把同步点移到 Viewer 自己的 context，
         # 不阻塞 renderer 的 GPU pipeline。
         present = self._pending_present_frame
-        if present is not None and getattr(present, 'has_fence', False) and present.fence_ns != 0:
+        has_fence = present is not None and getattr(present, 'has_fence', False) and present.fence_ns != 0
+        if has_fence:
             wait_fn = self._gl_fence_wait_fn
-            if wait_fn is not None:
-                try:
-                    wait_fn(present.fence_ns)
-                except Exception as e:
-                    logger.debug(f"present fence wait failed: {e}")
-            else:
-                # 默认实现：glWaitSync（非阻塞，等 fence signaled）
-                try:
-                    from OpenGL.GL import (
-                        glWaitSync, GL_SYNC_FLUSH_COMMANDS_COMPLETE,
-                        GL_TIMEOUT_IGNORED,
-                    )
-                    glWaitSync(present.fence_ns, GL_SYNC_FLUSH_COMMANDS_COMPLETE, GL_TIMEOUT_IGNORED)
-                except Exception as e:
-                    logger.debug(f"glWaitSync failed: {e}")
+            if wait_fn is None:
+                from src.shared.gpu.composite_gpu_frame_handle import wait_fence
 
-        if not _gl.glIsTexture(source_tex):
-            playback_trace(
-                "program_viewer.copy_shared_invalid",
-                tex_id=source_tex,
-                width=width,
-                height=height,
-            )
-            self._shared_tex_id = None
-            # AUD-20403: 源纹理无效早退时同样 ack——否则 renderer slot 悬挂，
-            # 只能等下一次 set_present_frame 补偿；若这是暂停/停止前最后
-            # 一帧，slot 长期占用甚至耗尽输出池。
-            self._ack_pending_present_without_display()
-            return
+                wait_fn = wait_fence
+            try:
+                fence_valid = wait_fn(present.fence_ns) is not False
+            except (OpenGLError, TypeError, ValueError, RuntimeError, ctypes.ArgumentError) as error:
+                logger.debug("ProgramViewer: present fence wait failed: %s", error)
+                playback_trace("program_viewer.present_fence_failed", frame=present.frame, error=error)
+                fence_valid = False
+            if not fence_valid:
+                self._ack_pending_present_without_display()
+                return
 
-        if self._current_tex_id is None:
-            self._current_tex_id = _gl.glGenTextures(1)
-
-        _gl.glBindTexture(GL_TEXTURE_2D, self._current_tex_id)
-        _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-        _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-        _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-
+        copied = False
         target_is_gl_oriented = bool(
             getattr(present, 'is_gl_oriented', True) if present is not None else True
         )
-        if (
-            self._tex_width != width
-            or self._tex_height != height
-            or self._current_tex_is_gl_oriented != target_is_gl_oriented
-        ):
-            _gl.glTexImage2D(
-                GL_TEXTURE_2D,
-                0,
-                GL_RGBA,
-                width,
-                height,
-                0,
-                GL_RGBA,
-                GL_UNSIGNED_BYTE,
-                None,
-            )
-
-        if self._copy_read_fbo is None:
-            self._copy_read_fbo = _gl.glGenFramebuffers(1)
-        if self._copy_draw_fbo is None:
-            self._copy_draw_fbo = _gl.glGenFramebuffers(1)
-
         try:
+            if not _gl.glIsTexture(source_tex):
+                playback_trace(
+                    "program_viewer.copy_shared_invalid",
+                    tex_id=source_tex,
+                    width=width,
+                    height=height,
+                )
+                return
+
+            if self._current_tex_id is None:
+                self._current_tex_id = _gl.glGenTextures(1)
+
+            _gl.glBindTexture(GL_TEXTURE_2D, self._current_tex_id)
+            _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+            _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+            _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+            _gl.glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+
+            if (
+                self._tex_width != width
+                or self._tex_height != height
+                or self._current_tex_is_gl_oriented != target_is_gl_oriented
+            ):
+                _gl.glTexImage2D(
+                    GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0,
+                    GL_RGBA, GL_UNSIGNED_BYTE, None,
+                )
+
+            if self._copy_read_fbo is None:
+                self._copy_read_fbo = _gl.glGenFramebuffers(1)
+            if self._copy_draw_fbo is None:
+                self._copy_draw_fbo = _gl.glGenFramebuffers(1)
+
             self._reset_copy_gl_state()
             _gl.glBindFramebuffer(GL_READ_FRAMEBUFFER, self._copy_read_fbo)
             _gl.glFramebufferTexture2D(
-                GL_READ_FRAMEBUFFER,
-                GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D,
-                source_tex,
-                0,
+                GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, source_tex, 0,
             )
             _gl.glBindFramebuffer(GL_DRAW_FRAMEBUFFER, self._copy_draw_fbo)
             _gl.glFramebufferTexture2D(
-                GL_DRAW_FRAMEBUFFER,
-                GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D,
-                self._current_tex_id,
-                0,
+                GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, self._current_tex_id, 0,
             )
             _gl.glClearColor(0.0, 0.0, 0.0, 0.0)
             _gl.glClear(GL_COLOR_BUFFER_BIT)
             _gl.glBlitFramebuffer(
-                0,
-                0,
-                width,
-                height,
-                0,
-                0,
-                width,
-                height,
-                GL_COLOR_BUFFER_BIT,
-                GL_NEAREST,
+                0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST,
             )
+            copied = True
         finally:
-            _gl.glBindFramebuffer(GL_FRAMEBUFFER, self.defaultFramebufferObject())
-            _gl.glBindTexture(GL_TEXTURE_2D, 0)
-            # AUD-20403: blit 抛异常的路径也要恰好一次地 ack renderer slot
-            # （_ack_pending_present_without_display 内部先触发回调再清空，
-            # 下方成功路径的重复调用因引用已清空而自然成为 no-op）。
-            # A0.1：此处的语义是 viewer_copy（blit 命令已入队 + fence 已
-            # 等待），不是可观测显示——displayed 在 paintGL 末尾
-            # frame_presented 处 annotate。
-            self._ack_pending_present_without_display(status="viewer_copy")
+            try:
+                _gl.glBindFramebuffer(GL_FRAMEBUFFER, self.defaultFramebufferObject())
+                _gl.glBindTexture(GL_TEXTURE_2D, 0)
+            finally:
+                # Return the producer slot on every path, including failed
+                # texture preparation and failed GL-state restoration.
+                self._ack_pending_present_without_display(
+                    status="viewer_copy" if copied else "superseded",
+                )
 
         self._tex_width = width
         self._tex_height = height
         self._current_tex_is_gl_oriented = target_is_gl_oriented
-        self._shared_tex_id = None
+        self._copied_present_key = getattr(present, 'lease_key', None) if has_fence else None
+        extra = getattr(present, "extra", {}) or {}
+        self._copied_scrub_present = present if extra.get("scrub_request_token") is not None else None
 
         playback_trace(
             "program_viewer.copy_shared_texture",
@@ -2170,12 +2203,6 @@ class ProgramViewer(QOpenGLWidget):
                 int(height),
                 bool(target_is_gl_oriented),
             )
-
-        # Batch 1: renderer slot 的 ack 已在上方 blit 的 finally 里统一触发
-        # （AUD-20403：成功/异常/早退路径均恰好一次）。
-        if present is not None:
-            self._pending_present_frame = None
-            self._pending_present_ack = None
 
     def set_monitor_readback_enabled(self, enabled: bool) -> None:
         """Enable GPU texture readback for external monitoring output."""

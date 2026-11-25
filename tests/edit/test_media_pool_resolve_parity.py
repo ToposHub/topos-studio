@@ -5,11 +5,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtCore import QModelIndex, QPointF, QSettings, Qt, QItemSelection, QItemSelectionModel
-from PyQt6.QtGui import QDropEvent
+from PyQt6.QtCore import QModelIndex, QPointF, QRect, QSettings, Qt, QItemSelection, QItemSelectionModel
+from PyQt6.QtGui import QDropEvent, QImage, QPainter
 from PyQt6.QtWidgets import QPushButton
 
-from src.features.edit.core.project import EditProject
+from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.ui.media_pool_panel import (
     AssetListModel, BinTreeWidget, MediaPoolPanel, SearchFilterMode, ViewMode,
     build_media_pool_drag_mime,
@@ -652,6 +652,60 @@ def test_poster_requests_can_resume_after_playback_and_slider_drag(pool, monkeyp
     panel.thumb_slider.setSliderDown(False)
     delegate._request_poster(path)
     requests.assert_called_once_with(path)
+
+
+def test_shared_thumbnail_pause_retries_grid_poster_and_subclips(pool, monkeypatch) -> None:
+    panel, *_ = pool
+    delegate = panel.grid_delegate
+    provider = panel._thumb_provider
+    requests = MagicMock()
+    frame_requests = MagicMock()
+    update = MagicMock()
+    panel.set_view_mode(ViewMode.GRID)
+    monkeypatch.setattr(provider, "get_thumbnail", requests)
+    monkeypatch.setattr(provider, "get_frame_thumbnail", frame_requests)
+    monkeypatch.setattr(panel.grid_view.viewport(), "update", update)
+
+    poster_path = "ordinary-poster.mov"
+    path = "shared-subclip-source.mov"
+    subclips = [
+        MediaAsset(asset_id=asset_id, path=path, media_type="video", display_name=asset_id,
+                   metadata={"is_subclip": True, "thumbnail_source_frame": 12})
+        for asset_id in ("first-subclip", "second-subclip")
+    ]
+    image = QImage(100, 67, QImage.Format.Format_RGB32)
+
+    def paint_missing_cards() -> None:
+        delegate._request_poster(poster_path)
+        painter = QPainter(image)
+        try:
+            for asset in subclips:
+                delegate._draw_thumbnail_area(painter, QRect(0, 0, 100, 67), asset, QModelIndex())
+        finally:
+            painter.end()
+
+    paint_missing_cards()
+    assert poster_path in delegate._pending_thumbnails
+    assert delegate._pending_subclip_frames[(path, 12)] == {asset.asset_id for asset in subclips}
+    requests.assert_called_once_with(poster_path)
+    frame_requests.assert_called_once()
+
+    try:
+        provider.set_playback_active(True)
+        paint_missing_cards()
+        assert not delegate._pending_thumbnails
+        assert not delegate._pending_subclip_frames
+        requests.assert_called_once_with(poster_path)
+        frame_requests.assert_called_once()
+
+        provider.set_playback_active(False)
+        update.assert_called_once_with()
+        paint_missing_cards()
+        assert requests.call_count == 2
+        assert frame_requests.call_count == 2
+        assert delegate._pending_subclip_frames[(path, 12)] == {asset.asset_id for asset in subclips}
+    finally:
+        provider.set_playback_active(False)
 
 
 def test_master_path_back_button_stays_visible_and_enabled_for_nested_bin(pool) -> None:

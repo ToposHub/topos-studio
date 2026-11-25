@@ -18,6 +18,29 @@ from src.features.edit.core.audio_waveform import (
 pytestmark = pytest.mark.edit_core
 
 
+def test_interrupted_waveform_defers_before_disk_or_decoder(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features.edit.core import audio_waveform
+
+    worker = WaveformExtractorWorker("asset-interrupted", "/tmp/test.wav")
+    deferred: list[tuple[str, str]] = []
+    worker.extraction_deferred.connect(lambda asset, path: deferred.append((asset, path)))
+    monkeypatch.setattr(worker, "isInterruptionRequested", lambda: True)
+    monkeypatch.setattr(
+        audio_waveform, "load_waveform_from_disk",
+        lambda *_args: pytest.fail("interrupted worker read the disk cache"),
+    )
+    monkeypatch.setattr(
+        worker, "_extract_waveform",
+        lambda: pytest.fail("interrupted worker opened the decoder"),
+    )
+
+    worker.run()
+
+    assert deferred == [("asset-interrupted", "/tmp/test.wav")]
+
+
 def test_waveform_worker_is_retained_until_finished(
     qapp: QApplication,
     monkeypatch: pytest.MonkeyPatch,

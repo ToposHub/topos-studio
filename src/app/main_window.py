@@ -3040,6 +3040,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # 1. 走带停止（先停时钟，避免关闭过程中又派发新渲染请求）
         try:
             panel = getattr(self, "timeline_panel", None)
+            priority = getattr(panel, "set_background_media_priority", None)
+            if callable(priority):
+                priority("shutdown", True)
             controller = panel.get_playback_controller() if panel else None
             if controller is not None and getattr(controller, "is_playing", False):
                 controller.pause()

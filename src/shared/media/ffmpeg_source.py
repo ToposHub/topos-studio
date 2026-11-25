@@ -23,6 +23,7 @@ FFmpeg/PyAV 媒体源实现。
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import sys
 import threading
@@ -83,6 +84,10 @@ INTRA_CODECS: frozenset[str] = frozenset({
 # 顺序吞吐（441fps vs 77fps），必须留在主会话。该表按实测数据维护，
 # 新 codec 需先复测再追加。
 GOP_SLICE_SEEK_CODECS: frozenset[str] = frozenset({'hevc', 'h265'})
+
+_SCRUB_HISTORY_BYTES = 112 << 20
+_REVERSE_SCRUB_HISTORY_BYTES = 320 << 20
+_REVERSE_SCRUB_MAX_FRAMES = 32
 
 
 # =============================================================================
@@ -696,6 +701,12 @@ class FFmpegMediaSource:
         self._frame_iterator: Optional[Generator[Any, None, None]] = None
         self._decoder_buffer: list[Any] = []  # 解码缓冲区（用于精确 seek）
         self._pending_av_frame: Optional[Any] = None  # seek 后缓存的 PyAV 目标帧
+        self._scrub_seek_frames: dict[int, Any] = {}
+        self._scrub_seek_frame_limit = 0
+        self._scrub_seek_last_pts: int | None = None
+        self._scrub_previous_request: int | None = None
+        self._scrub_reverse_window = False
+        self._scrub_largest_plane_bytes = 0
 
         # CPU 解码路径应禁用 hwaccel，防止 FFmpeg 8.1+ 在 macOS 上
         # 自动将 ProRes 等路由到 VideoToolbox 产出 GPU surface 帧。
@@ -740,6 +751,11 @@ class FFmpegMediaSource:
     def current_frame(self) -> int:
         """当前帧号"""
         return self._current_frame
+
+    @property
+    def metadata(self) -> Optional[VideoMetadata]:
+        """Return metadata already read by open or probe, without doing I/O."""
+        return self._metadata
 
     @property
     def target_size(self) -> Optional[Tuple[int, int]]:
@@ -810,6 +826,72 @@ class FFmpegMediaSource:
             # Keep smaller explicit budgets. Auto frame threading otherwise
             # uses the full logical core count alongside export rendering.
             decoder.thread_count = min(thread_count, decoder.thread_count or thread_count)
+
+    def tune_interactive_scrub(self) -> None:
+        """Limit frame threading for short, repeated UHD H.264 seeks before the first read."""
+        metadata = self._metadata
+        stream = self._video_stream
+        if (sys.platform != 'darwin' or platform.machine() != 'x86_64'
+                or not self._disable_hwaccel or self._target_size is not None or stream is None
+                or metadata is None or max(metadata.width, metadata.height) < 3840
+                or (os.cpu_count() or 1) <= 8):
+            return
+        decoder = stream.codec_context
+        if decoder.name == 'h264' and not decoder.is_open:
+            decoder.thread_count = min(8, decoder.thread_count or 8)
+            if metadata.pixel_format == 'yuv420p':
+                frame_bytes = metadata.width * metadata.height * 3 // 2
+                if frame_bytes > 0:
+                    self._scrub_seek_frame_limit = min(10, _SCRUB_HISTORY_BYTES // frame_bytes)
+
+    def read_recent_scrub_frame(self, frame_index: int) -> DecodedFrame | None:
+        """Read an exact frame already seen during a GOP walk without moving the decoder."""
+        if not self._is_open or not self._is_planar_mode:
+            return None
+        frame = self._scrub_seek_frames.get(frame_index)
+        if self._scrub_seek_frame_limit:
+            previous = self._scrub_previous_request
+            if previous != frame_index:
+                self._scrub_reverse_window = (
+                    previous is not None and 0 < previous - frame_index <= self._scrub_seek_frame_limit
+                )
+                self._scrub_previous_request = frame_index
+                if not self._scrub_reverse_window:
+                    self._trim_scrub_history()
+        if frame is None or frame.pts != self._frame_to_pts(frame_index):
+            return None
+        return self._convert_frame_planar(frame, frame_index=frame_index)
+
+    def _remember_scrub_seek_frame(self, index: int, frame: Any) -> None:
+        if not self._scrub_seek_frame_limit or not self._is_planar_mode:
+            return
+        if frame.pts != self._frame_to_pts(index) or frame.is_corrupt:
+            return
+        if frame.pts == self._scrub_seek_last_pts:
+            # A timestamp alone cannot identify a unique frame on this source.
+            self._scrub_seek_frame_limit = 0
+            self._scrub_seek_frames.clear()
+            return
+        self._scrub_seek_last_pts = frame.pts
+        self._scrub_seek_frames.pop(index, None)
+        self._scrub_seek_frames[index] = frame
+        # A backward walk already decoded the prefix of this GOP. Keep it
+        # available for nearby reverse requests. Account for padded planes
+        # and limit long GOPs independently of the nominal frame size.
+        plane_bytes = sum(plane.buffer_size for plane in frame.planes)
+        self._scrub_largest_plane_bytes = max(self._scrub_largest_plane_bytes, plane_bytes)
+        self._trim_scrub_history()
+
+    def _trim_scrub_history(self) -> None:
+        history = self._scrub_seek_frames
+        if not self._scrub_seek_frame_limit:
+            history.clear()
+            return
+        limit = _REVERSE_SCRUB_MAX_FRAMES if self._scrub_reverse_window else self._scrub_seek_frame_limit
+        budget = _REVERSE_SCRUB_HISTORY_BYTES if self._scrub_reverse_window else _SCRUB_HISTORY_BYTES
+        limit = min(limit, budget // max(1, self._scrub_largest_plane_bytes))
+        while len(history) > limit:
+            history.pop(next(iter(history)))
 
     def probe(self) -> VideoMetadata:
         """
@@ -1411,6 +1493,11 @@ class FFmpegMediaSource:
             self._pending_av_frame = None
             self._gop_seek_iterator = None
             self._main_resync_pts = None
+            self._scrub_seek_frames.clear()
+            self._scrub_seek_last_pts = None
+            self._scrub_previous_request = None
+            self._scrub_reverse_window = False
+            self._scrub_largest_plane_bytes = 0
         else:
             # 实例锁超时：本实例解码仍在途。PyAV 迭代器/帧的 dealloc 会
             # 在**当前线程**触碰 libav（正是 Q01 记录的互锁面）——移交
@@ -1423,6 +1510,11 @@ class FFmpegMediaSource:
                 if _obj is not None:
                     setattr(self, _attr, None)
                     _closer.put(_obj)
+            history = getattr(self, '_scrub_seek_frames', None)
+            self._scrub_seek_frame_limit = 0
+            if history:
+                self._scrub_seek_frames = {}
+                _closer.put(history)
             self._decoder_buffer = []  # 恒为空列表（遗留字段）
             self._main_resync_pts = None
 
@@ -1520,6 +1612,10 @@ class FFmpegMediaSource:
         if self._video_stream is None or self._video_stream.time_base != index.time_base:
             raise ValueError("Presentation index uses a different video time base.")
         self._presentation_index = index
+        self._scrub_seek_frames.clear()
+        self._scrub_seek_last_pts = None
+        self._scrub_previous_request = None
+        self._scrub_reverse_window = False
         if self._metadata is not None:
             self._metadata = replace(self._metadata, total_frames=len(index.pts))
 
@@ -1677,14 +1773,15 @@ class FFmpegMediaSource:
         )
 
         # 清理旧状态
+        codec_name = self._metadata.codec_name
+        if _is_gop_codec(codec_name) and self._try_short_forward_seek(frame_index):
+            return
         self._frame_iterator = None
         self._decoder_buffer = []
         self._pending_av_frame = None
         self._gop_seek_iterator = None
         self._main_resync_pts = None
-
-        # 根据编解码器类型选择 seek 策略
-        codec_name = self._metadata.codec_name
+        self._scrub_seek_last_pts = None
 
         try:
             if _is_intra_codec(codec_name):
@@ -1702,6 +1799,41 @@ class FFmpegMediaSource:
                 target_frame=frame_index,
                 actual_frame=self._current_frame
             ) from e
+
+    def _try_short_forward_seek(self, frame_index: int) -> bool:
+        """Reuse an open GOP iterator to reach a nearby exact frame."""
+        gap = frame_index - self._current_frame
+        if not 0 < gap <= 12 or self._pending_av_frame is not None:
+            return False
+
+        seek_iterator = self._gop_seek_iterator
+        iterator = seek_iterator if seek_iterator is not None else self._frame_iterator
+        if iterator is None:
+            return False
+        from av.error import FFmpegError
+
+        target_pts = self._frame_to_pts(frame_index)
+        try:
+            for _ in range(gap + 1):
+                frame = next(iterator, None)
+                if frame is None or frame.pts is None:
+                    return False
+                index = self._pts_to_frame(frame.pts)
+                if index > frame_index:
+                    return False
+                if index < frame_index:
+                    self._remember_scrub_seek_frame(index, frame)
+                if index == frame_index:
+                    if frame.pts != target_pts:
+                        return False
+                    self._pending_av_frame = frame
+                    self._current_frame = index
+                    if seek_iterator is not None:
+                        self._main_resync_pts = frame.pts
+                    return True
+        except (FFmpegError, OSError, ValueError, RuntimeError) as exc:
+            logger.debug("Forward decode to %s failed, retrying seek: %s", frame_index, exc)
+        return False
 
     def _seek_intra(self, frame_index: int) -> None:
         """
@@ -2088,6 +2220,7 @@ class FFmpegMediaSource:
                             )
                         return
 
+                    self._remember_scrub_seek_frame(self._current_frame, frame)
                     frames_decoded += 1
 
                 # 迭代器结束
@@ -2589,7 +2722,7 @@ class FFmpegMediaSource:
                     source_path=self._path
                 ) from e
 
-    def _convert_frame_planar(self, frame: Any) -> DecodedFrame:
+    def _convert_frame_planar(self, frame: Any, *, frame_index: int | None = None) -> DecodedFrame:
         """
         将 PyAV VideoFrame 转换为 DecodedFrame（planar 格式）。
 
@@ -2734,7 +2867,7 @@ class FFmpegMediaSource:
             extra_metadata['original_pixel_format'] = original_pix_fmt
 
         return DecodedFrame(
-            frame_index=self._current_frame,
+            frame_index=self._current_frame if frame_index is None else frame_index,
             pts=pts,
             time_seconds=time_seconds,
             data=None,  # planar 格式，无打包数据
@@ -3536,7 +3669,7 @@ from src.shared.media.av_concurrency import av_locked_operation as _av_op_dec  #
 
 for _av_entry in (
     "open", "probe", "read_frame", "read_next_frame", "seek_frame",
-    "warm_gop_index",
+    "warm_gop_index", "read_recent_scrub_frame",
 ):
     setattr(FFmpegMediaSource, _av_entry,
             _av_op_dec(FFmpegMediaSource.__dict__[_av_entry]))

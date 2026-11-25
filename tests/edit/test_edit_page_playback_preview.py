@@ -338,6 +338,42 @@ def test_scrub_moved_coalesces_high_frequency_frames_to_latest(qapp) -> None:
     assert scrub_requests == [10, 13]
 
 
+def test_scrub_return_to_emitted_frame_discards_intermediate_request(qapp) -> None:
+    from src.features.edit.ui.edit_page import EditPage
+
+    page = EditPage()
+    page._scrub_request_interval_ms = 1000
+    requests: list[int] = []
+    page.timeline_scrub_frame_requested.connect(requests.append)
+
+    page._on_scrub_started(10)
+    page._on_scrub_moved(11)
+    token = page._scrub_request_timer_token
+    assert page._scrub_request_timer_pending
+    page._on_scrub_moved(10)
+    page._flush_pending_scrub_frame(token)
+    assert requests == [10]
+
+
+def test_old_scrub_timer_does_not_release_current_timer(qapp) -> None:
+    from src.features.edit.ui.edit_page import EditPage
+
+    page = EditPage()
+    page._scrub_request_interval_ms = 1000
+    page._on_scrub_started(10)
+    page._on_scrub_moved(11)
+    old_token = page._scrub_request_timer_token
+
+    page._on_scrub_started(20)
+    page._on_scrub_moved(21)
+    token = page._scrub_request_timer_token
+    page._flush_pending_scrub_frame(old_token)
+    assert page._scrub_request_timer_pending
+    assert page._pending_scrub_request_frame == 21
+    page._flush_pending_scrub_frame(token)
+    assert page._last_scrub_requested_frame == 21
+
+
 def test_set_timeline_panel_wires_scrub_moved_to_preview_request(qapp) -> None:
     from src.features.edit.ui.edit_page import EditPage
 

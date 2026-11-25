@@ -367,6 +367,24 @@ def test_color_same_source_noncontiguous_clip_advances_on_wrap_with_seek() -> No
     assert controller.video_controller.is_playing is True
 
 
+def test_paused_color_seek_back_to_in_frame_preserves_the_selected_clip() -> None:
+    clip = _clip()
+    next_clip = ClipInstance(
+        clip_id="clip-next", asset_id=clip.asset_id, track_id=clip.track_id,
+        timeline_start=140, timeline_duration=40, source_start=10, source_duration=40,
+    )
+    controller, strip = _make_cross_clip_controller(clip, next_clip, same_source=True)
+    controller.video_controller.is_playing = False
+
+    controller._on_color_video_source_frame_changed(89)
+    controller._on_color_video_source_frame_changed(50)
+
+    context = controller._active_color_timeline_clip_playback_context()
+    assert context["clip"].clip_id == clip.clip_id
+    assert controller.video_controller.seek_calls == []
+    assert strip.active_clip_id is None
+
+
 def test_color_different_source_clip_does_not_advance_on_wrap() -> None:
     """A different-source neighbour keeps the current clip looping."""
     clip = _clip()  # source 50..89

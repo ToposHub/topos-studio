@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Mapping, Optional
 
 from PyQt6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtGui import QColor, QMouseEvent, QPainter, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QToolButton, QWidget
 
 from src.features.color.ui.panel_chrome import (
@@ -19,12 +19,19 @@ from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
 from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
 from src.shared.ui.widgets.viewport_toolbar_base import ViewerZoomMenuButton
+from src.shared.ui.widgets.scrubber_gesture import (
+    scrubber_mouse_move, scrubber_mouse_press,
+    scrubber_mouse_release, scrubber_track_bounds,
+)
 
 if TYPE_CHECKING:
     from PyQt6.QtGui import QAction
 
     from src.features.color.core.color_viewer_capabilities import ColorViewerCapability
     from src.features.color.ui.canvas import Canvas, VideoControlBar, ViewportMenuBar
+
+
+_SCRUBBER_MARGIN = 15.0
 
 
 _TRANSPORT_BUTTON_STYLE = f"""
@@ -67,7 +74,7 @@ def paint_color_scrubber(slider: QSlider) -> None:
     painter = QPainter(slider)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     painter.fillRect(slider.rect(), QColor(C.COLOR_PANEL_INSET))
-    left, right = 15.0, max(15.0, slider.width() - 15.0)
+    left, right = scrubber_track_bounds(slider, _SCRUBBER_MARGIN)
     top = slider.height() / 2.0
     painter.setPen(QPen(QColor("#101013"), 1.0))
     painter.setBrush(QColor("#49494d"))
@@ -114,6 +121,7 @@ class ColorViewportChrome(QObject):
         self.transport._color_chrome = self
         self.activate_transport()
         self.toolbar._color_chrome = self
+        self.transport.slider.installEventFilter(self)
         self.toolbar.installEventFilter(self)
         canvas.installEventFilter(self)
         self._sync_focus_capability()
@@ -544,8 +552,9 @@ class ColorViewportChrome(QObject):
         """Return the exact original controls to the shared Fusion row."""
         if not self._color_transport_active:
             return
-        self._color_transport_active = False
         bar = self.transport
+        bar.cancel_color_scrub()
+        self._color_transport_active = False
         bar.layout().removeWidget(bar.slider)
         bar.slider.setProperty("colorMonitorScrubber", False)
         bar.slider.setMinimumHeight(0)
@@ -567,6 +576,20 @@ class ColorViewportChrome(QObject):
         canvas = getattr(self, "canvas", None)
         if toolbar is None or canvas is None:
             return False
+        slider = self.transport.slider
+        if watched is slider and self._color_transport_active:
+            kind = event.type()
+            if isinstance(event, QMouseEvent):
+                if kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonDblClick):
+                    return scrubber_mouse_press(slider, event, margin=_SCRUBBER_MARGIN, start_at_pointer=True)
+                if kind == QEvent.Type.MouseMove:
+                    return scrubber_mouse_move(slider, event, margin=_SCRUBBER_MARGIN)
+                if kind == QEvent.Type.MouseButtonRelease:
+                    return scrubber_mouse_release(slider, event, margin=_SCRUBBER_MARGIN)
+            if kind in (QEvent.Type.Hide, QEvent.Type.UngrabMouse) or (
+                kind == QEvent.Type.EnabledChange and not slider.isEnabled()
+            ):
+                self.transport.cancel_color_scrub()
         if watched is toolbar and event.type() in {QEvent.Type.Resize, QEvent.Type.Show}:
             self.position_title()
             self._sync_focus_capability()

@@ -515,7 +515,9 @@ class TestSeekToFrameBlocking:
         controller.seek_to_frame(123, blocking=False)
 
         # 异步 seek，blocking=False
-        mock_coordinator.seek_to_frame.assert_called_once_with(123, blocking=False, churn_generation=True)
+        mock_coordinator.seek_to_frame.assert_called_once_with(
+            123, blocking=False, churn_generation=True, prefetch_proxy=True,
+        )
         # 关键：绝不在 UI 线程同步取 master 帧（这正是 ~300ms 卡顿的来源）。
         # 只允许非阻塞的 proxy/已就绪帧获取（is_master=False）。
         for call in mock_coordinator.get_current_frame_data.call_args_list:
@@ -561,7 +563,9 @@ class TestSeekToFrameBlocking:
             controller.seek_to_frame(77)
 
         # 未播放 → 旧行为是 blocking seek + 同步取帧
-        mock_coordinator.seek_to_frame.assert_called_once_with(77, blocking=True, churn_generation=True)
+        mock_coordinator.seek_to_frame.assert_called_once_with(
+            77, blocking=True, churn_generation=True, prefetch_proxy=True,
+        )
         mock_coordinator.get_current_frame_data.assert_called_once_with(is_master=True)
 
     def test_blocking_false_does_not_emit_blocking_static_preview(self, mock_engine_v3_enabled) -> None:

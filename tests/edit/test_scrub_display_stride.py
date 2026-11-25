@@ -158,10 +158,17 @@ def test_finish_scrub_lands_exact_frame(renderer) -> None:
 
 def test_stride_adapts_to_slow_codecs(renderer) -> None:
     # DNxHR 级解码周期 ~110ms（可持续 ~9fps）→ 中速拖拽也取大步长
-    renderer._scrub_input_velocity_fps = 100.0
+    renderer._scrub_input_velocity_fps = 120.0
     renderer._scrub_velocity_samples = 3
     renderer._scrub_cycle_period_ema_s = 0.11
     assert renderer._scrub_display_stride() == 16
+
+
+def test_normal_drag_keeps_short_sequential_steps_on_slow_codec(renderer) -> None:
+    renderer._scrub_input_velocity_fps = 60.0
+    renderer._scrub_velocity_samples = 3
+    renderer._scrub_cycle_period_ema_s = 0.11
+    assert renderer._scrub_display_stride() == 1
 
 
 def test_single_fast_input_does_not_stride(renderer) -> None:

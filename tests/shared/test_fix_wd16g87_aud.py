@@ -93,6 +93,17 @@ def test_wait_fence_infinite_uses_timeout_ignored(fake_gl) -> None:
     assert fake_gl.client_wait_sync_calls == []
 
 
+def test_wait_fence_infinite_uses_unsigned_timeout_with_macos_binding(fake_gl, monkeypatch) -> None:
+    import OpenGL.GL as gl
+    from src.shared.gpu.composite_gpu_frame_handle import wait_fence
+
+    monkeypatch.setattr(gl, "GL_TIMEOUT_IGNORED", -(2**63) + 1)
+
+    assert wait_fence(0x1234) is True
+    _, flags, timeout = fake_gl.wait_sync_calls[0]
+    assert (flags, timeout) == (0, 0xFFFFFFFFFFFFFFFF)
+
+
 def test_wait_fence_bounded_timeout_uses_client_wait(fake_gl) -> None:
     from src.shared.gpu.composite_gpu_frame_handle import wait_fence
 

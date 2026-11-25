@@ -301,7 +301,16 @@ assert_sequences_consistent（ref 层 key == sequence 层 key，把保存期校�
 - **装配**：`TimelinePreviewRenderer.__init__` 创建 engine 并 `configure(renderer=self, delegate_render=self._engine_delegate_render, delegate_scrub_render=..., source_resolver=..., layer_query_provider=...)`（timeline_preview_renderer.py:5868-5899）；渲染请求统一路由 `request_present_via_engine`（:7696）。engine 是编排层，实际渲染委托回 renderer（渐进式集成，复杂效果仍走 `_try_gpu_render` 任务组装）。
 - **request_present**（engine.py:683）每帧动作：generation 守卫 → 预算 back-pressure（`PlaybackBudgetController.before_render`，多轨超预算 drop 不阻塞 UI tick）→ `next_frame_trace_id()` 分配统一 trace id → `SourceResolver.resolve_layers` 产 `SourceDecision`（只影响 telemetry 与后台 proxy 触发，**不阻塞当前帧**——设计权衡见 engine.py:15-27 注释）→ `_schedule_decode_window` 预取 → 委托渲染 → telemetry（`PlaybackFrameTelemetry`）→ miss 处理。
 - **miss/rebuffer 状态机**：连续 miss ≥ 3 进 `REBUFFERING`，present 成功回 `PLAYING`；miss 归因由 worker 通过 `note_playback_miss()` 上报真实原因（GPU drop、解码失败），取代 delegate 布尔值的模糊分类。状态机：`IDLE → WARMING → READY → PLAYING ⇄ REBUFFERING → PAUSED → SHUTDOWN`。
-- **scrub 通道独立**：`request_scrub_present` 刻意不走 budget/rebuffer——scrub 的 miss 语义是"显示最近帧、永不冻结"。
+- **拖动播放头**时，`request_scrub_present` 独立于播放的 budget/rebuffer。GPU 预览携带各剪辑请求和实际解出的源帧号。换向时，Program Viewer 释放尚未绘制的旧方向结果，渲染器以最后画出的各轨源帧为起点，只接纳沿当前方向推进的画面。没有合适结果时保留当前画面，停止拖动后精确定位。
+
+GPU 可用时，Qt 为当前拖动位置准备渲染计划，预览线程直接从队列取得最新任务。新任务替换尚未开始的任务，正在解码的近邻帧可以完成并提交 GPU。呈现继续走已有的 fence 和纹理租约。松手提升渲染代数，清理旧队列，并请求播放头位置的精确帧。
+
+按下已停住的播放头时，查看器会提供实际绘制的纹理租约标识。标识、帧号和渲染代数都与暂停画面吻合时，首个没有移动的请求沿用当前画面，让预览线程直接接手下一帧的解码。点击其他位置、查看器仍有待绘制帧或画面状态变更时，继续正常请求。
+
+macOS 原片回拉时，VideoToolbox 在向前解码关键帧组的过程中分批提交额外的 H.264 和 HEVC 回看帧。H.264 的异步批次延伸到目标帧之前，每批最多七个压缩样本，目标帧仍同步提交。扩展用于单帧缓冲区不超过 16 MiB 的素材。新增回看区按原生缓冲区大小计费，每个解码器最多保留 224 MiB，进程上限为 384 MiB。预算满时淘汰历史帧，B 帧重排队列继续保留等待交付的帧。重新定位或关闭解码器时回收旧回看帧，已交给渲染器的帧沿用原有租约。
+
+单轨剪辑的正向等速 H.264 原片可启用独立的反向解码游标。MOV 样本索引定位上一关键帧组，送入 VideoToolbox 前核对样本位置、时间戳和组首 IDR。正拖已经解码的精确帧与反拖预热帧共用本轮手势的帧窗口，命中时查看器取得独立租约。该窗口最多使用 300 MiB，并与各解码器的回看区共用进程 384 MiB 预算。换剪辑、换解码路由、改变渲染代数或结束手势时清理旧窗口，原有精确分支负责停顿修正和松手定位。
+
 - **自适应质量（P1-10）**：`AdaptiveQualityController` 按负载观测（miss 归因 + 背压）调档，经 `quality_pressure_changed` 信号让 renderer 把档位映射为 decode scale 系数。
 
 ### 5.3 解码池化（解码不进热路径）

@@ -807,6 +807,7 @@ class TimelineView(QGraphicsView):
     scrub_started = pyqtSignal(int)  # frame
     scrub_moved = pyqtSignal(int)  # frame
     scrub_finished = pyqtSignal(int)  # frame
+    scrub_cancelled = pyqtSignal(int)
     selection_changed = pyqtSignal(object)  # TimelineSelection
     tool_changed = pyqtSignal(str)  # tool name
     snap_changed = pyqtSignal(bool)  # enabled
@@ -3632,50 +3633,12 @@ class TimelineView(QGraphicsView):
         frames for the same clips, doubling disk/CPU work and occasionally
         stretching a single cached frame across a filmstrip.
         """
-        if self._timeline is None:
+        if self._timeline is None or not self.isVisible() or self._thumb_provider.is_thumbnail_work_suspended:
             return
 
-        visible_clips = self._compute_visible_clip_info()
-        for clip_info in visible_clips:
-            clip_item = self._items_map.get(clip_info["clip_id"])
-            if isinstance(clip_item, ClipItem) and clip_item.isVisible():
-                clip_item.update()
-
-    def _compute_visible_clip_info(self) -> list[dict]:
-        """Build clip info list for visible clips in the current viewport."""
-        if self._timeline is None or self._audio_only:
-            return []
-
-        visible_start, visible_end = self._calculate_visible_frame_range()
-        result = []
-        for track in self._timeline.video_tracks:
-            for clip in track.clips:
-                clip_right = clip.timeline_start + clip.timeline_duration
-                # Skip clips outside visible range
-                if clip_right < visible_start or clip.timeline_start > visible_end:
-                    continue
-
-                # Pixel coordinates
-                clip_x = clip.timeline_start * self._pixels_per_frame
-                clip_w = clip.timeline_duration * self._pixels_per_frame
-                vis_px_start = max(clip_x, visible_start * self._pixels_per_frame)
-                vis_px_end = min(clip_x + clip_w, visible_end * self._pixels_per_frame)
-
-                asset_path = self._get_asset_path(clip.asset_id)
-                if not asset_path:
-                    continue
-
-                result.append({
-                    "asset_id": clip.asset_id,
-                    "file_path": asset_path,
-                    "clip_id": clip.clip_id,
-                    "source_start": clip.source_start,
-                    "source_duration": clip.source_duration,
-                    "visible_px_start": int(vis_px_start),
-                    "visible_px_end": int(vis_px_end),
-                    "mode": "filmstrip",
-                })
-        return result
+        for item in self.items(self.viewport().rect(), Qt.ItemSelectionMode.IntersectsItemBoundingRect):
+            if isinstance(item, ClipItem):
+                item.update()
 
     def _on_thumbnail_batch_ready(self, jobs) -> None:
         """Scheduler batch callback — dispatch to ThumbnailProvider."""
@@ -3718,12 +3681,8 @@ class TimelineView(QGraphicsView):
             self._pending_thumb_jobs.clear()
             return
 
-        # Resume lazily after playback stops; repainting visible items lets
-        # their density-aware requests rebuild only what is currently needed.
+        # The debounced callback refreshes the current viewport once.
         self._debounce_thumbnail_schedule()
-        for item in self._items_map.values():
-            if isinstance(item, ClipItem) and item.isVisible():
-                item.update()
 
     def get_scheduler_cached_thumbnail(self, asset_id: str, source_frame: int, height: int):
         """Get cached thumbnail from scheduler (used by ClipItem as L2 cache)."""
@@ -5772,6 +5731,10 @@ class TimelineView(QGraphicsView):
 
     def event(self, event: QEvent) -> bool:
         """Keep dynamic-trim keys ahead of the parent transport QShortcuts."""
+        if getattr(self, "_playhead_dragging", False) and event.type() in (
+            QEvent.Type.Hide, QEvent.Type.WindowDeactivate, QEvent.Type.FocusOut, QEvent.Type.UngrabMouse,
+        ):
+            self._finish_playhead_drag(cancelled=True)
         interaction = getattr(self, "_interaction", None)
         if (event.type() == QEvent.Type.ShortcutOverride and isinstance(event, QKeyEvent)
                 and interaction is not None and interaction.state == InteractionState.ROLLING
@@ -5782,6 +5745,11 @@ class TimelineView(QGraphicsView):
             event.accept()
             return True
         return super().event(event)
+
+    def viewportEvent(self, event: QEvent) -> bool:
+        if getattr(self, "_playhead_dragging", False) and event.type() == QEvent.Type.UngrabMouse:
+            self._finish_playhead_drag(cancelled=True)
+        return super().viewportEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         from src.features.edit.core.position_lock import PositionLockViolation
@@ -6080,7 +6048,6 @@ class TimelineView(QGraphicsView):
     def focusOutEvent(self, event: Any) -> None:
         """INT-02：拖拽/修剪中失焦（窗口切换、浮动面板抢焦点）时取消
         当前片段交互并恢复预览，避免 release 时提交一个已被中断的操作。
-        只处理片段级拖拽状态，不影响选框/播放头等轻量交互。
         INT-03：平移会话同样在此收尾并恢复光标。
         Trim Monitor 是不接收焦点的 viewer 子控件；真正失焦继续取消。
         """
@@ -6469,7 +6436,7 @@ class TimelineView(QGraphicsView):
 
         logger.debug(f"Playhead dragged to frame {frame}")
 
-    def _finish_playhead_drag(self) -> None:
+    def _finish_playhead_drag(self, *, cancelled: bool = False) -> None:
         """Complete playhead drag."""
         self._playhead_dragging = False
 
@@ -6478,7 +6445,9 @@ class TimelineView(QGraphicsView):
             self._playhead_item.set_dragging(False)
         self._refresh_playhead_visual()
 
-        self.scrub_finished.emit(self._playhead_frame)
+        self._interaction.finish()
+        signal = self.scrub_cancelled if cancelled else self.scrub_finished
+        signal.emit(self._playhead_frame)
         logger.debug(f"Playhead drag finished at frame {self._playhead_frame}")
 
     # ==================== Splitter (V/A Area Divider) ====================
@@ -6770,7 +6739,6 @@ class TimelineView(QGraphicsView):
         # UI-10: Finish playhead drag
         if self._playhead_dragging and event.button() == Qt.MouseButton.LeftButton:
             self._finish_playhead_drag()
-            self._interaction.finish()
             self._update_cursor_for_position(self.mapToScene(event.pos()))
             return
 
@@ -12087,6 +12055,9 @@ class TimelineView(QGraphicsView):
         INT-02：现在同样覆盖 ClipItem 自身驱动的拖拽/修剪——先取消 item
         的 grab/pending 并恢复其预览，release 因 drag_mode 已清空不再提交。
         """
+        if self._playhead_dragging:
+            self._finish_playhead_drag(cancelled=True)
+            return
         # P2-2: Restore all clips from ClipDragSession if present
         if self._current_drag_session is not None:
             # Clean up Alt-drag copy ghosts if present.

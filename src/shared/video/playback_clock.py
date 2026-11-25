@@ -125,6 +125,7 @@ class SourceManager:
         disk_proxy_path: Optional[str] = None,  # 磁盘代理文件路径
         disk_proxy_info: Optional[DiskProxyInfo] = None,  # 磁盘代理信息
         preferred_backend: Optional[str] = None,  # P0-2: 偏好的后端（替代自定义工厂）
+        interactive_scrub: bool = False,
     ) -> None:
         """
         初始化源管理器。
@@ -152,12 +153,14 @@ class SourceManager:
                                如果指定，内部工厂会优先使用该后端。
                                支持 'ffmpeg', 'gstreamer'。
                                替代自定义 source_factory，避免参数丢失。
+            interactive_scrub: Tune the master decoder for timeline scrubbing.
         """
         self._path: str = path
         self._proxy_config: ProxyConfig = proxy_config or DEFAULT_PROXY_CONFIG
         self._viewport_size: Optional[Tuple[int, int]] = viewport_size
         self._enable_planar_proxy: bool = enable_planar_proxy
         self._enable_planar_master: bool = enable_planar_master
+        self._interactive_scrub = interactive_scrub
 
         # 媒体源
         self._master_source: Optional[Any] = None  # MediaSource
@@ -362,6 +365,10 @@ class SourceManager:
                 # 旧签名不支持 target_size/preserve_planes，只用 path
                 self._master_source = self._source_factory(self._path)
             self._master_source.open()
+            if self._interactive_scrub:
+                tune_scrub = getattr(self._master_source, 'tune_interactive_scrub', None)
+                if callable(tune_scrub):
+                    tune_scrub()
 
             # 探测元数据
             self._metadata = self._master_source.probe()
@@ -618,8 +625,8 @@ class SourceManager:
             # P0.A: 缓存命中，记录
             self._perf_monitor.track_cache_hit(frame_index, True)
             self._perf_monitor.track_decode_time(frame_index, 0.0)  # 缓存命中，解码时间为 0
-            # AUD-39306: 共享源时同步 proxy 游标
-            self._record_master_position(frame_index)
+            if not self._interactive_scrub or self._shares_master_proxy_source:
+                self._record_master_position(frame_index)
             return cached
 
         # P0.A: 缓存未命中
@@ -627,6 +634,16 @@ class SourceManager:
 
         with self._decode_lock:
             try:
+                if self._interactive_scrub and not self._shares_master_proxy_source:
+                    # A history hit has no effect on the actual decoder cursor.
+                    read_recent = getattr(self._master_source, 'read_recent_scrub_frame', None)
+                    frame = read_recent(frame_index) if callable(read_recent) else None
+                    if frame is not None:
+                        self._cache.put_master(frame_index, frame)
+                        self._perf_monitor.track_decode_time(
+                            frame_index, (time.perf_counter() - start_time) * 1000,
+                        )
+                        return frame
                 # P1.A: Master 源保持精确，_master_current_frame == -1 时也需要 seek
                 seek_start = time.perf_counter()
                 if frame_index != self._master_current_frame:

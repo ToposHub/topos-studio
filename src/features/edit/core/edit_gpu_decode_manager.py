@@ -24,10 +24,11 @@ import sys
 import threading
 import time
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Optional, Dict, Any, Tuple
 
 from src.features.edit.core.playback_debug import playback_trace
+from src.features.edit.core.reverse_scrub import ReverseScrubFrames, ScrubClipRange
 from src.features.edit.core.realtime_playback.decode_metrics import (
     DecodeMetrics,
 )
@@ -136,7 +137,7 @@ _PLANAR_PREFERRED_CODECS = frozenset({
 })
 
 
-_SourceKey = Tuple[str, str, str, Optional[Tuple[int, int]], str]
+_SourceKey = Tuple[str, str, str, Optional[Tuple[int, int]], str, bool]
 
 
 @dataclass(frozen=True)
@@ -231,6 +232,7 @@ class EditGpuDecodeManager:
         self._interactive_prefetch_tokens: Dict[_SourceKey, int] = {}
         self._interactive_prefetch_events: set[threading.Event] = set()
         self._interactive_prefetch_generation: int = 0
+        self._reverse_scrub = ReverseScrubFrames()
         # Per-stream decode locks: serialize the display decode (get_frame)
         # against background stream prepositioning on the SAME clip stream.
         # Different clip streams keep independent locks, so parallel
@@ -290,10 +292,11 @@ class EditGpuDecodeManager:
             - frame_type: 'vt_pixel_buffer' | 'vt_planar' | 'gpu' | 'planar' | 'cpu' | ''
         """
         normalized_target_size = self._normalize_target_size(target_size)
-        source_spec = self._resolve_preview_decode_source(
-            asset_path, normalized_target_size, for_playback=True,
-        )
+        for_playback = self._playback_active
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
+        source_spec = self._resolve_stream_source(
+            asset_path, normalized_target_size, decode_stream_key, for_playback=for_playback,
+        )
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
         # Hot path: use cached source info. The cache itself is protected
@@ -321,7 +324,8 @@ class EditGpuDecodeManager:
                         time.perf_counter_ns() - int(start * 1e9))
             finally:
                 self._release_source(source_key)
-            self._kick_playback_prefetch(source, source_key, frame_index, result)
+            if for_playback:
+                self._kick_playback_prefetch(source, source_key, frame_index, result)
             return result
 
         self._metrics.record_cache("display", hit=False)
@@ -362,7 +366,8 @@ class EditGpuDecodeManager:
                     time.perf_counter_ns() - int(start * 1e9))
         finally:
             self._release_source(source_key)
-        self._kick_playback_prefetch(source, source_key, frame_index, result)
+        if for_playback:
+            self._kick_playback_prefetch(source, source_key, frame_index, result)
         return result
 
     def _kick_playback_prefetch(
@@ -598,6 +603,8 @@ class EditGpuDecodeManager:
         is_stale: Optional[Callable[[], bool]] = None,
         deadline_at: Optional[float] = None,
         coarse: bool = False,
+        background: bool = False,
+        scrub_clip: ScrubClipRange | None = None,
     ) -> Tuple[Optional[Any], str]:
         """
         Decode a frame for interactive scrub, aborting work that is already stale.
@@ -610,10 +617,11 @@ class EditGpuDecodeManager:
         """
         # 记录交互读时间窗：拖拽期间 _kick_playback_prefetch 抑制预取，
         # 避免预取线程与交互读争抢同一 source_key 的 stream lock。
-        self._last_interactive_read_at = time.perf_counter()
+        if not background:
+            self._last_interactive_read_at = time.perf_counter()
         normalized_target_size = self._normalize_target_size(target_size)
-        source_spec = self._resolve_preview_decode_source(asset_path, normalized_target_size)
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
+        source_spec = self._resolve_stream_source(asset_path, normalized_target_size, decode_stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
         if self._interactive_decode_should_abort(is_stale, deadline_at):
@@ -623,6 +631,16 @@ class EditGpuDecodeManager:
                 asset=asset_path,
             )
             return None, 'interactive_stale'
+
+        reverse_window = (
+            self._reverse_scrub if scrub_clip is not None and not coarse and not background
+            and source_spec.decode_path == asset_path and source_spec.source_kind in ('original', 'original_downscaled')
+            else None
+        )
+        if reverse_window is not None:
+            retained = reverse_window.borrow(source_key, scrub_clip, frame_index)
+            if retained is not None:
+                return retained, 'vt_pixel_buffer'
 
         with self._lock:
             cached = self._source_cache.get(source_key)
@@ -634,6 +652,8 @@ class EditGpuDecodeManager:
 
         if cached is not None:
             source, source_type = cached
+        elif source is None and background:
+            return None, 'interactive_stale'
         elif source is None and warmup_event is not None:
             timeout = self._interactive_warmup_wait_timeout(deadline_at)
             if timeout <= 0.0 or not warmup_event.wait(timeout):
@@ -693,7 +713,8 @@ class EditGpuDecodeManager:
                 )
                 return None, 'interactive_stale'
 
-        self._begin_interactive_decode()
+        if not background:
+            self._begin_interactive_decode()
         try:
             source, source_type = self._select_interactive_source(
                 source_key,
@@ -702,10 +723,26 @@ class EditGpuDecodeManager:
                 frame_index,
                 reserve=True,
             )
+            # Cache fill must never run a blocking decoder or wait behind a
+            # second consumer. Foreground callers may still use those routes.
+            if background and not (
+                source_type == 'vt_pixel_buffer'
+                and callable(getattr(source, 'read_frame_pixel_buffer_interactive', None))
+            ):
+                return None, 'interactive_stale'
             start = time.perf_counter()
-            # 标记交互临界区：后台预取/预置位让位（P1.5）
-            with self._stream_lock(source_key):
-                return self._decode_frame_interactive(
+            stream_lock = self._stream_lock(source_key)
+            if not stream_lock.acquire(blocking=not background):
+                return None, 'interactive_stale'
+            try:
+                if background:
+                    current = getattr(source, 'current_frame', None)
+                    buffered = getattr(source, 'has_buffered_frame', None)
+                    if not (callable(buffered) and buffered(frame_index)) and not (
+                        isinstance(current, int) and 0 <= frame_index - current <= 4
+                    ):
+                        return None, 'interactive_stale'
+                decoded, frame_type = self._decode_frame_interactive(
                     source,
                     source_type,
                     frame_index,
@@ -714,11 +751,50 @@ class EditGpuDecodeManager:
                     is_stale=is_stale,
                     deadline_at=deadline_at,
                     coarse=coarse,
+                    allow_seek=not background,
                 )
+                if (
+                    reverse_window is not None and frame_type == 'vt_pixel_buffer'
+                    and decoded is not None and decoded.frame_index == frame_index
+                    and callable(getattr(source, 'supports_h264_scrub_gops', None))
+                    and (is_stale is None or not is_stale())
+                ):
+                    reverse_window.observe(source_key, asset_path, scrub_clip, source, decoded)
+                return decoded, frame_type
+            finally:
+                stream_lock.release()
         finally:
-            self._end_interactive_decode()
+            if not background:
+                self._end_interactive_decode()
             self._release_interactive_source(source)
             self._release_source(source_key)
+
+    def get_frame_background(
+        self, asset_path: str, frame_index: int, *,
+        target_size: Optional[Tuple[int, int]], stream_key: Optional[str],
+        is_stale: Callable[[], bool], deadline_at: float,
+    ) -> Tuple[Optional[Any], str]:
+        """Try a short read from an open source for an idle cache fill."""
+        return self.get_frame_interactive(
+            asset_path, frame_index, target_size=target_size, stream_key=stream_key,
+            is_stale=is_stale, deadline_at=deadline_at, background=True,
+        )
+
+    def cancel_interactive_preposition(self) -> None:
+        """Let running speculative decodes retire at their next checkpoint."""
+        with self._lock:
+            self._interactive_prefetch_generation += 1
+        self._reverse_scrub.cancel()
+
+    def update_reverse_scrub_playhead(
+        self, generation: int, frame: int, direction: int, velocity: float, *, enabled: bool,
+    ) -> bool:
+        """Publish drag movement without probing or opening media on the UI thread."""
+        if not enabled or self._playback_active or self._closing:
+            self._reverse_scrub.cancel()
+            return False
+        self._reverse_scrub.move(generation, frame, direction, velocity)
+        return self._reverse_scrub.engaged(generation)
 
     def preposition_interactive_frame(
         self,
@@ -745,8 +821,10 @@ class EditGpuDecodeManager:
         generation 变化时失效。
         """
         normalized_target_size = self._normalize_target_size(target_size)
-        source_spec = self._resolve_preview_decode_source(asset_path, normalized_target_size)
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
+        source_spec = self._resolve_stream_source(asset_path, normalized_target_size, decode_stream_key)
+        if source_spec.vt_policy == 'hw_or_ffmpeg':
+            return False
         source_key = self._make_source_key(decode_stream_key, source_spec)
         frame_index = int(frame_index)
 
@@ -790,6 +868,9 @@ class EditGpuDecodeManager:
                     continue
                 if self._interactive_busy_sources.get(id(candidate)) is candidate:
                     continue
+                has_buffered_frame = getattr(candidate, 'has_buffered_frame', None)
+                if callable(has_buffered_frame) and has_buffered_frame(frame_index):
+                    return True
                 current_frame = getattr(candidate, "current_frame", None)
                 gap = (
                     abs(frame_index - current_frame)
@@ -882,6 +963,11 @@ class EditGpuDecodeManager:
                     error=e,
                 )
             finally:
+                if frame_type == 'vt_pixel_buffer' and decoded is not None:
+                    try:
+                        decoded.release()
+                    except (AttributeError, RuntimeError) as error:
+                        logger.warning("Interactive preposition frame release failed: %s", error)
                 self._release_interactive_source(selected_source)
                 with self._lock:
                     self._interactive_prefetch_events.discard(done_event)
@@ -949,8 +1035,8 @@ class EditGpuDecodeManager:
         before yielding back to the UI.
         """
         normalized_target_size = self._normalize_target_size(target_size)
-        source_spec = self._resolve_preview_decode_source(asset_path, normalized_target_size)
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
+        source_spec = self._resolve_stream_source(asset_path, normalized_target_size, decode_stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
         with self._lock:
@@ -1049,10 +1135,10 @@ class EditGpuDecodeManager:
         if self._closing:
             return
         normalized_target_size = self._normalize_target_size(target_size)
-        source_spec = self._resolve_preview_decode_source(
-            asset_path, normalized_target_size, for_playback=for_playback,
-        )
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
+        source_spec = self._resolve_stream_source(
+            asset_path, normalized_target_size, decode_stream_key, for_playback=for_playback,
+        )
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
         existing_source_type: Optional[str] = None
@@ -1162,6 +1248,8 @@ class EditGpuDecodeManager:
         """标记实时播放状态：播放中延迟交互解码池的预热。"""
         was = self._playback_active
         self._playback_active = bool(active)
+        if self._playback_active:
+            self._reverse_scrub.cancel()
         if was and not self._playback_active and self._playback_pool_warmup_deferred:
             # 播放结束：补齐播放期间被延迟的池预热请求。
             deferred = list(self._playback_pool_warmup_deferred)
@@ -1179,7 +1267,7 @@ class EditGpuDecodeManager:
     ) -> None:
         """Warm extra VT sources so random scrub can preserve multiple cursors."""
         # AUD-16503：close_all 之后不再预热新会话。
-        if self._closing:
+        if self._closing or source_spec.vt_policy == 'hw_or_ffmpeg':
             return
         if self._playback_active:
             self._playback_pool_warmup_deferred.add((source_key, source_spec))
@@ -1302,6 +1390,7 @@ class EditGpuDecodeManager:
         target_size: Optional[Tuple[int, int]] = None,
         stream_key: Optional[str] = None,
         *,
+        for_playback: bool = True,
         is_stale: Optional[Callable[[], bool]] = None,
         deadline_at: Optional[float] = None,
     ) -> bool:
@@ -1324,10 +1413,12 @@ class EditGpuDecodeManager:
         Returns True when the stream is positioned for a sequential read of
         ``frame_index`` (already was, or preposition decode succeeded).
         """
-        if frame_index <= 0:
+        if frame_index < 0 or (is_stale is not None and is_stale()):
             return False
         normalized_target_size = self._normalize_target_size(target_size)
-        source_spec = self._resolve_preview_decode_source(asset_path, normalized_target_size)
+        source_spec = self._resolve_preview_decode_source(
+            asset_path, normalized_target_size, for_playback=for_playback,
+        )
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
@@ -1339,6 +1430,16 @@ class EditGpuDecodeManager:
             self._preposition_inflight[source_key] = inflight
         leased = False
         try:
+            if is_stale is not None and is_stale():
+                return False
+            if source_spec.vt_policy == "hw_or_ffmpeg":
+                # Claim the same warmup slot that the display request uses.
+                # A parallel open could consume the last hardware decoder and
+                # leave a software source cached for the rest of the clip.
+                self.warmup_source(
+                    asset_path, normalized_target_size, decode_stream_key,
+                    for_playback=for_playback, warm_interactive_pool=False,
+                )
             source = self._get_or_create_source(
                 asset_path,
                 normalized_target_size,
@@ -1350,7 +1451,7 @@ class EditGpuDecodeManager:
             leased = True
             with self._lock:
                 source_type = self._source_types.get(source_key, 'cpu')
-            target = int(frame_index) - 1
+            target = max(0, int(frame_index) - 1)
 
             current_frame = getattr(source, "current_frame", None)
             if isinstance(current_frame, int) and current_frame >= target:
@@ -1365,6 +1466,8 @@ class EditGpuDecodeManager:
                 )
                 return False
             try:
+                if is_stale is not None and is_stale():
+                    return False
                 # Re-check under the lock: a display decode that owned the
                 # stream before us may already have advanced the cursor.
                 current_frame = getattr(source, "current_frame", None)
@@ -1907,6 +2010,29 @@ class EditGpuDecodeManager:
             source_spec.no_deblock,
         )
 
+    def _resolve_stream_source(
+        self, asset_path: str, target_size: Optional[Tuple[int, int]], stream_key: str,
+        *, for_playback: bool = False,
+    ) -> _DecodeSourceSpec:
+        spec = self._resolve_preview_decode_source(asset_path, target_size, for_playback=for_playback)
+        if for_playback or sys.platform != 'darwin' or spec.source_kind not in {
+            'original', 'original_downscaled', 'original_native_planar',
+        }:
+            return spec
+
+        # Preserve the hardware cursor when playback turns into a scrub or
+        # paused seek. Only reuse an existing, hardware-required VT source:
+        # the same policy can also contain a size-dependent FFmpeg fallback.
+        # VT output is native regardless of the size in its key.
+        playback_spec = replace(spec, vt_policy='hw_or_ffmpeg')
+        with self._lock:
+            for size in (playback_spec.target_size, None):
+                candidate = replace(playback_spec, target_size=size)
+                key = self._make_source_key(stream_key, candidate)
+                if self._source_types.get(key) == 'vt_pixel_buffer':
+                    return candidate
+        return spec
+
     def _resolve_preview_decode_source(
         self,
         asset_path: str,
@@ -2014,8 +2140,8 @@ class EditGpuDecodeManager:
         """Playback-only decoder routing.
 
         Returns one of:
-        - 'auto': unchanged VT zero-copy preference (8-bit camera codecs,
-          ProRes, scrub-shaped requests).
+        - 'auto': unchanged VT zero-copy preference for formats without
+          a strict hardware policy.
         - 'prefer_ffmpeg': the hardware probe says VideoToolbox has NO
           hardware decoder for this codec/bit-depth — sequential playback
           belongs on the frame-threaded FFmpeg planar path.
@@ -2041,8 +2167,18 @@ class EditGpuDecodeManager:
                 return 'auto'
             from src.shared.media.ffmpeg_source import _infer_bit_depth
             if _infer_bit_depth(pix_fmt) <= 8:
-                # 8-bit H.264/H.265 hardware decode is effectively always
-                # granted; skip probing and keep the auto session policy.
+                # Even a normally supported stream can receive a software
+                # VT session when the hardware decoder is busy. Require
+                # hardware for the standard H.264 playback path without
+                # opening an additional probe session.
+                if codec in {"h264", "avc", "avc1", "h264_mpeg", "libx264"} and pix_fmt in {
+                    "yuv420p", "yuvj420p", "nv12",
+                }:
+                    self._trace_playback_route_once(
+                        asset_path, codec, pix_fmt, 'hw_or_ffmpeg',
+                        reason='hw_session_strict',
+                    )
+                    return 'hw_or_ffmpeg'
                 return 'auto'
             from src.shared.media.macos_vt.hardware_capability import (
                 playback_should_prefer_ffmpeg,
@@ -2317,6 +2453,7 @@ class EditGpuDecodeManager:
         is_stale: Optional[Callable[[], bool]],
         deadline_at: Optional[float],
         coarse: bool = False,
+        allow_seek: bool = True,
     ) -> Tuple[Optional[Any], str]:
         """Decode with cooperative stale/deadline checks for scrub."""
         if self._interactive_decode_should_abort(is_stale, deadline_at):
@@ -2339,11 +2476,15 @@ class EditGpuDecodeManager:
                     if coarse:
                         # Fast-shuttle: keyframe-anchored single-frame decode.
                         kwargs["coarse"] = True
+                    if not allow_seek:
+                        kwargs['allow_seek'] = False
                     if self._interactive_should_prefer_seek(source, source_type, frame_index):
                         kwargs["prefer_seek"] = True
                     try:
                         decoded = read_interactive(frame_index, **kwargs)
                     except TypeError:
+                        if not allow_seek:
+                            return None, 'interactive_stale'
                         kwargs.pop("prefer_seek", None)
                         kwargs.pop("coarse", None)
                         decoded = read_interactive(frame_index, **kwargs)
@@ -2479,6 +2620,10 @@ class EditGpuDecodeManager:
         elif pixels >= 3840 * 2160:
             if any(name in codec_name for name in _H264_H265_CODECS):
                 deadline_ms += 48.0
+            elif is_intra_codec(codec_name):
+                # UHD software decode can miss the 96 ms budget repeatedly
+                # when other visible tracks are decoding in the same wave.
+                deadline_ms = 144.0
             else:
                 deadline_ms += 8.0
 
@@ -2504,11 +2649,16 @@ class EditGpuDecodeManager:
         with self._lock:
             candidates: list[Tuple[Any, str]] = [(primary_source, primary_source_type)]
             candidates.extend(self._interactive_source_pool.get(source_key, ()))
+            buffered: Optional[Tuple[int, int, Any, str]] = None
             best_forward: Optional[Tuple[int, int, Any, str]] = None
             best_any: Optional[Tuple[int, int, Any, str]] = None
             for index, (source, source_type) in enumerate(candidates):
                 if reserve and self._interactive_busy_sources.get(id(source)) is source:
                     continue
+                has_buffered_frame = getattr(source, 'has_buffered_frame', None)
+                if callable(has_buffered_frame) and has_buffered_frame(frame_index):
+                    buffered = (0, index, source, source_type)
+                    break
                 current_frame = getattr(source, "current_frame", None)
                 if not isinstance(current_frame, int):
                     continue
@@ -2521,7 +2671,7 @@ class EditGpuDecodeManager:
                 if best_any is None or score_any[:2] < best_any[:2]:
                     best_any = score_any
 
-            selected = best_forward or best_any
+            selected = buffered or best_forward or best_any
             if selected is None:
                 selected_index = 0
                 selected_source = primary_source
@@ -2746,25 +2896,20 @@ class EditGpuDecodeManager:
             return False
         gap = int(frame_index) - current_frame
 
-        if source_type == 'planar':
-            # FFmpeg intra codecs (DNxHR/ProRes on the CPU planar path): every
-            # frame is a keyframe and seek is exact + cheap (~5ms with slice
-            # threading). Sequential catch-up costs gap x per-frame and is
-            # always the worse option, so jump straight to the target.
-            metadata = getattr(source, "metadata", None)
-            codec = getattr(metadata, "codec_name", "") if metadata is not None else ""
-            if is_intra_codec(str(codec or "").lower()):
-                return gap != 0
+        if source_type not in ('planar', 'vt_pixel_buffer', 'vt_planar'):
             return False
-
-        if source_type not in ('vt_pixel_buffer', 'vt_planar'):
+        metadata = getattr(source, "metadata", None)
+        codec = getattr(metadata, "codec_name", "")
+        # Intra codecs can jump directly to the requested frame. Walking a
+        # gap can consume the full scrub budget on both FFmpeg and VT.
+        if is_intra_codec(str(codec or "").lower()):
+            return gap != 0
+        if source_type == 'planar':
             return False
         if gap <= _SEQUENTIAL_CATCHUP_MAX_FRAMES:
             return False
         if gap > _INTERACTIVE_POOL_FORWARD_MAX_FRAMES:
             return True
-        metadata = getattr(source, "metadata", None)
-        codec = getattr(metadata, "codec_name", "") if metadata is not None else ""
         seek_cost = estimate_seek_cost(
             current_frame,
             int(frame_index),
@@ -3462,6 +3607,7 @@ class EditGpuDecodeManager:
 
     def close_source(self, asset_path: str) -> None:
         """Close and remove a specific source."""
+        self._reverse_scrub.cancel()
         # Clear cache
         with self._lock:
             prefetch_events = self._cancel_interactive_prefetches_locked()
@@ -3535,6 +3681,7 @@ class EditGpuDecodeManager:
     def close_all(self) -> None:
         """Close all sources."""
         self._closing = True
+        self._reverse_scrub.cancel(close=True)
         self._join_playback_prefetches()
         # Clear cache
         with self._lock:
@@ -3603,6 +3750,7 @@ class EditGpuDecodeManager:
 
     def invalidate_all_sources(self) -> None:
         """Close and clear all cached decode sources (e.g. when preview quality changes)."""
+        self._reverse_scrub.cancel()
         self._join_playback_prefetches()
         with self._lock:
             prefetch_events = self._cancel_interactive_prefetches_locked()

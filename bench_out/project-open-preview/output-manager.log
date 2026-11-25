@@ -1,0 +1,66 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+INFO: Registered feature module: color
+INFO: Color module registered (core feature)
+INFO: AI Gen transport wired via profile 'profile-e954a936' (credential_ref=topos:profile-e954a936)
+INFO: Registered feature module: composite
+INFO: Registered page: composite (合成)
+INFO: composite module registered
+INFO: Scanning plugin directory: /Users/heng/.topos/plugins/node_plugins
+INFO: Scanning plugin directory: /Users/heng/Documents/vscode/topos-studio/plugins/node_plugins
+INFO: Registered node type 'vintage_tone' from plugin 'vintage_film'
+INFO: Registered node type 'film_grain' from plugin 'vintage_film'
+INFO: Plugin 'vintage_film' v1.0.0 loaded successfully
+INFO: Registered node type 'posterize' from plugin 'posterize'
+INFO: Plugin 'posterize' v1.0.0 loaded successfully
+INFO: Plugin discovery complete: 2 plugins loaded
+INFO: Registered node type 'vintage_tone' in category 'Film'
+INFO: Registered node type 'film_grain' in category 'Film'
+INFO: Registered node type 'posterize' in category 'Filter'
+INFO: Registered 3 node types from plugins
+INFO: Plugin discovery complete: 2 plugins loaded, 3 node types registered
+INFO: Composite: loaded 3 node plugins
+INFO: Loaded 3 node plugins
+INFO: Registered feature module: edit
+INFO: Registered page: edit (剪辑)
+INFO: edit module registered
+INFO: Registered feature module: mixer
+INFO: Registered page: mixer (混音)
+INFO: mixer module registered
+INFO: Registered feature module: deliver
+INFO: Registered page: deliver (交付)
+INFO: deliver module registered
+INFO: Registered feature module: teaching_animation
+INFO: Registered Composite node provider: teaching_animation
+INFO: Registered node type 'motion_graphic' in category 'Input'
+INFO: teaching_animation module registered
+INFO: Registered feature module: ai_workflow
+INFO: ai_workflow module registered
+INFO: Optional feature modules registered: ['ai_workflow', 'composite', 'deliver', 'edit', 'mixer', 'teaching_animation']
+2026-11-25 19:42:02.203 Python[62579:3315600] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to /var/folders/sh/2q_4ydjs6l76v9vncd0gtkmw0000gn/T/org.python.python.savedState
+[WARNING] src.features.edit.ui.viewport_budget_executor: budget executor: timeline decision (idle: still frame only) has no renderer budget surface to apply size cap
+qt.qpa.fonts: Populating font family aliases took 200 ms. Replace uses of missing font family "Monospace" with one that exists to avoid this cost. 
+[WARNING] src.app.controllers.ai_editing_mixin: AI Assistant 当前未启用：启动自检失败：ai_assistant feature flag 已关闭；如需使用已配置的 AI profile，请显式设置 TOPOS_FEATURE_AI_ASSISTANT=1。
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+qt.qpa.window: Window position QRect(-5315,-1514 4815x1014) outside any known screen, using primary screen
+qt.multimedia.ffmpeg: Using Qt multimedia with FFmpeg version 7.1.5 LGPL version 2.1 or later
+[WARNING] src.app.controllers.menu_toolbar_controller: Update check failed: HTTP 403
+2026-11-25 19:42:07.406 Python[62579:3315600] +[IMKClient subclass]: chose IMKClient_Modern
+2026-11-25 19:42:07.409 Python[62579:3315600] +[IMKInputSession subclass]: chose IMKInputSession_Modern
+[WARNING] src.shared.project.topos_project_io: Found 2 offline assets
+[WARNING] src.app.controllers.file_controller: package compatibility X:
+[blocker] source_media 76e32ce5-34c6-4b34-af9f-171b6155b2dc: 素材文件不存在且无内嵌资源: topos://comp_clip/76e32ce5-34c6-4b34-af9f-171b6155b2dc
+[WARNING] src.app.controllers.ai_editing_mixin: AI Assistant 当前未启用：启动自检失败：ai_assistant feature flag 已关闭；如需使用已配置的 AI profile，请显式设置 TOPOS_FEATURE_AI_ASSISTANT=1。
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: qwen3_vl_8b_awq unavailable (ModelPack 'qwen3_vl_8b_awq' is not installed or not verified: not installed); treated as missing model pack
+[WARNING] src.features.edit.ai_editing.visual_semantic_provider: siglip2_base unavailable (ModelPack 'siglip2_base' is not installed or not verified: not installed); treated as missing model pack
+OBS {"stage": "open", "page": "Edit", "context": "None", "head": 127, "edit_current": 127, "renderer": "TimelinePreviewRenderer", "last_emitted": -1, "gpu": true, "video_loaded": null, "color_frame": null, "painted": [127, 127], "color_visible": false, "program_visible": true, "program_frame": 127, "program_gl": true, "central": ""}
+ROI open [152.43476763 123.92650641 103.30282853] [66.44232033 50.94488191 37.38025156]
+OBS {"stage": "color", "page": "Color", "context": "PageContext(source_page=<PageType.EDIT: 'Edit'>, target_page=<PageType.COLOR: 'Color'>, clip_id='be51e721-1ec1-4976-895d-0a16a25be2cc', asset_id='cc611af8-cc45-47f9-8d6a-bff7ec914b34', timeline_frame=127, source_frame=127, clip_local_frame=127, color_stack_id='93437f97-2c7b-4454-b201-a2f48046d844', ", "head": 176, "edit_current": 127, "renderer": "TimelinePreviewRenderer", "last_emitted": 127, "gpu": true, "video_loaded": true, "color_frame": 176, "painted": [127, 127], "color_visible": true, "program_visible": false, "program_frame": 127, "program_gl": true, "central": ""}
+ROI color [127.91295361  95.6741725   73.14776036] [68.66402898 48.05425281 33.76862717]
+OpenCV: Couldn't read video stream from file "/Users/heng/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_DNxHR HQX 12bit.mov"
+OpenCV: Couldn't read video stream from file "/Users/heng/Documents/vscode/topos-color-multitask /topos-color01/tests/test_videos/2K_prores422LT.mov"
+OBS {"stage": "back", "page": "Edit", "context": "PageContext(source_page=<PageType.EDIT: 'Edit'>, target_page=<PageType.COLOR: 'Color'>, clip_id='be51e721-1ec1-4976-895d-0a16a25be2cc', asset_id='cc611af8-cc45-47f9-8d6a-bff7ec914b34', timeline_frame=127, source_frame=127, clip_local_frame=127, color_stack_id='93437f97-2c7b-4454-b201-a2f48046d844', ", "head": 176, "edit_current": 176, "renderer": "TimelinePreviewRenderer", "last_emitted": 176, "gpu": true, "video_loaded": true, "color_frame": 176, "painted": [127, 127, 176, 176], "color_visible": false, "program_visible": true, "program_frame": 176, "program_gl": true, "central": ""}
+ROI back [175.30778846 138.93899038 108.16409455] [50.58438884 40.31208517 31.31408743]

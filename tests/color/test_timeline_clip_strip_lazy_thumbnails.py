@@ -21,6 +21,7 @@ from src.features.color.ui.timeline_clip_strip import (
     build_clip_entries,
 )
 from src.app.controllers.edit_controller import _crop_pixmap_to_aspect
+from src.shared.media.thumbnail_provider import ThumbnailProvider
 
 # ---------------------------------------------------------------------------
 # Ensure a QApplication exists (required for QWidget tests)
@@ -537,6 +538,57 @@ class TestTimelineClipStripPlaybackToggle(unittest.TestCase):
         self.assertFalse(strip._playback_active)
 
         strip.deleteLater()
+
+    def test_shared_pause_retries_pending_cards_without_discarding_cached_card(self) -> None:
+        provider = ThumbnailProvider()
+        with patch.object(ThumbnailProvider, "instance", return_value=provider), patch.object(provider.pool, "start") as submit:
+            cached = QPixmap(12, 8)
+            image = _make_image_entry(1)
+            strip = TimelineClipStrip()
+            strip._entries = [_make_entry(0), image, _make_entry(2)]
+            strip._graded_preview_cache["clip-2"] = cached
+            strip._rebuild_cards()
+            strip.show()
+            strip._request_visible_thumbnails()
+            self.assertEqual(submit.call_count, 2)
+            self.assertTrue(strip._pending_image_cards)
+            self.assertTrue(strip._pending_frame_cards)
+
+            provider.set_playback_active(True)
+            self.assertFalse(strip._pending_image_cards)
+            self.assertFalse(strip._pending_frame_cards)
+            self.assertFalse(strip._cards[0]._thumbnail_requested)
+            self.assertFalse(strip._cards[1]._thumbnail_requested)
+            self.assertIs(strip._cards[2]._pixmap, cached)
+
+            strip._request_visible_thumbnails()
+            self.assertEqual(submit.call_count, 2)
+            provider.set_playback_active(False)
+            self.assertTrue(strip._thumbnail_debounce_timer.isActive())
+            _ensure_app().processEvents()
+            self.assertEqual(submit.call_count, 4)
+            strip.close()
+            strip.deleteLater()
+
+    def test_strip_created_during_shared_pause_can_request_after_resume(self) -> None:
+        provider = ThumbnailProvider()
+        provider.set_playback_active(True)
+        with patch.object(ThumbnailProvider, "instance", return_value=provider), patch.object(provider.pool, "start") as submit:
+            strip = TimelineClipStrip()
+            strip._entries = [_make_entry(0), _make_image_entry(1)]
+            strip._rebuild_cards()
+            strip.show()
+            _ensure_app().processEvents()
+            submit.assert_not_called()
+            self.assertFalse(any(card._thumbnail_requested for card in strip._cards))
+            self.assertFalse(strip._pending_image_cards)
+            self.assertFalse(strip._pending_frame_cards)
+
+            provider.set_playback_active(False)
+            _ensure_app().processEvents()
+            self.assertEqual(submit.call_count, 2)
+            strip.close()
+            strip.deleteLater()
 
 
 class TestTimelinePreviewCapture(unittest.TestCase):

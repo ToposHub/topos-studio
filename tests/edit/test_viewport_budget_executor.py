@@ -227,6 +227,9 @@ class _ShellRenderer(TimelinePreviewRenderer):
     def _invalidate_preview_frame_caches(self) -> None:
         pass
 
+    def _invalidate_render_generation_for_quality(self, reason: str) -> None:
+        self.invalidated_quality = reason
+
     def _clear_prebuffer_state(self) -> None:
         pass
 
@@ -266,6 +269,18 @@ def _worker_shell():
 
 
 class TestBudgetScaleDomain:
+    def test_budget_change_preserves_warm_decoder_sessions(self) -> None:
+        from unittest.mock import Mock
+
+        renderer = _renderer_shell((3840, 2160))
+        renderer._worker = Mock()
+
+        renderer.set_budget_size_cap((960, 540))
+
+        renderer._worker.set_budget_size_cap.assert_called_once_with((960, 540))
+        renderer._worker._gpu_decode_manager.invalidate_all_sources.assert_not_called()
+        assert renderer.invalidated_quality == "monitor_budget"
+
     @pytest.mark.parametrize("seq,cap", [
         ((1920, 1080), (707, 585)),
         ((3840, 2160), (621, 585)),

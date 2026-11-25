@@ -122,6 +122,7 @@ def migrate_legacy_stack(stack: ColorStackData) -> ColorGraphData:
       禁止双权威）。
     - v2+（stack.layers 非空）→ 逐层 Corrector 链。
     - v1（平铺键）→ 单 Corrector（平铺参数进 legacy_payload 视图）。
+    - 已绑定剪辑的空栈 → 单个中性 Corrector，供用户开始调色。
     """
     existing = getattr(stack, "color_graph", None)
     if existing is not None:
@@ -160,8 +161,9 @@ def migrate_legacy_stack(stack: ColorStackData) -> ColorGraphData:
                 src_node=prev, src_port="image",
                 dst_node=node.node_id, dst_port="image"))
             prev = node.node_id
-    elif _flat_view_nonempty(stack):
-        # v1：单 Corrector 承载平铺参数（含 curves/mixer/soft_clip/lut）
+    elif _flat_view_nonempty(stack) or (stack.scope == "clip_local" and stack.clip_id):
+        # A neutral clip still needs an editable first node. Use the same
+        # stable layer identity when the panel projects it and the first edit commits.
         flat_layer = _flat_layer_view(stack)
         node = _corrector_from_layer(flat_layer, 0)
         nodes.append(node)

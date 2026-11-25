@@ -14,7 +14,7 @@ from src.features.edit.core.timeline_export import (
     TimelineExporter,
     _topos_timeline_cpu_threads,
 )
-from src.shared.export.video_encoder import FFmpegVideoEncoder
+from src.shared.export.video_encoder import ColorMetadataConfig, FFmpegVideoEncoder
 from src.shared.media.ffmpeg_source import FFmpegMediaSource, _normalize_chroma_siting
 from src.shared.media.frame import DecodedFrame, PlaneInfo
 from src.shared.media.metadata import Rational, VideoMetadata
@@ -718,15 +718,62 @@ def test_h264_passthrough_rejects_full_range_source(
     assert exporter._try_render_planar_passthrough(plan, 12, config) is None
 
 
-def test_hevc_output_10bit_target_still_fail_closed(
+def test_hevc_main10_requires_high_precision_delivery(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """hevc+yuv420p10le 不在直通白名单（10-bit 档未验证）→ fail-closed。"""
+    """The 10-bit shortcut requires the high-precision timeline path."""
     exporter, plan, config, _source, _requested = _make_env(
         monkeypatch,
         codec="hevc", pix_fmt="yuv420p10le", high_precision=False,
         frame=_hevc_frame(),
     )
+    assert exporter._try_render_planar_passthrough(plan, 12, config) is None
+
+
+@pytest.mark.parametrize("bit_depth", [8, 10])
+def test_windows_main10_preserves_limited_yuv_samples(
+    monkeypatch: pytest.MonkeyPatch, bit_depth: int,
+) -> None:
+    import src.features.edit.core.timeline_export as export_module
+
+    monkeypatch.setattr(export_module, "sys", SimpleNamespace(platform="win32"))
+    source = _h264_frame() if bit_depth == 8 else _hevc10_420_frame()
+    source.planes[0][0, :4] = [16, 64, 235, 254] if bit_depth == 8 else [64, 258, 940, 1017]
+    source.planes[1][0] = [16, 128, 240, 250] if bit_depth == 8 else [64, 515, 960, 1001]
+    source.planes[2][0] = source.planes[1][0, ::-1]
+    exporter, plan, config, _, _ = _make_env(
+        monkeypatch, codec="hevc", pix_fmt="yuv420p10le", frame=source,
+    )
+    encoder = exporter._encoder
+    encoder._config.color_metadata = ColorMetadataConfig.sdr()
+    output = exporter._try_render_planar_passthrough(plan, 12, config)
+
+    assert output.pixel_format == output.metadata.pixel_format == "yuv420p10le"
+    assert output.metadata.bit_depth == 10
+    assert output.pts == 2
+    multiplier = 4 if bit_depth == 8 else 1
+    for output_plane, source_plane in zip(output.planes, source.planes):
+        np.testing.assert_array_equal(output_plane, source_plane.astype(np.uint16) * multiplier)
+        assert (output_plane is source_plane) is (bit_depth == 10)
+
+    # A hardware session accepts P010. Repacking must keep all 10 bits and
+    # interleave U/V in order, including the limited-range headroom samples.
+    p010 = FFmpegVideoEncoder._convert_planar_frame(
+        FFmpegVideoEncoder.__new__(FFmpegVideoEncoder), output, "p010le",
+    )
+    p010_y, p010_uv = (
+        np.ndarray((plane.height, output.width), dtype="<u2", buffer=plane,
+                   strides=(plane.line_size, 2)) for plane in p010.planes
+    )
+    np.testing.assert_array_equal(p010_y, output.planes[0] << 6)
+    np.testing.assert_array_equal(p010_uv[:, ::2], output.planes[1] << 6)
+    np.testing.assert_array_equal(p010_uv[:, 1::2], output.planes[2] << 6)
+
+    # Explicit center siting and actual grading both need the compositor.
+    source.extra = {"chroma_siting": 1}
+    assert exporter._try_render_planar_passthrough(plan, 12, config) is None
+    source.extra = None
+    plan.layers[0].clip.effects = (SimpleNamespace(),)
     assert exporter._try_render_planar_passthrough(plan, 12, config) is None
 
 

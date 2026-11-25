@@ -5,8 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtCore import QRectF, QSize, QSizeF, QPointF, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRectF, QSize, QSizeF, QPointF, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDockWidget, QGraphicsScene, QGraphicsView, QMainWindow, QToolButton, QWidget
 
 from src.features.color.ui.canvas import Canvas, VideoControlBar, ViewportMenuBar
@@ -122,6 +123,52 @@ def test_live_scrub_updates_both_timecodes_and_emits_one_final_seek(chrome) -> N
     assert events == [("start", 0), ("move", 100), ("finish", 100), ("seek", 100)]
     bar.set_time_info("01:02:03:04")
     assert chrome.header_timecode.text() == "01:02:03:04"
+
+
+def test_color_scrub_starts_on_empty_groove_and_follows_reverse_drag(chrome, qapp) -> None:
+    bar = chrome.transport
+    bar.show_for_video()
+    bar.set_total_frames(201)
+    slider = bar.slider
+    bar.resize(431, bar.height())
+    qapp.processEvents()
+    events = []
+    bar.scrub_started.connect(lambda value: events.append(("start", value)))
+    bar.scrub_moved.connect(lambda value: events.append(("move", value)))
+    bar.scrub_finished.connect(lambda value: events.append(("finish", value)))
+    bar.seek_requested.connect(lambda value: events.append(("seek", value)))
+
+    def point(fraction: float) -> QPoint:
+        return QPoint(round(15 + (slider.width() - 31) * fraction), slider.height() // 2)
+
+    QTest.mousePress(slider, Qt.MouseButton.LeftButton, pos=point(0.75))
+    QTest.mouseMove(slider, point(0.5))
+    QTest.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=point(0.25))
+    assert events == [("start", 150), ("move", 100), ("move", 50),
+                      ("finish", 50), ("seek", 50)]
+
+
+@pytest.mark.parametrize("interrupt", ["hide", "switch_to_composite", "disable"])
+def test_color_scrub_interrupted_finishes_once(chrome, qapp, interrupt) -> None:
+    bar = chrome.transport
+    bar.show_for_video()
+    bar.set_total_frames(201)
+    qapp.processEvents()
+    slider = bar.slider
+    events = []
+    bar.scrub_cancelled.connect(lambda: events.append("cancel"))
+    bar.scrub_finished.connect(lambda _: events.append("finish"))
+    bar.seek_requested.connect(lambda _: events.append("seek"))
+    QTest.mousePress(slider, Qt.MouseButton.LeftButton, pos=slider.rect().center())
+    assert slider.isSliderDown()
+    if interrupt == "switch_to_composite":
+        bar.show_for_video_with_io()
+    elif interrupt == "hide":
+        bar.hide()
+    else:
+        slider.setEnabled(False)
+    assert not slider.isSliderDown()
+    assert events == ["cancel"]
 
 
 def test_header_selector_stays_exactly_centered_without_overlapping_tools(chrome, qapp) -> None:

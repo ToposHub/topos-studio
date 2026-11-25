@@ -37,7 +37,7 @@ def renderer(monkeypatch: pytest.MonkeyPatch) -> tuple[EditGpuPreviewRenderer, _
     renderer._current_present_lease = None
     renderer._yuv_uploader = None
     renderer._gl_pass_timer = SimpleNamespace(unsupported=True)
-    renderer._snapshot_armed = False
+    renderer._snapshot_generation = None
     renderer._drain_composite_cache_invalidate = lambda: None
     renderer._drain_retired_output_pools = lambda: None
     renderer._drain_deferred_gpu_frame_releases = lambda **kwargs: None

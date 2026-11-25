@@ -4079,8 +4079,7 @@ class ImageEngine(QObject, WindowRasterizer):
         """
         mutex = self.gl_manager.mutex
         # Never stall the GUI event loop behind a long render-thread pass.
-        # Canvas retries a still-image paint when the worker owns the lock.
-        # Video playback can use the next frame notification.
+        # Canvas can retry the published frame once the worker releases it.
         if not mutex.tryLock():
             return False
         try:

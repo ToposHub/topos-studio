@@ -349,6 +349,10 @@ class ResolvePoolDelegate(GridDelegate):
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
         panel = self._get_panel()
+        if item_type == "timeline" and panel is not None:
+            timeline_id = index.data(AssetListModel.ITEM_ID_ROLE)
+            if isinstance(timeline_id, str):
+                panel.retry_timeline_preview_when_idle(timeline_id)
         drop_target = (item_type == "bin" and panel is not None and
                        getattr(panel, "_drop_target_bin_id", None) ==
                        index.data(AssetListModel.ITEM_ID_ROLE))
