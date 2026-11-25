@@ -13,6 +13,28 @@ from src.shared.panels.registry import PanelRegistry
 from src.shared.ui.widgets.curves_widget import CurvesWidget
 
 
+def test_adjusted_curve_has_no_extra_diagonal(qtbot) -> None:
+    canvas = CurvesWidget()
+    qtbot.addWidget(canvas)
+    canvas.resize(414, 254)
+    canvas.set_curves_data({
+        "M": [(0, 255), (128, 65), (255, 0)],
+        "G": [(0, 200), (255, 0)],
+    })
+    canvas.show()
+
+    image = canvas.grab().toImage()
+    ratio = image.devicePixelRatio()
+    x = round(152 * ratio)
+    assert image.pixelColor(x, round(160 * ratio)) == image.pixelColor(x, round(156 * ratio))
+    green_curve = image.pixelColor(x, round(127 * ratio))
+    assert green_curve.green() > green_curve.red()
+
+    canvas.set_active_channel("R")
+    image = canvas.grab().toImage()
+    assert image.pixelColor(x, round(160 * ratio)).red() > image.pixelColor(x, round(156 * ratio)).red()
+
+
 def test_sidebar_drafts_do_not_modify_curve_data_or_emit_render_updates(qapp):
     canvas = CurvesWidget()
     before = canvas.get_curves_data()
@@ -55,6 +77,10 @@ def test_soft_clip_defaults_match_mobile_identity_semantics(qapp):
     panel.soft_clip_rows["high_soft"].slider.setValue(100)
     values = panel.get_ui_state()["soft_clip_channels"]["R"]
     assert values["low_soft"] + values["high_soft"] <= 0.2 + 1e-9
+    panel.soft_clip_rows["high_clip"].slider.setValue(90)
+    assert panel.soft_clip_rows["high_clip"].value() == 1.0
+    assert panel.soft_clip_rows["low_clip"].value() == 0.8
+    assert panel.soft_clip_rows["low_soft"].value() == 0.2
 
     # Per-row reset returns that control to its identity default.
     panel._reset_soft_parameter("low_clip")

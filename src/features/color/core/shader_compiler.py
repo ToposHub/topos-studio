@@ -21,7 +21,10 @@ from src.features.color.core.shader_nodes import (COMMON_DEFINITIONS, GRADING_SN
                                     CURVES_SOFT_CLIP_CALIBRATION_SNIPPET,
                                     BLUR_SHARPEN_SNIPPET,
     WARPER_SPACE_SNIPPET)
-from src.features.color.core.warper_color import RESOLVE_HS709_SPACES, RESOLVE_HS709_V2_SPACE
+from src.features.color.core.warper_color import (
+    RESOLVE_HS709_RESPONSE_SPACES, WARPER_CHROMA709_SPACE, WARPER_PREPARED_SPACES,
+)
+from src.features.color.core.hsl_curve_calibration import VALID_HSL_LUT_SHAPES
 from src.features.color.core.plugin_manager import get_plugin_manager
 from src.features.color.core.composition_uniforms import (
     build_composition_uniform_manifest,
@@ -41,11 +44,12 @@ from src.shared.render_diagnostics import (
 _PRIMARY_CALIBRATION_GLSL = """
 vec3 apply_primary_calibration(vec3 color, sampler3D response_tex) {
     vec3 sdr = clamp(color, 0.0, 1.0);
-    vec3 encoded = pow(sdr, vec3(1.0 / 2.4));
+    vec3 encoded = u_rec709_calibration_encoded ? sdr : pow(sdr, vec3(1.0 / 2.4));
     vec3 grid_size = vec3(textureSize(response_tex, 0));
     vec3 uv = (encoded * (grid_size - 1.0) + 0.5) / grid_size;
     vec3 delta = texture(response_tex, uv).rgb;
-    vec3 graded = pow(clamp(encoded + delta, 0.0, 1.0), vec3(2.4));
+    vec3 mapped = clamp(encoded + delta, 0.0, 1.0);
+    vec3 graded = u_rec709_calibration_encoded ? mapped : pow(mapped, vec3(2.4));
     return graded + (color - sdr);
 }
 """
@@ -347,7 +351,7 @@ class ShaderPipeline:
             return False
         try:
             arr = np.asarray(lut, dtype=np.float32)
-            if arr.shape not in ((6, 256), (6, 512)):
+            if arr.shape not in VALID_HSL_LUT_SHAPES:
                 return True
             expected = np.ones_like(arr)
             expected[1, :] = 0.0
@@ -432,8 +436,9 @@ class ShaderPipeline:
             grain_enabled=grain_enabled, has_primary_calibration=has_primary_calibration,
             bindings=bindings)
 
-        calibrated_warper = has_warper and warper_space in RESOLVE_HS709_SPACES
-        response_warper = calibrated_warper and warper_space == RESOLVE_HS709_V2_SPACE
+        calibrated_warper = has_warper and warper_space in WARPER_PREPARED_SPACES
+        response_warper = has_warper and warper_space in RESOLVE_HS709_RESPONSE_SPACES
+        chroma_warper = has_warper and warper_space == WARPER_CHROMA709_SPACE
         shader_code = [
             "#version 330",
             *uniform_manifest.declarations("header"),
@@ -455,9 +460,14 @@ class ShaderPipeline:
             QUALIFIER_SNIPPET,
         ]
         if calibrated_warper:
-            from src.features.color.core.shader_nodes import RESOLVE_HS709_SNIPPET, RESOLVE_HS709_V2_SNIPPET
+            from src.features.color.core.shader_nodes import (
+                RESOLVE_HS709_SNIPPET, RESOLVE_HS709_V2_SNIPPET, WARPER_CHROMA709_SNIPPET,
+            )
 
-            shader_code.append(RESOLVE_HS709_V2_SNIPPET if response_warper else RESOLVE_HS709_SNIPPET)
+            if chroma_warper:
+                shader_code.append(WARPER_CHROMA709_SNIPPET)
+            else:
+                shader_code.append(RESOLVE_HS709_V2_SNIPPET if response_warper else RESOLVE_HS709_SNIPPET)
         if has_primary_calibration:
             shader_code.append(_PRIMARY_CALIBRATION_GLSL)
         if has_curves_soft_clip:
@@ -578,7 +588,7 @@ class ShaderPipeline:
         shader_code.append("    vec3 graded = apply_blur_sharpen(color, u_input_tex, v_texcoord, u_fx_mode, u_fx_sharpen, u_fx_texture, u_fx_halo, u_fx_radius, u_fx_iterations, u_tex_size, u_fx_enabled, u_blur_enabled, u_blur_mode, u_blur_intensity, u_blur_detail, u_blur_radius, u_blur_bokeh, u_blur_angle);")
         shader_code.append(
             "    if (u_mist_amount != 0.0) { graded += mist_delta(u_input_tex, v_texcoord, "
-            "color, u_tex_size, u_mist_spread, u_mist_amount); }")
+            "color, u_tex_size, u_mist_spread, u_mist_amount, u_mist_calibrated); }")
 
         primary_input = "graded"
         if has_primary_calibration:
@@ -598,14 +608,16 @@ class ShaderPipeline:
         # 恒等时编译进管线（默认恒等映射保留超白/负值，无需执行）。
         if has_curves_soft_clip:
             shader_code.append(
-                "    if (u_cs_calibrated) {\n"
-                "        graded = apply_calibrated_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft);\n"
+                "    if (u_cs_profile != 0) {\n"
+                "        graded = apply_calibrated_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft, u_cs_profile == 2);\n"
                 "    } else {\n"
                 "        graded = apply_curves_soft_clip(graded, u_cs_low_clip, u_cs_low_soft, u_cs_high_clip, u_cs_high_soft);\n"
                 "    }")
         if has_mixer:
             shader_code.append("    graded = apply_mixer(graded, u_red_p, u_orange_p, u_yellow_p, u_green_p, u_aqua_p, u_blue_p, u_purple_p, u_magenta_p);")
-        if response_warper:
+        if chroma_warper:
+            shader_code.append("    graded = apply_warper_chroma709(graded, u_warper_tex);")
+        elif response_warper:
             shader_code.append("    graded = apply_resolve_hs709_v2(graded, u_warper_tex);")
         elif calibrated_warper:
             shader_code.append("    graded = apply_resolve_hs709(graded, u_warper_tex);")

@@ -220,13 +220,10 @@ def _flat_view_nonempty(stack: ColorStackData) -> bool:
 
 def _needs_execution_graph(layer: Any) -> bool:
     from src.features.color.core.curves_calibration import curves_calibration_enabled
-    from src.features.color.core.curves_soft_clip import (
-        curves_soft_clip_is_identity,
-        uses_calibrated_soft_clip,
-    )
+    from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
     from src.features.color.core.primary_calibration import grade_uses_calibration
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
-    from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHMS, WarperStateV2
+    from src.features.color.core.warper_color import WARPER_PREPARED_SPACES
+    from src.features.color.core.warper_state import WarperStateV2, derives_warper_projection, renderable_projection
 
     get = layer.get if isinstance(layer, Mapping) else lambda key: getattr(layer, key, None)
     effects = get("effects_params")
@@ -234,16 +231,16 @@ def _needs_execution_graph(layer: Any) -> bool:
         return True
     clip = get("curves_soft_clip")
     warper = get("warper_state")
-    if isinstance(warper, Mapping) and warper.get("algorithm_version") in RESOLVE_HS_ALGORITHMS:
-        warper_active = not WarperStateV2.from_dict(warper).is_identity()
+    if isinstance(warper, Mapping) and derives_warper_projection(warper):
+        warper_active = renderable_projection(WarperStateV2.from_dict(warper))[0] is not None
     else:
-        warper_active = get("warper_space") in RESOLVE_HS709_SPACES and get("warper_params") is not None
+        warper_active = get("warper_space") in WARPER_PREPARED_SPACES and get("warper_params") is not None
     return bool(
         grade_uses_calibration(layer)
         or warper_active
         or (curves_calibration_enabled(get("curves_edit"))
             and (get("curves_data") or get("hsl_curve_data")))
-        or (uses_calibrated_soft_clip(clip) and not curves_soft_clip_is_identity(clip))
+        or (get("visible") is not False and not curves_soft_clip_is_identity(clip))
     )
 
 
@@ -256,7 +253,13 @@ def stack_primary_execution_graph(stack: ColorStackData | None) -> ColorGraphDat
         return graph
 
     layers = getattr(stack, "layers", None) or (stack,)
-    if not any(_needs_execution_graph(layer) for layer in layers):
+    # The oldest flat projection cannot apply these saved controls. The
+    # graph migration already copies them into the corrector.
+    flat_advanced = (
+        isinstance(stack, ColorStackData) and not stack.layers
+        and (stack.curves_data or stack.lut_path)
+    )
+    if not flat_advanced and not any(_needs_execution_graph(layer) for layer in layers):
         return None
 
     with _PRIMARY_EXECUTION_GRAPHS_LOCK:

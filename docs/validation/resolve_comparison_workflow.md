@@ -190,3 +190,28 @@ Topos PQ HEVC 成片独立查验了 `hvc1`、10 位 4:2:0 以及 ST 2086。使�
 本机显示器是 LECOO M3221PL，macOS 当前及潜在 EDR 余量均为 1.0。截图对拍覆盖桌面像素。原生 EDR、DeckLink 10 位参考输出、实体显示峰值和色度、HDR 示波器、Resolve 自动 DaVinci DRT、动态 HDR 元数据以及 ACES HDR ODT 是独立的待验项目。4K 长时播放和不同硬件平台的交付耗时尚未测量。
 
 本次采集证据位于 `/tmp/topos-resolve-hdr.NJxmxv`，包括 `hdr-measurement.json`、`desktop-measured.json` 和 `topos-delivery.json`。回归入口为 `tests/color/test_hdr_project_signal.py`、`tests/edit/test_preview_output_signal.py` 和 `tests/deliver/test_hdr_video_delivery.py`。资料使用 [Blackmagic Design 的 DWG／Intermediate 规范](https://documents.blackmagicdesign.com/InformationNotes/DaVinci_Resolve_17_Wide_Gamut_Intermediate.pdf?_v=1628751610000) 和 [ITU-R BT.2100](https://www.itu.int/rec/R-REC-BT.2100/en)。
+
+## 调色工具生产链路复测（2026-11-25）
+
+Resolve Studio 20.2.1.6 使用 DaVinci YRGB、Rec.709 Gamma 2.4、Full 电平。Topos 对同一图卡走实际视频时间线 OpenGL 渲染和 16 位 RGB TIFF 交付。中性帧逐码一致。原视频路径把已编码的输入当成线性值，导致已校准一级调色、曲线、柔化裁切和色相–饱和度扭曲器再次编码。现由预览和交付传入实际工作域，沿用节点保存的校准响应。下表误差为 4,096 个独立色块和 1,024 个灰阶样本的 10 位 RGB RMSE。
+
+| Resolve 设定 | 独立 RGB 旧版 → 新版 | 灰阶旧版 → 新版 |
+| --- | ---: | ---: |
+| 饱和度 58 | 18.3420 → 0.0035 | 0 → 0 |
+| 色相 26 | 44.9863 → 0.0025 | 0 → 0 |
+| 对比度 1.080 | 23.2041 → 0.0823 | 18.9087 → 0.0496 |
+| 色温 −1800 | 88.1000 → 0.0007 | 89.4599 → 0.0007 |
+
+调色页实际通过 ImageEngine、AsyncRenderer 和查看器显示 32 个独立色块。关闭显示器 ICC，并以对应 Resolve TIFF 的 8 位读数为参考。中性查看器逐码一致，四个调色用例的最大通道差均为 1 个 8 位码值。这组读数含查看器和输入图卡的 8 位量化。
+
+雾化用 1920×1080 图卡，包含多灰阶、彩色阶跃、单像素脉冲，以及 6、14、30、72 像素周期的纹理。Resolve 的半径中性为 0.50，Mix 默认为 100.00。从半径 0.50 横拖数字格 60 个逻辑像素得到 1.10。从 Mix 55.00 向左右各横拖 20 个逻辑像素得到 75.00 和 35.00。Topos 数值格采用同样速度和显示精度。本轮使用半径 0.48、0.52 验证新窄核。以半径 0.50 验证直通，并检查宽半径及 Mix 端点。采样固定 H/V Ratio 0.50、Scaling 0.25，RGB 链接。
+
+| 雾化半径 / Mix | 整帧 RGB RMSE 旧版 → v2 | 整帧最大通道差旧版 → v2 |
+| --- | ---: | ---: |
+| 0.50 / 100 | 0 → 0 | 0 → 0 |
+| 0.48 / 33 | 0.8271 → 0.0013 | 29.3155 → 0.0312 |
+| 0.52 / 33 | 2.4326 → 0.0027 | 86.2607 → 0.0937 |
+
+误差单位为 10 位码值。雾化新增窄核集中修正中性附近的响应，宽半径继续使用快速近似。测试包含正式交付回读、原生 Metal 和 OpenGL 与 CPU 的图结果对照，以及数字格松手才送达最终位置的交互回归。交付预检按权威图的已连接节点识别 RGB 曲线、LUT、色段混色、矢量窗口和限定器后处理。窗口跟踪、位图和不支持的效果仍有对应的交付诊断。原始图卡、Resolve TIFF、拖拽读数截图和 Topos 交付位于 `/tmp/topos-resolve-grading.3me5nk`。
+
+本次跨软件结果覆盖 Rec.709 Gamma 2.4 SDR。RAW、HDR、降噪、其他模糊与锐化模式、限定器与窗口的画面拟合需要独立样本。色彩扭曲器的色度–亮度、普通笔画和点到点笔画另有图卡实测。Topos 的八色混色器提供各色相段的 Hue、Sat、Lum 参数，本轮复测其预览与交付共用节点。Resolve RGB Mixer 的三输入三输出矩阵有自己的参数语义。 [色彩扭曲器实测](resolve_warper_calibration.md) · [Blackmagic Design 调色师指南](https://documents.blackmagicdesign.com/UserManuals/DaVinci-Resolve-20-Colorist-Guide.pdf)

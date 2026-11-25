@@ -143,7 +143,9 @@ float3 msl_apply_grading(float3 color, float2 v_texcoord,
 
     // === 暗部保护（Lift/Gamma 暗部溢出）===
     float luma_post_grading = dot(color, float3(0.299, 0.587, 0.114));
-    if (luma_post_grading < 0.0) {
+    bool wheels_adjusted = any(lift != float3(1.0)) || any(gamma != float3(1.0))
+                           || any(gain != float3(1.0));
+    if (wheels_adjusted && luma_post_grading < 0.0) {
         color.r = _grading_shadow_guard(color.r);
         color.g = _grading_shadow_guard(color.g);
         color.b = _grading_shadow_guard(color.b);
@@ -318,8 +320,8 @@ float msl_calibrated_curve_delta(texture2d<float> tex, sampler smp, float x,
     return tex.sample(smp, float2(u, 0.5))[channel];
 }
 
-float3 msl_apply_calibrated_curves(float3 color, texture2d<float> tex, sampler smp) {
-    float3 encoded = sign(color) * pow(abs(color), float3(1.0 / 2.4));
+float3 msl_apply_calibrated_curves(float3 color, texture2d<float> tex, sampler smp, bool encoded_input) {
+    float3 encoded = encoded_input ? color : sign(color) * pow(abs(color), float3(1.0 / 2.4));
     const float3 weights = float3(0.2126, 0.7152, 0.0722);
     float3 delta = float3(
         msl_calibrated_curve_delta(tex, smp, encoded.r, 0.0, 0),
@@ -329,13 +331,14 @@ float3 msl_apply_calibrated_curves(float3 color, texture2d<float> tex, sampler s
     float y = msl_calibrated_curve_delta(tex, smp, dot(encoded, weights), 256.0, 0);
     float3 response = delta + float3(y - dot(delta, weights));
     float3 mapped = encoded + response;
-    return select(sign(mapped) * pow(abs(mapped), float3(2.4)), color, response == 0.0);
+    float3 decoded = encoded_input ? mapped : sign(mapped) * pow(abs(mapped), float3(2.4));
+    return select(decoded, color, response == 0.0);
 }
 
 // —— CURVES_SNIPPET.apply_curves 逐条翻译
-float3 msl_apply_curves(float3 color, texture2d<float> curves_tex, sampler smp) {
+float3 msl_apply_curves(float3 color, texture2d<float> curves_tex, sampler smp, bool encoded_input) {
     if (curves_tex.get_width() == 512) {
-        return msl_apply_calibrated_curves(color, curves_tex, smp);
+        return msl_apply_calibrated_curves(color, curves_tex, smp, encoded_input);
     }
     // Sample points near boundaries to calculate slopes
     float3 v0 = curves_tex.sample(smp, float2(0.5 / 256.0, 0.5)).rgb;
@@ -376,7 +379,8 @@ float msl_sample_hsl_curve(texture2d<float> lut_tex, sampler smp,
 }
 
 float msl_sample_calibrated_hsl_curve(texture2d<float> tex, sampler smp, float x, float row) {
-    return tex.sample(smp, float2((row + 0.5) / 6.0, (clamp(x, 0.0, 1.0) * 511.0 + 0.5) / 512.0)).r;
+    float height = float(tex.get_height());
+    return tex.sample(smp, float2((row + 0.5) / 6.0, (clamp(x, 0.0, 1.0) * (height - 1.0) + 0.5) / height)).r;
 }
 
 float msl_calibrated_hsl_envelope(float t, float3 coefficients) {
@@ -390,8 +394,8 @@ float msl_calibrated_hsl_center(float x) {
     return msl_calibrated_hsl_envelope(2.0 * min(x, 1.0 - x), float3(0.74, 0.86, 1.37));
 }
 
-float3 msl_apply_calibrated_hsl_curves(float3 color, texture2d<float> tex, sampler smp) {
-    float3 encoded = sign(color) * pow(abs(color), float3(1.0 / 2.4));
+float3 msl_apply_calibrated_hsl_curves(float3 color, texture2d<float> tex, sampler smp, bool encoded_input) {
+    float3 encoded = encoded_input ? color : sign(color) * pow(abs(color), float3(1.0 / 2.4));
     const float3 weights = float3(0.2126, 0.7152, 0.0722);
     float luma = dot(encoded, weights);
     float cb = (encoded.b - luma) / 1.8556;
@@ -419,13 +423,57 @@ float3 msl_apply_calibrated_hsl_curves(float3 color, texture2d<float> tex, sampl
         delta = rotated - float3(dot(rotated, weights));
     }
     float3 mapped = delta * sat_factor + float3(luma * (1.0 + lum_response));
-    return sign(mapped) * pow(abs(mapped), float3(2.4));
+    return encoded_input ? mapped : sign(mapped) * pow(abs(mapped), float3(2.4));
+}
+
+
+float3 msl_apply_hsl_curves_v3(float3 color, texture2d<float> tex, sampler smp, bool encoded_input) {
+    float3 encoded = encoded_input ? color : sign(color) * pow(abs(color), float3(1.0 / 2.4));
+    const float3 weights = float3(0.2126, 0.7152, 0.0722);
+    float luma = dot(encoded, weights);
+    float cb = (encoded.b - luma) / 1.8556;
+    float cr = (encoded.r - luma) / 1.5748;
+    float u = 1.816 * cr - 0.41838 * cb;
+    float v = 1.87 * cb;
+    float chroma = 1.02076 * length(float2(u, v));
+    bool red_seam = encoded.r > encoded.g && encoded.g == encoded.b;
+    float phase = chroma > 1e-7 ? fract(-0.03509087 - atan2(v, u) / 6.283185307) : 0.0;
+    float hue = red_seam || chroma <= 1e-7 ? 0.0 : fract((1023.0 * phase - 0.5) / 1024.0);
+    float sat_x = (1023.0 * chroma - 1.0) / 1024.0;
+    float axis_sat = msl_sample_calibrated_hsl_curve(tex, smp, (1023.0 * luma - 0.5) / 1024.0, 0.0)
+        * msl_sample_calibrated_hsl_curve(tex, smp, sat_x, 4.0);
+    float sat = axis_sat * msl_sample_calibrated_hsl_curve(tex, smp, hue, 2.0);
+    float hue_lum = (msl_sample_calibrated_hsl_curve(tex, smp, hue, 3.0) - 1.0)
+        * smoothstep(0.0, 1.0, 2.0 * chroma * axis_sat);
+    float lum_factor = msl_sample_calibrated_hsl_curve(tex, smp, sat_x, 5.0) * (1.0 + hue_lum);
+    float rotation = msl_sample_calibrated_hsl_curve(tex, smp, hue, 1.0);
+    if (sat == 1.0 && rotation == 0.0 && lum_factor == 1.0) return color;
+    float3 delta = encoded - float3(luma);
+    if (rotation != 0.0) {
+        float low = min(min(encoded.r, encoded.g), encoded.b);
+        float hsv_hue = msl_rgb2hsv(encoded - float3(low)).x;
+        float drift = red_seam ? 0.0 : (hsv_hue + 0.5) / 1024.0;
+        float theta = (rotation + drift) * 6.283185307;
+        float c = cos(theta);
+        float s = sin(theta);
+        cb = (u * s + v * c) / 1.87;
+        cr = (u * c - v * s + 0.41838 * cb) / 1.816;
+        float red = 1.5748 * cr;
+        float blue = 1.8556 * cb;
+        float green = -(0.2126 * red + 0.0722 * blue) / 0.7152;
+        delta = float3(red, green, blue);
+    }
+    float3 mapped = delta * sat + float3(luma * lum_factor);
+    return encoded_input ? mapped : sign(mapped) * pow(abs(mapped), float3(2.4));
 }
 
 // —— CURVES_SNIPPET.apply_hsl_curves 逐条翻译
-float3 msl_apply_hsl_curves(float3 color, texture2d<float> hsl_lut_tex, sampler smp) {
+float3 msl_apply_hsl_curves(float3 color, texture2d<float> hsl_lut_tex, sampler smp, bool encoded_input) {
+    if (hsl_lut_tex.get_height() == 1024) {
+        return msl_apply_hsl_curves_v3(color, hsl_lut_tex, smp, encoded_input);
+    }
     if (hsl_lut_tex.get_height() == 512) {
-        return msl_apply_calibrated_hsl_curves(color, hsl_lut_tex, smp);
+        return msl_apply_calibrated_hsl_curves(color, hsl_lut_tex, smp, encoded_input);
     }
     // AUD-0840：负值 HDR 颜色按 MIXER 同防护——整条 HSV 链以 |color|
     // 为基准，出口按符号还原（与 GLSL 权威逐条一致；非负输入恒等）。
@@ -491,8 +539,8 @@ float3 msl_apply_hsl_curves(float3 color, texture2d<float> hsl_lut_tex, sampler 
 }
 
 // Legacy function name for backward compatibility
-float3 msl_apply_hsl_curve(float3 color, texture2d<float> hsl_lut_tex, sampler smp) {
-    return msl_apply_hsl_curves(color, hsl_lut_tex, smp);
+float3 msl_apply_hsl_curve(float3 color, texture2d<float> hsl_lut_tex, sampler smp, bool encoded_input) {
+    return msl_apply_hsl_curves(color, hsl_lut_tex, smp, encoded_input);
 }
 """
 
@@ -582,6 +630,26 @@ float3 msl_apply_warper(float3 color, texture2d<float> warper_tex,
 }
 """
 
+MSL_WARPER_CHROMA709 = """
+inline float3 msl_apply_warper_chroma709(float3 color, texture2d<float> field, bool encoded_input) {
+    if (!all(isfinite(color))) return color;
+    constexpr sampler response_sampler(coord::normalized, address::clamp_to_edge, filter::linear);
+    float3 sdr = clamp(color, 0.0, 1.0);
+    float3 encoded = encoded_input ? sdr : pow(sdr, float3(1.0 / 2.4));
+    float2 dims = float2(field.get_width(), field.get_height());
+    float3 index = encoded * (dims.x - 1.0);
+    float2 uv = (index.rg + 0.5) / dims;
+    float first = floor(index.b);
+    float second = min(first + 1.0, dims.x - 1.0);
+    float3 delta = mix(field.sample(response_sampler, uv + float2(0.0, first / dims.x)).rgb,
+                       field.sample(response_sampler, uv + float2(0.0, second / dims.x)).rgb, index.b - first);
+    if (all(delta == 0.0)) return color;
+    float3 mapped = max(encoded + delta, 0.0);
+    float3 adjusted = encoded_input ? mapped : pow(mapped, float3(2.4));
+    return adjusted + (color - sdr);
+}
+"""
+
 MSL_RESOLVE_HS709 = """
 // RESOLVE_HS709_SNIPPET, used in both the fragment and graph compute paths.
 float3 msl_hs709_basis(float hue) {
@@ -589,8 +657,9 @@ float3 msl_hs709_basis(float hue) {
     return clamp(abs(phase * 6.0 - 3.0) - 1.0, 0.0, 1.0);
 }
 
-float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh) {
-    float3 work = pow(max(color, 0.0), float3(1.605 / 2.4));
+float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh, bool encoded_input) {
+    float gamma = encoded_input ? 1.0 : 2.4;
+    float3 work = pow(max(color, 0.0), float3(1.605 / gamma));
     float3 hsv = msl_rgb2hsv(work);
     float peak = hsv.z;
     float chroma = peak - min(work.r, min(work.g, work.b));
@@ -640,7 +709,7 @@ float3 msl_apply_resolve_hs709(float3 color, texture2d<float> mesh) {
     float3 sat_shift = direction * (saturation * saturation_gain * pow(peak, 1.120));
     float3 warped = (work + (hue_shift + sat_shift) * neutral_fade);
     warped *= exp(1.981 * lightness * neutral_fade);
-    return pow(max(warped, 0.0), float3(2.4 / 1.605)) + min(color, 0.0);
+    return pow(max(warped, 0.0), float3(gamma / 1.605)) + min(color, 0.0);
 }
 """
 
@@ -652,8 +721,9 @@ float3 msl_hs709_response_tile(texture2d<float> field, uint2 base, uint2 next, f
     return mix(a, b, weight.y);
 }
 
-float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field) {
-    float3 code = pow(max(color, 0.0), float3(1.0 / 2.4));
+float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field, bool encoded_input) {
+    float3 positive = max(color, 0.0);
+    float3 code = encoded_input ? positive : pow(positive, float3(1.0 / 2.4));
     float3 hsv = msl_rgb2hsv(code);
     if (hsv.y <= 1e-8) return color;
 
@@ -671,7 +741,8 @@ float3 msl_apply_resolve_hs709_v2(float3 color, texture2d<float> field) {
     float3 second = msl_hs709_response_tile(field, base + upper, next + upper, fract(cell));
     float3 delta = mix(first, second, fract(plane));
     if (all(delta == float3(0.0))) return color;
-    return pow(max(code + hsv.z * delta, 0.0), float3(2.4)) + min(color, 0.0);
+    float3 mapped = max(code + hsv.z * delta, 0.0);
+    return (encoded_input ? mapped : pow(mapped, float3(2.4))) + min(color, 0.0);
 }
 """
 
@@ -1075,12 +1146,14 @@ float3 msl_apply_curves_soft_clip(float3 color, float3 low_clip, float3 low_soft
 }
 """ + CALIBRATED_SOFT_CLIP_KNEE + """
 float3 msl_apply_curves_soft_clip_profile(float3 color, float3 low, float3 low_soft,
-                                           float3 high, float3 high_soft, bool calibrated) {
-    if (!calibrated) return msl_apply_curves_soft_clip(color, low, low_soft, high, high_soft);
+                                           float3 high, float3 high_soft, int profile,
+                                           bool encoded_input) {
+    if (profile == 0) return msl_apply_curves_soft_clip(color, low, low_soft, high, high_soft);
+    bool independent = profile == 2;
     return float3(
-        calibrated_soft_clip_channel(color.r, low.r, low_soft.r, high.r, high_soft.r),
-        calibrated_soft_clip_channel(color.g, low.g, low_soft.g, high.g, high_soft.g),
-        calibrated_soft_clip_channel(color.b, low.b, low_soft.b, high.b, high_soft.b)
+        calibrated_soft_clip_channel(color.r, low.r, low_soft.r, high.r, high_soft.r, encoded_input, independent),
+        calibrated_soft_clip_channel(color.g, low.g, low_soft.g, high.g, high_soft.g, encoded_input, independent),
+        calibrated_soft_clip_channel(color.b, low.b, low_soft.b, high.b, high_soft.b, encoded_input, independent)
     );
 }
 """

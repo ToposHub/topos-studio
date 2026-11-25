@@ -119,7 +119,9 @@ def _has_warper(payload: Mapping[str, Any]) -> bool:
 
 def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | None:
     """可点态表达的 warper → (offsets ndarray, space int);否则 None。"""
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+    from src.features.color.core.warper_color import (
+        RESOLVE_HS709_SPACES, WARPER_CHROMA709_SPACE, WARPER_PREPARED_SPACES,
+    )
     from src.features.color.core.warper_state import (
         HS_GRID_NAME,
         WarperStateError,
@@ -132,10 +134,12 @@ def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | No
             space = int(payload.get("warper_space", 0) or 0)
         except (TypeError, ValueError):
             return None
-        if space in (0, 1, 2, *RESOLVE_HS709_SPACES):
-            components = 3 if space in RESOLVE_HS709_SPACES else 2
+        if space in (0, 1, 2, *WARPER_PREPARED_SPACES):
+            components = 3 if space in WARPER_PREPARED_SPACES else 2
             if (offsets.ndim == 3 and offsets.shape[2] == components
-                    and min(offsets.shape[:2]) >= 2 and np.isfinite(offsets).all()):
+                    and offsets.shape[0] >= 2
+                    and (offsets.shape[1] == 1 if space == WARPER_CHROMA709_SPACE else offsets.shape[1] >= 2)
+                    and np.isfinite(offsets).all()):
                 return offsets, space
         return None
     raw_state = payload.get("warper_state")
@@ -148,6 +152,8 @@ def _pointwise_warper(payload: Mapping[str, Any]) -> tuple[np.ndarray, int] | No
         if offsets is None and space in RESOLVE_HS709_SPACES:
             # Enabling 709 or creating pins alone is exportable identity.
             offsets = state.grids[HS_GRID_NAME].offsets
+        if offsets is None and space == WARPER_CHROMA709_SPACE:
+            return np.zeros((2, 2, 2), dtype=np.float32), 0
         return (offsets, space) if offsets is not None else None
     return None
 
@@ -192,12 +198,12 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
     warper = _pointwise_warper(layer)
     if warper is not None:
         from src.features.color.core.warper_color import (
-            RESOLVE_HS709_SPACES,
+            WARPER_PREPARED_SPACES,
             apply_warper_in_space,
             apply_warper_legacy_hsv,
         )
         offsets, space = warper
-        if space in RESOLVE_HS709_SPACES:
+        if space in WARPER_PREPARED_SPACES:
             from src.features.color.core.warper_color import apply_resolve_hs709
 
             out = apply_resolve_hs709(out, offsets, space).astype(np.float64, copy=False)

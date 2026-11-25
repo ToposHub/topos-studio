@@ -205,6 +205,16 @@ resolution_readbacks` 在命令循环里轮询，fence 就绪后 emit）；PBO �
   （if u_sc_enabled）→ mixer → warper → 3D LUT → 插件 `process_P{i}` →
   blend_mode → `mix(color, blended, mask * u_opacity)` → film grain → 输出
   `vec4(color, tex_color.a)`。
+- 色彩扭曲器保存各面板的控制数据和算法版本。色相–饱和度与色度–亮度可以叠加，
+  色度扭曲使用自己的笔画和固定点。执行 DTO 根据当前模式派生控制载荷，CPU、OpenGL
+  和 Metal 在既有 warper 阶段采样同一响应纹理。查看器暂停取样在 Corrector 的
+  `image` 输入纹理还在租约内时完成。回传的低分辨率浮点样本带节点、帧和源身份，
+  用于密度、取色和 Option 临时遮罩。网格显示从已编辑点与锁点求解，保存和渲染保留原始
+  控制约束。Chroma–Luma 的画布与颜色计算共用网格插值。Hue–Saturation 的
+  可选 `white_point` 记录中心位置和亮度，旧项目缺此字段时中心保持中性。
+  Warper 手势的逐步预览只提交到调色合并队列，松手再提交节点的完整状态。
+  同一节点和视频帧内的采样刷新保留已有分布，新的已确认样本一次性替换旧分布。
+  [色彩扭曲器实测](../validation/resolve_warper_calibration.md)
 - 雾化在现有 `effects_params` 中保存 `mist_enabled`、`mist_radius`（0–1）和
   `mist_mix`（0–100）。旧工程缺字段时关闭，打开后默认半径 0、Mixer 33。
   片段级 OpenGL、Metal 纹理预览和 CPU 视频交付使用相同的扩散采样权重。
@@ -381,7 +391,7 @@ front 双缓冲 + fence 的完整协议：
 | full-res 导出目标 | `_full_res_color_output_*` | 全分辨率 | RGBA **f4** | 独立于 live ColorOutput（防导出挤占消费者） |
 | scope 私有目标 | `_scope_color_output_*` | 质量档尺寸 | RGBA f2 | 独立（防档位切换失效 Composite 纹理） |
 | **matte 缓存** | `matte_cache` | `layer_id → (matte tex, params_hash)` | R16F f2 单通道 | params_hash 失配重建；视口重采样纹理逐帧释放 |
-| 层 aux 纹理 | `layer_textures` | `(layer_id, type)`：curves (256,1)×3ch / hsl_curve (6,256) R / warper RG / lut3d 3D / mask R8 | f4（mask 为 **f1**） | write-in-place 复用；REMOVE_LAYER/CLEAR 释放 |
+| 层 aux 纹理 | `layer_textures` | `(layer_id, type)`：curves (256,1)×3ch / hsl_curve (6,256) R / warper RG 或 RGB 响应 / lut3d 3D / mask R8 | f4（mask 为 **f1**） | write-in-place 复用；REMOVE_LAYER/CLEAR 释放 |
 | YUV→RGB 输出环 | `_yuv_rgb_output_cache` | 尺寸 → 3 个纹理 ring | RGBA f2 | 永久缓存（注意：按尺寸累积，审查 AUD-0202 指出无上限） |
 | 临时纹理池 | `FramebufferManager` | `(w,h,components,dtype)` | 任意 | get/release 对象池；ColorOutput 临时纹理经 ExitStack 保证全路径归还 |
 | composition program | `ShaderPipeline.comp_cache` | §2.3 结构化键 | GLSL | 结构变更前命中；`release()` 去重释放 |
@@ -406,6 +416,9 @@ pool/uploader → **composition program（在引用它的 VAO 之后）** → �
 - **float32（`'f4'`）用于"精确值"语义**：全分辨率导出目标与 source 覆盖纹理、
   curves LUT、HSL 曲线 LUT（R32F）、warper 网格（RG32F）、3D LUT、PBO/同步
   读回——曲线采样点与导出不应引入 f2 量化。
+- **HSL 曲线 LUT**按节点的曲线版本由控制点重建。六条曲线各占一列，传统、
+  初版校准与 v3 分别使用 256、512 与 1024 行。CPU、OpenGL 与 Metal 按同一
+  采样布局选择计算模型。v3 的 YRGB 段沿用 v2 算法。
 - **CPU 侧量化点**：输入归一化 `uint8/255`、`uint16/65535`；CPU mask 纹理
   uint8（→ f1 纹理，仅作权重足够）；导出读回 `fbo.read(dtype='f4')` → BGR
   float32 ndarray（应用层契约）；grain seed 恒为 `[0,1)` float，按黄金比例
@@ -621,3 +634,9 @@ CPU 和 OpenGL 共享浮点色域矩阵与 PQ、HLG、Intermediate 曲线。信�
 工程输出独立于桌面选择。桌面可显示 PQ／HLG 信号码值，也可显示 Rec.709 Gamma 2.4 的 SDR 参考转换。后者在桌面量化时裁切超出 SDR 显示范围的样本。工程交付使用输出指定的传递函数和 BT.2020 NCL 矩阵，将 RGB 打包为 10 位视频电平。烧录字幕按工程参考白编码。PQ HEVC 将所选母版峰值和色度写入 ST 2086。HEVC Main 10 在独立进程运行，通过单个共享内存帧缓冲和控制管道输入视频。完成帧数校验和封装后原子发布，取消或失败会删除暂存内容。常规进程内 HEVC 的防崩溃逻辑继续生效。
 
 [工程设置及输入解释](../../src/shared/color/hdr_video_signal.py) · [GPU 转换](../../src/shared/color/video_signal_gl.py) · [Main 10 封装](../../src/shared/export/hdr_hevc_encoder.py) · [实测记录](../validation/resolve_comparison_workflow.md#hdr-桌面预览与交付实测2026-11-25)
+
+### Rec.709 Gamma 2.4 调色域
+
+视频时间线以 Full 范围的 Rec.709 Gamma 2.4 RGB 码值执行调色图。Color 查看器把时间线工作域放入渲染快照，也覆盖时间线与输出空间相同的情况。剪辑预览和交付把同一工作域传入各自的图执行入口。已校准的一级调色、曲线、柔化裁切和色相–饱和度扭曲器直接在码值域应用响应。节点设有独立色彩空间变换时，校准阶段按节点变换后的输入执行。线性图像和线性 LUT 烘焙继续在校准阶段两端进行编码和解码。
+
+校准中间细节在原线性拟合域中采样邻域，在时间线码值域应用增益。OpenGL、Metal 与 CPU 都在双线性插值前解码各邻居。雾化 v2 沿用 `effects_params` 持久化版本、半径和混合值，CPU 和 GPU 共用近中性窄核与宽核过渡。未保存算法版本的旧雾化按原有宽核渲染。视频交付预检从图的输出依赖和节点真实参数读取可保留的处理。 [实测记录](../validation/resolve_comparison_workflow.md#调色工具生产链路复测2026-11-25)

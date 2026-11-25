@@ -44,8 +44,8 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from src.features.color.core.layer import Layer
-from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
-from src.features.color.core.mist import mist_render_params
+from src.features.color.core.curves_soft_clip import soft_clip_calibration_version
+from src.features.color.core.mist import mist_is_calibrated, mist_render_params
 from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
 from src.features.shared.effects.effect_spec import PluginBinding
 
@@ -330,12 +330,15 @@ def build_composition_uniform_manifest(
                                      glsl_type=ub.glsl_type))
     # The compiler emits this only in active GL variants.
     # Append the Metal field so earlier constant-buffer offsets are stable.
-    decls.append(UniformDecl(name="u_cs_calibrated", glsl_type="bool",
+    decls.append(UniformDecl(name="u_cs_profile", glsl_type="int",
                              section="curves_soft_clip"))
     # The grading snippet reads this uniform, so GLSL declares it before the
     # snippet while the Metal constant-buffer field stays appended.
     decls.append(UniformDecl(name="u_mid_detail_calibrated", glsl_type="float",
                              section="header"))
+    decls.append(UniformDecl(name="u_rec709_calibration_encoded", glsl_type="bool",
+                             section="header"))
+    decls.append(UniformDecl(name="u_mist_calibrated", glsl_type="bool", section="header"))
     return CompositionUniformManifest(_layout(decls), warper_space=warper_space if has_warper else 0)
 
 
@@ -490,6 +493,8 @@ def composition_uniform_values(
     values["u_mid_detail"] = float(p.get("mid_detail") or 0.0)
     values["u_mid_detail_calibrated"] = float(
         p.get(PRIMARY_CALIBRATION_VERSION_KEY) == 2)
+    values["u_rec709_calibration_encoded"] = bool(
+        _layer_get(layer, "_rec709_calibration_encoded", False))
     values["u_sharpness"] = float(p.get("sharpness") or 0.0)
     values["u_hue_shift"] = float(p.get("hue_shift") or 0.0)
     values["u_lift_saturation"] = float(p.get("lift_saturation") or 0.0)
@@ -543,6 +548,7 @@ def composition_uniform_values(
     values["u_blur_bokeh"] = float(fx.get("blur_bokeh", 0.0))
     values["u_blur_angle"] = float(fx.get("blur_angle", 0.0))
     values["u_mist_spread"], values["u_mist_amount"] = mist_render_params(fx)
+    values["u_mist_calibrated"] = mist_is_calibrated(fx)
     values["u_aspect_ratio"] = float(aspect_ratio
                                      if aspect_ratio is not None
                                      else width / height)
@@ -567,7 +573,7 @@ def composition_uniform_values(
     csc = _layer_get(layer, "curves_soft_clip") or {}
     if not isinstance(csc, Mapping):
         csc = {}
-    values["u_cs_calibrated"] = uses_calibrated_soft_clip(csc)
+    values["u_cs_profile"] = soft_clip_calibration_version(csc)
     csc_channels = csc.get("channels")
     if not isinstance(csc_channels, Mapping):
         csc_channels = {}

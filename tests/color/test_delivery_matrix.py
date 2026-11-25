@@ -241,7 +241,25 @@ def test_report_from_color_stacks_legacy_flat_keys():
     report = report_from_color_stacks([stack], TARGET_VIDEO)
     by_op = {r.operation: r.delivery for r in report.rows}
     assert set(by_op) == {"primary", "curves", "mixer", "lut"}
-    assert all(v == DELIVERY_DROPPED for k, v in by_op.items() if k != "primary")
+    assert set(by_op.values()) == {DELIVERY_FULL}
+
+
+def test_graph_delivery_reads_live_window_and_qualifier_payloads() -> None:
+    from dataclasses import replace
+    from src.features.color.core.color_graph_migration import migrate_legacy_stack
+
+    layer = _layer(mask_shapes=[{"id": "w1", "type": "circle"}],
+                   qualifier_params={"enabled": True, "clean_black": 0.1})
+    snapshot = _stack(layers=({"id": "corrector", **layer},), trackings={
+        "bindings": [{"shape_id": "w1", "transforms": {"12": {"matrix": [1.0]}}}],
+    })
+    graph = migrate_legacy_stack(snapshot)
+    stack = replace(snapshot, color_graph=graph, layers=(_layer(active_lut_path="/stale.cube"),))
+    rows = {row.operation: row.delivery for row in report_from_color_stacks((stack,), TARGET_VIDEO).rows}
+    assert rows["windows"] == DELIVERY_FULL
+    assert rows["qualifier_postprocess"] == DELIVERY_FULL
+    assert rows["tracking"] == DELIVERY_DROPPED
+    assert "lut" not in rows
 
 
 def test_report_from_color_stacks_tracking():

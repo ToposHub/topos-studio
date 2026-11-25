@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QToolButton
+from PyQt6.QtWidgets import QGraphicsView, QToolButton
 from pytestqt.qtbot import QtBot
 
 from src.features.color.adapters.warper_command_adapter import WarperCommandAdapter
@@ -16,7 +16,8 @@ from src.features.color.core.layer import Layer
 from src.features.color.core.warper_commands import WarperCommandService
 from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
 from src.features.color.core.warper_state import (
-    RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2, WARPER_SCHEMA_VERSION, WarperGrid, WarperPin, WarperStateV2,
+    RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2, RESOLVE_HS_ALGORITHM_V3,
+    WARPER_SCHEMA_VERSION, WarperGrid, WarperPin, WarperStateV2,
 )
 from src.features.color.ui.color_wheel import GradingPanel
 from src.features.color.ui.panel_chrome import PARAMETER_BAR_HEIGHT
@@ -56,7 +57,7 @@ def test_calibrated_rectangular_grid_numeric_edits_and_hydration(panel: WarperPa
     panel._use_measured_warper = lambda: True
     panel.load_layer_state(layer)
     assert layer.warper_state is None
-    assert not panel.space_combo.isEnabled()
+    assert panel.space_combo.isEnabled()
 
     panel.link_button.click()
     panel.grid_combo.setCurrentText("8")
@@ -65,7 +66,7 @@ def test_calibrated_rectangular_grid_numeric_edits_and_hydration(panel: WarperPa
     assert canvas.selected_values() == pytest.approx({"hue": 0.0, "sat": 1 / np.sqrt(3), "luma": 0.5})
 
     panel.hs_tools.values["hue"].setValue(0.075)
-    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM_V2
+    assert layer.warper_state.algorithm_version == RESOLVE_HS_ALGORITHM_V3
     panel.hs_tools.values["sat"].setValue(0.74)
     value = panel.hs_tools.values["luma"]
     value.interaction_started.emit()
@@ -424,7 +425,8 @@ def test_chroma_warp_strokes_pins_parameters_and_escape(panel: WarperPanel) -> N
     canvas.tool = "point_stroke"
     QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=canvas._screen([0.3, 0.3]).toPoint())
     QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=canvas._screen([0.6, 0.5]).toPoint())
-    assert len(canvas.strokes) == 1
+    assert len(canvas.strokes) == 2
+    assert all(stroke["path"][0] == stroke["path"][1] for stroke in canvas.strokes)
     assert canvas.strokes[0]["parameters"]["stroke_mode"] == "point_to_point"
     assert panel.stroke_tools.mode_buttons["point_to_point"].isChecked()
     canvas.tool = "add_pin"
@@ -445,9 +447,94 @@ def test_chroma_warp_strokes_pins_parameters_and_escape(panel: WarperPanel) -> N
     assert canvas.pins[0]["position"] == before
     canvas.selected = ("stroke", 0)
     canvas.delete_selection()
-    assert not canvas.strokes
+    assert len(canvas.strokes) == 1
     # The contract is ordinary serializable presentation data.
     json.dumps(panel.ui_state())
+
+
+def test_hosted_chroma_palettes_keep_grade_and_selection_across_node_reload(panel: WarperPanel) -> None:
+    from src.features.color.core.warper_color import WARPER_CHROMA709_SPACE
+
+    layer = Layer("Warper")
+    service = WarperCommandService()
+    adapter = WarperCommandAdapter(service, lambda: layer)
+
+    def submit(command: dict) -> None:
+        result = adapter.submit(command)
+        assert result["ok"], result
+        if result["dirty"] and command["payload"]["phase"] != "update":
+            panel.load_layer_state(layer)
+
+    panel.command_requested.connect(submit)
+    panel.load_layer_state(layer)
+    panel.mode_buttons["chroma_luma"].click()
+    cl = panel.chroma_luma
+    click_point(cl, (3, 3))
+    panel.cl_tools.values["luma"].setValue(0.6)
+    assert cl.selected == {(3, 3)}
+    assert layer.warper_space == WARPER_CHROMA709_SPACE
+    assert layer.warper_state.grids["grid1"].offsets[3, 3, 1] == pytest.approx(0.1)
+
+    panel.mode_buttons["chroma_warp"].click()
+    cw = panel.chroma_warp
+    QTest.mousePress(cw, Qt.MouseButton.LeftButton, pos=cw._screen([0.33, 0.33]).toPoint())
+    QTest.mouseRelease(cw, Qt.MouseButton.LeftButton, pos=cw._screen([0.42, 0.39]).toPoint())
+    assert cw.selected == ("stroke", 0)
+    stroke_id = layer.warper_state.strokes[0].stroke_id
+    panel.stroke_tools.values["exposure"].setValue(0.5)
+    assert cw.selected == ("stroke", 0)
+    assert layer.warper_state.strokes[0].params["exposure"] == 0.5
+    panel.mode_buttons["chroma_luma"].click()
+    assert layer.warper_state.mode == "chroma_luma"
+    assert layer.warper_state.for_mode("chroma_warp").strokes[0].stroke_id == stroke_id
+    assert layer.to_dict() == Layer.from_dict(layer.to_dict()).to_dict()
+    assert service.revision(layer) == 5
+
+
+def test_viewer_chroma_sample_rejects_old_target_and_selects_color(panel: WarperPanel, qtbot: QtBot) -> None:
+    view = QGraphicsView()
+    qtbot.addWidget(view)
+    view.setSceneRect(0, 0, 100, 100)
+    view.resize(142, 142)
+    view.show()
+    panel.bind_viewer(view, lambda: None)
+    panel.load_layer_state(Layer("Warper"))
+    first = panel.request_viewer_input("first", (1,))
+    second = panel.request_viewer_input("second", (2,))
+    green = np.full((2, 2, 3), [0.0, 0.72, 0.0], dtype=np.float32)
+    red = np.full((2, 2, 3), [0.8, 0.0, 0.0], dtype=np.float32)
+    panel.accept_viewer_input((second, (0, 0, 100, 100), True, green))
+    panel.accept_viewer_input((first, (0, 0, 100, 100), True, red))
+    assert panel.warper.density_overlays
+    panel.picker_button.setChecked(True)
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=view.mapFromScene(50, 50))
+    assert panel.warper.selected == {(5, 2)}
+
+
+def test_hosted_hs_color_space_changes_preserve_the_edit_coordinates(panel: WarperPanel) -> None:
+    from src.features.color.core.warper_state import HS_SPACES709_ALGORITHM
+
+    layer = Layer("Warper")
+    adapter = WarperCommandAdapter(WarperCommandService(), lambda: layer)
+
+    def submit(command: dict) -> None:
+        result = adapter.submit(command)
+        assert result["ok"], result
+        if result["dirty"] and command["payload"]["phase"] != "update":
+            panel.confirm_mesh_edit(layer.warper_state)
+
+    panel.command_requested.connect(submit)
+    panel._use_measured_warper = lambda: True
+    panel.load_layer_state(layer)
+    panel.warper.selected = {(2, 0)}
+    panel.warper.edit_component("hue", 0.075)
+    baseline = layer.warper_state.grids["hs"].offsets.copy()
+    for space in ("HSV", "HSL", "HSY", "HSP"):
+        panel.space_combo.setCurrentText(space)
+        assert layer.warper_state.color_space == space.lower()
+        assert layer.warper_state.algorithm_version == (
+            RESOLVE_HS_ALGORITHM_V3 if space == "HSP" else HS_SPACES709_ALGORITHM)
+        np.testing.assert_array_equal(layer.warper_state.grids["hs"].offsets, baseline)
 
 
 def test_hydration_none_cancels_pending_and_clears_selection(panel: WarperPanel, qtbot: QtBot) -> None:

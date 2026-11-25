@@ -106,6 +106,7 @@ class WarperRange(QWidget):
         self.grid_index = 0
         self.low, self.high = 0.0, 1.0
         self._handle: str | None = None
+        self._press: tuple[float, float, float] | None = None
         self.setFixedHeight(18)
         self.setAccessibleName(tr("range", "Range"))
         self.setToolTip(tr("range_help", "Drag to select a range; double-click to reset"))
@@ -118,8 +119,8 @@ class WarperRange(QWidget):
             colors = ("#595b35", "#515093") if self.grid_index == 0 else ("#316955", "#934b73")
             gradient.setColorAt(0, QColor(colors[0])); gradient.setColorAt(1, QColor(colors[1]))
         else:
-            for i, color in enumerate(("#2a00dd", "#a800ef", "#ff006b", "#ff1400", "#fff000", "#00ef00", "#00ddc7", "#0011ee")):
-                gradient.setColorAt(i / 7, QColor(color))
+            for i in range(7):
+                gradient.setColorAt(i / 6, QColor.fromHsv((240 + i * 60) % 360, 255, 238))
         p.setPen(QPen(QColor(C.PANEL_DIVIDER), 1)); p.setBrush(gradient)
         p.drawRoundedRect(rect, 2, 2)
         if self.low > 0 or self.high < 1:
@@ -134,24 +135,46 @@ class WarperRange(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
-        x = event.position().x() / max(1, self.width())
-        self._handle = "low" if abs(x - self.low) <= abs(x - self.high) else "high"
-        self.mouseMoveEvent(event)
+        x = self._position(event)
+        self._press = x, self.low, self.high
+        tolerance = 6 / max(1, self.width() - 2)
+        low_distance, high_distance = abs(x - self.low), abs(x - self.high)
+        if min(low_distance, high_distance) <= tolerance:
+            self._handle = "low" if low_distance <= high_distance else "high"
+        elif (self.low > 0 or self.high < 1) and self.low < x < self.high:
+            self._handle = "translate"
+        else:
+            self._handle = "draw"
+
+    def _position(self, event: QMouseEvent) -> float:
+        return max(0.0, min(1.0, (event.position().x() - 1) / max(1, self.width() - 2)))
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._handle is None:
+        if self._press is None:
             return
-        value = max(0.0, min(1.0, event.position().x() / max(1, self.width())))
-        if self._handle == "low":
-            self.low = min(value, self.high)
-        else:
-            self.high = max(value, self.low)
-        self.range_changed.emit(self.low, self.high); self.update()
+        origin, low, high = self._press
+        value = self._position(event)
+        if self._handle == "translate":
+            delta = min(1.0 - high, max(-low, value - origin))
+            self.low, self.high = low + delta, high + delta
+        elif self._handle == "draw":
+            self.low, self.high = sorted((origin, value))
+        elif self._handle == "low":
+            self.low, self.high = min(low + value - origin, high), high
+        elif self._handle == "high":
+            self.low, self.high = low, max(high + value - origin, low)
+        self.low, self.high = max(0.0, self.low), min(1.0, self.high)
+        self.range_changed.emit(self.low, self.high)
+        self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        self._handle = None
+        if event.button() == Qt.MouseButton.LeftButton and self._handle is not None:
+            self.mouseMoveEvent(event)
+            self._handle = None
+            self._press = None
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        self._handle = self._press = None
         self.low, self.high = 0.0, 1.0
         self.range_changed.emit(self.low, self.high); self.update()
 
@@ -260,7 +283,8 @@ class MeshTools(QWidget):
             value_label.setEnabled(False)
             self.value_labels[name] = value_label
             number_row.addWidget(value_label)
-            value = DragValue("", -1 if name == "chroma" else 0, 1, 0, 3, compact=True)
+            lower, upper = (-0.5, 0.5) if name == "chroma" else (0.0, 1.0)
+            value = DragValue("", lower, upper, 0, 2 if rectangular else 3, compact=True)
             value.setFixedValueWidth(42)
             value.setFixedSize(42, PARAMETER_ROW_HEIGHT)
             value.setAccessibleName(tr(name, label)); value.setMixedValue(True); value.setEnabled(False)
@@ -311,36 +335,36 @@ class StrokeTools(QWidget):
             QLabel {{ font-size: 11px; }}
             QLabel:disabled {{ color: {C.TEXT_HINT}; }}
         """)
-        layout = QVBoxLayout(self); layout.setContentsMargins(10, 7, 10, 10); layout.setSpacing(2)
+        layout = QVBoxLayout(self); layout.setContentsMargins(6, 5, 6, 5); layout.setSpacing(2)
         title_label = QLabel(tr("tools", "Tools"))
         title_label.setStyleSheet(SECTION_TITLE_STYLE)
         layout.addWidget(title_label)
-        layout.addSpacing(4)
+        layout.addSpacing(2)
         row = QHBoxLayout(); row.setSpacing(0)
         group = QButtonGroup(self); group.setExclusive(True)
         for name, label in (("stroke", "Add Stroke - Normal Mode"), ("point_stroke", "Add Stroke - Point To Point Mode"),
                             ("add_pin", "Add Pin Point"), ("select", "Select")):
-            button = tool_button(name, tr(name, label), True)
+            button = _sidebar_button(name, tr(name, label), True)
             group.addButton(button); button.setChecked(name == "stroke")
             button.clicked.connect(lambda checked=False, key=name: self.tool_selected.emit(key))
             row.addWidget(button); self.tool_buttons[name] = button
-        self.delete_button = tool_button("delete", tr("delete", "Delete the selected Strokes and Pin Points"))
+        self.delete_button = _sidebar_button("delete", tr("delete", "Delete the selected Strokes and Pin Points"))
         self.delete_button.setEnabled(False); self.delete_button.clicked.connect(lambda: self.action_requested.emit("delete"))
+        _join_buttons(*self.tool_buttons.values(), self.delete_button)
         row.addWidget(self.delete_button); layout.addLayout(row)
-        layout.addSpacing(6); layout.addWidget(separator()); layout.addSpacing(6)
+        layout.addSpacing(2); layout.addWidget(separator()); layout.addSpacing(2)
         title = QHBoxLayout()
         self.pin_label = QLabel(tr("pin_title", "Pin")); self.pin_label.setEnabled(False)
         self.pin_label.setStyleSheet(SECTION_TITLE_STYLE)
         title.addWidget(self.pin_label); title.addStretch()
-        reset = tool_button("reset", tr("reset_pin", "Reset Pin"))
-        style_reset_button(reset)
+        reset = reset_button(tr("reset_pin", "Reset Pin"))
         reset.clicked.connect(lambda: self.action_requested.emit("reset_pin")); title.addWidget(reset)
         layout.addLayout(title)
         self.pin_reset = reset
         for key, label, low, high, default in (
             ("chroma_range", "Chroma Range", 0.0, 1.0, 0.04),
-            ("tonal_low", "Tonal Range Low", 0.0, 2.0, 1.0),
-            ("tonal_high", "Tonal Range High", 0.0, 2.0, 1.0),
+            ("tonal_low", "Tonal Range Low", 0.0, 1.0, 1.0),
+            ("tonal_high", "Tonal Range High", 0.0, 1.0, 1.0),
             ("tonal_pivot", "Tonal Range Pivot", 0.0, 1.0, 0.5),
             ("exposure", "Exposure", -8.0, 8.0, 0.0),
         ):
@@ -363,22 +387,28 @@ class StrokeTools(QWidget):
         self.mode_buttons: dict[str, QToolButton] = {}
         group = QButtonGroup(self); group.setExclusive(True)
         for key, icon, fallback in (("normal", "stroke", "Normal Mode"), ("point_to_point", "point_stroke", "Point to Point Mode")):
-            button = tool_button(icon, tr(f"{key}_mode", fallback), True); button.setFixedWidth(46)
+            button = _sidebar_button(icon, tr(f"{key}_mode", fallback), True); button.setFixedWidth(46)
             group.addButton(button); button.setChecked(key == "normal"); button.setEnabled(False)
             button.clicked.connect(lambda checked=False, key=key: self.parameter_edited.emit("stroke_mode", key))
             modes.addWidget(button); self.mode_buttons[key] = button
+        _join_buttons(*self.mode_buttons.values())
         modes.addStretch(); layout.addLayout(modes); layout.addStretch()
 
-    def sync_selection(self, selected: bool, parameters: dict[str, float | str]) -> None:
+    def sync_selection(self, selected: bool, parameters: dict[str, float | str], *, pin: bool = False) -> None:
         self.delete_button.setEnabled(selected); self.pin_reset.setEnabled(selected)
         self.pin_label.setEnabled(selected)
+        self.pin_label.setText(tr("pin_title", "Pin") if pin or not selected else tr("stroke_title", "Stroke"))
+        reset = tr("reset_pin", "Reset Pin") if pin or not selected else tr("reset_stroke", "Reset Stroke")
+        self.pin_reset.setToolTip(reset)
+        self.pin_reset.setAccessibleName(reset)
         for key, value in self.values.items():
-            value.setEnabled(selected)
-            self.value_labels[key].setEnabled(selected)
+            enabled = selected and (not pin or key == "chroma_range")
+            value.setEnabled(enabled)
+            self.value_labels[key].setEnabled(enabled)
             value.blockSignals(True); value.setValue(float(parameters[key])); value.blockSignals(False)
-            slider = self.sliders[key]; slider.setEnabled(selected)
+            slider = self.sliders[key]; slider.setEnabled(enabled)
             slider.blockSignals(True)
             slider.setValue(round((value.value() - value._min) / (value._max - value._min) * 1000))
             slider.blockSignals(False)
         for key, button in self.mode_buttons.items():
-            button.setEnabled(selected); button.setChecked(key == parameters["stroke_mode"])
+            button.setEnabled(selected and not pin); button.setChecked(not pin and key == parameters["stroke_mode"])

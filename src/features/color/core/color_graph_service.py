@@ -1549,7 +1549,7 @@ class ColorGraphService:
         "curves_edit": (None, "curves_edit"),
         "curves_soft_clip": (None, "curves_soft_clip"),
         "hsl": (None, "hsl_curve_data"),
-        "mixer": (None, "mixer_params"),
+        "mixer": ("mixer", "mixer_params"),
         "soft_clip": (None, "soft_clip_params"),
         "qualifier": ("qualifier", None),
         "keyframes": ("grade_keyframes", None),

@@ -314,7 +314,7 @@ def test_resample_remaps_pins_deterministically() -> None:
 def test_capabilities_reflect_backend_reality() -> None:
     empty = describe_warper_capabilities(None, legacy=None, revision=3)
     assert empty.as_dict() == {"enabled": True, "reason": "bypass",
-                               "supported_modes": ["hue_saturation"],
+                               "supported_modes": ["hue_saturation", "chroma_luma", "chroma_warp"],
                                "backend": "none", "revision": 3}
     legacy = describe_warper_capabilities(legacy_from_ndarray(np.zeros((8, 8, 2), np.float32)))
     assert legacy.enabled and legacy.backend == "legacy_hsv_glsl"

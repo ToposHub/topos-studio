@@ -68,6 +68,21 @@ def _handle_center_x(slider) -> float:
     return hr.center().x()
 
 
+def test_groove_span_keeps_a_stationary_grab_and_applies_the_release(slider):
+    slider.use_groove_drag_span = True
+    slider.setStyleSheet("QSlider::handle:horizontal { width: 10px; }")
+    handle = slider._handle_rect().center()
+    _, span, _ = slider._groove_drag_geometry()
+    updates = []
+    slider.valueChanged.connect(updates.append)
+    slider.mousePressEvent(_press(handle.x(), handle.y()))
+    slider.mouseReleaseEvent(_release(handle.x(), handle.y()))
+    assert not updates
+    slider.mousePressEvent(_press(handle.x(), handle.y()))
+    slider.mouseReleaseEvent(_release(handle.x() + span // 4, handle.y()))
+    assert updates == [500 + round(1000 * (span // 4) / span)]
+
+
 # ── opt-in default ───────────────────────────────────────────────────────────
 
 def test_velocity_drag_disabled_by_default(qapp):

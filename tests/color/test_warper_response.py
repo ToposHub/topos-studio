@@ -7,8 +7,41 @@ import pytest
 from src.features.color.core.warper_color import (
     RESOLVE_HS709_SPACE,
     RESOLVE_HS709_V2_SPACE,
+    RESOLVE_HS709_V3_SPACE,
+    WARPER_CHROMA709_SPACE,
     apply_resolve_hs709,
+    apply_resolve_hs709_texture,
+    prepare_resolve_hs709_texture,
 )
+
+
+@pytest.mark.parametrize("index, maximum", [(0, 10.0), (1, 5.0), (2, 18.0), (3, 3.5)])
+def test_refined_warper_improves_held_out_multi_axis_settings(index: int, maximum: float) -> None:
+    fixture = Path(__file__).with_name("fixtures") / "resolve_warper_rec709_g24_v3.npz"
+    with np.load(fixture, allow_pickle=False) as data:
+        rgb = data["before"][:4096].astype(np.float32) / 65535.0
+        expected = data["targets"][index, :4096].astype(np.float32) / 65535.0
+        offsets = data["offsets"][index]
+    errors = []
+    for space in (RESOLVE_HS709_V2_SPACE, RESOLVE_HS709_V3_SPACE):
+        texture = prepare_resolve_hs709_texture(offsets, space)
+        output = apply_resolve_hs709_texture(rgb, texture, space, encoded_input=True)
+        errors.append(float(np.sqrt(np.mean((output.clip(0.0, 1.0) - expected) ** 2)) * 1023))
+    assert errors[1] < min(errors[0], maximum)
+
+
+@pytest.mark.parametrize("index, maximum", [(0, 14.0), (1, 15.0), (2, 20.0), (3, 15.0)])
+def test_chroma_response_on_held_out_resolve_gestures(index: int, maximum: float) -> None:
+    fixture = Path(__file__).with_name("fixtures") / "resolve_chroma_rec709_g24.npz"
+    with np.load(fixture, allow_pickle=False) as data:
+        rgb = data["before"][:4096].astype(np.float32) / 65535.0
+        expected = data["targets"][index, :4096].astype(np.float32) / 65535.0
+        controls = data[f"controls_{index}"]
+    texture = prepare_resolve_hs709_texture(controls, WARPER_CHROMA709_SPACE)
+    output = apply_resolve_hs709_texture(rgb, texture, WARPER_CHROMA709_SPACE, encoded_input=True)
+    rmse = np.sqrt(np.mean((output.clip(0.0, 1.0) - expected) ** 2)) * 1023
+    baseline = np.sqrt(np.mean((rgb - expected) ** 2)) * 1023
+    assert rmse < min(baseline, maximum)
 
 
 @pytest.fixture(scope="module")
@@ -46,6 +79,9 @@ def test_v2_matches_resolve_on_independent_rgb_patches(
     source = patches ** 2.4
     v1 = apply_resolve_hs709(source, offsets, RESOLVE_HS709_SPACE)
     v2 = apply_resolve_hs709(source, offsets, RESOLVE_HS709_V2_SPACE)
+    texture = prepare_resolve_hs709_texture(offsets, RESOLVE_HS709_V2_SPACE)
+    encoded_v2 = apply_resolve_hs709_texture(
+        patches, texture, RESOLVE_HS709_V2_SPACE, encoded_input=True)
     # Exclude the gray ramp here. TIFF comparison clips the final output to the
     # file's format while the renderer itself preserves extended-range RGB.
     rgb_patches = slice(0, 4096)
@@ -53,6 +89,10 @@ def test_v2_matches_resolve_on_independent_rgb_patches(
     error_v2 = np.mean((np.clip(v2, 0.0, 1.0) ** (1.0 / 2.4) - target)[rgb_patches] ** 2)
     assert np.sqrt(error_v2) * 1023.0 < max_error
     assert error_v2 < error_v1
+    np.testing.assert_allclose(
+        np.clip(encoded_v2, 0.0, 1.0),
+        np.clip(v2, 0.0, 1.0) ** (1.0 / 2.4), atol=2e-6, rtol=0,
+    )
     np.testing.assert_array_equal(v2[4096:], source[4096:])
 
 

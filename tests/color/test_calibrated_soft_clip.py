@@ -70,6 +70,36 @@ def test_calibrated_soft_clip_state_survives_project_round_trip() -> None:
     np.testing.assert_array_equal(graded[:, 1:], source[:, 1:])
 
 
+@pytest.mark.parametrize("channels,controls,expected", [
+    ("RGB", (0.25, 0.5, 0.75, 0.5),
+     (16983, 17104, 17239, 17558, 17948, 18416, 21210, 32704, 47071, 47547, 47944, 48269, 48530)),
+    ("RGB", (0.1875, 0.5, 0.8125, 0.4375),
+     (14183, 14417, 14667, 15221, 15849, 16556, 20253, 32698, 49101, 49832, 50482, 51052, 51549)),
+    ("RGB", (-0.125, 0.4375, 0.8125, 0.0),
+     (3606, 4272, 4956, 6379, 7876, 9446, 16456, 32688, 53159, 53159, 53159, 53159, 53159)),
+    ("G", (0.1875, 0.5, 0.875, 0.4375),
+     (14183, 14416, 14666, 15220, 15848, 16555, 20252, 32696, 50700, 51651, 52523, 53317, 54035)),
+], ids=["overlap", "asymmetric-overlap", "hard-high-with-low-soft", "green-only"])
+def test_independent_soft_clip_matches_resolve_ramp(
+    channels: str, controls: tuple[float, ...], expected: tuple[int, ...],
+) -> None:
+    keys = ("low_clip", "low_soft", "high_clip", "high_soft")
+    raw = dict(zip(keys, controls))
+    state = normalize_curves_soft_clip({
+        "calibration_version": 2, "channels": {ch: raw for ch in channels},
+    })
+    assert all(state["channels"][ch] == raw for ch in channels)
+    source = np.repeat(np.array((0, 1025, 2050, 4100, 6150, 8200, 16400,
+                                 32800, 57335, 59385, 61435, 63485, 65535),
+                                dtype=np.float32)[:, None] / 65535.0, 3, axis=1)
+    result = apply_curves_soft_clip_image(source, state, encoded_input=True)
+    for idx, channel in enumerate("RGB"):
+        if channel in channels:
+            np.testing.assert_allclose(result[:, idx] * 65535.0, expected, atol=1, rtol=0)
+        else:
+            np.testing.assert_array_equal(result[:, idx], source[:, idx])
+
+
 def test_calibrated_gl_soft_clip_matches_cpu_and_refreshes_version() -> None:
     moderngl = pytest.importorskip("moderngl")
 
@@ -82,6 +112,10 @@ def test_calibrated_gl_soft_clip_matches_cpu_and_refreshes_version() -> None:
     }
     legacy = normalize_curves_soft_clip({"channels": controls})
     calibrated = {**legacy, "calibration_version": 1}
+    independent = normalize_curves_soft_clip({"calibration_version": 2, "channels": {
+        "R": {"low_clip": 0.25, "low_soft": 0.5, "high_clip": 0.75, "high_soft": 0.5},
+        "B": {"high_clip": 0.875, "low_soft": 0.4},
+    }})
     source = np.asarray([[[-0.05, 1.3, 0.90, 0.25],
                           [0.00, -0.05, 1.15, 0.50],
                           [0.10, 0.50, 0.75, 0.75]]], dtype=np.float16)
@@ -91,7 +125,7 @@ def test_calibrated_gl_soft_clip_matches_cpu_and_refreshes_version() -> None:
         pytest.skip(f"No standalone OpenGL context: {exc}")
     pipeline = ShaderPipeline(ctx)
     try:
-        for state in (calibrated, legacy, calibrated):
+        for state in (independent, calibrated, legacy, independent):
             expected = apply_curves_soft_clip_image(source[..., :3], state)
             actual = run_serial_passes(ctx, pipeline, source, [{"curves_soft_clip": state}])
             np.testing.assert_allclose(actual[..., :3], expected, atol=5e-4, rtol=0.0)

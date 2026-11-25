@@ -18,13 +18,14 @@ PEAK_MIN, PEAK_MAX, PEAK_LEVELS = 0.21875, 0.875, 8
 HUE_INTERVALS, SAT_INTERVALS = 144, 64
 PROFILE_HALF_WIDTH = HUE_INTERVALS // 3
 _PROFILE_NAME = "warper_response_rec709_g24_v2.npz"
+_REFINED_PROFILE_NAME = "warper_response_rec709_g24_v3.npz"
 _LUMA_WEIGHTS = np.array((0.238, 0.549, 0.213), dtype=np.float32)
 _COMBINE_EXPONENT = np.float32(1.8)
 
 
-@lru_cache(maxsize=1)
-def _measured_profiles() -> tuple[np.ndarray, np.ndarray]:
-    path = Path(__file__).with_name("data") / _PROFILE_NAME
+@lru_cache(maxsize=2)
+def _read_profiles(name: str) -> tuple[np.ndarray, np.ndarray]:
+    path = Path(__file__).with_name("data") / name
     with np.load(path, allow_pickle=False) as data:
         controls = data["controls"]
         responses = data["responses"].astype(np.float32)
@@ -35,6 +36,15 @@ def _measured_profiles() -> tuple[np.ndarray, np.ndarray]:
             or np.any(controls[:, 3] == 0.0)):
         raise ValueError("Invalid Rec.709 Color Warper calibration profile")
     return controls, responses
+
+
+@lru_cache(maxsize=2)
+def _measured_profiles(refined: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    base = _read_profiles(_PROFILE_NAME)
+    if not refined:
+        return base
+    extra = _read_profiles(_REFINED_PROFILE_NAME)
+    return tuple(np.concatenate((original, supplement)) for original, supplement in zip(base, extra))
 
 
 def _hue_and_chroma(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -104,13 +114,13 @@ def _rescale_hue_response(source: np.ndarray, response: np.ndarray, amount: floa
     return peak[..., None] - chroma[..., None] * (1.0 - _hs709_basis(hue)) - source
 
 
-def build_response_texture(offsets: np.ndarray) -> np.ndarray:
+def build_response_texture(offsets: np.ndarray, *, refined: bool = False) -> np.ndarray:
     """Build a packed trilinear RGB delta field for an editable HSP mesh."""
-    return _build_cached(offsets.shape, np.ascontiguousarray(offsets, dtype=np.float32).tobytes())
+    return _build_cached(offsets.shape, np.ascontiguousarray(offsets, dtype=np.float32).tobytes(), refined)
 
 
 @lru_cache(maxsize=8)
-def _build_cached(shape: tuple[int, ...], mesh: bytes) -> np.ndarray:
+def _build_cached(shape: tuple[int, ...], mesh: bytes, refined: bool) -> np.ndarray:
     offsets = np.frombuffer(mesh, dtype=np.float32).reshape(shape)
     rows, cols, _ = offsets.shape
     hue, source = _coordinates()
@@ -120,7 +130,7 @@ def _build_cached(shape: tuple[int, ...], mesh: bytes) -> np.ndarray:
     remaining[..., 0] = (remaining[..., 0] + 0.5) % 1.0 - 0.5
     remaining[..., 1] = np.clip(remaining[..., 1], -rings, 1.5 - rings)
     remaining[..., 2] = np.clip(remaining[..., 2], -0.5, 0.5)
-    controls, samples = _measured_profiles()
+    controls, samples = _measured_profiles(refined)
     for row, col in np.argwhere(np.any(remaining != 0.0, axis=-1)):
         center, ring = col / cols, (row + 1) / rows
         move = remaining[row, col].copy()

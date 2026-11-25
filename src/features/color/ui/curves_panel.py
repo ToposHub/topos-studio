@@ -18,14 +18,20 @@ from PyQt6.QtWidgets import (
 
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.features.color.core.curves_calibration import (
-    CURVES_CALIBRATION_VERSION, CURVES_CALIBRATION_VERSION_KEY, curves_calibration_enabled,
+    CURVES_CALIBRATION_VERSION_KEY,
+    CUSTOM_CURVES_CALIBRATION_VERSION, HSL_CURVES_CALIBRATION_VERSION,
+    curves_calibration_version,
 )
 from src.features.color.core.curves_soft_clip import (
+    RESOLVE_SOFT_CLIP_BOUNDS,
+    SOFT_CLIP_CALIBRATION_VERSION,
+    SOFT_CLIP_PARAM_KEYS,
+    clamp_resolve_soft_clip_control,
     curves_edit_is_default,
     curves_soft_clip_is_identity,
     normalize_curves_edit,
     normalize_curves_soft_clip,
-    uses_calibrated_soft_clip,
+    soft_clip_calibration_version,
 )
 from src.shared.assets.icon_manager import icon_link, icon_unlink
 from src.shared.i18n.i18n import I18N
@@ -69,10 +75,14 @@ class CurvesPanel(QWidget):
         # 不得触发节流发射（_wiring_ready 在 __init__ 尾部才放行）。
         self._syncing = False
         self._wiring_ready = False
-        self._soft_calibrated = False
+        self._soft_version = 0
+        self._allow_automatic_soft_calibration = False
+        self.soft_calibration_pending = False
+        self.soft_clip_interaction_active = False
         self._use_measured_curves = use_measured_curves
         self._allow_automatic_calibration = False
         self.automatic_calibration_pending = False
+        self.hsl_calibration_pending = False
         # Keep the dock resizable on compact screens while preserving enough
         # room for a useful graph and the channel controls side by side.
         self.setMinimumWidth(420)
@@ -215,7 +225,7 @@ class CurvesPanel(QWidget):
             ("low_clip", "Low"), ("low_soft", "Low Soft"),
             ("high_clip", "High"), ("high_soft", "High Soft"),
         ):
-            row_min, row_max = self._soft_row_range(key, self._soft_defaults)
+            row_min, row_max = self._soft_row_range(key)
             row = ColorParameterRow(
                 I18N.tr(f"curves_palette.{key}", fallback), row_min, row_max,
                 self._soft_defaults[key], step=0.01, decimals=2,
@@ -248,8 +258,8 @@ class CurvesPanel(QWidget):
         self._edit_timer.setInterval(16)
         self._edit_timer.timeout.connect(self._emit_edit_now)
         for row in self.soft_clip_rows.values():
-            row.interactionStarted.connect(self.interaction_started)
-            row.interactionEnded.connect(self._on_row_interaction_ended)
+            row.interactionStarted.connect(self._on_soft_interaction_started)
+            row.interactionEnded.connect(self._on_soft_interaction_ended)
         for row in self.edit_rows.values():
             row.interactionStarted.connect(self.interaction_started)
             row.interactionEnded.connect(self._on_row_interaction_ended)
@@ -426,80 +436,96 @@ class CurvesPanel(QWidget):
         self._schedule_edit_emit()
 
     def _on_soft_row_changed(self, key: str, value: float) -> None:
-        if self._soft_calibrated:
+        if self._soft_version:
             value = (value - _SOFT_CLIP_DISPLAY_OFFSETS.get(key, 0.0)) / 200.0
         self._store_soft_value(key, value)
-        self._schedule_soft_emit()
 
     def _store_soft_value(self, key: str, value: float) -> None:
         targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
+        independent = self._uses_independent_soft_controls()
+        changed = False
         for channel in targets:
-            self._soft_values[channel] = self._clamped_channel(
-                self._soft_values[channel], key, value,
-                decimals=5 if self._soft_calibrated else 2)
+            current = self._soft_values[channel]
+            if independent:
+                updated = {**current, key: clamp_resolve_soft_clip_control(key, round(value, 5))}
+            else:
+                digits = 5 if self._soft_version else 2
+                low, high = self._legacy_soft_edit_bounds(key, current)
+                limited = min(max(round(value, digits), low), high)
+                updated = {**current, key: round(limited, 12)}
+            changed |= updated != current
+            self._soft_values[channel] = updated
+        if changed:
+            if independent:
+                self._soft_version = SOFT_CLIP_CALIBRATION_VERSION
+            self._schedule_soft_emit()
         self._refresh_soft_rows()
 
-    @staticmethod
-    def _clamped_channel(values: dict, key: str, value: float, *, decimals: int = 2) -> dict:
-        """Apply one control change with the shared mobile-app clamps.
-
-        Mirrors ``SoftClipChannelParams.withControl``: clip points stay
-        ordered inside [-1, 2] and the two knee widths share the gap
-        exclusively so ``low_soft + high_soft <= high_clip - low_clip``.
-        """
-        out = dict(values)
-        gap = max(out["high_clip"] - out["low_clip"], 0.0)
-        if key == "low_clip":
-            out["low_clip"] = min(max(value, -1.0), min(1.0, out["high_clip"]))
-            new_gap = max(out["high_clip"] - out["low_clip"], 0.0)
-            out["low_soft"] = min(max(out["low_soft"], 0.0), new_gap)
-            out["high_soft"] = min(
-                max(out["high_soft"], 0.0), max(new_gap - out["low_soft"], 0.0))
-        elif key == "low_soft":
-            out["low_soft"] = min(max(value, 0.0), max(gap - out["high_soft"], 0.0))
-        elif key == "high_clip":
-            out["high_clip"] = min(
-                max(value, max(0.0, out["low_clip"])), 2.0)
-            new_gap = max(out["high_clip"] - out["low_clip"], 0.0)
-            out["low_soft"] = min(max(out["low_soft"], 0.0), new_gap)
-            out["high_soft"] = min(
-                max(out["high_soft"], 0.0), max(new_gap - out["low_soft"], 0.0))
-        else:  # high_soft
-            out["high_soft"] = min(max(value, 0.0), max(gap - out["low_soft"], 0.0))
-        return {name: round(val, decimals) for name, val in out.items()}
+    def _uses_independent_soft_controls(self) -> bool:
+        if self._soft_version == SOFT_CLIP_CALIBRATION_VERSION:
+            return True
+        if self._soft_version != 1 or not (self._use_measured_curves and self._use_measured_curves()):
+            return False
+        if not all(
+            lo <= values[key] <= hi
+            for values in self._soft_values.values()
+            for key, (lo, hi) in RESOLVE_SOFT_CLIP_BOUNDS.items()
+        ):
+            return False
+        if self.soft_clip_link_btn.isChecked():
+            return True
+        # An edit to one old channel may upgrade the node only if its
+        # untouched channels render the same with both versions.
+        for channel, values in self._soft_values.items():
+            if channel == self._soft_channel:
+                continue
+            low, ls, high, hs = (values[key] for key in SOFT_CLIP_PARAM_KEYS)
+            if low + ls > 0.5 or 1.0 - high + hs > 0.5:
+                return False
+            if not hs and high != 1.0 and high - low + ls != min(high, 1.0):
+                return False
+        return True
 
     @staticmethod
-    def _soft_row_range(key: str, values: dict, *, decimals: int = 2) -> tuple[float, float]:
-        """Slider bounds per control, mirroring the mobile SoftClipPanel.
-
-        Bounds snap to the 2-decimal UI grid to avoid float-noise ticks.
-        """
-        gap = max(values["high_clip"] - values["low_clip"], 0.0)
+    def _legacy_soft_edit_bounds(key: str, values: dict) -> tuple[float, float]:
+        """Keep the mobile model legal by limiting only the edited value."""
+        low, high = values["low_clip"], values["high_clip"]
+        low_soft, high_soft = values["low_soft"], values["high_soft"]
         if key == "low_clip":
-            bounds = (-1.0, min(1.0, values["high_clip"]))
-        elif key == "low_soft":
-            bounds = (0.0, max(gap - values["high_soft"], 0.0))
-        elif key == "high_clip":
-            bounds = (max(0.0, values["low_clip"]), 2.0)
-        else:
-            bounds = (0.0, max(gap - values["low_soft"], 0.0))
-        return (round(bounds[0], decimals), round(bounds[1], decimals))
+            return -1.0, min(1.0, high - low_soft - high_soft)
+        if key == "high_clip":
+            return max(0.0, low + low_soft + high_soft), 2.0
+        other_soft = high_soft if key == "low_soft" else low_soft
+        return 0.0, max(0.0, high - low - other_soft)
+
+    @staticmethod
+    def _soft_row_range(key: str) -> tuple[float, float]:
+        """The legacy sliders use the full physical range for each field."""
+        if key == "low_clip":
+            return -1.0, 1.0
+        if key == "high_clip":
+            return 0.0, 2.0
+        return 0.0, 3.0
 
     def _refresh_soft_rows(self) -> None:
         """Push the constrained values of the active channel into the rows."""
         channel = self._soft_values[self._soft_channel]
+        independent = self._uses_independent_soft_controls()
         for key, row in self.soft_clip_rows.items():
             value, default = channel[key], self._soft_defaults[key]
-            row_min, row_max = self._soft_row_range(
-                key, channel, decimals=5 if self._soft_calibrated else 2)
-            if self._soft_calibrated:
+            if independent:
+                row_min, row_max = 0.0, 100.0
+            else:
+                row_min, row_max = self._soft_row_range(key)
+            if self._soft_version:
                 offset = _SOFT_CLIP_DISPLAY_OFFSETS.get(key, 0.0)
-                value = value * 200.0 + offset
+                value = round(value * 200.0 + offset, 2)
                 default = default * 200.0 + offset
-                row_min = min(value, max(0.0, row_min * 200.0 + offset))
-                row_max = max(value, min(100.0, row_max * 200.0 + offset))
+                if not independent:
+                    row_min = min(value, max(0.0, row_min * 200.0 + offset))
+                    row_max = max(value, min(100.0, row_max * 200.0 + offset))
             row.blockSignals(True)
-            row.setDecimals(1 if self._soft_calibrated else 2)
+            row.slider.use_groove_drag_span = independent
             row.setRange(row_min, row_max)
             row.setDefaultValue(default)
             row.setValue(value)
@@ -517,7 +543,8 @@ class CurvesPanel(QWidget):
 
     def _set_soft_linked(self, linked: bool) -> None:
         if linked:
-            values = dict(self._soft_values[self._soft_channel])
+            source = "R" if self._uses_independent_soft_controls() else self._soft_channel
+            values = self._soft_values[source]
             self._soft_values = {ch: dict(values) for ch in "RGB"}
         self.soft_clip_group.setExclusive(False)
         for channel, button in self.soft_clip_buttons.items():
@@ -537,13 +564,7 @@ class CurvesPanel(QWidget):
 
     def _reset_soft_parameter(self, key: str) -> None:
         self.interaction_started.emit()
-        targets = "RGB" if self.soft_clip_link_btn.isChecked() else self._soft_channel
-        for channel in targets:
-            self._soft_values[channel] = self._clamped_channel(
-                self._soft_values[channel], key, self._soft_defaults[key],
-                decimals=5 if self._soft_calibrated else 2)
-        self._refresh_soft_rows()
-        self._schedule_soft_emit()
+        self._store_soft_value(key, self._soft_defaults[key])
         self._on_row_interaction_ended()
 
     def get_ui_state(self) -> dict:
@@ -566,8 +587,8 @@ class CurvesPanel(QWidget):
     def get_soft_clip_payload(self) -> dict:
         """四参数柔化裁切的模型形 payload（``soft_clip_changed`` 载荷）。"""
         return {
-            **({CURVES_CALIBRATION_VERSION_KEY: CURVES_CALIBRATION_VERSION}
-               if self._soft_calibrated else {}),
+            **({CURVES_CALIBRATION_VERSION_KEY: self._soft_version}
+               if self._soft_version else {}),
             "linked": self.soft_clip_link_btn.isChecked(),
             "channels": {ch: dict(values) for ch, values in self._soft_values.items()},
         }
@@ -575,7 +596,7 @@ class CurvesPanel(QWidget):
     def get_edit_payload(self) -> dict:
         """Edit 强度/链接的模型形 payload（``edit_changed`` 载荷）。"""
         return {
-            **({CURVES_CALIBRATION_VERSION_KEY: CURVES_CALIBRATION_VERSION}
+            **({CURVES_CALIBRATION_VERSION_KEY: self.curves_widget.calibration_version}
                if self.curves_widget.calibrated else {}),
             "linked": self.edit_link_btn.isChecked(),
             "amounts": self.curves_widget.get_edit_amounts(),
@@ -587,9 +608,11 @@ class CurvesPanel(QWidget):
             "curves_soft_clip": self.get_soft_clip_payload(),
             "curves_edit": self.get_edit_payload(),
         }
-        if self.automatic_calibration_pending and not include_pending:
-            for params in state.values():
-                params.pop(CURVES_CALIBRATION_VERSION_KEY, None)
+        if not include_pending:
+            if self.automatic_calibration_pending:
+                state["curves_edit"].pop(CURVES_CALIBRATION_VERSION_KEY, None)
+            if self.soft_calibration_pending:
+                state["curves_soft_clip"].pop(CURVES_CALIBRATION_VERSION_KEY, None)
         return state
 
     def set_layer_state(self, state: dict) -> None:
@@ -604,6 +627,11 @@ class CurvesPanel(QWidget):
         raw_edit = state.get("curves_edit")
         soft = raw_soft if isinstance(raw_soft, dict) else {}
         edit = raw_edit if isinstance(raw_edit, dict) else {}
+        self.hsl_calibration_pending = (
+            curves_calibration_version(edit) == CUSTOM_CURVES_CALIBRATION_VERSION
+            and not (state.get("hsl_curve_data") or state.get("has_hsl_curve_lut"))
+            and bool(self._use_measured_curves and self._use_measured_curves())
+        )
         self._allow_automatic_calibration = (
             not (state.get("curves_data") or state.get("hsl_curve_data") or state.get("has_curve_lut"))
             and CURVES_CALIBRATION_VERSION_KEY not in soft
@@ -614,34 +642,52 @@ class CurvesPanel(QWidget):
             and curves_edit_is_default(edit)
         )
         self.set_soft_clip_state(soft)
+        self._allow_automatic_soft_calibration = (
+            not self._soft_version and self.soft_clip_link_btn.isChecked()
+            and curves_soft_clip_is_identity(self.get_soft_clip_payload())
+        )
         self.set_edit_state(edit)
         self.refresh_automatic_calibration()
 
-    def _set_curve_model(self, enabled: bool) -> None:
-        self.curves_widget.set_calibrated(enabled)
-        self.hsl_panel.hsl_curves_widget.set_calibrated(enabled)
+    def _set_curve_model(self, version: int) -> None:
+        self.curves_widget.set_calibrated(bool(version), version=version)
+        hsl_version = HSL_CURVES_CALIBRATION_VERSION if self.hsl_calibration_pending else version
+        self.hsl_panel.hsl_curves_widget.set_calibrated(bool(hsl_version), version=hsl_version)
+
+    def get_hsl_calibration_upgrade(self) -> dict:
+        state = self.get_layer_state()
+        state["curves_edit"][CURVES_CALIBRATION_VERSION_KEY] = HSL_CURVES_CALIBRATION_VERSION
+        return state
+
+    def confirm_hsl_calibration_upgrade(self) -> None:
+        self.hsl_calibration_pending = False
+        self._set_curve_model(HSL_CURVES_CALIBRATION_VERSION)
 
     def refresh_automatic_calibration(self) -> None:
-        if not self._allow_automatic_calibration:
-            self.automatic_calibration_pending = False
-            return
-        self.automatic_calibration_pending = bool(
-            self._use_measured_curves and self._use_measured_curves())
-        self._set_curve_model(self.automatic_calibration_pending)
-        self._soft_calibrated = self.automatic_calibration_pending
-        self._refresh_soft_rows()
+        measured = bool(self._use_measured_curves and self._use_measured_curves())
+        self.automatic_calibration_pending = self._allow_automatic_calibration and measured
+        if self._allow_automatic_calibration:
+            self._set_curve_model(HSL_CURVES_CALIBRATION_VERSION if measured else 0)
+        self.soft_calibration_pending = self._allow_automatic_soft_calibration and measured
+        if self._allow_automatic_soft_calibration:
+            self._soft_version = SOFT_CLIP_CALIBRATION_VERSION if measured else 0
+            self._refresh_soft_rows()
 
     def confirm_curve_edit(self) -> None:
         """Keep the current model once an edit has been accepted."""
         self._allow_automatic_calibration = False
         self.automatic_calibration_pending = False
 
+    def confirm_soft_clip_edit(self) -> None:
+        self._allow_automatic_soft_calibration = False
+        self.soft_calibration_pending = False
+
     def set_soft_clip_state(self, state: dict) -> None:
         """回填四参数柔化裁切（归一化 + 界面刷新，不发渲染信号）。"""
         normalized = normalize_curves_soft_clip(state)
         self._syncing = True
         try:
-            self._soft_calibrated = uses_calibrated_soft_clip(normalized)
+            self._soft_version = soft_clip_calibration_version(normalized)
             self._soft_values = {
                 ch: dict(normalized["channels"][ch]) for ch in "RGB"
             }
@@ -662,7 +708,7 @@ class CurvesPanel(QWidget):
         normalized = normalize_curves_edit(state)
         self._syncing = True
         try:
-            self._set_curve_model(curves_calibration_enabled(normalized))
+            self._set_curve_model(curves_calibration_version(normalized))
             self.curves_widget.set_edit_amounts(normalized["amounts"])
             for channel, row in self.edit_rows.items():
                 row.setValue(self.curves_widget.edit_amounts[channel])
@@ -707,4 +753,13 @@ class CurvesPanel(QWidget):
 
     def _on_row_interaction_ended(self) -> None:
         self._flush_pending()
+        self.interaction_ended.emit()
+
+    def _on_soft_interaction_started(self) -> None:
+        self.soft_clip_interaction_active = True
+        self.interaction_started.emit()
+
+    def _on_soft_interaction_ended(self) -> None:
+        self._flush_pending()
+        self.soft_clip_interaction_active = False
         self.interaction_ended.emit()

@@ -48,6 +48,37 @@ DEFAULT_MAX_SAMPLES = 65536
 _ACHROMATIC_SAT = 0.02
 
 
+def warper_plot_positions(pixels: np.ndarray, mode: str, *, angle: float = 0.0,
+                          color_space: str = "hsp", encoded_input: bool = True) -> np.ndarray:
+    """Project actual working RGB to one or two palette plots."""
+    from src.features.color.core.warper_chroma709 import chroma_luma_position, chroma_warp_position
+
+    colors = np.maximum(pixels.reshape(-1, 3), 0.0)
+    colors = colors if encoded_input else colors ** (1.0 / 2.4)
+    if mode == "chroma_luma":
+        return chroma_luma_position(colors, angle, color_space)
+    if mode == "chroma_warp":
+        return chroma_warp_position(colors)[:, None, :]
+    hue = _vectorized_hue(colors)
+    sat = _vectorized_saturation(colors)
+    if color_space == "hsl":
+        peak, low = colors.max(axis=1), colors.min(axis=1)
+        sat = (peak - low) / np.maximum(1.0 - abs(peak + low - 1.0), 1e-7)
+    radians = -2.0 * np.pi * (hue + 1.0 / 3.0)
+    return ((np.stack((np.cos(radians), np.sin(radians)), axis=-1) * sat[:, None] + 1) * 0.5)[:, None, :]
+
+
+def plot_density_rgba(points: np.ndarray, *, size: int = 128) -> np.ndarray:
+    """Rasterize point counts as a compact white density overlay."""
+    visible = points[np.all(np.isfinite(points) & (points >= 0) & (points <= 1), axis=-1)]
+    rgba = np.full((size, size, 4), 255, dtype=np.uint8)
+    cell = np.minimum((visible * size).astype(np.intp), size - 1)
+    counts = np.bincount(cell[:, 1] * size + cell[:, 0], minlength=size * size).reshape(size, size)
+    density = np.log1p(counts)
+    rgba[..., 3] = np.minimum(185, density * 185 / max(3.0, float(density.max()))).astype(np.uint8)
+    return rgba
+
+
 @dataclass(frozen=True)
 class DensityResult:
     """一次密度云采样结果(带完整标签;points 为 (N,2) HS 坐标 + 权重)。"""

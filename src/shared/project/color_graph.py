@@ -38,6 +38,8 @@ MAX_NODES = 4096
 MAX_EDGES = 32768
 MAX_COMPOUND_DEPTH = 16
 MAX_PARAM_RECURSION = 8
+# A saved Warper can wrap a complete mesh in other_modes (list + mode).
+MAX_WARPER_STATE_RECURSION = MAX_PARAM_RECURSION + 2
 
 
 class GraphSchemaError(ValueError):
@@ -170,7 +172,8 @@ NODE_PORT_CATALOG: Mapping[NodeType, Tuple[ColorPortSpec, ...]] = MappingProxyTy
 
 def freeze_params(value: Any, depth: int = 0, *,
                   context: str = "params",
-                  allow_paths: bool = False) -> Any:
+                  allow_paths: bool = False,
+                  max_depth: int = MAX_PARAM_RECURSION) -> Any:
     """递归冻结参数容器：dict→mappingproxy、list→tuple；标量校验。
 
     拒绝：NaN/Inf、绝对路径字符串、不可序列化对象（Qt/GPU 句柄等）。
@@ -178,9 +181,9 @@ def freeze_params(value: Any, depth: int = 0, *,
     ``allow_paths=True`` 仅供 B03 ``legacy_payload``（迁移期原始 Layer
     载荷，路径在 B14 资源闭包统一转工程引用）——params 永远走默认严格态。
     """
-    if depth > MAX_PARAM_RECURSION:
+    if depth > max_depth:
         raise GraphSchemaError("recursion_limit",
-                               f"{context} 嵌套超过 {MAX_PARAM_RECURSION} 层")
+                               f"{context} 嵌套超过 {max_depth} 层")
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, int):
@@ -202,14 +205,14 @@ def freeze_params(value: Any, depth: int = 0, *,
             if not isinstance(key, str) or not key:
                 raise GraphSchemaError(
                     "illegal_param_key", f"{context} 键必须是字符串: {key!r}")
-            frozen[key] = freeze_params(item, depth + 1,
-                                        context=f"{context}.{key}",
-                                        allow_paths=allow_paths)
+            limit = MAX_WARPER_STATE_RECURSION if depth == 0 and allow_paths and key == "warper_state" else max_depth
+            frozen[key] = freeze_params(item, depth + 1, context=f"{context}.{key}",
+                                        allow_paths=allow_paths, max_depth=limit)
         return MappingProxyType(frozen)
     if isinstance(value, (list, tuple)):
         return tuple(freeze_params(item, depth + 1,
                                   context=f"{context}[{i}]",
-                                  allow_paths=allow_paths)
+                                  allow_paths=allow_paths, max_depth=max_depth)
                      for i, item in enumerate(value))
     raise GraphSchemaError(
         "illegal_param_key",

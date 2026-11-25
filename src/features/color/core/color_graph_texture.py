@@ -259,11 +259,11 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
         hsl_default[1] = 0.0
         hsl = layer.get("hsl_curve_lut")
         if hsl is None and layer.get("hsl_curve_data"):
-            from src.features.color.core.curves_calibration import curves_calibration_enabled
+            from src.features.color.core.curves_calibration import curves_calibration_version
             from src.features.color.core.layer import build_hsl_curve_lut_from_data
             hsl = build_hsl_curve_lut_from_data(
                 dict(layer["hsl_curve_data"]),
-                calibration_version=int(curves_calibration_enabled(layer.get("curves_edit"))),
+                calibration_version=curves_calibration_version(layer.get("curves_edit")),
             )
         for uniform, key, size, components, default in (
             ("u_curves_tex", "curves_lut", (256, 1), 3, np.linspace(0,1,256)[:,None].repeat(3,1)),
@@ -287,15 +287,15 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
             prog["u_lut_tex"].value = 4
         if "u_warper_tex" in prog and layer.get("warper_params") is not None:
             from src.features.color.core.warper_color import (
-                RESOLVE_HS709_SPACES, prepare_resolve_hs709_texture,
+                WARPER_PREPARED_SPACES, prepare_resolve_hs709_texture,
             )
 
             array = np.ascontiguousarray(layer["warper_params"], dtype="f4")
             space = int(layer.get("warper_space", 0) or 0)
-            components = 3 if space in RESOLVE_HS709_SPACES else 2
+            components = 3 if space in WARPER_PREPARED_SPACES else 2
             if array.ndim != 3 or array.shape[-1] != components:
                 raise ValueError("Invalid Color Warper grid")
-            if space in RESOLVE_HS709_SPACES:
+            if space in WARPER_PREPARED_SPACES:
                 array = prepare_resolve_hs709_texture(array, space)
             tex = self._texture((array.shape[1], array.shape[0]), components, array.tobytes())
             tex.use(5)
@@ -307,12 +307,15 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
         return self._lut_texture(reference)
 
     def render(self, source: Any, graph: Any, frame: int, *,
-               output_key: str = "main", integer_source: bool = False) -> Any:
+               output_key: str = "main", integer_source: bool = False,
+               rec709_calibration_encoded: bool = False) -> Any:
         with preserve_framebuffer(self.ctx):
-            return self._render(source, graph, frame, output_key=output_key, integer_source=integer_source)
+            return self._render(
+                source, graph, frame, output_key=output_key, integer_source=integer_source,
+                rec709_calibration_encoded=rec709_calibration_encoded)
 
     def _render(self, source: Any, graph: Any, frame: int, *,
-                output_key: str, integer_source: bool) -> Any:
+                output_key: str, integer_source: bool, rec709_calibration_encoded: bool) -> Any:
         self._release_frame()
         if output_key not in self._outputs and len(self._outputs) >= 64:
             raise RuntimeError("Too many simultaneous Color graph outputs")
@@ -339,7 +342,8 @@ void main() { f_result=vec4(vec3(texture(u_input_tex,v_texcoord).rgb)/65535.0,1.
         # not the structural plan: playback must reuse the same compiled plan.
         snapshot = freeze_graph(graph, session_id="timeline-gl", source_frame=0)
         plan = compile_graph(snapshot, size=source.size, cache=self.plan_cache)
-        provider = graph_node_layer_provider(snapshot.graph, frame=frame)
+        provider = graph_node_layer_provider(
+            snapshot.graph, frame=frame, rec709_calibration_encoded=rec709_calibration_encoded)
         simple = False
         if len(plan.passes) == 3 and plan.passes[1].op == "corrector":
             layer = provider(plan.passes[1].node_id) or {}

@@ -221,12 +221,16 @@ class PrimaryCalibration:
         return apply_calibration_grid(rgb, grid)
 
 
-def apply_calibration_grid(rgb: np.ndarray, grid: np.ndarray) -> np.ndarray:
-    """Apply one signed response lattice to linear RGB, retaining HDR excess."""
+def apply_calibration_grid(
+    rgb: np.ndarray, grid: np.ndarray, *, encoded_input: bool = False,
+) -> np.ndarray:
+    """Apply the measured lattice in Gamma 2.4, retaining out-of-range excess."""
     sdr = np.clip(rgb, 0.0, 1.0)
-    encoded = np.power(sdr, np.float32(1.0 / PRIMARY_CALIBRATION_GAMMA))
-    decoded = np.power(_apply_encoded_grid(encoded, grid), np.float32(PRIMARY_CALIBRATION_GAMMA))
-    return decoded + (rgb - sdr)
+    encoded = sdr if encoded_input else np.power(sdr, np.float32(1.0 / PRIMARY_CALIBRATION_GAMMA))
+    graded = _apply_encoded_grid(encoded, grid)
+    if not encoded_input:
+        graded = np.power(graded, np.float32(PRIMARY_CALIBRATION_GAMMA))
+    return graded + (rgb - sdr)
 
 
 def _grading_params(layer: Any) -> Mapping[str, Any]:

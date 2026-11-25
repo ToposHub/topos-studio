@@ -38,13 +38,12 @@ from src.features.edit.ui.timeline_view import TimelineView, EditTool, MIN_ZOOM,
 from src.features.edit.ui.timeline_items import TRACK_HEADER_WIDTH
 from src.features.edit.ui.edit_style import EDIT_COLORS, EDIT_SIZES
 from src.shared.assets.icon_manager import (
-    icon_ripple, icon_roll, icon_slip, icon_slide, icon_hand_tool, icon_zoom_tool,
     icon_zoom_in, icon_zoom_out,
     icon_append_edit,
     get_icon, IconColors
 )
 from src.features.edit.ui.timeline_icons import (
-    timeline_icon, icon_select_tool, icon_trim_tool, icon_blade_tool,
+    timeline_icon,
     icon_snap, icon_link, icon_unlink,
     icon_insert_edit, icon_overwrite_edit, icon_marker,
 )
@@ -298,7 +297,7 @@ class TimelinePanel(QWidget):
         # instance to lazy-init would shadow the class attr on the instance
         # dict, and `is None` checks on later instances would read the
         # already-populated class attr and reuse stale button references.
-        self._tool_button_map: Optional[List[tuple]] = None
+        self._tool_button_map: list[tuple[QToolButton, EditTool]] | None = None
 
         # ==================== Tools Toolbar (single row) ====================
         tools_bar = QHBoxLayout()
@@ -314,7 +313,7 @@ class TimelinePanel(QWidget):
         self.btn_select.setToolTip(I18N.tr("edit.timeline_tools.select_tooltip", "Select Tool (A)"))
         self.btn_select.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_select.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_select.setIcon(icon_select_tool(IconColors.DEFAULT))
+        self.btn_select.setIcon(timeline_icon("select"))
         self.btn_select.setCheckable(True)
         self.btn_select.setChecked(True)
         self.btn_select.clicked.connect(lambda: self._set_tool(EditTool.SELECT))
@@ -325,7 +324,7 @@ class TimelinePanel(QWidget):
         self.btn_trim.setToolTip(I18N.tr("edit.timeline_tools.trim_tooltip", "Trim Tool (T)"))
         self.btn_trim.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_trim.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_trim.setIcon(icon_trim_tool(IconColors.DEFAULT))
+        self.btn_trim.setIcon(timeline_icon("trim"))
         self.btn_trim.setCheckable(True)
         self.btn_trim.clicked.connect(lambda: self._set_tool(EditTool.TRIM))
         tools_bar.addWidget(self.btn_trim)
@@ -335,7 +334,7 @@ class TimelinePanel(QWidget):
         self.btn_blade.setToolTip(I18N.tr("edit.timeline_tools.blade_tooltip", "Blade Tool (B)"))
         self.btn_blade.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_blade.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_blade.setIcon(icon_blade_tool(IconColors.DEFAULT))
+        self.btn_blade.setIcon(timeline_icon("blade"))
         self.btn_blade.setCheckable(True)
         self.btn_blade.clicked.connect(lambda: self._set_tool(EditTool.BLADE))
         tools_bar.addWidget(self.btn_blade)
@@ -345,7 +344,7 @@ class TimelinePanel(QWidget):
         self.btn_ripple.setToolTip(I18N.tr("edit.timeline_tools.ripple_tooltip", "Ripple Tool (R)"))
         self.btn_ripple.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_ripple.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_ripple.setIcon(icon_ripple(IconColors.DEFAULT))
+        self.btn_ripple.setIcon(timeline_icon("ripple"))
         self.btn_ripple.setCheckable(True)
         self.btn_ripple.clicked.connect(lambda: self._set_tool(EditTool.RIPPLE))
         tools_bar.addWidget(self.btn_ripple)
@@ -358,7 +357,7 @@ class TimelinePanel(QWidget):
         ))
         self.btn_rate_stretch.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_rate_stretch.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_rate_stretch.setIcon(icon_ripple(IconColors.DEFAULT))
+        self.btn_rate_stretch.setIcon(timeline_icon("rate_stretch"))
         self.btn_rate_stretch.setCheckable(True)
         self.btn_rate_stretch.clicked.connect(
             lambda: self._set_tool(EditTool.RATE_STRETCH))
@@ -369,7 +368,7 @@ class TimelinePanel(QWidget):
         self.btn_roll.setToolTip(I18N.tr("edit.timeline_tools.roll_tooltip", "Roll Tool (W)"))
         self.btn_roll.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_roll.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_roll.setIcon(icon_roll(IconColors.DEFAULT))
+        self.btn_roll.setIcon(timeline_icon("roll"))
         self.btn_roll.setCheckable(True)
         self.btn_roll.clicked.connect(lambda: self._set_tool(EditTool.ROLL))
         tools_bar.addWidget(self.btn_roll)
@@ -379,7 +378,7 @@ class TimelinePanel(QWidget):
         self.btn_slip.setToolTip(I18N.tr("edit.timeline_tools.slip_tooltip", "Slip Tool (Y)"))
         self.btn_slip.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_slip.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_slip.setIcon(icon_slip(IconColors.DEFAULT))
+        self.btn_slip.setIcon(timeline_icon("slip"))
         self.btn_slip.setCheckable(True)
         self.btn_slip.clicked.connect(lambda: self._set_tool(EditTool.SLIP))
         tools_bar.addWidget(self.btn_slip)
@@ -389,7 +388,7 @@ class TimelinePanel(QWidget):
         self.btn_slide.setToolTip(I18N.tr("edit.timeline_tools.slide_tooltip", "Slide Tool (U)"))
         self.btn_slide.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_slide.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_slide.setIcon(icon_slide(IconColors.DEFAULT))
+        self.btn_slide.setIcon(timeline_icon("slide"))
         self.btn_slide.setCheckable(True)
         self.btn_slide.clicked.connect(lambda: self._set_tool(EditTool.SLIDE))
         tools_bar.addWidget(self.btn_slide)
@@ -399,7 +398,7 @@ class TimelinePanel(QWidget):
         self.btn_hand.setToolTip(I18N.tr("edit.timeline_tools.hand_tooltip", "Hand Tool (H)"))
         self.btn_hand.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_hand.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_hand.setIcon(icon_hand_tool(IconColors.DEFAULT))
+        self.btn_hand.setIcon(timeline_icon("hand"))
         self.btn_hand.setCheckable(True)
         self.btn_hand.clicked.connect(lambda: self._set_tool(EditTool.HAND))
         tools_bar.addWidget(self.btn_hand)
@@ -409,7 +408,7 @@ class TimelinePanel(QWidget):
         self.btn_zoom.setToolTip(I18N.tr("edit.timeline_tools.zoom_tooltip", "Zoom Tool (Z)"))
         self.btn_zoom.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_zoom.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_zoom.setIcon(icon_zoom_tool(IconColors.DEFAULT))
+        self.btn_zoom.setIcon(timeline_icon("zoom"))
         self.btn_zoom.setCheckable(True)
         self.btn_zoom.clicked.connect(lambda: self._set_tool(EditTool.ZOOM))
         tools_bar.addWidget(self.btn_zoom)
@@ -427,7 +426,7 @@ class TimelinePanel(QWidget):
         self.btn_snap.setToolTip(I18N.tr("edit.timeline_tools.snap_tooltip", "Snap (N)"))
         self.btn_snap.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_snap.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_snap.setIcon(icon_snap(IconColors.DEFAULT))
+        self.btn_snap.setIcon(icon_snap(IconColors.ORANGE))
         self.btn_snap.setCheckable(True)
         self.btn_snap.setChecked(True)
         self.btn_snap.clicked.connect(self._on_snap_toggled)
@@ -438,7 +437,7 @@ class TimelinePanel(QWidget):
         self.btn_linked_selection.setToolTip(I18N.tr("tooltip.linked_selection", "Linked Selection — toggles linked A/V clip drag"))
         self.btn_linked_selection.setFixedSize(BTN_SIZE, BTN_SIZE)
         self.btn_linked_selection.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_linked_selection.setIcon(icon_link(IconColors.DEFAULT))
+        self.btn_linked_selection.setIcon(icon_link(IconColors.ORANGE))
         self.btn_linked_selection.setCheckable(True)
         self.btn_linked_selection.setChecked(True)
         self.btn_linked_selection.clicked.connect(self._on_linked_selection_toggled)
@@ -915,10 +914,9 @@ class TimelinePanel(QWidget):
         self.btn_zoom_custom = button("timelineCustomZoom",
             I18N.tr("timeline.zoom.custom", "Custom Zoom"),
             timeline_icon("zoom_custom"), True)
-        self.btn_zoom_custom.setChecked(True)
         self.btn_zoom_fit.setCheckable(True)
         self.btn_zoom_fit.setToolTip(I18N.tr("timeline.zoom.full", "Full Extent Zoom"))
-        self.btn_zoom_fit.setIcon(timeline_icon("zoom_full"))
+        self._sync_zoom_preset_buttons()
         self.btn_zoom_detail.clicked.connect(lambda: self._set_zoom_preset("detail"))
         self.btn_zoom_custom.clicked.connect(lambda: self._set_zoom_preset("custom"))
         self.btn_zoom_out.setIcon(timeline_icon("zoom_out"))
@@ -1047,8 +1045,8 @@ class TimelinePanel(QWidget):
         advanced = QMenu(self)
         group = QActionGroup(advanced)
         group.setExclusive(True)
-        for btn, factory, tool in self._get_tool_button_map()[3:]:
-            action = advanced.addAction(factory(IconColors.DEFAULT), btn.toolTip())
+        for btn, tool in self._get_tool_button_map()[3:]:
+            action = advanced.addAction(timeline_icon(tool.value), btn.toolTip())
             action.setCheckable(True)
             group.addAction(action)
             action.triggered.connect(lambda _checked=False, value=tool: self._set_tool(value))
@@ -2337,37 +2335,35 @@ class TimelinePanel(QWidget):
 
     # ==================== Tool Management ====================
 
-    def _get_tool_button_map(self) -> List[tuple]:
-        """Lazy-init tool button map: list of (button, icon_factory, EditTool)."""
+    def _get_tool_button_map(self) -> list[tuple[QToolButton, EditTool]]:
+        """Map each editing tool to its button; its value names the matching icon."""
         if self._tool_button_map is None:
             self._tool_button_map = [
-                (self.btn_select, icon_select_tool, EditTool.SELECT),
-                (self.btn_trim, icon_trim_tool, EditTool.TRIM),
-                (self.btn_blade, icon_blade_tool, EditTool.BLADE),
-                (self.btn_ripple, icon_ripple, EditTool.RIPPLE),
-                (self.btn_rate_stretch, icon_ripple, EditTool.RATE_STRETCH),
-                (self.btn_roll, icon_roll, EditTool.ROLL),
-                (self.btn_slip, icon_slip, EditTool.SLIP),
-                (self.btn_slide, icon_slide, EditTool.SLIDE),
-                (self.btn_hand, icon_hand_tool, EditTool.HAND),
-                (self.btn_zoom, icon_zoom_tool, EditTool.ZOOM),
+                (self.btn_select, EditTool.SELECT),
+                (self.btn_trim, EditTool.TRIM),
+                (self.btn_blade, EditTool.BLADE),
+                (self.btn_ripple, EditTool.RIPPLE),
+                (self.btn_rate_stretch, EditTool.RATE_STRETCH),
+                (self.btn_roll, EditTool.ROLL),
+                (self.btn_slip, EditTool.SLIP),
+                (self.btn_slide, EditTool.SLIDE),
+                (self.btn_hand, EditTool.HAND),
+                (self.btn_zoom, EditTool.ZOOM),
             ]
         return self._tool_button_map
 
     def _update_tool_icons(self, active_tool: EditTool) -> None:
         """Update tool button icons: active=orange, inactive=default."""
-        for btn, icon_fn, tool_enum in self._get_tool_button_map():
+        for btn, tool_enum in self._get_tool_button_map():
             color = IconColors.ORANGE if tool_enum == active_tool else IconColors.DEFAULT
-            btn.setIcon(icon_fn(color))
+            btn.setIcon(timeline_icon(tool_enum.value, color))
         if hasattr(self, "_advanced_tool_actions"):
             for tool, action in self._advanced_tool_actions.items():
                 action.setChecked(tool == active_tool)
             advanced = active_tool in self._advanced_tool_actions
             self.btn_advanced_tools.setChecked(advanced)
             if advanced:
-                factory = next((factory for _btn, factory, tool in self._get_tool_button_map()
-                                if tool == active_tool), icon_slip)
-                self.btn_advanced_tools.setIcon(factory(IconColors.ORANGE))
+                self.btn_advanced_tools.setIcon(timeline_icon(active_tool.value, IconColors.ORANGE))
             else:
                 self.btn_advanced_tools.setIcon(timeline_icon("dynamic_trim"))
 
@@ -2411,7 +2407,7 @@ class TimelinePanel(QWidget):
         # _set_tool 的手写清单漂移——此前本函数手写 9 个按钮同步、唯独漏掉
         # btn_rate_stretch，键盘（Shift+R）切换 Rate Stretch 后工具栏
         # 互斥选中状态与实际工具不一致。
-        for btn, _icon_fn, tool_enum in self._get_tool_button_map():
+        for btn, tool_enum in self._get_tool_button_map():
             btn.setChecked(tool_enum.value == tool_name)
 
         # Update icon colors
@@ -2639,7 +2635,7 @@ class TimelinePanel(QWidget):
         self.btn_linked_selection.blockSignals(True)
         try:
             self.btn_linked_selection.setChecked(enabled)
-            self.btn_linked_selection.setIcon(icon_link(IconColors.DEFAULT) if enabled else icon_unlink(IconColors.DEFAULT))
+            self.btn_linked_selection.setIcon(icon_link(IconColors.ORANGE) if enabled else icon_unlink(IconColors.DEFAULT))
         finally:
             self.btn_linked_selection.blockSignals(False)
 

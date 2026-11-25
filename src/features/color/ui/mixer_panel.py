@@ -131,12 +131,12 @@ class MixerPanel(QWidget):
         row.interactionStarted.connect(self.interaction_started.emit)
         row.interactionEnded.connect(self._flush_pending_params)
         row.interactionEnded.connect(self.interaction_ended.emit)
-        row.valueChanged.connect(lambda val, c=color, i=param_idx: self.update_param(c, i, int(val)))
+        row.valueChanged.connect(lambda val, c=color, i=param_idx: self.update_param(c, i, round(val)))
 
         return row
 
     def update_param(self, color, idx, val) -> None:
-        if self._syncing_ui:
+        if self._syncing_ui or self.params[color][idx] == val:
             return
         self.params[color][idx] = val
         self._schedule_param_update()

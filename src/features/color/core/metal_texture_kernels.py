@@ -36,7 +36,9 @@ from typing import Any, Mapping, Tuple
 
 import numpy as np
 
-from src.features.color.core.midtone_detail_calibration import DETAIL_SHADER_GAIN, detail_shader_taps
+from src.features.color.core.midtone_detail_calibration import (
+    DETAIL_SHADER_GAIN, detail_shader_linear_sampling, detail_shader_taps,
+)
 from src.features.color.core.mist import MIST_MSL
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
@@ -51,8 +53,11 @@ from src.features.color.core.shader_nodes_msl import (
     MSL_SOFT_CLIP,
     MSL_SOFT_CLIP_HELPERS,
     MSL_WARPER,
+    MSL_WARPER_CHROMA709,
 )
-from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
+from src.features.color.core.warper_color import (
+    RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE, RESOLVE_HS709_V3_SPACE, WARPER_CHROMA709_SPACE,
+)
 from src.shared.gpu.metal.kernels_color import METAL_POINTWISE_GRADING_MSL
 
 _MSL_HEADER = """#include <metal_stdlib>
@@ -79,7 +84,7 @@ struct TexExtraParams {
     uint  has_mixer;               // 8 通道混色器位
     uint  has_warper;              // Warper 纹理位
     uint  has_soft_clip;           // legacy 8 参数 soft clip 位
-    uint  has_curves_soft_clip;    // 曲线面板柔化裁切位
+    uint  has_curves_soft_clip;    // 零为禁用，其余为算法版本加一
     int   blend_mode;              // Layer.BLEND_MODES 索引（0=Normal）
     float lut_intensity;           // LUT3D 强度（R05）
     int   warper_space;            // legacy HSV / calibrated 709
@@ -109,6 +114,8 @@ struct TexExtraParams {
     uint  mid_detail_calibrated;
     float mist_spread;
     float mist_amount;
+    uint  rec709_calibration_encoded;
+    uint  mist_calibrated;
 };
 """
 
@@ -173,14 +180,15 @@ kernel void tg_copy(
 }
 
 static inline float3 tg_apply_primary_calibration(
-    float3 color, texture3d<float, access::sample> response_tex)
+    float3 color, texture3d<float, access::sample> response_tex, bool encoded_input)
 {
     float3 sdr = clamp(color, 0.0, 1.0);
-    float3 encoded = pow(sdr, float3(1.0 / 2.4));
+    float3 encoded = encoded_input ? sdr : pow(sdr, float3(1.0 / 2.4));
     float grid_size = float(response_tex.get_width());
     float3 uv = (encoded * (grid_size - 1.0) + 0.5) / grid_size;
     float3 delta = response_tex.sample(tg_sampler, uv).rgb;
-    float3 graded = pow(clamp(encoded + delta, 0.0, 1.0), float3(2.4));
+    float3 mapped = clamp(encoded + delta, 0.0, 1.0);
+    float3 graded = encoded_input ? mapped : pow(mapped, float3(2.4));
     return graded + (color - sdr);
 }
 
@@ -201,9 +209,12 @@ static inline float3 tg_apply_mid_detail(
     return color + (color - average) * (amount / 100.0) * weight;
 }
 
+""" + detail_shader_linear_sampling(metal=True) + """
 static inline float3 tg_apply_calibrated_detail(
-    float3 color, float3 source_color, texture2d<float, access::sample> src, uint2 gid, float amount)
+    float3 color, float3 source_color, texture2d<float, access::sample> src, uint2 gid, float amount,
+    bool encoded_input)
 {
+    if (encoded_input) source_color = detail_decode_rec709(source_color);
     const float3 taps[6] = {""" + detail_shader_taps("float3") + """};
     const float3 luma = float3(0.2126, 0.7152, 0.0722);
     float2 size = float2(src.get_width(), src.get_height());
@@ -214,7 +225,10 @@ static inline float3 tg_apply_calibrated_detail(
     for (int i = 0; i < 6; ++i) {
         float2 offset = taps[i].xy;
         for (int j = 0; j < 4; ++j) {
-            float3 pixel = src.sample(tg_sampler, uv + scale * offset).rgb;
+            float2 sample_uv = uv + scale * offset;
+            float3 pixel = encoded_input
+                ? detail_sample_linear(src, sample_uv, size)
+                : src.sample(tg_sampler, sample_uv).rgb;
             mean += pixel * taps[i].z;
             second += dot(pixel * pixel, luma) * taps[i].z;
             offset = float2(-offset.y, offset.x);
@@ -249,26 +263,28 @@ kernel void tg_corrector(
     if (x.mist_amount != 0.0) {
         float2 size = float2(src.get_width(), src.get_height());
         float2 uv = (float2(gid) + 0.5) / size;
-        color += mist_delta(src, tg_sampler, uv, color, size, x.mist_spread, x.mist_amount);
+        color += mist_delta(src, tg_sampler, uv, color, size, x.mist_spread,
+                            x.mist_amount, x.mist_calibrated != 0u);
     }
     float3 source_color = color;
+    bool encoded_input = x.rec709_calibration_encoded != 0u;
     if (x.has_primary_calibration != 0u) {
-        color = tg_apply_primary_calibration(color, primary_tex);
+        color = tg_apply_primary_calibration(color, primary_tex, encoded_input);
     }
     color = graph_grading_before_detail(color, g);
     if (x.mid_detail != 0.0) {
         color = x.mid_detail_calibrated != 0u
-            ? tg_apply_calibrated_detail(color, source_color, src, gid, x.mid_detail)
+            ? tg_apply_calibrated_detail(color, source_color, src, gid, x.mid_detail, encoded_input)
             : tg_apply_mid_detail(color, src, gid, x.mid_detail);
     }
     color = graph_grading_after_detail(color, source_color, g);
     if (g.has_curves == 2u) {
-        color = graph_apply_calibrated_curves(color, curves);
+        color = graph_apply_calibrated_curves(color, curves, encoded_input);
     } else if (g.has_curves != 0u) {
         color = graph_apply_curves(color, curves);
     }
     if (x.has_hsl != 0u) {
-        color = msl_apply_hsl_curves(color, hsl_tex, tg_sampler);
+        color = msl_apply_hsl_curves(color, hsl_tex, tg_sampler, encoded_input);
     }
     if (x.has_soft_clip != 0u) {
         color = msl_apply_soft_clip(color, x.sc_high, x.sc_white_point,
@@ -283,7 +299,7 @@ kernel void tg_corrector(
             float3(x.cs_low_soft_x, x.cs_low_soft_y, x.cs_low_soft_z),
             float3(x.cs_high_clip_x, x.cs_high_clip_y, x.cs_high_clip_z),
             float3(x.cs_high_soft_x, x.cs_high_soft_y, x.cs_high_soft_z),
-            x.has_curves_soft_clip == 2u);
+            int(x.has_curves_soft_clip - 1u), encoded_input);
     }
     if (x.has_mixer != 0u) {
         color = msl_apply_mixer(
@@ -298,10 +314,12 @@ kernel void tg_corrector(
             float3(x.mixer[21], x.mixer[22], x.mixer[23]));
     }
     if (x.has_warper != 0u) {
-        if (x.warper_space == tg_warper_hs709_v2) {
-            color = msl_apply_resolve_hs709_v2(color, warper_tex);
+        if (x.warper_space == tg_warper_chroma709) {
+            color = msl_apply_warper_chroma709(color, warper_tex, encoded_input);
+        } else if (x.warper_space == tg_warper_hs709_v2 || x.warper_space == tg_warper_hs709_v3) {
+            color = msl_apply_resolve_hs709_v2(color, warper_tex, encoded_input);
         } else if (x.warper_space == tg_warper_hs709) {
-            color = msl_apply_resolve_hs709(color, warper_tex);
+            color = msl_apply_resolve_hs709(color, warper_tex, encoded_input);
         } else {
             color = msl_apply_warper(color, warper_tex, tg_sampler, 0.0);
         }
@@ -566,6 +584,7 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + MSL_LUT3D
     + MSL_MIXER
     + MSL_WARPER
+    + MSL_WARPER_CHROMA709
     + MSL_RESOLVE_HS709
     + MSL_RESOLVE_HS709_V2
     + MSL_SOFT_CLIP_HELPERS
@@ -577,6 +596,8 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + _TEX_QUALIFIER_PARAMS_MSL
     + f"\nconstant int tg_warper_hs709 = {RESOLVE_HS709_SPACE};\n"
     + f"constant int tg_warper_hs709_v2 = {RESOLVE_HS709_V2_SPACE};\n"
+    + f"constant int tg_warper_hs709_v3 = {RESOLVE_HS709_V3_SPACE};\n"
+    + f"constant int tg_warper_chroma709 = {WARPER_CHROMA709_SPACE};\n"
     + _TEX_GRAPH_KERNELS_MSL
 )
 
@@ -622,6 +643,8 @@ TEX_EXTRA_PARAMS_DTYPE = np.dtype([
     ("mid_detail_calibrated", "<u4"),
     ("mist_spread", "<f4"),
     ("mist_amount", "<f4"),
+    ("rec709_calibration_encoded", "<u4"),
+    ("mist_calibrated", "<u4"),
 ])
 
 TEX_QUALIFIER_PARAMS_DTYPE = np.dtype([
@@ -685,12 +708,14 @@ def make_tex_extra_params(
     params["mid_detail"] = _as_float(values.get("u_mid_detail"), 0.0)
     params["mid_detail_calibrated"] = bool(values.get("u_mid_detail_calibrated"))
     if has_curves_soft_clip:
-        params["has_curves_soft_clip"] = 2 if values.get("u_cs_calibrated") else 1
+        params["has_curves_soft_clip"] = 1 + int(values.get("u_cs_profile", 0))
     params["blend_mode"] = int(_as_float(values.get("u_blend_mode"), 0.0))
     params["lut_intensity"] = _as_float(values.get("u_lut_intensity"), 1.0)
     params["warper_space"] = int(_as_float(values.get("u_warper_space"), 0.0))
     params["mist_spread"] = _as_float(values.get("u_mist_spread"), 0.0)
     params["mist_amount"] = _as_float(values.get("u_mist_amount"), 0.0)
+    params["rec709_calibration_encoded"] = bool(values.get("u_rec709_calibration_encoded"))
+    params["mist_calibrated"] = bool(values.get("u_mist_calibrated"))
     for field in _SC_DEFAULTS:
         params[field] = _as_float(values.get(f"u_{field}"),
                                   _SC_DEFAULTS[field])

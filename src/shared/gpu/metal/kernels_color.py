@@ -929,8 +929,9 @@ static inline float3 graph_grading_before_detail(float3 color, constant GraphGra
             : (color.z > 1.0) ? (gm.z * (color.z - 1.0) + 1.0) : gm.z * color.z;
     color = res;
 
-    // 安全修复：暗部负值软性保护（luma 压缩前计算，与 GLSL 同序）
-    color = graph_protect_negative_luma(color);
+    if (any(lift != float3(1.0)) || any(gamma != float3(1.0)) || any(gain != float3(1.0))) {
+        color = graph_protect_negative_luma(color);
+    }
 
     // 4.5 Offset（加性平衡轮）+ 4.6 Log 四轮（与 GLSL 同序同式）
     float3 offset = float3(p.offset_x, p.offset_y, p.offset_z);
@@ -1093,8 +1094,9 @@ static inline float graph_curve_delta(float x, int ch, int offset,
 }
 
 static inline float3 graph_apply_calibrated_curves(float3 color,
-                                                    device const float* curves) {
-    float3 encoded = sign(color) * pow(abs(color), float3(1.0 / 2.4));
+                                                    device const float* curves,
+                                                    bool encoded_input) {
+    float3 encoded = encoded_input ? color : sign(color) * pow(abs(color), float3(1.0 / 2.4));
     const float3 weights = float3(0.2126, 0.7152, 0.0722);
     float3 delta = float3(
         graph_curve_delta(encoded.r, 0, 0, curves),
@@ -1104,7 +1106,8 @@ static inline float3 graph_apply_calibrated_curves(float3 color,
     float y = graph_curve_delta(dot(encoded, weights), 0, 256, curves);
     float3 response = delta + float3(y - dot(delta, weights));
     float3 mapped = encoded + response;
-    return select(sign(mapped) * pow(abs(mapped), float3(2.4)), color, response == 0.0);
+    float3 decoded = encoded_input ? mapped : sign(mapped) * pow(abs(mapped), float3(2.4));
+    return select(decoded, color, response == 0.0);
 }
 """
 
@@ -1129,12 +1132,12 @@ kernel void graph_grading(
 
     color = graph_apply_grading(color, p);
     if (p.has_curves == 2u) {
-        color = graph_apply_calibrated_curves(color, curves);
+        color = graph_apply_calibrated_curves(color, curves, false);
     } else if (p.has_curves == 1u) {
         color = graph_apply_curves(color, curves);
     }
 #ifdef TOPOS_GRAPH_WARPER_709
-    color = TOPOS_GRAPH_WARPER_APPLY(color, warper);
+    color = TOPOS_GRAPH_WARPER_APPLY(color, warper, false);
 #endif
 
     float k = p.opacity;
@@ -1167,12 +1170,14 @@ _METAL_GRAPH_COMMON_MSL = (
 METAL_GRAPH_OPS_MSL = _METAL_GRAPH_COMMON_MSL + _GRAPH_GRADING_KERNEL_MSL
 
 
-def build_metal_graph_warper_msl(warper_code: str, *, v2: bool = False) -> str:
+def build_metal_graph_warper_msl(warper_code: str, *, v2: bool = False, chroma: bool = False) -> str:
     """Compile calibrated Warper with its own texture-binding variant."""
     suffix = "_v2" if v2 else ""
+    kernel = "graph_grading_chroma709" if chroma else f"graph_grading_709{suffix}"
+    apply = "msl_apply_warper_chroma709" if chroma else f"msl_apply_resolve_hs709{suffix}"
     return ("#define TOPOS_GRAPH_WARPER_709\n"
-            f"#define graph_grading graph_grading_709{suffix}\n"
-            f"#define TOPOS_GRAPH_WARPER_APPLY msl_apply_resolve_hs709{suffix}\n"
+            f"#define graph_grading {kernel}\n"
+            f"#define TOPOS_GRAPH_WARPER_APPLY {apply}\n"
             + _METAL_GRAPH_COMMON_MSL + warper_code + _GRAPH_GRADING_KERNEL_MSL)
 
 # GraphSizeParams / GraphGradingParams 的 numpy 布局（4 字节字段紧排）

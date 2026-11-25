@@ -212,7 +212,7 @@ class WarperCommandService:
             return WarperCommandResult(False, f"rejected: {exc.code}", self.revision(layer))
         if candidate is _NO_CHANGE:
             return WarperCommandResult(True, "ok", self.revision(layer), session.dirty)
-        if _states_equal(candidate, session.working):
+        if _states_equal(candidate, session.working) and not (candidate is None and layer.warper_params is not None):
             return WarperCommandResult(True, "ok", self.revision(layer), session.dirty)
         # 首个实质变更:先压基线(此时层上仍是手势前状态)
         if not session.history_pushed:
@@ -231,6 +231,11 @@ class WarperCommandService:
             # revision 漂移(手势中途 undo/外部提交):恢复基线,不算成功
             self._finish_cancel(session, restore=True)
             return WarperCommandResult(False, "stale_revision", self.revision(layer))
+        if (session.dirty and _states_equal(session.working, session.base_state)
+                and layer.warper_space == session.base_space
+                and np.array_equal(layer.warper_params, session.base_offsets)):
+            self._finish_cancel(session, restore=True)
+            return WarperCommandResult(True, "ok", self.revision(layer), False)
         self._sessions.pop(layer.id, None)
         if session.dirty:
             if not self._commit_state(layer):
@@ -270,9 +275,7 @@ class WarperCommandService:
 
     def _write(self, layer: Layer, state: WarperStateV2 | None) -> None:
         layer.warper_state = state.copy() if state is not None else None
-        # CW-B08 渲染投影:HS 两分量网格(含 HSL/HSP)→ 纹理载荷 + 空间
-        # 变体;三分量/CL/CW 无 GPU 后端 → 清投影,画面保持不变
-        # (capability 由宿主如实展示,不伪造效果)
+        # Project compact controls here. The renderer builds the response texture.
         offsets, space = renderable_projection(state)
         layer.warper_params = offsets
         layer.warper_space = space

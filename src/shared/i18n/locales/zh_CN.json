@@ -1128,6 +1128,8 @@
   },
   "warper": {
     "upgrade_hs_algorithm": "将色相–饱和度算法升级到 v2",
+    "upgrade_hs_algorithm_v3": "将色相–饱和度算法升级到 v3",
+    "viewer_picker": "在查看器中取色并拖动调整",
     "grid_density": "网格密度:",
     "reset": "重置网格",
     "chroma_warp": "色度扭曲",
@@ -1188,7 +1190,9 @@
     "add_pin": "添加固定点",
     "delete": "删除所选笔画与固定点",
     "pin_title": "固定点",
+    "stroke_title": "笔画",
     "reset_pin": "重置固定点",
+    "reset_stroke": "重置笔画",
     "chroma_range": "色度范围",
     "tonal_low": "影调范围低值",
     "tonal_high": "影调范围高值",
@@ -2581,7 +2585,9 @@
     "input_hue": "输入色相",
     "input_lum": "输入亮度",
     "input_sat": "输入饱和度",
+    "output_sat": "输出饱和度",
     "hue_rotate": "色相旋转",
+    "lum_gain": "亮度增益",
     "saturation": "饱和度",
     "lum": "亮度",
     "add_anchor": "添加曲线控制点"

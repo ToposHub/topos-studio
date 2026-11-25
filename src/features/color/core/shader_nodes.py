@@ -1,6 +1,6 @@
 # GLSL Code Snippets for Pipeline Fusion
 from src.features.color.core.midtone_detail_calibration import (
-    DETAIL_SHADER_GAIN, detail_shader_taps,
+    DETAIL_SHADER_GAIN, detail_shader_linear_sampling, detail_shader_taps,
 )
 
 COMMON_DEFINITIONS = """
@@ -25,8 +25,10 @@ vec3 hsv2rgb(vec3 c) {
 
 GRADING_SNIPPET = """
 uniform vec2 u_tex_size;
-
+""" + detail_shader_linear_sampling(metal=False) + """
 vec3 apply_calibrated_detail(vec3 color, vec3 source_color, float amount) {
+    bool encoded_input = u_rec709_calibration_encoded;
+    if (encoded_input) source_color = detail_decode_rec709(source_color);
     const vec3 taps[6] = vec3[6](""" + detail_shader_taps("vec3") + """);
     const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
     vec2 size = vec2(textureSize(u_input_tex, 0));
@@ -37,7 +39,10 @@ vec3 apply_calibrated_detail(vec3 color, vec3 source_color, float amount) {
     for (int i = 0; i < 6; ++i) {
         vec2 offset = taps[i].xy;
         for (int j = 0; j < 4; ++j) {
-            vec3 pixel = texture(u_input_tex, clamp(v_texcoord + scale * offset, margin, 1.0 - margin)).rgb;
+            vec2 sample_uv = clamp(v_texcoord + scale * offset, margin, 1.0 - margin);
+            vec3 pixel = encoded_input
+                ? detail_sample_linear(u_input_tex, sample_uv, size)
+                : texture(u_input_tex, sample_uv).rgb;
             mean += pixel * taps[i].z;
             second += dot(pixel * pixel, luma) * taps[i].z;
             offset = vec2(-offset.y, offset.x);
@@ -277,7 +282,7 @@ float calibrated_curve_delta(sampler2D curves_tex, float x, float offset, int ch
 }
 
 vec3 apply_calibrated_curves(vec3 color, sampler2D curves_tex) {
-    vec3 encoded = sign(color) * pow(abs(color), vec3(1.0 / 2.4));
+    vec3 encoded = u_rec709_calibration_encoded ? color : sign(color) * pow(abs(color), vec3(1.0 / 2.4));
     const vec3 weights = vec3(0.2126, 0.7152, 0.0722);
     vec3 delta = vec3(
         calibrated_curve_delta(curves_tex, encoded.r, 0.0, 0),
@@ -287,7 +292,7 @@ vec3 apply_calibrated_curves(vec3 color, sampler2D curves_tex) {
     float y = calibrated_curve_delta(curves_tex, dot(encoded, weights), 256.0, 0);
     vec3 response = delta + vec3(y - dot(delta, weights));
     vec3 mapped = encoded + response;
-    vec3 decoded = sign(mapped) * pow(abs(mapped), vec3(2.4));
+    vec3 decoded = u_rec709_calibration_encoded ? mapped : sign(mapped) * pow(abs(mapped), vec3(2.4));
     return mix(decoded, color, equal(response, vec3(0.0)));
 }
 
@@ -372,7 +377,8 @@ float sample_hsl_curve(sampler2D lut_tex, float sample_normalized, int curve_idx
 }
 
 float sample_calibrated_hsl_curve(sampler2D tex, float x, float row) {
-    return texture(tex, vec2((row + 0.5) / 6.0, (clamp(x, 0.0, 1.0) * 511.0 + 0.5) / 512.0)).r;
+    float height = float(textureSize(tex, 0).y);
+    return texture(tex, vec2((row + 0.5) / 6.0, (clamp(x, 0.0, 1.0) * (height - 1.0) + 0.5) / height)).r;
 }
 
 float calibrated_hsl_envelope(float t, vec3 coefficients) {
@@ -387,7 +393,7 @@ float calibrated_hsl_center(float x) {
 }
 
 vec3 apply_calibrated_hsl_curves(vec3 color, sampler2D tex) {
-    vec3 encoded = sign(color) * pow(abs(color), vec3(1.0 / 2.4));
+    vec3 encoded = u_rec709_calibration_encoded ? color : sign(color) * pow(abs(color), vec3(1.0 / 2.4));
     const vec3 weights = vec3(0.2126, 0.7152, 0.0722);
     float luma = dot(encoded, weights);
     float cb = (encoded.b - luma) / 1.8556;
@@ -415,10 +421,54 @@ vec3 apply_calibrated_hsl_curves(vec3 color, sampler2D tex) {
         delta = rotated - vec3(dot(rotated, weights));
     }
     vec3 mapped = delta * sat_factor + vec3(luma * (1.0 + lum_response));
-    return sign(mapped) * pow(abs(mapped), vec3(2.4));
+    return u_rec709_calibration_encoded ? mapped : sign(mapped) * pow(abs(mapped), vec3(2.4));
+}
+
+
+vec3 apply_hsl_curves_v3(vec3 color, sampler2D tex) {
+    vec3 encoded = u_rec709_calibration_encoded ? color : sign(color) * pow(abs(color), vec3(1.0 / 2.4));
+    const vec3 weights = vec3(0.2126, 0.7152, 0.0722);
+    float luma = dot(encoded, weights);
+    float cb = (encoded.b - luma) / 1.8556;
+    float cr = (encoded.r - luma) / 1.5748;
+    float u = 1.816 * cr - 0.41838 * cb;
+    float v = 1.87 * cb;
+    float chroma = 1.02076 * length(vec2(u, v));
+    bool red_seam = encoded.r > encoded.g && encoded.g == encoded.b;
+    float phase = chroma > 1e-7 ? fract(-0.03509087 - atan(v, u) / 6.283185307) : 0.0;
+    float hue = red_seam || chroma <= 1e-7 ? 0.0 : fract((1023.0 * phase - 0.5) / 1024.0);
+    float sat_x = (1023.0 * chroma - 1.0) / 1024.0;
+    float axis_sat = sample_calibrated_hsl_curve(tex, (1023.0 * luma - 0.5) / 1024.0, 0.0)
+        * sample_calibrated_hsl_curve(tex, sat_x, 4.0);
+    float sat = axis_sat * sample_calibrated_hsl_curve(tex, hue, 2.0);
+    float hue_lum = (sample_calibrated_hsl_curve(tex, hue, 3.0) - 1.0)
+        * smoothstep(0.0, 1.0, 2.0 * chroma * axis_sat);
+    float lum_factor = sample_calibrated_hsl_curve(tex, sat_x, 5.0) * (1.0 + hue_lum);
+    float rotation = sample_calibrated_hsl_curve(tex, hue, 1.0);
+    if (sat == 1.0 && rotation == 0.0 && lum_factor == 1.0) return color;
+    vec3 delta = encoded - vec3(luma);
+    if (rotation != 0.0) {
+        float low = min(min(encoded.r, encoded.g), encoded.b);
+        float hsv_hue = rgb2hsv(encoded - vec3(low)).x;
+        float drift = red_seam ? 0.0 : (hsv_hue + 0.5) / 1024.0;
+        float theta = (rotation + drift) * 6.283185307;
+        float c = cos(theta);
+        float s = sin(theta);
+        cb = (u * s + v * c) / 1.87;
+        cr = (u * c - v * s + 0.41838 * cb) / 1.816;
+        float red = 1.5748 * cr;
+        float blue = 1.8556 * cb;
+        float green = -(0.2126 * red + 0.0722 * blue) / 0.7152;
+        delta = vec3(red, green, blue);
+    }
+    vec3 mapped = delta * sat + vec3(luma * lum_factor);
+    return u_rec709_calibration_encoded ? mapped : sign(mapped) * pow(abs(mapped), vec3(2.4));
 }
 
 vec3 apply_hsl_curves(vec3 color, sampler2D hsl_lut_tex) {
+    if (textureSize(hsl_lut_tex, 0).y == 1024) {
+        return apply_hsl_curves_v3(color, hsl_lut_tex);
+    }
     if (textureSize(hsl_lut_tex, 0).y == 512) {
         return apply_calibrated_hsl_curves(color, hsl_lut_tex);
     }
@@ -788,6 +838,25 @@ vec3 apply_3dlut(vec3 color, sampler3D lut_tex, float intensity) {
     }
     vec3 negative_excess = color - clamp(color, 0.0, 99999.0);
     return mix(color, lut_hdr, intensity) + negative_excess * intensity;
+}
+"""
+
+WARPER_CHROMA709_SNIPPET = """
+vec3 apply_warper_chroma709(vec3 color, sampler2D field) {
+    if (any(isnan(color)) || any(isinf(color))) return color;
+    vec3 sdr = clamp(color, 0.0, 1.0);
+    vec3 encoded = u_rec709_calibration_encoded ? sdr : pow(sdr, vec3(1.0 / 2.4));
+    vec2 dims = vec2(textureSize(field, 0));
+    vec3 index = encoded * (dims.x - 1.0);
+    vec2 uv = (index.rg + 0.5) / dims;
+    float first = floor(index.b);
+    float second = min(first + 1.0, dims.x - 1.0);
+    vec3 delta = mix(texture(field, uv + vec2(0.0, first / dims.x)).rgb,
+                     texture(field, uv + vec2(0.0, second / dims.x)).rgb, index.b - first);
+    if (all(equal(delta, vec3(0.0)))) return color;
+    vec3 mapped = max(encoded + delta, 0.0);
+    vec3 adjusted = u_rec709_calibration_encoded ? mapped : pow(mapped, vec3(2.4));
+    return adjusted + (color - sdr);
 }
 """
 
@@ -1198,36 +1267,49 @@ float calibrated_soft_clip_toe(float value, float edge, float width) {
     return edge + width * t * t;
 }
 
+float resolve_soft_clip_toe(float value, float edge, float width, bool independent) {
+    if (!independent || edge + width <= 0.5)
+        return calibrated_soft_clip_toe(value, edge, width);
+    if (value >= 0.5) return value;
+    float start = edge - width;
+    float span = 0.5 - start;
+    float t = clamp((value - start) / span, 0.0, 1.0);
+    return edge + t * t * ((0.5 - edge) * (3.0 - 2.0 * t) + (t - 1.0) * span);
+}
+
 float calibrated_soft_clip_channel(float color, float low, float low_soft,
-                                    float high, float high_soft) {
+                                    float high, float high_soft, bool encoded_input,
+                                    bool independent) {
     if (isnan(color) || isinf(color)) return color;
     if (low == 0.0 && low_soft == 0.0 && high == 1.0 && high_soft == 0.0)
         return color;
     float gap = max(high - low, 0.0);
-    if (gap == 0.0) return sign(low) * pow(abs(low), 2.4);
-    float low_knee = clamp(low_soft, 0.0, gap);
-    float high_knee = clamp(high_soft, 0.0, gap - low_knee);
+    if (!independent && gap == 0.0) return encoded_input ? low : sign(low) * pow(abs(low), 2.4);
+    float low_knee = independent ? low_soft : clamp(low_soft, 0.0, gap);
+    float high_knee = independent ? high_soft : clamp(high_soft, 0.0, gap - low_knee);
 
-    float encoded = sign(color) * pow(abs(color), 1.0 / 2.4);
+    float encoded = encoded_input ? color : sign(color) * pow(abs(color), 1.0 / 2.4);
     float bias = 0.5 - 1.5 * (low - low_knee) + 0.5 * (high - 1.0 + high_knee);
     encoded -= (clamp(encoded, 0.0, 1.0) + bias) / 1024.0;
     if (low != 0.0 || low_knee > 0.0)
-        encoded = calibrated_soft_clip_toe(encoded, low, low_knee);
+        encoded = resolve_soft_clip_toe(encoded, low, low_knee, independent);
     if (high_knee > 0.0)
-        encoded = 1.0 - calibrated_soft_clip_toe(1.0 - encoded, 1.0 - high, high_knee);
-    else if (high != 1.0)
-        encoded = min(encoded, high - clamp(high, 0.0, 1.0) / 1024.0);
-    return sign(encoded) * pow(abs(encoded), 2.4);
+        encoded = 1.0 - resolve_soft_clip_toe(1.0 - encoded, 1.0 - high, high_knee, independent);
+    else if (high != 1.0) {
+        float span = independent ? high - low + low_knee : clamp(high, 0.0, 1.0);
+        encoded = min(encoded, high - span / 1024.0);
+    }
+    return encoded_input ? encoded : sign(encoded) * pow(abs(encoded), 2.4);
 }
 """
 
 CURVES_SOFT_CLIP_CALIBRATION_SNIPPET = CALIBRATED_SOFT_CLIP_KNEE + """
 vec3 apply_calibrated_soft_clip(vec3 color, vec3 low, vec3 low_soft,
-                                vec3 high, vec3 high_soft) {
+                                vec3 high, vec3 high_soft, bool independent) {
     return vec3(
-        calibrated_soft_clip_channel(color.r, low.r, low_soft.r, high.r, high_soft.r),
-        calibrated_soft_clip_channel(color.g, low.g, low_soft.g, high.g, high_soft.g),
-        calibrated_soft_clip_channel(color.b, low.b, low_soft.b, high.b, high_soft.b)
+        calibrated_soft_clip_channel(color.r, low.r, low_soft.r, high.r, high_soft.r, u_rec709_calibration_encoded, independent),
+        calibrated_soft_clip_channel(color.g, low.g, low_soft.g, high.g, high_soft.g, u_rec709_calibration_encoded, independent),
+        calibrated_soft_clip_channel(color.b, low.b, low_soft.b, high.b, high_soft.b, u_rec709_calibration_encoded, independent)
     );
 }
 """
@@ -1240,7 +1322,8 @@ vec3 hs709_basis(float hue) {
 }
 
 vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
-    vec3 work = pow(max(color, 0.0), vec3(1.605 / 2.4));
+    float gamma = u_rec709_calibration_encoded ? 1.0 : 2.4;
+    vec3 work = pow(max(color, 0.0), vec3(1.605 / gamma));
     vec3 hsv = rgb2hsv(work);
     float peak = hsv.z;
     float chroma = peak - min(work.r, min(work.g, work.b));
@@ -1290,14 +1373,15 @@ vec3 apply_resolve_hs709(vec3 color, sampler2D mesh) {
     vec3 sat_shift = direction * (saturation * saturation_gain * pow(peak, 1.120));
     vec3 warped = (work + (hue_shift + sat_shift) * neutral_fade);
     warped *= exp(1.981 * lightness * neutral_fade);
-    return pow(max(warped, 0.0), vec3(2.4 / 1.605)) + min(color, 0.0);
+    return pow(max(warped, 0.0), vec3(gamma / 1.605)) + min(color, 0.0);
 }
 """
 
 
 RESOLVE_HS709_V2_SNIPPET = """
 vec3 apply_resolve_hs709_v2(vec3 color, sampler2D field) {
-    vec3 code = pow(max(color, 0.0), vec3(1.0 / 2.4));
+    vec3 positive = max(color, 0.0);
+    vec3 code = u_rec709_calibration_encoded ? positive : pow(positive, vec3(1.0 / 2.4));
     vec3 hsv = rgb2hsv(code);
     if (hsv.y <= 1e-8) return color;
 
@@ -1313,6 +1397,7 @@ vec3 apply_resolve_hs709_v2(vec3 color, sampler2D field) {
     vec3 second = texture(field, uv + vec2(0.0, min(lower + 1.0, levels - 1.0) / levels)).rgb;
     vec3 delta = mix(first, second, fract(plane));
     if (all(equal(delta, vec3(0.0)))) return color;
-    return pow(max(code + hsv.z * delta, 0.0), vec3(2.4)) + min(color, 0.0);
+    vec3 mapped = max(code + hsv.z * delta, 0.0);
+    return (u_rec709_calibration_encoded ? mapped : pow(mapped, vec3(2.4))) + min(color, 0.0);
 }
 """

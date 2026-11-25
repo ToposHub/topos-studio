@@ -144,11 +144,10 @@ class TestPreflightBlocking:
         from src.features.deliver.core.video_export_preflight import (
             PreflightContext, PreflightResult, _check_color_delivery_preflight,
         )
-        from src.features.deliver.core.video_export_preflight import (
-            SourceKind,
-        )
+        from src.features.deliver.core.video_export_job import SourceKind, VideoConfig
+
         job = NS(config={"allow_degraded_grade": allow_degraded},
-                 source_kind=SourceKind.TIMELINE)
+                 source_kind=SourceKind.TIMELINE, video_config=VideoConfig())
         row = NS(is_lossy=True, detail_key="curves")
         report = NS(rows=[row])
         monkeypatch.setattr(

@@ -55,8 +55,8 @@ class TestPanelSignals:
         panel.edit_rows["Y"].slider.setValue(50)
         panel._on_row_interaction_ended()
         assert not panel.automatic_calibration_pending
-        assert layer.curves_edit["calibration_version"] == 1
-        assert layer.curves_soft_clip["calibration_version"] == 1
+        assert layer.curves_edit["calibration_version"] == 3
+        assert layer.curves_soft_clip["calibration_version"] == 2
         assert layer.curves_soft_clip["channels"]["B"] == pytest.approx(
             {"low_clip": 0.0305, "low_soft": 0.0, "high_clip": 0.94, "high_soft": 0.06})
         assert layer.curves_edit["amounts"]["Y"] == 50.0
@@ -69,7 +69,60 @@ class TestPanelSignals:
         panel.set_layer_state({"curves_data": {"M": [(0, 255), (128, 100), (255, 0)]}})
         assert not panel.automatic_calibration_pending
         assert not panel.curves_widget.calibrated
-        assert panel.soft_clip_rows["low_clip"].value() == 0
+        assert panel.soft_calibration_pending
+        assert panel.soft_clip_rows["low_clip"].value() == 50.0
+
+    def test_resolve_soft_clip_edits_keep_four_independent_values(self, qapp, image_engine):
+        from src.app.controllers.layer_controller import LayerOpsMixin
+
+        host = LayerOpsMixin()
+        host.engine = image_engine
+        host.video_controller = None
+        host._graph_tool_route = lambda: None
+        panel = host.curves_panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
+        panel.soft_clip_changed.connect(host.on_curves_soft_clip_changed)
+        layer = image_engine.get_active_layer()
+        layer.curves_soft_clip = {"calibration_version": 1, "channels": {
+            ch: {"low_soft": 0.4, "high_soft": 0.4} for ch in "RGB"
+        }}
+        panel.set_layer_state({"curves_soft_clip": layer.curves_soft_clip})
+        rows = panel.soft_clip_rows
+        assert panel.get_soft_clip_payload()["calibration_version"] == 1
+        assert all((row.slider.minimum(), row.slider.maximum()) == (0, 10000)
+                   for row in rows.values())
+        rows["high_clip"].slider.setValue(0)
+        rows["low_clip"].spin.setValue(99.95)
+        rows["high_soft"].slider.setValue(10000)
+        panel._flush_pending()
+        assert layer.curves_soft_clip["calibration_version"] == 2
+        assert layer.curves_soft_clip["channels"]["R"] == {
+            "low_clip": 0.24975, "low_soft": 0.4, "high_clip": 0.75, "high_soft": 0.5,
+        }
+        reloaded = type(layer).from_dict(layer.to_dict())
+        panel.set_layer_state(reloaded.to_dict())
+        assert [row.value() for row in rows.values()] == [99.95, 80.0, 0.0, 100.0]
+
+        panel.soft_clip_buttons["G"].click()
+        panel._reset_soft_parameter("high_clip")
+        assert panel.get_soft_clip_payload()["channels"]["G"]["high_clip"] == 1.0
+        panel.soft_clip_buttons["R"].click()
+        assert [row.value() for row in rows.values()] == [99.95, 80.0, 0.0, 100.0]
+        panel.soft_clip_buttons["G"].click()
+        panel.soft_clip_link_btn.click()
+        assert [row.value() for row in rows.values()] == [99.95, 80.0, 0.0, 100.0]
+
+    def test_v1_single_channel_edit_keeps_other_channel_response(self, qapp):
+        panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
+        panel.set_layer_state({"curves_soft_clip": {"calibration_version": 1, "linked": False,
+            "channels": {"G": {"low_clip": 0.24, "low_soft": 0.45}},
+        }})
+        green = panel.get_soft_clip_payload()["channels"]["G"]
+        panel.soft_clip_buttons["R"].click()
+        panel.soft_clip_rows["high_soft"].spin.setValue(2.0)
+        state = panel.get_soft_clip_payload()
+        assert state["calibration_version"] == 1
+        assert state["channels"]["R"]["high_soft"] == 0.01
+        assert state["channels"]["G"] == green
 
     def test_709_linked_drag_commits_latest_xy_and_lut_in_one_gesture(self, qapp):
         widget = CurvesWidget()
@@ -93,7 +146,7 @@ class TestPanelSignals:
         assert points["M"][1][1] < 135
         assert lut.shape == (512, 1, 3)
 
-    def test_709_sat_curve_starts_with_a_single_global_anchor(self, qapp):
+    def test_709_sat_curve_keeps_the_two_default_endpoints(self, qapp):
         panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
         panel.set_layer_state({})
         panel.set_curve_mode("SatSat")
@@ -102,11 +155,13 @@ class TestPanelSignals:
         changed = QSignalSpy(canvas.changed)
         x, y = canvas.to_widget(127.5, 127.5)
         QTest.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=QPoint(round(x), round(y)))
-        assert len(canvas.curves["SatSat"]) == 1
+        assert len(canvas.curves["SatSat"]) == 3
         assert canvas.selected_values()[0] == pytest.approx(0.25, abs=0.002)
         canvas.set_selected_value("y", 1.3)
         canvas.flush()
-        np.testing.assert_allclose(changed[-1][0][4], 1.3, atol=1e-6)
+        response = changed[-1][0][4]
+        assert response[[0, -1]].tolist() == [1.0, 1.0]
+        assert response.max() == pytest.approx(1.3, abs=1e-4)
 
     def test_soft_clip_drag_emits_model_payload_after_throttle(self, qapp):
         panel = CurvesPanel(CurvesWidget())
@@ -303,18 +358,30 @@ class _FakePalettePanel:
 
 
 class TestHydratorCurvesPalette:
-    def test_flat_709_stack_restores_rendered_curves_with_sidebar(self, image_engine):
+    def test_legacy_flat_soft_clip_state_restores_to_engine(self, image_engine):
+        state = set_soft_clip_control({}, "B", "low_clip", -0.4)
+        stack = ColorStackData.create().with_curves_soft_clip(state)
+        ColorStackHydrator().apply_stack_to_engine(stack, image_engine)
+        assert image_engine.get_active_layer().curves_soft_clip == state
+
+    @pytest.mark.parametrize("version", (1, 2, 3))
+    def test_flat_709_stack_restores_rendered_curves_with_sidebar(self, image_engine, version: int):
+        from src.features.color.core.layer import build_curves_lut_from_data
+
         stack = (ColorStackData.create()
                  .with_curves({"M": [(0, 255), (127, 100), (255, 0)]})
                  .with_hsl_curves({"HueSat": [(127, 120)]})
-                 .with_curves_edit({"calibration_version": 1, "amounts": {"Y": 50}})
+                 .with_curves_edit({"calibration_version": version, "amounts": {"Y": 50}})
                  .with_curves_soft_clip({"calibration_version": 1,
                                          "channels": {"R": {"low_soft": 0.1}}}))
         ColorStackHydrator().apply_stack_to_engine(stack, image_engine)
         layer = image_engine.get_active_layer()
         assert layer.curves_edit["amounts"]["Y"] == 50.0
+        assert layer.curves_edit["calibration_version"] == version
         assert layer.curves_lut.shape == (512, 1, 3)
-        assert layer.hsl_curve_lut.shape == (6, 512)
+        np.testing.assert_array_equal(layer.curves_lut, build_curves_lut_from_data(
+            layer.curves_data, layer.curves_edit["amounts"], calibration_version=version))
+        assert layer.hsl_curve_lut.shape == (6, 1024 if version == 3 else 512)
         assert layer.curves_soft_clip["channels"]["R"]["low_soft"] == 0.1
 
     def test_apply_prefers_active_layer_snapshot(self):

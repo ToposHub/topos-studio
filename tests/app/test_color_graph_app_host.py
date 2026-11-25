@@ -384,7 +384,7 @@ class TestGradingGestureRouting:
                     if n.node_id == corrector.node_id)
         assert node.params["grade"]["exposure"] == 15.0
 
-    @pytest.mark.parametrize("control", ["yrgb", "hsl", "soft_clip"])
+    @pytest.mark.parametrize("control", ["yrgb", "yrgb_drag", "hsl", "hsl_on_v2", "soft_clip"])
     @pytest.mark.parametrize("graphless", [False, True])
     def test_first_video_curve_edit_saves_profile_in_same_graph_command(
             self, qapp, qtbot, control, graphless):
@@ -398,7 +398,11 @@ class TestGradingGestureRouting:
 
         project, stack_id = EditProject.create(name="709").create_color_stack(asset_id="a", name="s")
         project = project.with_color_management({TIMELINE_SPACE_KEY: "rec709-g24"})
-        stack = project.color_stacks[stack_id].with_layers([Layer("Neutral").to_dict()])
+        layer = Layer("Neutral")
+        if control == "hsl_on_v2":
+            layer.curves_edit["calibration_version"] = 2
+            layer.curves_data = {"M": [(0, 255), (128, 90), (255, 0)]}
+        stack = project.color_stacks[stack_id].with_layers([layer.to_dict()])
         graph = migrate_legacy_stack(stack)
         project = project.update_color_stack(
             stack_id, layers=stack.layers, color_graph=None if graphless else graph)
@@ -426,22 +430,51 @@ class TestGradingGestureRouting:
             "curves_palette": panel, "curves_panel": panel.curves_widget, "hsl_panel": panel.hsl_panel,
         }
         h.host._sync_engine_from_bound_stack(project)
-        assert panel.automatic_calibration_pending
+        assert panel.automatic_calibration_pending == (control != "hsl_on_v2")
+        assert panel.hsl_calibration_pending == (control == "hsl_on_v2")
         assert not h.cmd_stack._undo_stack
-        if control == "yrgb":
+        if control == "yrgb_drag":
+            from PyQt6.QtCore import QPoint, Qt
+
+            widget = panel.curves_widget
+            widget.resize(457, 351)
+            widget.changed.connect(host.on_curves_changed)
+            x, y = widget.to_widget(0, 255)
+            black = QPoint(round(x), round(y))
+            qtbot.mousePress(widget, Qt.MouseButton.LeftButton, pos=black)
+            qtbot.mouseMove(widget, pos=black + QPoint(40, 0))
+            widget.flush()
+            host._tool_flush_timer.return_value.start.assert_not_called()
+            assert h.host.grade_gesture_open()
+            assert not h.cmd_stack._undo_stack
+            qtbot.mouseRelease(widget, Qt.MouseButton.LeftButton, pos=black + QPoint(80, 0))
+        elif control == "yrgb":
             panel.curves_widget.changed.connect(host.on_curves_changed)
             panel.curves_widget.set_curves_data({"M": [(0, 255), (128, 100), (255, 0)]}, emit_changed=True)
             panel.curves_widget.flush()
-        elif control == "hsl":
+        elif control in ("hsl", "hsl_on_v2"):
             hsl = panel.hsl_panel.hsl_curves_widget
             hsl.changed.connect(host.on_hsl_curve_changed)
             hsl.set_curves_data({"SatSat": [(127.5, 95)]})
             hsl.update_lut()
             hsl.flush()
         else:
+            from PyQt6.QtCore import QPoint, Qt
+
             panel.soft_clip_changed.connect(host.on_curves_soft_clip_changed)
-            panel.soft_clip_rows["low_soft"].slider.setValue(1200)
-            panel._on_row_interaction_ended()
+            slider = panel.soft_clip_rows["low_soft"].slider
+            slider.resize(166, 18)
+            start = slider._handle_rect().center()
+            stop = start + QPoint(76, 0)
+            qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=start)
+            qtbot.mouseMove(slider, pos=stop)
+            panel._flush_pending()
+            host._tool_flush_timer.return_value.start.assert_not_called()
+            assert panel.soft_clip_interaction_active
+            assert h.host.grade_gesture_open()
+            assert not h.cmd_stack._undo_stack
+            qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=stop)
+            assert not panel.soft_clip_interaction_active
 
         draft = h.engine.set_color_graph_preview.call_args.args[0]
         assert draft is not None
@@ -449,10 +482,17 @@ class TestGradingGestureRouting:
         assert len(h.cmd_stack._undo_stack) == 1
         assert not panel.automatic_calibration_pending
         payload = h.host.panel_layer_payload(node.node_id)
-        for domain in ("curves_soft_clip", "curves_edit"):
-            assert payload[domain]["calibration_version"] == 1
+        if control == "yrgb_drag":
+            assert payload["curves_data"]["M"][0] == pytest.approx((80 * 255 / 443, 255))
+        if control != "hsl_on_v2":
+            assert payload["curves_soft_clip"]["calibration_version"] == 2
+        if control == "soft_clip":
+            assert payload["curves_soft_clip"]["channels"]["R"]["low_soft"] == pytest.approx(
+                panel.soft_clip_rows["low_soft"].value() / 200.0)
+        assert payload["curves_edit"]["calibration_version"] == 3
         assert h.host.undo()
-        assert panel.automatic_calibration_pending
+        assert panel.automatic_calibration_pending == (control != "hsl_on_v2")
+        assert panel.hsl_calibration_pending == (control == "hsl_on_v2")
         assert h.host.redo()
         assert not panel.automatic_calibration_pending
 
@@ -842,15 +882,17 @@ def test_warper_preview_remains_transient_and_commit_is_undoable(harness) -> Non
     assert h.host.panel_layer_payload(node.node_id).get("warper_state") is None
 
 
-def test_first_video_warper_edit_without_cpu_frame_uses_one_undo(qapp, qtbot) -> None:
+@pytest.mark.parametrize("parallel", [False, True])
+def test_first_video_warper_edit_without_cpu_frame_uses_one_undo(qapp, qtbot, parallel: bool) -> None:
     from types import SimpleNamespace
 
-    from PyQt6.QtCore import QObject
+    from PyQt6.QtCore import QObject, QPoint, Qt
+    from PyQt6.QtTest import QTest
 
     from src.app.controllers.color_controller import ColorControllerMixin
     from src.app.controllers.layer_controller import LayerOpsMixin
     from src.features.color.core.layer import Layer
-    from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHM_V2
+    from src.features.color.core.warper_state import RESOLVE_HS_ALGORITHM_V3
     from src.features.color.ui.warper_panel import WarperPanel
     from src.shared.color.color_space_descriptor import TIMELINE_SPACE_KEY
 
@@ -861,10 +903,14 @@ def test_first_video_warper_edit_without_cpu_frame_uses_one_undo(qapp, qtbot) ->
     project = project.with_color_management({TIMELINE_SPACE_KEY: "rec709-g24"})
     stack = project.color_stacks[stack_id].with_layers([Layer("Neutral").to_dict()])
     graph = migrate_legacy_stack(stack)
+    node = next(node for node in graph.nodes if node.node_type == "corrector")
+    if parallel:
+        from src.features.color.core.color_graph_service import ColorGraphService
+
+        graph = ColorGraphService().op_add_parallel_branch(graph).graph
     project = project.update_color_stack(stack_id, layers=stack.layers, color_graph=graph)
     h = _Harness(qapp, project)
     h.host.on_clip_stack_loaded(stack_id)
-    node = next(node for node in graph.nodes if node.node_type == "corrector")
     h.host.panel_host._on_active_node_changed(node.node_id)
 
     host = Host()
@@ -891,7 +937,7 @@ def test_first_video_warper_edit_without_cpu_frame_uses_one_undo(qapp, qtbot) ->
     panel.warper.selected = {(2, 0)}
     panel.warper.edit_component("hue", 0.075)
     saved = h.host.panel_layer_payload(node.node_id)["warper_state"]
-    assert saved["algorithm_version"] == RESOLVE_HS_ALGORITHM_V2
+    assert saved["algorithm_version"] == RESOLVE_HS_ALGORITHM_V3
     assert saved["grids"]["hs"]["offsets"][2][0][0] == pytest.approx(-0.075)
     assert len(h.cmd_stack._undo_stack) == 1
     assert h.host.undo()
@@ -900,3 +946,52 @@ def test_first_video_warper_edit_without_cpu_frame_uses_one_undo(qapp, qtbot) ->
     assert not panel.warper.calibrated_offsets().any()
     assert h.host.redo()
     assert h.host.panel_layer_payload(node.node_id)["warper_state"] == saved
+
+    panel.resize(900, 420)
+    panel.show()
+    host.idle_render_timer = Mock()
+    host.idle_render_timer.isActive.return_value = False
+    h.engine.render_pipeline.reset_mock()
+    h.engine.set_warper_params.reset_mock()
+    for mode in ("chroma_luma", "chroma_warp"):
+        panel.mode_buttons[mode].click()
+        canvas = panel.active_canvas()
+        if mode == "chroma_luma":
+            start = canvas.point_screen((3, 3)).toPoint()
+        else:
+            canvas.tool = "stroke"
+            start = canvas._screen([0.32, 0.34]).toPoint()
+        end = start + QPoint(20, -13)
+        committed = h.holder["project"]
+        QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+        QTest.mouseMove(canvas, end)
+        # Let the palette's coalescing timer publish while the pointer is down.
+        def has_draft() -> bool:
+            call = h.engine.set_color_graph_preview.call_args
+            graph = call.args[0] if call is not None else None
+            return graph is not None and any(
+                n.legacy_payload.get("warper_state") is not None
+                and n.legacy_payload["warper_state"]["mode"] == mode
+                and n.legacy_payload.get("warper_params") is not None
+                for n in graph.nodes)
+
+        qtbot.waitUntil(has_draft)
+        draft = next(n for n in h.engine.set_color_graph_preview.call_args.args[0].nodes
+                     if n.node_id == node.node_id).legacy_payload["warper_state"]
+        assert {item["mode"] for item in draft["other_modes"]} >= {"hue_saturation"}
+        assert h.holder["project"] is committed
+        QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=end)
+        actual = h.host.panel_layer_payload(node.node_id)["warper_state"]
+        assert actual["mode"] == mode
+        assert panel._saved_warper is not None and panel._saved_warper.to_dict() == actual
+    assert {item["mode"] for item in actual["other_modes"]} == {"hue_saturation", "chroma_luma"}
+    from src.shared.project.color_graph import ColorGraphData, unfreeze_params
+
+    reopened = ColorGraphData.from_dict(h.host.bound_graph().to_dict())
+    reopened_node = next(n for n in reopened.nodes if n.node_id == node.node_id)
+    assert unfreeze_params(reopened_node.legacy_payload["warper_state"]) == actual
+    assert host.idle_render_timer.stop.called
+    assert not host.idle_render_timer.start.called
+    h.engine.set_warper_params.assert_not_called()
+    assert h.engine.render_pipeline.call_count >= 2
+    assert all(call.kwargs == {"render_reason": "grading"} for call in h.engine.render_pipeline.call_args_list)

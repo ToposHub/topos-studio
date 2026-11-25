@@ -63,6 +63,37 @@ def test_measured_flat_stack_projects_even_when_only_extended_wheel_is_active(co
     assert updated.graph_revision != graph.graph_revision
 
 
+@pytest.mark.parametrize("layered", (False, True))
+def test_soft_clip_with_legacy_model_projects_for_delivery(layered: bool) -> None:
+    from src.features.color.core.curves_soft_clip import set_soft_clip_control
+
+    state = set_soft_clip_control({}, "G", "high_soft", 0.15)
+    stack = ColorStackData.create()
+    if layered:
+        other = Layer()
+        other.curves_soft_clip = state
+        stack = stack.with_layers([Layer().to_dict(), other.to_dict()], active_layer_index=0)
+    else:
+        stack = stack.with_curves_soft_clip(state)
+    graph = stack_primary_execution_graph(stack)
+    assert graph is not None
+    assert project_legacy_layers(graph)[-1]["curves_soft_clip"] == state
+
+
+def test_resolve_soft_clip_normalizes_graph_import_at_execution() -> None:
+    from src.features.color.core.color_graph_param_source import node_layer_payload
+
+    raw = {"linked": False, "calibration_version": 2, "channels": {
+        "red": {"lowSoft": 0.49, "highSoft": 0.9, "highClip": 0.75},
+    }}
+    stack = ColorStackData.create().with_curves_soft_clip(raw)
+    graph = migrate_legacy_stack(stack)
+    node = next(node for node in graph.nodes if node.node_type == NodeType.CORRECTOR.value)
+    assert node_layer_payload(node, include_lut_cache=False)["curves_soft_clip"] == raw
+    assert node_layer_payload(node)["curves_soft_clip"] == Layer.from_dict(
+        {"curves_soft_clip": raw}).curves_soft_clip
+
+
 # ── v2+ layers 迁移 ──────────────────────────────────────────────────────
 
 class TestLayerStackMigration:

@@ -47,6 +47,8 @@ _HEADER_BASELINE = [
     "uniform sampler2D u_input_tex;",
     "uniform sampler2D u_matte_tex;",
     "uniform float u_mid_detail_calibrated;",
+    "uniform bool u_rec709_calibration_encoded;",
+    "uniform bool u_mist_calibrated;",
 ]
 
 _BODY_BASELINE_MINIMAL = [

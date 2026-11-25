@@ -115,7 +115,7 @@ from src.shared.color.project_video_signal import (
     aces_input_bgr, aces_input_descriptor, aces_monitor_space, aces_timeline_black, normalized_video_bgr,
     project_aces_settings, read_aces_still, read_video_still_bgr, render_aces_bgr,
     convert_video_signal_bgr, encode_timeline_linear_bgr,
-    video_signal_spaces, video_signal_uses_legacy_space,
+    timeline_uses_rec709_gamma24, video_signal_spaces, video_signal_uses_legacy_space,
 )
 from src.shared.color.video_signal_gl import can_render_video_signal_gl
 from src.shared.gpu.gl_backend import GLContextManager
@@ -5199,6 +5199,8 @@ class PreviewRenderWorker(QThread):
         if graph is not None:
             return {"stack_id": str(stack_id), "color_graph": graph,
                     "source_frame": int(getattr(layer, "source_frame", 0)),
+                    "rec709_calibration_encoded": timeline_uses_rec709_gamma24(
+                        video_signal_spaces(self._preview_color_settings())),
                     "chain_extra_params": extras,
                     "has_advanced_operations": True}
 
@@ -5534,6 +5536,8 @@ class PreviewRenderWorker(QThread):
             return run_graph_frame_cpu(
                 graph, frame_data,
                 int(getattr(layer, "source_frame", 0) or 0),
+                rec709_calibration_encoded=timeline_uses_rec709_gamma24(
+                    video_signal_spaces(self._preview_color_settings())),
                 pre_chain=pre, post_chain=after)
         except (UnsupportedNode, GraphCompileError) as exc:
             logger.warning(
@@ -5601,6 +5605,7 @@ class PreviewRenderWorker(QThread):
             integer_input = np.issubdtype(frame_data.dtype, np.integer)
             max_value = float(np.iinfo(frame_data.dtype).max) if integer_input else 1.0
             rgb = frame_data[..., :3][..., ::-1].astype(np.float32) / max_value
+            encoded = timeline_uses_rec709_gamma24(video_signal_spaces(self._preview_color_settings()))
             # M05（S08）：链段按 _chain_segment 分侧——pre 段在主栈之前，
             # trim/post 段在主栈之后（pre→main→trim→post；未标记载荷按
             # 主栈之后处理，与旧行为一致）。
@@ -5623,12 +5628,13 @@ class PreviewRenderWorker(QThread):
                                         "hue_shift")) or any(
                             any(abs(float(v)) > 1e-6 for v in extra.get(w, ()))
                             for w in ("lift", "gamma", "gain")):
-                        buf = GradingMath.apply_grading(buf, extra)
+                        buf = GradingMath.apply_grading(buf, extra, rec709_calibration_encoded=encoded)
                 return buf
 
             graded = _apply_chain_entries(
                 rgb, [e for e in extras if e.get("_chain_segment") == "pre"])
-            graded = GradingMath.apply_grading(graded, grading_params)
+            graded = GradingMath.apply_grading(
+                graded, grading_params, rec709_calibration_encoded=encoded)
             # F4.1: 调色链段（pre_group → trim → post_group）顺序应用。
             # 非线性参数无代数合并，顺序执行即精确组合；高级标记段
             # （curves/LUT）在 primary 域不可表示——跳过并告警（与

@@ -426,11 +426,11 @@ def _with_hsl_curve_lut(payload: dict) -> dict:
     缩略图看起来像没调过。
     """
     if payload.get("hsl_curve_lut") is None and payload.get("hsl_curve_data"):
-        from src.features.color.core.curves_calibration import curves_calibration_enabled
+        from src.features.color.core.curves_calibration import curves_calibration_version
         from src.features.color.core.layer import build_hsl_curve_lut_from_data
         payload["hsl_curve_lut"] = build_hsl_curve_lut_from_data(
             dict(payload["hsl_curve_data"]),
-            calibration_version=int(curves_calibration_enabled(payload.get("curves_edit"))),
+            calibration_version=curves_calibration_version(payload.get("curves_edit")),
         )
     return payload
 

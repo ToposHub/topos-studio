@@ -134,8 +134,8 @@ class ToposClickableSlider(ToposSlider):
     其中 ``base = (maximum − minimum) / widget_width``，与 DragValue 完全一致，
     拖满控件宽度 = 覆盖完整值域。
 
-    注意：只有「抓住手柄拖拽」走速度档位；点击滑槽空白处仍瞬间跳转
-    （保留现有快速定位行为）。
+    ``use_groove_drag_span`` 让手柄在 Qt 滑槽的实际行程内跟随指针，
+    并将空白滑槽的按下、跳转及拖拽收为同一次交互。
     """
 
     def __init__(
@@ -147,9 +147,11 @@ class ToposClickableSlider(ToposSlider):
         super().__init__(orientation, default_value, parent)
         # 三档速度拖拽（opt-in）。color 页十几个面板默认不启用，行为不变。
         self._velocity_drag = False
+        self.use_groove_drag_span = False
         # 当前拖拽会话状态
         self._vdrag_active = False
         self._vdrag_start_pos = 0.0      # 拖拽起点（水平=x，垂直=y）
+        self._vdrag_last_pos = 0.0
         self._vdrag_start_value = 0      # 拖拽起点的 value（int 域）
         self._vdrag_accum = 0.0          # 浮点累积，避免 int 来回拖丢精度
 
@@ -177,7 +179,8 @@ class ToposClickableSlider(ToposSlider):
 
         int 域最终 setValue 会按整数四舍五入。
         """
-        w = max(self.width(), 1)
+        w = (self._groove_drag_geometry()[1] if self.use_groove_drag_span
+             else max(self.width(), 1))
         base = (self.maximum() - self.minimum()) / w
         if mods & Qt.KeyboardModifier.ShiftModifier:
             return base * _SLIDER_LARGE_SPEED
@@ -199,6 +202,18 @@ class ToposClickableSlider(ToposSlider):
         return (event.position().x() if self.orientation() == Qt.Orientation.Horizontal
                 else event.position().y())
 
+    def _groove_drag_geometry(self) -> tuple[float, int, bool]:
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        groove = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderGroove, self)
+        handle = self._handle_rect()
+        if self.orientation() == Qt.Orientation.Horizontal:
+            origin, track_size, handle_size = groove.left(), groove.width(), handle.width()
+        else:
+            origin, track_size, handle_size = groove.top(), groove.height(), handle.height()
+        return origin + (handle_size - 1) / 2, max(track_size - handle_size, 1), opt.upsideDown
+
     # ── 鼠标事件 ──────────────────────────────────────────────
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -206,13 +221,21 @@ class ToposClickableSlider(ToposSlider):
         - 开启三档速度 + 点击落在手柄上 → 进入速度拖拽会话，自己接管；
         - 否则 → 原有「点击滑槽跳转」+ super。
         """
-        if (event.button() == Qt.MouseButton.LeftButton
-                and self._velocity_drag
-                and self._handle_rect().contains(event.position().toPoint())):
+        on_handle = self._handle_rect().contains(event.position().toPoint())
+        if (event.button() == Qt.MouseButton.LeftButton and self._velocity_drag
+                and (on_handle or self.use_groove_drag_span)):
             self._vdrag_active = True
             self._vdrag_start_pos = self._press_pos(event)
+            self._vdrag_last_pos = self._vdrag_start_pos
             self._vdrag_start_value = self.value()
             self._vdrag_accum = 0.0
+            self.setSliderDown(True)
+            if not on_handle:
+                first, span, upside_down = self._groove_drag_geometry()
+                self.setValue(QStyle.sliderValueFromPosition(
+                    self.minimum(), self.maximum(), round(self._vdrag_start_pos - first),
+                    span, upside_down))
+                self._vdrag_start_value = self.value()
             event.accept()
             return
         # 原有行为：点击滑槽直接跳转
@@ -228,9 +251,11 @@ class ToposClickableSlider(ToposSlider):
         if not self._vdrag_active:
             super().mouseMoveEvent(event)
             return
-        dx = self._press_pos(event) - self._vdrag_start_pos
-        # 垂直滑块：向上拖增大（与手柄方向一致），故取负
-        if self.orientation() == Qt.Orientation.Vertical:
+        self._vdrag_last_pos = self._press_pos(event)
+        dx = self._vdrag_last_pos - self._vdrag_start_pos
+        inverted = (self._groove_drag_geometry()[2] if self.use_groove_drag_span
+                    else self.orientation() == Qt.Orientation.Vertical)
+        if inverted:
             dx = -dx
         sensitivity = self._drag_sensitivity(event.modifiers())
         # 累积浮点增量，再四舍五入成 int，保证小幅拖拽也能逐渐变化。
@@ -241,7 +266,10 @@ class ToposClickableSlider(ToposSlider):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._vdrag_active:
+            if self._press_pos(event) != self._vdrag_last_pos:
+                self.mouseMoveEvent(event)
             self._vdrag_active = False
+            self.setSliderDown(False)
             event.accept()
             return
         super().mouseReleaseEvent(event)

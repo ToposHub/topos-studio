@@ -1,6 +1,7 @@
 """Unified curve navigation retains the existing HSL editing contract."""
 import pytest
-from PyQt6.QtCore import QPointF
+from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtTest import QSignalSpy
 
 from src.features.color.ui.curves_panel import CurvesPanel, CURVE_PALETTE_ORDER
@@ -95,3 +96,68 @@ def test_legacy_hsl_workspace_opens_curves_instead_of_color_mapping():
     resolved = sanitize_preset(preset, ['color.curves', 'color.mapping'])
     assert 'color.curves' in resolved
     assert 'color.mapping' not in resolved
+
+
+@pytest.mark.parametrize("mode", MODE_ORDER)
+def test_calibrated_hsl_pointer_commits_release_position(qapp, mode: str) -> None:
+    panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
+    panel.set_layer_state({})
+    panel.set_curve_mode(mode)
+    canvas = panel.hsl_panel.hsl_curves_widget
+    canvas.resize(711, 370)
+    started, changed, ended = (QSignalSpy(signal) for signal in
+                               (canvas.interaction_started, canvas.changed, canvas.interaction_ended))
+
+    def event(kind: QEvent.Type, x: float, y: float) -> QMouseEvent:
+        point = QPointF(*canvas.to_widget(x, y))
+        return QMouseEvent(kind, point, point, Qt.MouseButton.LeftButton,
+                           Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+
+    press = event(QEvent.Type.MouseButtonPress, 85.0, 95.0)
+    release = event(QEvent.Type.MouseButtonRelease, 112.0, 105.0)
+    canvas.mousePressEvent(press)
+    canvas.mouseReleaseEvent(release)
+    points = canvas.get_curves_data()[mode]
+    assert len(points) == (1 if mode.startswith("Hue") else 3)
+    assert points[len(points) // 2] == pytest.approx((112.0, 105.0))
+    assert (len(started), len(changed), len(ended)) == (1, 1, 1)
+    assert changed[0][0].shape == (6, 1024)
+
+    canvas.mousePressEvent(event(QEvent.Type.MouseButtonPress, 112.0, 105.0))
+    canvas.mouseReleaseEvent(release)
+    assert (len(started), len(changed), len(ended)) == (1, 1, 1)
+
+
+def test_calibrated_presets_and_hue_readback_wrap(qapp) -> None:
+    panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
+    panel.set_layer_state({})
+    panel.set_curve_mode("HueSat")
+    canvas = panel.hsl_panel.hsl_curves_widget
+    assert canvas.selected_values() == (256.0, 1.0)
+    canvas.add_preset_anchor(0.0)
+    points = canvas.get_curves_data()["HueSat"]
+    assert [p[0] for p in points] == pytest.approx([0.0, 42.5, 212.5])
+    assert canvas.selected_values() == (256.0, 1.0)
+    canvas.set_selected_value("x", 255.0)
+    assert canvas.selected_values() == pytest.approx((255.0, 1.0))
+    assert canvas.get_curves_data()["HueSat"][-1][0] == pytest.approx(359.0 * 255.0 / 360.0)
+    canvas.set_selected_value("x", 90.0)
+    assert canvas.selected_values() == pytest.approx((255.0, 1.0))
+    canvas.set_selected_value("x", 281.0)
+    assert canvas.selected_values() == (281.0, 1.0)
+    assert canvas.get_curves_data()["HueSat"][0][0] == pytest.approx(25.0 * 255.0 / 360.0)
+    panel.set_curve_mode("LumSat")
+    canvas.add_preset_anchor(1.0)
+    assert canvas.selected_values() == (0.75, 1.0)
+
+
+def test_calibrated_hue_seam_is_a_single_editable_point(qapp) -> None:
+    panel = CurvesPanel(CurvesWidget(), use_measured_curves=lambda: True)
+    panel.set_layer_state({})
+    panel.set_curve_mode("HueSat")
+    canvas = panel.hsl_panel.hsl_curves_widget
+    canvas.set_curves_data({"HueSat": [(0.0, 110.0), None, (110.0, 130.0), (255.0, 100.0)]})
+    assert canvas.get_curves_data()["HueSat"] == [(0.0, 105.0), (110.0, 130.0)]
+    canvas.add_anchor(1.0)
+    assert len(canvas.get_curves_data()["HueSat"]) == 2
+    assert canvas.selected_values() == pytest.approx((256.0, 150.0 / 127.5))

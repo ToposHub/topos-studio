@@ -267,6 +267,16 @@ def generate_analysis(
                          "warper_response_rec709_g24_v2.npz"),
             "src/features/color/core/data",
         ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
+                         "warper_response_rec709_g24_v3.npz"),
+            "src/features/color/core/data",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "features", "color", "core", "data",
+                         "hs_white_point_rec709_g24.npz"),
+            "src/features/color/core/data",
+        ),
         # Node usage help documents (per-node bilingual Markdown).
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "node_help", "docs"),

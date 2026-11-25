@@ -301,8 +301,10 @@ def _corrector_prefix_reference(image: np.ndarray, layer) -> np.ndarray:
 
 class TestStructural:
     def test_param_dtypes_layout(self) -> None:
-        # 29 base fields + 24 mixer values + 3 primary/detail fields + 2 Mist fields.
-        assert TEX_EXTRA_PARAMS_DTYPE.itemsize == 232
+        # 29 base fields + 24 mixer values + 4 primary/detail fields + 3 Mist fields.
+        assert TEX_EXTRA_PARAMS_DTYPE.itemsize == 240
+        assert TEX_EXTRA_PARAMS_DTYPE.fields["rec709_calibration_encoded"][1] == 232
+        assert TEX_EXTRA_PARAMS_DTYPE.fields["mist_calibrated"][1] == 236
         assert TEX_QUALIFIER_PARAMS_DTYPE.itemsize == 60
         for name in TEX_EXTRA_PARAMS_DTYPE.names:
             offset = (TEX_EXTRA_PARAMS_DTYPE.fields[name][1]
@@ -439,13 +441,14 @@ def metal_ctx():
 
 
 def _run_graph(ctx, executor, graph, image, *, frame=None, request_id="t",
-               cancel_check=None, size=None, with_cpu=True):
+               cancel_check=None, size=None, with_cpu=True, encoded=False):
     import Metal
 
     height, width = image.shape[:2]
     snapshot = freeze_graph(graph, session_id="tex")
     plan = compile_graph(snapshot, size=size or (width, height))
-    provider = graph_node_layer_provider(snapshot.graph, frame=frame)
+    provider = graph_node_layer_provider(snapshot.graph, frame=frame,
+                                         rec709_calibration_encoded=encoded)
     cpu = None
     if with_cpu:
         cpu = run_plan_cpu(plan, _quantized(image),
@@ -546,6 +549,21 @@ class TestTextureGraphVsCpu:
             executor.release_pool()
         assert not executor._primary_textures
 
+    def test_encoded_rec709_preview_combines_measured_primary_and_curve(self, metal_ctx: Any) -> None:
+        layer = _neutral_layer("Measured Rec.709")
+        layer.grading_params.update(primary_calibration_version=2, saturation=16.0)
+        layer.curves_edit["calibration_version"] = 1
+        layer.curves_data = {"M": [(0, 255), (128, 98), (255, 0)]}
+        executor = ColorGraphMetalTextureExecutor(metal_ctx)
+        src = f02_patches(32)
+        try:
+            result, cpu = _run_graph(
+                metal_ctx, executor, _graph_for([layer]), src, encoded=True)
+            assert result.published, result.diagnostic_message
+            _assert_dual(executor.read_output_rgba16f(result), cpu.output, "encoded Rec.709")
+        finally:
+            executor.release_pool()
+
     def test_midtone_detail_uses_neighbor_input_at_same_resolution(self, metal_ctx):
         layer = _neutral_layer("Midtone Detail")
         layer.grading_params.update({"primary_calibration_version": 1, "mid_detail": 50.0})
@@ -611,20 +629,28 @@ class TestTextureGraphVsCpu:
         _assert_dual(executor.read_output_rgba16f(result), cpu.output,
                      "curves")
 
-    @pytest.mark.parametrize("operator", ["yrgb", "hsl", "soft_clip"])
-    def test_resolve_calibrated_curves_match_cpu(self, metal_ctx, operator):
+    @pytest.mark.parametrize(("operator", "version"), [
+        ("yrgb", 1), ("hsl", 1), ("hsl", 3), ("soft_clip", 1), ("soft_clip", 2),
+    ])
+    def test_resolve_calibrated_curves_match_cpu(self, metal_ctx, operator, version):
         from src.features.color.core.curves_soft_clip import normalize_curves_soft_clip
 
         layer = _neutral_layer(operator)
-        layer.curves_edit["calibration_version"] = 1
+        layer.curves_edit["calibration_version"] = version
         if operator == "yrgb":
             layer.curves_data = {"M": [(0, 255), (127.5, 102), (255, 0)]}
         elif operator == "hsl":
-            layer.hsl_curve_data = {"HueSat": [(127.5, 100.0)]}
+            layer.hsl_curve_data = {
+                "HueSat": [(51.0, 127.5), (127.5, 100.0), (221.0, 135.0)],
+                "HueHue": [(127.5, 110.0)],
+                "SatLum": [(0.0, 127.5), (255.0, 115.0)],
+            }
         else:
+            settings = ({"low_clip": 0.25, "low_soft": 0.5, "high_clip": 0.75, "high_soft": 0.5}
+                        if version == 2 else {"low_soft": 0.15, "high_clip": 0.8})
             layer.curves_soft_clip = normalize_curves_soft_clip({
-                "calibration_version": 1,
-                "channels": {"G": {"low_soft": 0.15, "high_clip": 0.8}},
+                "calibration_version": version,
+                "channels": {"G": settings},
             })
         executor = ColorGraphMetalTextureExecutor(metal_ctx)
         src = f02_patches(32)

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Callable, Optional, Tuple, Dict, Any
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, Qt
 
 from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
+from src.features.color.core.hsl_curve_calibration import VALID_HSL_LUT_SHAPES
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     from src.features.color.core.layer import Layer
@@ -115,7 +116,7 @@ class LutExportWorker(QObject):
         Identity is all-ones except row 1 (HueHue) which is zero.
 
         Args:
-            lut: ``Layer.hsl_curve_lut`` ndarray of shape (6, 256) or (6, 512).
+            lut: Legacy or calibrated ``Layer.hsl_curve_lut``.
 
         Returns:
             bool: True if the LUT would change colors (parse failure also
@@ -125,7 +126,7 @@ class LutExportWorker(QObject):
             return False
         try:
             arr = np.asarray(lut, dtype=np.float32)
-            if arr.shape not in ((6, 256), (6, 512)):
+            if arr.shape not in VALID_HSL_LUT_SHAPES:
                 return True
             expected = np.ones_like(arr)
             expected[1, :] = 0.0
@@ -1298,10 +1299,10 @@ class LutExporter:
         if hasattr(layer, 'mixer_params') and LutExportWorker._has_active_mixer_params(layer.mixer_params):
             data['mixer_params'] = copy.deepcopy(layer.mixer_params)
 
-        from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+        from src.features.color.core.warper_color import WARPER_PREPARED_SPACES
 
         space = getattr(layer, 'warper_space', 0)
-        if space in RESOLVE_HS709_SPACES and layer.warper_params is not None:
+        if space in WARPER_PREPARED_SPACES and layer.warper_params is not None:
             data['warper_params'] = layer.warper_params.copy()
             data['warper_space'] = space
 

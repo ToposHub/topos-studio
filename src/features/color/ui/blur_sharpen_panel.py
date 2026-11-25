@@ -6,7 +6,9 @@ from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
 from src.features.color.core.mist import (
-    MIST_DEFAULT_MIX, MIST_DEFAULT_RADIUS, MIST_MAX_MIX, mist_params,
+    MIST_CALIBRATION_VERSION, MIST_DEFAULT_MIX, MIST_DEFAULT_RADIUS, MIST_KEYS, MIST_MAX_MIX,
+    MIST_MAX_RADIUS,
+    mist_defaults, mist_is_calibrated, mist_params,
 )
 from src.features.color.ui.panel_chrome import (
     ColorParameterRow, PARAMETER_LABEL_STYLE, SECTION_TITLE_STYLE,
@@ -51,6 +53,7 @@ class BlurSharpenPanel(QWidget):
         self._pending_params = None
         self._syncing_ui = False
         self._mist_available = True
+        self._mist_calibrated = True
 
         self.init_ui()
 
@@ -286,12 +289,15 @@ class BlurSharpenPanel(QWidget):
         mist_layout.setContentsMargins(4, 0, 4, 0)
         mist_layout.setSpacing(4)
         self.mist_radius_slider = self._create_row(
-            I18N.tr("blur_sharpen.radius", "半径"), 0, 1, MIST_DEFAULT_RADIUS,
+            I18N.tr("blur_sharpen.radius", "半径"), 0, MIST_MAX_RADIUS, MIST_DEFAULT_RADIUS,
             step=0.01, decimals=2)
         self.mist_mix_slider = self._create_row(
-            I18N.tr("blur_sharpen.mist_mix", "Mixer"), 0, MIST_MAX_MIX, MIST_DEFAULT_MIX)
+            I18N.tr("blur_sharpen.mist_mix", "Mixer"), 0, MIST_MAX_MIX, MIST_DEFAULT_MIX,
+            step=0.01, decimals=2)
         self.mist_radius_slider.slider.enable_velocity_drag = False
         self.mist_mix_slider.slider.enable_velocity_drag = False
+        self.mist_radius_slider.spin.set_drag_rate(0.01)
+        self.mist_mix_slider.spin.set_drag_rate(1.0)
         self.mist_mix_slider.setToolTip(I18N.tr(
             "blur_sharpen.mist_mix_tooltip", "Lower Mixer values increase diffusion."))
         mist_layout.addWidget(self.mist_radius_slider)
@@ -493,6 +499,7 @@ class BlurSharpenPanel(QWidget):
             'mist_enabled': self.mist_enable_cb.isChecked(),
             'mist_radius': float(self.mist_radius_slider.value()),
             'mist_mix': float(self.mist_mix_slider.value()),
+            'mist_version': MIST_CALIBRATION_VERSION if self._mist_calibrated else 1,
         }
 
     def set_params_dict(self, params, emit=False) -> None:
@@ -557,6 +564,11 @@ class BlurSharpenPanel(QWidget):
         self.blur_fast_intensity_slider.setValue(float(params.get('fast_blur_intensity', old_intensity if blur_mode == 3 else 0)))
         self.blur_fast_radius_slider.setValue(float(params.get('fast_blur_radius', old_radius if blur_mode == 3 else 0)))
 
+        self._mist_calibrated = mist_is_calibrated(params) or MIST_KEYS.isdisjoint(params)
+        default_radius, default_mix = mist_defaults(self._mist_calibrated)
+        self.mist_radius_slider.setRange(0.0, MIST_MAX_RADIUS if self._mist_calibrated else 1.0)
+        self.mist_radius_slider.setDefaultValue(default_radius)
+        self.mist_mix_slider.setDefaultValue(default_mix)
         mist_enabled, mist_radius, mist_mix = mist_params(params)
         self.mist_enable_cb.setChecked(mist_enabled)
         self.mist_radius_slider.setValue(mist_radius)

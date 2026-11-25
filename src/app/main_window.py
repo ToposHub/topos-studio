@@ -2103,10 +2103,30 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             logger.exception("script timeline context failed")
             return [] if what == "list_clips" else None
 
+    def _warper_input_request(self) -> tuple | None:
+        if self._is_video_playing() or self.engine.is_interacting:
+            return None
+        graph = getattr(self, "color_graph_host", None)
+        node_id = graph.active_grade_node_id() if graph is not None else ""
+        identity = graph.active_grade_node_identity() if graph is not None else ""
+        layer = self.engine.get_active_layer()
+        revision = self.engine.__dict__
+        return self.warper_panel.request_viewer_input(
+            node_id, (identity, layer.id if layer is not None else "", revision.get("_source_epoch"),
+                      revision.get("current_grade_frame")),
+            revision=(self.engine.color_graph_revision, tuple(self.engine.visible_rect)))
+
     def setup_connections(self):
         self.canvas.file_open_requested.connect(self._open_media_path)
         self.engine.frame_ready.connect(self.on_frame_ready)
         self.engine.scope_snapshot_ready.connect(self.on_scope_snapshot_ready)
+        self.engine.warper_input_ready.connect(self.warper_panel.accept_viewer_input)
+        self.engine.warper_input_request = self._warper_input_request
+        self.warper_panel.bind_viewer(
+            self.canvas, lambda: self.engine.render_pipeline(render_reason="viewport_refresh"),
+            available=lambda: not self._is_video_playing(),
+            overlay_changed=self.canvas._sync_color_metal_host,
+        )
         # Native GPU scope descriptor (no CPU pixel readback).
         if hasattr(self.engine, 'gpu_scope_ready'):
             self.engine.gpu_scope_ready.connect(self.on_gpu_scope_ready)

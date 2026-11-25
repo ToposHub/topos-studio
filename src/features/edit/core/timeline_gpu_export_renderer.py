@@ -1768,7 +1768,8 @@ class TimelineGpuExportRenderer:
                 slot = int(getattr(self, "_color_graph_output_slot", 0))
                 self._color_graph_output_slot = 1 - slot
                 result = renderer.render(prepared[0], packet["color_graph"],
-                    int(packet.get("source_frame", 0)), output_key=str(slot), integer_source=prepared[1])
+                    int(packet.get("source_frame", 0)), output_key=str(slot), integer_source=prepared[1],
+                    rec709_calibration_encoded=bool(packet.get("rec709_calibration_encoded")))
                 return result, False
             finally:
                 if raw_tex is not None:

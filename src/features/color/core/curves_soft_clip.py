@@ -10,8 +10,8 @@
 - 算法 = 指数软膝（膝内斜率从 1 无缝衔接、渐近衰减到 0）；默认值即恒等
   映射，超白/负 RGB 原样保留给后续节点。GLSL/MSL/CPU 端逐式对齐本模块
   的 :func:`apply_soft_clip_channel`，修改时必须三端同步。
-- 桌面可选的 ``calibration_version=1`` 在 Rec.709 Gamma 2.4 编码域
-  使用四参数二次曲线，缺省版本仍按上述移动端模型处理。
+- 桌面校准版在 Rec.709 Gamma 2.4 编码域处理。v1 保留历史的共享膝宽；
+  v2 记录四项独立参数，并在软膝越过中灰时使用三次过渡。
 - 旧 8 参数 ``soft_clip_params``（threshold/shoulder 等）是独立的旧工程
   兼容路径，本模块不读不写、不做等价转换。
 """
@@ -25,6 +25,13 @@ from numbers import Real
 from typing import Any, Dict
 
 SOFT_CLIP_PARAM_KEYS = ("low_clip", "low_soft", "high_clip", "high_soft")
+SOFT_CLIP_CALIBRATION_VERSION = 2
+RESOLVE_SOFT_CLIP_BOUNDS = {
+    "low_clip": (-0.25, 0.25),
+    "low_soft": (0.0, 0.5),
+    "high_clip": (0.75, 1.25),
+    "high_soft": (0.0, 0.5),
+}
 
 # 每通道四参数默认值（恒等映射）。dict 而非常量共享：调用方一律经
 # default_curves_soft_clip() 取全新副本，避免活对象与默认值互串。
@@ -47,12 +54,23 @@ _MOBILE_KEY_ALIASES = {
 _CHANNEL_ALIASES = {"R": ("R", "red"), "G": ("G", "green"), "B": ("B", "blue")}
 
 
-def uses_calibrated_soft_clip(params: Any) -> bool:
+def soft_clip_calibration_version(params: Any) -> int:
     """Read the four-control soft clip algorithm version."""
     version = params.get("calibration_version", 0) if isinstance(params, Mapping) else 0
-    if isinstance(version, bool) or not isinstance(version, Real) or version not in (0, 1):
+    if isinstance(version, bool) or not isinstance(version, Real) or version not in (
+        0, 1, SOFT_CLIP_CALIBRATION_VERSION,
+    ):
         raise ValueError(f"Unsupported soft clip calibration version: {version!r}")
-    return version == 1
+    return int(version)
+
+
+def uses_calibrated_soft_clip(params: Any) -> bool:
+    return bool(soft_clip_calibration_version(params))
+
+
+def clamp_resolve_soft_clip_control(key: str, value: float) -> float:
+    low, high = RESOLVE_SOFT_CLIP_BOUNDS[key]
+    return min(max(value, low), high)
 
 
 def default_curves_soft_clip() -> Dict[str, Any]:
@@ -83,13 +101,18 @@ def _read_number(raw: Any, key: str, fallback: float) -> float:
     return fallback
 
 
-def _normalize_channel(raw: Any) -> Dict[str, float]:
+def _normalize_channel(raw: Any, version: int) -> Dict[str, float]:
     """归一化单通道四参数（移动版 fromJson 的钳制顺序）。
 
     clip 点先互相约束（low ∈ [-1,1] 且 ≤ high；high ∈ [max(0,low), 2]），
     再把两个膝宽依次压进剩余 gap（low_soft 优先占位，high_soft ≤ 剩余）。
     非有限值回退默认——NaN 会污染钳制链。
     """
+    if version == SOFT_CLIP_CALIBRATION_VERSION:
+        return {
+            key: clamp_resolve_soft_clip_control(key, _read_number(raw, key, default))
+            for key, default in _CHANNEL_DEFAULTS.items()
+        }
     low = min(max(_read_number(raw, "low_clip", 0.0), -1.0), 1.0)
     high = min(max(_read_number(raw, "high_clip", 1.0), max(0.0, low)), 2.0)
     low_soft = min(max(_read_number(raw, "low_soft", 0.0), 0.0), max(high - low, 0.0))
@@ -114,8 +137,9 @@ def normalize_curves_soft_clip(data: Any) -> Dict[str, Any]:
     result = default_curves_soft_clip()
     if not isinstance(data, dict):
         return result
-    if uses_calibrated_soft_clip(data):
-        result["calibration_version"] = 1
+    version = soft_clip_calibration_version(data)
+    if version:
+        result["calibration_version"] = version
     linked = data.get("linked", True)
     result["linked"] = bool(linked) if isinstance(linked, bool) else True
     channels = data.get("channels")
@@ -124,7 +148,7 @@ def normalize_curves_soft_clip(data: Any) -> Dict[str, Any]:
     for canonical, aliases in _CHANNEL_ALIASES.items():
         for alias in aliases:
             if alias in channels:
-                result["channels"][canonical] = _normalize_channel(channels[alias])
+                result["channels"][canonical] = _normalize_channel(channels[alias], version)
                 break
     return result
 
@@ -137,10 +161,11 @@ def normalize_curves_edit(data: Any) -> Dict[str, Any]:
     linked = data.get("linked", True)
     result["linked"] = bool(linked) if isinstance(linked, bool) else True
     from src.features.color.core.curves_calibration import (
-        CURVES_CALIBRATION_VERSION, CURVES_CALIBRATION_VERSION_KEY, curves_calibration_enabled,
+        CURVES_CALIBRATION_VERSION_KEY, curves_calibration_version,
     )
-    if curves_calibration_enabled(data):
-        result[CURVES_CALIBRATION_VERSION_KEY] = CURVES_CALIBRATION_VERSION
+    version = curves_calibration_version(data)
+    if version:
+        result[CURVES_CALIBRATION_VERSION_KEY] = version
     amounts = data.get("amounts")
     if not isinstance(amounts, dict):
         return result
@@ -220,6 +245,9 @@ def set_soft_clip_control(
     value = float(value)
 
     result = normalize_curves_soft_clip(params)
+    if soft_clip_calibration_version(result) == SOFT_CLIP_CALIBRATION_VERSION:
+        result["channels"][channel][key] = clamp_resolve_soft_clip_control(key, value)
+        return result
     values = dict(result["channels"][channel])
     gap = max(values["high_clip"] - values["low_clip"], 0.0)
     if key == "low_clip":
@@ -284,8 +312,11 @@ def sanitize_payload(payload: Any) -> Dict[str, Any]:
 
 
 __all__ = [
+    "RESOLVE_SOFT_CLIP_BOUNDS",
+    "SOFT_CLIP_CALIBRATION_VERSION",
     "SOFT_CLIP_PARAM_KEYS",
     "apply_soft_clip_channel",
+    "clamp_resolve_soft_clip_control",
     "curves_edit_is_default",
     "curves_soft_clip_is_identity",
     "default_curves_edit",
@@ -294,5 +325,6 @@ __all__ = [
     "normalize_curves_soft_clip",
     "set_soft_clip_control",
     "sanitize_payload",
+    "soft_clip_calibration_version",
     "uses_calibrated_soft_clip",
 ]

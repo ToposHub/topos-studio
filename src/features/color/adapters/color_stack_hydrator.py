@@ -355,19 +355,14 @@ class ColorStackHydrator:
                     layer.soft_clip_params = dict(stack.soft_clip_params)
                 else:
                     layer.soft_clip_params = {}
-                # v1 栈不携带曲线侧栏状态：重置为恒等默认，防止上一剪辑
-                # 的侧栏值（四参数柔化裁切/强度）泄漏到本剪辑
+                # 缺少侧栏状态的平铺工程回到中性，已有参数按各自版本回填。
                 from src.features.color.core.curves_soft_clip import (
                     default_curves_edit,
-                    default_curves_soft_clip,
                     normalize_curves_edit,
                     normalize_curves_soft_clip,
-                    uses_calibrated_soft_clip,
                 )
-                soft_clip = getattr(stack, "curves_soft_clip", None)
-                layer.curves_soft_clip = (
-                    normalize_curves_soft_clip(soft_clip) if uses_calibrated_soft_clip(soft_clip)
-                    else default_curves_soft_clip())
+                layer.curves_soft_clip = normalize_curves_soft_clip(
+                    getattr(stack, "curves_soft_clip", None))
                 from src.features.color.core.curves_calibration import curves_calibration_enabled
                 curve_edit = getattr(stack, "curves_edit", None)
                 layer.curves_edit = default_curves_edit()
@@ -379,10 +374,12 @@ class ColorStackHydrator:
                     layer.curves_edit = normalize_curves_edit(curve_edit)
                     if layer.curves_data:
                         layer.curves_lut = build_curves_lut_from_data(
-                            layer.curves_data, layer.curves_edit["amounts"], calibration_version=1)
+                            layer.curves_data, layer.curves_edit["amounts"],
+                            calibration_version=layer.curves_edit["calibration_version"])
                     if layer.hsl_curve_data:
                         layer.hsl_curve_lut = build_hsl_curve_lut_from_data(
-                            layer.hsl_curve_data, calibration_version=1)
+                            layer.hsl_curve_data,
+                            calibration_version=layer.curves_edit["calibration_version"])
                 # LUT
                 layer.active_lut_path = stack.lut_path
                 layer.lut_intensity = stack.lut_intensity
@@ -738,6 +735,7 @@ class ColorStackHydrator:
         if payload is not None:
             state["has_curve_lut"] = (
                 payload.get("curves_lut") is not None or payload.get("hsl_curve_lut") is not None)
+            state["has_hsl_curve_lut"] = payload.get("hsl_curve_lut") is not None
         setter(state)
 
     @staticmethod

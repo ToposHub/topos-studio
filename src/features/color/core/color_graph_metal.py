@@ -670,7 +670,7 @@ class ColorGraphMetalExecutor:
             import Metal
 
             from src.features.color.core.warper_color import (
-                RESOLVE_HS709_V2_SPACE, prepare_resolve_hs709_texture,
+                RESOLVE_HS709_RESPONSE_SPACES, WARPER_CHROMA709_SPACE, prepare_resolve_hs709_texture,
             )
 
             space = layer["warper_space"]
@@ -680,7 +680,10 @@ class ColorGraphMetalExecutor:
             rgba[..., :3] = sampled
             warper_tex = self.ctx.create_texture_from_numpy(
                 rgba, Metal.MTLPixelFormatRGBA32Float, columns, rows)
-            kernel_name = "graph_grading_709_v2" if space == RESOLVE_HS709_V2_SPACE else "graph_grading_709"
+            if space == WARPER_CHROMA709_SPACE:
+                kernel_name = "graph_grading_chroma709"
+            else:
+                kernel_name = "graph_grading_709_v2" if space in RESOLVE_HS709_RESPONSE_SPACES else "graph_grading_709"
         out = self._pool.acquire(width * height * 8)
         dispatched = False
         try:
@@ -725,14 +728,20 @@ class ColorGraphMetalExecutor:
         kernel = self._kernels.get(kernel_name)
         if kernel is None:
             source = METAL_GRAPH_OPS_MSL
-            if kernel_name in ("graph_grading_709", "graph_grading_709_v2"):
+            if kernel_name in ("graph_grading_709", "graph_grading_709_v2", "graph_grading_chroma709"):
                 from src.features.color.core.shader_nodes_msl import (
                     MSL_HSV_FUNCS, MSL_RESOLVE_HS709, MSL_RESOLVE_HS709_V2,
+                    MSL_WARPER_CHROMA709,
                 )
 
                 v2 = kernel_name == "graph_grading_709_v2"
-                warper_code = MSL_RESOLVE_HS709_V2 if v2 else MSL_RESOLVE_HS709
-                source = build_metal_graph_warper_msl(MSL_HSV_FUNCS + warper_code, v2=v2)
+                chroma = kernel_name == "graph_grading_chroma709"
+                warper_code = {
+                    "graph_grading_709": MSL_RESOLVE_HS709,
+                    "graph_grading_709_v2": MSL_RESOLVE_HS709_V2,
+                    "graph_grading_chroma709": MSL_WARPER_CHROMA709,
+                }[kernel_name]
+                source = build_metal_graph_warper_msl(MSL_HSV_FUNCS + warper_code, v2=v2, chroma=chroma)
             kernel = self.ctx.compile_kernel(kernel_name, source)
             self._kernels[kernel_name] = kernel
         self.ctx.dispatch(kernel, buffers=buffers,

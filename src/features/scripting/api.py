@@ -800,15 +800,20 @@ class ToposAPI:
                     f"Valid: {list(type_index.keys())}"
                 )
 
-            if layer.hsl_curve_lut is None:
-                layer.hsl_curve_lut = _build_default_hsl_lut()
-            
-            if layer.hsl_curve_data is None:
-                layer.hsl_curve_data = {}
-            
-            layer.hsl_curve_lut[idx] = _interpolate_hsl_curve_255(points, curve_type)
-            layer.hsl_curve_data[curve_type] = [(float(x), float(y)) for x, y in points]
-            self._engine.apply_hsl_curve(layer.hsl_curve_lut)
+            from src.features.color.core.curves_calibration import curves_calibration_version
+            from src.features.color.core.layer import build_hsl_curve_lut_from_data
+
+            curve_data = dict(layer.hsl_curve_data or {})
+            curve_data[curve_type] = [(float(x), float(y)) for x, y in points]
+            version = curves_calibration_version(getattr(layer, "curves_edit", None))
+            if version:
+                lut = build_hsl_curve_lut_from_data(curve_data, calibration_version=version)
+            else:
+                lut = (_build_default_hsl_lut() if layer.hsl_curve_lut is None
+                       else layer.hsl_curve_lut.copy())
+                lut[idx] = _interpolate_hsl_curve_255(points, curve_type)
+            layer.hsl_curve_data = curve_data
+            self._engine.apply_hsl_curve(lut)
             # AUD-25904: apply_hsl_curve 内部触发渲染，仍需视频缓存失效。
             self._invalidate_video_render_params_if_loaded()
         self._bridge.call_sync(_do)

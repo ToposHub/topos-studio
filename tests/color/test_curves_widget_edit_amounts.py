@@ -160,12 +160,9 @@ class TestLinkedEditing:
             widget.curves[ch] = [QPointF(0, 255), QPointF(128, 128),
                                  QPointF(255, 0)]
         widget.set_active_channel("M")
-        widget.selected_point_idx = 1
-        _press(widget, 0, 0)  # 触发 interaction_started（位置无关）
-        widget.selected_point_idx = 1
-        rect = widget.get_draw_rect()
         start = widget.to_widget(128, 128)
         end = widget.to_widget(128, 100)
+        _press(widget, *start)
         widget.mouseMoveEvent(_mouse_event(
             QEvent.Type.MouseMove, end[0], end[1], Qt.MouseButton.LeftButton))
         _release(widget, end[0], end[1])
@@ -192,6 +189,85 @@ class TestLinkedEditing:
         _release(widget, end[0], end[1])
         for ch in ("R", "G", "B"):
             assert widget.curves[ch][1].y() == pytest.approx(128.0, abs=1e-6)
+
+    def test_select_without_edit_and_move_anchor_to_final_release(self) -> None:
+        widget = CurvesWidget()
+        widget.set_calibrated(True, version=2)
+        widget.set_curves_data({"M": [(0, 255), (128, 80), (255, 0)]})
+        x, y = widget.to_widget(128, 80)
+        order = []
+        widget.interaction_started.connect(lambda: order.append("start"))
+        widget.changed.connect(lambda *_: order.append("change"))
+        widget.interaction_ended.connect(lambda: order.append("end"))
+        _press(widget, x + 4, y + 2)
+        _release(widget, x + 4, y + 2)
+        assert order == []
+        _press(widget, x + 4, y + 2)
+        _release(widget, x + 24, y - 18)
+        rect = widget.get_draw_rect()
+        point = widget.curves["M"][1]
+        assert point.x() == pytest.approx(128 + 24 * 255 / rect.width())
+        assert point.y() == pytest.approx(80 - 18 * 255 / rect.height())
+        assert order == ["start", "change", "end"]
+
+    def test_insert_near_curve_uses_the_clicked_position(self) -> None:
+        widget = CurvesWidget()
+        widget.set_calibrated(True, version=2)
+        widget.resize(457, 351)
+        x, y = widget.to_widget(128, 127)
+        started = QSignalSpy(widget.interaction_started)
+        _press(widget, x, y - 20)
+        _release(widget, x, y - 20)
+        assert len(started) == 0
+        assert len(widget.curves["M"]) == 2
+        _press(widget, x, y - 10)
+        _release(widget, x, y - 10)
+        assert len(started) == 1
+        assert len(widget.curves["M"]) == 3
+        assert widget.curves["M"][1].y() == pytest.approx(127 - 10 * 255 / 337)
+
+    @pytest.mark.parametrize(("index", "release", "expected"), [
+        (0, (0.0, 0.17), (0.0, 0.17)),
+        (0, (0.18, 0.0), (0.18, 0.0)),
+        (0, (0.17, 0.19), (0.0, 0.19)),
+        (1, (1.0, 0.84), (1.0, 0.84)),
+        (1, (0.82, 1.0), (0.82, 1.0)),
+        (1, (0.81, 0.84), (0.81, 1.0)),
+    ])
+    def test_default_endpoints_move_along_boundaries(
+        self, index: int, release: tuple[float, float], expected: tuple[float, float],
+    ) -> None:
+        widget = CurvesWidget()
+        widget.set_calibrated(True, version=2)
+        widget.edit_linked = True
+        start = widget.curves["M"][index]
+        _press(widget, *widget.to_widget(start.x(), start.y()))
+        _release(widget, *widget.to_widget(255 * release[0], 255 * (1.0 - release[1])))
+        for points in widget.curves.values():
+            assert len(points) == 2
+            assert points[index].x() / 255 == pytest.approx(expected[0])
+            assert 1.0 - points[index].y() / 255 == pytest.approx(expected[1])
+        moved = widget.curves["M"][index]
+        _press(widget, *widget.to_widget(moved.x(), moved.y()))
+        _release(widget, *widget.to_widget(start.x(), start.y()))
+        for points in widget.curves.values():
+            assert len(points) == 2
+            assert points[index] == start
+
+    def test_inserting_on_a_linked_curve_reuses_an_existing_x(self) -> None:
+        widget = CurvesWidget()
+        widget.set_calibrated(True, version=2)
+        widget.edit_linked = True
+        widget.set_curves_data({"R": [(0, 255), (128, 150), (145, 70), (255, 0)]})
+        start = widget.to_widget(128, 127)
+        _press(widget, *start)
+        end = widget.to_widget(210, 95)
+        widget.mouseMoveEvent(_mouse_event(QEvent.Type.MouseMove, *end, Qt.MouseButton.LeftButton))
+        _release(widget, *widget.to_widget(220, 80))
+        assert len(widget.curves["R"]) == 4
+        assert widget.curves["R"][1].x() < 145
+        assert widget.curves["R"][1].y() == pytest.approx(103.0)
+        assert widget.curves["M"][1].x() == pytest.approx(220.0)
 
     def test_double_click_reset_while_linked_resets_all_channels(self):
         widget = CurvesWidget()

@@ -32,13 +32,13 @@ except ModuleNotFoundError:
 from src.features.color.core.window_softness import normalize_edge_softness
 from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
 from src.features.color.core.curves_calibration import (
-    CURVES_CALIBRATION_VERSION,
     CURVES_CALIBRATION_VERSION_KEY,
     build_calibrated_curves_lut,
+    curves_calibration_version,
     is_calibrated_curves_lut,
 )
 from src.features.color.core.warper_state import (
-    RESOLVE_HS_ALGORITHMS, WarperStateV2, WarperStateError, renderable_projection,
+    derives_warper_projection, WarperStateV2, WarperStateError, renderable_projection,
 )
 
 from src.features.color.core.curves_soft_clip import (
@@ -1085,13 +1085,13 @@ class Layer:
         if raw_grid_pasted or state_pasted:
             raw_state = patch.get("warper_state") if state_pasted else None
             state = WarperStateV2.from_dict(copy.deepcopy(raw_state)) if raw_state is not None else None
-            if state is not None and state.algorithm_version in RESOLVE_HS_ALGORITHMS:
+            if state is not None and derives_warper_projection(state):
                 offsets, space = renderable_projection(state)
             elif raw_grid_pasted:
                 raw_grid = patch["warper_params"]
                 offsets = np.array(raw_grid, dtype=np.float32) if raw_grid is not None else None
                 space = int(patch.get("warper_space", 0) or 0)
-            elif self.warper_state is not None and self.warper_state.algorithm_version in RESOLVE_HS_ALGORITHMS:
+            elif self.warper_state is not None and derives_warper_projection(self.warper_state):
                 offsets, space = None, 0
             else:
                 offsets, space = self.warper_params, self.warper_space
@@ -1424,7 +1424,7 @@ class Layer:
 
     def _project_calibrated_warper(self) -> None:
         state = self.warper_state
-        if state is not None and state.algorithm_version in RESOLVE_HS_ALGORITHMS:
+        if state is not None and derives_warper_projection(state):
             self.warper_params, self.warper_space = renderable_projection(state)
 
     @classmethod
@@ -1662,7 +1662,9 @@ def _sanitize_control_points(pts: Any) -> Optional[Tuple[np.ndarray, np.ndarray]
     for p in pts:
         if isinstance(p, (list, tuple, np.ndarray)) and len(p) >= 2:
             try:
-                clean.append((float(p[0]), float(p[1])))
+                x, y = float(p[0]), float(p[1])
+                if np.isfinite(x) and np.isfinite(y):
+                    clean.append((x, y))
             except (TypeError, ValueError):
                 continue
     if len(clean) < 2:
@@ -1677,8 +1679,13 @@ def _sanitize_control_points(pts: Any) -> Optional[Tuple[np.ndarray, np.ndarray]
         ys_list.append(y)
     if len(xs_list) < 2:
         return None
-    return (np.array(xs_list, dtype=np.float32),
-            np.array(ys_list, dtype=np.float32))
+    x, y = np.array(xs_list), np.array(ys_list)
+    max_float = np.finfo(np.float32).max
+    if np.max(np.abs(x)) <= max_float and np.max(np.abs(y)) <= max_float:
+        x32 = x.astype(np.float32)
+        if np.all(x32[1:] > x32[:-1]):
+            return x32, y.astype(np.float32)
+    return x, y
 
 
 def _interpolate_curve_255(pts: Any) -> Optional[np.ndarray]:
@@ -1823,10 +1830,11 @@ def build_curves_lut_from_data(
     if not isinstance(curves_data, dict):
         curves_data = {}
 
-    if type(calibration_version) is int and calibration_version == CURVES_CALIBRATION_VERSION:
+    if curves_calibration_version({CURVES_CALIBRATION_VERSION_KEY: calibration_version}):
         return build_calibrated_curves_lut(
             {ch: _sanitize_control_points(curves_data.get(ch)) for ch in "MRGB"},
             {ch: _edit_amount_factor(edit_amounts, "Y" if ch == "M" else ch) for ch in "MRGB"},
+            version=calibration_version,
         )
 
     master = _interpolate_curve_255(curves_data.get('M'))
@@ -1850,7 +1858,7 @@ def build_hsl_curve_lut_from_data(
     
     Returns:
         LUT array of shape (6, 256) float32 for legacy projects or
-        (6, 512) for the calibrated response.
+        (6, 512) or (6, 1024) for the calibrated responses.
         Index order: LumSat=0, HueHue=1, HueSat=2, HueLum=3, SatSat=4, SatLum=5
         - Multiplier types: values in 0.0-2.0 range (default 1.0)
         - Shift type (HueHue): values in -0.5 to +0.5 range (default 0.0)
@@ -1859,10 +1867,10 @@ def build_hsl_curve_lut_from_data(
         # AUD-0701：容器非法时按"全部默认曲线"处理（乘子 1.0 / HueHue 0）
         hsl_curve_data = {}
 
-    if calibration_version == 1:
+    if curves_calibration_version({CURVES_CALIBRATION_VERSION_KEY: calibration_version}):
         from src.features.color.core.hsl_curve_calibration import build_calibrated_hsl_lut
 
-        return build_calibrated_hsl_lut(hsl_curve_data)
+        return build_calibrated_hsl_lut(hsl_curve_data, version=calibration_version)
 
     mode_order = ['LumSat', 'HueHue', 'HueSat', 'HueLum', 'SatSat', 'SatLum']
     lut = np.zeros((6, 256), dtype=np.float32)

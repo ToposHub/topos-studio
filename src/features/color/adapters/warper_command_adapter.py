@@ -39,11 +39,14 @@ from src.features.color.core.warper_state import (
     RESOLVE_HS_ALGORITHMS,
     RESOLVE_HS_ALGORITHM,
     RESOLVE_HS_ALGORITHM_V2,
+    RESOLVE_HS_ALGORITHM_V3,
     WARPER_SCHEMA_VERSION,
     WarperCommandRequest,
     WarperGrid,
     WarperPin,
+    WarperStateError,
     WarperStateV2,
+    legacy_from_ndarray,
     make_point_id,
 )
 
@@ -70,6 +73,7 @@ CONTINUOUS_ACTIONS = frozenset({"axis_angle"})
 
 _GRID_BY_INDEX = {0: CL_GRID_NAMES[0], 1: CL_GRID_NAMES[1]}
 _CALIBRATED_SIGNATURE = ("replace_state", "calibrated_mesh")
+WARPER_PALETTE_GESTURES = frozenset({"calibrated_mesh", "palette_edit"})
 
 
 def _legacy_published(command: Mapping[str, Any]) -> bool:
@@ -137,7 +141,7 @@ class WarperCommandAdapter:
                     "revision": None, "dirty": False}
 
         calibrated_phase = None
-        if action == "calibrated_mesh":
+        if action in WARPER_PALETTE_GESTURES:
             calibrated_phase = (command.get("payload") or {}).get("phase")
             if calibrated_phase in {"commit", "cancel"}:
                 return self._finish_calibrated(calibrated_phase, layer)
@@ -145,7 +149,11 @@ class WarperCommandAdapter:
                 return {"ok": False, "reason": "invalid_mesh_phase", "handled": True,
                         "revision": self._service.revision(layer), "dirty": False}
 
-        operation, payload = self._translate(action, command, layer)
+        try:
+            operation, payload = self._translate(action, command, layer)
+        except WarperStateError as exc:
+            return {"ok": False, "reason": f"rejected: {exc.code}", "handled": True,
+                    "revision": self._service.revision(layer), "dirty": False}
         if operation is None:
             return {"ok": False, "reason": "unsupported_targeting", "handled": True,
                     "revision": None, "dirty": False}
@@ -215,19 +223,24 @@ class WarperCommandAdapter:
     def _calibrated_state(payload: Mapping[str, Any], layer: Layer) -> WarperStateV2:
         offsets = np.asarray(payload["offsets"], dtype=np.float32)
         rows, cols, _ = offsets.shape
-        previous = layer.warper_state
+        previous = layer.warper_state.for_mode("hue_saturation") if layer.warper_state is not None else None
         if previous is None or previous.algorithm_version not in RESOLVE_HS_ALGORITHMS:
             previous = WarperStateV2(
-                schema_version=WARPER_SCHEMA_VERSION, algorithm_version=RESOLVE_HS_ALGORITHM_V2,
+                schema_version=WARPER_SCHEMA_VERSION,
+                algorithm_version=payload.get("algorithm_version", RESOLVE_HS_ALGORITHM_V2),
                 mode="hue_saturation", color_space="hsp", axis_angle=0.0,
                 grids={HS_GRID_NAME: WarperGrid.identity(HS_GRID_NAME, rows, cols, ("dh", "ds", "dl"))})
         grid = previous.grids[HS_GRID_NAME]
         old_pins = {pin.point_id: pin for pin in grid.pins}
-        pins = tuple(old_pins.get(point_id, WarperPin(point_id)) for point_id in payload.get("pins", ()))
+        pins = tuple(old_pins.get(point_id) or WarperPin(point_id, _extra_fields={"affects_response": True})
+                     for point_id in payload.get("pins", ()))
         if (grid.rows, grid.cols) != (rows, cols):
             resized = WarperGrid.identity(HS_GRID_NAME, rows, cols, ("dh", "ds", "dl"))
             grid = replace(grid, rows=rows, cols=cols, offsets=resized.offsets)
-        return previous.with_grid(replace(grid.with_offsets(offsets), pins=pins))
+        white = payload.get("white_point", previous.white_point)
+        if not isinstance(white, (list, tuple)):
+            raise WarperStateError("invalid_param", "Invalid Hue–Saturation white point")
+        return replace(previous.with_grid(replace(grid.with_offsets(offsets), pins=pins)), white_point=tuple(white))
 
     def _request(self, phase: str, operation: str, payload: Any, layer: Layer,
                  *, gesture_id: str | None) -> WarperCommandRequest:
@@ -254,15 +267,30 @@ class WarperCommandAdapter:
         state = command.get("state") or {}
         mode = command.get("mode")
 
-        if action == "calibrated_mesh":
-            if payload_in.get("upgrade_to_v2"):
-                previous = layer.warper_state
+        if action in WARPER_PALETTE_GESTURES:
+            previous = layer.warper_state
+            if previous is None and layer.warper_params is not None and layer.warper_space == 0:
+                raw = layer.warper_params
+                if raw.ndim == 3 and raw.shape[0] == raw.shape[1] and raw.shape[2] == 2:
+                    previous = legacy_from_ndarray(raw)
+            if action == "palette_edit":
+                raw = payload_in.get("state")
+                state = WarperStateV2.from_dict(raw) if isinstance(raw, Mapping) else None
+                if (state is not None and previous is None and not state.strokes and not state.pin_points
+                        and state.is_identity() and not any(grid.pins for grid in state.grids.values())):
+                    state = None
+            elif payload_in.get("upgrade_to_v2") or payload_in.get("upgrade_to_v3"):
+                old = previous.for_mode("hue_saturation") if previous is not None else None
+                old_version = RESOLVE_HS_ALGORITHM if payload_in.get("upgrade_to_v2") else RESOLVE_HS_ALGORITHM_V2
+                new_version = RESOLVE_HS_ALGORITHM_V2 if payload_in.get("upgrade_to_v2") else RESOLVE_HS_ALGORITHM_V3
                 if (payload_in.get("phase") != "atomic" or previous is None
-                        or previous.algorithm_version != RESOLVE_HS_ALGORITHM):
+                        or old is None or old.algorithm_version != old_version):
                     return None, {}
-                state = replace(previous, algorithm_version=RESOLVE_HS_ALGORITHM_V2)
+                state = replace(old, algorithm_version=new_version)
             else:
                 state = self._calibrated_state(payload_in, layer) if payload_in.get("enabled") else None
+            if state is not None and previous is not None:
+                state = previous.replacing_mode(state)
             return "replace_state", {"state": state.to_dict() if state is not None else None}
 
         if action == "resolution":

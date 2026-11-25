@@ -203,6 +203,13 @@ def video_signal_spaces(
             _video_signal_space(settings, output, "output"))
 
 
+def timeline_uses_rec709_gamma24(
+    spaces: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None,
+) -> bool:
+    """Whether the timeline supplies full-range Rec.709 Gamma 2.4 code values."""
+    return spaces is not None and spaces[0] == descriptor_for_space_preset("rec709-g24")
+
+
 def video_signal_uses_legacy_space(
     settings: Mapping[str, Any] | None, *, timeline_only: bool = False,
 ) -> bool:

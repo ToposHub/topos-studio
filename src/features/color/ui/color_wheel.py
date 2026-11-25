@@ -199,14 +199,11 @@ class _GradingValue(DragValue):
             self._drag_start_value = self.value()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            if self._cancelled_drag:
-                self._cancelled_drag = False
-                self.interaction_ended.emit()
-                event.accept()
-                return
-            if self._dragging:
-                self.mouseMoveEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton and self._cancelled_drag:
+            self._cancelled_drag = False
+            self.interaction_ended.emit()
+            event.accept()
+            return
         super().mouseReleaseEvent(event)
 
     def cancel_drag(self) -> None:

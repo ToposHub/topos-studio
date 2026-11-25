@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
@@ -270,11 +270,11 @@ def _layer_operations(data: Dict[str, Any]) -> set:
     if data.get("active_lut_path") or data.get("lut_path"):
         ops.add("lut")
     if data.get("warper_params") is not None:
-        from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+        from src.features.color.core.warper_color import WARPER_PREPARED_SPACES
 
-        ops.add("warper_709" if data.get("warper_space") in RESOLVE_HS709_SPACES else "warper")
+        ops.add("warper_709" if data.get("warper_space") in WARPER_PREPARED_SPACES else "warper")
     effects = data.get("effects_params") or {}
-    if effects.get("enabled"):
+    if effects.get("enabled") or effects.get("blur_enabled"):
         ops.add("effects")
     if mist_is_active(effects):
         ops.add("mist")
@@ -433,6 +433,51 @@ def _stack_layer_dicts(stack: Any) -> List[Dict[str, Any]]:
     return [pseudo]
 
 
+def _video_graph_layers(stack: Any) -> list[dict[str, Any]] | None:
+    """Read the same output dependency cone and payloads as the compositor."""
+    from src.features.color.core.color_graph_compiler import GraphCompileError, compile_graph
+    from src.features.color.core.color_graph_migration import (
+        LegacyMigrationError, stack_primary_execution_graph,
+    )
+    from src.features.color.core.color_graph_param_source import graph_node_layer_provider
+    from src.features.color.core.color_graph_snapshot import freeze_graph
+
+    try:
+        graph = stack_primary_execution_graph(stack)
+        if graph is None:
+            return None
+        snapshot = freeze_graph(graph, session_id="delivery-matrix")
+        plan = compile_graph(snapshot, size=(1, 1))
+    except (GraphCompileError, LegacyMigrationError):
+        return None
+    provider = graph_node_layer_provider(snapshot.graph)
+    return [
+        dict(payload) for render_pass in plan.passes
+        if render_pass.op in ("corrector", "shared_corrector")
+        and (payload := provider(render_pass.node_id)) is not None
+        and payload.get("visible", True)
+    ]
+
+
+def _video_graph_window_supported(shapes: Any) -> bool:
+    """The timeline CPU/GL paths can rasterize geometry stored in the graph."""
+    from src.features.color.core.layer import MaskGroup, MaskShape
+
+    for shape in shapes:
+        if not isinstance(shape, dict):
+            return False
+        if not shape.get("visible", True):
+            continue
+        kind = shape.get("type")
+        if kind == MaskGroup.TYPE:
+            if not _video_graph_window_supported(shape.get("children") or ()):
+                return False
+        elif kind not in (MaskShape.CIRCLE, MaskShape.RECT, MaskShape.GRADIENT,
+                          MaskShape.CURVE, MaskShape.BRUSH):
+            return False
+    return True
+
+
 def report_from_color_stacks(
     stacks: Iterable[Any], target: str,
     video_denoise_enabled: bool = False,
@@ -446,6 +491,8 @@ def report_from_color_stacks(
     行（降噪参数是引擎会话级、不在调色栈上，导出方显式告知）。
     """
     all_layers: List[Dict[str, Any]] = []
+    video_supported: set[str] = set()
+    video_unsupported: set[str] = set()
     has_tracking = False
     has_stack_denoise = False
     allowed_clip_ids = (
@@ -525,11 +572,22 @@ def report_from_color_stacks(
         return True
 
     for stack in stacks or []:
-        stack_layers = _stack_layer_dicts(stack)
+        graph_layers = _video_graph_layers(stack) if target == TARGET_VIDEO else None
+        stack_layers = _stack_layer_dicts(stack) if graph_layers is None else graph_layers
         all_layers.extend(stack_layers)
+        if target == TARGET_VIDEO:
+            for layer in stack_layers:
+                for operation in _layer_operations(layer):
+                    if graph_layers is not None and (
+                        operation in {"curves", "lut", "mixer", "qualifier_postprocess"}
+                        or (operation == "windows" and _video_graph_window_supported(layer["mask_shapes"]))
+                    ):
+                        video_supported.add(operation)
+                    else:
+                        video_unsupported.add(operation)
         # ColorStackData v2 snapshots are the authoritative mask list. Empty
         # legacy snapshots cannot prove that a stored binding is orphaned.
-        has_authoritative_layers = bool(getattr(stack, "layers", ()))
+        has_authoritative_layers = graph_layers is not None or bool(getattr(stack, "layers", ()))
         visible_shape_ids = collect_visible_shape_ids(stack_layers)
         stack_clip_id = getattr(stack, "clip_id", None)
         trackings = getattr(stack, "trackings", None)
@@ -578,8 +636,15 @@ def report_from_color_stacks(
                 or (vd.get("temporal") or {}).get("enabled")):
             has_stack_denoise = True
     report = build_delivery_matrix_report(all_layers, target)
-    if has_tracking and target != TARGET_STILL and "windows" not in {
-            r.operation for r in report.rows}:
+    if target == TARGET_VIDEO:
+        kept = video_supported - video_unsupported
+        report = DeliveryMatrixReport(target, tuple(
+            replace(row, delivery=DELIVERY_FULL) if row.operation in kept else row
+            for row in report.rows
+        ))
+    if has_tracking and target != TARGET_STILL and not any(
+        row.operation == "windows" for row in report.dropped_rows
+    ):
         # 旧版栈可能未保存完整蒙版快照；通过上面的剪辑/窗口校验后，
         # 仍需要单独报告其跟踪数据无法由 LUT/时间线导出表达。
         meta = _OPERATIONS["tracking"]

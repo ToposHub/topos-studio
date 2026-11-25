@@ -1,5 +1,7 @@
 """Render-thread DTO coverage for ImageEngine layer state."""
 
+import pytest
+
 from src.features.color.core.curves_soft_clip import set_soft_clip_control
 from src.features.color.core.image_engine import ImageEngine, _layer_render_data
 from src.features.color.core.layer import Layer
@@ -29,11 +31,14 @@ def test_layer_render_data_keeps_bake_and_ai_plugin_identity():
     assert data["plugins"][0]["params"] is not layer.plugins[0]["params"]
 
 
-def test_calibrated_soft_clip_is_frozen_for_preview_and_bake(image_engine: ImageEngine) -> None:
+@pytest.mark.parametrize("profile", (0, 1, 2))
+def test_curves_soft_clip_is_frozen_for_preview_and_bake(
+    image_engine: ImageEngine, profile: int,
+) -> None:
     layer = Layer()
     assert "curves_soft_clip" not in _layer_render_data(layer)
     layer.curves_soft_clip = set_soft_clip_control(
-        {"calibration_version": 1}, "R", "low_soft", 0.1)
+        {"calibration_version": profile}, "R", "low_soft", 0.1)
 
     preview = _layer_render_data(layer)
     bake = image_engine._create_layer_snapshot(layer)

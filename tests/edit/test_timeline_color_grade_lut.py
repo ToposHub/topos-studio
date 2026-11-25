@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -218,7 +219,8 @@ def test_measured_chain_without_a_main_stack_uses_same_cpu_grade(
         exporter._gpu_grade_uniforms(layer)
 
 
-def test_measured_curves_only_stack_reaches_preview_and_export() -> None:
+@pytest.mark.parametrize("version", [0, 1, 2])
+def test_curves_only_stack_reaches_preview_and_export(version: int) -> None:
     from src.features.color.core.color_graph_cpu import apply_curves_cpu
     from src.features.color.core.layer import build_curves_lut_from_data
     from src.features.edit.core.timeline_preview_renderer import PreviewRenderWorker
@@ -226,7 +228,7 @@ def test_measured_curves_only_stack_reaches_preview_and_export() -> None:
 
     points = {"M": [(0, 255), (128, 80), (255, 0)]}
     stack = ColorStackData.create().with_curves(points).with_curves_edit(
-        {"calibration_version": 1}
+        {"calibration_version": version}
     )
     exporter, layer = _exporter_for_grade({})
     exporter._project.color_stacks["stack"] = stack
@@ -235,10 +237,83 @@ def test_measured_curves_only_stack_reaches_preview_and_export() -> None:
     worker._timeline_sequence = SimpleNamespace(timeline_id="timeline")
     working_bgr = np.array([[[0.15, 0.09, 0.02], [0.22, 0.33, 1.4]]], dtype=np.float32)
 
-    lut = build_curves_lut_from_data(points, calibration_version=1)
+    lut = build_curves_lut_from_data(points, calibration_version=version)
     expected = apply_curves_cpu(working_bgr[..., ::-1], lut)[..., ::-1]
     assert not np.array_equal(working_bgr, expected)
     np.testing.assert_allclose(
         worker._apply_preview_color_grade_unstabilized(working_bgr, layer), expected)
     np.testing.assert_allclose(
         exporter._apply_color_grade_unstabilized(working_bgr, layer), expected)
+
+
+@pytest.mark.parametrize("dtype", [np.uint8, np.uint16])
+def test_legacy_flat_lut_keeps_its_saved_strength(tmp_path: Path, dtype: type) -> None:
+    from src.features.color.core.delivery_matrix import report_from_color_stacks
+    from src.features.edit.core.timeline_preview_renderer import PreviewRenderWorker
+    from src.shared.project.color_stack import ColorStackData
+
+    cube = tmp_path / "black.cube"
+    cube.write_text("LUT_3D_SIZE 2\n" + "0 0 0\n" * 8, encoding="utf-8")
+    stack = ColorStackData(stack_id="stack", lut_path=str(cube), lut_intensity=0.5)
+    exporter, layer = _exporter_for_grade({})
+    exporter._project.color_stacks["stack"] = stack
+    worker = PreviewRenderWorker.__new__(PreviewRenderWorker)
+    worker._asset_resolver = SimpleNamespace(_project=exporter._project)
+    worker._timeline_sequence = SimpleNamespace(timeline_id="timeline")
+    frame = np.array([[[52, 124, 222]]], dtype=dtype)
+    assert ("lut", "full") in {
+        (row.operation, row.delivery) for row in report_from_color_stacks((stack,), "video").rows
+    }
+    np.testing.assert_array_equal(exporter._apply_color_grade_unstabilized(frame, layer), frame // 2)
+    np.testing.assert_array_equal(worker._apply_preview_color_grade_unstabilized(frame, layer), frame // 2)
+    cube.unlink()
+    with pytest.raises(ValueError, match="color graph cpu failed"):
+        exporter._apply_color_grade_unstabilized(frame, layer)
+
+
+def test_rec709_measured_grade_through_tiff_delivery(tmp_path: Path) -> None:
+    import cv2
+
+    from src.features.edit.core.project import EditProject, MediaAsset
+    from src.features.edit.core.timeline_export import (
+        ExportCodec, TimelineExportConfig, create_timeline_exporter,
+    )
+    from src.features.edit.core.timeline_preview_renderer import AssetResolver, PreviewRenderWorker
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+    from src.shared.media.metadata import Rational
+    from src.shared.project.color_stack import ColorStackData
+
+    codes = np.empty((64, 128, 3), dtype=np.uint16)
+    codes[:, :64] = [14900, 36200, 44600]
+    codes[:, 64:] = [37500, 15000, 41100]
+    source = tmp_path / "source.tif"
+    assert cv2.imwrite(str(source), codes)
+    asset = MediaAsset("asset", str(source), "image", "SDR plate", {})
+    stack = ColorStackData(stack_id="stack", grading_params={
+        "primary_calibration_version": 2, "saturation": 16.0,
+    })
+    project = EditProject("parity", "Parity", assets={asset.asset_id: asset},
+                          color_stacks={stack.stack_id: stack}).with_color_management({
+        "color.timeline_space": "rec709-g24", "color.output_space": "rec709-g24",
+    })
+    clip = ClipInstance("clip", asset.asset_id, "v0", 0, 1, 0, 1, color_stack_id=stack.stack_id)
+    sequence = TimelineSequence(
+        timeline_id="timeline", name="Parity", width=128, height=64, fps=Rational(24, 1),
+        video_tracks=(EditTrack("v0", "V1", "video", 0, clips=(clip,)),),
+    )
+    _, layer = _exporter_for_grade({})
+    layer.clip = clip
+    worker = PreviewRenderWorker.__new__(PreviewRenderWorker)
+    worker._asset_resolver = AssetResolver(project)
+    worker._timeline_sequence = sequence
+    preview = worker._apply_preview_color_grade_unstabilized(codes, layer)
+    outcome = create_timeline_exporter(project, sequence).export_timeline(TimelineExportConfig(
+        output_path=str(tmp_path / "output"), codec=ExportCodec.TIFF_SEQUENCE, bit_depth=16,
+        timeline_id=sequence.timeline_id, include_audio=False, burn_subtitles=False,
+    ))
+    assert outcome.success, outcome.cause
+    delivered = cv2.imread(str(next(tmp_path.glob("output*.tif"))), cv2.IMREAD_UNCHANGED)
+    luma = codes @ np.array([0.09, 0.70, 0.21])
+    expected = np.rint(codes + 0.16 * (codes - luma[..., None]))
+    np.testing.assert_allclose(preview, expected, atol=1, rtol=0)
+    np.testing.assert_allclose(delivered, expected, atol=1, rtol=0)

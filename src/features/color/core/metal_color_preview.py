@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+import numpy as np
+
 from src.features.color.core.color_graph_entry import SharedColorGraphEntry
 from src.features.color.core.color_graph_metal import MetalGraphCancelled
 from src.features.color.core.color_graph_param_source import graph_node_layer_provider
@@ -25,6 +27,20 @@ from src.shared.gpu.metal.present_port import SurfacePublisher
 from src.shared.gpu.present_frame import PresentColorInfo
 
 logger = logging.getLogger(__name__)
+
+_WARPER_SAMPLE_MSL = """
+#include <metal_stdlib>
+using namespace metal;
+kernel void warper_input_sample(texture2d<float, access::sample> source [[texture(0)]],
+                                device float4 *result [[buffer(0)]],
+                                constant uint2 &size [[buffer(1)]],
+                                uint2 gid [[thread_position_in_grid]]) {
+    if (any(gid >= size)) return;
+    constexpr sampler colors(coord::normalized, address::clamp_to_edge, filter::nearest);
+    float2 uv = (float2(gid) + 0.5) / float2(size);
+    result[gid.y * size.x + gid.x] = source.sample(colors, uv);
+}
+"""
 
 
 @dataclass(frozen=True)
@@ -54,6 +70,7 @@ class ColorMetalPreview:
         self._shared_surfaces: dict[str, MetalColorSharedSurface] = {}
         self._graph_sizes: dict[bool, tuple[int, int]] = {}
         self._scope_engine = None
+        self._warper_sample_kernel = None
         self._sequence = 0
         self._reason = ""
         self.last_submitted_serial = 0
@@ -82,6 +99,7 @@ class ColorMetalPreview:
         cancelled: Callable[[], bool],
         display: tuple[int, int, int] | None,
         scope_output: bool = False,
+        input_sample: tuple[str, Callable[[np.ndarray], None]] | None = None,
     ) -> bool:
         """Return success only after the compatible GL texture is complete."""
         self._sequence += 1
@@ -95,7 +113,9 @@ class ColorMetalPreview:
                 return False
 
             provider = graph_node_layer_provider(
-                snapshot.graph, frame=source_frame, preview_grade=snapshot.preview_grade)
+                snapshot.graph, frame=source_frame, preview_grade=snapshot.preview_grade,
+                rec709_calibration_encoded=bool(
+                    snapshot.working_color_context.get("rec709_calibration_encoded")))
             # GL maps full-image windows to the current ROI, while the Metal
             # executor rasterizes normalized windows in its target texture.
             for render_pass in outcome.plan.passes:
@@ -119,11 +139,16 @@ class ColorMetalPreview:
                 self._graph_sizes[scope_output] = (width, height)
                 self._executor.retain_preview_sizes(frozenset(self._graph_sizes.values()))
             source_texture = shared.copy_from_gl(source)
+            sample_kwargs = {}
+            if input_sample is not None:
+                node_id, accept = input_sample
+                sample_kwargs["input_sample"] = (node_id, lambda texture: self._sample_warper(texture, accept))
             result = self._executor.execute_plan(
                 outcome.plan, source_texture, request_id=request_id,
                 source_size=(width, height),
                 cancel_check=lambda _request: cancelled(),
                 layer_param_provider=provider,
+                **sample_kwargs,
             )
             if result.diagnostic_code == "cancelled":
                 raise MetalGraphCancelled(request_id, -1)
@@ -166,6 +191,23 @@ class ColorMetalPreview:
         finally:
             if not retained_by_display:
                 self._executor.release_revision(request_id)
+
+    def _sample_warper(self, texture: Any, accept: Callable[[np.ndarray], None]) -> None:
+        try:
+            width, height = int(texture.width()), int(texture.height())
+            scale = min(1.0, 320.0 / max(width, height))
+            w, h = max(1, round(width * scale)), max(1, round(height * scale))
+            if self._warper_sample_kernel is None:
+                self._warper_sample_kernel = self._ctx.compile_kernel("warper_input_sample", _WARPER_SAMPLE_MSL)
+            output = self._ctx.create_buffer(w * h * 16)
+            size = self._ctx.create_buffer_from_numpy(np.array([w, h], dtype=np.uint32))
+            self._ctx.dispatch(self._warper_sample_kernel, buffers={0: output, 1: size}, textures={0: texture},
+                               threads=(w, h, 1))
+            self._ctx.finish()
+            pixels = self._ctx.read_buffer(output).view(np.float32).reshape(h, w, 4)
+            accept(np.ascontiguousarray(pixels[::-1, :, :3]))
+        except (AttributeError, RuntimeError, ValueError):
+            logger.debug("Could not sample the Color Warper input", exc_info=True)
 
     def render_scope(self, demand: ScopeDemand, source: Any, destination: Any) -> bool:
         """Publish an unmasked scope into the existing GPU-only panel texture."""

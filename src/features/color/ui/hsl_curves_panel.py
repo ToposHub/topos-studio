@@ -97,8 +97,9 @@ class HSLCurvesPanel(QWidget):
             footer.addWidget(value)
         self.input_value.valueChanged.connect(lambda v: self.hsl_curves_widget.set_selected_value('x', v))
         self.output_value.valueChanged.connect(lambda v: self.hsl_curves_widget.set_selected_value('y', v))
+        self.numeric_edit_active = False
         for field in (self.input_value, self.output_value):
-            field.interaction_started.connect(self.hsl_curves_widget.interaction_started)
+            field.interaction_started.connect(self._begin_numeric_edit)
             field.interaction_ended.connect(self._finish_numeric_edit)
         self._preset_mode = ''
         self._syncing_footer = False
@@ -120,8 +121,13 @@ class HSLCurvesPanel(QWidget):
         self.footer.show()
         self._sync_footer()
 
+    def _begin_numeric_edit(self) -> None:
+        self.numeric_edit_active = True
+        self.hsl_curves_widget.interaction_started.emit()
+
     def _finish_numeric_edit(self) -> None:
         self.hsl_curves_widget.flush()
+        self.numeric_edit_active = False
         self.hsl_curves_widget.interaction_ended.emit()
 
     def _sync_footer(self, *_args: object) -> None:
@@ -148,7 +154,7 @@ class HSLCurvesPanel(QWidget):
                     button.setFixedSize(13, 13)
                     button.setToolTip(I18N.tr('hsl_curves.add_anchor', 'Add curve control point'))
                     button.setStyleSheet(f'QPushButton {{ background: {color}; border: 1px solid #404044; border-radius: 6px; }}')
-                    button.clicked.connect(lambda _checked=False, x=position: canvas.add_anchor(x))
+                    button.clicked.connect(lambda _checked=False, x=position: canvas.add_preset_anchor(x))
                     self._preset_row.addWidget(button)
                 self._preset_mode = axis
             names = {'hue': ('input_hue', 'Input Hue'), 'lum': ('input_lum', 'Input Lum'),
@@ -158,17 +164,24 @@ class HSLCurvesPanel(QWidget):
             shift = mode['y_type'] == 'shift'
             output_key, output_name = ('hue_rotate', 'Hue Rotate') if shift else (
                 ('saturation', 'Saturation') if mode['y_axis'] == 'sat' else ('lum', 'Lum'))
+            if canvas._uses_measured_hsl_controls():
+                if canvas.current_mode == 'SatSat':
+                    output_key, output_name = 'output_sat', 'Output Sat'
+                elif canvas.current_mode == 'HueLum':
+                    output_key, output_name = 'lum_gain', 'Lum Gain'
             self.output_label.setText(I18N.tr(f'hsl_curves.{output_key}', output_name))
             input_blocked = self.input_value.blockSignals(True)
             output_blocked = self.output_value.blockSignals(True)
             try:
                 self.input_value.setRange(0.0, canvas.input_maximum())
+                self.input_value.setSingleStep(1.0 if axis == 'hue' else 0.01)
                 self.output_value.setRange(-180.0 if shift else 0.0, 180.0 if shift else 2.0)
+                self.output_value.setSingleStep(1.0 if shift else 0.01)
                 self.output_value.setDefaultValue(0.0 if shift else 1.0)
                 x, y = canvas.selected_values()
                 self.input_value.setValue(x)
                 self.output_value.setValue(y)
-                points = canvas.curves[canvas.current_mode]
+                points = canvas._editable_points()
                 index = min(canvas._inspected_point_idx, len(points) - 1)
                 self.input_value.setEnabled(bool(points) and not canvas._is_endpoint(index))
                 self.output_value.setEnabled(bool(points))

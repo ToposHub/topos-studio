@@ -60,7 +60,6 @@ from src.features.color.core.layer import Layer, MaskShape, MaskGroup
 from src.features.color.core.window_rasterizer import WindowRasterizer
 from src.features.color.core.curves_soft_clip import (
     curves_soft_clip_is_identity,
-    uses_calibrated_soft_clip,
 )
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 
@@ -159,10 +158,8 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
         "plugins": plugins,
         "is_baked": bool(getattr(layer, "is_baked", False)),
     }
-    # Versioned nodes opt into this stage in the preview and bake DTOs.
-    # Keep older DTO digests stable so existing baked grades still resolve.
     csc = layer.curves_soft_clip
-    if uses_calibrated_soft_clip(csc) and not curves_soft_clip_is_identity(csc):
+    if not curves_soft_clip_is_identity(csc):
         data["curves_soft_clip"] = copy.deepcopy(csc)
     return data
 
@@ -260,6 +257,7 @@ class ImageEngine(QObject, WindowRasterizer):
     frame_ready = pyqtSignal(int)
     grade_set_preview_ready = pyqtSignal(object, object)  # (source epoch, grade revision), RGB pixels
     scope_snapshot_ready = pyqtSignal(object)
+    warper_input_ready = pyqtSignal(object)
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     error_occurred = pyqtSignal(str)
     mask_shapes_changed = pyqtSignal()
@@ -321,6 +319,7 @@ class ImageEngine(QObject, WindowRasterizer):
         self._active_color_graph = None
         self._active_graph_stack_id = ""
         self._active_graph_key = None
+        self._active_graph_requires_execution = False
         self._active_graph_snapshot_cache = None
         self._color_graph_revision = 0
 
@@ -743,6 +742,7 @@ class ImageEngine(QObject, WindowRasterizer):
             self.renderer.frame_ready.connect(self.frame_ready.emit)
             self.renderer.grade_set_preview_ready.connect(self.grade_set_preview_ready.emit)
             self.renderer.scope_snapshot_ready.connect(self.scope_snapshot_ready.emit)
+            self.renderer.warper_input_ready.connect(self.warper_input_ready.emit)
             # GPU scope: forward the descriptor frame only; no pixel data.
             if hasattr(self.renderer, 'gpu_scope_ready'):
                 self.renderer.gpu_scope_ready.connect(self.gpu_scope_ready.emit)
@@ -838,8 +838,11 @@ class ImageEngine(QObject, WindowRasterizer):
         self._active_graph_stack_id = str(stack_id or "")
         key = (id(graph), getattr(graph, "graph_revision", 0), self._active_graph_stack_id)
         if key != getattr(self, '_active_graph_key', None):
+            from src.features.color.core.color_graph_migration import can_project_to_legacy_layers
+
             self._color_graph_preview = None
             self._active_graph_key = key
+            self._active_graph_requires_execution = graph is not None and not can_project_to_legacy_layers(graph)
             self._color_graph_revision = int(
                 getattr(self, '_color_graph_revision', 0)) + 1
             self._active_graph_snapshot_cache = None
@@ -852,6 +855,7 @@ class ImageEngine(QObject, WindowRasterizer):
             self._active_color_graph = None
             self._active_graph_stack_id = ""
             self._active_graph_key = None
+            self._active_graph_requires_execution = False
             self._active_graph_snapshot_cache = None
             self._color_graph_revision = int(
                 getattr(self, '_color_graph_revision', 0)) + 1
@@ -884,12 +888,18 @@ class ImageEngine(QObject, WindowRasterizer):
         if cache is not None:
             return cache
         from src.features.color.core.color_graph_snapshot import freeze_graph
+        from src.shared.color.project_video_signal import timeline_uses_rec709_gamma24
+
+        context = dict(graph.working_color_context)
+        context["rec709_calibration_encoded"] = timeline_uses_rec709_gamma24(
+            self.__dict__.get('_project_viewer_signal'))
         snapshot = freeze_graph(
             graph,
             session_id=self.active_color_graph_stack_id,
             source_frame=0,
             source_content_revision=self.color_graph_revision,
             preview_grade=patch,
+            working_color_context=context,
         )
         self._active_graph_snapshot_cache = snapshot
         return snapshot
@@ -926,6 +936,7 @@ class ImageEngine(QObject, WindowRasterizer):
         self._project_viewer_aces = aces
         self._project_input_space = input_space
         self._project_viewer_hdr = hdr
+        self._active_graph_snapshot_cache = None
         return True
 
     def _attach_color_graph_params(self, render_params: dict,
@@ -938,6 +949,10 @@ class ImageEngine(QObject, WindowRasterizer):
         ``TOPOS_COLOR_GRAPH_RENDER`` 开启后 front/color output 切图执行。
         """
         spaces = self.__dict__.get('_project_viewer_signal')
+        if spaces is not None:
+            from src.shared.color.project_video_signal import timeline_uses_rec709_gamma24
+
+            render_params['rec709_calibration_encoded'] = timeline_uses_rec709_gamma24(spaces)
         aces = self.__dict__.get('_project_viewer_aces')
         hdr = self.__dict__.get('_project_viewer_hdr')
         if spaces is not None and (spaces[0] != spaces[1] or aces is not None or hdr is not None):
@@ -975,7 +990,8 @@ class ImageEngine(QObject, WindowRasterizer):
                         working_color_context=(
                             snapshot.working_color_context),
                     ))
-            if execute or self.__dict__.get('_color_graph_preview') is not None:
+            if (execute or self.__dict__.get('_active_graph_requires_execution', False)
+                    or self.__dict__.get('_color_graph_preview') is not None):
                 render_params['color_graph_execute'] = True
 
     @property
@@ -1133,19 +1149,22 @@ class ImageEngine(QObject, WindowRasterizer):
         if render:
             self.render_pipeline()
 
-    def set_interaction_mode(self, is_active: bool, itype: str = "general") -> None:
+    def set_interaction_mode(self, is_active: bool, itype: str = "general", *,
+                             render: bool = True) -> None:
         """进入/退出交互模式（滑杆拖动、裁剪、蒙版绘制等）。
 
         退出交互时把所有层蒙版置脏，随后的渲染按静止基准（1024）重
         栅格化。交互中的渲染走轻量 merge lane：general 调色用
         'grading'，其余类型用 'full'。
         """
-        if self.is_interacting and not is_active:
+        if self.is_interacting and not is_active and getattr(self, "interaction_type", "general") != "warper":
             for layer in self.layers:
                 layer.mask_dirty = True
                 
         self.is_interacting = is_active
         self.interaction_type = itype
+        if not render:
+            return
         # General adjustment controls already submit an interactive preview on
         # their first value change.  Keep this state transition in the same
         # merge lane so starting a wheel/slider drag cannot enqueue an
@@ -2899,7 +2918,7 @@ class ImageEngine(QObject, WindowRasterizer):
         """
         if not self.renderer or self.img_full_original is None: return
         h, w = self.img_full_original.shape[:2]
-        if self.is_interacting or preview:
+        if (self.is_interacting and getattr(self, "interaction_type", "general") != "warper") or preview:
             base_size = 512
         else:
             base_size = 1024
@@ -3210,6 +3229,11 @@ class ImageEngine(QObject, WindowRasterizer):
             # 由执行器按 target 用 f4 dtype，复杂图 fail-closed 不回退）
             self._attach_color_graph_params(
                 render_params, execute=self.color_graph_render_enabled)
+            sample = self.__dict__.get('warper_input_request')
+            if sample is not None and not is_full_res and render_reason != 'playback':
+                target = sample()
+                if target is not None:
+                    render_params['warper_sample'] = target
             if is_full_res:
                 # CPU-side colour conversion is deliberately limited to
                 # preparing immutable data.  All GL work and the readback are
@@ -3635,11 +3659,11 @@ class ImageEngine(QObject, WindowRasterizer):
                     # Warper
                     if flags["has_warper"]:
                         from src.features.color.core.warper_color import (
-                            RESOLVE_HS709_SPACES, prepare_resolve_hs709_texture,
+                            WARPER_PREPARED_SPACES, prepare_resolve_hs709_texture,
                         )
 
                         wp = np.ascontiguousarray(layer.warper_params, dtype=np.float32)
-                        if flags["warper_space"] in RESOLVE_HS709_SPACES:
+                        if flags["warper_space"] in WARPER_PREPARED_SPACES:
                             wp = prepare_resolve_hs709_texture(wp, flags["warper_space"])
                         wh, ww, components = wp.shape
                         w_tex = ctx.texture((ww, wh), components, data=wp.tobytes(), dtype='f4')
@@ -5322,6 +5346,6 @@ class ImageEngine(QObject, WindowRasterizer):
             'is_baked': False,  # Always False for baking - we're creating the baked result
         }
         csc = layer.curves_soft_clip
-        if uses_calibrated_soft_clip(csc) and not curves_soft_clip_is_identity(csc):
+        if not curves_soft_clip_is_identity(csc):
             snapshot["curves_soft_clip"] = copy.deepcopy(csc)
         return snapshot

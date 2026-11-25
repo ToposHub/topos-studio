@@ -46,6 +46,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import (
     Qt,
     QEvent,
+    QRect,
     QRectF,
     QPointF,
     QPoint,
@@ -67,6 +68,7 @@ from PyQt6.QtGui import (
 
 from src.features.edit.ui.edit_style import EDIT_SIZES, get_color
 from src.features.edit.ui.timeline_edit_affordances import edit_cursor, paint_trim_bracket
+from src.features.edit.ui.timeline_icons import icon_link, icon_unlink
 from src.features.edit.ui.timeline_layout import TRACK_HEADER_WIDTH
 from src.shared.assets.icon_manager import get_icon
 from src.shared.ui.horizontal_peak_meter import paint_horizontal_peak_bar
@@ -3665,40 +3667,14 @@ class ClipItem(QGraphicsObject):
 
 
     def _draw_linked_indicator(self, painter: QPainter) -> None:
-        """Draw a Resolve-style chain icon before the clip name.
-
-        The icon lives inside the bottom information strip instead of the
-        thumbnail/waveform area.  Its position matches the ``text_offset``
-        reserved by the label renderer above.
-        """
-        icon_center = QPointF(10.0, float(self._track_height) - 10.0)
-        link_color = (
-            QColor(245, 245, 245, 230)
-            if self._linked_selection_enabled
-            else QColor(170, 175, 180, 150)
-        )
-
+        """Paint the toolbar's linked-selection glyph beside the clip name."""
+        if self._linked_selection_enabled:
+            icon, opacity = icon_link("#f5f5f5"), 0.9
+        else:
+            icon, opacity = icon_unlink("#aaafb4"), 0.6
         painter.save()
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(QPen(
-            link_color,
-            1.35,
-            Qt.PenStyle.SolidLine,
-            Qt.PenCapStyle.RoundCap,
-            Qt.PenJoinStyle.RoundJoin,
-        ))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        # Two overlapping rounded links, rotated to form a compact chain.
-        painter.translate(icon_center)
-        painter.rotate(-42.0)
-        painter.drawRoundedRect(QRectF(-7.0, -2.5, 8.0, 5.0), 2.2, 2.2)
-        painter.drawRoundedRect(QRectF(-1.0, -2.5, 8.0, 5.0), 2.2, 2.2)
-
-        if not self._linked_selection_enabled:
-            # Preserve the broken-link cue without restoring the old badge.
-            painter.drawLine(QPointF(-4.5, -4.5), QPointF(4.5, 4.5))
-
+        painter.setOpacity(painter.opacity() * opacity)
+        icon.paint(painter, QRect(2, self._track_height - 18, 16, 16))
         painter.restore()
 
     def _draw_linked_group_border(self, painter: QPainter, clip_rect: QRectF) -> None:

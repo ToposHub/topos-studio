@@ -377,6 +377,7 @@ class ColorGraphExecutor:
         dtype: str = "f2",
         cache_context: tuple = (),
         fold_single_corrector_io: bool = False,
+        input_sample: tuple[str, Callable[[Any], None]] | None = None,
     ) -> GraphExecutionResult:
         """执行 plan；source pass 消费 ``source_texture``（租借不持有）。
 
@@ -487,6 +488,9 @@ class ColorGraphExecutor:
                 if cancel(request_id):
                     raise GraphExecutionCancelled(
                         request_id, render_pass.index)
+
+                if input_sample is not None and render_pass.node_id == input_sample[0]:
+                    input_sample[1](self._input_for(render_pass, "image", node_outputs, source_texture))
 
                 # N06：查缓存（Off/不eligible 跳过；命中直接作为本 pass
                 # 输出——不执行、不 lease，纹理所有权在缓存）
@@ -1083,11 +1087,14 @@ class ColorGraphExecutor:
             return self._default_hsl_texture()
         data = np.ascontiguousarray(samples.T).tobytes()
         texture = getattr(self, "_calibrated_hsl_tex", None)
-        if texture is None:
-            texture = self.ctx.texture(samples.shape, components=1, dtype="f4", data=data)
-            texture.filter = (self.ctx.LINEAR, self.ctx.LINEAR)
-            texture.repeat_x = texture.repeat_y = False
-            self._calibrated_hsl_tex = texture
+        if texture is None or texture.size != samples.shape:
+            replacement = self.ctx.texture(samples.shape, components=1, dtype="f4", data=data)
+            replacement.filter = (self.ctx.LINEAR, self.ctx.LINEAR)
+            replacement.repeat_x = replacement.repeat_y = False
+            self._calibrated_hsl_tex = replacement
+            if texture is not None:
+                texture.release()
+            texture = replacement
         elif data != self._calibrated_hsl_bytes:
             texture.write(data)
         self._calibrated_hsl_bytes = data

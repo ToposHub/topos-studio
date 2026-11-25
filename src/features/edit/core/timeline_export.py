@@ -106,6 +106,7 @@ from src.shared.color.project_video_signal import (
     normalized_video_bgr, read_aces_still, read_video_still_bgr, render_aces_bgr,
     convert_video_signal_bgr,
     encode_timeline_linear_bgr,
+    timeline_uses_rec709_gamma24,
     video_signal_spaces,
     video_signal_uses_legacy_space,
 )
@@ -11900,6 +11901,8 @@ class TimelineExporter:
             if any(extra.get("mid_detail") for extra in extras):
                 raise ValueError("Midtone Detail in a color-chain segment requires the CPU compositor")
             return {"color_graph": graph, "source_frame": int(layer.source_frame),
+                    "rec709_calibration_encoded": timeline_uses_rec709_gamma24(
+                        getattr(self, "_export_video_signal_spaces", None)),
                     "chain_extra_params": extras}
         grade = self._get_clip_color_grade(layer)
         if grade is None:
@@ -12552,6 +12555,8 @@ class TimelineExporter:
             return run_graph_frame_cpu(
                 graph, frame_data, source_frame,
                 plan_cache=getattr(self, "_graph_plan_cache", None),
+                rec709_calibration_encoded=timeline_uses_rec709_gamma24(
+                    getattr(self, "_export_video_signal_spaces", None)),
                 pre_chain=pre, post_chain=after)
         except (UnsupportedNode, GraphCompileError) as exc:
             if not allow_degraded:
@@ -12827,6 +12832,7 @@ class TimelineExporter:
                 e for e in extras if e.get("_chain_segment") == "pre"]
             after_entries = [
                 e for e in extras if e.get("_chain_segment") != "pre"]
+            encoded = timeline_uses_rec709_gamma24(getattr(self, "_export_video_signal_spaces", None))
 
             def _apply_entries(buf, entries):
                 for extra in entries:
@@ -12840,11 +12846,12 @@ class TimelineExporter:
                             " 等高级操作，primary 导出跳过该段",
                             layer.clip_id)
                         continue
-                    buf = GradingMath.apply_grading(buf, extra)
+                    buf = GradingMath.apply_grading(buf, extra, rec709_calibration_encoded=encoded)
                 return buf
 
             graded = _apply_entries(rgb, pre_entries)
-            graded = GradingMath.apply_grading(graded, grading_params)
+            graded = GradingMath.apply_grading(
+                graded, grading_params, rec709_calibration_encoded=encoded)
             # M05.2b：RGB 曲线（GPU 合成序中 curves 在主 grade 之后，
             # 见 shader_compiler build_composition_shader 的段序）
             curves_data = grade.get("curves_data")
@@ -14937,6 +14944,8 @@ class TimelineExporter:
         spaces = getattr(self, "_export_video_signal_spaces", None)
         color_management = (EXPORT_OETF_VERSION,) if spaces is None else (
             EXPORT_OETF_VERSION, "straight-bgra", str(spaces[0]))
+        if timeline_uses_rec709_gamma24(spaces):
+            color_management += ("rec709-grade-signal-v2",)
         hdr = getattr(self, "_hdr_export", None)
         if hdr is not None:
             color_management += (hdr.input, str(hdr.luminance))

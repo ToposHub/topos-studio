@@ -200,7 +200,8 @@ def test_v2_variant_renders_fixture_grid_consistently_with_cpu() -> None:
     quad.release(); vao.release()
 
 
-@pytest.fixture(params=[3, 4], ids=["709-v1", "709-v2"])
+@pytest.fixture(params=[3, 4, 5, "chroma_luma", "chroma_warp"],
+                ids=["709-v1", "709-v2", "709-v3", "chroma-luma", "chroma-warp"])
 def calibrated_graph_case(request: pytest.FixtureRequest) -> tuple:
     from src.shared.project.color_graph import ColorEdgeData, ColorGraphData, ColorNodeData, NodeType
 
@@ -210,9 +211,25 @@ def calibrated_graph_case(request: pytest.FixtureRequest) -> tuple:
     ]], np.float32)
     offsets = np.zeros((6, 8, 3), np.float32)
     offsets[1:5, (0, 4, 7), :] = (0.06, -0.08, 0.09)
+    space = request.param
+    if isinstance(space, str):
+        from src.features.color.core.warper_state import CHROMA709_ALGORITHM, WarperStroke
+
+        if space == "chroma_luma":
+            grid = WarperGrid.identity("grid1", 7, 7, ("dc", "dl"))
+            change = grid.mutable_offsets()
+            change[2, 3] = (0.10, -0.1)
+            grids = {"grid1": grid.with_offsets(change), "grid2": WarperGrid.identity("grid2", 7, 7, ("dc", "dl"))}
+            strokes = ()
+        else:
+            grids = {}
+            strokes = (WarperStroke("test", "normal", (1.0, 0.0, 0.0), (0.9, 0.1, 0.2),
+                                    {"chroma_range": 0.18}, ((0.29, 0.18), (0.35, 0.27))),)
+        state = WarperStateV2(WARPER_SCHEMA_VERSION, CHROMA709_ALGORITHM, space, "hsp", 0.0, grids, strokes)
+        offsets, space = renderable_projection(state)
     payload = {
         "grading_params": {}, "warper_params": offsets.tolist(),
-        "warper_space": request.param, "opacity": 0.7,
+        "warper_space": space, "opacity": 0.7,
     }
     nodes = (
         ColorNodeData(node_id="source", node_type=NodeType.SOURCE.value),

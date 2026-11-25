@@ -27,7 +27,7 @@ from __future__ import annotations
 import copy
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -65,10 +65,13 @@ LEGACY_ALGORITHM = "legacy_hsv_v1"
 CURRENT_ALGORITHM = "topos_warper_v1"
 RESOLVE_HS_ALGORITHM = "resolve_hs_rec709_v1"
 RESOLVE_HS_ALGORITHM_V2 = "resolve_hs_rec709_v2"
-RESOLVE_HS_ALGORITHMS = (RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2)
+RESOLVE_HS_ALGORITHM_V3 = "resolve_hs_rec709_v3"
+RESOLVE_HS_ALGORITHMS = (RESOLVE_HS_ALGORITHM, RESOLVE_HS_ALGORITHM_V2, RESOLVE_HS_ALGORITHM_V3)
+CHROMA709_ALGORITHM = "topos_chroma_rec709_v1"
+HS_SPACES709_ALGORITHM = "topos_hs_spaces_rec709_v1"
 
 SUPPORTED_MODES = ("hue_saturation", "chroma_luma", "chroma_warp")
-SUPPORTED_COLOR_SPACES = ("hsv", "hsl", "hsp")
+SUPPORTED_COLOR_SPACES = ("hsv", "hsl", "hsp", "hsy")
 
 #: UI 候选 6/8/12/16/24(HS)/4..24(CL);上限取一档余量,越界即拒绝。
 MAX_GRID_DIM = 64
@@ -416,7 +419,12 @@ class WarperStroke:
         path_raw = data.get("path") or ()
         if not isinstance(path_raw, (list, tuple)):
             raise WarperStateError("corrupt_payload", "path 需要 list/tuple")
-        path = tuple((float(p[0]), float(p[1])) for p in path_raw)
+        if any(not isinstance(p, (list, tuple)) or len(p) != 2 for p in path_raw):
+            raise WarperStateError("invalid_array", "Stroke path points must contain two coordinates")
+        try:
+            path = tuple((float(p[0]), float(p[1])) for p in path_raw)
+        except (TypeError, ValueError) as exc:
+            raise WarperStateError("invalid_array", "Stroke path coordinates must be numeric") from exc
         known = frozenset(cls._KNOWN_KEYS)
         extras = {key: copy.deepcopy(value) for key, value in data.items() if key not in known}
         return cls(
@@ -499,9 +507,11 @@ class WarperStateV2:
     strokes: tuple[WarperStroke, ...] = ()
     pin_points: tuple[WarperPinPoint, ...] = ()
     _extra_fields: dict = field(default_factory=dict, repr=False, compare=False)
+    other_modes: tuple[WarperStateV2, ...] = ()
+    white_point: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     _KNOWN_KEYS = ("schema_version", "algorithm_version", "mode", "color_space",
-                   "axis_angle", "grids", "strokes", "pins")
+                   "axis_angle", "grids", "strokes", "pins", "other_modes", "white_point")
 
     def __post_init__(self) -> None:
         if self.mode not in SUPPORTED_MODES:
@@ -510,6 +520,11 @@ class WarperStateV2:
             raise WarperStateError("invalid_mode", f"color_space {self.color_space!r} 非法")
         if not math.isfinite(self.axis_angle) or not -180.0 <= self.axis_angle <= 180.0:
             raise WarperStateError("invalid_param", f"axis_angle {self.axis_angle} 越界 [-180, 180]")
+        if (not isinstance(self.white_point, tuple) or len(self.white_point) != 3
+                or not all(isinstance(value, (int, float)) and math.isfinite(value) for value in self.white_point)
+                or math.hypot(*self.white_point[:2]) > 0.650001 or abs(self.white_point[2]) > 0.5
+                or (self.mode != "hue_saturation" and any(self.white_point))):
+            raise WarperStateError("invalid_param", "Invalid Hue–Saturation white point")
         if self.mode == "hue_saturation":
             required, forbidden = (HS_GRID_NAME,), CL_GRID_NAMES
         elif self.mode == "chroma_luma":
@@ -531,6 +546,20 @@ class WarperStateV2:
                 name, row, col = _split_point_id(pin.point_id)
                 if name != HS_GRID_NAME or not (0 <= row < grid.rows and 0 <= col < grid.cols):
                     raise WarperStateError("invalid_id", f"Pin is outside the 709 mesh: {pin.point_id}")
+        if self.algorithm_version == CHROMA709_ALGORITHM and self.mode == "hue_saturation":
+            raise WarperStateError("invalid_mode", "Chroma calibration requires a Chroma Warper mode")
+        if self.algorithm_version == CHROMA709_ALGORITHM and self.mode == "chroma_luma":
+            if len({(self.grids[name].rows, self.grids[name].cols) for name in CL_GRID_NAMES}) != 1:
+                raise WarperStateError("invalid_array", "Chroma–Luma grids must share the resolution")
+        if self.algorithm_version == CHROMA709_ALGORITHM and self.mode == "chroma_warp":
+            if any(len(point) != 2 or not all(0.0 <= value <= 1.0 for value in point)
+                   for stroke in self.strokes for point in stroke.path):
+                raise WarperStateError("invalid_array", "Chroma Warp paths must be inside the plot")
+        if self.algorithm_version == HS_SPACES709_ALGORITHM and self.mode != "hue_saturation":
+            raise WarperStateError("invalid_mode", "Hue–Saturation color spaces require a Hue–Saturation grid")
+        modes = {self.mode, *(state.mode for state in self.other_modes)}
+        if len(modes) != len(self.other_modes) + 1 or any(state.other_modes for state in self.other_modes):
+            raise WarperStateError("invalid_mode", "Warper modes must be unique and flat")
         if len(self.strokes) > MAX_STROKES:
             raise WarperStateError("size_exceeded", f"strokes 超过 {MAX_STROKES}")
         if len(self.pin_points) > MAX_PINS:
@@ -555,6 +584,10 @@ class WarperStateV2:
             "strokes": [stroke.to_dict() for stroke in self.strokes],
             "pins": [pin.to_dict() for pin in self.pin_points],
         }
+        if self.other_modes:
+            data["other_modes"] = [state.to_dict() for state in self.other_modes]
+        if any(self.white_point):
+            data["white_point"] = list(self.white_point)
         data.update(copy.deepcopy(self._extra_fields))
         return data
 
@@ -588,12 +621,19 @@ class WarperStateV2:
         if not isinstance(pins_raw, (list, tuple)):
             raise WarperStateError("corrupt_payload", "pins 需要 list/tuple")
         pin_points = tuple(WarperPinPoint.from_dict(p) for p in pins_raw)
+        other_modes_raw = data.get("other_modes", ())
+        if (not isinstance(other_modes_raw, (list, tuple)) or len(other_modes_raw) > 2
+                or any(not isinstance(item, Mapping) or "other_modes" in item for item in other_modes_raw)):
+            raise WarperStateError("corrupt_payload", "Warper modes must be unique and flat")
         known = frozenset(cls._KNOWN_KEYS)
         extras = {key: copy.deepcopy(value) for key, value in data.items() if key not in known}
         try:
             axis_angle = float(data.get("axis_angle", 0.0))
         except (TypeError, ValueError) as exc:
             raise WarperStateError("corrupt_payload", f"axis_angle 非法: {data.get('axis_angle')!r}") from exc
+        white_point = data.get("white_point", (0.0, 0.0, 0.0))
+        if not isinstance(white_point, (list, tuple)):
+            raise WarperStateError("invalid_param", "Invalid Hue–Saturation white point")
         return cls(
             schema_version=version,
             algorithm_version=str(data.get("algorithm_version", CURRENT_ALGORITHM)),
@@ -604,6 +644,8 @@ class WarperStateV2:
             strokes=strokes,
             pin_points=pin_points,
             _extra_fields=extras,
+            other_modes=tuple(cls.from_dict(item) for item in other_modes_raw),
+            white_point=tuple(white_point),
         )
 
     # ---- 派生 ----
@@ -616,15 +658,20 @@ class WarperStateV2:
         """替换/新增一个网格,派生新状态。"""
         grids = dict(self.grids)
         grids[grid.name] = grid
-        return WarperStateV2(
-            schema_version=self.schema_version, algorithm_version=self.algorithm_version,
-            mode=self.mode, color_space=self.color_space, axis_angle=self.axis_angle,
-            grids=grids, strokes=self.strokes, pin_points=self.pin_points,
-            _extra_fields=copy.deepcopy(self._extra_fields))
+        return replace(self, grids=grids, _extra_fields=copy.deepcopy(self._extra_fields))
+
+    def for_mode(self, mode: str) -> WarperStateV2 | None:
+        return next((state for state in (self, *self.other_modes) if state.mode == mode), None)
+
+    def replacing_mode(self, state: WarperStateV2) -> WarperStateV2:
+        """Use the edited palette and retain the other palettes' controls."""
+        saved = tuple(replace(previous, other_modes=()) for previous in (self, *self.other_modes)
+                      if previous.mode != state.mode)
+        return replace(state, other_modes=tuple(sorted(saved, key=lambda item: item.mode)))
 
     def is_identity(self) -> bool:
         """全部网格零位移、无笔画/Pin 时为恒等(可安全丢弃不参与渲染)。"""
-        if self.strokes or self.pin_points:
+        if self.strokes or self.pin_points or any(self.white_point):
             return False
         return all(not grid.offsets.any() for grid in self.grids.values())
 
@@ -678,22 +725,62 @@ def legacy_ndarray(state: WarperStateV2 | None) -> np.ndarray | None:
 
 def resolve_hs_render_space(algorithm_version: str | None) -> int | None:
     """Return the renderer variant for a calibrated HS algorithm."""
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
+    from src.features.color.core.warper_color import (
+        RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE, RESOLVE_HS709_V3_SPACE,
+    )
 
     if algorithm_version == RESOLVE_HS_ALGORITHM:
         return RESOLVE_HS709_SPACE
     if algorithm_version == RESOLVE_HS_ALGORITHM_V2:
         return RESOLVE_HS709_V2_SPACE
+    if algorithm_version == RESOLVE_HS_ALGORITHM_V3:
+        return RESOLVE_HS709_V3_SPACE
     return None
+
+
+def derives_warper_projection(state: WarperStateV2 | Mapping[str, Any]) -> bool:
+    versions = (*RESOLVE_HS_ALGORITHMS, CHROMA709_ALGORITHM, HS_SPACES709_ALGORITHM)
+    if isinstance(state, WarperStateV2):
+        grid = state.grids.get(HS_GRID_NAME)
+        return bool(state.other_modes or state.algorithm_version in versions or any(state.white_point)
+                    or (grid is not None and has_hue_pin_constraints(grid)))
+    if state.get("other_modes") or state.get("algorithm_version") in versions or state.get("white_point"):
+        return True
+    grids = state.get("grids")
+    grid = grids.get(HS_GRID_NAME) if isinstance(grids, Mapping) else None
+    pins = grid.get("pins") if isinstance(grid, Mapping) else None
+    return isinstance(pins, (list, tuple)) and any(
+        isinstance(pin, Mapping) and pin.get("affects_response") is True for pin in pins)
 
 
 def renderable_projection(state: WarperStateV2 | None) -> tuple[np.ndarray | None, int]:
     """Project a legacy two-channel or calibrated three-channel HS mesh for rendering."""
-    if state is None or state.mode != "hue_saturation":
+    if state is None:
+        return None, 0
+    chroma = None if state.mode == "chroma_warp" else state.for_mode("chroma_luma")
+    if chroma is not None and (chroma.algorithm_version != CHROMA709_ALGORITHM or chroma.is_identity()):
+        chroma = None
+    if chroma is not None or (state.mode == "chroma_warp" and state.algorithm_version == CHROMA709_ALGORITHM):
+        from src.features.color.core.warper_color import WARPER_CHROMA709_SPACE
+        from src.features.color.core.warper_chroma_texture import pack_chroma_state
+
+        if chroma is not None:
+            return pack_chroma_state(chroma, state.for_mode("hue_saturation")), WARPER_CHROMA709_SPACE
+        return pack_chroma_state(state), WARPER_CHROMA709_SPACE
+    if state.mode == "chroma_luma":
+        state = state.for_mode("hue_saturation")
+        if state is None:
+            return None, 0
+    if state.mode != "hue_saturation":
         return None, 0
     grid = state.grids.get(HS_GRID_NAME)
     if grid is None:
         return None, 0
+    if state.algorithm_version == HS_SPACES709_ALGORITHM or any(state.white_point) or has_hue_pin_constraints(grid):
+        from src.features.color.core.warper_color import WARPER_CHROMA709_SPACE
+        from src.features.color.core.warper_chroma_texture import pack_hue_state
+
+        return pack_hue_state(state), WARPER_CHROMA709_SPACE
     # 空间索引与 warper_color.WARPER_SPACE_INDEX(shader u_warper_space
     # 取值)同一事实源,避免两处字典漂移。
     from src.features.color.core.warper_color import WARPER_SPACE_INDEX
@@ -705,6 +792,10 @@ def renderable_projection(state: WarperStateV2 | None) -> tuple[np.ndarray | Non
         return None, 0
     return np.array(grid.offsets, dtype=np.float32, copy=True), \
         WARPER_SPACE_INDEX.get(state.color_space, 0)
+
+
+def has_hue_pin_constraints(grid: WarperGrid) -> bool:
+    return any(pin._extra_fields.get("affects_response") is True for pin in grid.pins)
 
 
 # ---- 能力契约(计划 §2.3) ----
@@ -734,7 +825,7 @@ def describe_warper_capabilities(
     revision: int | None = None,
 ) -> WarperCapabilities:
     """当前后端只有 legacy HSV GLSL/MSL 路径;新空间/模式如实报 unimplemented。"""
-    supported = ("hue_saturation",)
+    supported = SUPPORTED_MODES
     if state is None:
         if legacy is not None:
             return WarperCapabilities(True, "ok", supported, "legacy_hsv_glsl", revision)
@@ -742,6 +833,9 @@ def describe_warper_capabilities(
     if state.algorithm_version == LEGACY_ALGORITHM:
         return WarperCapabilities(True, "ok", supported, "legacy_hsv_glsl", revision)
     offsets, space = renderable_projection(state)
+    if state.algorithm_version in (CHROMA709_ALGORITHM, HS_SPACES709_ALGORITHM):
+        return WarperCapabilities(True, "bypass" if offsets is None else "ok",
+                                  supported, "chroma_rec709", revision)
     if state.algorithm_version in RESOLVE_HS_ALGORITHMS:
         return WarperCapabilities(True, "bypass" if offsets is None else "ok",
                                   supported, "hs_rec709", revision)

@@ -60,7 +60,7 @@ from src.features.color.core.primary_calibration import (
     grade_uses_calibration,
 )
 from src.features.color.core.warper_color import (
-    RESOLVE_HS709_SPACES,
+    WARPER_PREPARED_SPACES,
     prepare_resolve_hs709_texture,
 )
 from src.shared.gpu.metal.context import MetalComputeContext
@@ -160,7 +160,7 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
     warper = layer.get("warper_params")
     if warper is not None:
         warper_space = int(layer.get("warper_space") or 0)
-        if warper_space not in (0, *RESOLVE_HS709_SPACES):
+        if warper_space not in (0, *WARPER_PREPARED_SPACES):
             errors.append(f"warper 多空间变体未接线（space={warper_space}）")
     return errors
 
@@ -282,6 +282,7 @@ class ColorGraphMetalTextureExecutor:
         cancel_check: Callable[[str], bool] | None = None,
         layer_param_provider: Callable[
             [str], Mapping[str, Any] | None] | None = None,
+        input_sample: tuple[str, Callable[[Any], None]] | None = None,
     ) -> MetalTextureGraphResult:
         """执行 plan；``source_texture`` 为同设备 RGBA16Float 输入纹理。
 
@@ -354,6 +355,8 @@ class ColorGraphMetalTextureExecutor:
                 if cancel(request_id):
                     raise MetalGraphCancelled(
                         request_id, render_pass.index)
+                if input_sample is not None and render_pass.node_id == input_sample[0]:
+                    input_sample[1](self._input_for(render_pass, "image", node_outputs, source_texture))
                 out = self._execute_pass(
                     render_pass, source_texture, node_outputs, key_outputs,
                     layer_param_provider, width, height, leases,
@@ -708,14 +711,13 @@ class ColorGraphMetalTextureExecutor:
         if hsl_lut is None:
             hsl_data = layer.get("hsl_curve_data")
             if isinstance(hsl_data, Mapping) and hsl_data:
-                from src.features.color.core.curves_calibration import curves_calibration_enabled
+                from src.features.color.core.curves_calibration import curves_calibration_version
                 from src.features.color.core.layer import (
                     build_hsl_curve_lut_from_data,
                 )
                 try:
-                    calibrated = curves_calibration_enabled(layer.get("curves_edit"))
                     hsl_lut = build_hsl_curve_lut_from_data(
-                        dict(hsl_data), calibration_version=int(calibrated))
+                        dict(hsl_data), calibration_version=curves_calibration_version(layer.get("curves_edit")))
                 except (TypeError, ValueError):
                     hsl_lut = None
         mixer = layer.get("mixer_params")
@@ -942,10 +944,10 @@ class ColorGraphMetalTextureExecutor:
                 self._hsl_default = self._upload_r32(
                     np.ascontiguousarray(default.T), 6, 256)
             return self._hsl_default
-        from src.features.color.core.hsl_curve_calibration import CALIBRATED_HSL_SAMPLES
+        from src.features.color.core.hsl_curve_calibration import VALID_HSL_LUT_SHAPES
 
         lut = np.asarray(hsl_lut, dtype=np.float32)
-        if lut.shape not in ((6, 256), (6, CALIBRATED_HSL_SAMPLES)):
+        if lut.shape not in VALID_HSL_LUT_SHAPES:
             raise MetalTextureGraphFailure("param_shape_unsupported", "Invalid HSL curve LUT layout")
         arr = np.ascontiguousarray(lut.T)
         key = hashlib.sha256(arr.tobytes()).hexdigest()
@@ -972,7 +974,7 @@ class ColorGraphMetalTextureExecutor:
     def _warper_texture(self, warper_params: Any, space: int = 0) -> Any:
         """Upload legacy RG offsets or a prepared calibration field as RGBA32F."""
         array = np.ascontiguousarray(warper_params, dtype=np.float32)
-        calibrated = space in RESOLVE_HS709_SPACES
+        calibrated = space in WARPER_PREPARED_SPACES
         components = 3 if calibrated else 2
         if (array.ndim != 3 or array.shape[-1] != components
                 or not array.shape[0] or not array.shape[1]):

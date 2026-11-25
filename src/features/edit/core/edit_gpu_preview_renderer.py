@@ -4945,7 +4945,9 @@ class EditGpuPreviewRenderer(QThread):
                 from src.features.color.core.color_graph_texture import ColorGraphTextureRenderer
                 renderer = ColorGraphTextureRenderer(self.ctx)
                 self._color_graph_texture_renderer = renderer
-            result = renderer.render(pre_tex, graph, int(grade.get("source_frame", 0)))
+            result = renderer.render(
+                pre_tex, graph, int(grade.get("source_frame", 0)),
+                rec709_calibration_encoded=bool(grade.get("rec709_calibration_encoded")))
             # Preserve the track output when the next track uses graph scratch.
             if scratch_key is not None:
                 target_fbo, target_tex = self._ensure_adjustment_grade_fbo(scratch_key, w, h, pin_glo=pin_glo)

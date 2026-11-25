@@ -169,6 +169,99 @@ def test_mist_retains_detail_and_reaches_video_delivery_from_a_legacy_stack(ctx:
         source.release()
 
 
+def test_rec709_timeline_graph_uses_code_values_for_measured_stages(ctx: Any) -> None:
+    layer = _neutral_layer("Measured")
+    layer.grading_params.update(primary_calibration_version=2, saturation=16.0)
+    layer.curves_edit["calibration_version"] = 1
+    layer.curves_data = {"M": [(0, 255), (121, 111), (255, 0)]}
+    graph = migrate_legacy_stack(_stack_with_layers([layer]))
+    rgb = np.random.default_rng(27).uniform(0.18, 0.82, (8, 10, 3)).astype("f4")
+    source = ctx.texture((10, 8), 3, rgb.tobytes(), dtype="f4")
+    renderer = ColorGraphTextureRenderer(ctx)
+    try:
+        code = run_graph_frame_cpu(
+            graph, rgb[..., ::-1], 0, rec709_calibration_encoded=True)[..., ::-1]
+        reference = run_graph_frame_cpu(graph, rgb[..., ::-1] ** 2.4, 0)[..., ::-1] ** (1 / 2.4)
+        np.testing.assert_allclose(code, reference, atol=3e-6, rtol=0)
+        result = renderer.render(source, graph, 0, rec709_calibration_encoded=True)
+        gl = np.frombuffer(result.read(), dtype="f4").reshape(8, 10, 4)[..., :3]
+        np.testing.assert_allclose(gl, code, atol=3e-5, rtol=0)
+    finally:
+        renderer.release()
+        source.release()
+
+
+@pytest.mark.parametrize("with_mist", [False, True])
+def test_rec709_midtone_detail_filters_decoded_neighbours(ctx: Any, with_mist: bool) -> None:
+    layer = _neutral_layer("Midtone Detail")
+    layer.grading_params.update(primary_calibration_version=2, mid_detail=100.0)
+    if with_mist:
+        layer.effects_params.update(mist_enabled=True, mist_radius=0.52, mist_mix=33, mist_version=2)
+    graph = migrate_legacy_stack(_stack_with_layers([layer]))
+    rgb = np.random.default_rng(30).uniform(0.1, 0.9, (24, 1920, 3)).astype("f4")
+    source = ctx.texture((1920, 24), 3, rgb.tobytes(), dtype="f4")
+    source.filter = (ctx.LINEAR, ctx.LINEAR)
+    renderer = ColorGraphTextureRenderer(ctx)
+    try:
+        tex = renderer.render(source, graph, 0, rec709_calibration_encoded=True)
+        gl = np.frombuffer(tex.read(), dtype="f4").reshape(24, 1920, 4)[..., :3]
+        cpu = run_graph_frame_cpu(
+            graph, rgb[..., ::-1], 0, rec709_calibration_encoded=True)[..., ::-1]
+        np.testing.assert_allclose(gl, cpu, atol=0.001, rtol=0)
+    finally:
+        renderer.release()
+        source.release()
+
+
+def test_new_corrector_mixer_matches_cpu_for_signed_inputs(ctx: Any) -> None:
+    from src.features.color.core.color_graph_service import ColorGraphService
+    from src.shared.project.color_graph import ColorGraphData
+
+    service = ColorGraphService()
+    inserted = service.op_insert_corrector(ColorGraphData.create_serial())
+    assert inserted.ok
+    node = next(node for node in inserted.graph.nodes if node.node_type == "corrector")
+    edited = service.op_paste_selected_domains(
+        inserted.graph, (node.node_id,), {"mixer": {"red": (8, 14, 100)}}, ("mixer",))
+    assert edited.ok
+    rgb = np.array([[[-0.5, -0.02, 0.04], [0.5, 0.02, 0.04]]], dtype="f4")
+    source = ctx.texture((2, 1), 3, rgb.tobytes(), dtype="f4")
+    renderer = ColorGraphTextureRenderer(ctx)
+    try:
+        tex = renderer.render(source, edited.graph, 0)
+        gl = np.frombuffer(tex.read(), dtype="f4").reshape(1, 2, 4)[..., :3]
+        cpu = run_graph_frame_cpu(edited.graph, rgb[..., ::-1], 0)[..., ::-1]
+        assert not np.allclose(cpu, rgb)
+        np.testing.assert_allclose(gl, cpu, atol=3e-6, rtol=0)
+    finally:
+        renderer.release()
+        source.release()
+
+
+def test_mist_calibration_near_neutral_matches_measured_step(ctx: Any) -> None:
+    layer = _neutral_layer("Mist")
+    layer.effects_params.update(mist_enabled=True, mist_radius=0.52, mist_mix=33, mist_version=2)
+    graph = migrate_legacy_stack(_stack_with_layers([layer]))
+    rgb = np.full((12, 1920, 3), 0.25, dtype="f4")
+    rgb[:, :960] = 0.45
+    source = ctx.texture((1920, 12), 3, rgb.tobytes(), dtype="f4")
+    source.filter = (ctx.LINEAR, ctx.LINEAR)
+    renderer = ColorGraphTextureRenderer(ctx)
+    try:
+        result = renderer.render(source, graph, 0)
+        gl = np.frombuffer(result.read(), dtype="f4").reshape(12, 1920, 4)[..., :3]
+        cpu = run_graph_frame_cpu(graph, rgb[..., ::-1], 0)[..., ::-1]
+        np.testing.assert_allclose(gl, cpu, atol=6e-5, rtol=0)
+        # Resolve 20.2.1.6, Rec.709 Gamma 2.4 Full, at the step in a 1080p chart.
+        np.testing.assert_allclose(
+            (cpu[6, 958:962, 0] - rgb[6, 958:962, 0]) * 1023,
+            (0.0, -11.77, 11.77, 0.0), atol=0.04, rtol=0,
+        )
+    finally:
+        renderer.release()
+        source.release()
+
+
 def test_edit_preview_packet_and_real_graph_pass(ctx):
     from src.features.edit.core.edit_gpu_preview_renderer import EditGpuPreviewRenderer
     from src.features.edit.core.project import ColorStackData

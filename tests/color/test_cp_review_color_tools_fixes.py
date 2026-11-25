@@ -196,8 +196,9 @@ def test_mist_panel_gesture_and_legacy_hydration(blur_panel, qtbot) -> None:
     qtbot.mouseClick(panel.mist_enable_cb, Qt.MouseButton.LeftButton)
     assert events[0] == "start"
     assert events[1]["mist_enabled"] is True
-    assert events[1]["mist_radius"] == 0.0
-    assert events[1]["mist_mix"] == 33.0
+    assert events[1]["mist_radius"] == 0.5
+    assert events[1]["mist_mix"] == 100.0
+    assert events[1]["mist_version"] == 2
     assert events[2] == "end"
     assert panel.mist_container.isEnabled()
 
@@ -207,10 +208,10 @@ def test_mist_panel_gesture_and_legacy_hydration(blur_panel, qtbot) -> None:
     handle = slider.style().subControlRect(
         QStyle.ComplexControl.CC_Slider, option, QStyle.SubControl.SC_SliderHandle, slider)
     qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=handle.center())
-    qtbot.mouseMove(slider, pos=handle.center() + QPoint(45, 0))
-    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=handle.center() + QPoint(45, 0))
+    qtbot.mouseMove(slider, pos=handle.center() - QPoint(45, 0))
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=handle.center() - QPoint(45, 0))
     assert events[3] == "start"
-    assert events[4]["mist_mix"] > 33.0
+    assert events[4]["mist_mix"] < 100.0
     assert events[5] == "end"
 
     panel.set_params_dict({"mist_enabled": True, "mist_radius": 0.2, "mist_mix": 27})
@@ -218,13 +219,36 @@ def test_mist_panel_gesture_and_legacy_hydration(blur_panel, qtbot) -> None:
     panel.reset_mist()
     assert panel.mist_enable_cb.isChecked()
     assert panel.mist_mix_slider.value() == 33
+    assert panel.get_params_dict()["mist_version"] == 1
 
     panel.set_params_dict({})
     qtbot.wait(20)
     assert not panel.mist_enable_cb.isChecked()
     assert not panel.mist_container.isEnabled()
-    assert panel.mist_mix_slider.value() == 33
+    assert panel.mist_mix_slider.value() == 100
     assert len(events) == 9
+
+
+def test_mist_numeric_fields_apply_resolve_drag_rates_at_release(blur_panel, qtbot) -> None:
+    from PyQt6.QtCore import QPoint, Qt
+
+    blur_panel.set_params_dict({
+        "mist_enabled": True, "mist_version": 2, "mist_radius": 0.5, "mist_mix": 55,
+    })
+    blur_panel.resize(640, 336)
+    blur_panel.show()
+    events = []
+    blur_panel.effects_changed.connect(lambda params: events.append(params))
+    blur_panel.interaction_ended.connect(lambda: events.append("end"))
+    for row, dx, key, expected in (
+        (blur_panel.mist_radius_slider, 60, "mist_radius", 1.1),
+        (blur_panel.mist_mix_slider, 20, "mist_mix", 75.0),
+    ):
+        start = row.spin.rect().center()
+        qtbot.mousePress(row.spin, Qt.MouseButton.LeftButton, pos=start)
+        qtbot.mouseRelease(row.spin, Qt.MouseButton.LeftButton, pos=start + QPoint(dx, 0))
+        assert events[-2][key] == pytest.approx(expected)
+        assert events[-1] == "end"
 
 
 # ---------------------------------------------------------------------------

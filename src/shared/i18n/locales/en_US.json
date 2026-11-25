@@ -1086,6 +1086,8 @@
   },
   "warper": {
     "upgrade_hs_algorithm": "Upgrade Hue–Saturation Algorithm to v2",
+    "upgrade_hs_algorithm_v3": "Upgrade Hue–Saturation Algorithm to v3",
+    "viewer_picker": "Pick and drag colors in the viewer",
     "grid_density": "Grid Density:",
     "reset": "Reset Grid",
     "chroma_warp": "Chroma Warp",
@@ -1146,7 +1148,9 @@
     "add_pin": "Add Pin Point",
     "delete": "Delete the selected Strokes and Pin Points",
     "pin_title": "Pin",
+    "stroke_title": "Stroke",
     "reset_pin": "Reset Pin",
+    "reset_stroke": "Reset Stroke",
     "chroma_range": "Chroma Range",
     "tonal_low": "Tonal Range Low",
     "tonal_high": "Tonal Range High",
@@ -2581,7 +2585,9 @@
     "input_hue": "Input Hue",
     "input_lum": "Input Lum",
     "input_sat": "Input Sat",
+    "output_sat": "Output Sat",
     "hue_rotate": "Hue Rotate",
+    "lum_gain": "Lum Gain",
     "saturation": "Saturation",
     "lum": "Lum",
     "add_anchor": "Add curve control point"

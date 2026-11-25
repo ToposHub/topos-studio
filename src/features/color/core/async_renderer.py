@@ -167,6 +167,7 @@ class AsyncRenderer(QThread):
     color_output_ready = pyqtSignal(int, int, int)  # ColorOutput: (texture_id, width, height)
     monitor_color_output_ready = pyqtSignal(int, int, int)  # DeckLink monitor output only
     scope_snapshot_ready = pyqtSignal(object)  # BGR float32 scope image (CPU fallback)
+    warper_input_ready = pyqtSignal(object)
     grade_set_preview_ready = pyqtSignal(object, object)  # (source epoch, grade revision), RGB uint8 or None
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     
@@ -1732,6 +1733,21 @@ class AsyncRenderer(QThread):
             (texture for texture in self.tex_pair
              if texture is not None and texture.glo == self.current_front_tex_id), None)
 
+    def _warper_sample_gl(self, texture: moderngl.Texture, params: dict) -> None:
+        try:
+            w, h = texture.size
+            scale = min(1.0, 320.0 / max(w, h))
+            size = max(1, round(w * scale)), max(1, round(h * scale))
+            pixels = self._read_scaled_texture(texture, size, dtype="f4")
+            rgb = np.frombuffer(pixels, dtype=np.float32).reshape(size[1], size[0], 3)
+            self._publish_warper_sample(params, np.ascontiguousarray(rgb[::-1]))
+        except (AttributeError, RuntimeError, ValueError, moderngl.Error):
+            logger.debug("Could not sample the Color Warper input", exc_info=True)
+
+    def _publish_warper_sample(self, params: dict, pixels: np.ndarray) -> None:
+        self.warper_input_ready.emit((params["warper_sample"], params.get("scene_visible_rect"),
+                                      bool(params.get("rec709_calibration_encoded")), pixels))
+
     def _read_scaled_texture(
         self, texture: moderngl.Texture, size: tuple[int, int], *, dtype: str,
         uv: tuple[float, float, float, float] | None = None,
@@ -2179,6 +2195,8 @@ class AsyncRenderer(QThread):
             # front/composite/scope 维持 f2）
             graph_dtype = ("f4" if str(params.get('color_output_target')
                                        or '') == 'full_res' else "f2")
+            sample = params.get("warper_sample") if not params.get("color_output_mode") else None
+            sample_kwargs = {"input_sample": (sample[0], lambda texture: self._warper_sample_gl(texture, params))} if sample else {}
             result = executor.execute_plan(
                 plan, raw_view_tex,
                 request_id=request_id,
@@ -2190,7 +2208,9 @@ class AsyncRenderer(QThread):
                 layer_param_provider=graph_node_layer_provider(
                     snapshot.graph,
                     frame=params.get('color_graph_source_frame'),
-                    preview_grade=snapshot.preview_grade),
+                    preview_grade=snapshot.preview_grade,
+                    rec709_calibration_encoded=bool(
+                        snapshot.working_color_context.get("rec709_calibration_encoded"))),
                 render_quad=self._render_quad,
                 bind_aux=lambda prog, layer:
                     self._bind_aux_textures_single_layer(prog, layer),
@@ -2199,6 +2219,7 @@ class AsyncRenderer(QThread):
                 cache_context=self._graph_cache_context(
                     snapshot, params,
                     self.__dict__.get('_mask_epoch') or {}),
+                **sample_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 —— 编译/执行异常 fail-closed
             scope_diagnostics.record(
@@ -3368,6 +3389,7 @@ class AsyncRenderer(QThread):
             params.get('color_graph_execute')
             and params.get('color_graph_snapshot') is not None)
         metal_preview = self.__dict__.get("_color_metal_preview")
+        warper_sample = params.get("warper_sample") if not color_output_mode else None
         metal_grade = False
         metal_display = None
         if metal_preview is not None and not color_output_mode:
@@ -3388,11 +3410,12 @@ class AsyncRenderer(QThread):
                                  self._video_generation_id, surface.generation)
             from src.features.color.core.color_graph_metal import MetalGraphCancelled
             try:
+                sample_kwargs = {"input_sample": (warper_sample[0], lambda rgb: self._publish_warper_sample(params, rgb))} if warper_sample else {}
                 metal_grade = metal_preview.grade(
                     params["color_graph_snapshot"],
                     params.get("color_graph_source_frame"),
                     raw_view_fbo, ping_fbo, cancelled=is_cancelled,
-                    display=metal_display, scope_output=color_output_mode)
+                    display=metal_display, scope_output=color_output_mode, **sample_kwargs)
             except MetalGraphCancelled:
                 return False
             if metal_grade:
@@ -3415,6 +3438,8 @@ class AsyncRenderer(QThread):
                 current_source_tex = graph_out_tex
                 layers = ()  # 跳过旧 layers 循环
         for i, layer in enumerate(layers):
+            if params.get('rec709_calibration_encoded'):
+                layer = {**layer, "_rec709_calibration_encoded": True}
             if is_cancelled():
                 logger.info("Render request cancelled before layer %s", i)
                 return False
@@ -3424,6 +3449,9 @@ class AsyncRenderer(QThread):
             # Skip hidden layers unless we need to preview their mask
             if not is_visible and not (is_active and show_mask):
                 continue
+
+            if is_active and warper_sample:
+                self._warper_sample_gl(current_source_tex, params)
 
             if full_res_request_id:
                 self._emit_full_resolution_progress(
@@ -4848,7 +4876,7 @@ class AsyncRenderer(QThread):
             tex_unit += 1
         
         if 'u_warper_tex' in prog:
-            from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+            from src.features.color.core.warper_color import WARPER_PREPARED_SPACES
 
             grid = layer.get('warper_params')
             if grid is not None:
@@ -4856,7 +4884,7 @@ class AsyncRenderer(QThread):
                 # the Layer texture slot. Cache uploads by actual payload.
                 offsets = np.ascontiguousarray(grid, dtype=np.float32)
                 space = int(layer.get('warper_space') or 0)
-                components = 3 if space in RESOLVE_HS709_SPACES else 2
+                components = 3 if space in WARPER_PREPARED_SPACES else 2
                 if offsets.ndim != 3 or offsets.shape[2] != components:
                     raise ValueError("Invalid Color Warper grid shape")
                 rows, columns, _ = offsets.shape
@@ -5090,8 +5118,10 @@ class AsyncRenderer(QThread):
             else:
                 tex.write(tex_data)
         elif tex_type == 'hsl_curve':
+            from src.features.color.core.hsl_curve_calibration import VALID_HSL_LUT_SHAPES
+
             lut_array = np.frombuffer(data['data'], dtype=np.float32).reshape(6, -1)
-            if lut_array.shape[1] not in (256, 512):
+            if lut_array.shape not in VALID_HSL_LUT_SHAPES:
                 raise ValueError("Invalid HSL curves texture size")
             size = lut_array.shape
             tex_data = lut_array.T.tobytes()
@@ -5122,20 +5152,20 @@ class AsyncRenderer(QThread):
                     path)
         elif tex_type == 'warper':
             from src.features.color.core.warper_color import (
-                RESOLVE_HS709_SPACES, prepare_resolve_hs709_texture,
+                WARPER_PREPARED_SPACES, prepare_resolve_hs709_texture,
             )
 
             w, h = data['size']
             tex_data = data['data']
             space = int(data.get('space', 0) or 0)
-            components = 3 if space in RESOLVE_HS709_SPACES else 2
+            components = 3 if space in WARPER_PREPARED_SPACES else 2
             if w <= 0 or h <= 0 or len(tex_data) != w * h * components * 4:
                 raise ValueError("Invalid Color Warper grid texture")
             slot = self.layer_textures[l_id]
             key = (space, w, h, tex_data)
             if slot.get('warper_key') == key:
                 return
-            if space in RESOLVE_HS709_SPACES:
+            if space in WARPER_PREPARED_SPACES:
                 offsets = np.frombuffer(tex_data, dtype=np.float32).reshape(h, w, components)
                 sampled = prepare_resolve_hs709_texture(offsets, space)
                 h, w = sampled.shape[:2]

@@ -70,6 +70,10 @@ def node_layer_payload(node: Any, *,
         default_layer.id = node.node_id
         base = default_layer.to_dict(None)
     payload = dict(base)
+    if include_lut_cache:
+        # A new corrector can have a sparse payload after its first tool edit.
+        # Route it through the same production evaluator as a complete Layer.
+        payload.setdefault("grading_params", {})
     params = node.params if isinstance(node.params, Mapping) else {}
     identities = (node.node_id, str(payload.get("id") or ""),
                   str(params.get("source_layer_id") or ""))
@@ -132,28 +136,36 @@ def node_layer_payload(node: Any, *,
             payload.pop("curves_data", None)
     hsl_data = payload.get("hsl_curve_data")
     if include_lut_cache and isinstance(hsl_data, Mapping) and hsl_data:
-        from src.features.color.core.curves_calibration import curves_calibration_enabled
-        from src.features.color.core.hsl_curve_calibration import CALIBRATED_HSL_SAMPLES
+        from src.features.color.core.curves_calibration import curves_calibration_version
+        from src.features.color.core.hsl_curve_calibration import hsl_lut_shape
         from src.features.color.core.layer import build_hsl_curve_lut_from_data
 
-        calibrated = curves_calibration_enabled(payload.get("curves_edit"))
-        expected_shape = (6, CALIBRATED_HSL_SAMPLES if calibrated else 256)
+        version = curves_calibration_version(payload.get("curves_edit"))
+        expected_shape = hsl_lut_shape(version)
         try:
             cache_shape = np.shape(payload.get("hsl_curve_lut"))
         except (TypeError, ValueError):
             cache_shape = ()
         if cache_shape != expected_shape:
             payload["hsl_curve_lut"] = build_hsl_curve_lut_from_data(
-                dict(hsl_data), calibration_version=int(calibrated),
+                dict(hsl_data), calibration_version=version,
             ).tolist()
     if include_lut_cache:
+        from src.features.color.core.curves_soft_clip import (
+            SOFT_CLIP_CALIBRATION_VERSION, normalize_curves_soft_clip,
+            soft_clip_calibration_version,
+        )
+
+        soft_clip = payload.get("curves_soft_clip")
+        if soft_clip_calibration_version(soft_clip) == SOFT_CLIP_CALIBRATION_VERSION:
+            payload["curves_soft_clip"] = normalize_curves_soft_clip(soft_clip)
         warper = payload.get("warper_state")
         if isinstance(warper, Mapping):
             from src.features.color.core.warper_state import (
-                WarperStateV2, renderable_projection, resolve_hs_render_space,
+                WarperStateV2, derives_warper_projection, renderable_projection,
             )
 
-            if resolve_hs_render_space(warper.get("algorithm_version")) is not None:
+            if derives_warper_projection(warper):
                 # Raw offsets are a derived cache. A matching render-space
                 # number does not establish that the cached grid is current.
                 offsets, space = renderable_projection(WarperStateV2.from_dict(warper))
@@ -201,6 +213,7 @@ def graph_node_layer_provider(
     frame: int | None = None,
     *,
     preview_grade: Mapping[str, Mapping[str, Any]] | None = None,
+    rec709_calibration_encoded: bool = False,
 ) -> Callable[[str], Mapping[str, Any] | None]:
     """``layer_param_provider`` 工厂：node_id → 合并后的 Layer DTO。
 
@@ -214,9 +227,18 @@ def graph_node_layer_provider(
     KF-06：未参与求值的节点（恒定/无轨道）仍返回完整合并 base 参数
     （此前返回 None，执行器回退 plan 内嵌 params 会丢 legacy 域）。
     """
-    payloads: dict[str, dict[str, Any] | None] = {
-        n.node_id: node_layer_payload(n) for n in _iter_corrector_nodes(graph)
-    }
+    from src.features.color.core.color_node_color_space import node_color_is_identity
+
+    payloads: dict[str, dict[str, Any] | None] = {}
+    for node in _iter_corrector_nodes(graph):
+        payload = node_layer_payload(node)
+        if payload is not None and rec709_calibration_encoded:
+            color = node.params.get("color")
+            if not isinstance(color, Mapping) or node_color_is_identity(
+                color.get("color_space"), color.get("gamma"),
+            ):
+                payload["_rec709_calibration_encoded"] = True
+        payloads[node.node_id] = payload
     evaluated: dict[str, dict[str, Any] | None] | None = None
     if frame is not None:
         from src.features.color.core.grade_keyframes import (

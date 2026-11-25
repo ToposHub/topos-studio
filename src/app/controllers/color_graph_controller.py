@@ -2239,6 +2239,11 @@ class ColorGraphAppHost:
         """Buffer the built-in spatial effect settings and preview the draft graph."""
         return self._submit_tool_domains(node_id, {"blur_sharpen": params}, transaction_id)
 
+    def submit_mixer_change(self, node_id: str, params: Mapping[str, Any],
+                            transaction_id: str) -> bool:
+        """Preview and commit the corrector's hue-band mixer values."""
+        return self._submit_tool_domains(node_id, {"mixer": params}, transaction_id)
+
     def submit_warper_change(self, node_id: str, payload: Mapping[str, Any],
                              transaction_id: str) -> bool:
         """Store a complete Warper mesh as one grade-transfer transaction."""

@@ -323,7 +323,10 @@ class SharedColorGraphEntry:
         source_texture = self._metal_ctx.create_texture_from_numpy(
             data, self._texture_executor.rgba16f_format,
             size[0], size[1])
-        provider = graph_node_layer_provider(snapshot.graph, frame=frame)
+        provider = graph_node_layer_provider(
+            snapshot.graph, frame=frame, preview_grade=snapshot.preview_grade,
+            rec709_calibration_encoded=bool(
+                snapshot.working_color_context.get("rec709_calibration_encoded")))
         from src.features.color.core.color_graph_metal import (
             MetalGraphCancelled,
         )
@@ -377,7 +380,9 @@ class SharedColorGraphEntry:
                         f"cpu_compile:{outcome.compile_error}",),
                     fallback_reason=fallback_reason)
             provider = graph_node_layer_provider(
-                snapshot.graph, frame=frame)
+                snapshot.graph, frame=frame, preview_grade=snapshot.preview_grade,
+                rec709_calibration_encoded=bool(
+                    snapshot.working_color_context.get("rec709_calibration_encoded")))
             quantized = np.ascontiguousarray(
                 source_rgba16f, dtype=np.float16).astype(np.float32)
             execution = run_plan_cpu(

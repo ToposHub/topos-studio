@@ -53,7 +53,11 @@ __all__ = [
 WARPER_SPACE_INDEX = {"hsv": 0, "hsl": 1, "hsp": 2}
 RESOLVE_HS709_SPACE = 3
 RESOLVE_HS709_V2_SPACE = 4
-RESOLVE_HS709_SPACES = (RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE)
+RESOLVE_HS709_V3_SPACE = 5
+RESOLVE_HS709_RESPONSE_SPACES = (RESOLVE_HS709_V2_SPACE, RESOLVE_HS709_V3_SPACE)
+RESOLVE_HS709_SPACES = (RESOLVE_HS709_SPACE, *RESOLVE_HS709_RESPONSE_SPACES)
+WARPER_CHROMA709_SPACE = 6
+WARPER_PREPARED_SPACES = (*RESOLVE_HS709_SPACES, WARPER_CHROMA709_SPACE)
 
 #: HSP 感知权重(经典 NTSC 系数;冻结于测试,改动即破坏 round-trip 语义)。
 HSP_WEIGHTS = (0.299, 0.587, 0.114)
@@ -288,10 +292,14 @@ def prepare_resolve_hs709_texture(offsets: np.ndarray, space: int = RESOLVE_HS70
     rows, cols, components = offsets.shape
     if components != 3 or rows < 1 or cols < 1:
         raise ValueError("709 Hue–Saturation requires a nonempty three-channel mesh")
-    if space == RESOLVE_HS709_V2_SPACE:
+    if space == WARPER_CHROMA709_SPACE:
+        from src.features.color.core.warper_chroma_texture import prepare_chroma_texture
+
+        return prepare_chroma_texture(offsets)
+    if space in RESOLVE_HS709_RESPONSE_SPACES:
         from src.features.color.core.warper_response import build_response_texture
 
-        return build_response_texture(offsets)
+        return build_response_texture(offsets, refined=space == RESOLVE_HS709_V3_SPACE)
     return _prefilter_hs709_rings(offsets)
 
 
@@ -317,14 +325,21 @@ def apply_resolve_hs709(rgb: np.ndarray, offsets: np.ndarray,
     return apply_resolve_hs709_texture(rgb, prepare_resolve_hs709_texture(offsets, space), space)
 
 
-def apply_resolve_hs709_texture(rgb: np.ndarray, texture: np.ndarray, space: int) -> np.ndarray:
+def apply_resolve_hs709_texture(
+    rgb: np.ndarray, texture: np.ndarray, space: int, *, encoded_input: bool = False,
+) -> np.ndarray:
     """Sample a prepared response. CPU delivery can reuse the texture across blocks."""
+    if space == WARPER_CHROMA709_SPACE:
+        from src.features.color.core.warper_chroma_texture import apply_chroma_texture
+
+        return apply_chroma_texture(rgb, texture, encoded_input=encoded_input)
     source = np.asarray(rgb)
     colors = source.reshape(-1, 3)
     nonnegative = np.maximum(colors, 0.0)
-    response_texture = space == RESOLVE_HS709_V2_SPACE
+    response_texture = space in RESOLVE_HS709_RESPONSE_SPACES
+    signal_gamma = 1.0 if encoded_input else 2.4
     exponent = 1.0 if response_texture else 1.605
-    work = nonnegative ** (exponent / 2.4)
+    work = nonnegative if encoded_input and response_texture else nonnegative ** (exponent / signal_gamma)
     peak = np.max(work, axis=-1)
     chroma = peak - np.min(work, axis=-1)
     r, g, b = work.T
@@ -337,7 +352,8 @@ def apply_resolve_hs709_texture(rgb: np.ndarray, texture: np.ndarray, space: int
         saturation = chroma / np.maximum(peak, 1.0e-10)
         change = sample_response_texture(texture, hue, saturation, peak)
         warped = work + change * peak[:, None]
-        result = np.maximum(warped, 0.0) ** 2.4 + np.minimum(colors, 0.0)
+        positive = np.maximum(warped, 0.0)
+        result = (positive if encoded_input else positive ** 2.4) + np.minimum(colors, 0.0)
         unchanged = (saturation <= 1.0e-8) | np.all(change == 0.0, axis=-1)
         return np.where(unchanged[:, None], colors, result).reshape(source.shape).astype(source.dtype, copy=False)
     radius = np.minimum(0.876 * chroma / np.maximum(peak, 1.0e-10) ** 1.074, 1.0)
@@ -382,7 +398,7 @@ def apply_resolve_hs709_texture(rgb: np.ndarray, texture: np.ndarray, space: int
     warped = (work + (hue_shift + sat_shift) * neutral_fade[:, None])
     warped *= np.exp(1.981 * lightness[:, None] * neutral_fade[:, None])
     # Keep the SDR fit above black while carrying the original negative headroom.
-    result = np.maximum(warped, 0.0) ** (2.4 / 1.605) + np.minimum(colors, 0.0)
+    result = np.maximum(warped, 0.0) ** (signal_gamma / 1.605) + np.minimum(colors, 0.0)
     unchanged = (chroma <= 1.0e-10) | ((saturation == 0.0) & (lightness == 0.0)
                                         & np.all(hue_change == 0.0, axis=-1))
     return np.where(unchanged[:, None], colors, result).reshape(source.shape).astype(source.dtype, copy=False)

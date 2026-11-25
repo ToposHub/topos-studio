@@ -435,6 +435,10 @@ CURVES_SOFTCLIP_SDR_CASES = [
                                    "high_clip": 0.9, "high_soft": 0.15},
                                  B={"high_clip": 0.96}),
                     "calibration_version": 1}),
+    ("independent_knees", {**_csc_state(
+        R={"low_clip": 0.25, "low_soft": 0.5, "high_clip": 0.75, "high_soft": 0.5},
+        G={"low_clip": -0.125, "low_soft": 0.4375, "high_clip": 0.8125},
+    ), "calibration_version": 2}),
 ]
 CURVES_SOFTCLIP_HDR_CASES = [
     ("hdr_knees", _csc_state(R={"low_clip": -0.1, "low_soft": 0.2,

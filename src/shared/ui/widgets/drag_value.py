@@ -114,7 +114,9 @@ class DragValue(QWidget):
         self._dragging = False           # 鼠标左键已按下（潜在的拖拽）
         self._drag_engaged = False       # 已越过阈值，进入真正的数值调整
         self._drag_start_x = 0
+        self._drag_last_x = 0.0
         self._drag_start_value = 0.0
+        self._fixed_drag_rate: float | None = None
 
         # 内联编辑状态
         self._editing = False
@@ -361,13 +363,24 @@ class DragValue(QWidget):
 
     # ---- 鼠标事件 ----
 
-    def _drag_sensitivity(self, mods) -> float:
+    def set_drag_rate(self, units_per_pixel: float | None) -> None:
+        """Use a tool-specific rate for the numeric field's normal drag."""
+        self._fixed_drag_rate = units_per_pixel
+
+    def _drag_sensitivity(self, mods: Qt.KeyboardModifier) -> float:
         """拖拽时每像素的数值变化量，按修饰键分三档。
 
         委托给纯函数 ``drag_speed_per_pixel``：固定 200px 参考宽度，
         换算不受控件实际宽度、DPR 或 offscreen 坐标影响。
         """
-        return drag_speed_per_pixel(self._max - self._min, mods)
+        rate = self._fixed_drag_rate
+        if rate is None:
+            return drag_speed_per_pixel(self._max - self._min, mods)
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            return rate * (_LARGE_SPEED / _DEFAULT_SPEED)
+        if mods & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier):
+            return rate * (_FINE_SPEED / _DEFAULT_SPEED)
+        return rate
 
     def mousePressEvent(self, event: QMouseEvent):
         if self._editing:
@@ -381,6 +394,7 @@ class DragValue(QWidget):
             self._dragging = True
             self._drag_engaged = False
             self._drag_start_x = event.position().x()
+            self._drag_last_x = self._drag_start_x
             self._drag_start_value = self._value
             self._value_label.setStyleSheet(self._active_value_style)
             event.accept()
@@ -388,7 +402,8 @@ class DragValue(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent):
         if not self._dragging:
             return
-        dx = event.position().x() - self._drag_start_x
+        self._drag_last_x = event.position().x()
+        dx = self._drag_last_x - self._drag_start_x
         if not self._drag_engaged:
             if abs(dx) < _DRAG_THRESHOLD:
                 return  # 未越过阈值，视为点击，暂不改变数值
@@ -399,8 +414,12 @@ class DragValue(QWidget):
         self.setValue(new_value)
         event.accept()
 
-    def mouseReleaseEvent(self, event: QMouseEvent):
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            # Qt can coalesce the final move into the release. Apply it before
+            # the destination commits the preview as one undoable gesture.
+            if event.position().x() != self._drag_last_x:
+                self.mouseMoveEvent(event)
             was_engaged = self._drag_engaged
             self._dragging = False
             self._drag_engaged = False
@@ -425,15 +444,13 @@ class DragValue(QWidget):
                      | Qt.KeyboardModifier.MetaModifier):
             step *= _FINE_SPEED / _DEFAULT_SPEED    # Ctrl / ⌘ = 微调（×0.1）
         delta = event.angleDelta().y()
-        before = self._value
-        if delta > 0:
-            self.setValue(self._value + step)
-        elif delta < 0:
-            self.setValue(self._value - step)
-        if self._value != before:
+        target = self._value + (step if delta > 0 else -step if delta < 0 else 0)
+        target = max(self._min, min(self._max, target))
+        if target != self._value:
             # A wheel notch is one complete interaction, just like committing
             # an inline edit.  Consumers can therefore create one undo item
             # rather than one for every low-level valueChanged signal.
             self.interaction_started.emit()
+            self.setValue(target)
             self.interaction_ended.emit()
         event.accept()

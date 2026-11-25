@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -55,6 +57,47 @@ def test_calibrated_hue_curves_wrap_between_interior_points() -> None:
     assert 1.0 < samples[0] < samples.max()
 
 
+@pytest.mark.parametrize(("mode", "expected_codes"), [
+    ("HueHue", [[60259, 19013, 5874], [38708, 13397, 63449], [49127, 33345, 9085]]),
+    ("HueSat", [[62657, 17161, 17161], [31136, 15817, 61774], [28602, 40973, 0]]),
+    ("HueLum", [[63539, 14388, 14388], [30289, 13905, 63056], [36974, 47213, 8302]]),
+    ("LumSat", [[65535, 14637, 14637], [34457, 13320, 65535], [30336, 39327, 5159]]),
+    ("SatSat", [[64982, 16533, 16533], [30532, 16271, 59054], [30332, 39331, 5134]]),
+    ("SatLum", [[65151, 16000, 16000], [28843, 12459, 61610], [25462, 35701, 0]]),
+])
+def test_v3_hsl_matches_resolve_holdout(mode: str, expected_codes: list[list[int]]) -> None:
+    source = np.array([[65535, 16384, 16384], [31744, 15360, 64511], [29696, 39935, 1024]],
+                      dtype=np.float32) / 65535.0
+    # Recorded normalized anchors from the Resolve SDR TIFF capture.
+    controls = [(41, 187), (197, 107), (413, 180), (641, 133)]
+    if not mode.startswith("Hue"):
+        controls = [(0, 156.5), *controls, (697, 156.5)]
+    lut = build_hsl_curve_lut_from_data(
+        {mode: [(x * 255 / 697, y * 255 / 313) for x, y in controls]}, calibration_version=3)
+    result = np.clip(apply_hsl_curves_image(source, lut, encoded_input=True), 0.0, 1.0)
+    np.testing.assert_allclose(result * 65535, expected_codes, atol=42, rtol=0)
+
+
+def test_script_uses_the_active_hsl_calibration_version() -> None:
+    from src.features.scripting.api import ToposAPI
+
+    layer = Layer("Recorded curves")
+    layer.curves_edit["calibration_version"] = 3
+    layer.hsl_curve_data = {"SatLum": [(10.0, 130.0)]}
+    layer.hsl_curve_lut = build_hsl_curve_lut_from_data(layer.hsl_curve_data, calibration_version=3)
+    api = ToposAPI.__new__(ToposAPI)
+    api._engine = SimpleNamespace(
+        get_active_layer=lambda: layer,
+        apply_hsl_curve=lambda lut: setattr(layer, "hsl_curve_lut", lut),
+    )
+    api._bridge = SimpleNamespace(call_sync=lambda fn: fn())
+    api._invalidate_video_render_params_if_loaded = lambda: None
+    api.set_hsl_curve("HueSat", [(90.0, 100.0)])
+    restored = Layer.from_dict(layer.to_dict())
+    np.testing.assert_array_equal(layer.hsl_curve_lut, restored.hsl_curve_lut)
+    assert layer.hsl_curve_lut.shape == (6, 1024)
+
+
 def test_calibrated_hsl_graph_rebuilds_and_bakes_saved_controls() -> None:
     from src.features.color.core.advanced_grade_cpu import apply_curves_soft_clip_image
     from src.features.color.core.color_graph_cpu import apply_curves_cpu
@@ -97,8 +140,10 @@ def test_calibrated_hsl_graph_rebuilds_and_bakes_saved_controls() -> None:
     np.testing.assert_allclose(sample_lut_trilinear(cube, probe), expected, atol=2e-6)
 
 
-def test_calibrated_hsl_curves_render_with_cpu_gl_parity() -> None:
+@pytest.mark.parametrize("version", [1, 3])
+def test_calibrated_hsl_curves_render_with_cpu_gl_parity(version: int) -> None:
     moderngl = pytest.importorskip("moderngl")
+    from src.features.color.core.async_renderer import AsyncRenderer
     from src.features.color.core.corrector_render_service import run_serial_passes
 
     try:
@@ -106,6 +151,7 @@ def test_calibrated_hsl_curves_render_with_cpu_gl_parity() -> None:
     except (RuntimeError, OSError) as exc:
         pytest.skip(f"OpenGL context unavailable: {exc}")
     pipeline = ShaderPipeline(ctx)
+    owner = SimpleNamespace(ctx=ctx, layer_textures={})
     try:
         data = {
             "LumSat": [(80.0, 116.0)],
@@ -115,14 +161,26 @@ def test_calibrated_hsl_curves_render_with_cpu_gl_parity() -> None:
             "SatSat": [(70.0, 140.0)],
             "SatLum": [(150.0, 110.0)],
         }
-        lut = build_hsl_curve_lut_from_data(data, calibration_version=1)
+        lut = build_hsl_curve_lut_from_data(data, calibration_version=version)
+        legacy = build_hsl_curve_lut_from_data(data)
+        for table in (legacy, lut, legacy):
+            AsyncRenderer._do_update_aux_tex(owner, {
+                "type": "hsl_curve", "data": table.tobytes(), "layer_id": "single",
+            })
+            texture = owner.layer_textures["single"]["hsl_curve"]
+            assert texture.size == table.shape
+            np.testing.assert_array_equal(np.frombuffer(texture.read(), dtype=np.float32),
+                                          table.T.ravel())
         source = np.random.default_rng(25).uniform(-0.1, 1.4, (32, 32, 4)).astype(np.float32)
         source[..., 3] = 1.0
         rgb_fp16 = source[..., :3].astype(np.float16).astype(np.float32)
         expected = apply_hsl_curves_image(rgb_fp16, lut)
         rendered = run_serial_passes(ctx, pipeline, source, [{"hsl_curve_lut": lut}])
-        np.testing.assert_allclose(rendered[..., :3], expected, atol=2e-3)
+        tolerance = np.maximum(2e-3, np.abs(np.spacing(expected.astype(np.float16))))
+        np.testing.assert_array_less(np.abs(rendered[..., :3] - expected), tolerance)
         np.testing.assert_array_equal(rendered[..., 3], 1.0)
     finally:
+        for textures in owner.layer_textures.values():
+            textures["hsl_curve"].release()
         pipeline.release()
         ctx.release()

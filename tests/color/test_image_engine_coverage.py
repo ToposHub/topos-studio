@@ -629,6 +629,22 @@ class TestUpdateMaskTextures:
                  if a["type"] == "mask"]
         assert masks[0]["size"] == (512, 512)
 
+    def test_warper_keeps_masks_full_size_when_an_async_matte_arrives(
+        self, image_engine: ImageEngine
+    ) -> None:
+        engine = image_engine
+        engine.renderer = MagicMock()
+        engine.img_full_original = np.zeros((100, 100, 3), dtype=np.uint8)
+        engine.set_interaction_mode(True, "warper", render=False)
+        layer = engine.layers[0]
+        layer.mask_dirty = True
+        engine._update_mask_textures()
+        engine.set_interaction_mode(False, render=False)
+        masks = [a for a in _submit_calls(engine, RenderCommand.UPDATE_AUX_TEX)
+                 if a["type"] == "mask"]
+        assert masks[0]["size"] == (1024, 1024)
+        assert not layer.mask_dirty
+
     def test_mask_size_preserves_aspect_ratio(self, image_engine: ImageEngine) -> None:
         engine = image_engine
         engine.renderer = MagicMock()

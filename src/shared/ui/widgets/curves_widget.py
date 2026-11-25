@@ -1,18 +1,10 @@
-import logging
-
 import numpy as np
 from typing import Dict, Optional, Any
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QButtonGroup, QWidget
 from PyQt6.QtCore import Qt, QEvent, QPointF, pyqtSignal, QRectF, QTimer
-from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath
+from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath, QMouseEvent
 from src.shared.ui.widgets.gpu_scope_widget import GpuScopeWidget
 from src.shared.gpu.scope_publication import ScopePublication
-
-try:
-    from scipy.interpolate import PchipInterpolator
-    HAS_SCIPY = True
-except ModuleNotFoundError:
-    HAS_SCIPY = False
 
 from src.shared.i18n.i18n import I18N
 from src.shared.assets.icon_manager import icon_color_picker, icon_reset
@@ -23,8 +15,6 @@ from src.shared.ui.style_sheet import (
     CURVE_RESET_BTN_STYLE,
     curve_channel_btn_style,
 )
-
-logger = logging.getLogger(__name__)
 
 class _CurveOverlay(QWidget):
     """Raster UI chrome stays visible even without a GPU scope frame."""
@@ -83,9 +73,10 @@ class CurvesWidget(QWidget):
         self.edit_amounts = {"Y": 100.0, "R": 100.0, "G": 100.0, "B": 100.0}
         self.edit_linked = False
         self.calibrated = False
-        # AUD-38211: 左键 press 是否已发射 interaction_started（release 时
-        # 据此配对 interaction_ended，避免点击空白处的孤儿 started 信号）
+        self.calibration_version = 0
         self._press_interaction = False
+        self._drag_position: QPointF | None = None
+        self._drag_points: dict[str, tuple[int, QPointF]] = {}
         
         # Color Picker state
         self._picker_active = False
@@ -178,6 +169,7 @@ class CurvesWidget(QWidget):
 
     def set_active_channel(self, ch):
         self.active_channel = ch
+        self.selected_point_idx = -1
         self.update()
 
     def get_draw_rect(self):
@@ -240,9 +232,10 @@ class CurvesWidget(QWidget):
             'B': QColor(100, 150, 255)
         }
 
-        # Draw Inactive Curves first (Reference)
+        # Draw edited channels underneath the active one.
+        default_points = [QPointF(0, 255), QPointF(255, 0)]
         for ch in self.channels:
-            if ch == self.active_channel:
+            if ch == self.active_channel or self.curves[ch] == default_points:
                 continue
             self._draw_curve(painter, ch, inactive_colors[ch], rect, thickness=1.0)
 
@@ -280,11 +273,6 @@ class CurvesWidget(QWidget):
                 else:
                     painter.drawLine(round(rect.left()), round(y), round(rect.right()), round(y))
 
-        # Draw diagonal reference line (from bottom-left to top-right)
-        diagonal_pen = QPen(QColor(52, 52, 56), 0.3)
-        painter.setPen(diagonal_pen)
-        painter.drawLine(int(rect.left()), int(rect.bottom()), int(rect.right()), int(rect.top()))
-
     def _cached_curve_values(self, ch: str, points) -> np.ndarray:
         """AUD-38219: 按控制点坐标快照缓存 calculate_curve 的 256 点采样。
 
@@ -305,47 +293,11 @@ class CurvesWidget(QWidget):
         if len(points) < 2:
             return
         
-        pts_sorted = sorted(points, key=lambda p: p.x())
-        min_x = int(pts_sorted[0].x())
-        max_x = int(pts_sorted[-1].x())
-        
-        # Calculate curve values for the full range (AUD-38219: 缓存复用)
         vals = self._cached_curve_values(ch, points)
-        
-        # Use 300+ sampling points for ultra-smooth curves
-        num_samples = 300
         path = QPainterPath()
-        
-        # Start from the first control point's X position
-        start_idx = min_x
-        wx, wy = self.to_widget(start_idx, vals[start_idx])
-        path.moveTo(wx, wy)
-        
-        # Calculate step for sub-pixel sampling
-        x_range = max_x - min_x
-        if x_range > 0:
-            step = x_range / num_samples
-            # Sample at sub-pixel positions for smoother curves
-            for i in range(1, num_samples + 1):
-                # Interpolate at sub-pixel positions
-                sample_x = min_x + i * step
-                if sample_x > max_x:
-                    sample_x = max_x
-                
-                # Get interpolated Y value (use linear interpolation between integer samples)
-                x_floor = int(sample_x)
-                x_ceil = min(x_floor + 1, 255)
-                t = sample_x - x_floor
-                
-                if x_floor >= 0 and x_ceil < 256:
-                    y_interp = vals[x_floor] * (1 - t) + vals[x_ceil] * t
-                elif x_floor < 0:
-                    y_interp = vals[0]
-                else:
-                    y_interp = vals[255]
-                
-                wx, wy = self.to_widget(sample_x, y_interp)
-                path.lineTo(wx, wy)
+        path.moveTo(*self.to_widget(0, vals[0]))
+        for x in range(1, len(vals)):
+            path.lineTo(*self.to_widget(x, vals[x]))
         
         painter.setPen(QPen(color, thickness))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -378,203 +330,164 @@ class CurvesWidget(QWidget):
                 painter.setPen(QPen(QColor(160, 160, 160), 1.5))
                 painter.drawEllipse(QPointF(wx, wy), 4, 4)
 
-    def calculate_curve(self, points):
-        pts = sorted(points, key=lambda p: p.x())
-        xs = np.array([p.x() for p in pts])
-        ys = np.array([p.y() for p in pts])
-
+    def calculate_curve(self, points: list[QPointF]) -> np.ndarray:
+        xs = np.array([point.x() for point in points])
+        ys = np.array([point.y() for point in points])
         if self.calibrated:
             from src.features.color.core.curves_calibration import calibrated_curve_samples
-            xs, indices = np.unique(xs, return_index=True)
-            return 255.0 * (1.0 - calibrated_curve_samples(xs, ys[indices]))
-        
-        try:
-            if len(xs) < 2:
-                # Default case should not happen with 2+ points
-                return np.full(256, ys[0] if len(ys) > 0 else 127)
-            
-            xi = np.arange(256)
-            
-            if len(xs) == 2:
-                slope = (ys[1] - ys[0]) / (xs[1] - xs[0]) if xs[1] != xs[0] else 0
-                return ys[0] + slope * (xi - xs[0])
-            
-            if HAS_SCIPY:
-                mask_mid = (xi >= xs[0]) & (xi <= xs[-1])
-                res = np.zeros(256)
-                
-                pchip = PchipInterpolator(xs, ys)
-                res[mask_mid] = pchip(xi[mask_mid])
-                
-                mask_left = xi < xs[0]
-                if np.any(mask_left):
-                    dx = max(0.1, (xs[1] - xs[0]) * 0.1)
-                    y_start = float(pchip(xs[0]))
-                    y_next = float(pchip(xs[0] + dx))
-                    slope = (y_next - y_start) / dx
-                    res[mask_left] = ys[0] + slope * (xi[mask_left] - xs[0])
-                    
-                mask_right = xi > xs[-1]
-                if np.any(mask_right):
-                    dx = max(0.1, (xs[-1] - xs[-2]) * 0.1)
-                    y_end = float(pchip(xs[-1]))
-                    y_prev = float(pchip(xs[-1] - dx))
-                    slope = (y_end - y_prev) / dx
-                    res[mask_right] = ys[-1] + slope * (xi[mask_right] - xs[-1])
-                    
-                return res
-            else:
-                return np.interp(xi, xs, ys)
-        except (ValueError, IndexError):
-            # AUD-38215: 裸 except 违反 .clinerules 且会掩盖编程错误
-            # （如 AttributeError）。只捕获插值域错误并降级到线性插值：
-            # - ValueError: PCHIP 构造拒绝退化/非有限控制点
-            # - IndexError: 控制点不足时的越界访问
-            logger.warning(
-                "AUD-38215: 曲线插值域错误，降级为线性插值（点数=%d）",
-                len(points),
-                exc_info=True,
-            )
-            return np.interp(np.arange(256), xs, ys)
 
-    def mousePressEvent(self, event):
-        pos = event.position()
-        mx, my = self.from_widget(pos.x(), pos.y())
-        
-        pts = self.curves[self.active_channel]
-        clicked_idx = -1
-        
-        # Precise distance calculation (Euclidean distance in screen pixels)
-        min_dist = 12.0 # Threshold radius: 12 pixels
-        for i, p in enumerate(pts):
-            wx, wy = self.to_widget(p.x(), p.y())
-            dist = np.sqrt((wx - pos.x())**2 + (wy - pos.y())**2)
-            if dist < min_dist:
-                min_dist = dist
-                clicked_idx = i
-        
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.interaction_started.emit()
-            # AUD-38211: 记录本次 press 发射过 started —— 无论随后是否
-            # 命中/新增控制点，release 都必须配对 interaction_ended。
+            mapped = calibrated_curve_samples(xs, ys, version=self.calibration_version)
+            return 255.0 * (1.0 - np.clip(mapped, 0.0, 1.0))
+        from src.features.color.core.layer import _interpolate_curve_255
+
+        sampled = _interpolate_curve_255(list(zip(xs, ys)))
+        return 255.0 - np.arange(256) if sampled is None else 255.0 * (1.0 - sampled)
+
+    def _begin_point_edit(self) -> None:
+        if not self._press_interaction:
             self._press_interaction = True
-            if clicked_idx != -1:
-                self.selected_point_idx = clicked_idx
-            else:
-                # Only add new point if clicking inside or very close to the draw area
+            self.interaction_started.emit()
+
+    def _add_curve_anchor(self, channel: str, x: float, y: float) -> int:
+        points = self.curves[channel]
+        for index, point in enumerate(points):
+            if abs(point.x() - x) <= 0.5:
+                return index
+        anchor = QPointF(x, y)
+        points.append(anchor)
+        points.sort(key=lambda point: point.x())
+        self._lut_dirty[channel] = True
+        return points.index(anchor)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        pos = event.position()
+        x, y = self.from_widget(pos.x(), pos.y())
+        points = self.curves[self.active_channel]
+        offsets = [(QPointF(*self.to_widget(p.x(), p.y())) - pos, i) for i, p in enumerate(points)]
+        distance_squared, index = min(
+            ((offset.x() ** 2 + offset.y() ** 2, i) for offset, i in offsets),
+            default=(float("inf"), -1),
+        )
+        clicked = index if distance_squared <= 12.0 ** 2 else -1
+
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_position = None
+            self._drag_points.clear()
+            self.selected_point_idx = -1
+            if clicked < 0:
                 rect = self.get_draw_rect()
-                # Relaxed boundary check for adding points
-                if rect.adjusted(-5, -5, 5, 5).contains(pos):
-                    # Clamp to 0-255 range for internal representation
-                    mx_clamped = max(0, min(255, mx))
-                    my_clamped = max(0, min(255, my))
-                    new_point = QPointF(mx_clamped, my_clamped)
-                    pts.append(new_point)
-                    pts.sort(key=lambda p: p.x())
-                    self.selected_point_idx = pts.index(new_point)
-                    self._lut_dirty[self.active_channel] = True
-                    # 链接编辑：新点同步到全部通道（同一 x/y）
-                    if self.edit_linked:
-                        for ch in self.channels:
-                            if ch == self.active_channel:
-                                continue
-                            other = self.curves[ch]
-                            other.append(QPointF(mx_clamped, my_clamped))
-                            other.sort(key=lambda p: p.x())
-                            self._lut_dirty[ch] = True
-                    self.update_lut()
-        elif event.button() == Qt.MouseButton.RightButton:
-            if clicked_idx != -1 and len(pts) > 2:
-                self.interaction_started.emit()
-                removed_x = pts[clicked_idx].x()
-                pts.pop(clicked_idx)
-                self.selected_point_idx = -1
-                # 标记当前通道为脏
-                self._lut_dirty[self.active_channel] = True
-                # 链接编辑：同步删除其余通道同 x 的控制点
+                if not rect.adjusted(-5, -5, 5, 5).contains(pos):
+                    return
+                x = min(max(x, 0.0), 255.0)
+                y = min(max(y, 0.0), 255.0)
+                if any(abs(point.x() - x) <= 0.5 for point in points):
+                    return
+                if self.calibrated:
+                    samples = self._cached_curve_values(self.active_channel, points)
+                    axis = np.arange(len(samples))
+                    dx = rect.left() + axis * rect.width() / 255.0 - pos.x()
+                    dy = rect.top() + samples * rect.height() / 255.0 - pos.y()
+                    if np.min(dx * dx + dy * dy) > 9.0 ** 2:
+                        return
+                    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        y = float(np.interp(x, axis, samples))
+                self._begin_point_edit()
+                clicked = self._add_curve_anchor(self.active_channel, x, y)
                 if self.edit_linked:
-                    for ch in self.channels:
-                        if ch == self.active_channel:
-                            continue
-                        for p in self.curves[ch]:
-                            if abs(p.x() - removed_x) <= 0.5:
-                                self.curves[ch].remove(p)
-                                self._lut_dirty[ch] = True
-                                break
+                    for channel in self.channels:
+                        if channel != self.active_channel:
+                            self._add_curve_anchor(channel, x, y)
                 self.update_lut()
-                self.flush()
-                self.interaction_ended.emit()
-        
+            self.selected_point_idx = clicked
+            anchor = points[clicked]
+            self._drag_position = pos
+            self._drag_points[self.active_channel] = (clicked, QPointF(anchor))
+            if self.edit_linked:
+                for channel in self.channels:
+                    if channel == self.active_channel:
+                        continue
+                    for index, peer in enumerate(self.curves[channel]):
+                        if abs(peer.x() - anchor.x()) <= 0.5:
+                            self._drag_points[channel] = (index, QPointF(peer))
+                            break
+        elif event.button() == Qt.MouseButton.RightButton and clicked >= 0 and len(points) > 2:
+            self.interaction_started.emit()
+            removed_x = points.pop(clicked).x()
+            self.selected_point_idx = -1
+            self._lut_dirty[self.active_channel] = True
+            if self.edit_linked:
+                for channel in self.channels:
+                    if channel == self.active_channel or len(self.curves[channel]) <= 2:
+                        continue
+                    for peer in self.curves[channel]:
+                        if abs(peer.x() - removed_x) <= 0.5:
+                            self.curves[channel].remove(peer)
+                            self._lut_dirty[channel] = True
+                            break
+            self.update_lut()
+            self.flush()
+            self.interaction_ended.emit()
         self.update()
 
-    def mouseMoveEvent(self, event):
-        if self.selected_point_idx != -1:
-            pos = event.position()
-            mx, my = self.from_widget(pos.x(), pos.y())
+    def _constrain_anchor(self, points: list[QPointF], index: int, x: float, y: float) -> QPointF:
+        x = min(max(x, 0.0), 255.0)
+        y = min(max(y, 0.0), 255.0)
+        if index == 0:
+            if x < 255.0 - y:
+                x = 0.0
+            else:
+                y = 255.0
+        elif index == len(points) - 1:
+            if 255.0 - x < y:
+                x = 255.0
+            else:
+                y = 0.0
+        lower = points[index - 1].x() + 0.1 if index else 0.0
+        upper = points[index + 1].x() - 0.1 if index + 1 < len(points) else 255.0
+        return QPointF(min(max(x, lower), upper), y)
 
-            mx = max(0, min(255, mx))
-            my = max(0, min(255, my))
-
-            pts = self.curves[self.active_channel]
-
-            # Special Constraints for Black (0) and White (-1) points
-            # They MUST stay on the boundary box edges.
-            if self.selected_point_idx == 0:
-                # Black point: stays on left edge (X=0) or bottom edge (Y=255)
-                # Determine which edge is closer to current mouse position
-                if mx < (255 - my): # Closer to left edge
-                    mx = 0
-                else:               # Closer to bottom edge
-                    my = 255
-            elif self.selected_point_idx == len(pts) - 1:
-                # White point: stays on right edge (X=255) or top edge (Y=0)
-                if (255 - mx) < my: # Closer to right edge
-                    mx = 255
-                else:               # Closer to top edge
-                    my = 0
-
-            # Constraints: avoid swapping order
-            if self.selected_point_idx > 0:
-                mx = max(mx, pts[self.selected_point_idx-1].x() + 0.1)
-            if self.selected_point_idx < len(pts) - 1:
-                mx = min(mx, pts[self.selected_point_idx+1].x() - 0.1)
-
-            prev_x = pts[self.selected_point_idx].x()
-            prev_y = pts[self.selected_point_idx].y()
-            pts[self.selected_point_idx] = QPointF(mx, my)
-            if self.edit_linked and self.selected_point_idx >= 0:
-                dy = my - prev_y
-                if dy != 0.0 or (self.calibrated and mx != prev_x):
-                    for ch in self.channels:
-                        if ch == self.active_channel:
-                            continue
-                        other = self.curves[ch]
-                        for i, p in enumerate(other):
-                            if abs(p.x() - prev_x) <= 0.5:
-                                p.setY(max(0.0, min(255.0, p.y() + dy)))
-                                if self.calibrated:
-                                    lower = other[i - 1].x() + 0.1 if i else 0.0
-                                    upper = other[i + 1].x() - 0.1 if i + 1 < len(other) else 255.0
-                                    p.setX(max(lower, min(upper, mx)))
-                                self._lut_dirty[ch] = True
-                                break
-            self._lut_dirty[self.active_channel] = True
-            self._final_lut_dirty = True
-            self._compute_lut()
+    def _move_curve_anchors(self, position: QPointF) -> None:
+        if (self._drag_position is None or position == self._drag_position
+                or self.active_channel not in self._drag_points):
+            return
+        self._drag_position = position
+        x, y = self.from_widget(position.x(), position.y())
+        index, anchor = self._drag_points[self.active_channel]
+        active = self._constrain_anchor(self.curves[self.active_channel], index, x, y)
+        changes = {self.active_channel: (index, active)}
+        for channel, (index, peer) in self._drag_points.items():
+            if channel != self.active_channel:
+                x = active.x() + (peer.x() - anchor.x()) if self.calibrated else peer.x()
+                y = active.y() + (peer.y() - anchor.y())
+                changes[channel] = (index, self._constrain_anchor(self.curves[channel], index, x, y))
+        updates = [(channel, index, point) for channel, (index, point) in changes.items()
+                   if point != self.curves[channel][index]]
+        if updates:
+            self._begin_point_edit()
+            for channel, index, point in updates:
+                self.curves[channel][index] = point
+                self._lut_dirty[channel] = True
+            self.update_lut()
             self.update()
 
-    def mouseReleaseEvent(self, event):
-        # AUD-38211: 左键 press 发出的 interaction_started 必须在 release
-        # 配对 interaction_ended —— 此前仅在命中/新增控制点
-        # （selected_point_idx != -1）时发射，左键点击空白处（未加点）时
-        # started 成为孤儿信号，undo/空闲渲染状态被破坏。
-        if event.button() == Qt.MouseButton.LeftButton and self._press_interaction:
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        self._move_curve_anchors(event.position())
+
+    def point_drag_active(self) -> bool:
+        """Whether a pressed curve anchor is awaiting its mouse release."""
+        return self._drag_position is not None
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._move_curve_anchors(event.position())
+        self._drag_position = None
+        self._drag_points.clear()
+        if self._press_interaction:
             self._press_interaction = False
-            if self._pending_lut is not None:
-                self._update_timer.stop()
-                self._emit_changed_signal()
+            self._update_timer.stop()
+            self._emit_changed_signal()
             self.interaction_ended.emit()
-        self.selected_point_idx = -1
         self.update()
 
     def mouseDoubleClickEvent(self, event):
@@ -584,6 +497,8 @@ class CurvesWidget(QWidget):
             event.ignore()
             return
         self.interaction_started.emit()
+        self._drag_position = None
+        self._drag_points.clear()
         reset_targets = self.channels if self.edit_linked else [self.active_channel]
         for ch in reset_targets:
             self.curves[ch] = [QPointF(0, 255), QPointF(255, 0)]
@@ -641,13 +556,13 @@ class CurvesWidget(QWidget):
                        else None)
             if self.calibrated:
                 final_lut = build_curves_lut_from_data(
-                    self.get_curves_data(), amounts, calibration_version=1)
+                    self.get_curves_data(), amounts, calibration_version=self.calibration_version)
             else:
-                final_lut = compose_curves_lut(
+                final_lut = np.clip(compose_curves_lut(
                     self._lut_cache.get('M'),
                     {ch: self._lut_cache.get(ch) for ch in ('R', 'G', 'B')},
                     amounts,
-                )
+                ), 0.0, 1.0)
 
             self._final_lut_cache = final_lut
             self._final_lut_dirty = False
@@ -662,14 +577,17 @@ class CurvesWidget(QWidget):
     def _emit_changed_signal(self) -> None:
         """节流定时器回调：发射真正的 changed 信号"""
         if self._pending_lut is not None:
-            self.changed.emit(self._pending_lut, self._pending_data)
+            lut, points = self._pending_lut, self._pending_data
             self._pending_lut = None
             self._pending_data = None
+            self.changed.emit(lut, points)
 
     def reset(self, emit_changed: bool = True):
         for ch in self.channels:
             self.curves[ch] = [QPointF(0, 255), QPointF(255, 0)]
         self.selected_point_idx = -1
+        self._drag_position = None
+        self._drag_points.clear()
         # 所有通道数据都变了，标记所有通道为脏
         for ch in self.channels:
             self._lut_dirty[ch] = True
@@ -704,6 +622,8 @@ class CurvesWidget(QWidget):
                 self.curves[ch] = [QPointF(0, 255), QPointF(255, 0)]
 
         self.selected_point_idx = -1
+        self._drag_position = None
+        self._drag_points.clear()
         # 所有通道数据都变了，标记所有通道为脏
         for ch in self.channels:
             self._lut_dirty[ch] = True
@@ -819,9 +739,11 @@ class CurvesWidget(QWidget):
     # Edit 强度 / 链接编辑（曲线面板侧栏状态）
     # ============================================================
 
-    def set_calibrated(self, enabled: bool) -> None:
-        if self.calibrated != enabled:
+    def set_calibrated(self, enabled: bool, *, version: int = 1) -> None:
+        version = version if enabled else 0
+        if self.calibration_version != version:
             self.calibrated = enabled
+            self.calibration_version = version
             self._lut_dirty = dict.fromkeys(self.channels, True)
             self._curve_cache.clear()
             self.update_lut(emit_changed=False)
@@ -921,10 +843,7 @@ class CurvesWidget(QWidget):
         # Calculate current curve values using PCHIP
         curve_values = self.calculate_curve(pts)
 
-        # Get Y value at the calculated X position (seamless injection)
-        x_int = int(round(x_coord))
-        x_int = max(0, min(255, x_int))
-        y_value = curve_values[x_int]
+        y_value = float(np.interp(x_coord, np.arange(256), curve_values))
 
         # Create new point
         new_point = QPointF(x_coord, y_value)

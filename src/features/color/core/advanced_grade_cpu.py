@@ -12,7 +12,9 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
+from src.features.color.core.curves_soft_clip import (
+    SOFT_CLIP_CALIBRATION_VERSION, soft_clip_calibration_version,
+)
 
 
 def _rgb_to_hsv(rgb: np.ndarray) -> np.ndarray:
@@ -49,7 +51,7 @@ def _hsv_to_rgb(hsv: np.ndarray) -> np.ndarray:
 
 
 def apply_hsl_curves_image(
-    rgb: np.ndarray, hsl_curve_lut: Optional[np.ndarray],
+    rgb: np.ndarray, hsl_curve_lut: Optional[np.ndarray], *, encoded_input: bool = False,
 ) -> np.ndarray:
     """HSL 曲线（6×256 LUT）作用于 RGB 图像（..., 3）float。
 
@@ -59,14 +61,15 @@ def apply_hsl_curves_image(
     if hsl_curve_lut is None:
         return rgb
     hsl_curve_lut = np.asarray(hsl_curve_lut, dtype=np.float32)
-    if hsl_curve_lut.shape not in ((6, 256), (6, 512)):
-        return rgb
     from src.features.color.core.hsl_curve_calibration import (
+        VALID_HSL_LUT_SHAPES,
         apply_calibrated_hsl_curves,
         is_calibrated_hsl_lut,
     )
+    if hsl_curve_lut.shape not in VALID_HSL_LUT_SHAPES:
+        return rgb
     if is_calibrated_hsl_lut(hsl_curve_lut):
-        return apply_calibrated_hsl_curves(rgb, hsl_curve_lut)
+        return apply_calibrated_hsl_curves(rgb, hsl_curve_lut, encoded_input=encoded_input)
     result = rgb.astype(np.float32, copy=True)
     orig_shape = result.shape
     flat = result.reshape(-1, 3)
@@ -174,31 +177,47 @@ def _quadratic_toe(values: np.ndarray, edge: float, width: float) -> np.ndarray:
     return np.where(values < edge + width, edge + width * t * t, values)
 
 
+def _resolve_toe(values: np.ndarray, edge: float, width: float) -> np.ndarray:
+    if width <= 0.0 or edge + width <= 0.5:
+        return _quadratic_toe(values, edge, width)
+    # A knee reaching past mid-gray keeps its floor but joins the identity
+    # at mid-gray with Hermite slopes of zero and one at the two ends.
+    start = edge - width
+    span = 0.5 - start
+    t = np.clip((values - start) / span, 0.0, 1.0)
+    knee = edge + t * t * ((0.5 - edge) * (3.0 - 2.0 * t) + (t - 1.0) * span)
+    return np.where(values < 0.5, knee, values)
+
+
 def _apply_calibrated_soft_clip(
     values: np.ndarray, low: float, low_knee: float, high: float, high_knee: float,
+    *, encoded_input: bool, independent: bool,
 ) -> np.ndarray:
     """Evaluate the fitted knees in Gamma 2.4 code values."""
-    encoded = np.copysign(np.power(np.abs(values), 1.0 / 2.4), values)
+    encoded = values if encoded_input else np.copysign(np.power(np.abs(values), 1.0 / 2.4), values)
     # The measured interior has slope 1023/1024 for an active channel.
     # Extend the endpoint response continuously into signed/HDR values.
     bias = 0.5 - 1.5 * (low - low_knee) + 0.5 * (high - 1.0 + high_knee)
     encoded -= (np.clip(encoded, 0.0, 1.0) + bias) / 1024.0
+    toe = _resolve_toe if independent else _quadratic_toe
     if low != 0.0 or low_knee > 0.0:
-        encoded = _quadratic_toe(encoded, low, low_knee)
+        encoded = toe(encoded, low, low_knee)
     if high_knee > 0.0:
-        encoded = 1.0 - _quadratic_toe(1.0 - encoded, 1.0 - high, high_knee)
+        encoded = 1.0 - toe(1.0 - encoded, 1.0 - high, high_knee)
     elif high != 1.0:
-        encoded = np.minimum(encoded, high - np.clip(high, 0.0, 1.0) / 1024.0)
-    return np.copysign(np.power(np.abs(encoded), 2.4), encoded)
+        span = high - low + low_knee if independent else np.clip(high, 0.0, 1.0)
+        encoded = np.minimum(encoded, high - span / 1024.0)
+    return encoded if encoded_input else np.copysign(np.power(np.abs(encoded), 2.4), encoded)
 
 
-def apply_curves_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
-                                 ) -> np.ndarray:
+def apply_curves_soft_clip_image(
+    rgb: np.ndarray, params: Dict[str, Any], *, encoded_input: bool = False,
+) -> np.ndarray:
     """曲线面板四参数软剪裁（指数软膝）作用于 RGB 图像。
 
     逐式镜像 curves_soft_clip.apply_soft_clip_channel（= 移动版
     soft_clip.frag / GLSL CURVES_SOFT_CLIP_SNIPPET / MSL 同式）。默认
-    参数下严格恒等：超白与负 RGB 原样保留。校准版使用编码域二次软膝。
+    参数下严格恒等：超白与负 RGB 原样保留。校准版在编码域处理。
     非有限像素原样直通（软膝只定义在有限域上）。
     """
     result = rgb.astype(np.float64, copy=True)
@@ -206,7 +225,8 @@ def apply_curves_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
     if not isinstance(channels, dict):
         return result.astype(np.float32)
 
-    calibrated = uses_calibrated_soft_clip(params)
+    version = soft_clip_calibration_version(params)
+    independent = version == SOFT_CLIP_CALIBRATION_VERSION
     finite = np.isfinite(result)
     for idx, name in ((0, "R"), (1, "G"), (2, "B")):
         values = channels.get(name)
@@ -218,20 +238,23 @@ def apply_curves_soft_clip_image(rgb: np.ndarray, params: Dict[str, Any],
         high_soft = float(values.get("high_soft", 0.0))
 
         gap = max(high_clip - low_clip, 0.0)
-        if gap == 0.0:
-            floor = np.copysign(abs(low_clip) ** 2.4, low_clip) if calibrated else low_clip
+        if not independent and gap == 0.0:
+            floor = low_clip
+            if version and not encoded_input:
+                floor = np.copysign(abs(low_clip) ** 2.4, low_clip)
             result[..., idx] = np.where(finite[..., idx], floor,
                                         result[..., idx])
             continue
-        low_knee = min(max(low_soft, 0.0), gap)
-        high_knee = min(max(high_soft, 0.0), max(gap - low_knee, 0.0))
+        low_knee = low_soft if independent else min(max(low_soft, 0.0), gap)
+        high_knee = high_soft if independent else min(max(high_soft, 0.0), max(gap - low_knee, 0.0))
 
         col = result[..., idx]
         col_finite = finite[..., idx]
-        if calibrated:
+        if version:
             if (low_clip, low_knee, high_clip, high_knee) != (0.0, 0.0, 1.0, 0.0):
                 col[col_finite] = _apply_calibrated_soft_clip(
-                    col[col_finite], low_clip, low_knee, high_clip, high_knee)
+                    col[col_finite], low_clip, low_knee, high_clip, high_knee,
+                    encoded_input=encoded_input, independent=independent)
             continue
         if low_knee > 0.0:
             low_start = low_clip + low_knee

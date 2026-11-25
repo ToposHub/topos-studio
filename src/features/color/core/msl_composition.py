@@ -33,7 +33,9 @@ from src.features.color.core.composition_uniforms import (
     CompositionUniformManifest,
 )
 from src.features.color.core.mist import MIST_MSL
-from src.features.color.core.warper_color import RESOLVE_HS709_SPACE, RESOLVE_HS709_V2_SPACE
+from src.features.color.core.warper_color import (
+    RESOLVE_HS709_RESPONSE_SPACES, RESOLVE_HS709_SPACE, WARPER_CHROMA709_SPACE,
+)
 from src.features.color.core.shader_nodes_msl import (
     MSL_BLEND_MODES,
     MSL_BLUR_SHARPEN,
@@ -150,9 +152,9 @@ _PIPELINE_CALLS = {
         "if (params.u_mist_amount != 0.0) { "
         "color += mist_delta(u_input_tex, smp, r.uv, tex_color.rgb, "
         "float2(params.u_tex_size_x, params.u_tex_size_y), "
-        "params.u_mist_spread, params.u_mist_amount); }"),
-    "curves": "color = msl_apply_curves(color, u_curves_tex, smp);",
-    "hsl_curve": "color = msl_apply_hsl_curve(color, u_hsl_curve_tex, smp);",
+        "params.u_mist_spread, params.u_mist_amount, params.u_mist_calibrated != 0u); }"),
+    "curves": "color = msl_apply_curves(color, u_curves_tex, smp, params.u_rec709_calibration_encoded != 0u);",
+    "hsl_curve": "color = msl_apply_hsl_curve(color, u_hsl_curve_tex, smp, params.u_rec709_calibration_encoded != 0u);",
     "lut3d": "color = msl_apply_3dlut(color, u_lut_tex, smp, params.u_lut_intensity);",
     "mixer": ("color = msl_apply_mixer(color, "
               + ", ".join(_vec3_expr(f) for f in _MIXER_FIELDS) + ");"),
@@ -173,7 +175,7 @@ _PIPELINE_CALLS = {
         "float3(params.u_cs_low_soft_x, params.u_cs_low_soft_y, params.u_cs_low_soft_z), "
         "float3(params.u_cs_high_clip_x, params.u_cs_high_clip_y, params.u_cs_high_clip_z), "
         "float3(params.u_cs_high_soft_x, params.u_cs_high_soft_y, params.u_cs_high_soft_z), "
-        "params.u_cs_calibrated != 0u);"),
+        "params.u_cs_profile, params.u_rec709_calibration_encoded != 0u);"),
     # blend_modes 无管线位调用——语义在 main 尾部 epilog（见
     # _MSL_FRAGMENT_EPILOG_BLEND）。
     # film_grain 位于 blend/mix 之后（GL main 末位），由 epilog 组装段
@@ -226,18 +228,24 @@ def emit_composition_msl(
     if "mixer" in active_effects:
         parts.append(MSL_MIXER)
     if "warper" in active_effects:
-        if manifest.warper_space == RESOLVE_HS709_V2_SPACE:
+        if manifest.warper_space == WARPER_CHROMA709_SPACE:
+            from src.features.color.core.shader_nodes_msl import MSL_WARPER_CHROMA709
+
+            parts.append(MSL_WARPER_CHROMA709)
+            pipeline_calls = {**_PIPELINE_CALLS,
+                              "warper": "color = msl_apply_warper_chroma709(color, u_warper_tex, params.u_rec709_calibration_encoded != 0u);"}
+        elif manifest.warper_space in RESOLVE_HS709_RESPONSE_SPACES:
             from src.features.color.core.shader_nodes_msl import MSL_RESOLVE_HS709_V2
 
             parts.append(MSL_RESOLVE_HS709_V2)
             pipeline_calls = {**_PIPELINE_CALLS,
-                              "warper": "color = msl_apply_resolve_hs709_v2(color, u_warper_tex);"}
+                              "warper": "color = msl_apply_resolve_hs709_v2(color, u_warper_tex, params.u_rec709_calibration_encoded != 0u);"}
         elif manifest.warper_space == RESOLVE_HS709_SPACE:
             from src.features.color.core.shader_nodes_msl import MSL_RESOLVE_HS709
 
             parts.append(MSL_RESOLVE_HS709)
             pipeline_calls = {**_PIPELINE_CALLS,
-                              "warper": "color = msl_apply_resolve_hs709(color, u_warper_tex);"}
+                              "warper": "color = msl_apply_resolve_hs709(color, u_warper_tex, params.u_rec709_calibration_encoded != 0u);"}
         else:
             parts.append(MSL_WARPER)
     if "blur_sharpen" in active_effects:

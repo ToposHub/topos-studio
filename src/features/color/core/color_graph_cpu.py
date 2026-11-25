@@ -20,12 +20,17 @@ Corrector 两层（B12.2 起）：
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Mapping, Sequence
+from functools import lru_cache
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 import numpy as np
 
+if TYPE_CHECKING:
+    from src.shared.color.lut_loader import LoadedLut
+
 from src.features.color.core.mist import (
-    MIST_KEYS, apply_mist_cpu, mist_is_active, mist_render_params,
+    MIST_KEYS, apply_mist_cpu, mist_is_active, mist_is_calibrated, mist_render_params,
 )
 from src.features.color.core.color_graph_compiler import (
     ColorGraphRenderPlan,
@@ -326,7 +331,8 @@ def apply_midtone_detail_cpu(color: np.ndarray, source: np.ndarray, amount: floa
 
 def apply_grading_uniforms_cpu(color: np.ndarray,
                                values: Mapping[str, Any], *,
-                               source_color: np.ndarray | None = None) -> np.ndarray:
+                               source_color: np.ndarray | None = None,
+                               detail_samples: np.ndarray | None = None) -> np.ndarray:
     """GRADING_SNIPPET.apply_grading 的 numpy 移植（基础点态域，逐条同序）。
 
     ``values`` 为 ``composition_uniform_values`` 的产物（与 GL 同一
@@ -380,22 +386,19 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
                             gm * x)).astype(_F32)
     c = res
 
-    # 安全修复：暗部负值软性保护（luma 在压缩前计算，与 GLSL 同序）
-    luma = _luma601(c)
-    neg = luma < 0.0
-    if neg.any():
-        compressed = np.where(c < -0.5,
-                              _F32(-0.5) - (np.abs(c + _F32(0.5))
-                                            * _F32(0.1)), c).astype(_F32)
-        min_c = np.minimum(np.minimum(compressed[..., 0], compressed[..., 1]),
-                           compressed[..., 2])
-        max_c = np.maximum(np.maximum(compressed[..., 0], compressed[..., 1]),
-                           compressed[..., 2])
-        need = neg & ((max_c - min_c) > _F32(0.15)) & (min_c < 0.0)
-        balance = np.clip(np.abs(min_c) * _F32(0.25), _F32(0.0), _F32(0.15))
-        mixed = (compressed * (_F32(1.0) - balance)[..., None]
-                 + luma[..., None] * balance[..., None])
-        c = np.where(need[..., None], mixed, compressed).astype(_F32)
+    # Match the GL wheel guard and preserve other pixels' signed channels.
+    if np.any(lift != 1.0) or np.any(gamma != 1.0) or np.any(gain != 1.0):
+        luma = _luma601(c)
+        negative = luma < 0.0
+        if negative.any():
+            compressed = np.where(negative[..., None] & (c < -0.5),
+                                  _F32(-0.5) - np.abs(c + _F32(0.5)) * _F32(0.1), c)
+            min_c, max_c = compressed.min(axis=-1), compressed.max(axis=-1)
+            needs_balance = negative & ((max_c - min_c) > _F32(0.15)) & (min_c < 0.0)
+            balance = np.clip(np.abs(min_c) * _F32(0.25), _F32(0.0), _F32(0.15))
+            mixed = (compressed * (_F32(1.0) - balance)[..., None]
+                     + luma[..., None] * balance[..., None])
+            c = np.where(needs_balance[..., None], mixed, compressed).astype(_F32)
 
     # 4.5 Offset（加性平衡轮）+ 4.6 Log 四轮（与 GLSL 同序同式）
     offset = np.asarray(values.get("u_offset", (0.0, 0.0, 0.0)),
@@ -478,12 +481,15 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
 
     # 8. Midtone Detail samples the ungraded input at the current node.
     if mid_detail != 0.0:
+        samples = source if detail_samples is None else detail_samples
         if values.get("u_mid_detail_calibrated", 0.0):
             from src.features.color.core.midtone_detail_calibration import apply_calibrated_detail_cpu
 
-            c = apply_calibrated_detail_cpu(c, source, mid_detail)
+            c = apply_calibrated_detail_cpu(
+                c, samples, mid_detail, encoded_input=bool(values.get("u_rec709_calibration_encoded")),
+                center_color=None if detail_samples is None else source)
         else:
-            c = apply_midtone_detail_cpu(c, source, mid_detail)
+            c = apply_midtone_detail_cpu(c, samples, mid_detail)
 
     # 9. Hue Shift（符号防护 HSV 旋转）
     hue_shift = _F32(values.get("u_hue_shift", 0.0))
@@ -517,8 +523,10 @@ def apply_grading_uniforms_cpu(color: np.ndarray,
     return c
 
 
-def apply_layer_grading_cpu(color: np.ndarray, layer: Mapping[str, Any], *,
-                            width: int, height: int) -> tuple[np.ndarray, dict[str, Any]]:
+def apply_layer_grading_cpu(
+    color: np.ndarray, layer: Mapping[str, Any], *, width: int, height: int,
+    detail_samples: np.ndarray | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
     """Evaluate the primary grade stage for CPU rendering and pointwise bake."""
     from src.features.color.core.composition_uniforms import composition_uniform_values
     from src.features.color.core.primary_calibration import (
@@ -534,13 +542,17 @@ def apply_layer_grading_cpu(color: np.ndarray, layer: Mapping[str, Any], *,
     if calibrated is not None:
         grid, legacy_params = calibrated
         if grid is not None:
-            color = apply_calibration_grid(color, grid)
+            color = apply_calibration_grid(
+                color, grid, encoded_input=bool(layer.get("_rec709_calibration_encoded")))
     values = composition_uniform_values(
         dict(layer), width=width, height=height, grading_params_override=legacy_params)
-    return apply_grading_uniforms_cpu(color, values, source_color=source_color), values
+    return apply_grading_uniforms_cpu(
+        color, values, source_color=source_color, detail_samples=detail_samples), values
 
 
-def apply_curves_cpu(color: np.ndarray, lut: np.ndarray) -> np.ndarray:
+def apply_curves_cpu(
+    color: np.ndarray, lut: np.ndarray, *, encoded_input: bool = False,
+) -> np.ndarray:
     """CURVES_SNIPPET.apply_curves 的 numpy 移植（256×3 LUT）。
 
     GL 经 LINEAR 纹理在 texel 中心采样（数学上等价最近邻取整）；区间外
@@ -551,7 +563,7 @@ def apply_curves_cpu(color: np.ndarray, lut: np.ndarray) -> np.ndarray:
     )
     lut = np.asarray(lut, dtype=_F32)
     if is_calibrated_curves_lut(lut):
-        return apply_calibrated_curves_cpu(color, lut)
+        return apply_calibrated_curves_cpu(color, lut, encoded_input=encoded_input)
     lut = lut.reshape(256, 3)
     res = np.empty_like(color)
     v0, v1 = lut[0], lut[1]
@@ -649,7 +661,7 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     恢复不一次性取消 fail-closed。
     """
     from src.features.color.core.primary_calibration import grade_uses_calibration
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+    from src.features.color.core.warper_color import WARPER_PREPARED_SPACES
 
     errors: list[str] = []
     grading = layer.get("grading_params")
@@ -674,10 +686,13 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     if layer.get("_plugin_bindings"):
         errors.append("执行器级插件绑定仅 GL 路径支持")
     mixer = layer.get("mixer_params")
-    if isinstance(mixer, Mapping) and mixer:
-        errors.append("mixer_params 不在基础域")
+    if backend != "cpu" and isinstance(mixer, Mapping) and mixer:
+        from src.features.color.core.shader_compiler import ShaderPipeline
+
+        if ShaderPipeline.has_active_mixer_params(dict(mixer)):
+            errors.append("mixer_params 不在基础域")
     if layer.get("warper_params") is not None:
-        if layer.get("warper_space") in RESOLVE_HS709_SPACES:
+        if layer.get("warper_space") in WARPER_PREPARED_SPACES:
             try:
                 calibrated_warper_offsets(layer)
             except (TypeError, ValueError) as exc:
@@ -738,18 +753,24 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     return errors
 
 
-_LUT3D_CACHE: dict[str, tuple] = {}
+@lru_cache(maxsize=32)
+def _load_graph_lut(path: Path, file_revision: tuple[int, ...]) -> LoadedLut:
+    from src.shared.color.lut_loader import load_lut, resample_to_unit_domain
+
+    return resample_to_unit_domain(load_lut(str(path)))
 
 
 def calibrated_warper_offsets(layer: Mapping[str, Any]) -> np.ndarray | None:
     """Return the calibrated HS texture payload, if active."""
-    from src.features.color.core.warper_color import RESOLVE_HS709_SPACES
+    from src.features.color.core.warper_color import WARPER_CHROMA709_SPACE, WARPER_PREPARED_SPACES
 
     data = layer.get("warper_params")
-    if data is None or layer.get("warper_space") not in RESOLVE_HS709_SPACES:
+    space = layer.get("warper_space")
+    if data is None or space not in WARPER_PREPARED_SPACES:
         return None
     offsets = np.asarray(data, dtype=np.float32)
-    if offsets.ndim != 3 or min(offsets.shape[:2]) < 2 or offsets.shape[2] != 3:
+    if (offsets.ndim != 3 or offsets.shape[2] != 3 or offsets.shape[0] < 2
+            or (offsets.shape[1] != 1 if space == WARPER_CHROMA709_SPACE else offsets.shape[1] < 2)):
         raise ValueError("Invalid 709 Color Warper grid shape")
     if not np.isfinite(offsets).all():
         raise ValueError("Invalid 709 Color Warper grid values")
@@ -760,22 +781,18 @@ def _apply_lut3d_cpu(graded: np.ndarray, path: str,
                      strength: float) -> np.ndarray:
     """N14 v1：CPU LUT3D（trilinear + R05 强度混合，与 GL 同语义）。
 
-    LUT 解析/重采样按路径缓存（同路径同内容重复加载零开销；路径内容
-    变更由 R02 资源身份保证——内容寻址路径即缓存键）。
+    Resolve project resources before caching and observe external file edits.
     """
     from src.shared.color.lut_loader import (
-        load_lut, resample_to_unit_domain, sample_lut_trilinear,
+        resolve_lut_path, sample_lut_trilinear,
     )
     from src.features.color.core.color_node_lut_spec import (
         blend_node_lut_strength,
     )
-    cached = _LUT3D_CACHE.get(path)
-    if cached is None:
-        loaded = resample_to_unit_domain(load_lut(path))
-        _LUT3D_CACHE[path] = cached = (loaded,)
-        if len(_LUT3D_CACHE) > 32:
-            _LUT3D_CACHE.pop(next(iter(_LUT3D_CACHE)))
-    loaded = cached[0]
+    resolved = Path(resolve_lut_path(path)).absolute()
+    info = resolved.stat()
+    loaded = _load_graph_lut(resolved, (
+        info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns))
     sdr = np.clip(graded, 0.0, 1.0)
     sampled = sample_lut_trilinear(loaded, sdr.reshape(-1, 3))
     sampled = sampled.reshape(graded.shape)
@@ -801,17 +818,20 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         raise UnsupportedNode("; ".join(errors))
     h, w = image.shape[:2]
     src = np.ascontiguousarray(image, dtype=_F32)
-    color = src[..., :3]
+    input_rgb = src[..., :3]
+    color = input_rgb
     effects = layer.get("effects_params")
     if isinstance(effects, Mapping):
         spread, amount = mist_render_params(effects)
         if amount != 0.0:
-            color = apply_mist_cpu(color, spread, amount)
+            color = apply_mist_cpu(color, spread, amount, calibrated=mist_is_calibrated(effects))
+    encoded = bool(layer.get("_rec709_calibration_encoded"))
     graded, values = apply_layer_grading_cpu(
-        color, layer, width=width or w, height=height or h)
+        color, layer, width=width or w, height=height or h,
+        detail_samples=None if color is input_rgb else input_rgb)
     lut = layer.get("curves_lut")
     if lut is not None:
-        graded = apply_curves_cpu(graded, lut)
+        graded = apply_curves_cpu(graded, lut, encoded_input=encoded)
     # N14-B：HSL 曲线（GL 段序在 curves 之后；LUT 预构建或从数据重建，
     # 索引序与 lut_exporter/GPU 同源）
     hsl_lut = layer.get("hsl_curve_lut")
@@ -822,11 +842,11 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
                 build_hsl_curve_lut_from_data,
             )
             try:
-                from src.features.color.core.curves_calibration import curves_calibration_enabled
+                from src.features.color.core.curves_calibration import curves_calibration_version
 
                 hsl_lut = build_hsl_curve_lut_from_data(
                     dict(hsl_data),
-                    calibration_version=int(curves_calibration_enabled(layer.get("curves_edit"))),
+                    calibration_version=curves_calibration_version(layer.get("curves_edit")),
                 )
             except (TypeError, ValueError):
                 hsl_lut = None
@@ -834,7 +854,7 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         from src.features.color.core.advanced_grade_cpu import (
             apply_hsl_curves_image,
         )
-        graded = apply_hsl_curves_image(graded, hsl_lut).astype(_F32)
+        graded = apply_hsl_curves_image(graded, hsl_lut, encoded_input=encoded).astype(_F32)
     # N14-B：soft_clip（legacy 8 参数）→ curves_soft_clip（GL 段序：
     # sc 在 curves_soft_clip 之前；默认参数恒等直通）
     from src.features.color.core.advanced_grade_cpu import (
@@ -847,7 +867,15 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         graded = apply_soft_clip_image(graded, dict(sc)).astype(_F32)
     csc = layer.get("curves_soft_clip")
     if isinstance(csc, Mapping) and csc:
-        graded = apply_curves_soft_clip_image(graded, dict(csc)).astype(_F32)
+        graded = apply_curves_soft_clip_image(graded, dict(csc), encoded_input=encoded).astype(_F32)
+    if layer.get("mixer_params"):
+        from src.features.color.core.composition_uniforms import _MIXER_CHANNELS
+        from src.features.color.core.shader_compiler import ShaderPipeline
+        from src.features.color.core.the_decompiler import GradingMath
+
+        mixer = {channel: values[f"u_{channel}_p"] for channel in _MIXER_CHANNELS}
+        if ShaderPipeline.has_active_mixer_params(mixer):
+            graded = GradingMath.apply_mixer(graded, mixer).astype(_F32)
     warper = calibrated_warper_offsets(layer)
     if warper is not None:
         from src.features.color.core.warper_color import (
@@ -862,7 +890,8 @@ def corrector_production_oracle(image: np.ndarray, layer: Mapping[str, Any],
         block_size = 262_144
         for start in range(0, len(flat), block_size):
             block = slice(start, start + block_size)
-            warped[block] = apply_resolve_hs709_texture(flat[block], texture, space)
+            warped[block] = apply_resolve_hs709_texture(
+                flat[block], texture, space, encoded_input=encoded)
         graded = warped.reshape(graded.shape)
     # N14 v1：LUT3D 域（R05 顺序在 curves 之后；GL 同序——trilinear
     # 采样 + blend_node_lut_strength HDR/负值语义同源）
@@ -1157,6 +1186,7 @@ def run_graph_frame_cpu(
     source_frame: int,
     *,
     plan_cache: dict | None = None,
+    rec709_calibration_encoded: bool = False,
     pre_chain: Sequence[Mapping[str, Any]] = (),
     post_chain: Sequence[Mapping[str, Any]] = (),
 ) -> np.ndarray:
@@ -1205,7 +1235,8 @@ def run_graph_frame_cpu(
         for extra in entries:
             if extra.get("_unsupported_advanced"):
                 raise UnsupportedNode("Advanced Color chain segment requires full graph execution")
-            graded = GradingMath.apply_grading(buf[..., :3], dict(extra))
+            graded = GradingMath.apply_grading(
+                buf[..., :3], dict(extra), rec709_calibration_encoded=rec709_calibration_encoded)
             buf = buf.copy()
             buf[..., :3] = graded
         return buf
@@ -1216,8 +1247,9 @@ def run_graph_frame_cpu(
                             source_frame=int(source_frame))
     plan = compile_graph(snapshot, size=(work.shape[1], work.shape[0]),
                          cache=plan_cache)
-    provider = graph_node_layer_provider(snapshot.graph,
-                                         frame=int(source_frame))
+    provider = graph_node_layer_provider(
+        snapshot.graph, frame=int(source_frame),
+        rec709_calibration_encoded=rec709_calibration_encoded)
     execution = run_plan_cpu(
         plan, work,
         params_of=lambda render_pass: provider(render_pass.node_id) or {})

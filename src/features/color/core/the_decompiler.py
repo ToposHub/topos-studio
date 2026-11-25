@@ -184,7 +184,9 @@ class GradingMath:
         return res
 
     @staticmethod
-    def apply_grading(color: np.ndarray, params: Dict[str, Any]) -> np.ndarray:
+    def apply_grading(
+        color: np.ndarray, params: Dict[str, Any], *, rec709_calibration_encoded: bool = False,
+    ) -> np.ndarray:
         """
         NumPy implementation of apply_grading snippet from shader_nodes.py
         color: (N, 3) point samples or (H, W, 3) RGB frame
@@ -207,6 +209,7 @@ class GradingMath:
         if grade_uses_calibration(layer):
             from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
 
+            layer["_rec709_calibration_encoded"] = rec709_calibration_encoded
             height, width = frame_shape[:2] if frame_shape is not None else (1, 1)
             return apply_layer_grading_cpu(color, layer, width=width, height=height)[0]
         mid_detail = float(params.get("mid_detail") or 0.0)
