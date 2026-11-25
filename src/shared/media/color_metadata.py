@@ -40,6 +40,7 @@ name = get_standard_name(ColorTransfer.PQ)  # 'smpte2084'
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Optional, Dict, Any
 
 # Import fundamental color types from shared
@@ -548,6 +549,47 @@ COLOR_RANGE_MAP: Dict[int, str] = {
     2: 'full',
 }
 
+_FRAME_TAG_CODES = {
+    'color_matrix': COLOR_SPACE_MAP,
+    'color_range': COLOR_RANGE_MAP,
+    'color_primaries': COLOR_PRIMARIES_MAP,
+    'color_transfer': COLOR_TRANSFER_MAP,
+}
+
+
+def _specified_color_tag(value: Any) -> str | int | None:
+    value = getattr(value, 'value', value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        value = value.strip().lower()
+        if value not in ('', 'unknown', 'unspecified', 'reserved'):
+            return value
+    return None
+
+
+def decoded_frame_color_tag(frame: Any, field: str, *, stream: Any = None) -> str | int | None:
+    """Prefer the decoder's output tag, then the container's stream metadata.
+
+    Direct numeric tags can be backend-specific. Numeric stream tags use the
+    FFmpeg code tables. GPU descriptors carry a mapping for stream metadata,
+    whereas CPU frames carry a VideoMetadata object.
+    """
+    output_tags = getattr(frame, 'color_metadata', None)
+    if isinstance(output_tags, Mapping):
+        value = _specified_color_tag(output_tags.get(field))
+        if value is not None:
+            return value
+    value = _specified_color_tag(getattr(frame, field, None))
+    if value is not None:
+        return value
+    if stream is None:
+        stream = getattr(frame, 'metadata', None)
+    value = _specified_color_tag(stream.get(field) if isinstance(stream, Mapping) else getattr(stream, field, None))
+    if isinstance(value, int):
+        return _specified_color_tag(_FRAME_TAG_CODES[field].get(value))
+    return value
+
 
 # =============================================================================
 # 兼容性函数（向后兼容 ffmpeg_source.py）
@@ -867,6 +909,7 @@ from src.shared.color.types import (
 
 # 重新导出所有公共接口
 __all__ = [
+    'decoded_frame_color_tag',
     # 枚举类型
     'ColorPrimaries',
     'ColorTransfer',

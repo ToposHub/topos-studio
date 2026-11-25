@@ -406,7 +406,7 @@ class CurvesPanel(QWidget):
 
     def _set_edit_linked(self, linked: bool) -> None:
         # 链接编辑语义落在画布：拖动/加点/删点同步到全部通道（任务 5）
-        self.curves_widget.edit_linked = linked
+        self.curves_widget.set_edit_linked(linked)
         self.edit_group.setExclusive(False)
         active = "Y" if self.curves_widget.active_channel == "M" else self.curves_widget.active_channel
         for channel, button in self.edit_buttons.items():
@@ -716,7 +716,7 @@ class CurvesPanel(QWidget):
             self.edit_link_btn.blockSignals(True)
             self.edit_link_btn.setChecked(linked)
             self.edit_link_btn.blockSignals(False)
-            self.curves_widget.edit_linked = linked
+            self.curves_widget.set_edit_linked(linked)
             active = ("Y" if self.curves_widget.active_channel == "M"
                       else self.curves_widget.active_channel)
             self.edit_group.setExclusive(False)

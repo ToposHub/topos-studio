@@ -16,6 +16,24 @@ from src.shared.media.macos_vt.packet_demux import CompressedPacket, PacketDemux
 from src.shared.media.macos_vt import vt_session
 
 
+def test_negotiated_output_range_overrides_full_range_container(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.shared.media.macos_vt.source import MacOSVtZeroCopySource
+
+    monkeypatch.setattr(vt_session, '_PYOBJC_AVAILABLE', True)
+    monkeypatch.setattr(vt_session, '_CV_LIB', SimpleNamespace(
+        CVPixelBufferRetain=lambda _: 1,
+        CVPixelBufferGetIOSurface=lambda _: None,
+    ))
+    output = vt_session.VtDecodeOutputQueue()
+    assert output.put_pixel_buffer(1, 0, 0, 16, 16, 'nv12', 8)
+    source = MacOSVtZeroCopySource()
+    source._info = SimpleNamespace(color_range='full', color_matrix='smpte170m',
+                                   color_primaries='bt2020', color_transfer='smpte2084')
+    frame = source._make_pixel_buffer_frame(output.get_pixel_buffer())
+    assert (frame.color_matrix, frame.color_range) == ('smpte170m', 'limited')
+    assert (frame.color_primaries, frame.color_transfer) == ('bt2020', 'smpte2084')
+
+
 def test_destroy_releases_pending_outputs_and_preserves_external_lease(monkeypatch: pytest.MonkeyPatch) -> None:
     session = vt_session.VtSession()
     session._output_queue = vt_session.VtDecodeOutputQueue()

@@ -35,6 +35,43 @@ def test_adjusted_curve_has_no_extra_diagonal(qtbot) -> None:
     assert image.pixelColor(x, round(160 * ratio)).red() > image.pixelColor(x, round(156 * ratio)).red()
 
 
+def test_linked_curve_draws_one_line_even_if_saved_channel_shapes_differ(qtbot) -> None:
+    canvas = CurvesWidget()
+    qtbot.addWidget(canvas)
+    canvas.resize(414, 254)
+    canvas.btn_container.hide()
+    canvas.edit_linked = True
+    master = [(0, 255), (160, 170), (255, 0)]
+    previous = [(0, 255), (143, 112), (255, 0)]
+    canvas.set_curves_data({"M": master})
+    canvas.show()
+    active_only = canvas.grab().toImage()
+
+    canvas.set_curves_data({"M": master, **dict.fromkeys("RGB", previous)})
+
+    assert canvas.grab().toImage() == active_only
+    assert all(canvas.get_curves_data()[channel] == previous for channel in "RGB")
+
+
+def test_independent_curves_with_coincident_shapes_draw_once(qtbot) -> None:
+    canvas = CurvesWidget()
+    qtbot.addWidget(canvas)
+    canvas.resize(414, 254)
+    canvas.btn_container.hide()
+    master = [(0, 255), (160, 170), (255, 0)]
+    red = [(0, 210), (255, 0)]
+    green = [(0, 210), (127.5, 105), (255, 0)]
+    blue = [(0, 255), (160, 54), (255, 0)]
+    canvas.set_curves_data({"M": master, "R": red, "B": blue})
+    canvas.show()
+    distinct = canvas.grab().toImage()
+
+    canvas.set_curves_data({"M": master, "R": red, "G": green, "B": blue})
+
+    assert canvas.grab().toImage() == distinct
+    assert canvas.get_curves_data()["G"] == green
+
+
 def test_sidebar_drafts_do_not_modify_curve_data_or_emit_render_updates(qapp):
     canvas = CurvesWidget()
     before = canvas.get_curves_data()

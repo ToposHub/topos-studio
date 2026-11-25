@@ -45,6 +45,25 @@ def test_busy_gl_still_retries_paint_without_input(qtbot, monkeypatch) -> None:
     canvas.engine = None
 
 
+def test_paused_front_recovers_after_long_gl_contention(qtbot, monkeypatch) -> None:
+    canvas = Canvas()
+    qtbot.addWidget(canvas)
+    renderer = SimpleNamespace(video_texture_pending=False, current_front_tex_id=42, _video_generation_id=5)
+    draw = Mock(side_effect=[False] * 6 + [True])
+    canvas.engine = SimpleNamespace(renderer=renderer, _is_video_mode=True, scope_source_revision=2,
+                                    viewer_waiting_for_gl=True, _draw_background_tex_id=draw)
+    monkeypatch.setattr(canvas, 'isVisible', lambda: True)
+    painter = Mock()
+    monkeypatch.setattr(canvas.viewport(), 'update', lambda: canvas.drawBackground(painter, QRectF()))
+    try:
+        canvas.drawBackground(painter, QRectF())
+        qtbot.waitUntil(lambda: draw.call_count == 7)
+        assert not canvas._present_retry.isActive()
+        assert canvas._video_present_retry_key is None
+    finally:
+        canvas.engine = None
+
+
 def test_busy_gl_video_retries_once_per_front_revision(qtbot, monkeypatch) -> None:
     canvas = Canvas()
     qtbot.addWidget(canvas)

@@ -62,6 +62,7 @@ from typing import Optional, Tuple, Dict, Any, List, Mapping, Callable
 from dataclasses import dataclass
 from enum import Enum
 from src.shared.media.color_decode import ColorConverter
+from src.shared.media.color_metadata import decoded_frame_color_tag
 from src.shared.color.types import ColorMatrix, ColorRange
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, QThread, QMutex, Qt
 from src.shared.video.render_commands import RenderCommand
@@ -871,6 +872,7 @@ class VideoPlaybackEngine(QObject):
 
         # 缓存的渲染参数（播放时复用，避免每帧重建）
         self._cached_render_params: Optional[Dict[str, Any]] = None
+        self._cached_render_params_playing = False
         # Monotonic revision used to re-grade a held frame exactly once after
         # a user changes a Color parameter during playback.
         self._render_params_generation: int = 0
@@ -1012,8 +1014,7 @@ class VideoPlaybackEngine(QObject):
         ``visible_rect`` so the source frame keeps its own aspect ratio in
         texture space.
         """
-        if self._cached_render_params is None:
-            self._cached_render_params = self._build_render_params()
+        cached = self._get_cached_render_params()
 
         viewport_size = getattr(self.engine, 'viewport_size', None)
         if not viewport_size or viewport_size[0] <= 0 or viewport_size[1] <= 0:
@@ -1021,7 +1022,7 @@ class VideoPlaybackEngine(QObject):
 
         width = max(1, int(frame_width))
         height = max(1, int(frame_height))
-        params = self._cached_render_params.copy()
+        params = cached.copy()
         params['viewport_size'] = tuple(int(v) for v in viewport_size)
         params['visible_rect'] = (0.0, 0.0, float(width), float(height))
         params['scene_visible_rect'] = (0.0, 0.0, float(width), float(height))
@@ -1583,8 +1584,8 @@ class VideoPlaybackEngine(QObject):
                 'drop_if_stale': drop_if_stale,
                 'decode_path': gpu_frame.decode_path,
                 'frame_path': render_path,
-                'yuv_matrix': gpu_frame.color_matrix,
-                'color_range': gpu_frame.color_range,
+                'yuv_matrix': decoded_frame_color_tag(gpu_frame, 'color_matrix'),
+                'color_range': decoded_frame_color_tag(gpu_frame, 'color_range'),
                 'quality': quality,
                 'reason': reason,
             })
@@ -1806,7 +1807,8 @@ class VideoPlaybackEngine(QObject):
         )
         return True
 
-    def _get_yuv_matrix(self, frame: Any) -> int:
+    @staticmethod
+    def _get_yuv_matrix(frame: Any) -> int:
         """
         从 DecodedFrame.metadata 获取 YUV 矩阵类型。
 
@@ -1819,20 +1821,21 @@ class VideoPlaybackEngine(QObject):
             - YUVGPUUploader.MATRIX_BT2020 (1): BT.2020 (HDR)
             - YUVGPUUploader.MATRIX_BT601 (2): BT.601 (SD video)
         """
-        if not hasattr(frame, 'metadata') or frame.metadata is None:
-            return YUVGPUUploader.MATRIX_BT709  # 默认 BT709
-
-        matrix_str = getattr(frame.metadata, 'color_matrix', 'bt709')
+        matrix = decoded_frame_color_tag(frame, 'color_matrix')
         matrix_map = {
             'bt709': YUVGPUUploader.MATRIX_BT709,
             'smpte170m': YUVGPUUploader.MATRIX_BT601,
+            'bt601': YUVGPUUploader.MATRIX_BT601,
+            'bt.601': YUVGPUUploader.MATRIX_BT601,
             'bt470bg': YUVGPUUploader.MATRIX_BT601,
             'bt2020nc': YUVGPUUploader.MATRIX_BT2020,
             'bt2020': YUVGPUUploader.MATRIX_BT2020,
+            'bt.2020': YUVGPUUploader.MATRIX_BT2020,
         }
-        return matrix_map.get(matrix_str.lower(), YUVGPUUploader.MATRIX_BT709)
+        return matrix_map.get(matrix, YUVGPUUploader.MATRIX_BT709)
 
-    def _get_color_range(self, frame: Any) -> int:
+    @staticmethod
+    def _get_color_range(frame: Any) -> int:
         """
         从 DecodedFrame.metadata 获取颜色范围。
 
@@ -1844,17 +1847,15 @@ class VideoPlaybackEngine(QObject):
             - YUVGPUUploader.RANGE_LIMITED (0): TV legal range (16-235)
             - YUVGPUUploader.RANGE_FULL (1): PC full range (0-255)
         """
-        if not hasattr(frame, 'metadata') or frame.metadata is None:
-            return YUVGPUUploader.RANGE_LIMITED  # 默认 LIMITED
-
-        range_str = getattr(frame.metadata, 'color_range', 'limited')
+        range_tag = decoded_frame_color_tag(frame, 'color_range')
         range_map = {
             'limited': YUVGPUUploader.RANGE_LIMITED,
             'tv': YUVGPUUploader.RANGE_LIMITED,
             'full': YUVGPUUploader.RANGE_FULL,
             'pc': YUVGPUUploader.RANGE_FULL,
+            'jpeg': YUVGPUUploader.RANGE_FULL,
         }
-        return range_map.get(range_str.lower(), YUVGPUUploader.RANGE_LIMITED)
+        return range_map.get(range_tag, YUVGPUUploader.RANGE_LIMITED)
 
     def _identity_video_raw_params(self) -> Dict[str, Any]:
         """Return a no-op raw preview block for normal video playback."""
@@ -1911,10 +1912,9 @@ class VideoPlaybackEngine(QObject):
         render_at_source_resolution: bool = False,
     ) -> Dict[str, Any]:
         """Return render params with cached layer data and live viewport state."""
-        if self._cached_render_params is None:
-            self._cached_render_params = self._build_render_params()
+        cached = self._get_cached_render_params()
 
-        params = self._cached_render_params.copy()
+        params = cached.copy()
 
         viewport_size = getattr(self.engine, 'viewport_size', (0, 0))
         if not viewport_size or viewport_size[0] <= 0 or viewport_size[1] <= 0:
@@ -2052,6 +2052,13 @@ class VideoPlaybackEngine(QObject):
 
         return None
 
+    def _get_cached_render_params(self) -> Dict[str, Any]:
+        """Cache per playback state so paused frames always recover the full grade."""
+        if self._cached_render_params is None or self._cached_render_params_playing != self.is_playing:
+            self._cached_render_params = self._build_render_params()
+            self._cached_render_params_playing = self.is_playing
+        return self._cached_render_params
+
     def _build_render_params(self) -> Dict[str, Any]:
         """
         构建渲染参数（播放时缓存复用）。
@@ -2072,76 +2079,28 @@ class VideoPlaybackEngine(QObject):
             'visible_rect': (0, 0, 0, 0),  # 每帧由 _get_playback_render_params 刷新
             'grain_visible_rect': (0, 0, 0, 0),
             'show_mask': False,
-            'active_layer_index': 0,
+            'active_layer_index': getattr(self.engine, 'active_layer_index', 0),
         }
 
-        # P3-4: 获取效果预览质量管理器
-        quality_manager = get_effect_preview_quality_manager()
-        is_playing = self.is_playing
-
-        # 从 engine 获取 layers 数据
-        if hasattr(self.engine, 'layers') and self.engine.layers:
-            layers_data = []
-            for L in self.engine.layers:
-                layer_plugins = []
-                if hasattr(L, 'plugins') and L.plugins:
-                    for plugin_inst in L.plugins:
-                        plugin_id = plugin_inst.get('plugin_id')
-                        plugin_enabled = plugin_inst.get('enabled', True)
-
-                        # P3-4: 播放时检查插件是否需要跳过
-                        # 如果插件标记为 SKIP preview_quality，播放时禁用
-                        if is_playing and quality_manager.should_skip_effect(f"plugin:{plugin_id}"):
-                            plugin_enabled = False
-
-                        layer_plugins.append({
-                            'plugin_id': plugin_id,
-                            'enabled': plugin_enabled,
-                            'params': plugin_inst.get('params', {}).copy()
-                        })
-
-                # P3-4: AI Matte 播放时锁定
-                ai_matte_enabled = L.ai_matte_enabled if hasattr(L, 'ai_matte_enabled') else False
-                if is_playing and ai_matte_enabled and quality_manager.should_skip_effect("ai_matte"):
-                    ai_matte_enabled = False
-
-                # P3-4: 高半径 blur 检查
-                effects_params = L.effects_params.copy() if hasattr(L, 'effects_params') and L.effects_params else None
-                if is_playing and effects_params:
-                    blur_radius = effects_params.get('blur_radius', 0.0)
-                    if blur_radius > 20.0 and quality_manager.is_effect_degraded("blur_high_radius"):
-                        # 限制 blur 半径
-                        effects_params['blur_radius'] = 20.0
-                        effects_params['blur_iterations'] = 1
-
-                layers_data.append({
-                    'id': id(L),
-                    'visible': L.visible,
-                    'opacity': L.opacity,
-                    'blend_mode': L.blend_mode,
-                    'grading_params': L.grading_params.copy() if L.grading_params else None,
-                    'active_lut_path': L.active_lut_path,
-                    'lut_intensity': L.lut_intensity,
-                    'soft_clip_params': L.soft_clip_params.copy() if L.soft_clip_params else None,
-                    'qualifier_params': L.qualifier_params.copy() if L.qualifier_params else None,
-                    'curves_lut': L.curves_lut,
-                    'hsl_curve_lut': L.hsl_curve_lut,
-                    'warper_params': L.warper_params,
-                    'warper_space': int(getattr(L, 'warper_space', 0) or 0),
-                    'mixer_params': L.mixer_params.copy() if L.mixer_params else None,
-                    'effects_params': effects_params,
-                    'mask_shapes': [s.to_dict() for s in L.mask_shapes],
-                    'has_mask': any(s.visible for s in L.mask_shapes) or (L.ai_matte is not None and ai_matte_enabled),
-                    # P3-4: 使用修改后的 ai_matte_enabled
-                    'ai_matte_enabled': ai_matte_enabled,
-                    'plugins': layer_plugins
-                })
-            params['layers'] = layers_data
-
-            # 找到活跃图层
-            for i, L in enumerate(self.engine.layers):
-                if hasattr(self.engine, '_active_layer_index'):
-                    params['active_layer_index'] = self.engine._active_layer_index
+        if getattr(self.engine, 'layers', None):
+            # Still grading and video submissions bind the same uploaded LUT,
+            # mask and plugin textures by the persistent layer/instance IDs.
+            layers = self.engine.snapshot_render_layers()
+            params['layers'] = layers
+            if self.is_playing:
+                quality_manager = get_effect_preview_quality_manager()
+                for layer in layers:
+                    for plugin in layer['plugins']:
+                        if quality_manager.should_skip_effect(f"plugin:{plugin['plugin_id']}"):
+                            plugin['enabled'] = False
+                    if layer['ai_matte_enabled'] and quality_manager.should_skip_effect("ai_matte"):
+                        layer['ai_matte_enabled'] = False
+                        layer['has_mask'] = any(shape['visible'] for shape in layer['mask_shapes'])
+                    effects = layer['effects_params']
+                    if (effects and effects.get('blur_radius', 0.0) > 20.0
+                            and quality_manager.is_effect_degraded("blur_high_radius")):
+                        effects['blur_radius'] = 20.0
+                        effects['blur_iterations'] = 1
 
         params['raw_preview'] = self._build_video_raw_params()
 
@@ -4034,38 +3993,17 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             u_plane = frame.planes[1]
             v_plane = frame.planes[2]
 
-            # 获取色彩元数据
-            color_matrix = ColorMatrix.BT709  # 默认值
-            color_range = ColorRange.LIMITED  # 默认值
-            bit_depth = 8  # 默认值
-
-            if hasattr(frame, 'metadata') and frame.metadata:
-                # 从 metadata 解析 color_matrix
-                matrix_str = frame.metadata.color_matrix
-                if matrix_str:
-                    matrix_map = {
-                        'bt709': ColorMatrix.BT709,
-                        'bt2020nc': ColorMatrix.BT2020_NC,
-                        'bt2020': ColorMatrix.BT2020_NC,
-                        'smpte170m': ColorMatrix.BT601,
-                        'bt470bg': ColorMatrix.BT601_PAL,
-                    }
-                    color_matrix = matrix_map.get(matrix_str.lower(), ColorMatrix.BT709)
-
-                # 从 metadata 解析 color_range
-                range_str = frame.metadata.color_range
-                if range_str:
-                    range_map = {
-                        'limited': ColorRange.LIMITED,
-                        'tv': ColorRange.LIMITED,
-                        'full': ColorRange.FULL,
-                        'pc': ColorRange.FULL,
-                    }
-                    color_range = range_map.get(range_str.lower(), ColorRange.LIMITED)
-
-                # 获取位深度
-                if hasattr(frame.metadata, 'bit_depth'):
-                    bit_depth = frame.metadata.bit_depth
+            # Use the same decoded sample tags as the video upload path.
+            color_matrix = {
+                YUVGPUUploader.MATRIX_BT709: ColorMatrix.BT709,
+                YUVGPUUploader.MATRIX_BT601: ColorMatrix.BT601,
+                YUVGPUUploader.MATRIX_BT2020: ColorMatrix.BT2020_NC,
+            }[VideoPlaybackEngine._get_yuv_matrix(frame)]
+            color_range = (
+                ColorRange.FULL if VideoPlaybackEngine._get_color_range(frame) == YUVGPUUploader.RANGE_FULL
+                else ColorRange.LIMITED
+            )
+            bit_depth = getattr(getattr(frame, 'metadata', None), 'bit_depth', 8)
 
             # 使用 ColorConverter 进行转换
             converter = ColorConverter()

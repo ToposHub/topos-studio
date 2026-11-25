@@ -70,6 +70,7 @@ from src.shared.gpu.gl_resource_registry import (
 from src.features.color.core.opengl_render_backend import OpenGLRenderBackend
 from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
 from src.shared.media.graded_thumbnail import GRADED_PREVIEW_MAX_EDGE
+from src.shared.media.color_metadata import decoded_frame_color_tag
 from src.shared.media.gpu_frame import (
     GpuDecodedFrame,
     GpuFrameRelease,
@@ -308,7 +309,7 @@ class AsyncRenderer(QThread):
         self.reference_pyramid_textures = []
         self._reference_follows_source = False
         self.tiles = []
-        self.layer_textures = {} # {id(layer): {'curves': tex, 'warper': tex, 'lut3d': tex}}
+        self.layer_textures = {}  # Layer.id -> uploaded curves, warper, LUTs and masks
         self.baked_textures = {}  # AI Baking: {layer_id: texture} - cached baked layer textures
         self.ai_plugin_textures = {}  # AI Plugins: {(layer_id, instance_id): texture}
         self.identity_lut = None
@@ -1291,7 +1292,7 @@ class AsyncRenderer(QThread):
 
         ``Layer.reset_params()`` clears curves/LUT/warper/qualifier/mask in the
         model, but previously nothing told the GPU side — so the renderer kept
-        binding the old ``layer_textures[id(layer)]`` entries (the bind path
+        binding the old ``layer_textures[layer.id]`` entries (the bind path
         falls back to stale textures when present). Drop the layer's AUX slot
         so subsequent renders bind the identity defaults, matching the reset
         model state, and free the GL objects. Only the named layer is affected;
@@ -6370,10 +6371,8 @@ class AsyncRenderer(QThread):
 
         # Execute render
         self.debug_last_render_command = "RENDER_VIDEO_FRAME"
-        self._color_metal_source_transfer = getattr(
-            getattr(decoded_frame, "metadata", None), "color_transfer", None)
-        self._video_source_primaries = getattr(
-            getattr(decoded_frame, "metadata", None), "color_primaries", None)
+        self._color_metal_source_transfer = decoded_frame_color_tag(decoded_frame, "color_transfer")
+        self._video_source_primaries = decoded_frame_color_tag(decoded_frame, "color_primaries")
         # New frame content: qualifier mattes keyed on this epoch must regenerate
         # (__new__-constructed test stubs skip __init__; __dict__ access avoids
         # the QObject RuntimeError raised by plain attribute reads)
@@ -6459,8 +6458,10 @@ class AsyncRenderer(QThread):
         render_params = data.get('render_params', {})
         drop_if_stale = data.get('drop_if_stale', True)
         decode_path = data.get('decode_path', gpu_frame.decode_path)
-        yuv_matrix = self._coerce_video_yuv_matrix(gpu_frame.color_matrix)
-        color_range = self._coerce_video_color_range(gpu_frame.color_range)
+        matrix_tag = decoded_frame_color_tag(gpu_frame, "color_matrix")
+        range_tag = decoded_frame_color_tag(gpu_frame, "color_range")
+        yuv_matrix = self._coerce_video_yuv_matrix(matrix_tag)
+        color_range = self._coerce_video_color_range(range_tag)
 
         # Generation check: drop stale frames
         if drop_if_stale and generation_id < self._video_generation_id:
@@ -6526,8 +6527,8 @@ class AsyncRenderer(QThread):
         self._current_gpu_frame_planes = planes
         self._current_gpu_frame_width = gpu_frame.width
         self._current_gpu_frame_height = gpu_frame.height
-        self._current_gpu_frame_color_range = gpu_frame.color_range
-        self._current_gpu_frame_color_matrix = gpu_frame.color_matrix
+        self._current_gpu_frame_color_range = range_tag
+        self._current_gpu_frame_color_matrix = matrix_tag
         self._current_gpu_frame_bit_depth = gpu_frame.bit_depth
         self._current_gpu_frame_pixel_format = gpu_frame.pixel_format
 
@@ -6589,8 +6590,8 @@ class AsyncRenderer(QThread):
 
         # Execute render using the external GPU texture planes
         self.debug_last_render_command = "RENDER_VIDEO_GPU_FRAME"
-        self._color_metal_source_transfer = getattr(gpu_frame, "color_transfer", None)
-        self._video_source_primaries = getattr(gpu_frame, "color_primaries", None)
+        self._color_metal_source_transfer = decoded_frame_color_tag(gpu_frame, "color_transfer")
+        self._video_source_primaries = decoded_frame_color_tag(gpu_frame, "color_primaries")
         # New frame content: qualifier mattes keyed on this epoch must regenerate
         # (__new__-constructed test stubs skip __init__; __dict__ access avoids
         # the QObject RuntimeError raised by plain attribute reads)

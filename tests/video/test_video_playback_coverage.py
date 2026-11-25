@@ -1583,6 +1583,23 @@ class TestFrameSubmitPaths:
         assert controller._last_displayed_decoded_frame is frame
         assert controller._last_displayed_frame_index == 7
 
+    @pytest.mark.parametrize(('matrix', 'range_tag', 'stream', 'expected'), [
+        ('bt2020nc', 'full', SimpleNamespace(color_matrix=None, color_range=None), (1, 1)),
+        ('unknown', None, SimpleNamespace(color_matrix='smpte170m', color_range='pc'), (2, 1)),
+        ('bt709', 'limited', SimpleNamespace(color_matrix='smpte170m', color_range='full'), (0, 0)),
+        (None, None, SimpleNamespace(color_matrix=None, color_range=None), (0, 0)),
+    ])
+    def test_planar_submission_resolves_decoder_and_stream_tags(
+        self, make_controller, matrix, range_tag, stream, expected,
+    ) -> None:
+        controller, renderer = self._submit_controller(make_controller)
+        frame = make_planar_frame(3)
+        frame.color_matrix, frame.color_range, frame.metadata = matrix, range_tag, stream
+        controller._submit_decoded_frame_playback(frame, 3)
+        command, payload = renderer.submit.call_args.args
+        assert command == RenderCommand.RENDER_VIDEO_FRAME
+        assert (payload['yuv_matrix'], payload['color_range']) == expected
+
     def test_planar_frame_submits_with_yuv_metadata(self, make_controller) -> None:
         controller, renderer = self._submit_controller(make_controller)
         renderer._yuv_gpu_supported = False

@@ -373,14 +373,19 @@ class PageManagementMixin:
         # was last visible. Contextual entries re-enter switch_to_page via
         # switch_to_page_with_context with the guard flag set and must not
         # route through the clip path a second time.
-        if (
-            from_page == "Edit"
-            and requested_page == "Color"
-            and not force
-            and not getattr(self, "_contextual_page_switch_in_progress", False)
-            and self._switch_to_color_following_edit_playhead()
-        ):
-            return
+        if (requested_page == "Color" and not force
+                and not getattr(self, "_contextual_page_switch_in_progress", False)):
+            # A first visit from the Library has no Color source yet, even
+            # when the project already has an active timeline.
+            first_library_entry = (
+                from_page == "Library"
+                and getattr(self, "_current_edit_project", None) is not None
+                and not getattr(self, "current_file_path", None)
+                and self._color_session_manager.get_current_session() is None
+            )
+            if from_page == "Edit" or first_library_entry:
+                if self._switch_to_color_following_edit_playhead():
+                    return
 
         # Delayed layout repairs and redraws belong to this particular visit.
         # A later switch, even back to the same page, makes them obsolete.

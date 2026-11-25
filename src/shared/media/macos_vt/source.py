@@ -40,6 +40,7 @@ from ...media.gpu_frame import (
     normalize_color_range,
 )
 from ...media.frame import DecodedFrame, PlaneInfo
+from ...media.color_metadata import decoded_frame_color_tag
 from ...media.frame_path import DecodePath
 from ...media.metadata import VideoMetadata, FPS_24, Rational
 
@@ -344,10 +345,6 @@ class MacOSVtZeroCopySource:
         self._scrub_suppressed_through = -1
         self._last_coarse_target: int | None = None
         self._coarse_forward = False
-        # 流级色彩标记回退值（VT 解码帧本身不携带色彩元数据）。
-        # 默认与调色页一致：bt709 / limited；open() 时按容器标记覆盖。
-        self._stream_color_matrix: str = "bt709"
-        self._stream_color_range: str = "limited"
 
     def open(self, path: str, *, require_zero_copy: bool = True, require_hardware: bool = False) -> bool:
         """
@@ -436,23 +433,15 @@ class MacOSVtZeroCopySource:
             codec_profile='',
             pixel_format=pixel_format,
             bit_depth=info.bit_depth,
+            color_primaries=getattr(info, 'color_primaries', None),
+            color_transfer=getattr(info, 'color_transfer', None),
+            color_matrix=normalize_color_matrix(getattr(info, 'color_space', None) or 'bt709'),
+            color_range=normalize_color_range(getattr(info, 'color_range', None)),
         )
         self._time_base_num = int(getattr(info, "time_base_num", 1) or 1)
         self._time_base_den = int(getattr(info, "time_base_den", 30) or 30)
         if self._time_base_den <= 0:
             self._time_base_den = 30
-
-        # 从容器流标记提取色彩元数据。不提取时所有帧都会默认 bt709/
-        # limited，BT.601/full-range 素材会被错误矩阵/范围解码，
-        # 表现为肤色色偏（与调色页读流元数据的行为对齐）。
-        stream_color_space = str(getattr(info, "color_space", "") or "")
-        stream_color_range = str(getattr(info, "color_range", "") or "")
-        self._stream_color_matrix = (
-            normalize_color_matrix(stream_color_space) if stream_color_space else "bt709"
-        )
-        self._stream_color_range = (
-            normalize_color_range(stream_color_range) if stream_color_range else "limited"
-        )
 
         self._is_open = True
         self._zero_copy_available = require_zero_copy
@@ -1175,11 +1164,6 @@ class MacOSVtZeroCopySource:
         return decoded
 
     def _make_pixel_buffer_frame(self, decoded: object) -> VtPixelBufferFrame:
-        cm = getattr(decoded, "color_metadata", None) or {}
-        raw_matrix = cm.get('color_matrix', getattr(decoded, 'color_matrix', self._stream_color_matrix))
-        raw_range = cm.get('color_range', self._stream_color_range)
-        raw_primaries = cm.get('color_primaries', getattr(decoded, 'color_primaries', None))
-        raw_transfer = cm.get('color_transfer', getattr(decoded, 'color_transfer', None))
         return VtPixelBufferFrame(
             source=self,
             decoded=decoded,
@@ -1190,10 +1174,10 @@ class MacOSVtZeroCopySource:
             height=int(getattr(decoded, "height", 0) or 0),
             pixel_format=str(getattr(decoded, "pixel_format", "nv12") or "nv12"),
             bit_depth=int(getattr(decoded, "bit_depth", 8) or 8),
-            color_range=normalize_color_range(raw_range),
-            color_matrix=normalize_color_matrix(raw_matrix),
-            color_primaries=raw_primaries,
-            color_transfer=raw_transfer,
+            color_range=normalize_color_range(decoded_frame_color_tag(decoded, 'color_range', stream=self._info)),
+            color_matrix=normalize_color_matrix(decoded_frame_color_tag(decoded, 'color_matrix', stream=self._info)),
+            color_primaries=decoded_frame_color_tag(decoded, 'color_primaries', stream=self._info),
+            color_transfer=decoded_frame_color_tag(decoded, 'color_transfer', stream=self._info),
             _release_decoded=getattr(self._vt_session, 'release_decoded_frame', None),
             _retain_decoded=getattr(self._vt_session, 'retain_decoded_frame', None),
             _decoded_data_size=getattr(self._vt_session, 'decoded_frame_data_size', None),

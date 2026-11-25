@@ -460,6 +460,9 @@ class VtDecodeOutputQueue:
                 height=height,
                 pixel_format=pixel_format,
                 bit_depth=bit_depth,
+                # The session explicitly negotiates VideoRange NV12/P010.
+                # VT also rescales full-range sources into those code values.
+                color_metadata={"color_range": "limited"},
                 frame_index=frame_index,
                 is_iosurface_backed=is_iosurface,
             )

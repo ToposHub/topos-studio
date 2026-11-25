@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Generator, Iterator
 
+from ..color_metadata import normalize_color_primaries, normalize_color_transfer
 from ..mov_atoms import find_mov_atom, iter_file_mov_atoms, iter_mov_atoms
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,8 @@ class VideoStreamInfo:
     start_time: int | None = None
     color_space: str = ""
     color_range: str = ""
+    color_primaries: str | None = None
+    color_transfer: str | None = None
 
 
 class PacketDemuxer:
@@ -229,6 +232,8 @@ class PacketDemuxer:
             color_range=self._ffmpeg_color_range_name(
                 getattr(stream.codec_context, 'color_range', 0) or 0
             ),
+            color_primaries=normalize_color_primaries(getattr(stream.codec_context, 'color_primaries', None)),
+            color_transfer=normalize_color_transfer(getattr(stream.codec_context, 'color_trc', None)),
         )
 
         if '10' in self._info.pixel_format or 'p010' in self._info.pixel_format.lower():

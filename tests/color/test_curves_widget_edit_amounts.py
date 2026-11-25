@@ -52,6 +52,57 @@ def _final_lut(widget) -> np.ndarray:
     return widget._final_lut_cache.copy()
 
 
+@pytest.mark.parametrize("version", [0, 1])
+def test_restore_neutral_lut_without_control_points(version: int, qapp) -> None:
+    widget = CurvesWidget()
+    widget.set_calibrated(bool(version), version=version)
+    widget.set_curves_data({"M": [(0, 255), (80, 90), (255, 0)]})
+    lut = build_curves_lut_from_data({}, calibration_version=version)
+    changes = QSignalSpy(widget.changed)
+
+    widget.set_lut(lut)
+
+    assert all(points == [(0, 255), (255, 0)] for points in widget.get_curves_data().values())
+    np.testing.assert_array_equal(_final_lut(widget), lut)
+    assert len(changes) == 0
+
+
+def test_restore_previous_widget_neutral_lut_without_absorbing_edits(qapp) -> None:
+    from src.features.color.core.layer import _interpolate_curve_255, compose_curves_lut
+
+    # Produce exactly what the previous widget saved for four untouched curves.
+    sampled = _interpolate_curve_255([(0, 255), (255, 0)])
+    previous_widget_y = 255.0 * (1.0 - sampled)
+    channel = (255.0 - previous_widget_y) / 255.0
+    lut = compose_curves_lut(channel, dict.fromkeys("RGB", channel))
+    identity = build_curves_lut_from_data({})
+    assert not np.array_equal(lut, identity)
+
+    widget = CurvesWidget()
+    changes = QSignalSpy(widget.changed)
+    widget.set_lut(lut)
+    assert all(points == [(0, 255), (255, 0)] for points in widget.get_curves_data().values())
+    np.testing.assert_array_equal(_final_lut(widget), identity)
+
+    edited = lut.copy()
+    edited[128, 0, 0] = np.nextafter(edited[128, 0, 0], np.float32(1))
+    widget.set_lut(edited)
+    assert len(widget.get_curves_data()["R"]) > 2
+    assert len(changes) == 0
+
+
+def test_explicit_collinear_anchors_survive_stack_hydration(qapp) -> None:
+    from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
+    from src.shared.project.color_stack import ColorStackData
+
+    widget = CurvesWidget()
+    anchors = [(0, 255), (32, 223), (100, 155), (255, 0)]
+    payload = {"curves_data": {"M": anchors}, "curves_lut": build_curves_lut_from_data({})}
+    ColorStackHydrator._apply_curves_to_panel(ColorStackData(stack_id="curves"), widget, payload)
+
+    assert widget.get_curves_data()["M"] == anchors
+
+
 class TestEditAmounts:
     def test_default_amounts_keep_legacy_behavior(self):
         widget = CurvesWidget()
@@ -174,6 +225,23 @@ class TestLinkedEditing:
             assert p.x() == pytest.approx(128.0, abs=0.5)
             assert p.y() == pytest.approx(100.0, abs=1.0)
 
+    def test_two_linked_drags_keep_legacy_anchors_aligned(self) -> None:
+        widget = CurvesWidget()
+        widget.edit_linked = True
+        anchors = [(0, 255), (128, 127), (255, 0)]
+        widget.set_curves_data(dict.fromkeys(widget.channels, anchors))
+
+        _press(widget, *widget.to_widget(128, 127))
+        _release(widget, *widget.to_widget(145, 105))
+        _press(widget, *widget.to_widget(145, 105))
+        _move(widget, *widget.to_widget(145, 75))
+        _release(widget, *widget.to_widget(145, 60))
+
+        for points in widget.curves.values():
+            assert len(points) == 3
+            assert points[1].x() == pytest.approx(145)
+            assert points[1].y() == pytest.approx(60)
+
     def test_drag_without_link_keeps_other_channels(self):
         widget = CurvesWidget()
         for ch in widget.channels:
@@ -225,6 +293,22 @@ class TestLinkedEditing:
         assert len(started) == 1
         assert len(widget.curves["M"]) == 3
         assert widget.curves["M"][1].y() == pytest.approx(127 - 10 * 255 / 337)
+
+    def test_fast_linked_drag_near_an_anchor_moves_it_without_adding_a_point(self) -> None:
+        widget = CurvesWidget()
+        widget.resize(457, 351)
+        widget.set_calibrated(True, version=2)
+        widget.edit_linked = True
+        anchors = [(0, 255), (128, 127), (255, 0)]
+        widget.set_curves_data(dict.fromkeys(widget.channels, anchors))
+        x, y = widget.to_widget(128, 127)
+
+        _press(widget, x + 10, y - 9)
+        _move(widget, x + 10, y - 40)
+        _release(widget, x + 10, y - 59)
+
+        assert all(len(points) == 3 for points in widget.curves.values())
+        assert widget.curves["M"][1].y() == pytest.approx(widget.from_widget(x + 10, y - 59)[1])
 
     @pytest.mark.parametrize(("index", "release", "expected"), [
         (0, (0.0, 0.17), (0.0, 0.17)),

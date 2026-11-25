@@ -153,6 +153,7 @@ def _layer_render_data(layer: Layer) -> Dict[str, Any]:
         "mixer_params": layer.mixer_params.copy() if layer.mixer_params else None,
         "effects_params": layer.effects_params.copy() if layer.effects_params else None,
         "mask_shapes": mask_shapes,
+        "ai_matte_enabled": layer.ai_matte_enabled,
         "has_mask": any(shape.visible for shape in layer.mask_shapes)
         or (layer.ai_matte is not None and layer.ai_matte_enabled),
         "plugins": plugins,
@@ -293,6 +294,7 @@ class ImageEngine(QObject, WindowRasterizer):
         # Set by MainWindow after canvas.engine = self.engine
         self.canvas_ref = None
         self.drawn_video_frame: tuple[int, int] | None = None
+        self.viewer_waiting_for_gl = False
         self.scrub_paint_generation: int | None = None
 
         self.img_full_original = None # BGR uint8 (Phase 3.5 Optimization)
@@ -520,6 +522,10 @@ class ImageEngine(QObject, WindowRasterizer):
         """The ColorOutput instance for the Composite page."""
         return self._color_output
 
+    def snapshot_render_layers(self) -> list[dict[str, Any]]:
+        """Capture the current grade and the IDs of its uploaded render resources."""
+        return [_layer_render_data(layer) for layer in self.layers]
+
     def request_color_output(
         self, max_proxy_dim=None, update_masks=True, target="composite",
         quality_mode=None,
@@ -558,7 +564,7 @@ class ImageEngine(QObject, WindowRasterizer):
                 vx, vy, vw, vh = v_rect
                 eff_visible_rect = (vx * scale_x, vy * scale_y, vw * scale_x, vh * scale_y)
 
-        layers_data = [_layer_render_data(layer) for layer in self.layers]
+        layers_data = self.snapshot_render_layers()
 
         # Build raw params (same logic as render_pipeline)
         curr = self.current_raw_params
@@ -3078,7 +3084,7 @@ class ImageEngine(QObject, WindowRasterizer):
                     eff_visible_rect = (vx * scale_x, vy * scale_y, vw * scale_x, vh * scale_y)
                     # grain_visible_rect 保持原始坐标不变，让着色器使用一致的坐标系统
 
-            layers_data = [_layer_render_data(layer) for layer in self.layers]
+            layers_data = self.snapshot_render_layers()
             
             # GPU 硬件 Mipmap 优化：LOD 始终为 0
             # GPU 会通过 LINEAR_MIPMAP_LINEAR 过滤器自动根据 Screen-space derivatives
@@ -4109,8 +4115,12 @@ class ImageEngine(QObject, WindowRasterizer):
         # Never stall the GUI event loop behind a long render-thread pass.
         # Canvas can retry the published frame once the worker releases it.
         if not mutex.tryLock():
+            if viewer_paint:
+                self.viewer_waiting_for_gl = True
             return False
         try:
+            if viewer_paint:
+                self.viewer_waiting_for_gl = False
             # Canvas reads tex_id before taking the shared GL mutex. During
             # continuous playback the renderer can publish a newer front slot
             # before Canvas obtains the lock. Drawing the captured id would be

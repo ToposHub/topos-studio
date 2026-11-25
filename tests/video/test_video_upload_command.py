@@ -2285,6 +2285,21 @@ class TestGpuFrameAtomicSwap:
         # _previous_gpu_frame 恢复为旧帧
         assert renderer._previous_gpu_frame is prev
 
+    def test_resident_frame_falls_back_to_stream_color_tags(self) -> None:
+        renderer = self._make_renderer()
+        renderer._wrap_external_gpu_planes = lambda planes, gpu_frame: [MagicMock()]
+        renderer._do_render = MagicMock()
+        frame = self._make_gpu_frame(3)
+        frame.color_matrix = 'unknown'
+        frame.color_range = ''
+        frame.color_transfer = 'hlg'
+        frame.metadata = {'color_matrix': 9, 'color_range': 2, 'color_primaries': 9, 'color_transfer': 16}
+        renderer._do_render_video_gpu_frame({'gpu_decoded_frame': frame})
+        assert renderer.current_video_yuv_matrix == 'bt2020nc'
+        assert renderer.current_video_color_range == 'full'
+        assert renderer._video_source_primaries == 'bt2020'
+        assert renderer._color_metal_source_transfer == 'hlg'
+
     def test_no_planes_keeps_previous_frame_backing(self):
         renderer = self._make_renderer()
         prev = self._make_gpu_frame(1)

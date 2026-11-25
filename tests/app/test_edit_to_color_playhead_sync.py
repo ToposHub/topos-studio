@@ -288,6 +288,24 @@ def test_unavailable_page_fallback_to_color_keeps_plain_switch(qapp) -> None:
     assert controller.current_page == "Color"
 
 
+@pytest.mark.parametrize("existing_file,existing_session", [(None, None), ("still.png", None), (None, object())])
+def test_first_color_entry_from_library_loads_only_an_empty_viewer(qapp, existing_file, existing_session) -> None:
+    controller, clips = _three_clip_controller(playhead=90)
+    controller.current_page = "Library"
+    controller.current_file_path = existing_file
+    controller._color_session_manager = SimpleNamespace(get_current_session=lambda: existing_session)
+    controller.open_timeline_clip_in_color = MagicMock(return_value=True)
+
+    controller.switch_to_page("Color")
+
+    if existing_file or existing_session:
+        controller.open_timeline_clip_in_color.assert_not_called()
+    else:
+        controller.open_timeline_clip_in_color.assert_called_once_with(
+            controller._current_edit_project.active_timeline_id, clips[2].clip_id, 90
+        )
+
+
 def test_switch_from_deliver_does_not_follow_playhead(qapp) -> None:
     """Deliver shares the timeline panel; only Edit entries may route."""
     controller, _clips = _three_clip_controller(playhead=90)

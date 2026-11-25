@@ -1,5 +1,7 @@
-import numpy as np
+from functools import cache
 from typing import Dict, Optional, Any
+
+import numpy as np
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QButtonGroup, QWidget
 from PyQt6.QtCore import Qt, QEvent, QPointF, pyqtSignal, QRectF, QTimer
 from PyQt6.QtGui import QPainter, QColor, QPen, QPainterPath, QMouseEvent
@@ -15,6 +17,23 @@ from src.shared.ui.style_sheet import (
     CURVE_RESET_BTN_STYLE,
     curve_channel_btn_style,
 )
+
+
+_LINKED_ANCHOR_PICK_RADIUS = 16.0
+
+
+@cache
+def _neutral_absolute_curves() -> tuple[np.ndarray, np.ndarray]:
+    axis = np.arange(256, dtype=np.float32)
+    identity = axis / 255.0
+    # Older widgets round-tripped the default curve through float32 screen Y,
+    # then sampled that channel at the master curve's output positions.
+    screen_y = 255.0 * (1.0 - identity)
+    channel = (255.0 - screen_y) / 255.0
+    master_index = channel.astype(np.float64) * 255.0
+    previous = np.interp(master_index, axis, channel).astype(np.float32)
+    return identity[:, None], previous[:, None]
+
 
 class _CurveOverlay(QWidget):
     """Raster UI chrome stays visible even without a GPU scope frame."""
@@ -172,6 +191,11 @@ class CurvesWidget(QWidget):
         self.selected_point_idx = -1
         self.update()
 
+    def set_edit_linked(self, linked: bool) -> None:
+        if self.edit_linked != linked:
+            self.edit_linked = linked
+            self.update()
+
     def get_draw_rect(self):
         w, h = self.width(), self.height()
         return QRectF(self.margin, self.margin, w - 2 * self.margin, h - 2 * self.margin)
@@ -232,15 +256,26 @@ class CurvesWidget(QWidget):
             'B': QColor(100, 150, 255)
         }
 
-        # Draw edited channels underneath the active one.
-        default_points = [QPointF(0, 255), QPointF(255, 0)]
-        for ch in self.channels:
-            if ch == self.active_channel or self.curves[ch] == default_points:
-                continue
-            self._draw_curve(painter, ch, inactive_colors[ch], rect, thickness=1.0)
+        active_points = self.curves[self.active_channel]
+        active_curve = (self._cached_curve_values(self.active_channel, active_points)
+                        if len(active_points) >= 2 else None)
+        if not self.edit_linked:
+            # Suppress coincident paths before painting, with priority given
+            # to the active channel's color and control points.
+            drawn = [active_curve] if active_curve is not None else []
+            default_points = [QPointF(0, 255), QPointF(255, 0)]
+            for ch in self.channels:
+                points = self.curves[ch]
+                if ch == self.active_channel or len(points) < 2 or points == default_points:
+                    continue
+                samples = self._cached_curve_values(ch, points)
+                if any(np.allclose(samples, curve, rtol=0.0, atol=1e-4) for curve in drawn):
+                    continue
+                drawn.append(samples)
+                self._draw_curve(painter, samples, inactive_colors[ch], thickness=1.0)
 
-        # Draw Active Curve with thicker line
-        self._draw_curve(painter, self.active_channel, active_colors[self.active_channel], rect, thickness=1.2)
+        if active_curve is not None:
+            self._draw_curve(painter, active_curve, active_colors[self.active_channel], thickness=1.2)
 
         # Draw Control Points for Active Channel
         self._draw_control_points(painter, active_colors[self.active_channel], rect)
@@ -287,17 +322,12 @@ class CurvesWidget(QWidget):
         self._curve_cache[ch] = (key, vals)
         return vals
 
-    def _draw_curve(self, painter: QPainter, ch: str, color: QColor, rect: QRectF, thickness: float = 1.5):
-        """Draw smooth curve with high-density sampling for ultra-smooth rendering."""
-        points = self.curves[ch]
-        if len(points) < 2:
-            return
-        
-        vals = self._cached_curve_values(ch, points)
+    def _draw_curve(self, painter: QPainter, samples: np.ndarray, color: QColor, thickness: float) -> None:
+        """Paint the sampled curve in widget coordinates."""
         path = QPainterPath()
-        path.moveTo(*self.to_widget(0, vals[0]))
-        for x in range(1, len(vals)):
-            path.lineTo(*self.to_widget(x, vals[x]))
+        path.moveTo(*self.to_widget(0, samples[0]))
+        for x in range(1, len(samples)):
+            path.lineTo(*self.to_widget(x, samples[x]))
         
         painter.setPen(QPen(color, thickness))
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -331,6 +361,10 @@ class CurvesWidget(QWidget):
                 painter.drawEllipse(QPointF(wx, wy), 4, 4)
 
     def calculate_curve(self, points: list[QPointF]) -> np.ndarray:
+        if points == [QPointF(0, 255), QPointF(255, 0)]:
+            # Integer screen coordinates keep the neutral LUT exactly linear
+            # when _compute_lut converts the inverted Y axis back to RGB.
+            return 255.0 - np.arange(256)
         xs = np.array([point.x() for point in points])
         ys = np.array([point.y() for point in points])
         if self.calibrated:
@@ -368,7 +402,10 @@ class CurvesWidget(QWidget):
             ((offset.x() ** 2 + offset.y() ** 2, i) for offset, i in offsets),
             default=(float("inf"), -1),
         )
-        clicked = index if distance_squared <= 12.0 ** 2 else -1
+        # A missed linked grab would insert a point in every channel.
+        radius = (_LINKED_ANCHOR_PICK_RADIUS
+                  if self.edit_linked and event.button() == Qt.MouseButton.LeftButton else 12.0)
+        clicked = index if distance_squared <= radius ** 2 else -1
 
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_position = None
@@ -457,7 +494,7 @@ class CurvesWidget(QWidget):
         changes = {self.active_channel: (index, active)}
         for channel, (index, peer) in self._drag_points.items():
             if channel != self.active_channel:
-                x = active.x() + (peer.x() - anchor.x()) if self.calibrated else peer.x()
+                x = active.x() + (peer.x() - anchor.x())
                 y = active.y() + (peer.y() - anchor.y())
                 changes[channel] = (index, self._constrain_anchor(self.curves[channel], index, x, y))
         updates = [(channel, index, point) for channel, (index, point) in changes.items()
@@ -672,7 +709,22 @@ class CurvesWidget(QWidget):
             else:
                 lut_2d = None
 
-            if lut.ndim == 2 and lut.shape[1] == 1:
+            # A LUT without stored anchors can already be the identity. Restore
+            # the default handles in that case. Calibrated LUTs store deltas,
+            # whereas legacy LUTs store absolute output values.
+            from src.features.color.core.curves_calibration import is_calibrated_curves_lut
+
+            neutral = is_calibrated_curves_lut(lut) and not np.any(lut)
+            if lut.shape in ((256, 1), (256, 3), (256, 1, 3)):
+                samples = lut.reshape(256, -1)
+                neutral = any(np.all(samples == identity) for identity in _neutral_absolute_curves())
+            if neutral:
+                for ch in self.channels:
+                    self.curves[ch] = [QPointF(0, 255), QPointF(255, 0)]
+                self.selected_point_idx = -1
+                self._drag_position = None
+                self._drag_points.clear()
+            elif lut.ndim == 2 and lut.shape[1] == 1:
                 lut_1d = lut[:, 0]
                 points = []
                 for x in sample_positions:

@@ -6839,13 +6839,16 @@ class Canvas(QGraphicsView):
         key = (id(renderer), getattr(renderer, '_video_generation_id', 0), self.engine.scope_source_revision)
         previous = self._video_present_retry_key
         if key == previous:
-            # Paused video may get no subsequent frame-ready notification to
-            # replace a failed paint. Give that exact frame a bounded window.
             playing = getattr(getattr(self, 'video_control_bar', None), 'is_playing', False)
-            if (not playing and self._video_present_retry_attempts < 3
-                    and not self._present_retry.isActive()):
-                self._video_present_retry_attempts += 1
-                self._present_retry.start(11)
+            if playing or self._present_retry.isActive():
+                return
+            # A paused front has no next frame-ready signal. Keep trying
+            # while the worker owns GL, backing off during a long scope pass.
+            attempts = self._video_present_retry_attempts
+            if attempts < 3 or getattr(self.engine, 'viewer_waiting_for_gl', False):
+                self._video_present_retry_attempts = attempts + 1
+                delay_ms = (11, 11, 11, 22, 44, 88)[min(attempts, 5)]
+                self._present_retry.start(delay_ms)
             return
         self._video_present_retry_key = key
         self._video_present_retry_attempts = 1
@@ -6897,6 +6900,8 @@ class Canvas(QGraphicsView):
                     if did_draw:
                         if self._present_retry.isActive():
                             self._present_retry.stop()
+                        self._video_present_retry_key = None
+                        self._video_present_retry_attempts = 0
                         _diag_blit_tex = int(tex_id)
                         self._record_presented_preview_frame()
                     else:

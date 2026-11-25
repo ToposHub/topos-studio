@@ -603,6 +603,73 @@ class TestSeekToFrameBlocking:
 class TestPlaybackFrameSubmit:
     """Regression tests for the lightweight v2 playback submit path."""
 
+    def test_exact_and_playback_frames_bind_the_graded_layer_resources(self, mock_engine) -> None:
+        from src.features.color.core.async_renderer import AsyncRenderer
+        from src.features.color.core.image_engine import ImageEngine
+        from src.features.color.core.layer import Layer
+        from src.shared.video.video_playback import VideoPlaybackEngine
+
+        layer = Layer("Grade")
+        layer.active_lut_path = "test.cube"
+        layer.curves_soft_clip['channels']['R']['high_clip'] = 0.8
+        layer.is_baked = True
+        layer.plugins = [{'plugin_id': 'test', 'type': 'ai', 'instance_id': 'instance-A'}]
+        mock_engine.layers = [layer]
+        mock_engine.snapshot_render_layers.side_effect = lambda: ImageEngine.snapshot_render_layers(mock_engine)
+        mock_engine.current_raw_params = {'enabled': False}
+        mock_engine.visible_rect = (0, 0, 1920, 1080)
+        mock_engine.scene_size = (1920, 1080)
+        controller = VideoPlaybackEngine(mock_engine)
+        renderer = MagicMock()
+        curves, lut = MagicMock(), MagicMock()
+        renderer.layer_textures = {layer.id: {'curves': curves, 'lut3d': lut}}
+
+        exact = controller._get_static_preview_render_params(1920, 1080)
+        controller.is_playing = True
+        playing = controller._get_playback_render_params(960, 540)
+        for params in [exact, playing]:
+            graded = params['layers'][0]
+            AsyncRenderer._bind_aux_textures_single_layer(renderer, {}, graded)
+            assert graded['curves_soft_clip'] == layer.curves_soft_clip
+            assert graded['plugins'][0]['instance_id'] == 'instance-A'
+            assert graded['plugins'][0]['type'] == 'ai'
+            assert graded['is_baked']
+        assert curves.use.call_count == lut.use.call_count == 2
+        renderer.identity_lut.use.assert_not_called()
+
+    def test_cached_grade_restores_full_quality_after_stopping(self, mock_engine, monkeypatch) -> None:
+        from src.features.color.core.image_engine import ImageEngine
+        from src.features.color.core.layer import Layer
+        from src.shared.video import video_playback
+
+        layer = Layer("Grade")
+        layer.effects_params = {'blur_radius': 40.0, 'blur_iterations': 3}
+        layer.ai_matte = np.ones((2, 2), np.float32)
+        layer.plugins = [{'plugin_id': 'slow', 'enabled': True}]
+        mock_engine.layers = [layer]
+        mock_engine.snapshot_render_layers.side_effect = lambda: ImageEngine.snapshot_render_layers(mock_engine)
+        mock_engine.current_raw_params = {'enabled': False}
+        manager = MagicMock()
+        manager.should_skip_effect.return_value = True
+        manager.is_effect_degraded.return_value = True
+        monkeypatch.setattr(video_playback, 'get_effect_preview_quality_manager', lambda: manager)
+        controller = video_playback.VideoPlaybackEngine(mock_engine)
+
+        mock_engine.visible_rect = (0, 0, 1920, 1080)
+        mock_engine.scene_size = (1920, 1080)
+        before = controller._get_static_preview_render_params(1920, 1080)['layers'][0]
+        controller.is_playing = True
+        during = controller._get_playback_render_params(960, 540)['layers'][0]
+        assert during is controller._get_playback_render_params(960, 540)['layers'][0]
+        controller.is_playing = False
+        after = controller._get_static_preview_render_params(1920, 1080)['layers'][0]
+        assert not during['plugins'][0]['enabled'] and not during['has_mask']
+        assert during['effects_params']['blur_radius'] == 20.0
+        for full in [before, after]:
+            assert full['plugins'][0]['enabled'] and full['has_mask']
+            assert full['effects_params'] == {'blur_radius': 40.0, 'blur_iterations': 3}
+        assert layer.effects_params == after['effects_params']
+
     def test_submit_frame_playback_keeps_ui_tick_lightweight(self, mock_engine) -> None:
         """UI tick should submit raw frame data, not pre-convert BGR to RGBA."""
         import numpy as np
