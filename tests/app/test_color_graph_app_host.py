@@ -13,7 +13,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
@@ -206,6 +208,76 @@ class TestClipHydration:
         assert "lut_path" not in h.panel.view.cards[node_id].node.node_options
         assert h.host.redo()
         assert h.panel.view.cards[node_id].node.node_options["lut_path"] == entry.uri
+
+    @pytest.mark.parametrize("legacy_null_soft_clip", [False, True])
+    def test_first_wheel_edit_can_use_the_same_node_after_an_idle_save(
+        self, fresh_clip_harness: tuple[_Harness, str], legacy_null_soft_clip: bool,
+    ) -> None:
+        from src.features.color.adapters.color_stack_hydrator import ColorStackHydrator
+        from src.features.color.core.layer import Layer
+        from src.shared.project.save_router import SaveRouter
+
+        h, stack_id = fresh_clip_harness
+        project = h.holder["project"]
+        stack = project.color_stacks[stack_id]
+        if legacy_null_soft_clip:
+            stack = type(stack).from_dict({**stack.to_dict(), "soft_clip_params": None})
+            project = replace(project, color_stacks={stack_id: stack})
+        node_id = h.host.active_grade_node_id()
+        h.engine.layers = [Layer("Video source")]
+        h.engine.current_raw_params = {}
+        h.engine.tracking_store = None
+        ColorStackHydrator().apply_stack_to_engine(stack, h.engine)
+        snapshot = SaveRouter().snapshot_color_project(project, h.engine, stack_id=stack_id)
+        h.holder["project"] = snapshot
+        assert snapshot.color_stacks[stack_id].layers
+        assert snapshot.color_stacks[stack_id].color_graph is None
+
+        gamma = (0.13, 0.26, -0.035)
+        h.host.begin_grade_gesture("wheel")
+        assert h.host.submit_grade_change(node_id, "gamma", gamma, "wheel")
+        assert h.host.end_grade_gesture()
+        assert h.engine.layers[0].grading_params["gamma"] == gamma
+
+    @pytest.mark.parametrize("save_method", ["_perform_debounced_save", "_perform_periodic_save"])
+    def test_autosave_waits_for_first_wheel_edit_to_commit(
+        self, fresh_clip_harness: tuple[_Harness, str], save_method: str,
+    ) -> None:
+        from src.app.controllers.file_controller import FileOpsMixin
+
+        h, stack_id = fresh_clip_harness
+        project = h.holder["project"]
+        node_id = h.host.active_grade_node_id()
+        gamma = (0.13, 0.26, -0.035)
+        assert project.color_stacks[stack_id].color_graph is None
+        h.engine.is_interacting = True
+        window = SimpleNamespace(
+            current_page="Color",
+            current_file_path="sample.mov",
+            _current_edit_project_filepath="sample.topos",
+            _current_edit_project=project,
+            edit_project_dirty=True,
+            engine=h.engine,
+            color_graph_host=h.host,
+            save_router=Mock(),
+            _has_grade_set_photo=lambda: False,
+            _schedule_autosave=Mock(),
+        )
+        autosave = getattr(FileOpsMixin, save_method)
+
+        h.host.begin_grade_gesture("wheel")
+        assert h.host.submit_grade_change(node_id, "gamma", gamma, "wheel")
+        h.host.preview_grade_gesture()
+        assert h.host.panel_grade_params()["gamma"] == gamma
+
+        autosave(window)
+        window.save_router.save.assert_not_called()
+        window._schedule_autosave.assert_called_once_with(2000)
+        assert h.host.end_grade_gesture()
+        assert h.engine.layers[0].grading_params["gamma"] == gamma
+
+        autosave(window)
+        window.save_router.save.assert_called_once_with()
 
     def test_first_delete_of_new_clip_node_can_be_undone(
         self, fresh_clip_harness: tuple[_Harness, str], qtbot: QtBot,

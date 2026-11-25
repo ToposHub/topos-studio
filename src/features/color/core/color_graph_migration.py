@@ -161,7 +161,7 @@ def migrate_legacy_stack(stack: ColorStackData) -> ColorGraphData:
                 src_node=prev, src_port="image",
                 dst_node=node.node_id, dst_port="image"))
             prev = node.node_id
-    elif _flat_view_nonempty(stack) or (stack.scope == "clip_local" and stack.clip_id):
+    elif (stack.scope == "clip_local" and stack.clip_id) or _flat_view_nonempty(stack):
         # A neutral clip still needs an editable first node. Use the same
         # stable layer identity when the panel projects it and the first edit commits.
         flat_layer = _flat_layer_view(stack)

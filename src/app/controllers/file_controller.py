@@ -1513,7 +1513,24 @@ class FileOpsMixin:
         self._schedule_autosave(0)
         return False
 
+    def _defer_autosave_for_color_gesture(self) -> bool:
+        """Wait for the grade transaction before capturing the live engine."""
+        if (
+            getattr(self, "current_page", None) != "Color"
+            or getattr(getattr(self, "engine", None), "is_interacting", False) is not True
+        ):
+            return False
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is None or not graph_host.grade_gesture_open():
+            return False
+        # SaveRouter publishes a new legacy stack snapshot from the engine.
+        # Keep the stack stable until the active gesture commits or cancels.
+        self._schedule_autosave(2000)
+        return True
+
     def _perform_debounced_save(self) -> None:
+        if FileOpsMixin._defer_autosave_for_color_gesture(self):
+            return
         if not self._has_grade_set_photo():
             self.save_router.save()
             return
@@ -1591,7 +1608,8 @@ class FileOpsMixin:
             if not has_dirty and self._current_edit_project_filepath:
                 logger.debug("periodic save skipped: project clean")
                 return
-        self.save_router.save()
+        if not FileOpsMixin._defer_autosave_for_color_gesture(self):
+            self.save_router.save()
 
     # ------------------------------------------------------------------
     # Canvas / Undo-Redo action update

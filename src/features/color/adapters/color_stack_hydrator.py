@@ -25,6 +25,7 @@ from src.shared.project.color_stack import ColorStackData
 from src.shared.project.color_graph import GraphSchemaError
 from src.features.color.core.color_graph_migration import (
     can_project_to_legacy_layers,
+    migrate_legacy_stack,
     project_legacy_layers,
 )
 
@@ -284,6 +285,15 @@ class ColorStackHydrator:
 
     def _apply_legacy_layers_or_flat(self, stack, engine) -> None:
         layers_snapshot = getattr(stack, "layers", None) or ()
+        if (
+            not layers_snapshot
+            and isinstance(stack, ColorStackData)
+            and stack.scope == "clip_local"
+            and stack.clip_id
+        ):
+            # The graph panel already projects this flat clip as a corrector.
+            # Use its layer identity so the first save keeps that node editable.
+            layers_snapshot = project_legacy_layers(migrate_legacy_stack(stack))
         if layers_snapshot:
             from src.features.color.core.layer import Layer
 
