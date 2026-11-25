@@ -126,6 +126,45 @@ def _take_scrub_preview(take: Callable[..., Any], target: int, frame_range: tupl
     return take(target) if frame_range is None else take(target, frame_range=frame_range)
 
 
+def _scrub_viewer_frames(
+    playback: "EnhancedVideoPlaybackEngine",
+) -> tuple[tuple[int, int] | None, tuple[int, int] | None] | None:
+    frames = getattr(playback.__dict__.get("engine"), "scrub_viewer_frames", None)
+    return frames if isinstance(frames, tuple) else None
+
+
+def _reset_scrub_anchor(playback: "EnhancedVideoPlaybackEngine", origin: int, direction: int) -> None:
+    """Start a drag leg at the frame last drawn by the canvas."""
+    viewer_frames = _scrub_viewer_frames(playback)
+    generation = playback.__dict__.get("_generation_id", 0)
+    if viewer_frames is None:
+        # The native Metal presenter and headless controllers do not acknowledge GL paints.
+        if not direction:
+            playback._scrub_anchor = origin if playback._last_displayed_frame_index == origin else None
+            playback._scrub_generation_floor = generation + 1
+        return
+
+    drawn, _ = viewer_frames
+    if not direction:
+        at_origin = drawn == (generation, origin)
+        playback._scrub_anchor = origin if at_origin else None
+        # A press elsewhere starts a fresh gesture. A retained frame painted
+        # before that jump must not constrain the next turn.
+        playback._scrub_generation_floor = generation if at_origin else generation + 1
+        return
+
+    first_generation = getattr(playback, "_scrub_generation_floor", generation)
+    playback._scrub_anchor = drawn[1] if drawn and first_generation <= drawn[0] <= generation else None
+
+
+def _last_scrub_submission(playback: "EnhancedVideoPlaybackEngine", directional: bool) -> int | None:
+    if not directional:
+        return getattr(playback, "_last_displayed_frame_index", None)
+    if playback.__dict__.get("_last_submitted_video_generation") == playback.__dict__.get("_generation_id"):
+        return getattr(playback, "_last_displayed_frame_index", None)
+    return None
+
+
 # =============================================================================
 # P0-3/P0-4: Fallback 枚举和 FirstFrameStatus 类
 # =============================================================================
@@ -1066,7 +1105,7 @@ class VideoPlaybackEngine(QObject):
         self.engine.img_full_original = frame
         self.engine.img_source_full = frame
 
-    def load_video(self, path: str) -> bool:
+    def load_video(self, path: str, *, initial_frame: int = 0) -> bool:
         """
         加载视频文件（基类桩）。
 
@@ -1396,6 +1435,7 @@ class VideoPlaybackEngine(QObject):
         # as the first frame of a newly started playback session.
         self._last_submitted_video_reason = reason
         self._last_submitted_video_frame_index = int(frame_num)
+        self._last_submitted_video_generation = self._generation_id
 
         h, w = frame.shape[:2]
         frame_payload = frame if frame.flags['C_CONTIGUOUS'] else np.ascontiguousarray(frame)
@@ -1504,6 +1544,7 @@ class VideoPlaybackEngine(QObject):
         # DeckLink path uses this to reject a delayed static frame after Play.
         self._last_submitted_video_reason = reason
         self._last_submitted_video_frame_index = int(frame_num)
+        self._last_submitted_video_generation = self._generation_id
 
         # Phase D: GPU 零拷贝路径 — GpuDecodedFrame 直接绑定外部纹理
         if is_gpu_decoded_frame(frame):
@@ -1724,7 +1765,9 @@ class VideoPlaybackEngine(QObject):
         # source frame between two playback frames and visibly flash between
         # pictures.  The next playback tick reads the current viewport state
         # and presents it through the video lane.
-        if self.is_playing:
+        # Clip switches also have a single publisher. A fit/resize during
+        # grade hydration must not resubmit the bootstrap's ungraded frame.
+        if self.is_playing or getattr(renderer, "video_texture_pending", False) is True:
             return True
 
         # 获取已有视频纹理的尺寸
@@ -2499,7 +2542,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         # 只保存 DecodedFrame 引用和帧号，不复制 numpy 数组
         self._last_displayed_decoded_frame: Optional[Any] = None  # DecodedFrame 引用
         self._last_displayed_frame_index: Optional[int] = None  # 帧号
-        self._scrub_anchored: bool = False
+        self._scrub_anchor: int | None = None
+        self._scrub_generation_floor: int = 0
         self._scrub_prefetch_target: int | None = None
         self._last_submitted_render_params_generation: int = -1
 
@@ -2773,7 +2817,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         if str(getattr(self, "current_path", "") or "") == "":
             return False
         try:
-            if int(getattr(self, "current_frame", -1) or -1) != int(frame_number):
+            if int(getattr(self, "current_frame", -1)) != int(frame_number):
                 return False
         except (TypeError, ValueError):
             return False
@@ -2783,6 +2827,11 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             engine = None
         renderer = getattr(engine, "renderer", None) if engine else None
         if renderer is None:
+            return False
+        # A seek can update the transport before its source texture is uploaded.
+        # Republish the held texture only if it belongs to this frame.
+        uploaded_frame = getattr(renderer, "current_video_frame_index", None)
+        if isinstance(uploaded_frame, int) and uploaded_frame != frame_number:
             return False
         return (
             getattr(renderer, "current_video_planes", None) is not None
@@ -2946,7 +2995,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                         f"init failure: {close_error}")
             self._frame_scheduler = None
 
-    def load_video(self, path: str) -> bool:
+    def load_video(self, path: str, *, initial_frame: int = 0) -> bool:
         """
         加载视频文件（P5.A 改造版）。
 
@@ -3008,12 +3057,17 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 self._playback_clock = self._coordinator.session.playback_clock if self._coordinator.session else None
 
                 # 设置基本属性（兼容父类接口）
-                self.current_frame = 0
                 self.current_path = path
 
                 # 获取视频信息
                 fps = self._coordinator.fps or 30.0
                 total_frames = self._coordinator.total_frames or 0
+                frame_index = max(0, int(initial_frame))
+                if total_frames:
+                    frame_index = min(frame_index, total_frames - 1)
+                if frame_index:
+                    self._coordinator.seek_to_frame(frame_index, blocking=False, prefetch_proxy=False)
+                self.current_frame = frame_index
 
                 # P2.2: 从 coordinator 获取视频分辨率并初始化代理阶梯
                 video_info = self._coordinator.get_video_info() if self._coordinator else None
@@ -3040,12 +3094,12 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 # 发送信号
                 self.total_frames_changed.emit(total_frames)
                 self.video_loaded.emit(path)
-                self.frame_changed.emit(0)
+                self.frame_changed.emit(frame_index)
 
                 # P0-3: 显示第一帧（使用三级处理）
                 # 只有明确 codec/backend 不支持时才 fallback v2
                 # ProRes 第一帧慢、高位深转换失败不应触发 v2 fallback
-                result = self._show_first_frame_via_coordinator()
+                result = self._show_first_frame_via_coordinator(frame_index)
 
                 if result.should_fallback_v2:
                     # V-P0-3/V-P0-5: 统一 fallback 处理
@@ -3135,7 +3189,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             )
             return False
 
-    def _show_first_frame_via_coordinator(self) -> FirstFrameResult:
+    def _show_first_frame_via_coordinator(self, frame_index: int = 0) -> FirstFrameResult:
         """
         使用 PlaybackCoordinator 显示第一帧（P0-3 三级处理）。
 
@@ -3194,7 +3248,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         master_start = time.perf_counter()
 
         # 使用 blocking 方法获取 master 帧
-        master_frame = self._get_first_frame_blocking(is_master=True, timeout_ms=master_timeout_ms)
+        master_frame = self._get_first_frame_blocking(
+            is_master=True, timeout_ms=master_timeout_ms, frame_index=frame_index)
         master_elapsed_ms = (time.perf_counter() - master_start) * 1000
 
         if master_frame is not None:
@@ -3205,7 +3260,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
 
             if frame_array is not None:
                 # 处理成功，渲染并返回
-                render_success = self._render_first_frame(frame_array, master_frame)
+                render_success = self._render_first_frame(frame_array, master_frame, frame_index)
                 if render_success:
                     result.status = FirstFrameStatus.MASTER_OK
                     result.frame = master_frame
@@ -3247,7 +3302,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
 
         proxy_start = time.perf_counter()
 
-        proxy_frame = self._get_first_frame_blocking(is_master=False, timeout_ms=proxy_timeout_ms)
+        proxy_frame = self._get_first_frame_blocking(
+            is_master=False, timeout_ms=proxy_timeout_ms, frame_index=frame_index)
         proxy_elapsed_ms = (time.perf_counter() - proxy_start) * 1000
 
         if proxy_frame is not None:
@@ -3258,7 +3314,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
 
             if frame_array is not None:
                 # 处理成功，渲染并返回
-                render_success = self._render_first_frame(frame_array, proxy_frame)
+                render_success = self._render_first_frame(frame_array, proxy_frame, frame_index)
                 if render_success:
                     result.status = FirstFrameStatus.PROXY_OK
                     result.frame = proxy_frame
@@ -3326,6 +3382,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         self,
         is_master: bool,
         timeout_ms: int,
+        *,
+        frame_index: int = 0,
     ) -> Optional[Any]:
         """
         同步获取第一帧（带超时）。
@@ -3350,10 +3408,10 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
 
         if is_master:
             # 使用 session 的 blocking 方法获取 master 帧
-            return session.get_master_frame_blocking(0, timeout_ms=timeout_ms)
+            return session.get_master_frame_blocking(frame_index, timeout_ms=timeout_ms)
         else:
             # 获取 proxy 帧（blocking）
-            return self._get_proxy_frame_blocking(session, 0, timeout_ms=timeout_ms)
+            return self._get_proxy_frame_blocking(session, frame_index, timeout_ms=timeout_ms)
 
     def _get_proxy_frame_blocking(
         self,
@@ -3397,6 +3455,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         self,
         frame_array: np.ndarray,
         decoded_frame: Any,
+        frame_index: int = 0,
     ) -> bool:
         """
         渲染首帧到 canvas。
@@ -3406,6 +3465,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         Args:
             frame_array: 处理后的 numpy 数组
             decoded_frame: 原始 DecodedFrame
+            frame_index: 首次显示的源帧索引。
 
         Returns:
             True 表示渲染成功
@@ -3419,7 +3479,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             )
             self._last_displayed_frame = frame_array.copy()
             self._last_displayed_decoded_frame = decoded_frame
-            self._last_displayed_frame_index = 0
+            self._last_displayed_frame_index = frame_index
             self.frame_ready.emit()
             return True
         except Exception as e:
@@ -3653,6 +3713,10 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         # 清空后，残留的 RENDER_FRAME 会回退到 pyramid_textures（新片段首帧）
         # 或因无源纹理直接 return，不再闪旧片段。
         self._clear_renderer_video_texture_state()
+        self._scrub_anchor = None
+        if self.engine is not None:
+            self.engine.drawn_video_frame = None
+            self.engine.scrub_paint_generation = None
 
         # 重置跨片段残留的惰性决策标志。这些标志从不在 unload 中清理，
         # 残留的旧值会误导新片段的帧提交 / 监视器输出 / Canvas 更新路径。
@@ -3660,6 +3724,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         self._last_submitted_video_frame_index = -1
         self._last_frame_ready_direct_render = False
         self._static_preview_request_key = None
+        self._last_static_preview_delivered = False
         self._last_displayed_static_preview_is_thumbnail = False
         # 解除 paintGL hold，防止上一个片段 seek 路径残留的 hold 导致
         # 切换期间 paintGL 不清屏、保留旧 framebuffer。
@@ -4094,12 +4159,14 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 self._begin_static_preview_generation()
                 self._mark_renderer_video_texture_pending()
             elif scrub_reset:
+                if scrub_origin is not None:
+                    _reset_scrub_anchor(self, scrub_origin, scrub_direction)
                 self._begin_static_preview_generation()
+                image_engine = self.__dict__.get("engine")
+                if not allow_proxy_fallback and image_engine is not None:
+                    image_engine.scrub_paint_generation = self._generation_id
                 self._set_static_preview_frame_hold(False)
                 self._scrub_prefetch_target = None
-                if scrub_origin is not None and not scrub_direction:
-                    # The previous drag may have ended far from this mouse press.
-                    self._scrub_anchored = self._last_displayed_frame_index == scrub_origin
 
             # 使用 coordinator seek（scrub 高频路径不翻 generation，否则慢于
             # 请求节奏的 master 解码在入队时全部被丢为过期帧——快拖冻结）。
@@ -4135,7 +4202,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 # 1) 异步请求目标 master 帧（松手后/refine 时可用）。
                 frame_range = _scrub_preview_range(
                     frame_number, scrub_origin, scrub_direction,
-                    self._last_displayed_frame_index if scrub_origin is not None and self._scrub_anchored else None,
+                    self._scrub_anchor if scrub_origin is not None else None,
                 )
                 can_present = frame_range is None or frame_range[0] <= frame_range[1]
                 request_master = getattr(self._coordinator, 'request_master_frame', None)
@@ -4187,7 +4254,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                     if (
                         master_only_scrub
                         and not is_gpu_decoded_frame(frame)
-                        and getattr(self, "_last_displayed_frame_index", None) == display_index
+                        and _last_scrub_submission(self, scrub_origin is not None) == display_index
                     ):
                         return
                 self._submit_decoded_frame_playback(
@@ -4202,7 +4269,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                     drop_if_stale=True,
                 )
                 if scrub_origin is not None and self._last_displayed_frame_index == display_index:
-                    self._scrub_anchored = True
+                    self._scrub_anchor = display_index
                 if blocking_seek:
                     self._set_static_preview_frame_hold(False)
                     # An exact blocking seek presents the requested frame, so
@@ -4261,6 +4328,19 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         """Whether a nonblocking seek can deliver through the ready frame API."""
         return bool(self._use_dual_path and self._coordinator)
 
+    def is_scrub_frame_presented(self, frame_number: int) -> bool:
+        """Whether the exact scrub frame has reached the current viewer generation."""
+        viewer_frames = _scrub_viewer_frames(self)
+        if viewer_frames is None:
+            return self._last_displayed_frame_index == frame_number
+        identity = (self._generation_id, frame_number)
+        return viewer_frames == (identity, identity)
+
+    def end_scrub_paint_guard(self) -> None:
+        """Resume ordinary canvas paints after an interrupted drag."""
+        if self.engine is not None:
+            self.engine.scrub_paint_generation = None
+
     def present_ready_scrub_frame(self, frame_number: int) -> bool:
         """Present a just-decoded target frame during an interactive scrub.
 
@@ -4275,15 +4355,33 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
             return False
 
         frame_number = int(frame_number)
-        if getattr(self, "_last_displayed_frame_index", None) == frame_number:
-            self._scrub_anchored = True
+        if self.is_scrub_frame_presented(frame_number):
+            self._scrub_anchor = frame_number
             return True
+        viewer_frames = _scrub_viewer_frames(self)
+        retry_submission = (
+            viewer_frames is not None
+            and self.__dict__.get("_last_submitted_video_generation") == self._generation_id
+            and self.__dict__.get("_last_submitted_video_frame_index") == frame_number
+        )
+        if retry_submission:
+            identity = (self._generation_id, frame_number)
+            if viewer_frames[1] == identity:
+                return False  # The render has published; wait for the Qt paint.
+            now = time.monotonic()
+            last_wait = self.__dict__.get("_scrub_exact_wait")
+            if last_wait is None or last_wait[0] != identity:
+                self._scrub_exact_wait = (identity, now)
+                return False
+            if now - last_wait[1] < 0.25:
+                return False
+            self._scrub_exact_wait = (identity, now)
 
         take_master = getattr(self._coordinator, "take_ready_master_frame", None)
         if not callable(take_master):
             return False
         try:
-            frame = take_master(frame_number)
+            frame = take_master(frame_number, retry_submission=True) if retry_submission else take_master(frame_number)
         except (AttributeError, RuntimeError, TypeError) as exc:
             logger.debug("Unable to consume ready scrub frame %s: %s", frame_number, exc)
             return False
@@ -4306,8 +4404,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         finally:
             self._force_source_resolution_submit = False
         if getattr(self, "_last_displayed_frame_index", None) == frame_number:
-            self._scrub_anchored = True
-        return True
+            self._scrub_anchor = frame_number
+        return viewer_frames is None or self.is_scrub_frame_presented(frame_number)
 
     def present_latest_ready_scrub_frame(
         self, target_frame: int, *, scrub_origin: int | None = None, scrub_direction: int = 0,
@@ -4331,7 +4429,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         try:
             frame_range = _scrub_preview_range(
                 int(target_frame), scrub_origin, scrub_direction,
-                self._last_displayed_frame_index if scrub_origin is not None and self._scrub_anchored else None,
+                self._scrub_anchor if scrub_origin is not None else None,
             )
             if frame_range is not None and frame_range[0] > frame_range[1]:
                 # Keep the prepared frame queued until the pointer reaches it.
@@ -4344,9 +4442,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         frame_index = getattr(frame, "frame_index", None)
         if frame_index is None:
             return False
-        if getattr(self, "_last_displayed_frame_index", None) == int(frame_index):
-            if scrub_origin is not None:
-                self._scrub_anchored = True
+        previous = _last_scrub_submission(self, scrub_origin is not None)
+        if previous == int(frame_index) and not is_gpu_decoded_frame(frame):
             return True
 
         self._force_source_resolution_submit = True
@@ -4361,7 +4458,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         finally:
             self._force_source_resolution_submit = False
         if scrub_origin is not None and self._last_displayed_frame_index == int(frame_index):
-            self._scrub_anchored = True
+            self._scrub_anchor = int(frame_index)
         return True
 
     def request_static_preview_frame(self, frame_number: int) -> bool:
@@ -4375,7 +4472,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         if self._use_dual_path and self._coordinator:
             frame_number = int(frame_number)
             request_key = (str(getattr(self, "current_path", "") or ""), frame_number)
-            if request_key != self.__dict__.get("_static_preview_request_key"):
+            new_request = request_key != self.__dict__.get("_static_preview_request_key")
+            if new_request:
                 # The page polls this method while a master frame is decoding.
                 # A seek/generation bump on every poll invalidates the exact
                 # frame already being decoded, so only issue it for a new
@@ -4389,9 +4487,6 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 except TypeError:
                     self._coordinator.seek_to_frame(frame_number)
 
-                request_master = getattr(self._coordinator, 'request_master_frame', None)
-                if callable(request_master):
-                    request_master(frame_number)
                 self._static_preview_request_key = request_key
                 # A new request supersedes any previously delivered static
                 # preview; the fast-complete path must not treat the old
@@ -4413,6 +4508,10 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 frame = None
 
             if frame is None:
+                if new_request:
+                    request_master = getattr(self._coordinator, 'request_master_frame', None)
+                    if callable(request_master):
+                        request_master(frame_number)
                 logger.debug(
                     "[COLOR_CLIP_PREVIEW] pending frame=%s path=%s",
                     frame_number,

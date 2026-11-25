@@ -1396,6 +1396,25 @@ class TestLoadVideoPaths:
         engine.set_image.assert_called_once()
         assert controller._use_dual_path is True
 
+    def test_open_at_edit_playhead_reuses_the_exact_master_for_color(self, make_controller) -> None:
+        engine = make_engine()
+        coordinator = make_coordinator(total_frames=100)
+        master = make_packed_frame(73)
+        coordinator.session = _session_for_first_frame(master, None)
+        coordinator.take_ready_master_frame.return_value = master
+        controller = make_controller(engine, coordinator)
+        with patch("src.shared.video.playback_state.PlaybackCoordinator", return_value=coordinator):
+            assert controller.load_video("/tmp/imported.mov", initial_frame=73)
+
+        coordinator.session.get_master_frame_blocking.assert_called_once_with(73, timeout_ms=500)
+        assert controller.current_frame == controller._last_displayed_frame_index == 73
+        engine.set_image.assert_called_once()
+        controller._submit_decoded_frame_playback = MagicMock()
+        assert controller.request_static_preview_frame(73)
+        controller._submit_decoded_frame_playback.assert_called_once_with(
+            master, 73, quality="master", reason="seek", drop_if_stale=True)
+        coordinator.request_master_frame.assert_not_called()
+
     def test_load_failure_returns_false_and_cleans_up(self, make_controller, qapp) -> None:
         engine = make_engine()
         coordinator = make_coordinator()
@@ -2302,6 +2321,16 @@ class TestStaticPreviewState:
         assert renderer.current_front_tex_id is None
         assert renderer.current_front_size == (0, 0)
 
+    def test_fit_during_clip_hydration_cannot_submit_an_ungraded_frame(self, make_controller) -> None:
+        engine = make_engine()
+        engine.renderer = SimpleNamespace(video_texture_pending=True)
+        controller = make_controller(engine, make_coordinator())
+        controller._last_displayed_decoded_frame = make_packed_frame(31)
+        controller._last_displayed_frame_index = 31
+        controller._submit_decoded_frame_playback = MagicMock()
+        assert controller.refresh_current_frame_view()
+        controller._submit_decoded_frame_playback.assert_not_called()
+
     def test_clip_switch_guard_discards_pending_refreshes(self, make_controller) -> None:
         engine = make_engine()
         renderer = MagicMock()
@@ -2500,6 +2529,14 @@ class TestStaticPreviewShowsFrame:
         renderer.current_video_texture = MagicMock()
         controller = self._make(make_controller, renderer)
         assert controller.static_preview_shows_frame(24) is True
+
+    def test_reopening_paused_first_frame_can_republish_its_texture(self, make_controller) -> None:
+        renderer = SimpleNamespace(current_video_planes=object(), current_video_frame_index=0)
+        controller = self._make(make_controller, renderer)
+        controller.current_frame = 0
+        assert controller.static_preview_shows_frame(0)
+        renderer.current_video_frame_index = 8
+        assert not controller.static_preview_shows_frame(0)
 
     def test_false_while_playing(self, make_controller) -> None:
         controller = self._make(make_controller, MagicMock())

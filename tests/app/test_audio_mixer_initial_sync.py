@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from PyQt6.QtCore import QObject, Qt, pyqtSignal
-from PyQt6.QtWidgets import QDockWidget, QMainWindow, QWidget
+from PyQt6.QtWidgets import QDialog, QDockWidget, QMainWindow, QWidget
 import pytest
 
 from src.app.controllers.edit_controller import EditControllerMixin
@@ -89,6 +91,39 @@ def test_visible_restored_dock_is_reconciled_when_connections_are_installed(host
     qtbot.waitUntil(host.dock_audio_mixer.isVisible)
     assert not host.audio_mixer_panel._track_mixers
     host._connect_audio_mixer_sync()
+    _assert_tracks(host, host.edit_page._current_timeline)
+
+
+def test_color_defers_first_hidden_strips_and_syncs_engine_until_dock_opens(host, qtbot) -> None:
+    host.current_page = "Color"
+    host._connect_audio_mixer_sync()
+    host.show()
+    engine = Mock()
+    host.edit_page._audio_manager = engine
+    latest = _timeline("switched", 2)
+    host.edit_page.set_timeline(latest)
+    qtbot.waitUntil(lambda: engine.set_master_volume.called)
+    engine.set_master_muted.assert_called_with(latest.master_muted)
+    assert engine.set_track_routing.call_count == len(latest.audio_tracks)
+    assert not host.audio_mixer_panel._track_mixers
+
+    host.dock_audio_mixer.show()
+    _assert_tracks(host, latest)
+    host.dock_audio_mixer.hide()
+    updated = _timeline("updated", 3)
+    host.edit_page.set_timeline(updated)
+    qtbot.waitUntil(lambda: updated.audio_tracks[0].track_id in host.audio_mixer_panel._track_mixers)
+    _assert_tracks(host, updated)
+
+
+def test_color_syncs_strips_for_a_visible_mixer_dialog(host, qtbot) -> None:
+    host.current_page = "Color"
+    host._connect_audio_mixer_sync()
+    host.show()
+    dialog = QDialog(host.audio_mixer_panel)
+    dialog.show()
+    qtbot.waitUntil(dialog.isVisible)
+    host._fire_audio_mixer_sync()
     _assert_tracks(host, host.edit_page._current_timeline)
 
 

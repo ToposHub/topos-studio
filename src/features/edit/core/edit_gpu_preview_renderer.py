@@ -354,6 +354,7 @@ class EditRenderTask:
     luminance: VideoSignalLuminance | None = None
     scrub_settled: bool = False
     scrub_source_frames: tuple[ScrubSourceFrame, ...] = ()
+    idle_prebuffer_cancelled: threading.Event | None = None
 
     def __post_init__(self) -> None:
         if self.adjustment_layers is None:
@@ -2165,7 +2166,8 @@ class EditGpuPreviewRenderer(QThread):
         )
 
         w, h = task.output_fbo_size
-        if w <= 0 or h <= 0:
+        cancelled = task.idle_prebuffer_cancelled
+        if w <= 0 or h <= 0 or (cancelled is not None and cancelled.is_set()):
             self._release_task_sources(task)
             return
         # Keep the working signal in half float through composition. The

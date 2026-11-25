@@ -2755,7 +2755,10 @@ class EditControllerMixin:
                 "color": getattr(track, 'color', None),
             })
         try:
-            panel.sync_tracks(tracks)
+            # Color can become interactive before the project-load mixer timer
+            # fires. Opening the mixer already reconciles the current sequence.
+            if getattr(self, "current_page", None) != "Color" or not panel.can_defer_track_initialization():
+                panel.sync_tracks(tracks)
             # CW-A1: 侧链源列表下发（压缩器外部检源选择器：任意轨可选）
             if hasattr(panel, 'set_sidechain_sources_all'):
                 panel.set_sidechain_sources_all([
@@ -9263,9 +9266,15 @@ class EditControllerMixin:
         clear_armed = getattr(self, "_clear_mixer_armed_inputs", None)
         if callable(clear_armed):
             clear_armed()
+        if getattr(self, "_color_program_monitor_active", False):
+            self.set_color_timeline_composite_monitor(False)
         self._current_edit_project = None
         self._current_edit_project_filepath = None
         self._current_timeline_sequences = {}
+        # Detach Program before clearing the panels, which can request frames.
+        release_preview = getattr(self, "_release_timeline_preview_renderer", None)
+        if callable(release_preview):
+            release_preview()
         if grade_set_panel is not None:
             grade_set_panel.set_active_path(None)
         finish_recordings = getattr(self, "_finish_mixer_timeline_recordings", None)

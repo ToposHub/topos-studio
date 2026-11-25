@@ -233,6 +233,8 @@ class TimelinePanel(QWidget):
         # I01-2：起播仲裁门（宿主协调器安装；None = 未安装，行为同旧）
         self._playback_gate: Optional[Callable[[str], Optional[str]]] = None
         self._preview_renderer: Optional[Any] = None
+        self._detached_program_playhead: Callable[[int], None] | None = None
+        self._detached_program_frame = 0
         self._scrubbing_playhead: bool = False
         self._project: Optional[Any] = None
         # P1-23: 播放性能 HUD（懒创建，toggle_playback_hud 控制）
@@ -2159,6 +2161,9 @@ class TimelinePanel(QWidget):
         # Color page already reflects the playhead through its own transport.
         timeline_view = getattr(self, "timeline_view", None)
         if timeline_view is not None and not timeline_view.isVisible():
+            if not self._playback_controller.is_playing and getattr(self, "_detached_program_playhead", None):
+                self._detached_program_frame = frame
+                self._detached_program_playhead(frame)
             return
         self._update_timecode_display(frame)
         if not self._playback_controller.is_playing:
@@ -2228,10 +2233,12 @@ class TimelinePanel(QWidget):
         # Edit GL viewport（macOS 隐藏初始化 abort，见上方注释），也避免
         # 用隐藏视图的旧 playhead 触发背压 reanchor 令 Color 页播放回跳。
         timeline_view = getattr(self, "timeline_view", None)
-        if timeline_view is not None and not timeline_view.isVisible():
+        hidden = timeline_view is not None and not timeline_view.isVisible()
+        detached = getattr(self, "_detached_program_playhead", None) if hidden else None
+        if hidden and detached is None:
             return
         if self._should_defer_playback_tick(frame):
-            stable_frame = self._get_visible_playhead_frame()
+            stable_frame = self._detached_program_frame if hidden else self._get_visible_playhead_frame()
             playback_trace(
                 "timeline_panel.timer_frame_deferred",
                 requested_frame=frame,
@@ -2242,9 +2249,14 @@ class TimelinePanel(QWidget):
                 emit_frame_changed=False,
             )
             self.playback_reanchored.emit(stable_frame)
-            self._update_timecode_display(stable_frame)
+            if not hidden:
+                self._update_timecode_display(stable_frame)
             return
 
+        if detached is not None:
+            self._detached_program_frame = frame
+            detached(frame)
+            return
         self._update_timecode_display(frame)
         self._set_view_playhead_from_controller(frame)
 
@@ -3131,6 +3143,11 @@ class TimelinePanel(QWidget):
     def get_playback_controller(self) -> Any:
         """Get the EditPlaybackController instance for timeline playback state."""
         return self._playback_controller
+
+    def set_detached_program_playhead(self, callback: Callable[[int], None] | None) -> None:
+        """Drive the visible Program dock while the timeline widget is hidden."""
+        self._detached_program_frame = self._playback_controller.current_frame
+        self._detached_program_playhead = callback
 
     def set_preview_renderer(self, renderer: Optional[Any]) -> None:
         """Attach the timeline preview renderer for playback backpressure."""

@@ -857,12 +857,12 @@ class PlaybackCoordinator:
             if self._session is not None:
                 self._session.request_master_frame(int(frame_index))
 
-    def take_ready_master_frame(self, frame_index: int) -> Optional[Any]:
+    def take_ready_master_frame(self, frame_index: int, *, retry_submission: bool = False) -> Optional[Any]:
         """Return an exact master frame only when its async decode has completed."""
         with self._session_lock:
             if self._session is None:
                 return None
-            return self._session.take_ready_master_frame(int(frame_index))
+            return self._session.take_ready_master_frame(int(frame_index), retry_submission=retry_submission)
 
     def take_latest_ready_master_frame(
         self, current_target: int, *, max_frame_distance: int = 96,

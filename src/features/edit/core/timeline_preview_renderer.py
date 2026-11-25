@@ -559,11 +559,18 @@ class _GuardedPreviewSource:
 
 
 @dataclass(frozen=True, slots=True)
-class _ScrubWorkerResult:
+class _WorkerFrameResult:
     generation: int
     result: Any
     error: bool = False
     request_token: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PlaybackStart:
+    frame: int
+    deadline: float
+    hold_preview: bool
 
 
 class PreviewRenderWorker(QThread):
@@ -657,7 +664,7 @@ class PreviewRenderWorker(QThread):
         self._interactive_scrub_active: bool = False
         self._interactive_scrub_token: int = 0
         self._interactive_scrub_frame: int = -1
-        self._scrub_result_generation: int | None = None
+        self._active_result_generation: int | None = None
         self._scrub_result_token: int | None = None
         self._scrub_service_period_s: float | None = None
         # Scrub is latest-only: once the mouse moves, an old random seek must
@@ -905,6 +912,10 @@ class PreviewRenderWorker(QThread):
                     self._queue.task_done()
                     continue
 
+                cancelled = task_meta.get("idle_prebuffer_cancelled")
+                if cancelled is not None and cancelled.is_set():
+                    self._queue.task_done()
+                    continue
                 if self._is_abandoned_interactive_scrub_task(frame, task_meta):
                     self._emit_interactive_scrub_drop(
                         frame,
@@ -931,9 +942,11 @@ class PreviewRenderWorker(QThread):
                 )
                 self._active_decode_target_size = decode_target_size
                 self._current_task_background = bool(task_meta.get("background"))
-                if task_meta.get("request_kind") == "scrub" or task_meta.get("scrub_settled"):
-                    self._scrub_result_generation = generation_id
-                    self._scrub_result_token = task_meta.get("scrub_request_token")
+                # A sequence edit can reach the UI after the worker emits its
+                # result but before Qt delivers it. Keep the producing job's
+                # generation on playback and paused results as well as scrubs.
+                self._active_result_generation = generation_id
+                self._scrub_result_token = task_meta.get("scrub_request_token")
                 try:
                     self._execute_render(
                         frame,
@@ -944,14 +957,12 @@ class PreviewRenderWorker(QThread):
                         task_meta=task_meta,
                     )
                 except Exception as error:
-                    if self._scrub_result_generation is None:
-                        raise
-                    logger.exception("Scrub render failed for frame %s", frame)
+                    logger.exception("Preview render failed for frame %s", frame)
                     self._emit_worker_result(frame, str(error), error=True)
                 finally:
                     self._active_decode_target_size = None
                     self._current_task_background = False
-                    self._scrub_result_generation = None
+                    self._active_result_generation = None
                     self._scrub_result_token = None
                     self._queue.task_done()
 
@@ -1176,6 +1187,7 @@ class PreviewRenderWorker(QThread):
         generation_id: int,
         *,
         decode_target_size: Optional[Tuple[int, int]] = None,
+        cancelled: threading.Event | None = None,
     ) -> bool:
         """Queue an idle-prebuffer cache-fill task only when nothing waits.
 
@@ -1187,6 +1199,7 @@ class PreviewRenderWorker(QThread):
             return False
         task_meta: Dict[str, Any] = {
             "request_kind": "idle_prebuffer",
+            "idle_prebuffer_cancelled": cancelled,
             "frame": int(frame),
             "background": True,
             # P1-02: 后台缓存回填 = cache_fill 优先级（可被任何交互任务淘汰）。
@@ -1392,12 +1405,12 @@ class PreviewRenderWorker(QThread):
                 "reason": reason,
                 "scrub_request_token": (task_meta or {}).get("scrub_request_token"),
             }
-            self.frame_rendered.emit(int(frame), _ScrubWorkerResult(generation_id, result))
+            self.frame_rendered.emit(int(frame), _WorkerFrameResult(generation_id, result))
 
     def _emit_worker_result(self, frame: int, result: Any, *, error: bool = False) -> None:
-        generation = self._scrub_result_generation
+        generation = self._active_result_generation
         if generation is not None:
-            self.frame_rendered.emit(frame, _ScrubWorkerResult(
+            self.frame_rendered.emit(frame, _WorkerFrameResult(
                 generation, result, error, self._scrub_result_token,
             ))
         elif error:
@@ -2248,6 +2261,7 @@ class PreviewRenderWorker(QThread):
         if (
             callable(has_cached)
             and not realtime_now
+            and not background
             and has_cached(int(frame), int(generation_id), self._viewport_size) is True
         ):
             cache_task = EditRenderTask(
@@ -3058,6 +3072,7 @@ class PreviewRenderWorker(QThread):
             ),
             deadline_ns=int(task_meta.get("deadline_ns", 0) or 0),
             background=bool(task_meta.get("background")),
+            idle_prebuffer_cancelled=task_meta.get("idle_prebuffer_cancelled"),
             # Interactive decoders can return a nearby source frame. Only
             # exact renders can populate the cache keyed by timeline frame.
             cacheable=not realtime_now and task_meta.get("request_kind") != "scrub",
@@ -6777,6 +6792,7 @@ class TimelinePreviewRenderer(QObject):
     # Final-4: 通知下游 Viewer 当前 realtime 状态（让 set_frame 在 REALTIME
     # 下拒绝裸 tuple，必须走 GpuPresentFrame fence/slot 协议）。
     playback_mode_changed = pyqtSignal(bool)
+    playback_start_ready = pyqtSignal(int)  # Cold start frame is ready for the transport clock and PCM.
 
     def __init__(
         self,
@@ -6861,6 +6877,7 @@ class TimelinePreviewRenderer(QObject):
         # 轮询在静默满 delay_ms 后才开跑；渲染完成链里的同帧重入请求只会
         # 推迟预缓冲，不会孤立已排定的回调（epoch 方案的缺陷）。
         self._idle_prebuffer_armed: bool = False
+        self._idle_prebuffer_cancelled = threading.Event()
         self._idle_prebuffer_polling: bool = False
         self._idle_prebuffer_dispatching: bool = False
         self._idle_prebuffer_anchor: int = 0
@@ -7073,6 +7090,8 @@ class TimelinePreviewRenderer(QObject):
         # 记录已发射到 viewer 的最大帧号；比该值更旧的渲染结果直接丢弃。
         # 在 set_sequence() / set_project() / 大跳变（seek）时重置为 -1。
         self._last_emitted_frame: int = -1
+        self._playback_session_emitted = False
+        self._playback_start_wait: _PlaybackStart | None = None
 
         # 渲染节流：同一时间只允许一个预览渲染执行。
         # 播放 tick 在渲染中到来时合并为 _queued_frame，完成后只消费
@@ -8259,6 +8278,7 @@ class TimelinePreviewRenderer(QObject):
 
     _SEEK_JUMP_THRESHOLD: int = 10  # 帧号跳变超过此值视为 seek
     _PLAYBACK_STALE_TOLERANCE_FRAMES: int = 6
+    _PLAYBACK_RELEASE_WATCHDOG_S: float = 2.0
     # A timer callback may arrive a frame late even when decode and present are
     # healthy. Do not turn that ordinary event-loop jitter into a controller
     # re-anchor; only hold the clock after a real multi-frame backlog exists.
@@ -8358,6 +8378,7 @@ class TimelinePreviewRenderer(QObject):
 
     def _mark_frame_emitted(self, frame: int) -> None:
         """记录已发射帧号（更新守卫）"""
+        start = getattr(self, "_playback_start_wait", None)
         direction = getattr(self, '_playback_direction', 1)
         if direction >= 0:
             if frame > self._last_emitted_frame:
@@ -8367,6 +8388,9 @@ class TimelinePreviewRenderer(QObject):
                 self._last_emitted_frame = frame
         # 标记本播放会话已成功发射过帧
         self._playback_session_emitted = True
+        if start is not None and start.frame == frame:
+            self._playback_start_wait = None
+            self.playback_start_ready.emit(frame)
 
     def _advance_last_emitted_to_dropped_frame(self, dropped_frame: int) -> None:
         """
@@ -8457,6 +8481,11 @@ class TimelinePreviewRenderer(QObject):
         except Exception:
             return False
 
+    @property
+    def gpu_preview_ready(self) -> bool:
+        """Whether the timeline can deliver GPU preview frames."""
+        return self._has_gpu_preview_pipeline()
+
     def _has_gpu_preview_pipeline(self) -> bool:
         """
         Return whether the edit preview has a GPU decode/render pipeline attached.
@@ -8527,6 +8556,10 @@ class TimelinePreviewRenderer(QObject):
             return False
         return self._should_use_gpu_only_realtime_preview()
 
+    def is_waiting_for_playback_start(self, frame: int) -> bool:
+        start = self._playback_start_wait
+        return start is not None and start.frame == frame
+
     def should_defer_playback_tick(self, requested_frame: int | None = None) -> bool:
         """
         Return whether TimelinePanel should hold a playback timer tick.
@@ -8547,6 +8580,16 @@ class TimelinePreviewRenderer(QObject):
         """
         if not self._is_controller_playing():
             return False
+        start = getattr(self, "_playback_start_wait", None)
+        if start is not None:
+            if time.monotonic() < start.deadline:
+                # A monitor budget change can retire the startup job between
+                # the spacebar and the first tick. Reissue the same frame.
+                if not self._render_in_flight:
+                    self.request_render(start.frame)
+                return self._playback_start_wait is not None
+            self._playback_start_wait = None
+            self.playback_start_ready.emit(start.frame)
         if not self._render_in_flight:
             return False
 
@@ -9198,6 +9241,9 @@ class TimelinePreviewRenderer(QObject):
             is_playing: True=进入播放，False=暂停/停止
         """
         self._engine_playback_active = bool(is_playing)
+        if not is_playing:
+            self._playback_start_wait = None
+            self._playback_session_started = False
         if is_playing:
             # Any paused FULL request becomes stale as soon as playback starts.
             self._cancel_full_quality_refresh()
@@ -10079,6 +10125,7 @@ class TimelinePreviewRenderer(QObject):
         self._publish_interactive_scrub_state(frame, active=False)
         self._invalidate_render_generation_for_scrub(frame, "finish" if settle else "cancel")
         if not settle:
+            self._cancel_full_quality_refresh()
             return
         playback_trace("renderer.scrub_finished_exact_request", frame=frame)
         self.request_render(frame)
@@ -10215,11 +10262,7 @@ class TimelinePreviewRenderer(QObject):
             )
             if frame not in (int(self._scrub_latest_frame), display):
                 return
-        if (
-            not getattr(self, "_scrub_active", False)
-            and self._is_controller_playing()
-            and getattr(self, "_playback_session_emitted", False)
-        ):
+        if self._playback_holds_preview_over_thumbnail():
             return
         if pixmap is None or pixmap.isNull():
             return
@@ -10265,6 +10308,12 @@ class TimelinePreviewRenderer(QObject):
         if not self._pending_placeholder_requests:
             self._placeholder_accepting_frame = None
 
+    def _playback_holds_preview_over_thumbnail(self) -> bool:
+        if self._scrub_active or not self._is_controller_playing():
+            return False
+        start = self._playback_start_wait
+        return self._playback_session_emitted or (start is not None and start.hold_preview)
+
     def _emit_cached_placeholder_frame(
         self,
         frame: int,
@@ -10284,11 +10333,7 @@ class TimelinePreviewRenderer(QObject):
         if self._should_use_gpu_only_realtime_preview():
             playback_trace("renderer.placeholder_skip_gpu_only_realtime", frame=frame)
             return
-        if (
-            not getattr(self, "_scrub_active", False)
-            and self._is_controller_playing()
-            and getattr(self, "_playback_session_emitted", False)
-        ):
+        if self._playback_holds_preview_over_thumbnail():
             return
         if not getattr(plan, "has_content", False):
             return
@@ -10419,6 +10464,32 @@ class TimelinePreviewRenderer(QObject):
             self.request_scrub_preview(frame)
             return
 
+        # 检测播放状态转换：非播放→播放时重置会话标记
+        is_currently_playing = getattr(self, "_is_controller_playing", lambda: False)()
+        if is_currently_playing:
+            if not getattr(self, '_playback_session_started', False):
+                self._playback_session_started = True
+                self._playback_session_emitted = False
+                refine = getattr(self, "_scrub_exact_frame", None)
+                last_frame = getattr(self, "_last_emitted_frame", -1)
+                if last_frame != frame or refine is not None:
+                    self._playback_start_wait = _PlaybackStart(
+                        frame=frame,
+                        deadline=time.monotonic() + TimelinePreviewRenderer._PLAYBACK_RELEASE_WATCHDOG_S,
+                        hold_preview=refine is not None or last_frame >= 0,
+                    )
+                if refine is not None:
+                    # A late paused exact result must not constrain the next
+                    # playback generation after its quality/monitor changes.
+                    self._scrub_exact_frame = None
+                    self._scrub_finish_exact_frame = None
+                    self._invalidate_render_generation_for_scrub(frame, "playback_takeover")
+                else:
+                    self._reset_emitted_frame_guard()
+                playback_trace("renderer.playback_resume_reset_guard")
+        else:
+            self._playback_session_started = False
+
         # Final-1: 播放态经 engine 热路径入口（request_present_via_engine）。
         # _render_from_engine 标记来自 engine delegate 的递归调用，直接执行核心逻辑。
         if (
@@ -10442,21 +10513,6 @@ class TimelinePreviewRenderer(QObject):
                     frame=frame,
                     error=str(e),
                 )
-
-        # 检测播放状态转换：非播放→播放时重置会话标记
-        is_currently_playing = getattr(self, "_is_controller_playing", lambda: False)()
-        if is_currently_playing:
-            if not getattr(self, '_playback_session_started', False):
-                self._playback_session_started = True
-                self._playback_session_emitted = False
-                # BUG FIX: 恢复播放时重置单调帧守卫。
-                # 上一次播放会话可能有旧渲染结果在暂停期间被丢弃或显示，
-                # 导致 _last_emitted_frame 指向旧帧。如果不重置，
-                # 新会话的第一帧会被单调守卫误判或产生大幅跳跃。
-                self._reset_emitted_frame_guard()
-                playback_trace("renderer.playback_resume_reset_guard")
-        else:
-            self._playback_session_started = False
 
         # 检测 seek（帧号大幅跳变），重置单调帧守卫并中断当前渲染
         self._pending_mutex.lock()
@@ -12184,7 +12240,7 @@ class TimelinePreviewRenderer(QObject):
             result: 渲染结果（QImage 或 texture_id）
         """
         scrub_token = None
-        if isinstance(result, _ScrubWorkerResult):
+        if isinstance(result, _WorkerFrameResult):
             if result.generation != self._generation_id:
                 return
             scrub_token = result.request_token
@@ -12263,6 +12319,7 @@ class TimelinePreviewRenderer(QObject):
                     and self._should_bypass_scrub_cpu_cache()
                 )
                 or self._is_scrub_finish_exact_request(frame)
+                or self.is_waiting_for_playback_start(frame)
             )
             fallback = None if bypass_none_fallback_cache else self._get_nearest_cached_frame(frame)
             if bypass_none_fallback_cache:
@@ -12559,13 +12616,25 @@ class TimelinePreviewRenderer(QObject):
             return int(scrub_latest)
         return 0
 
+    def set_idle_prebuffer_active(self, active: bool) -> None:
+        """Retire only speculative neighbour frames when the Program viewer is hidden."""
+        if active:
+            if self._idle_prebuffer_cancelled.is_set():
+                self._idle_prebuffer_cancelled = threading.Event()
+        else:
+            self._idle_prebuffer_cancelled.set()
+            self._idle_prebuffer_armed = False
+            self._idle_prebuffer_dispatching = False
+            self._idle_prebuffer_targets.clear()
+            self._idle_prebuffer_pending.clear()
+
     def _schedule_idle_prebuffer(self, frame: Optional[int] = None) -> None:
         """布防空闲预缓冲：静默满 delay_ms 后在播放头邻域后台填缓存。
 
         只布防 + 启动一条低频轮询链；任何渲染请求都会刷新
         _last_render_request_ts，轮询自然推迟。重复调用安全（锚点覆盖）。
         """
-        if not getattr(self, "_idle_prebuffer_enabled_flag", False):
+        if not getattr(self, "_idle_prebuffer_enabled_flag", False) or self._idle_prebuffer_cancelled.is_set():
             return
         if getattr(self, "_scrub_active", False):
             return
@@ -12717,6 +12786,7 @@ class TimelinePreviewRenderer(QObject):
                         plan,
                         self._generation_id,
                         decode_target_size=self._auto2k_decode_target_size(),
+                        cancelled=self._idle_prebuffer_cancelled,
                     )
                 except Exception as e:
                     logger.debug(f"idle prebuffer enqueue failed at frame={frame}: {e}")

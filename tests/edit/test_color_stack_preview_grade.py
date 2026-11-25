@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -98,3 +100,61 @@ def test_gpu_color_stack_shader_compiles() -> None:
         assert renderer._grade_program is not None
     finally:
         ctx.release()
+
+
+def test_gpu_program_composites_independent_per_track_luts(tmp_path: Path) -> None:
+    from PyQt6.QtCore import QThread
+    from src.features.color.core.color_graph_migration import migrate_legacy_stack
+    from src.features.edit.core.edit_gpu_preview_renderer import EditGpuPreviewRenderer
+    from tests.color.fixtures.color_graph import _neutral_layer
+    from tests.color.test_color_graph_migration import _stack_with_layers
+
+    moderngl = pytest.importorskip("moderngl")
+    colors = [(0.8, 0.2, 0.1), (0.1, 0.8, 0.2), (0.2, 0.1, 0.8), (0.7, 0.5, 0.2)]
+    graphs = []
+    for index, (r, g, b) in enumerate(colors):
+        cube = tmp_path / f"track-{index}.cube"
+        cube.write_text("LUT_3D_SIZE 2\n" + f"{r} {g} {b}\n" * 8)
+        layer = _neutral_layer(f"Track {index}")
+        layer.active_lut_path = str(cube)
+        graphs.append(migrate_legacy_stack(_stack_with_layers([layer])))
+
+    def render() -> np.ndarray:
+        try:
+            ctx = moderngl.create_standalone_context(require=330)
+        except Exception as error:
+            pytest.skip(f"No offscreen GL context: {error}")
+        preview = EditGpuPreviewRenderer.__new__(EditGpuPreviewRenderer)
+        QThread.__init__(preview)
+        preview.ctx = ctx
+        try:
+            assert preview._init_shaders()
+            preview._init_quad()
+            preview._graded_track_fbos = []
+            preview._graded_track_texes = []
+            preview._working_dtype = "f4"
+            size = (8, 4)
+            preview._composite_tex = ctx.texture(size, 4, dtype="f4")
+            preview._composite_fbo = ctx.framebuffer([preview._composite_tex])
+            pixels = np.full((4, 8, 4), 0.4, "f4")
+            pixels[..., 3] = 1.0
+            source = ctx.texture(size, 4, pixels, dtype="f4")
+            tracks = []
+            for index, graph in enumerate(graphs):
+                tex = preview._apply_preview_grade(
+                    source, index, *size, {"color_graph": graph, "source_frame": 7})
+                tracks.append((tex, 1.0 if index == 0 else 0.5))
+            out = preview._composite_tracks(tracks, *size)
+            return np.frombuffer(out.read(), "f4").reshape(4, 8, 4)[2, 4, :3].copy()
+        finally:
+            graph_renderer = getattr(preview, "_color_graph_texture_renderer", None)
+            if graph_renderer is not None:
+                graph_renderer.release()
+            ctx.release()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        actual = pool.submit(render).result()
+    expected = np.array(colors[0])
+    for overlay in colors[1:]:
+        expected = 0.5 * expected + 0.5 * np.array(overlay)
+    np.testing.assert_allclose(actual, expected, atol=0.004)

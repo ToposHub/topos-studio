@@ -6892,8 +6892,15 @@ class TimelineView(QGraphicsView):
 
         # UI-10: Finish playhead drag
         if self._playhead_dragging and event.button() == Qt.MouseButton.LeftButton:
+            scene_pos = self.mapToScene(event.pos())
+            # A fast release can arrive beyond the last mouse-move event.
+            # Preserve a stationary click within the playhead's hit area.
+            if scene_pos.x() != self._interaction.current_pos.x():
+                frame = self._frame_from_scene_x(scene_pos.x())
+                if frame != self._playhead_frame:
+                    self.set_playhead(frame)
             self._finish_playhead_drag()
-            self._update_cursor_for_position(self.mapToScene(event.pos()))
+            self._update_cursor_for_position(scene_pos)
             return
 
         if self._rubber_band_active and event.button() == Qt.MouseButton.LeftButton:

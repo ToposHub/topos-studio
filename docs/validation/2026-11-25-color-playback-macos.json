@@ -1,0 +1,4122 @@
+{
+  "baseline_commit": "fcb0bbed",
+  "machine": "Intel Core i9-9900K, macOS 15.3.1",
+  "gpu": "AMD Radeon RX 6900 XT",
+  "display_hz": 60.0,
+  "resolve_version": "21.2.0.6",
+  "media": "tests/test_videos/4K_H264.mov",
+  "project_fps": 25,
+  "viewer_size": [
+    704,
+    396
+  ],
+  "sample_roi": [
+    320,
+    180
+  ],
+  "lut": "Topos_Resolve_AB_33.cube",
+  "lut_sha256": "ffba7587f1e154dc5fa0919266c87fc9df538db4dbdbe262723f3c201bad6fc7",
+  "color_playback_decoded_size": [
+    1920,
+    1080
+  ],
+  "color_scrub_decoded_size": [
+    3840,
+    2160
+  ],
+  "gesture_results": {
+    "before": {
+      "play": {
+        "median": {
+          "input_to_first_ms": 258.92,
+          "gap_p95_ms": 57.5,
+          "max_gap_ms": 258.92,
+          "optical_hz": 23.74,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "topos-head-1-color-1-play.npz",
+            "input_to_first_ms": 258.92,
+            "gap_p95_ms": 57.33,
+            "max_gap_ms": 258.92,
+            "optical_hz": 23.74,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.15,
+            "painted_source_frame_changes": 96
+          },
+          {
+            "file": "topos-head-2-color-1-play.npz",
+            "input_to_first_ms": 243.21,
+            "gap_p95_ms": 57.58,
+            "max_gap_ms": 243.21,
+            "optical_hz": 23.74,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.28,
+            "painted_source_frame_changes": 96
+          },
+          {
+            "file": "topos-head-3-color-1-play.npz",
+            "input_to_first_ms": 299.8,
+            "gap_p95_ms": 57.5,
+            "max_gap_ms": 299.8,
+            "optical_hz": 23.74,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.14,
+            "painted_source_frame_changes": 95
+          },
+          {
+            "file": "topos-head-4-color-1-play.npz",
+            "input_to_first_ms": 317.93,
+            "gap_p95_ms": 57.24,
+            "max_gap_ms": 317.93,
+            "optical_hz": 23.49,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.71,
+            "painted_source_frame_changes": 94
+          },
+          {
+            "file": "topos-head-5-color-1-play.npz",
+            "input_to_first_ms": 221.7,
+            "gap_p95_ms": 57.59,
+            "max_gap_ms": 221.7,
+            "optical_hz": 23.99,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.22,
+            "painted_source_frame_changes": 97
+          }
+        ]
+      },
+      "fast": {
+        "median": {
+          "input_to_first_ms": 97.14,
+          "gap_p95_ms": 308.69,
+          "max_gap_ms": 396.16,
+          "optical_hz": 8.0,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "topos-head-1-color-1-fast.npz",
+            "input_to_first_ms": 95.02,
+            "gap_p95_ms": 324.12,
+            "max_gap_ms": 485.75,
+            "optical_hz": 8.0,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 3.19,
+            "painted_source_frame_changes": 30,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 120.57,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 416.56,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 240.05,
+                "wrong_way": [
+                  [
+                    31.5,
+                    121,
+                    89
+                  ]
+                ]
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 209.34,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 334.53,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 225.41,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-head-2-color-1-fast.npz",
+            "input_to_first_ms": 63.56,
+            "gap_p95_ms": 310.9,
+            "max_gap_ms": 455.69,
+            "optical_hz": 7.47,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 13.53,
+            "painted_source_frame_changes": 28,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 124.69,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 309.12,
+                "wrong_way": [
+                  [
+                    30.2,
+                    161,
+                    201
+                  ]
+                ]
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 208.5,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 358.6,
+                "wrong_way": [
+                  [
+                    216.9,
+                    129,
+                    201
+                  ]
+                ]
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 387.68,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": null,
+                "wrong_way": [
+                  [
+                    27.0,
+                    153,
+                    169
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "file": "topos-head-3-color-1-fast.npz",
+            "input_to_first_ms": 99.4,
+            "gap_p95_ms": 294.83,
+            "max_gap_ms": 359.66,
+            "optical_hz": 8.8,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 3.05,
+            "painted_source_frame_changes": 34,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 84.85,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 265.66,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 235.15,
+                "wrong_way": [
+                  [
+                    75.7,
+                    105,
+                    89
+                  ]
+                ]
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 222.45,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 305.64,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 252.62,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-head-4-color-1-fast.npz",
+            "input_to_first_ms": 97.14,
+            "gap_p95_ms": 308.69,
+            "max_gap_ms": 396.16,
+            "optical_hz": 7.73,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 5.02,
+            "painted_source_frame_changes": 29,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 87.94,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 328.29,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 239.56,
+                "wrong_way": [
+                  [
+                    66.3,
+                    105,
+                    89
+                  ]
+                ]
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 184.97,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 372.9,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 240.62,
+                "wrong_way": [
+                  [
+                    25.3,
+                    161,
+                    177
+                  ]
+                ]
+              }
+            ]
+          },
+          {
+            "file": "topos-head-5-color-1-fast.npz",
+            "input_to_first_ms": 116.46,
+            "gap_p95_ms": 228.37,
+            "max_gap_ms": 310.59,
+            "optical_hz": 10.4,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.38,
+            "painted_source_frame_changes": 39,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 123.13,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 214.73,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 217.09,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 215.36,
+                "wrong_way": [
+                  [
+                    34.4,
+                    177,
+                    193
+                  ]
+                ]
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 256.75,
+                "wrong_way": [
+                  [
+                    38.2,
+                    97,
+                    65
+                  ]
+                ]
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 260.94,
+                "wrong_way": []
+              }
+            ]
+          }
+        ],
+        "all_legs": {
+          "count": 30,
+          "unresponsive": 1,
+          "wrong_direction_frames": 9,
+          "first_correct_ms_p50_p95_max": [
+            239.56,
+            381.77,
+            416.56
+          ]
+        }
+      },
+      "reverse": {
+        "median": {
+          "input_to_first_ms": 179.74,
+          "gap_p95_ms": 167.84,
+          "max_gap_ms": 195.4,
+          "optical_hz": 19.45,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "topos-head-1-color-1-reverse.npz",
+            "input_to_first_ms": 175.98,
+            "gap_p95_ms": 177.25,
+            "max_gap_ms": 195.4,
+            "optical_hz": 18.1,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 4.98,
+            "painted_source_frame_changes": 57,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 155.66,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-head-2-color-1-reverse.npz",
+            "input_to_first_ms": 227.62,
+            "gap_p95_ms": 174.98,
+            "max_gap_ms": 227.62,
+            "optical_hz": 19.45,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 4.49,
+            "painted_source_frame_changes": 60,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 210.48,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-head-3-color-1-reverse.npz",
+            "input_to_first_ms": 190.81,
+            "gap_p95_ms": 167.84,
+            "max_gap_ms": 231.64,
+            "optical_hz": 19.44,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 6.27,
+            "painted_source_frame_changes": 59,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 188.08,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-head-4-color-1-reverse.npz",
+            "input_to_first_ms": 177.32,
+            "gap_p95_ms": 162.85,
+            "max_gap_ms": 177.32,
+            "optical_hz": 20.45,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 3.33,
+            "painted_source_frame_changes": 64,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 214.58,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-head-5-color-1-reverse.npz",
+            "input_to_first_ms": 179.74,
+            "gap_p95_ms": 135.48,
+            "max_gap_ms": 179.74,
+            "optical_hz": 22.12,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.43,
+            "painted_source_frame_changes": 71,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 144.01,
+                "wrong_way": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "after": {
+      "play": {
+        "median": {
+          "input_to_first_ms": 212.33,
+          "gap_p95_ms": 57.03,
+          "max_gap_ms": 212.33,
+          "optical_hz": 24.0,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "topos-release-1-color-1-play.npz",
+            "input_to_first_ms": 212.33,
+            "gap_p95_ms": 57.28,
+            "max_gap_ms": 212.33,
+            "optical_hz": 24.0,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.15,
+            "painted_source_frame_changes": 97
+          },
+          {
+            "file": "topos-release-2-color-1-play.npz",
+            "input_to_first_ms": 216.35,
+            "gap_p95_ms": 57.03,
+            "max_gap_ms": 216.35,
+            "optical_hz": 24.0,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.25,
+            "painted_source_frame_changes": 96
+          },
+          {
+            "file": "topos-release-3-color-1-play.npz",
+            "input_to_first_ms": 203.13,
+            "gap_p95_ms": 57.19,
+            "max_gap_ms": 203.13,
+            "optical_hz": 24.0,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.05,
+            "painted_source_frame_changes": 97
+          },
+          {
+            "file": "topos-release-4-color-1-play.npz",
+            "input_to_first_ms": 212.2,
+            "gap_p95_ms": 56.38,
+            "max_gap_ms": 212.2,
+            "optical_hz": 24.0,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.29,
+            "painted_source_frame_changes": 97
+          },
+          {
+            "file": "topos-release-5-color-1-play.npz",
+            "input_to_first_ms": 223.82,
+            "gap_p95_ms": 56.87,
+            "max_gap_ms": 223.82,
+            "optical_hz": 23.75,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.11,
+            "painted_source_frame_changes": 96
+          }
+        ]
+      },
+      "fast": {
+        "median": {
+          "input_to_first_ms": 85.76,
+          "gap_p95_ms": 133.46,
+          "max_gap_ms": 330.07,
+          "optical_hz": 18.14,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "topos-release-1-color-1-fast.npz",
+            "input_to_first_ms": 97.76,
+            "gap_p95_ms": 139.66,
+            "max_gap_ms": 279.42,
+            "optical_hz": 17.61,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.33,
+            "painted_source_frame_changes": 70,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 59.27,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 261.87,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 106.78,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 185.9,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 46.22,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 136.15,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-2-color-1-fast.npz",
+            "input_to_first_ms": 89.44,
+            "gap_p95_ms": 133.46,
+            "max_gap_ms": 334.54,
+            "optical_hz": 18.4,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.43,
+            "painted_source_frame_changes": 70,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 42.3,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 285.67,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 65.96,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 137.4,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 101.38,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 77.64,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-3-color-1-fast.npz",
+            "input_to_first_ms": 83.62,
+            "gap_p95_ms": 141.53,
+            "max_gap_ms": 330.07,
+            "optical_hz": 18.14,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.4,
+            "painted_source_frame_changes": 71,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 42.9,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 283.91,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 96.51,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 110.1,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 41.53,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 159.26,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-4-color-1-fast.npz",
+            "input_to_first_ms": 80.95,
+            "gap_p95_ms": 117.53,
+            "max_gap_ms": 342.05,
+            "optical_hz": 17.6,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.25,
+            "painted_source_frame_changes": 72,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 40.31,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 303.56,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 35.01,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 69.38,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 70.51,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 84.21,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-5-color-1-fast.npz",
+            "input_to_first_ms": 85.76,
+            "gap_p95_ms": 127.62,
+            "max_gap_ms": 282.77,
+            "optical_hz": 18.14,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.44,
+            "painted_source_frame_changes": 70,
+            "legs": [
+              {
+                "direction": 1,
+                "first_correct_ms": 41.74,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 249.45,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 70.06,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 85.66,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": 87.71,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 95.02,
+                "wrong_way": []
+              }
+            ]
+          }
+        ],
+        "all_legs": {
+          "count": 30,
+          "unresponsive": 0,
+          "wrong_direction_frames": 0,
+          "first_correct_ms_p50_p95_max": [
+            86.68,
+            284.88,
+            303.56
+          ]
+        }
+      },
+      "reverse": {
+        "median": {
+          "input_to_first_ms": 200.06,
+          "gap_p95_ms": 145.25,
+          "max_gap_ms": 200.06,
+          "optical_hz": 20.78,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "topos-release-1-color-1-reverse.npz",
+            "input_to_first_ms": 212.28,
+            "gap_p95_ms": 155.29,
+            "max_gap_ms": 307.77,
+            "optical_hz": 18.44,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.41,
+            "painted_source_frame_changes": 58,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 162.63,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 36.68,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": 1,
+                "first_correct_ms": null,
+                "wrong_way": []
+              },
+              {
+                "direction": -1,
+                "first_correct_ms": 28.38,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-2-color-1-reverse.npz",
+            "input_to_first_ms": 159.34,
+            "gap_p95_ms": 154.53,
+            "max_gap_ms": 175.15,
+            "optical_hz": 20.78,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.35,
+            "painted_source_frame_changes": 68,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 115.64,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-3-color-1-reverse.npz",
+            "input_to_first_ms": 174.73,
+            "gap_p95_ms": 124.27,
+            "max_gap_ms": 174.73,
+            "optical_hz": 22.12,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.32,
+            "painted_source_frame_changes": 70,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 129.29,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-4-color-1-reverse.npz",
+            "input_to_first_ms": 211.13,
+            "gap_p95_ms": 145.25,
+            "max_gap_ms": 211.13,
+            "optical_hz": 20.78,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.32,
+            "painted_source_frame_changes": 66,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 168.72,
+                "wrong_way": []
+              }
+            ]
+          },
+          {
+            "file": "topos-release-5-color-1-reverse.npz",
+            "input_to_first_ms": 200.06,
+            "gap_p95_ms": 135.12,
+            "max_gap_ms": 200.06,
+            "optical_hz": 23.13,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.27,
+            "painted_source_frame_changes": 74,
+            "legs": [
+              {
+                "direction": -1,
+                "first_correct_ms": 154.06,
+                "wrong_way": []
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "resolve": {
+      "play": {
+        "median": {
+          "input_to_first_ms": 103.14,
+          "gap_p95_ms": 56.38,
+          "max_gap_ms": 103.14,
+          "optical_hz": 26.17,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "resolve-match-release-1-1-play.npz",
+            "input_to_first_ms": 113.28,
+            "gap_p95_ms": 56.14,
+            "max_gap_ms": 113.28,
+            "optical_hz": 25.9,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 5.32
+          },
+          {
+            "file": "resolve-match-release-2-1-play.npz",
+            "input_to_first_ms": 115.26,
+            "gap_p95_ms": 56.31,
+            "max_gap_ms": 115.26,
+            "optical_hz": 26.17,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.83
+          },
+          {
+            "file": "resolve-match-release-3-1-play.npz",
+            "input_to_first_ms": 103.14,
+            "gap_p95_ms": 56.67,
+            "max_gap_ms": 103.14,
+            "optical_hz": 26.18,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.93
+          },
+          {
+            "file": "resolve-match-release-4-1-play.npz",
+            "input_to_first_ms": 93.02,
+            "gap_p95_ms": 56.87,
+            "max_gap_ms": 93.02,
+            "optical_hz": 26.44,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.68
+          },
+          {
+            "file": "resolve-match-release-5-1-play.npz",
+            "input_to_first_ms": 102.14,
+            "gap_p95_ms": 56.38,
+            "max_gap_ms": 102.14,
+            "optical_hz": 26.17,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 3.25
+          }
+        ]
+      },
+      "fast": {
+        "median": {
+          "input_to_first_ms": 51.74,
+          "gap_p95_ms": 100.43,
+          "max_gap_ms": 134.54,
+          "optical_hz": 18.94,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "resolve-match-release-1-1-fast.npz",
+            "input_to_first_ms": 54.89,
+            "gap_p95_ms": 97.43,
+            "max_gap_ms": 125.85,
+            "optical_hz": 19.2,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.59
+          },
+          {
+            "file": "resolve-match-release-2-1-fast.npz",
+            "input_to_first_ms": 50.03,
+            "gap_p95_ms": 107.66,
+            "max_gap_ms": 134.54,
+            "optical_hz": 18.94,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.54
+          },
+          {
+            "file": "resolve-match-release-3-1-fast.npz",
+            "input_to_first_ms": 51.74,
+            "gap_p95_ms": 105.85,
+            "max_gap_ms": 182.67,
+            "optical_hz": 18.4,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.47
+          },
+          {
+            "file": "resolve-match-release-4-1-fast.npz",
+            "input_to_first_ms": 95.39,
+            "gap_p95_ms": 100.43,
+            "max_gap_ms": 183.4,
+            "optical_hz": 18.41,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.37
+          },
+          {
+            "file": "resolve-match-release-5-1-fast.npz",
+            "input_to_first_ms": 40.64,
+            "gap_p95_ms": 96.93,
+            "max_gap_ms": 125.42,
+            "optical_hz": 20.27,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.76
+          }
+        ]
+      },
+      "reverse": {
+        "median": {
+          "input_to_first_ms": 117.08,
+          "gap_p95_ms": 116.73,
+          "max_gap_ms": 128.46,
+          "optical_hz": 21.12,
+          "dark_samples": 0,
+          "n": 5
+        },
+        "runs": [
+          {
+            "file": "resolve-match-release-1-1-reverse.npz",
+            "input_to_first_ms": 192.82,
+            "gap_p95_ms": 116.09,
+            "max_gap_ms": 192.82,
+            "optical_hz": 20.78,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.69
+          },
+          {
+            "file": "resolve-match-release-2-1-reverse.npz",
+            "input_to_first_ms": 111.93,
+            "gap_p95_ms": 116.73,
+            "max_gap_ms": 117.74,
+            "optical_hz": 21.12,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 3.2
+          },
+          {
+            "file": "resolve-match-release-3-1-reverse.npz",
+            "input_to_first_ms": 128.68,
+            "gap_p95_ms": 117.12,
+            "max_gap_ms": 128.68,
+            "optical_hz": 21.12,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.24
+          },
+          {
+            "file": "resolve-match-release-4-1-reverse.npz",
+            "input_to_first_ms": 117.08,
+            "gap_p95_ms": 117.07,
+            "max_gap_ms": 128.46,
+            "optical_hz": 21.45,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 2.53
+          },
+          {
+            "file": "resolve-match-release-5-1-reverse.npz",
+            "input_to_first_ms": 114.39,
+            "gap_p95_ms": 111.44,
+            "max_gap_ms": 114.39,
+            "optical_hz": 21.11,
+            "dark_samples": 0,
+            "capture_age_ms_p95": 1.63
+          }
+        ]
+      }
+    }
+  },
+  "planar_scaling_p95_ms": {
+    "tests/test_videos/4K_H264.mov": {
+      "per_frame": 25.27,
+      "per_source": 1.78
+    },
+    "tests/test_videos/4K_H265.mov": {
+      "per_frame": 19.42,
+      "per_source": 3.83
+    },
+    "tests/test_videos/4K_prores422HQ.mov": {
+      "per_frame": 24.84,
+      "per_source": 2.97
+    },
+    "tests/test_videos/4K_DNxHR HQX 10bit.mov": {
+      "per_frame": 24.9,
+      "per_source": 3.27
+    }
+  },
+  "master_replay": {
+    "candidate": {
+      "matched": 277,
+      "fast": {
+        "requests": 59,
+        "physical_seeks": 12,
+        "decoded_av_frames": 214,
+        "source_read_calls": 22,
+        "raw_history_hits": 1,
+        "display_cache_hits": 36,
+        "gop_walks": 12,
+        "gop_walk_frames": 142,
+        "short_walks": 10,
+        "short_walk_frames": 72,
+        "peak_raw_bytes": 111974400,
+        "peak_raw_frames": 9,
+        "peak_display_cache_bytes": 261273600,
+        "source_ms": {
+          "total": 916.31,
+          "p50": 0.02,
+          "p95": 79.49,
+          "maximum": 98.01
+        },
+        "walk_ms": {
+          "total": 780.84,
+          "p50": 63.12,
+          "p95": 97.15,
+          "maximum": 97.74
+        },
+        "strides": {
+          "1": 1,
+          "4": 2,
+          "8": 11,
+          "12": 3,
+          "16": 21,
+          "32": 1,
+          "24": 7,
+          "20": 12,
+          "10": 1
+        }
+      }
+    },
+    "control": {
+      "matched": 277,
+      "fast": {
+        "requests": 59,
+        "physical_seeks": 36,
+        "decoded_av_frames": 612,
+        "source_read_calls": 50,
+        "raw_history_hits": 2,
+        "display_cache_hits": 7,
+        "gop_walks": 36,
+        "gop_walk_frames": 516,
+        "short_walks": 14,
+        "short_walk_frames": 96,
+        "peak_raw_bytes": 111974400,
+        "peak_raw_frames": 9,
+        "peak_display_cache_bytes": 49766400,
+        "source_ms": {
+          "total": 2843.75,
+          "p50": 58.89,
+          "p95": 90.83,
+          "maximum": 104.01
+        },
+        "walk_ms": {
+          "total": 2628.82,
+          "p50": 74.89,
+          "p95": 97.57,
+          "maximum": 103.74
+        },
+        "strides": {
+          "1": 1,
+          "4": 2,
+          "8": 11,
+          "12": 3,
+          "16": 21,
+          "32": 1,
+          "24": 7,
+          "20": 12,
+          "10": 1
+        }
+      }
+    }
+  },
+  "source_switch": [
+    {
+      "file": "4K_H264.mov",
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "frame": 7,
+      "pts": 3584,
+      "cache_frame_limit": 24
+    },
+    {
+      "file": "2K_h264.mp4",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "frame": 7,
+      "pts": 3584,
+      "cache_frame_limit": 4
+    },
+    {
+      "file": "4K_H264.mov",
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "frame": 7,
+      "pts": 3584,
+      "cache_frame_limit": 24
+    }
+  ],
+  "multi_track_samples": [
+    {
+      "timeline": "h264-t1-n1",
+      "timeline_frame": 110,
+      "source_frames": [
+        135
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 21.25,
+            "p95_gap_ms": 56.6,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 23.49,
+            "p95_gap_ms": 56.7,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t1-n3",
+      "timeline_frame": 110,
+      "source_frames": [
+        135
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 23.0,
+            "p95_gap_ms": 56.6,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 23.49,
+            "p95_gap_ms": 56.49,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t1-n6",
+      "timeline_frame": 110,
+      "source_frames": [
+        135
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 22.99,
+            "p95_gap_ms": 56.37,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 23.5,
+            "p95_gap_ms": 56.5,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t2-n1",
+      "timeline_frame": 110,
+      "source_frames": [
+        135,
+        190
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0,
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true,
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 20.0,
+            "p95_gap_ms": 76.49,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 20.0,
+            "p95_gap_ms": 57.86,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 22.25,
+            "p95_gap_ms": 71.14,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.75,
+            "p95_gap_ms": 56.6,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t2-n3",
+      "timeline_frame": 110,
+      "source_frames": [
+        135,
+        190
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0,
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true,
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 19.5,
+            "p95_gap_ms": 56.69,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.5,
+            "p95_gap_ms": 56.69,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 23.25,
+            "p95_gap_ms": 56.33,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 23.25,
+            "p95_gap_ms": 56.33,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t2-n6",
+      "timeline_frame": 110,
+      "source_frames": [
+        135,
+        190
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0,
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true,
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 20.75,
+            "p95_gap_ms": 56.23,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 20.75,
+            "p95_gap_ms": 56.23,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 23.75,
+            "p95_gap_ms": 56.09,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 23.75,
+            "p95_gap_ms": 56.09,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t4-n1",
+      "timeline_frame": 110,
+      "source_frames": [
+        135,
+        190,
+        260,
+        325
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 18.0,
+            "p95_gap_ms": 73.62,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 18.75,
+            "p95_gap_ms": 57.02,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.25,
+            "p95_gap_ms": 56.67,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.25,
+            "p95_gap_ms": 56.67,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 22.75,
+            "p95_gap_ms": 56.98,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.75,
+            "p95_gap_ms": 56.56,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 23.25,
+            "p95_gap_ms": 56.12,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 23.25,
+            "p95_gap_ms": 56.12,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t4-n3",
+      "timeline_frame": 110,
+      "source_frames": [
+        135,
+        190,
+        260,
+        325
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 19.75,
+            "p95_gap_ms": 56.83,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.5,
+            "p95_gap_ms": 57.47,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.75,
+            "p95_gap_ms": 56.83,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.75,
+            "p95_gap_ms": 56.83,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 22.49,
+            "p95_gap_ms": 56.51,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.49,
+            "p95_gap_ms": 56.51,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.49,
+            "p95_gap_ms": 56.51,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.49,
+            "p95_gap_ms": 56.51,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "h264-t4-n6",
+      "timeline_frame": 110,
+      "source_frames": [
+        135,
+        190,
+        260,
+        325
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 19.49,
+            "p95_gap_ms": 68.88,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.49,
+            "p95_gap_ms": 68.88,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.49,
+            "p95_gap_ms": 68.88,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 19.49,
+            "p95_gap_ms": 68.88,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 22.99,
+            "p95_gap_ms": 56.44,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.99,
+            "p95_gap_ms": 56.44,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.99,
+            "p95_gap_ms": 56.44,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 22.99,
+            "p95_gap_ms": 56.44,
+            "dark_samples": 0
+          }
+        ]
+      }
+    },
+    {
+      "timeline": "mixed-t4-n6",
+      "timeline_frame": 110,
+      "source_frames": [
+        135,
+        190,
+        260,
+        325
+      ],
+      "gpu_result": "gpu",
+      "edit_color_rgb_rmse_8bit": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "source_frame_uniquely_verified": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "playback": {
+        "edit": [
+          {
+            "changes_s": 8.0,
+            "p95_gap_ms": 139.23,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 8.0,
+            "p95_gap_ms": 139.23,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 8.0,
+            "p95_gap_ms": 139.23,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 8.0,
+            "p95_gap_ms": 139.23,
+            "dark_samples": 0
+          }
+        ],
+        "color": [
+          {
+            "changes_s": 14.0,
+            "p95_gap_ms": 139.06,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 14.0,
+            "p95_gap_ms": 139.06,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 14.0,
+            "p95_gap_ms": 139.06,
+            "dark_samples": 0
+          },
+          {
+            "changes_s": 14.0,
+            "p95_gap_ms": 139.06,
+            "dark_samples": 0
+          }
+        ]
+      }
+    }
+  ],
+  "resolve_edit_four_track": {
+    "h264-t4-n6": {
+      "page": "edit",
+      "roi": [
+        698,
+        60,
+        797,
+        448
+      ],
+      "tile_correlations": [
+        [
+          0.9946160316467285,
+          0.7746430039405823,
+          0.6052229404449463,
+          0.3781473636627197
+        ],
+        [
+          0.7772836089134216,
+          0.9859331846237183,
+          0.7350000143051147,
+          0.36197802424430847
+        ],
+        [
+          0.6266326904296875,
+          0.7545289397239685,
+          0.9902322888374329,
+          0.31820282340049744
+        ],
+        [
+          0.36769625544548035,
+          0.34966525435447693,
+          0.29580891132354736,
+          0.9855303168296814
+        ]
+      ],
+      "stop_frame": 118,
+      "motion": [
+        {
+          "track": 1,
+          "roi": [
+            0,
+            0,
+            48,
+            27
+          ],
+          "clock": "desktop_times",
+          "changes": 95,
+          "changes_s": 23.587030495780798,
+          "first_ms": 202.65346599626355,
+          "p95_gap_ms": 57.115220497507835,
+          "max_gap_ms": 202.65346599626355,
+          "samples": 106,
+          "dark_samples": 0
+        },
+        {
+          "track": 2,
+          "roi": [
+            48,
+            0,
+            96,
+            27
+          ],
+          "clock": "desktop_times",
+          "changes": 95,
+          "changes_s": 23.587030495780798,
+          "first_ms": 202.65346599626355,
+          "p95_gap_ms": 57.115220497507835,
+          "max_gap_ms": 202.65346599626355,
+          "samples": 106,
+          "dark_samples": 0
+        },
+        {
+          "track": 3,
+          "roi": [
+            0,
+            27,
+            48,
+            54
+          ],
+          "clock": "desktop_times",
+          "changes": 97,
+          "changes_s": 24.08359955884987,
+          "first_ms": 202.65346599626355,
+          "p95_gap_ms": 57.02596594856004,
+          "max_gap_ms": 202.65346599626355,
+          "samples": 106,
+          "dark_samples": 0
+        },
+        {
+          "track": 4,
+          "roi": [
+            48,
+            27,
+            96,
+            54
+          ],
+          "clock": "desktop_times",
+          "changes": 97,
+          "changes_s": 24.08359955884987,
+          "first_ms": 202.65346599626355,
+          "p95_gap_ms": 57.02596594856004,
+          "max_gap_ms": 202.65346599626355,
+          "samples": 106,
+          "dark_samples": 0
+        }
+      ]
+    },
+    "mixed-t4-n6": {
+      "page": "edit",
+      "roi": [
+        698,
+        60,
+        797,
+        448
+      ],
+      "tile_correlations": [
+        [
+          0.9946160316467285,
+          -0.08565928786993027,
+          0.05972090736031532,
+          -0.10158482939004898
+        ],
+        [
+          -0.08834808319807053,
+          0.9913176894187927,
+          -0.22212061285972595,
+          -0.23731347918510437
+        ],
+        [
+          0.07795534282922745,
+          -0.23116520047187805,
+          0.9626293778419495,
+          0.06116649881005287
+        ],
+        [
+          -0.1054256483912468,
+          -0.27550753951072693,
+          0.07773584127426147,
+          0.9401626586914062
+        ]
+      ],
+      "stop_frame": 116,
+      "motion": [
+        {
+          "track": 1,
+          "roi": [
+            0,
+            0,
+            48,
+            27
+          ],
+          "clock": "desktop_times",
+          "changes": 91,
+          "changes_s": 22.747285538001925,
+          "first_ms": 236.65594100020826,
+          "p95_gap_ms": 62.02521889790662,
+          "max_gap_ms": 236.65594100020826,
+          "samples": 112,
+          "dark_samples": 0
+        },
+        {
+          "track": 2,
+          "roi": [
+            48,
+            0,
+            96,
+            27
+          ],
+          "clock": "desktop_times",
+          "changes": 93,
+          "changes_s": 23.247225879496472,
+          "first_ms": 236.65594100020826,
+          "p95_gap_ms": 57.367971353960456,
+          "max_gap_ms": 236.65594100020826,
+          "samples": 112,
+          "dark_samples": 0
+        },
+        {
+          "track": 3,
+          "roi": [
+            0,
+            27,
+            48,
+            54
+          ],
+          "clock": "desktop_times",
+          "changes": 93,
+          "changes_s": 23.247225879496472,
+          "first_ms": 236.65594100020826,
+          "p95_gap_ms": 57.367971353960456,
+          "max_gap_ms": 236.65594100020826,
+          "samples": 112,
+          "dark_samples": 0
+        },
+        {
+          "track": 4,
+          "roi": [
+            48,
+            27,
+            96,
+            54
+          ],
+          "clock": "desktop_times",
+          "changes": 93,
+          "changes_s": 23.247225879496472,
+          "first_ms": 236.65594100020826,
+          "p95_gap_ms": 57.367971353960456,
+          "max_gap_ms": 236.65594100020826,
+          "samples": 112,
+          "dark_samples": 0
+        }
+      ]
+    }
+  },
+  "multi_track_edit_color_all_exact": true,
+  "related_tests": {
+    "passed": 768,
+    "skipped": 0,
+    "media_fixtures": "tests/test_videos"
+  },
+  "cold_scrub": {
+    "method": "Natural cold project and fresh process per trial; both HEAD and candidate use the default D (suspend both background task types when dragging). No injected workload or prewarming. Backend activity recorded as observed at first press. A (allow both) was not applied in these trials.",
+    "summary": {
+      "final-head": {
+        "press_first_effective_move_ms": {
+          "median": 1243.1319999999996,
+          "worst": 1275.7309999999998,
+          "values": [
+            1243.13,
+            1271.73,
+            1240.14,
+            1275.73,
+            1211.13
+          ]
+        },
+        "move_first_direction_correct_blit_ms": {
+          "median": 253.16799999999967,
+          "worst": 263.0609999999997,
+          "values": [
+            253.17,
+            250.79,
+            263.06,
+            261.84,
+            223.61
+          ]
+        },
+        "press_first_direction_correct_blit_ms": {
+          "median": 1503.2019999999993,
+          "worst": 1537.571,
+          "values": [
+            1496.3,
+            1522.52,
+            1503.2,
+            1537.57,
+            1434.75
+          ]
+        },
+        "longest_move_interval_ms": {
+          "median": 189.75,
+          "worst": 219.5,
+          "values": [
+            189.75,
+            186.78,
+            200.56,
+            219.5,
+            179.11
+          ]
+        },
+        "longest_blit_interval_ms": {
+          "median": 161.09199999999873,
+          "worst": 171.27900000000045,
+          "values": [
+            171.28,
+            169.3,
+            148.09,
+            158.65,
+            161.09
+          ]
+        },
+        "p95_blit_interval_ms": {
+          "median": 126.81420000000031,
+          "worst": 137.42340000000002,
+          "values": [
+            137.42,
+            126.81,
+            124.98,
+            131.47,
+            124.09
+          ]
+        },
+        "gesture_visible_frames": {
+          "median": 10,
+          "worst": 9,
+          "values": [
+            10,
+            10,
+            10,
+            9,
+            11
+          ]
+        },
+        "move_span_ms": {
+          "median": 698.9369999999999,
+          "worst": 730.369999999999,
+          "values": [
+            730.37,
+            698.94,
+            716.63,
+            690.38,
+            629.72
+          ]
+        },
+        "extra_release_exact_ms": {
+          "median": 0,
+          "worst": 0,
+          "values": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "final-idle-after": {
+        "press_first_effective_move_ms": {
+          "median": 996.9470000000001,
+          "worst": 1056.1680000000015,
+          "values": [
+            1056.17,
+            974.19,
+            973.75,
+            996.95,
+            1006.39
+          ]
+        },
+        "move_first_direction_correct_blit_ms": {
+          "median": 210.39199999999983,
+          "worst": 232.41100000000006,
+          "values": [
+            232.41,
+            199.13,
+            199.06,
+            228.92,
+            210.39
+          ]
+        },
+        "press_first_direction_correct_blit_ms": {
+          "median": 1216.7780000000002,
+          "worst": 1288.5790000000015,
+          "values": [
+            1288.58,
+            1173.32,
+            1172.81,
+            1225.87,
+            1216.78
+          ]
+        },
+        "longest_move_interval_ms": {
+          "median": 170.04099999999926,
+          "worst": 187.84599999999955,
+          "values": [
+            187.85,
+            146.19,
+            170.04,
+            150.0,
+            170.45
+          ]
+        },
+        "longest_blit_interval_ms": {
+          "median": 153.4979999999996,
+          "worst": 181.34200000000055,
+          "values": [
+            133.71,
+            157.47,
+            135.81,
+            153.5,
+            181.34
+          ]
+        },
+        "p95_blit_interval_ms": {
+          "median": 126.079199999999,
+          "worst": 140.81550000000018,
+          "values": [
+            121.7,
+            126.08,
+            123.03,
+            128.72,
+            140.82
+          ]
+        },
+        "gesture_visible_frames": {
+          "median": 9,
+          "worst": 9,
+          "values": [
+            9,
+            10,
+            9,
+            9,
+            9
+          ]
+        },
+        "move_span_ms": {
+          "median": 623.152,
+          "worst": 663.9159999999993,
+          "values": [
+            663.92,
+            614.47,
+            623.1,
+            632.53,
+            623.15
+          ]
+        },
+        "extra_release_exact_ms": {
+          "median": 0,
+          "worst": 77.34200000000055,
+          "values": [
+            77.34,
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    "trials": [
+      {
+        "trial": "idle-final-1-final-head",
+        "arm": "final-head",
+        "source_media_inode": 56004483,
+        "press_first_effective_move_ms": 1243.1319999999996,
+        "move_first_direction_correct_blit_ms": 253.16799999999967,
+        "press_first_direction_correct_blit_ms": 1496.2999999999993,
+        "p95_blit_interval_ms": 137.42340000000002,
+        "longest_move_interval_ms": 189.75,
+        "longest_blit_interval_ms": 171.27900000000045,
+        "gesture_visible_frames": 10,
+        "move_span_ms": 730.369999999999,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.346,
+          "wave": 0.412
+        },
+        "resume_ms": {
+          "thumb": 263.59499999999935,
+          "wave": 263.65399999999863
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-1-final-idle-after",
+        "arm": "final-idle-after",
+        "source_media_inode": 56004604,
+        "press_first_effective_move_ms": 1056.1680000000015,
+        "move_first_direction_correct_blit_ms": 232.41100000000006,
+        "press_first_direction_correct_blit_ms": 1288.5790000000015,
+        "p95_blit_interval_ms": 121.70450000000045,
+        "longest_move_interval_ms": 187.84599999999955,
+        "longest_blit_interval_ms": 133.70600000000013,
+        "gesture_visible_frames": 9,
+        "move_span_ms": 663.9159999999993,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 77.34200000000055,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.307,
+          "wave": 0.36
+        },
+        "resume_ms": {
+          "thumb": 238.83300000000054,
+          "wave": 238.96099999999933
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-2-final-head",
+        "arm": "final-head",
+        "source_media_inode": 56004865,
+        "press_first_effective_move_ms": 1271.7309999999998,
+        "move_first_direction_correct_blit_ms": 250.79100000000108,
+        "press_first_direction_correct_blit_ms": 1522.5220000000008,
+        "p95_blit_interval_ms": 126.81420000000031,
+        "longest_move_interval_ms": 186.77500000000146,
+        "longest_blit_interval_ms": 169.29500000000007,
+        "gesture_visible_frames": 10,
+        "move_span_ms": 698.9369999999999,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.382,
+          "wave": 0.458
+        },
+        "resume_ms": {
+          "thumb": 262.3099999999995,
+          "wave": 262.3719999999994
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-2-final-idle-after",
+        "arm": "final-idle-after",
+        "source_media_inode": 56004728,
+        "press_first_effective_move_ms": 974.1890000000003,
+        "move_first_direction_correct_blit_ms": 199.1329999999998,
+        "press_first_direction_correct_blit_ms": 1173.3220000000001,
+        "p95_blit_interval_ms": 126.079199999999,
+        "longest_move_interval_ms": 146.1900000000005,
+        "longest_blit_interval_ms": 157.46799999999894,
+        "gesture_visible_frames": 10,
+        "move_span_ms": 614.473,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 216,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.319,
+          "wave": 0.432
+        },
+        "resume_ms": {
+          "thumb": 261.9500000000007,
+          "wave": 262.021999999999
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-3-final-head",
+        "arm": "final-head",
+        "source_media_inode": 56004990,
+        "press_first_effective_move_ms": 1240.1409999999996,
+        "move_first_direction_correct_blit_ms": 263.0609999999997,
+        "press_first_direction_correct_blit_ms": 1503.2019999999993,
+        "p95_blit_interval_ms": 124.97779999999983,
+        "longest_move_interval_ms": 200.5630000000001,
+        "longest_blit_interval_ms": 148.09100000000035,
+        "gesture_visible_frames": 10,
+        "move_span_ms": 716.634,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.296,
+          "wave": 0.354
+        },
+        "resume_ms": {
+          "thumb": 263.35799999999836,
+          "wave": 263.41899999999987
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-3-final-idle-after",
+        "arm": "final-idle-after",
+        "source_media_inode": 56005109,
+        "press_first_effective_move_ms": 973.7470000000012,
+        "move_first_direction_correct_blit_ms": 199.0599999999995,
+        "press_first_direction_correct_blit_ms": 1172.8070000000007,
+        "p95_blit_interval_ms": 123.02860000000008,
+        "longest_move_interval_ms": 170.04099999999926,
+        "longest_blit_interval_ms": 135.8119999999999,
+        "gesture_visible_frames": 9,
+        "move_span_ms": 623.0999999999985,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.291,
+          "wave": 0.345
+        },
+        "resume_ms": {
+          "thumb": 262.46800000000076,
+          "wave": 262.53300000000127
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-4-final-head",
+        "arm": "final-head",
+        "source_media_inode": 56005366,
+        "press_first_effective_move_ms": 1275.7309999999998,
+        "move_first_direction_correct_blit_ms": 261.84000000000015,
+        "press_first_direction_correct_blit_ms": 1537.571,
+        "p95_blit_interval_ms": 131.46535000000017,
+        "longest_move_interval_ms": 219.5,
+        "longest_blit_interval_ms": 158.65300000000025,
+        "gesture_visible_frames": 9,
+        "move_span_ms": 690.3829999999998,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.345,
+          "wave": 0.414
+        },
+        "resume_ms": {
+          "thumb": 239.6140000000014,
+          "wave": 239.6780000000017
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-4-final-idle-after",
+        "arm": "final-idle-after",
+        "source_media_inode": 56005243,
+        "press_first_effective_move_ms": 996.9470000000001,
+        "move_first_direction_correct_blit_ms": 228.92200000000048,
+        "press_first_direction_correct_blit_ms": 1225.8690000000006,
+        "p95_blit_interval_ms": 128.7194000000001,
+        "longest_move_interval_ms": 149.99599999999919,
+        "longest_blit_interval_ms": 153.4979999999996,
+        "gesture_visible_frames": 9,
+        "move_span_ms": 632.5300000000007,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.309,
+          "wave": 0.367
+        },
+        "resume_ms": {
+          "thumb": 263.2479999999996,
+          "wave": 263.3189999999995
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-5-final-head",
+        "arm": "final-head",
+        "source_media_inode": 56005489,
+        "press_first_effective_move_ms": 1211.1329999999998,
+        "move_first_direction_correct_blit_ms": 223.61299999999937,
+        "press_first_direction_correct_blit_ms": 1434.7459999999992,
+        "p95_blit_interval_ms": 124.08534999999983,
+        "longest_move_interval_ms": 179.11299999999937,
+        "longest_blit_interval_ms": 161.09199999999873,
+        "gesture_visible_frames": 11,
+        "move_span_ms": 629.7180000000008,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.295,
+          "wave": 0.352
+        },
+        "resume_ms": {
+          "thumb": 262.90200000000004,
+          "wave": 262.96299999999974
+        },
+        "wave_and_thumb_fully_recovered": true
+      },
+      {
+        "trial": "idle-final-5-final-idle-after",
+        "arm": "final-idle-after",
+        "source_media_inode": 56005615,
+        "press_first_effective_move_ms": 1006.3860000000004,
+        "move_first_direction_correct_blit_ms": 210.39199999999983,
+        "press_first_direction_correct_blit_ms": 1216.7780000000002,
+        "p95_blit_interval_ms": 140.81550000000018,
+        "longest_move_interval_ms": 170.4459999999999,
+        "longest_blit_interval_ms": 181.34200000000055,
+        "gesture_visible_frames": 9,
+        "move_span_ms": 623.152,
+        "first_blit_within_gesture": true,
+        "extra_release_exact_ms": 0,
+        "stable_exact": true,
+        "no_wrong_at_settle": true,
+        "all_inputs_correct": true,
+        "first_frame": 219,
+        "thumb_or_wave_inflight": [
+          0,
+          0
+        ],
+        "frame_requests_before_press": [
+          0,
+          2,
+          0
+        ],
+        "suspend_ms": {
+          "thumb": 0.306,
+          "wave": 0.361
+        },
+        "resume_ms": {
+          "thumb": 239.02099999999882,
+          "wave": 239.09000000000015
+        },
+        "wave_and_thumb_fully_recovered": true
+      }
+    ]
+  },
+  "settle_checks": {
+    "before": [
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-head-1-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-head-1-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-head-2-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-head-2-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-head-3-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-head-3-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-head-4-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-head-4-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-head-5-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-head-5-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      }
+    ],
+    "after": [
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-release-1-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-release-1-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-release-2-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-release-2-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-release-3-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-release-3-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-release-4-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-release-4-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 110,
+        "presented": 135,
+        "source_target": 135,
+        "name": "topos-release-5-color-1",
+        "kind": "fast",
+        "still_presented": 135,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      },
+      {
+        "head": 20,
+        "presented": 45,
+        "source_target": 45,
+        "name": "topos-release-5-color-1",
+        "kind": "reverse",
+        "still_presented": 45,
+        "rgb_mae": 0.0,
+        "rgb_rmse": 0.0
+      }
+    ]
+  },
+  "hold_checks_500ms": [
+    {
+      "kind": "slow",
+      "head": 112,
+      "source": 137,
+      "during_frame": 137,
+      "after_frame": 137,
+      "rgb_mae": 0.0
+    },
+    {
+      "kind": "fast",
+      "head": 150,
+      "source": 175,
+      "during_frame": 175,
+      "after_frame": 175,
+      "rgb_mae": 0.0
+    }
+  ],
+  "resolve_optical_source_reference": {
+    "h264-t2-n3": [
+      {
+        "track": 1,
+        "requested_in": 25,
+        "api_source_start": 25,
+        "left_offset": 25,
+        "node_count": 3,
+        "linked_audio_in": 25,
+        "nominal": 135,
+        "rmse_8bit": [
+          10.135058403015137,
+          2.467050075531006,
+          11.489078521728516
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 4.7689924240112305
+      },
+      {
+        "track": 2,
+        "requested_in": 80,
+        "api_source_start": 79,
+        "left_offset": 80,
+        "node_count": 3,
+        "linked_audio_in": 79,
+        "nominal": 190,
+        "rmse_8bit": [
+          16.045804977416992,
+          2.8231444358825684,
+          18.743507385253906
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 6.605106830596924
+      }
+    ],
+    "h264-t4-n6": [
+      {
+        "track": 1,
+        "requested_in": 25,
+        "api_source_start": 25,
+        "left_offset": 25,
+        "node_count": 6,
+        "linked_audio_in": 25,
+        "nominal": 135,
+        "rmse_8bit": [
+          11.973885536193848,
+          2.9853947162628174,
+          13.49591064453125
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 5.809666633605957
+      },
+      {
+        "track": 2,
+        "requested_in": 80,
+        "api_source_start": 79,
+        "left_offset": 80,
+        "node_count": 6,
+        "linked_audio_in": 79,
+        "nominal": 190,
+        "rmse_8bit": [
+          17.20092010498047,
+          3.369239568710327,
+          19.755062103271484
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 7.865929126739502
+      },
+      {
+        "track": 3,
+        "requested_in": 150,
+        "api_source_start": 150,
+        "left_offset": 150,
+        "node_count": 6,
+        "linked_audio_in": 150,
+        "nominal": 260,
+        "rmse_8bit": [
+          12.611478805541992,
+          3.4682810306549072,
+          8.938355445861816
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 8.230957984924316
+      },
+      {
+        "track": 4,
+        "requested_in": 215,
+        "api_source_start": 214,
+        "left_offset": 215,
+        "node_count": 6,
+        "linked_audio_in": 214,
+        "nominal": 325,
+        "rmse_8bit": [
+          5.92369270324707,
+          2.966864585876465,
+          6.286871910095215
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 6.198746204376221
+      }
+    ],
+    "mixed-t4-n6": [
+      {
+        "track": 1,
+        "requested_in": 25,
+        "api_source_start": 25,
+        "left_offset": 25,
+        "node_count": 6,
+        "linked_audio_in": 25,
+        "nominal": 135,
+        "rmse_8bit": [
+          11.973885536193848,
+          2.9853947162628174,
+          13.49591064453125
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 5.809666633605957
+      },
+      {
+        "track": 2,
+        "requested_in": 80,
+        "api_source_start": 79,
+        "left_offset": 80,
+        "node_count": 6,
+        "linked_audio_in": 79,
+        "nominal": 190,
+        "rmse_8bit": [
+          21.362024307250977,
+          3.0827181339263916,
+          20.59054183959961
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 3.7455592155456543
+      },
+      {
+        "track": 3,
+        "requested_in": 150,
+        "api_source_start": 150,
+        "left_offset": 150,
+        "node_count": 6,
+        "linked_audio_in": 150,
+        "nominal": 260,
+        "rmse_8bit": [
+          63.96723937988281,
+          7.462592124938965,
+          60.351741790771484
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 18.017620086669922
+      },
+      {
+        "track": 4,
+        "requested_in": 215,
+        "api_source_start": 214,
+        "left_offset": 215,
+        "node_count": 6,
+        "linked_audio_in": 214,
+        "nominal": 325,
+        "rmse_8bit": [
+          15.508726119995117,
+          7.067093372344971,
+          15.582595825195312
+        ],
+        "correct": true,
+        "topos_color_window_rmse_8bit": 7.1191582679748535
+      }
+    ]
+  },
+  "resolve_original_project_after": {
+    "project": "Topos vs Resolve UHD25 2026-11-22",
+    "page": "edit",
+    "timeline": "H264 - Original",
+    "timecode": "01:00:08:22"
+  },
+  "raw_capture_directory": "bench_out/diag-playback-2026-11-25-CHbofd",
+  "optical_change_definition": "ScreenCaptureKit display timestamps, centre 320x180 window sample, mean absolute consecutive RGB difference > 0.12 after discarding sample borders. The gaps include first input and end of gesture.",
+  "stability": {
+    "reopen": {
+      "open_accepted": true,
+      "plays": [
+        {
+          "cycle": 154,
+          "t0": 622.692,
+          "t1": 624.333,
+          "blits": 31,
+          "forward_steps": 30,
+          "first": 229,
+          "last": 265
+        }
+      ],
+      "gestures": [
+        {
+          "cycle": 154,
+          "direction": "reverse",
+          "start_t": 624.496,
+          "release_t": 625.458,
+          "checked_t": 625.544,
+          "timeline_start": 240,
+          "timeline_end": 152,
+          "expected_source": 177,
+          "actual_source": 177,
+          "genuine_directional_blit": true,
+          "exact": true,
+          "observed_blits": 13
+        },
+        {
+          "cycle": 154,
+          "direction": "forward",
+          "start_t": 625.745,
+          "release_t": 626.345,
+          "checked_t": 626.436,
+          "timeline_start": 152,
+          "timeline_end": 200,
+          "expected_source": 225,
+          "actual_source": 225,
+          "genuine_directional_blit": true,
+          "exact": true,
+          "observed_blits": 14
+        }
+      ],
+      "open_elapsed_s": 0.631
+    },
+    "trace_buffer": {
+      "current": 18,
+      "peak": 45,
+      "total": 13418,
+      "retention": "Cleared at the start of each play or gesture, and after close and before reopen",
+      "representative_gl_event_bytes": 168,
+      "approx_peak_if_all_gl_rows_bytes": 7976,
+      "estimate_method": "List object plus private numerical objects per representative [t, shared gl-blit tag, generation, frame] row; exact stored row count is peak. Actual tags/payloads vary."
+    },
+    "close_observation_start": 603.7947925490007,
+    "close_observation_end": 619.2232910169987,
+    "kind": "4K H.264 with linked audio and 33-cube LUT, ordinary play and alternating reverse/forward 20 ms mouse drags on Color",
+    "requested_wall_s": 600,
+    "clock": "monotonic",
+    "elapsed_since_start_s": 626.637,
+    "active_elapsed_s": 603.436,
+    "phase": "done",
+    "error": null,
+    "project_close_succeeded": true,
+    "cycles": 154,
+    "finished": true,
+    "memory_and_threads": {
+      "first_active_minute": {
+        "rss_bytes": {
+          "samples": 30,
+          "min": 3401785344,
+          "median": 4428826624.0,
+          "max": 4572483584
+        },
+        "os_threads": {
+          "samples": 30,
+          "min": 106,
+          "median": 122.0,
+          "max": 126
+        },
+        "ffmpeg_master_containers": {
+          "samples": 12,
+          "min": 3,
+          "median": 3.0,
+          "max": 3
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 12,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 12,
+          "min": 3,
+          "median": 9.0,
+          "max": 9
+        },
+        "known_cache_bytes": {
+          "samples": 12,
+          "min": 24883200,
+          "median": 311585280.0,
+          "max": 311585280
+        },
+        "cache_components": {
+          "color_master_cache_bytes": {
+            "samples": 12,
+            "min": 24883200,
+            "median": 261273600.0,
+            "max": 261273600
+          },
+          "color_proxy_cache_bytes": {
+            "samples": 12,
+            "min": 0,
+            "median": 49766400.0,
+            "max": 49766400
+          },
+          "edit_preview_cache_bytes": {
+            "samples": 12,
+            "min": 0,
+            "median": 545280.0,
+            "max": 545280
+          }
+        }
+      },
+      "last_active_minute": {
+        "rss_bytes": {
+          "samples": 30,
+          "min": 4948848640,
+          "median": 4949346304.0,
+          "max": 5026480128
+        },
+        "os_threads": {
+          "samples": 30,
+          "min": 106,
+          "median": 110.0,
+          "max": 123
+        },
+        "ffmpeg_master_containers": {
+          "samples": 12,
+          "min": 3,
+          "median": 3.0,
+          "max": 3
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 12,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 12,
+          "min": 9,
+          "median": 9.0,
+          "max": 9
+        },
+        "known_cache_bytes": {
+          "samples": 12,
+          "min": 311585280,
+          "median": 311585280.0,
+          "max": 311585280
+        },
+        "cache_components": {
+          "color_master_cache_bytes": {
+            "samples": 12,
+            "min": 261273600,
+            "median": 261273600.0,
+            "max": 261273600
+          },
+          "color_proxy_cache_bytes": {
+            "samples": 12,
+            "min": 49766400,
+            "median": 49766400.0,
+            "max": 49766400
+          },
+          "edit_preview_cache_bytes": {
+            "samples": 12,
+            "min": 545280,
+            "median": 545280.0,
+            "max": 545280
+          }
+        }
+      },
+      "active_window": {
+        "rss_bytes": {
+          "samples": 301,
+          "min": 3401785344,
+          "median": 4708925440,
+          "max": 5026480128
+        },
+        "os_threads": {
+          "samples": 301,
+          "min": 105,
+          "median": 122,
+          "max": 126
+        },
+        "ffmpeg_master_containers": {
+          "samples": 121,
+          "min": 3,
+          "median": 3,
+          "max": 3
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 121,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 121,
+          "min": 3,
+          "median": 9,
+          "max": 9
+        },
+        "known_cache_bytes": {
+          "samples": 121,
+          "min": 24883200,
+          "median": 311585280,
+          "max": 311585280
+        },
+        "cache_components": {
+          "color_master_cache_bytes": {
+            "samples": 121,
+            "min": 24883200,
+            "median": 261273600,
+            "max": 261273600
+          },
+          "color_proxy_cache_bytes": {
+            "samples": 121,
+            "min": 0,
+            "median": 49766400,
+            "max": 49766400
+          },
+          "edit_preview_cache_bytes": {
+            "samples": 121,
+            "min": 0,
+            "median": 545280,
+            "max": 545280
+          }
+        }
+      },
+      "after_project_close": {
+        "rss_bytes": {
+          "samples": 7,
+          "min": 4897320960,
+          "median": 4897357824,
+          "max": 4897570816
+        },
+        "os_threads": {
+          "samples": 7,
+          "min": 31,
+          "median": 33,
+          "max": 50
+        },
+        "ffmpeg_master_containers": {
+          "samples": 4,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 4,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 4,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "known_cache_bytes": {
+          "samples": 4,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "cache_components": {
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": null
+        }
+      }
+    },
+    "minute_peaks": [
+      {
+        "minute": 1,
+        "rss_bytes": 4572483584,
+        "os_threads": 126,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 2,
+        "rss_bytes": 4633223168,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 3,
+        "rss_bytes": 4690288640,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 4,
+        "rss_bytes": 4693508096,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 5,
+        "rss_bytes": 4708900864,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 6,
+        "rss_bytes": 4742631424,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 7,
+        "rss_bytes": 4767170560,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 8,
+        "rss_bytes": 4916883456,
+        "os_threads": 124,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 9,
+        "rss_bytes": 4946915328,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 10,
+        "rss_bytes": 5019389952,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      }
+    ],
+    "checks": {
+      "total_plays": 154,
+      "cycles_with_forward_play": 154,
+      "total_gestures": 308,
+      "direction_correct_gestures": 308,
+      "exact_gestures": 308,
+      "reverse": 154,
+      "forward": 154,
+      "return_code": 0,
+      "child_terminated": true
+    },
+    "measurement_info": {
+      "os": "macOS-15.3.1-x86_64-i386-64bit",
+      "rss": "psutil process RSS and OS threads every 2 seconds in a separate process",
+      "cache": "Sum of reported Color master and proxy decoded cache bytes and Edit Program frame-cache bytes; absent caches have null component values",
+      "decoder": "Weakly observed FFmpeg open master/seek AVContainers and application-owned VtSession decompression handles. AVFoundation/driver total sessions and per-process GPU memory unavailable.",
+      "timeline": "25 fps, source offset 25, single linked A/V, Color original clip, one 33-cube LUT",
+      "os_file_cache": "normal OS caching",
+      "source_commit": "fcb0bbed1a63f0d9238aa7cbaf2378e3a1817ff9",
+      "media_sha256": "044b677f60b6bfb5561bfabb974ebb2ab62c128da9a409d52ff0c1dc67973717",
+      "final_sample_after_process_exit": {
+        "rss_bytes": 0,
+        "os_threads": 0,
+        "reason": "process exited"
+      },
+      "external_sampling": {
+        "initial_vmmap_started_s": 105.38,
+        "initial_vmmap_command_duration_s": 3.27,
+        "observed_cycle": 28,
+        "note": "Resource soak with distinct frame and exact-target checks. Exclude this loop from speed/latency inference."
+      }
+    },
+    "reopen_checks": {
+      "opened": true,
+      "forward_play": true,
+      "directional_gestures": 2,
+      "exact_gestures": 2,
+      "directions": [
+        "reverse",
+        "forward"
+      ],
+      "error": null
+    },
+    "source_digests": {
+      "src/app/controllers/file_controller.py": "cce2a9f16e917ad03d3ab3df82dbd99c22e98d6a4b8c2db816d424455f4945c5",
+      "src/app/controllers/edit_controller.py": "e123c4d505f6d506512d90b3fa7135f3d545ffeb24c4a0266e06c98205e3409d"
+    },
+    "close_release_checks": {
+      "project_attached": {
+        "first": false,
+        "last": false,
+        "max": false
+      },
+      "timeline_renderer_attached": {
+        "first": false,
+        "last": false,
+        "max": false
+      },
+      "edit_decode_manager_attached": {
+        "first": false,
+        "last": false,
+        "max": false
+      },
+      "color_playback_sessions": {
+        "first": 0,
+        "last": 0,
+        "max": 0
+      },
+      "ffmpeg_master_containers": {
+        "first": 0,
+        "last": 0,
+        "max": 0
+      },
+      "ffmpeg_seek_containers": {
+        "first": 0,
+        "last": 0,
+        "max": 0
+      },
+      "tracked_vt_decompression_sessions": {
+        "first": 0,
+        "last": 0,
+        "max": 0
+      },
+      "known_cache_bytes": {
+        "first": 0,
+        "last": 0,
+        "max": 0
+      }
+    },
+    "comparison_semantics": {
+      "rss": "OS resident size (not total allocations, GPU usage or private footprint), independent 2s sampling",
+      "cold_first_minute_vs_warm_last": "Active window sampled from first Color control ready through the end of the final two-way gesture",
+      "process_exit": "Zero process resources after exit does not establish all resources were released by project close",
+      "per_minute_peaks_rss_strictly_rising": true
+    },
+    "supplemental_close_reopen": {
+      "reason": "Coarse Qt timer reopened at 15.43 s in the 603.436 s trial. Independently confirm at least 18 s after project close using a monotonic deadline.",
+      "independent_process": true,
+      "active_before_close_s": 7.741,
+      "closed_window_s": 18.011934727008338,
+      "closed_samples": [
+        {
+          "t": 8.047,
+          "phase": "after_project_close",
+          "cycle": 2,
+          "project_attached": false,
+          "timeline_renderer_attached": false,
+          "edit_decode_manager_attached": false,
+          "color_monitor_attached": false,
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": null,
+          "known_cache_bytes": 0,
+          "ffmpeg_master_containers": 0,
+          "ffmpeg_seek_containers": 0,
+          "tracked_vt_decompression_sessions": 0,
+          "color_playback_sessions": 0,
+          "python_threads": 9,
+          "gl_source_frame": 225
+        },
+        {
+          "t": 10.191,
+          "phase": "after_project_close",
+          "cycle": 2,
+          "project_attached": false,
+          "timeline_renderer_attached": false,
+          "edit_decode_manager_attached": false,
+          "color_monitor_attached": false,
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": null,
+          "known_cache_bytes": 0,
+          "ffmpeg_master_containers": 0,
+          "ffmpeg_seek_containers": 0,
+          "tracked_vt_decompression_sessions": 0,
+          "color_playback_sessions": 0,
+          "python_threads": 9,
+          "gl_source_frame": 225
+        },
+        {
+          "t": 15.19,
+          "phase": "after_project_close",
+          "cycle": 2,
+          "project_attached": false,
+          "timeline_renderer_attached": false,
+          "edit_decode_manager_attached": false,
+          "color_monitor_attached": false,
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": null,
+          "known_cache_bytes": 0,
+          "ffmpeg_master_containers": 0,
+          "ffmpeg_seek_containers": 0,
+          "tracked_vt_decompression_sessions": 0,
+          "color_playback_sessions": 0,
+          "python_threads": 9,
+          "gl_source_frame": 225
+        },
+        {
+          "t": 20.191,
+          "phase": "after_project_close",
+          "cycle": 2,
+          "project_attached": false,
+          "timeline_renderer_attached": false,
+          "edit_decode_manager_attached": false,
+          "color_monitor_attached": false,
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": null,
+          "known_cache_bytes": 0,
+          "ffmpeg_master_containers": 0,
+          "ffmpeg_seek_containers": 0,
+          "tracked_vt_decompression_sessions": 0,
+          "color_playback_sessions": 0,
+          "python_threads": 9,
+          "gl_source_frame": 225
+        },
+        {
+          "t": 25.19,
+          "phase": "after_project_close",
+          "cycle": 2,
+          "project_attached": false,
+          "timeline_renderer_attached": false,
+          "edit_decode_manager_attached": false,
+          "color_monitor_attached": false,
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": null,
+          "known_cache_bytes": 0,
+          "ffmpeg_master_containers": 0,
+          "ffmpeg_seek_containers": 0,
+          "tracked_vt_decompression_sessions": 0,
+          "color_playback_sessions": 0,
+          "python_threads": 9,
+          "gl_source_frame": 225
+        },
+        {
+          "t": 26.059,
+          "phase": "after_project_close",
+          "cycle": 2,
+          "project_attached": false,
+          "timeline_renderer_attached": false,
+          "edit_decode_manager_attached": false,
+          "color_monitor_attached": false,
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": null,
+          "known_cache_bytes": 0,
+          "ffmpeg_master_containers": 0,
+          "ffmpeg_seek_containers": 0,
+          "tracked_vt_decompression_sessions": 0,
+          "color_playback_sessions": 0,
+          "python_threads": 9,
+          "gl_source_frame": 225
+        }
+      ],
+      "reopen": {
+        "open_accepted": true,
+        "plays": [
+          {
+            "cycle": 2,
+            "t0": 29.178,
+            "t1": 30.815,
+            "blits": 32,
+            "forward_steps": 31,
+            "first": 229,
+            "last": 265
+          }
+        ],
+        "gestures": [
+          {
+            "cycle": 2,
+            "direction": "reverse",
+            "start_t": 30.984,
+            "release_t": 31.924,
+            "checked_t": 32.012,
+            "timeline_start": 240,
+            "timeline_end": 152,
+            "expected_source": 177,
+            "actual_source": 177,
+            "genuine_directional_blit": true,
+            "exact": true,
+            "observed_blits": 15
+          },
+          {
+            "cycle": 2,
+            "direction": "forward",
+            "start_t": 32.213,
+            "release_t": 32.753,
+            "checked_t": 32.858,
+            "timeline_start": 152,
+            "timeline_end": 200,
+            "expected_source": 225,
+            "actual_source": 225,
+            "genuine_directional_blit": true,
+            "exact": true,
+            "observed_blits": 12
+          }
+        ],
+        "open_elapsed_s": 0.524
+      }
+    },
+    "raw_file": "stability-600s-fixed.json"
+  },
+  "provenance": {
+    "commit": "fcb0bbed1a63f0d9238aa7cbaf2378e3a1817ff9",
+    "branch": "fix-ui",
+    "product_and_tests_patch_sha256": "c24854fe55e2ae30c92f12b64d6dc933526fe36d12c861d9ddd3f5a2b44cb231",
+    "media": {
+      "4K_H264.mov": {
+        "bytes": 53743212,
+        "sha256": "044b677f60b6bfb5561bfabb974ebb2ab62c128da9a409d52ff0c1dc67973717",
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "h264",
+            "codec_type": "video",
+            "codec_tag_string": "avc1",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv420p",
+            "avg_frame_rate": "25/1",
+            "nb_frames": "743"
+          },
+          {
+            "index": 1,
+            "codec_name": "pcm_s24le",
+            "codec_type": "audio",
+            "codec_tag_string": "lpcm",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "1426560"
+          },
+          {
+            "index": 2,
+            "codec_type": "data",
+            "codec_tag_string": "tmcd",
+            "avg_frame_rate": "12800/512",
+            "nb_frames": "1"
+          }
+        ]
+      },
+      "4K_H265.mov": {
+        "bytes": 151384974,
+        "sha256": "4a37ace370d8381c997d4abd0e49eafdf1d54a5a33b3d3e5d16d23ebf604ddb5",
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "hevc",
+            "codec_type": "video",
+            "codec_tag_string": "hvc1",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv420p10le",
+            "avg_frame_rate": "25/1",
+            "nb_frames": "487"
+          },
+          {
+            "index": 1,
+            "codec_name": "pcm_s24le",
+            "codec_type": "audio",
+            "codec_tag_string": "lpcm",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "935040"
+          },
+          {
+            "index": 2,
+            "codec_type": "data",
+            "codec_tag_string": "tmcd",
+            "avg_frame_rate": "12800/512",
+            "nb_frames": "1"
+          }
+        ]
+      },
+      "4K_prores422HQ.mov": {
+        "bytes": 1789044428,
+        "sha256": "db18b46ec97cc73d6c6e28407d278b22501a3861ebf89e449e21d9908f05921d",
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "prores",
+            "codec_type": "video",
+            "codec_tag_string": "apch",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv422p10le",
+            "avg_frame_rate": "25/1",
+            "nb_frames": "487"
+          },
+          {
+            "index": 1,
+            "codec_name": "pcm_s24le",
+            "codec_type": "audio",
+            "codec_tag_string": "in24",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "935040"
+          },
+          {
+            "index": 2,
+            "codec_type": "data",
+            "codec_tag_string": "tmcd",
+            "avg_frame_rate": "12800/512",
+            "nb_frames": "1"
+          }
+        ]
+      },
+      "4K_DNxHR HQX 10bit.mov": {
+        "bytes": 1778948900,
+        "sha256": "4192dcedf81613c331a9d781a06229114e97f43e6bfc3adc02852e08f5530422",
+        "streams": [
+          {
+            "index": 0,
+            "codec_name": "dnxhd",
+            "codec_type": "video",
+            "codec_tag_string": "AVdh",
+            "width": 3840,
+            "height": 2160,
+            "pix_fmt": "yuv422p10le",
+            "avg_frame_rate": "25/1",
+            "nb_frames": "487"
+          },
+          {
+            "index": 1,
+            "codec_name": "pcm_s24le",
+            "codec_type": "audio",
+            "codec_tag_string": "lpcm",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "935040"
+          },
+          {
+            "index": 2,
+            "codec_type": "data",
+            "codec_tag_string": "tmcd",
+            "avg_frame_rate": "12800/512",
+            "nb_frames": "1"
+          }
+        ]
+      },
+      "4K_topos_422_HQ.mov": {
+        "bytes": 1583117149,
+        "sha256": "50bc67456a1159eb80c1125ad946257f0ac3c76b9c941351ab6ded9a8ae4cf80",
+        "streams": [
+          {
+            "index": 0,
+            "codec_type": "video",
+            "codec_tag_string": "TPIC",
+            "width": 3840,
+            "height": 2160,
+            "avg_frame_rate": "25/1",
+            "nb_frames": "487",
+            "side_data_list": [
+              {}
+            ]
+          },
+          {
+            "index": 1,
+            "codec_name": "pcm_s24be",
+            "codec_type": "audio",
+            "codec_tag_string": "lpcm",
+            "avg_frame_rate": "0/0",
+            "nb_frames": "914"
+          }
+        ]
+      }
+    },
+    "python_packages": {
+      "av": "18.1.0",
+      "moderngl": "5.12.0",
+      "PyQt6": "6.11.0",
+      "numpy": "2.5.2"
+    },
+    "lut_sha256": "ffba7587f1e154dc5fa0919266c87fc9df538db4dbdbe262723f3c201bad6fc7"
+  },
+  "monotonic_reverse_audit": [
+    {
+      "trial": 1,
+      "posted_horizontal_positions": 180,
+      "posted_wrong_direction": 0,
+      "controller_forward_steps": 6,
+      "painted_forward_steps": 0,
+      "first_and_last_drawn": [
+        225,
+        45
+      ]
+    },
+    {
+      "trial": 2,
+      "posted_horizontal_positions": 180,
+      "posted_wrong_direction": 0,
+      "controller_forward_steps": 0,
+      "painted_forward_steps": 0,
+      "first_and_last_drawn": [
+        225,
+        45
+      ]
+    },
+    {
+      "trial": 3,
+      "posted_horizontal_positions": 180,
+      "posted_wrong_direction": 0,
+      "controller_forward_steps": 0,
+      "painted_forward_steps": 0,
+      "first_and_last_drawn": [
+        225,
+        45
+      ]
+    },
+    {
+      "trial": 4,
+      "posted_horizontal_positions": 180,
+      "posted_wrong_direction": 0,
+      "controller_forward_steps": 0,
+      "painted_forward_steps": 0,
+      "first_and_last_drawn": [
+        225,
+        45
+      ]
+    },
+    {
+      "trial": 5,
+      "posted_horizontal_positions": 180,
+      "posted_wrong_direction": 0,
+      "controller_forward_steps": 0,
+      "painted_forward_steps": 0,
+      "first_and_last_drawn": [
+        225,
+        45
+      ]
+    }
+  ],
+  "audio_scope": {
+    "warm_single_track_topos": "video timeline track only",
+    "cold_and_stability": "linked audio",
+    "audio_video_drift_measured": false
+  },
+  "stability_before_project_close_fix": {
+    "kind": "4K H.264 with linked audio and 33-cube LUT, ordinary play and alternating reverse/forward 20 ms mouse drags on Color",
+    "requested_wall_s": 600,
+    "clock": "monotonic",
+    "elapsed_since_start_s": 617.456,
+    "active_elapsed_s": 601.841,
+    "phase": "done",
+    "error": null,
+    "project_close_succeeded": true,
+    "cycles": 157,
+    "finished": true,
+    "memory_and_threads": {
+      "first_active_minute": {
+        "rss_bytes": {
+          "samples": 30,
+          "min": 3450548224,
+          "median": 4411336704.0,
+          "max": 4497670144
+        },
+        "os_threads": {
+          "samples": 30,
+          "min": 106,
+          "median": 122.0,
+          "max": 125
+        },
+        "ffmpeg_master_containers": {
+          "samples": 12,
+          "min": 3,
+          "median": 3.0,
+          "max": 3
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 12,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 12,
+          "min": 3,
+          "median": 9.0,
+          "max": 9
+        },
+        "known_cache_bytes": {
+          "samples": 12,
+          "min": 24883200,
+          "median": 311585280.0,
+          "max": 311585280
+        },
+        "cache_components": {
+          "color_master_cache_bytes": {
+            "samples": 12,
+            "min": 24883200,
+            "median": 261273600.0,
+            "max": 261273600
+          },
+          "color_proxy_cache_bytes": {
+            "samples": 12,
+            "min": 0,
+            "median": 49766400.0,
+            "max": 49766400
+          },
+          "edit_preview_cache_bytes": {
+            "samples": 12,
+            "min": 0,
+            "median": 545280.0,
+            "max": 545280
+          }
+        }
+      },
+      "last_active_minute": {
+        "rss_bytes": {
+          "samples": 30,
+          "min": 4784816128,
+          "median": 4799909888.0,
+          "max": 4800409600
+        },
+        "os_threads": {
+          "samples": 30,
+          "min": 106,
+          "median": 107.0,
+          "max": 123
+        },
+        "ffmpeg_master_containers": {
+          "samples": 12,
+          "min": 3,
+          "median": 3.0,
+          "max": 3
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 12,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 12,
+          "min": 9,
+          "median": 9.0,
+          "max": 9
+        },
+        "known_cache_bytes": {
+          "samples": 12,
+          "min": 311585280,
+          "median": 311585280.0,
+          "max": 311585280
+        },
+        "cache_components": {
+          "color_master_cache_bytes": {
+            "samples": 12,
+            "min": 261273600,
+            "median": 261273600.0,
+            "max": 261273600
+          },
+          "color_proxy_cache_bytes": {
+            "samples": 12,
+            "min": 49766400,
+            "median": 49766400.0,
+            "max": 49766400
+          },
+          "edit_preview_cache_bytes": {
+            "samples": 12,
+            "min": 545280,
+            "median": 545280.0,
+            "max": 545280
+          }
+        }
+      },
+      "active_window": {
+        "rss_bytes": {
+          "samples": 300,
+          "min": 3450548224,
+          "median": 4618567680.0,
+          "max": 4800409600
+        },
+        "os_threads": {
+          "samples": 300,
+          "min": 105,
+          "median": 122.0,
+          "max": 125
+        },
+        "ffmpeg_master_containers": {
+          "samples": 121,
+          "min": 3,
+          "median": 3,
+          "max": 3
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 121,
+          "min": 0,
+          "median": 0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 121,
+          "min": 3,
+          "median": 9,
+          "max": 9
+        },
+        "known_cache_bytes": {
+          "samples": 121,
+          "min": 24883200,
+          "median": 311585280,
+          "max": 311585280
+        },
+        "cache_components": {
+          "color_master_cache_bytes": {
+            "samples": 121,
+            "min": 24883200,
+            "median": 261273600,
+            "max": 261273600
+          },
+          "color_proxy_cache_bytes": {
+            "samples": 121,
+            "min": 0,
+            "median": 49766400,
+            "max": 49766400
+          },
+          "edit_preview_cache_bytes": {
+            "samples": 121,
+            "min": 0,
+            "median": 545280,
+            "max": 545280
+          }
+        }
+      },
+      "after_project_close": {
+        "rss_bytes": {
+          "samples": 7,
+          "min": 4670533632,
+          "median": 4670541824,
+          "max": 4670570496
+        },
+        "os_threads": {
+          "samples": 7,
+          "min": 65,
+          "median": 65,
+          "max": 67
+        },
+        "ffmpeg_master_containers": {
+          "samples": 4,
+          "min": 1,
+          "median": 1.0,
+          "max": 1
+        },
+        "ffmpeg_seek_containers": {
+          "samples": 4,
+          "min": 0,
+          "median": 0.0,
+          "max": 0
+        },
+        "tracked_vt_decompression_sessions": {
+          "samples": 4,
+          "min": 9,
+          "median": 9.0,
+          "max": 9
+        },
+        "known_cache_bytes": {
+          "samples": 4,
+          "min": 545280,
+          "median": 545280.0,
+          "max": 545280
+        },
+        "cache_components": {
+          "color_master_cache_bytes": null,
+          "color_proxy_cache_bytes": null,
+          "edit_preview_cache_bytes": {
+            "samples": 4,
+            "min": 545280,
+            "median": 545280.0,
+            "max": 545280
+          }
+        }
+      }
+    },
+    "minute_peaks": [
+      {
+        "minute": 1,
+        "rss_bytes": 4497670144,
+        "os_threads": 125,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 2,
+        "rss_bytes": 4560523264,
+        "os_threads": 122,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 3,
+        "rss_bytes": 4568522752,
+        "os_threads": 122,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 4,
+        "rss_bytes": 4608487424,
+        "os_threads": 122,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 5,
+        "rss_bytes": 4618653696,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 6,
+        "rss_bytes": 4752789504,
+        "os_threads": 124,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 7,
+        "rss_bytes": 4773318656,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 8,
+        "rss_bytes": 4781441024,
+        "os_threads": 122,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 9,
+        "rss_bytes": 4784943104,
+        "os_threads": 122,
+        "known_cache_bytes": 311585280
+      },
+      {
+        "minute": 10,
+        "rss_bytes": 4800200704,
+        "os_threads": 123,
+        "known_cache_bytes": 311585280
+      }
+    ],
+    "checks": {
+      "total_plays": 157,
+      "cycles_with_forward_play": 157,
+      "total_gestures": 314,
+      "direction_correct_gestures": 314,
+      "exact_gestures": 314,
+      "reverse": 157,
+      "forward": 157,
+      "return_code": 0,
+      "child_terminated": true
+    },
+    "measurement_info": {
+      "os": "macOS-15.3.1-x86_64-i386-64bit",
+      "rss": "psutil process RSS and OS threads every 2 seconds in a separate process",
+      "cache": "Sum of reported Color master and proxy decoded cache bytes and Edit Program frame-cache bytes; absent caches have null component values",
+      "decoder": "Weakly observed FFmpeg open master/seek AVContainers and application-owned VtSession decompression handles. AVFoundation/driver total sessions and per-process GPU memory unavailable.",
+      "timeline": "25 fps, source offset 25, single linked A/V, Color original clip, one 33-cube LUT",
+      "os_file_cache": "normal OS caching",
+      "source_commit": "fcb0bbed1a63f0d9238aa7cbaf2378e3a1817ff9",
+      "media_sha256": "044b677f60b6bfb5561bfabb974ebb2ab62c128da9a409d52ff0c1dc67973717",
+      "final_sample_after_process_exit": {
+        "rss_bytes": 0,
+        "os_threads": 0,
+        "reason": "process exited"
+      }
+    },
+    "raw_file": "stability-600s.json"
+  },
+  "gesture_measurement_patch_sha256": "367a4004aa23af5de5045ea1e14f74d1a94a3da1d3615aa8021600a44a6cd006",
+  "darwin_memory_samples": {
+    "units": "MiB. Early vmmap decimal displays in KiB/MiB/GiB rounded to the precision printed; later measurements use exact Mach page bytes. Kernel VM tag counters reflect resident pages in mappings and can double-count shared mappings. The early vmmap dirty field excludes clean/reusable bytes differently from kernel pri_pages_dirtied, so only compare the resident rows for early versus late. Do not sum categories into RSS or identify the allocating library from a tag alone.",
+    "late_usage": {
+      "pid": 4087,
+      "regions": 2765,
+      "page_size": 4096,
+      "rss_begin": 4938600448,
+      "rss_end": 4938653696,
+      "physical_footprint_begin": 2031190016,
+      "physical_footprint_end": 2031251456
+    },
+    "closed_usage": {
+      "pid": 4087,
+      "regions": 2570,
+      "page_size": 4096,
+      "rss_begin": 4897357824,
+      "rss_end": 4897357824,
+      "physical_footprint_begin": 870277120,
+      "physical_footprint_end": 870277120
+    },
+    "early_footprint_vmmap": "1.9 GiB (one decimal)"
+  }
+}

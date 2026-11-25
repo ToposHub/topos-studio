@@ -36,6 +36,7 @@ import numpy as np
 
 if TYPE_CHECKING:  # pragma: no cover - annotation-only import
     import queue
+    from av.video.reformatter import VideoReformatter
     from .presentation_time import PresentationIndex
 
 from .metadata import Rational, VideoMetadata
@@ -685,6 +686,7 @@ class FFmpegMediaSource:
         self._path: str = path
         self._presentation_index: PresentationIndex | None = None
         self._target_size: Optional[Tuple[int, int]] = target_size
+        self._proxy_reformatter: VideoReformatter | None = None
         self._preserve_planes: bool = preserve_planes
         self._output_mode: OutputMode = output_mode
         self._retain_yuv420p_av_frame = bool(retain_yuv420p_av_frame)
@@ -827,15 +829,15 @@ class FFmpegMediaSource:
             # uses the full logical core count alongside export rendering.
             decoder.thread_count = min(thread_count, decoder.thread_count or thread_count)
 
-    def tune_interactive_scrub(self) -> None:
-        """Limit frame threading for short, repeated UHD H.264 seeks before the first read."""
+    def tune_interactive_scrub(self) -> bool:
+        """Tune short UHD H.264 seeks. Return whether CPU planar history is available."""
         metadata = self._metadata
         stream = self._video_stream
         if (sys.platform != 'darwin' or platform.machine() != 'x86_64'
                 or not self._disable_hwaccel or self._target_size is not None or stream is None
                 or metadata is None or max(metadata.width, metadata.height) < 3840
                 or (os.cpu_count() or 1) <= 8):
-            return
+            return False
         decoder = stream.codec_context
         if decoder.name == 'h264' and not decoder.is_open:
             decoder.thread_count = min(8, decoder.thread_count or 8)
@@ -843,6 +845,7 @@ class FFmpegMediaSource:
                 frame_bytes = metadata.width * metadata.height * 3 // 2
                 if frame_bytes > 0:
                     self._scrub_seek_frame_limit = min(10, _SCRUB_HISTORY_BYTES // frame_bytes)
+        return self._scrub_seek_frame_limit > 0
 
     def read_recent_scrub_frame(self, frame_index: int) -> DecodedFrame | None:
         """Read an exact frame already seen during a GOP walk without moving the decoder."""
@@ -1492,6 +1495,7 @@ class FFmpegMediaSource:
             self._decoder_buffer = []
             self._pending_av_frame = None
             self._gop_seek_iterator = None
+            self._proxy_reformatter = None
             self._main_resync_pts = None
             self._scrub_seek_frames.clear()
             self._scrub_seek_last_pts = None
@@ -1505,7 +1509,7 @@ class FFmpegMediaSource:
             # 状态（N16：全套件顺序关闭路径上的残余竞争窗口）。
             _closer = _ensure_closer_thread()
             for _attr in ("_frame_iterator", "_pending_av_frame",
-                          "_gop_seek_iterator"):
+                          "_gop_seek_iterator", "_proxy_reformatter"):
                 _obj = getattr(self, _attr, None)
                 if _obj is not None:
                     setattr(self, _attr, None)
@@ -2780,7 +2784,16 @@ class FFmpegMediaSource:
             if target_planar_fmt:
                 # 尝试 reformat 到目标尺寸和 planar 格式
                 try:
-                    converted = frame.reformat(
+                    # A VideoFrame owns its own scaler. Keep one scaler for
+                    # this source while decoding successive preview frames.
+                    reformatter = self._proxy_reformatter
+                    if reformatter is None:
+                        from av.video.reformatter import VideoReformatter
+
+                        reformatter = VideoReformatter()
+                        self._proxy_reformatter = reformatter
+                    converted = reformatter.reformat(
+                        frame,
                         width=output_width,
                         height=output_height,
                         format=target_planar_fmt
@@ -2843,6 +2856,14 @@ class FFmpegMediaSource:
 
         # 构建额外元数据（记录 reformat 状态）
         extra_metadata = {}
+        if not is_proxy and pix_fmt == 'yuv420p' and getattr(frame, 'planes', None):
+            # Any zero-copy plane keeps the whole AVFrame alive. Chroma planes
+            # with padded rows can also own separate contiguous NumPy copies.
+            if any(not plane.flags.owndata for plane in planes):
+                extra_metadata['retained_plane_bytes'] = (
+                    sum(plane.buffer_size for plane in frame.planes)
+                    + sum(plane.nbytes for plane in planes if plane.flags.owndata)
+                )
         frame_chroma_siting = _normalize_chroma_siting(
             getattr(frame, 'chroma_location', None))
         if frame_chroma_siting is not None:
@@ -3669,7 +3690,7 @@ from src.shared.media.av_concurrency import av_locked_operation as _av_op_dec  #
 
 for _av_entry in (
     "open", "probe", "read_frame", "read_next_frame", "seek_frame",
-    "warm_gop_index", "read_recent_scrub_frame",
+    "warm_gop_index", "read_recent_scrub_frame", "read_frame_planar",
 ):
     setattr(FFmpegMediaSource, _av_entry,
             _av_op_dec(FFmpegMediaSource.__dict__[_av_entry]))

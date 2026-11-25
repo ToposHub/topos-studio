@@ -2896,6 +2896,13 @@
   },
   "viewport": {
     "color_monitor": "色彩管线诊断",
+    "timeline_composite_monitor": "时间线合成监看",
+    "monitor_waiting": "正在等待时间线画面",
+    "monitor_gpu": "GPU 纹理",
+    "monitor_image": "图像帧",
+    "monitor_cpu": "CPU 图像预览",
+    "monitor_empty": "无时间线画面",
+    "monitor_unavailable": "无法初始化时间线预览",
     "zoom_in": "放大",
     "zoom_out": "缩小",
     "fit": "适合窗口",

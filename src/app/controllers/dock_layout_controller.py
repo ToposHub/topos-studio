@@ -527,6 +527,11 @@ class DockLayoutMixin:
                 self.canvas.viewport_menu.timeline_switch_requested.connect(
                     self.edit_page.switch_timeline
                 )
+                menu = self.canvas.viewport_menu
+                if self.dock_program_viewer is not None:
+                    menu.timeline_composite_monitor_act.triggered.connect(self.set_color_timeline_composite_monitor)
+                    menu.view_menu.aboutToShow.connect(self._sync_color_timeline_monitor_action)
+                    self.dock_program_viewer.visibilityChanged.connect(self._on_color_program_dock_visibility)
             if self.timeline_panel is not None:
                 self.edit_page.set_timeline_panel(self.timeline_panel)
             if self.media_pool_panel is not None:
@@ -1874,6 +1879,120 @@ class DockLayoutMixin:
         finally:
             self.restoreState(previous)
 
+    def _color_program_monitor_available(self) -> bool:
+        project = getattr(self, "_current_edit_project", None)
+        return (getattr(self, "current_page", None) == "Color"
+                and getattr(self, "edit_viewport", None) is not None
+                and project is not None
+                and project.active_timeline_id in getattr(self, "_current_timeline_sequences", {}))
+
+    def _sync_color_timeline_monitor_action(self) -> None:
+        action = self.canvas.viewport_menu.timeline_composite_monitor_act
+        if getattr(self, "_color_program_monitor_active", False):
+            project = getattr(self, "_current_edit_project", None)
+            if (self.current_page != "Color" or project is None or not project.active_timeline_id
+                    or project.project_id != self._color_monitor_project_id):
+                self.set_color_timeline_composite_monitor(False)
+        # A newly selected timeline may materialize its sequence just after
+        # the pool's project_changed notification. The user can always close.
+        action.setEnabled(getattr(self, "_color_program_monitor_active", False)
+                          or self._color_program_monitor_available())
+
+    def _on_color_program_dock_visibility(self, visible: bool) -> None:
+        if visible or not getattr(self, "_color_program_monitor_active", False):
+            return
+        session = self._color_monitor_session
+
+        def finish_hide() -> None:
+            # Floating and re-docking briefly hide the same widget during its
+            # Qt parent change. A user close stays hidden after that operation.
+            if (self._color_monitor_session is session and self.dock_program_viewer.isHidden()):
+                self.set_color_timeline_composite_monitor(False)
+
+        QTimer.singleShot(0, finish_hide)
+
+    def set_color_timeline_composite_monitor(self, enabled: bool) -> None:
+        """Borrow the existing Program viewer and its single texture consumer on Color."""
+        action = self.canvas.viewport_menu.timeline_composite_monitor_act
+        enabled = bool(enabled and self._color_program_monitor_available())
+        action.setChecked(enabled)
+        if enabled == getattr(self, "_color_program_monitor_active", False):
+            return
+        controller = self.timeline_panel.get_playback_controller()
+        slider = self.edit_viewport.program_slider
+        dock = self.dock_program_viewer
+        if enabled:
+            if self.timeline_preview_renderer is None:
+                self._init_timeline_preview_renderer()
+            if self.timeline_preview_renderer is None:
+                action.setChecked(False)
+                self.statusBar().showMessage(I18N.tr(
+                    "viewport.monitor_unavailable", "Timeline preview could not be initialized"), 4000)
+                return
+            source = getattr(self, "video_controller", None)
+            if source is not None and source.is_playing:
+                source.stop_playback()
+            self._color_program_monitor_active = True
+            self._color_monitor_session = object()
+            self._color_program_output_kind = None
+            self._color_monitor_project_id = self._current_edit_project.project_id
+            self._color_monitor_previous_title = dock.windowTitle()
+            dock.setWindowTitle(action.text())
+            self.edit_viewport.set_program_only(True, color_monitor=True)
+            self.edit_viewport.timeline_monitor_status.setText(
+                I18N.tr("viewport.monitor_waiting", "Waiting for timeline frame"))
+            self.program_viewer_widget.clear_texture()
+            # The hidden Edit timeline deliberately skips controller callbacks to
+            # avoid waking its GL viewport. Drive only the visible Program picture.
+            self.timeline_panel.set_detached_program_playhead(self.edit_page._on_playhead_changed)
+            slider.scrub_started_at.connect(self._begin_color_program_scrub)
+            slider.scrub_finished_at.connect(self._finish_color_program_scrub)
+            slider.scrub_cancelled.connect(self._cancel_color_program_scrub)
+            self.edit_viewport.set_program_position(controller.current_frame)
+            dock.show()
+            dock.raise_()
+            self._request_current_timeline_preview_frame()
+        else:
+            self._color_program_monitor_active = False
+            self._color_monitor_session = None
+            self.timeline_panel.set_detached_program_playhead(None)
+            slider.scrub_started_at.disconnect(self._begin_color_program_scrub)
+            slider.scrub_finished_at.disconnect(self._finish_color_program_scrub)
+            slider.scrub_cancelled.disconnect(self._cancel_color_program_scrub)
+            if controller.is_playing:
+                controller.pause()
+            if self.edit_page._scrub_active:
+                self.edit_page._on_scrub_finished(controller.current_frame, settle=False)
+            elif self.timeline_preview_renderer is not None:
+                # A release or a pause can still have an exact frame in flight.
+                # Retire its generation before a hidden viewer can take the lease.
+                self.timeline_preview_renderer.finish_scrub(controller.current_frame, settle=False)
+            if not getattr(getattr(self, "video_controller", None), "is_playing", False):
+                self.edit_page.shutdown_audio_playback()
+            self.program_viewer_widget.clear_texture()
+            self.edit_viewport.set_program_only(False)
+            dock.setWindowTitle(self._color_monitor_previous_title)
+            dock.hide()
+        if hasattr(self, "_sync_timeline_idle_prebuffer"):
+            self._sync_timeline_idle_prebuffer()
+
+    def _begin_color_program_scrub(self, frame: int) -> None:
+        source = getattr(self, "video_controller", None)
+        if source is not None and source.is_playing:
+            source.stop_playback()
+        controller = self.timeline_panel.get_playback_controller()
+        if controller.is_playing:
+            controller.pause()
+        self.edit_page._on_scrub_started(frame)
+
+    def _finish_color_program_scrub(self, frame: int) -> None:
+        if self.edit_page._scrub_active:
+            self.edit_page._on_scrub_finished(frame)
+
+    def _cancel_color_program_scrub(self) -> None:
+        if self.edit_page._scrub_active:
+            self.edit_page._on_scrub_finished(self.edit_viewport.program_slider.value(), settle=False)
+
     def _sync_color_timeline_selector(self, *_args: object) -> None:
         """Refresh the Color viewport's active-timeline selector."""
         viewport_menu = getattr(getattr(self, "canvas", None), "viewport_menu", None)
@@ -1912,6 +2031,8 @@ class DockLayoutMixin:
                 timelines = {str(timeline_id): current_timeline}
                 active_timeline_id = str(timeline_id)
         viewport_menu.set_timeline_choices(timelines, active_timeline_id)
+        if hasattr(viewport_menu, "timeline_composite_monitor_act") and hasattr(self, "_sync_color_timeline_monitor_action"):
+            self._sync_color_timeline_monitor_action()
 
     # ------------------------------------------------------------------
     # initialize_page_layouts
@@ -4259,6 +4380,8 @@ class DockLayoutMixin:
                      self.dock_caption_workspace]
         if self.current_page != "Edit":
             for d in edit_only:
+                if d is self.dock_program_viewer and color_active and getattr(self, "_color_program_monitor_active", False):
+                    continue
                 if d is not None:
                     d.setVisible(False)
         elif getattr(self, "edit_viewport", None) is not None:

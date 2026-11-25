@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,6 +23,7 @@ from src.shared.video.session import VideoSession
 def _session_with_queue():
     session = VideoSession.__new__(VideoSession)
     session._frame_queue = MagicMock()
+    session._source_manager = None
     session._current_master_frame = None
     return session
 
@@ -48,7 +49,6 @@ def test_scrub_seek_skips_generation_churn() -> None:
     session._notify_state_change = lambda: None
     session._stats = MagicMock()
 
-    from unittest.mock import patch
 
     with patch.object(session, "_increment_generation") as bump:
         session.seek_to_frame(100, blocking=False, churn_generation=False)
@@ -80,6 +80,28 @@ def test_take_latest_ready_master_frame_empty_queue() -> None:
     session._frame_queue.dequeue.return_value = None
 
     assert session.take_latest_ready_master_frame(10) is None
+
+
+def test_directional_scrub_can_present_exact_cached_cpu_masters() -> None:
+    import numpy as np
+    from src.shared.media.frame import DecodedFrame
+    from src.shared.video.frame_queue import ReadyFrameQueue
+    from src.shared.video.playback_clock import SourceManager
+
+    session = _session_with_queue()
+    session._frame_queue = ReadyFrameQueue()
+    manager = session._source_manager = SourceManager('memory')
+    cache = manager.cache.master_cache
+    pixels = np.zeros((4, 4), np.uint8)
+    for index in (40, 50, 60, 70):
+        cache.put(index, DecodedFrame(index, index, 0.0, planes=(pixels,)))
+    assert session.take_latest_ready_master_frame(55, frame_range=(41, 55)) is None
+    manager._scrub_master_cache = cache
+    assert session.take_latest_ready_master_frame(55, frame_range=(41, 55)).frame_index == 50
+    assert session.take_latest_ready_master_frame(55, frame_range=(55, 69)).frame_index == 60
+    assert session.take_latest_ready_master_frame(55, frame_range=(51, 55)) is None
+    assert session.take_latest_ready_master_frame(55, frame_range=(41, 55), max_frame_distance=3) is None
+    assert session.take_latest_ready_master_frame(55) is None
 
 
 def test_engine_fast_scrub_skips_generation_and_uses_latest() -> None:
@@ -166,7 +188,7 @@ def test_reverse_pump_uses_the_closest_ready_frame_within_its_direction() -> Non
         _use_dual_path=True,
         _coordinator=session,
         _last_displayed_frame_index=46,
-        _scrub_anchored=True,
+        _scrub_anchor=46,
         _submit_decoded_frame_playback=lambda f, fn, **k: submitted.append(fn),
     )
 
@@ -191,7 +213,7 @@ def test_directional_seek_prepares_one_frame_when_the_accepted_frame_leads_the_t
         _use_dual_path=True,
         _coordinator=coordinator,
         _last_displayed_frame_index=35,
-        _scrub_anchored=True,
+        _scrub_anchor=35,
         in_frame=0,
         out_frame=None,
         is_playing=False,
@@ -239,7 +261,7 @@ def test_directional_scrub_prefetch_respects_clip_bounds(direction, in_frame, ou
     coordinator = MagicMock(total_frames=100)
     engine = SimpleNamespace(
         _use_dual_path=True, _coordinator=coordinator,
-        _last_displayed_frame_index=35, _scrub_anchored=True,
+        _last_displayed_frame_index=35, _scrub_anchor=35,
         in_frame=in_frame, out_frame=out_frame, is_playing=False,
         _begin_static_preview_generation=MagicMock(), _set_static_preview_frame_hold=MagicMock(),
     )
@@ -259,7 +281,7 @@ def test_scrub_press_at_a_new_position_does_not_wait_for_the_old_playhead() -> N
         _use_dual_path=True,
         _coordinator=coordinator,
         _last_displayed_frame_index=150,
-        _scrub_anchored=True,
+        _scrub_anchor=150,
         is_playing=False,
         frame_changed=MagicMock(),
         _begin_static_preview_generation=MagicMock(),
@@ -274,7 +296,7 @@ def test_scrub_press_at_a_new_position_does_not_wait_for_the_old_playhead() -> N
     engine._submit_decoded_frame_playback = submit
     scrub = {"blocking": False, "allow_proxy_fallback": False, "fast_scrub": True, "scrub_origin": 20}
     EnhancedVideoPlaybackEngine.seek_to_frame(engine, 20, scrub_reset=True, **scrub)
-    assert not engine._scrub_anchored
+    assert engine._scrub_anchor is None
 
     EnhancedVideoPlaybackEngine.seek_to_frame(engine, 25, scrub_direction=1, **scrub)
     coordinator.request_master_frame.assert_called_with(25)
@@ -285,11 +307,60 @@ def test_scrub_press_at_a_new_position_does_not_wait_for_the_old_playhead() -> N
         engine, 25, scrub_origin=20, scrub_direction=1,
     )
     assert submitted == [23]
-    assert engine._scrub_anchored
+    assert engine._scrub_anchor == 23
 
     coordinator.take_latest_ready_master_frame.return_value = None
     EnhancedVideoPlaybackEngine.seek_to_frame(engine, 26, scrub_direction=1, **scrub)
     coordinator.take_latest_ready_master_frame.assert_called_with(26, frame_range=(24, 26))
+
+
+def test_scrub_press_refreshes_grade_then_turn_uses_frame_that_reached_canvas() -> None:
+    from src.features.color.core.image_engine import ImageEngine
+    from src.shared.video.video_playback import EnhancedVideoPlaybackEngine
+
+    renderer = SimpleNamespace(video_texture_pending=False, current_front_video_frame=(3, 50))
+    image_engine = ImageEngine.__new__(ImageEngine)
+    image_engine.renderer = renderer
+    image_engine.drawn_video_frame = (3, 50)
+    coordinator = MagicMock(total_frames=200)
+    coordinator.take_latest_ready_master_frame.return_value = None
+    playback = SimpleNamespace(
+        engine=image_engine, _coordinator=coordinator, _use_dual_path=True,
+        _last_displayed_frame_index=50, _generation_id=3,
+        is_playing=False, _set_static_preview_frame_hold=MagicMock(),
+        in_frame=0, out_frame=None,
+    )
+    playback._begin_static_preview_generation = lambda: setattr(playback, "_generation_id", playback._generation_id + 1)
+    scrub = {"blocking": False, "fast_scrub": True, "allow_proxy_fallback": False}
+    EnhancedVideoPlaybackEngine.seek_to_frame(playback, 50, scrub_origin=50, scrub_reset=True, **scrub)
+    assert coordinator.seek_to_frame.call_args.kwargs["churn_generation"] is True
+    coordinator.request_master_frame.assert_called_once_with(50)
+    coordinator.request_master_frame.reset_mock()
+    coordinator.take_latest_ready_master_frame.reset_mock()
+
+    # The pointer advanced to 65. A frame submitted for 62 was coalesced.
+    # The front already contains 58, but only frame 53 has reached the canvas.
+    playback._last_displayed_frame_index = 62
+    playback._scrub_anchor = 62
+    renderer.current_front_video_frame = (4, 58)
+    image_engine.drawn_video_frame = (4, 53)
+    EnhancedVideoPlaybackEngine.seek_to_frame(
+        playback, 54, scrub_origin=65, scrub_direction=-1, scrub_reset=True, **scrub,
+    )
+    coordinator.request_master_frame.assert_called_once_with(52)
+    coordinator.take_latest_ready_master_frame.assert_not_called()
+
+    # The original press has left the visible frame. A jump elsewhere must
+    # decode immediately even when the old frame was submitted at that index.
+    playback._last_displayed_frame_index = 15
+    EnhancedVideoPlaybackEngine.seek_to_frame(playback, 15, scrub_origin=15, scrub_reset=True, **scrub)
+    coordinator.request_master_frame.assert_called_with(15)
+    assert playback._scrub_anchor is None
+    EnhancedVideoPlaybackEngine.seek_to_frame(
+        playback, 17, scrub_origin=19, scrub_direction=-1, scrub_reset=True, **scrub,
+    )
+    coordinator.request_master_frame.assert_called_with(17)
+    coordinator.take_latest_ready_master_frame.assert_called_with(17, frame_range=(17, 19))
 
 
 def test_present_latest_ready_scrub_frame_dedup_and_miss() -> None:
@@ -313,6 +384,62 @@ def test_present_latest_ready_scrub_frame_dedup_and_miss() -> None:
     coordinator.take_latest_ready_master_frame.return_value = SimpleNamespace(frame_index=5)
     assert EnhancedVideoPlaybackEngine.present_latest_ready_scrub_frame(engine, 80) is True
     assert not submitted
+
+
+def test_exact_scrub_polls_until_current_generation_is_drawn() -> None:
+    from src.features.color.core.image_engine import ImageEngine
+    from src.shared.video.video_playback import EnhancedVideoPlaybackEngine
+
+    renderer = SimpleNamespace(video_texture_pending=False, current_front_video_frame=(1, 10))
+    image_engine = ImageEngine.__new__(ImageEngine)
+    image_engine.renderer = renderer
+    image_engine.drawn_video_frame = (1, 10)
+    playback = EnhancedVideoPlaybackEngine.__new__(EnhancedVideoPlaybackEngine)
+    playback.engine = image_engine
+    playback._use_dual_path = True
+    playback._coordinator = MagicMock()
+    playback._coordinator.take_ready_master_frame.return_value = SimpleNamespace(frame_index=10)
+    playback._generation_id = 2
+    playback._last_displayed_frame_index = 10
+    playback._last_submitted_video_generation = 1
+    playback._last_submitted_video_frame_index = 10
+    playback._submit_decoded_frame_playback = MagicMock(
+        side_effect=lambda *args, **kwargs: setattr(playback, "_last_submitted_video_generation", 2),
+    )
+    assert not playback.present_ready_scrub_frame(10)
+    with patch("src.shared.video.video_playback.time.monotonic", side_effect=[1.0, 1.1, 1.26]):
+        assert not playback.present_ready_scrub_frame(10)
+        assert not playback.present_ready_scrub_frame(10)
+        assert not playback.present_ready_scrub_frame(10)
+    assert playback._submit_decoded_frame_playback.call_count == 2
+    playback._coordinator.take_ready_master_frame.assert_called_with(10, retry_submission=True)
+    renderer.current_front_video_frame = (2, 10)
+    assert not playback.present_ready_scrub_frame(10)
+    image_engine.drawn_video_frame = (2, 10)
+    assert playback.present_ready_scrub_frame(10)
+    assert playback._submit_decoded_frame_playback.call_count == 2
+
+
+def test_settle_retry_obtains_a_fresh_gpu_lease() -> None:
+    from threading import RLock
+    from src.shared.media.gpu_frame import GpuDecodedFrame
+    from src.shared.video.playback_state import PlaybackCoordinator
+
+    session = _session_with_queue()
+    previous = MagicMock(spec=GpuDecodedFrame, frame_index=12)
+    previous.release = SimpleNamespace(is_released=False)
+    fresh = MagicMock(spec=GpuDecodedFrame, frame_index=12)
+    fresh.release = SimpleNamespace(is_released=False)
+    session._current_master_frame = previous
+    session.request_master_frame = MagicMock()
+    coordinator = PlaybackCoordinator.__new__(PlaybackCoordinator)
+    coordinator._session_lock = RLock()
+    coordinator._session = session
+    session._frame_queue.dequeue.side_effect = [None, SimpleNamespace(frame=previous), SimpleNamespace(frame=fresh)]
+    assert coordinator.take_ready_master_frame(12) is None
+    assert coordinator.take_ready_master_frame(12, retry_submission=True) is None
+    session.request_master_frame.assert_called_once_with(12)
+    assert coordinator.take_ready_master_frame(12, retry_submission=True) is fresh
 
 
 def test_present_latest_ready_requires_coordinator_api() -> None:

@@ -329,6 +329,29 @@ class TestOpenClose:
 class TestSequentialDecode:
     """测试顺序解码功能"""
 
+    @pytest.mark.parametrize("clip", ["h264_sdr", "h265_pq_v2", "prores"])
+    def test_scaled_planar_frames_match_independent_conversions(self, clip: str) -> None:
+        av = pytest.importorskip("av")
+        path = TEST_VIDEOS[clip]
+        pytest_skip_if_no_video(path)
+        with FFmpegMediaSource(path, target_size=(320, 180), preserve_planes=True) as source:
+            first = source.read_next_frame()
+            scaler = source._proxy_reformatter
+            assert scaler is not None
+            frames = [first, source.read_next_frame(), source.read_next_frame()]
+            assert source._proxy_reformatter is scaler
+
+        assert source._proxy_reformatter is None
+        with av.open(path) as reference:
+            reference_frames = reference.decode(video=0)
+            for index, frame in enumerate(frames):
+                raw = next(reference_frames)
+                assert (frame.frame_index, frame.pts) == (index, raw.pts)
+                expected = raw.reformat(width=320, height=180, format=raw.format.name)
+                planes, _ = source._extract_planes_from_frame(expected, expected.format.name)
+                for actual, exact in zip(frame.planes, planes, strict=True):
+                    np.testing.assert_array_equal(actual, exact)
+
     @pytest.mark.skipif(
         not get_available_videos(),
         reason="No test videos available"

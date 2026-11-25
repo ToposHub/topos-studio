@@ -1100,7 +1100,11 @@ def test_enter_color_timeline_clip_force_refreshes_target_frame() -> None:
     controller.load_video = MagicMock()
     controller.edit_page = None
     controller._setup_grading_save_callback = MagicMock()
-    controller._load_color_stack_to_grading_panel = MagicMock()
+    def hydrate_grade(stack_id: str) -> None:
+        assert stack_id == clip.color_stack_id
+        assert video_controller.seek_calls == []
+
+    controller._load_color_stack_to_grading_panel = hydrate_grade
     controller._request_color_clip_thumbnail_static_preview = MagicMock(return_value=False)
     controller._color_session_manager = manager
     controller.color_timeline_clip_strip = SimpleNamespace(set_active_clip=MagicMock())

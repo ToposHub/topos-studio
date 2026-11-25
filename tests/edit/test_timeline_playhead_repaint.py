@@ -91,3 +91,20 @@ def test_playback_keeps_repainting_only_narrow_playhead_strips(view: TimelineVie
     assert recorder.region.contains(QPoint(old_x, y))
     assert not recorder.region.contains(QPoint(view.viewport().width() - 30, y))
     assert view.viewportUpdateMode() == QGraphicsView.ViewportUpdateMode.MinimalViewportUpdate
+
+
+@pytest.mark.parametrize("last_move,release_frame", [(360, 410), (240, 185)])
+def test_fast_playhead_drag_settles_at_mouse_release(
+    view: TimelineView, last_move: int, release_frame: int,
+) -> None:
+    def position(frame: int) -> QPoint:
+        return view.mapFromScene(QPointF(view._layout_engine.frame_to_x(frame), 14))
+
+    finished: list[int] = []
+    view.scrub_finished.connect(finished.append)
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=position(300))
+    QTest.mouseMove(view.viewport(), position(last_move))
+    assert view._playhead_frame == last_move
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=position(release_frame))
+    assert finished == [release_frame]
+    assert view._playhead_frame == release_frame

@@ -598,6 +598,10 @@ class EditViewport(QWidget):
         self.program_slider.valueChanged.connect(self.program_seek_requested.emit)
         viewer.layout().addWidget(self.program_slider)
         viewer.layout().addWidget(footer)
+        self.timeline_monitor_status = QLabel(viewer)
+        self.timeline_monitor_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.timeline_monitor_status.hide()
+        viewer.layout().addWidget(self.timeline_monitor_status)
         footer.position_groups()
         self.program_footer = footer
         return header
@@ -643,7 +647,7 @@ class EditViewport(QWidget):
         self._mixer_transport_layout = controls
 
     def _program_controls_layout(self) -> QHBoxLayout:
-        if self._program_only and self._mixer_transport_layout is not None:
+        if self.program_footer.mixer_mode and self._mixer_transport_layout is not None:
             return self._mixer_transport_layout
         return self.program_footer.groups[1]
 
@@ -825,8 +829,8 @@ class EditViewport(QWidget):
             header.dual_button.setVisible(modes_visible and not self._dual_view)
             header.set_active(monitor == self._active_monitor and self._dual_view and not self._program_only)
 
-    def set_program_only(self, enabled: bool) -> None:
-        """Show the audio monitoring presentation in the Mixer dock."""
+    def set_program_only(self, enabled: bool, *, color_monitor: bool = False) -> None:
+        """Temporarily show Program without altering the Edit pane preferences."""
         if enabled == self._program_only:
             return
         previous_sizes = self.splitter.sizes()
@@ -834,22 +838,24 @@ class EditViewport(QWidget):
             self._dual_sizes = previous_sizes
         self._program_only = enabled
         header = self.program_header
-        if enabled and self._mixer_picture_options is None:
+        mixer = enabled and not color_monitor
+        if mixer and self._mixer_picture_options is None:
             options = self._mixer_picture_options = QMenu(header)
             options.addMenu(self._program_toolbar.view_menu)
             options.addMenu(self._program_toolbar.quality_menu)
             options.addAction(I18N.tr("viewport.fullscreen", "Fullscreen"),
                               self.program_viewer.toggle_fullscreen)
-        header.mixer_mode = enabled
+        header.mixer_mode = mixer
         header._style_timecode()
-        header.options_button.setMenu(self._mixer_picture_options if enabled else self._program_options)
+        header.options_button.setMenu(self._mixer_picture_options if mixer else self._program_options)
         header.options_button.setToolTip(
-            I18N.tr("mixer.monitor.picture_options", "Picture Options") if enabled
+            I18N.tr("mixer.monitor.picture_options", "Picture Options") if mixer
             else I18N.tr("edit.viewport.options", "Viewer Options"))
         header.options_button.setAccessibleName(header.options_button.toolTip())
-        self.program_slider.setVisible(not enabled)
-        self.program_footer.mixer_mode = enabled
-        self._place_program_transport(enabled)
+        self.program_slider.setVisible(not mixer)
+        self.timeline_monitor_status.setVisible(enabled and color_monitor)
+        self.program_footer.mixer_mode = mixer
+        self._place_program_transport(mixer)
         self.program_footer.position_groups()
         self._apply_mode()
         if not enabled and self._dual_view and self._dual_sizes:

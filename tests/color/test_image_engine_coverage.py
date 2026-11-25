@@ -1308,6 +1308,20 @@ class TestRenderPipelineReasonSemantics:
         command, _ = engine.renderer.submit.call_args.args
         assert command == RenderCommand.RENDER_FRAME
 
+    def test_clip_bootstrap_image_waits_for_the_graded_video_command(
+        self, image_engine: ImageEngine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _prep_render_engine(monkeypatch, image_engine)
+        image_engine._is_video_mode = True
+        renderer = image_engine.renderer
+        renderer.video_texture_pending = True
+        ImageEngine.render_pipeline(image_engine, render_reason="viewport_refresh")
+        renderer.submit.assert_not_called()
+
+        renderer.video_texture_pending = False
+        ImageEngine.render_pipeline(image_engine, render_reason="viewport_refresh")
+        assert renderer.submit.call_args.args[0] == RenderCommand.RENDER_FRAME
+
     def test_preview_render_submits_nothing(
         self, image_engine: ImageEngine, monkeypatch: pytest.MonkeyPatch
     ) -> None:

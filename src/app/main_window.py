@@ -2023,6 +2023,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         invalidate = getattr(self, "_invalidate_video_render_params_if_playing", None)
         if callable(invalidate):
             invalidate()
+        if getattr(self, "_color_program_monitor_active", False):
+            self._request_current_timeline_preview_frame()
         renderer = getattr(self, "_color_timeline_preview_renderer", None)
         if renderer is not None and getattr(self, "current_page", None) == "Color":
             provider = getattr(self, "_color_timeline_playback_controller", None)

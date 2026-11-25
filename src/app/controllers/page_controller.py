@@ -40,7 +40,7 @@ import threading
 import time
 from typing import Optional, Any, Callable
 
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 
 from src.app.controllers.dock_layout_controller import COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS
 from src.shared.diagnostics import flash_diag as _flash_diag
@@ -470,6 +470,8 @@ class PageManagementMixin:
             self._attach_edit_panels_to_mixer()
 
         self.current_page = page_name
+        if hasattr(self, "_sync_timeline_idle_prebuffer"):
+            self._sync_timeline_idle_prebuffer()
         self.status_bar.showMessage(f"Mode: {page_name}", 2000)
 
         # Post-restore: enforce page-specific dock visibility.
@@ -700,6 +702,8 @@ class PageManagementMixin:
         # must be idle once the page is hidden, otherwise its decode workers and
         # color render commands compete with the Edit or Composite page.
         if page_name == "Color":
+            if getattr(self, "_color_program_monitor_active", False):
+                self.set_color_timeline_composite_monitor(False)
             controller = getattr(self, "video_controller", None)
             if controller is not None and getattr(controller, "is_playing", False):
                 try:
@@ -2573,6 +2577,7 @@ class PageManagementMixin:
                     lambda: self.load_video(
                         asset.path,
                         for_timeline_clip=True,
+                        initial_frame=source_frame,
                         display_size=None,
                     ),
                 )
@@ -2660,17 +2665,6 @@ class PageManagementMixin:
         if clip_id and not color_stack_id:
             color_stack_id = self._ensure_clip_has_color_stack(clip_id, asset_id)
 
-        # Seek the new clip's first frame BEFORE hydrating the grading panel.
-        # Hydration triggers grading-panel signals that submit RENDER_FRAME
-        # commands; if the new frame's RENDER_VIDEO_FRAME has not been queued
-        # yet, those RENDER_FRAME commands reuse the departing clip's video
-        # texture (the renderer's current_video_texture) and briefly flash the
-        # previous shot on the Canvas and DeckLink monitor.  Seeking first
-        # ensures the worker processes the new frame before any hydration-
-        # triggered RENDER_FRAME, so the latter reads the correct texture.
-        if asset.is_video and is_timeline_clip:
-            self._show_color_timeline_clip_static_preview(context)
-
         # Load color stack to grading panel
         if color_stack_id:
             # Bind the target callback before changing panel values. During
@@ -2685,6 +2679,11 @@ class PageManagementMixin:
                 self._load_color_stack_to_grading_panel(color_stack_id)
             finally:
                 self._color_stack_hydration_in_progress = False
+
+        # The replacement frame carries a snapshot of the render parameters.
+        # Keep the clip-switch guard armed until the target grade is installed.
+        if asset.is_video and is_timeline_clip:
+            self._show_color_timeline_clip_static_preview(context)
 
         # ── Create ColorSession for save routing ─────────────────────
         project_id = self._current_edit_project.project_id
@@ -2743,6 +2742,23 @@ class PageManagementMixin:
             except Exception:
                 self._disarm_color_clip_switch_guard(video_controller)
                 return
+        # On the first visit from Edit, Qt may not have initialized the Color
+        # viewport yet. Consuming the decoded master before its renderer exists
+        # loses that frame and marks a blank viewport as already displayed.
+        viewport = getattr(getattr(self, "canvas", None), "gl_viewport", None)
+        initialized = getattr(viewport, "gl_initialized", None)
+        if (initialized is not None and getattr(viewport, "_gl_initialized", True) is False
+                and getattr(self.engine, "renderer", None) is None):
+            visit = getattr(self, "_page_switch_generation", 0)
+
+            def resume_preview() -> None:
+                self._schedule_page_switch_callback(
+                    0, lambda: self._show_color_timeline_clip_static_preview(context, token=token),
+                    page_name="Color", generation=visit,
+                )
+
+            initialized.connect(resume_preview, Qt.ConnectionType.SingleShotConnection)
+            return
         source_frame = int(getattr(context, "source_frame", 0) or 0)
         preview_key = (int(token), source_frame)
         _emit_color_clip_debug(
@@ -3766,7 +3782,13 @@ class PageManagementMixin:
             return False
 
         # --- f. Resolve timeline_frame ------------------------------------
-        if timeline_frame is None:
+        composite_monitor = getattr(self, "_color_program_monitor_active", False) is True
+        if composite_monitor:
+            # A card selects which track's nodes to edit. For overlapping
+            # tracks, open that source at the Program playhead, not its thumbnail.
+            timeline_frame = self.timeline_panel.get_playhead_frame()
+            source_frame_override = None
+        elif timeline_frame is None:
             if getattr(self, "current_page", None) == "Color":
                 # TimelineClipStrip clicks identify the target clip, not the
                 # Edit playhead. Using the old playhead here made Color clip
@@ -3788,7 +3810,8 @@ class PageManagementMixin:
         # A Color clip card is a timeline navigation action. Keep Edit's
         # playhead as the canonical timeline position; Color maps it to the
         # graded source frame and exposes this clip as its transport range.
-        self._sync_timeline_playhead_for_color_entry(timeline_frame)
+        if not composite_monitor:
+            self._sync_timeline_playhead_for_color_entry(timeline_frame)
 
         # --- h. Compute frame mappings ------------------------------------
         clip_local_frame = timeline_frame - clip.timeline_start
@@ -3971,6 +3994,8 @@ class PageManagementMixin:
             except Exception:
                 logger.debug("Failed to stop Color video before clip switch", exc_info=True)
 
+        if getattr(self, "_color_program_monitor_active", False) is True:
+            return
         timeline_panel = getattr(self, "timeline_panel", None)
         if timeline_panel is None:
             return

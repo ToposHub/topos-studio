@@ -2554,6 +2554,10 @@ class ViewportMenuBar(ViewportToolBarBase):
             I18N.tr("viewport.color_monitor", "Color Pipeline Diagnostics"))
         self.color_monitor_act.setCheckable(True)
         self.color_monitor_act.toggled.connect(self.color_monitor_toggled.emit)
+        self.timeline_composite_monitor_act = menu.addAction(
+            I18N.tr("viewport.timeline_composite_monitor", "Timeline Composite Monitor"))
+        self.timeline_composite_monitor_act.setCheckable(True)
+        self.timeline_composite_monitor_act.setEnabled(False)
 
         # P1-COLOR-05: A/B 比较 / 参考 wipe
         self.ab_toggle_act = menu.addAction(
@@ -6888,6 +6892,7 @@ class Canvas(QGraphicsView):
                         (vw, vh),
                         rotation_angle=self._crop_preview_angle,
                         desktop_display=self._display_color,
+                        viewer_paint=True,
                     )
                     if did_draw:
                         if self._present_retry.isActive():

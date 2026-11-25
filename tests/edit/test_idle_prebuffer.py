@@ -124,6 +124,49 @@ def _make_renderer(mock_project, simple_sequence, mock_frame_provider):
 
 
 class TestIdlePrebufferScheduler:
+    def test_color_cancels_only_speculative_neighbours_and_retires_their_gpu_work(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ):
+        from src.app.controllers.file_controller import FileOpsMixin
+
+        renderer = _make_renderer(mock_project, simple_sequence, mock_frame_provider)
+        host = SimpleNamespace(timeline_preview_renderer=renderer, current_page="Color")
+        enqueue = Mock(return_value=True)
+        renderer._worker.enqueue_background_if_idle = enqueue
+        try:
+            renderer._start_idle_prebuffer(50)
+            old = enqueue.call_args.kwargs["cancelled"]
+            FileOpsMixin._sync_timeline_idle_prebuffer(host)
+            assert old.is_set()
+            assert not renderer._idle_prebuffer_pending
+            renderer._schedule_idle_prebuffer(50)
+            renderer._idle_prebuffer_poll()
+            renderer._tick_idle_prebuffer()
+            assert enqueue.call_count == 1
+            assert not renderer._idle_prebuffer_armed
+            # A decoded cache-fill frame already waiting for the shared GL
+            # mutex releases its inputs before it can run the colour graph.
+            gpu = SimpleNamespace(_release_task_sources=Mock())
+            task = EditRenderTask(frame=51, generation_id=1, layers=[], background=True,
+                                  idle_prebuffer_cancelled=old, output_fbo_size=(1920, 1080))
+            EditGpuPreviewRenderer._process_task(gpu, task)
+            gpu._release_task_sources.assert_called_once_with(task)
+
+            host._color_program_monitor_active = True
+            FileOpsMixin._sync_timeline_idle_prebuffer(host)
+            renderer._start_idle_prebuffer(50)
+            new = enqueue.call_args.kwargs["cancelled"]
+            assert old.is_set() and not new.is_set()
+            host._color_program_monitor_active = False
+            FileOpsMixin._sync_timeline_idle_prebuffer(host)
+            assert new.is_set()
+            host.current_page = "Edit"
+            FileOpsMixin._sync_timeline_idle_prebuffer(host)
+            renderer._schedule_idle_prebuffer(50)
+            assert renderer._idle_prebuffer_armed
+        finally:
+            renderer.shutdown()
+
     def test_start_enqueues_forward_neighbor_first(
         self, mock_project, simple_sequence, mock_frame_provider
     ):
@@ -264,6 +307,21 @@ class TestWorkerBackgroundEnqueue:
             bg_emit.assert_called_once()
             assert bg_emit.call_args[0][0] == 10
             fr_emit.assert_not_called()
+
+    def test_cached_composite_present_shortcut_is_foreground_only(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ):
+        worker = self._make_worker(mock_project, simple_sequence, mock_frame_provider)
+        gpu = Mock()
+        gpu.has_cached_composite.return_value = True
+        gpu.submit.return_value = True
+        worker._gpu_renderer = gpu
+        worker._current_render_realtime = False
+        worker._try_gpu_render(3, (), (), 1, task_meta={"background": True, "request_kind": "idle_prebuffer"})
+        gpu.has_cached_composite.assert_not_called()
+        assert all(not call.args[0].cached_composite for call in gpu.submit.call_args_list)
+        ok, _ = worker._try_gpu_render(3, (), (), 1, task_meta={"request_kind": "seek"})
+        assert ok and gpu.submit.call_args.args[0].cached_composite
 
 
 def patch_signal(signal):

@@ -2896,6 +2896,13 @@
   },
   "viewport": {
     "color_monitor": "Color Pipeline Diagnostics",
+    "timeline_composite_monitor": "Timeline Composite Monitor",
+    "monitor_waiting": "Waiting for timeline frame",
+    "monitor_gpu": "GPU texture",
+    "monitor_image": "Image frame",
+    "monitor_cpu": "CPU image preview",
+    "monitor_empty": "No timeline picture",
+    "monitor_unavailable": "Timeline preview could not be initialized",
     "zoom_in": "Zoom In",
     "zoom_out": "Zoom Out",
     "fit": "Fit to Window",

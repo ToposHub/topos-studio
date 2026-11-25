@@ -160,7 +160,9 @@ def test_ui_presents_current_texture_when_playback_replaces_captured_texture() -
     mutex = _Mutex()
     engine = SimpleNamespace(
         gl_manager=SimpleNamespace(mutex=mutex),
-        renderer=SimpleNamespace(current_front_tex_id=42, current_front_fence=99),
+        retired_scrub_front=False,
+        renderer=SimpleNamespace(current_front_tex_id=42, current_front_fence=99, _video_generation_id=5,
+                                 current_front_video_frame=(5, 32)),
         _wait_for_front_texture_fence=ImageEngine._wait_for_front_texture_fence,
         _do_draw_background_tex_id=Mock(),
     )
@@ -170,9 +172,11 @@ def test_ui_presents_current_texture_when_playback_replaces_captured_texture() -
             engine,
             41,
             (1920, 1080),
+            viewer_paint=True,
         )
 
     assert did_draw is True
+    assert engine.drawn_video_frame == (5, 32)
     engine._do_draw_background_tex_id.assert_called_once_with(
         42,
         (1920, 1080),
@@ -182,6 +186,49 @@ def test_ui_presents_current_texture_when_playback_replaces_captured_texture() -
         None,
     )
     assert mutex.unlocked is True
+
+    engine.renderer.current_front_video_frame = (5, 33)
+    engine._do_draw_background_tex_id.return_value = True
+    with patch('OpenGL.GL.glWaitSync'):
+        # A successful offscreen scope pass and an unsuccessful viewer paint
+        # both leave the previously drawn viewer frame intact.
+        assert ImageEngine._draw_background_tex_id(engine, 42, (960, 540))
+        engine._do_draw_background_tex_id.return_value = False
+        assert not ImageEngine._draw_background_tex_id(engine, 42, (960, 540), viewer_paint=True)
+    assert engine.drawn_video_frame == (5, 32)
+
+
+def test_scrub_turn_holds_canvas_and_rejects_undrawn_front() -> None:
+    from src.features.color.ui.gl_viewport import GLCanvasViewport
+
+    engine = ImageEngine.__new__(ImageEngine)
+    engine.renderer = SimpleNamespace(current_front_tex_id=33, current_front_fence=None,
+                                      current_front_video_frame=(4, 60), _video_generation_id=5)
+    engine.scrub_paint_generation = 5
+    engine.drawn_video_frame = (4, 50)
+    engine.gl_manager = Mock()
+    engine.gl_manager.mutex.tryLock.return_value = True
+    engine._do_draw_background_tex_id = Mock(return_value=True)
+    viewport = SimpleNamespace(_canvas_engine_ref=lambda: engine, gl_manager=Mock())
+
+    # The old direction published 60, but the user has only seen 50.
+    GLCanvasViewport.paintGL(viewport)
+    viewport.gl_manager.ctx.clear.assert_not_called()
+    assert not engine._draw_background_tex_id(33, (640, 360), viewer_paint=True)
+    assert engine.drawn_video_frame == (4, 50)
+    engine._do_draw_background_tex_id.assert_not_called()
+    assert engine._draw_background_tex_id(33, (640, 360))  # Independent offscreen scope.
+    engine.renderer.current_front_video_frame = (4, 50)
+    assert engine._draw_background_tex_id(33, (640, 360), viewer_paint=True)
+    # A new framebuffer has no pixels to retain. Clear the backdrop and
+    # wait for a valid source instead of drawing an unseen old clip.
+    engine.drawn_video_frame = None
+    GLCanvasViewport.paintGL(viewport)
+    viewport.gl_manager.ctx.clear.assert_called_once()
+    assert not engine._draw_background_tex_id(33, (640, 360), viewer_paint=True)
+    engine.renderer.current_front_video_frame = (5, 49)
+    assert engine._draw_background_tex_id(33, (640, 360), viewer_paint=True)
+    assert engine.drawn_video_frame == (5, 49)
 
 
 def test_sync_gpu_none_reports_incomplete_without_blocking() -> None:

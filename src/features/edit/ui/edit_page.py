@@ -318,6 +318,7 @@ class EditPage(QWidget):
 
         # Audio playback manager (audio clock master when audio clips present)
         self._audio_manager: Optional[Any] = None  # AudioPlaybackManager, lazy-init
+        self._audio_start_renderer: QObject | None = None
 
         # MainWindow reference (explicitly injected, since EditPage has no Qt parent
         # and self.window() returns EditPage itself). Used to access dock panels like
@@ -989,17 +990,32 @@ class EditPage(QWidget):
         # controller playback must immediately give video rendering priority
         # over every non-essential timeline background task.
         self._set_thumbnail_playback(state == "playing")
+        self._cancel_pending_audio_start()
 
         if state == "playing":
+            host = getattr(self, "_main_window", None)
+            if getattr(host, "_color_program_monitor_active", False) is True:
+                source = getattr(host, "video_controller", None)
+                if source is not None and source.is_playing:
+                    source.stop_playback()
+                if not self._audio_active:
+                    self._sync_audio_tracks_from_timeline()
             start_frame = self._current_transport_frame()
             self._current_frame = start_frame
             # AUD-19901: 隐藏的 Edit 页不得驱动自己的预览渲染器（理由与
             # _on_playhead_changed 的门控一致：隐藏渲染器二次解码同一内容，
             # 其渲染背压拖慢共享播放钟）。音频管理器仍照常启动。
-            if self._preview_refresh_allowed():
+            refresh_preview = self._preview_refresh_allowed()
+            if refresh_preview:
                 playback_trace("edit_page.playback_start_request_frame", frame=start_frame)
                 self.timeline_frame_requested.emit(start_frame)
             if not self._audio_active or self._audio_manager is None:
+                return
+            renderer = getattr(host, "timeline_preview_renderer", None)
+            waiting = getattr(renderer, "is_waiting_for_playback_start", None)
+            if refresh_preview and callable(waiting) and waiting(start_frame) is True:
+                self._audio_start_renderer = renderer
+                renderer.playback_start_ready.connect(self._play_prerolled_audio)
                 return
             self._audio_manager.play(start_frame=start_frame)
         elif state == "paused":
@@ -1010,6 +1026,22 @@ class EditPage(QWidget):
             if self._audio_manager is None:
                 return
             self._audio_manager.stop()
+
+    def _cancel_pending_audio_start(self) -> None:
+        renderer = self._audio_start_renderer
+        self._audio_start_renderer = None
+        if renderer is not None:
+            try:
+                renderer.playback_start_ready.disconnect(self._play_prerolled_audio)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _play_prerolled_audio(self, frame: int) -> None:
+        if self.sender() is not self._audio_start_renderer:
+            return
+        self._cancel_pending_audio_start()
+        if self._audio_active and self._audio_manager is not None:
+            self._audio_manager.play(start_frame=frame)
 
     def _current_transport_frame(self) -> int:
         """Return the timeline panel/controller frame used for transport sync."""
@@ -1035,7 +1067,7 @@ class EditPage(QWidget):
         seek audio as well; otherwise a stalled video preview keeps moving
         audio and leaves the two clocks permanently out of sync.
         """
-        if not self._audio_active or self._audio_manager is None:
+        if self._audio_start_renderer is not None or not self._audio_active or self._audio_manager is None:
             return
 
         if self._timeline_panel is not None:
@@ -1255,6 +1287,7 @@ class EditPage(QWidget):
         the process on macOS.  Keep this boundary idempotent so it is safe to
         call from both page transitions and the main-window shutdown path.
         """
+        self._cancel_pending_audio_start()
         manager = self._audio_manager
         self._audio_active = False
         self._audio_timeline_signature = None
@@ -2699,13 +2732,14 @@ class EditPage(QWidget):
         incorrectly suppressed, producing audio with a frozen picture.
 
         Keep the lifecycle flag as the fast path, and use the main window's
-        page as a narrowly scoped fallback.  A hidden Edit page still cannot
-        submit preview frames while Color or Composite is active.
+        page as a fallback, including Color's opt-in Program monitor.
         """
         if self._is_active:
             return True
         main_window = getattr(self, "_main_window", None)
-        return getattr(main_window, "current_page", None) == "Edit"
+        page = getattr(main_window, "current_page", None)
+        return page == "Edit" or (
+            page == "Color" and getattr(main_window, "_color_program_monitor_active", False) is True)
 
     def _preview_refresh_allowed(self) -> bool:
         """Gate refresh-style frame requests (AUD-19901).

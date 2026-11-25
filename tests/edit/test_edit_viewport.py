@@ -307,6 +307,46 @@ def test_program_scrub_distinguishes_updates_from_user_seeks(viewport) -> None:
     assert not viewport.program_slider.isEnabled()
 
 
+def test_color_monitor_keeps_program_controls_and_restores_edit_panes(viewport) -> None:
+    viewport.show_source(focus=False)
+    viewport.set_dual_view(True)
+    program = viewport.program_viewer.get_viewer()
+    changes = []
+    viewport.mode_changed.connect(changes.append)
+    viewport.active_monitor_changed.connect(changes.append)
+    viewport.set_program_only(True, color_monitor=True)
+    assert viewport.source_pane.isHidden()
+    assert not viewport.program_pane.isHidden()
+    assert not viewport.program_slider.isHidden()
+    assert not viewport.program_footer.isHidden()
+    assert not viewport.timeline_monitor_status.isHidden()
+    assert viewport.program_viewer.get_viewer() is program
+    viewport.set_program_only(False)
+    assert viewport.timeline_monitor_status.isHidden()
+    assert viewport.dual_view and viewport.active_monitor == "source"
+    assert not viewport.source_pane.isHidden()
+    assert not changes
+
+
+def test_program_scrubber_starts_at_pointer_and_distinguishes_lost_grab(viewport, qtbot) -> None:
+    slider = viewport.program_slider
+    viewport.set_program_range(200)
+    slider.setValue(5)
+    starts, releases, cancels = [], [], []
+    slider.scrub_started_at.connect(starts.append)
+    slider.scrub_finished_at.connect(releases.append)
+    slider.scrub_cancelled.connect(lambda: cancels.append(True))
+    point = QPoint(slider.width() * 2 // 3, slider.height() // 2)
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=point)
+    assert starts == [slider.value()] and starts[0] > 100
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=point)
+    assert releases == starts and not cancels
+    qtbot.mousePress(slider, Qt.MouseButton.LeftButton, pos=point)
+    QApplication.sendEvent(slider, QEvent(QEvent.Type.UngrabMouse))
+    qtbot.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=point)
+    assert cancels == [True] and len(releases) == 1
+
+
 def test_program_duration_uses_existing_drop_frame_timecode(viewport) -> None:
     from src.shared.media.metadata import Rational
 

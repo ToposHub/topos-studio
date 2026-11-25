@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QThread, QMutex
+from PyQt6.QtCore import QCoreApplication, QEvent, QThread, QMutex
 from PyQt6.QtGui import QImage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -43,7 +43,7 @@ from src.features.edit.core.timeline_preview_renderer import (
     PreviewRenderWorker,
     TimelinePreviewRenderer,
     AssetResolver,
-    _ScrubWorkerResult,
+    _WorkerFrameResult,
     create_timeline_preview_renderer,
 )
 from src.features.edit.core.edit_playback_controller import (
@@ -3500,6 +3500,92 @@ class TestTimelinePreviewRenderer:
             resume.set()
             renderer.shutdown()
 
+    @pytest.mark.parametrize("old_error", [False, True])
+    def test_queued_preview_from_before_clip_drop_cannot_replace_new_playback(
+        self, mock_project, simple_sequence, mock_frame_provider, qtbot, old_error,
+    ) -> None:
+        empty = replace(simple_sequence, video_tracks=())
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=empty,
+            frame_provider=mock_frame_provider, viewport_size=(32, 18),
+        )
+        old_generation = renderer._generation_id
+        old_queued = threading.Event()
+        new_started = threading.Event()
+        allow_new = threading.Event()
+        stale = QImage(32, 18, QImage.Format.Format_RGB32)
+        stale.fill(0xffff0000)
+        new = QImage(32, 18, QImage.Format.Format_RGB32)
+        new.fill(0xff00ff00)
+        frames = []
+        renderer.frame_ready.connect(lambda frame, image: frames.append(image))
+
+        def execute(frame, _plan, generation, **_kwargs):
+            if generation == old_generation:
+                renderer._worker._emit_worker_result(frame, "old decode" if old_error else stale, error=old_error)
+                old_queued.set()
+            else:
+                new_started.set()
+                allow_new.wait(3)
+                renderer._worker._emit_worker_result(frame, new)
+
+        try:
+            with patch.object(renderer._worker, "_execute_render", side_effect=execute):
+                renderer.request_render(0)
+                assert old_queued.wait(2)
+                renderer.set_sequence(simple_sequence)
+                renderer.request_render(0)
+                assert new_started.wait(2)
+                assert renderer._dispatched_generation_id != old_generation
+                QCoreApplication.sendPostedEvents(None, QEvent.Type.MetaCall.value)
+                assert frames == []
+                assert renderer._render_in_flight
+                assert renderer._cache.get(0) is None
+                allow_new.set()
+                qtbot.waitUntil(lambda: bool(frames))
+                assert all(image == new for image in frames)
+        finally:
+            allow_new.set()
+            renderer.shutdown()
+
+    def test_play_after_scrub_retries_landing_frame_after_monitor_budget_change(
+        self, mock_project, simple_sequence, mock_frame_provider,
+    ) -> None:
+        renderer = TimelinePreviewRenderer(
+            project=mock_project, sequence=simple_sequence,
+            frame_provider=mock_frame_provider, viewport_size=(32, 18),
+        )
+        try:
+            with patch.object(renderer, "request_render"):
+                renderer.finish_scrub(20)
+            scrub_generation = renderer._generation_id
+            with patch.object(renderer, "_is_controller_playing", return_value=True), \
+                    patch.object(renderer._worker, "enqueue", return_value=True):
+                renderer._engine_playback_active = True
+                with patch.object(renderer, "_is_seeking_from_non_playing", return_value=False), \
+                        patch.object(renderer, "request_present_via_engine", return_value=False) as miss:
+                    renderer.request_render(20)
+                    miss.assert_called_once_with(20)
+                    assert renderer.should_defer_playback_tick(21)
+                renderer._engine_playback_active = False
+                assert renderer._scrub_exact_frame is None
+                assert renderer._generation_id > scrub_generation
+                assert renderer.should_defer_playback_tick(21)
+                renderer._on_frame_rendered(20, _WorkerFrameResult(scrub_generation, QImage()))
+                assert renderer._playback_start_wait is not None
+                renderer._invalidate_render_generation_for_quality("monitor_budget")
+                assert renderer.should_defer_playback_tick(21)
+                assert renderer._pending_frame == 20
+                frame = QImage(32, 18, QImage.Format.Format_RGB32)
+                renderer._on_frame_rendered(20, _WorkerFrameResult(renderer._generation_id, frame))
+                assert renderer._playback_start_wait is None
+                assert not renderer.should_defer_playback_tick(21)
+                renderer._playback_session_started = False
+                renderer.request_render(20)
+                assert not renderer.is_waiting_for_playback_start(20)
+        finally:
+            renderer.shutdown()
+
     def test_delayed_scrub_cpu_result_cannot_replace_exact_release(
         self, mock_project, simple_sequence, mock_frame_provider,
     ) -> None:
@@ -3518,8 +3604,8 @@ class TestTimelinePreviewRenderer:
             renderer._render_in_flight = True
             with patch.object(renderer, "frame_ready") as ready, \
                     patch.object(renderer, "_on_render_error") as error:
-                renderer._on_frame_rendered(12, _ScrubWorkerResult(old_generation, QImage()))
-                renderer._on_frame_rendered(12, _ScrubWorkerResult(old_generation, "decode", error=True))
+                renderer._on_frame_rendered(12, _WorkerFrameResult(old_generation, QImage()))
+                renderer._on_frame_rendered(12, _WorkerFrameResult(old_generation, "decode", error=True))
             ready.emit.assert_not_called()
             error.assert_not_called()
             assert renderer._pending_frame == 12
@@ -4609,13 +4695,15 @@ class TestTimelinePreviewRenderer:
         provider.request_frame_pixmap_async.assert_called_once()
         renderer.shutdown()
 
-    def test_playback_first_frame_allows_cached_thumbnail_placeholder(
+    @pytest.mark.parametrize("scrubbed", [False, True], ids=["empty-monitor", "scrub-takeover"])
+    def test_playback_first_frame_thumbnail_respects_previous_scrub(
         self,
         mock_project,
         simple_sequence,
         mock_frame_provider,
+        scrubbed,
     ):
-        """播放会话首个真实帧未显示前，允许缩略图避免空屏。"""
+        """A source thumbnail can fill an empty monitor, but must not replace the scrub image."""
         asset = MediaAsset(
             asset_id="asset-001",
             path="/path/to/video.mp4",
@@ -4634,6 +4722,10 @@ class TestTimelinePreviewRenderer:
 
         controller = EditPlaybackController()
         controller.set_timeline_duration(100)
+        target = 18 if scrubbed else 0
+        if scrubbed:
+            with patch.object(renderer, "request_render"):
+                renderer.finish_scrub(target)
         controller.play()
         renderer.set_playback_controller(controller)
 
@@ -4648,7 +4740,8 @@ class TestTimelinePreviewRenderer:
                 return image
 
         provider = Mock()
-        provider.get_cached_frame_pixmap.return_value = FakePixmap()
+        provider.get_cached_frame_pixmap.return_value = None if scrubbed else FakePixmap()
+        provider.get_cached_thumbnail.return_value = FakePixmap()
 
         fake_module = types.ModuleType("src.shared.media.thumbnail_provider")
         fake_module.ThumbnailProvider = type(
@@ -4657,16 +4750,29 @@ class TestTimelinePreviewRenderer:
             {"instance": staticmethod(lambda: provider)},
         )
 
-        with patch.dict(sys.modules, {"src.shared.media.thumbnail_provider": fake_module}):
-            with patch.object(renderer, "frame_ready") as mock_signal:
-                renderer.request_render(0)
-
-        assert mock_signal.emit.call_count == 1
-        emitted_frame, emitted_image = mock_signal.emit.call_args.args
-        assert emitted_frame == 0
-        assert isinstance(emitted_image, QImage)
-
-        renderer.shutdown()
+        try:
+            with patch.dict(sys.modules, {"src.shared.media.thumbnail_provider": fake_module}), \
+                    patch.object(renderer, "_should_use_gpu_only_realtime_preview", return_value=False), \
+                    patch.object(renderer, "frame_ready") as ready:
+                renderer.request_render(target)
+            if scrubbed:
+                ready.emit.assert_not_called()
+                provider.get_cached_thumbnail.assert_not_called()
+                # A decode miss must not relabel a neighbour as the landing
+                # frame and release the PCM gate.
+                renderer._cache.put(target - 1, image)
+                with patch.object(renderer, "frame_ready") as decode_ready:
+                    renderer._on_frame_rendered(target, _WorkerFrameResult(renderer._generation_id, None))
+                decode_ready.emit.assert_not_called()
+                assert renderer._cache.get(target) is None
+                assert renderer.is_waiting_for_playback_start(target)
+            else:
+                ready.emit.assert_called_once()
+                emitted_frame, emitted_image = ready.emit.call_args.args
+                assert emitted_frame == target
+                assert isinstance(emitted_image, QImage)
+        finally:
+            renderer.shutdown()
 
     def test_playback_after_real_frame_suppresses_thumbnail_placeholder(
         self,

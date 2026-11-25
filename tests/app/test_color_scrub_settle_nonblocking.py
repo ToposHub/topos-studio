@@ -117,6 +117,7 @@ class TestScrubSettleNonBlocking:
         assert not fc._viewport_scrub_active
         assert not fc._viewport_scrub_settle_pending
         assert fc._viewport_scrub_drag_generation > generation
+        fc.video_controller.end_scrub_paint_guard.assert_called_once_with()
         fc.video_controller.seek_to_frame.assert_not_called()
 
     def test_new_drag_clears_stale_settle_flag(self):
@@ -186,6 +187,33 @@ class TestScrubSettleNonBlocking:
         timer()
         fc.video_controller.seek_to_frame.assert_not_called()
 
+    @pytest.mark.parametrize("presented", [False, True])
+    def test_hold_checks_the_drawn_frame_before_skipping_exact_seek(
+        self, qapp, presented: bool,
+    ) -> None:
+        fc = _make_controller()
+        controller = fc.video_controller
+        controller.is_scrub_frame_presented.return_value = presented
+        fc.on_video_scrub_started(16)
+        fc._viewport_scrub_pending_frame = 20
+        with (
+            patch("src.shared.video.scrub_stride.display_stride", return_value=1),
+            patch("src.app.controllers.file_controller.QTimer.singleShot") as schedule,
+        ):
+            fc._emit_pending_viewport_scrub()
+            timer = schedule.call_args.args[1]
+            fc._viewport_scrub_last_emit_ms -= 150
+            controller._last_submitted_video_frame_index = 120
+            controller.seek_to_frame.reset_mock()
+            timer()
+        controller.is_scrub_frame_presented.assert_called_once_with(120)
+        if presented:
+            controller.seek_to_frame.assert_not_called()
+        else:
+            controller.seek_to_frame.assert_called_once_with(
+                120, blocking=False, allow_proxy_fallback=False, scrub_reset=True,
+            )
+
     @pytest.mark.parametrize("before_exact_seek", [True, False])
     def test_held_fast_scrub_cannot_seek_or_present_after_clip_change(
         self, qapp, before_exact_seek: bool,
@@ -226,6 +254,25 @@ class TestScrubSettleNonBlocking:
 
 class TestScrubCoalesceWatchdog:
     """拖拽合并闩锁自愈：singleShot 回调丢失不再永久冻结调色页拖拽。"""
+
+    def test_color_turn_retires_old_frames_even_when_peak_is_still_pending(self) -> None:
+        fc = _make_controller()
+        fc._viewport_scrub_interval_ms = 1000
+        with (
+            patch("src.app.controllers.file_controller.QTimer.singleShot") as schedule,
+            patch("src.shared.video.scrub_stride.display_stride", return_value=1),
+        ):
+            fc.on_video_scrub_started(193)
+            fc.on_video_scrub_moved(200)
+            deferred = schedule.call_args.args[1]
+            fc.on_video_scrub_moved(198)
+            fc.video_controller.seek_to_frame.assert_called_with(
+                298, blocking=False, fast_scrub=True, allow_proxy_fallback=False,
+                scrub_origin=300, scrub_direction=-1, scrub_reset=True,
+            )
+            fc.video_controller.seek_to_frame.reset_mock()
+            deferred()
+            fc.video_controller.seek_to_frame.assert_not_called()
 
     def test_stuck_coalesce_timer_recovers_within_watchdog(self):
         import time

@@ -58,7 +58,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Tuple, Any, Callable
 
 from src.shared.media.decode_policy import (
@@ -77,7 +77,7 @@ from src.shared.media.proxy import (
     get_disk_proxy_rejection_reason,
     VIEWPORT_THRESHOLD,
 )
-from src.shared.media.cache import DualFrameCache
+from src.shared.media.cache import DualFrameCache, FrameCache
 from src.shared.media.metadata import Rational
 from src.shared.media.frame import DecodedFrame
 
@@ -181,6 +181,8 @@ class SourceManager:
 
         # 双缓存
         self._cache: DualFrameCache = DualFrameCache()
+        self._master_cache_policy = self._cache.master_cache.policy
+        self._scrub_master_cache: Optional[FrameCache] = None
 
         # 元数据
         self._metadata: Optional[Any] = None  # VideoMetadata
@@ -365,10 +367,11 @@ class SourceManager:
                 # 旧签名不支持 target_size/preserve_planes，只用 path
                 self._master_source = self._source_factory(self._path)
             self._master_source.open()
+            scrub_history = False
             if self._interactive_scrub:
                 tune_scrub = getattr(self._master_source, 'tune_interactive_scrub', None)
                 if callable(tune_scrub):
-                    tune_scrub()
+                    scrub_history = tune_scrub() is True
 
             # 探测元数据
             self._metadata = self._master_source.probe()
@@ -525,14 +528,18 @@ class SourceManager:
                         fallback_reason='no_proxy_needed'
                     )
 
-            self._is_open = True
-
             # 记录源类型
             source_type = 'disk_proxy' if disk_proxy_ready else (
                 'memory_proxy' if self._proxy_source else 'master_only'
             )
             proxy_planar_mode = getattr(self._proxy_source, 'is_planar_mode', False) if self._proxy_source else False
             master_planar_mode = bool(getattr(self._master_source, 'is_planar_mode', False))
+            if scrub_history and master_planar_mode and not self._shares_master_proxy_source:
+                # A turnaround often revisits frames already delivered during the
+                # previous leg. Keep those exact frames within the master byte cap.
+                self._cache.master_cache.policy = replace(self._master_cache_policy, max_frames=24)
+                self._scrub_master_cache = self._cache.master_cache
+            self._is_open = True
             hwaccel_info = f"hwaccel={self._hwaccel_status.decoder_type}" if self._hwaccel_status else "hwaccel=unknown"
 
             logger.info(
@@ -555,6 +562,7 @@ class SourceManager:
 
     def close(self) -> None:
         """关闭所有源（包括磁盘代理源）"""
+        self._scrub_master_cache = None
         with self._decode_lock:
             master_source = self._master_source
             proxy_source = self._proxy_source
@@ -582,10 +590,16 @@ class SourceManager:
                 self._disk_proxy_source = None
 
         self._cache.clear_all()
+        self._cache.master_cache.policy = self._master_cache_policy
         self._is_open = False
         self._metadata = None
 
         logger.info("SourceManager closed")
+
+    def get_cached_scrub_frame(self, target: int, first: int, last: int) -> Optional[DecodedFrame]:
+        """Return an original-quality CPU frame without entering the decoder."""
+        cache = self._scrub_master_cache
+        return cache.try_get_scrub_frame(target, first, last) if cache is not None else None
 
     def get_master_frame(self, frame_index: int) -> Optional[DecodedFrame]:
         """

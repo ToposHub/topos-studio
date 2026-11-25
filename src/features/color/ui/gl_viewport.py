@@ -1,4 +1,5 @@
 import logging
+import weakref
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import QGraphicsScene
 from PyQt6.QtCore import pyqtSignal, QTimer
@@ -27,6 +28,7 @@ class GLCanvasViewport(QOpenGLWidget):
         self._needs_context_restore = False
         self._pending_render_after_show = False
         self._gl_initialized = False  # Track whether GL init has completed
+        self._canvas_engine_ref = None
         # AUD-25411：show 后延迟渲染的重试计数（尺寸无效时有限重试）
         self._show_render_retries = 0
         
@@ -52,6 +54,7 @@ class GLCanvasViewport(QOpenGLWidget):
             parent_canvas = parent_canvas.parent()
 
         if parent_canvas and hasattr(parent_canvas, 'engine'):
+            self._canvas_engine_ref = weakref.ref(parent_canvas.engine)
             parent_canvas.engine.initialize_async_renderer(self.context())
             self.context().aboutToBeDestroyed.connect(self._release_aces_split)
             # Connect the frame_ready signal to trigger update
@@ -103,6 +106,11 @@ class GLCanvasViewport(QOpenGLWidget):
 
     def resizeGL(self, width, height) -> None:
         """Called whenever the widget has been resized."""
+        # Qt replaces its backing framebuffer on resize. Only a subsequent
+        # successful canvas draw can mark its pixels as available for a hold.
+        engine = self._canvas_engine_ref() if self._canvas_engine_ref is not None else None
+        if engine is not None:
+            engine.drawn_video_frame = None
         if self.gl_manager.ctx:
             # Update viewport if needed
             self.gl_manager.ctx.viewport = (0, 0, width, height)
@@ -135,13 +143,11 @@ class GLCanvasViewport(QOpenGLWidget):
         Note: QGraphicsView will call drawBackground, so we don't necessarily
         perform all rendering here if used as a viewport.
         """
-        # The renderer may retain a previous frame during an exact seek, but
-        # the viewer backdrop must still be painted every frame.  Returning
-        # early here retained QOpenGLWidget's default black buffer, making
-        # static previews use black bars while playback used gray bars.
-        # AUD-25413: 原先这里每次重绘都做一次父级遍历（结果从未使用），
-        # 属于 paintGL 每帧热路径死代码，已删除。
-        # Clear the background
+        # PartialUpdate preserves the last paint while a scrub turn replaces
+        # an undrawn front. A new or resized framebuffer still needs a clear.
+        engine = self._canvas_engine_ref() if self._canvas_engine_ref is not None else None
+        if engine is not None and engine.drawn_video_frame is not None and engine.retired_scrub_front:
+            return
         if self.gl_manager.ctx:
             # A paused seek can briefly retain the widget framebuffer while
             # the renderer owns the shared context.  Clear it to the exact

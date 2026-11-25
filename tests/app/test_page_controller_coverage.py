@@ -59,7 +59,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QObject
+from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
 from src.app.controllers import page_controller as pc
@@ -1605,6 +1605,38 @@ def test_static_preview_stale_token_returns_early() -> None:
     video_controller.seek_to_frame.assert_not_called()
 
 
+@pytest.mark.parametrize("leave_before_init", [False, True])
+def test_first_color_visit_waits_for_viewport_before_submitting_exact_frame(
+    qapp: Any, leave_before_init: bool,
+) -> None:
+    class Viewport(QObject):
+        _gl_initialized = False
+        gl_initialized = pyqtSignal()
+
+    host = _PageHost(current_page="Color")
+    viewport = Viewport()
+    host.canvas.gl_viewport = viewport
+    host.engine.renderer = None
+    submit = MagicMock(return_value=True)
+    host.video_controller = _preview_video_controller(request_static_preview_frame=submit)
+    host._show_color_timeline_clip_static_preview(_preview_context(source_frame=0))
+    submit.assert_not_called()
+    assert not hasattr(host, "_color_static_preview_rendered_key")
+
+    host._show_color_timeline_clip_static_preview(_preview_context(source_frame=1))
+    if leave_before_init:
+        host.current_page = "Edit"
+    host.engine.renderer = object()
+    viewport._gl_initialized = True
+    viewport.gl_initialized.emit()
+    qapp.processEvents()
+    if leave_before_init:
+        submit.assert_not_called()
+    else:
+        submit.assert_called_once_with(1)
+        assert host._color_static_preview_rendered_key == (2, 1)
+
+
 def test_static_preview_fast_completes_already_displayed_frame() -> None:
     host = _PageHost()
     withdraw = MagicMock()
@@ -2908,6 +2940,32 @@ def test_open_timeline_clip_in_color_clamps_frames_to_clip_start() -> None:
     )
     context = host._handle_enter_color_with_context.call_args.args[0]
     assert context.timeline_frame == 100  # past end → back to start
+
+
+@pytest.mark.parametrize(("playhead", "source_frame"), [(115, 515), (177, 500)])
+def test_color_composite_monitor_selection_preserves_program_clock(playhead: int, source_frame: int) -> None:
+    from src.app.controllers.file_controller import FileOpsMixin
+
+    host = _PageHost()
+    clip = _clip("clip-1", timeline_start=100, duration=40, source_start=500, color_stack_id="stack-1")
+    host._current_edit_project = SimpleNamespace(
+        assets={"asset-1": SimpleNamespace(is_video=True, is_image=False, metadata={})},
+        color_stacks={}, project_id="p1", active_timeline_id="tl-1")
+    host._current_timeline_sequences = {"tl-1": _fake_timeline([_FakeTrack([clip])])}
+    host.timeline_panel = _make_timeline_panel(None, playhead=playhead)
+    host.timeline_panel.set_playhead_frame = MagicMock()
+    clock = SimpleNamespace(is_playing=True, pause=MagicMock())
+    host.timeline_panel.get_playback_controller = lambda: clock
+    host.current_page = "Color"
+    host._color_program_monitor_active = True
+    host._handle_enter_color_with_context = MagicMock()
+    assert host.open_timeline_clip_in_color("tl-1", "clip-1", timeline_frame=100, source_frame_override=500)
+    context = host._handle_enter_color_with_context.call_args.args[0]
+    assert context.source_frame == source_frame
+    # A delayed frame from the newly selected source cannot seek Program either.
+    FileOpsMixin._sync_color_timeline_playhead(host, 0)
+    host.timeline_panel.set_playhead_frame.assert_not_called()
+    clock.pause.assert_not_called()
 
 
 def test_open_timeline_clip_re_fetches_clip_after_stack_creation() -> None:

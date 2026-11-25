@@ -260,6 +260,24 @@ class FrameCache:
             self._hit_count += 1
             return entry.frame_data
 
+    def try_get_scrub_frame(self, target: int, first: int, last: int) -> Optional[DecodedFrame]:
+        """Peek at a decoded CPU master inside the current sweep without waiting."""
+        if first > last or not self._lock.acquire(blocking=False):
+            return None
+        try:
+            closest: Optional[DecodedFrame] = None
+            for index, entry in self._cache.items():
+                if not first <= index <= last or entry.is_expired(self.policy.ttl_seconds):
+                    continue
+                frame = entry.frame_data
+                if (entry.is_master and isinstance(frame, DecodedFrame) and frame.is_planar
+                        and not frame.is_proxy and frame.frame_index == index
+                        and (closest is None or abs(index - target) < abs(closest.frame_index - target))):
+                    closest = frame
+            return closest
+        finally:
+            self._lock.release()
+
     def contains(self, frame_index: int) -> bool:
         """
         检查帧是否存在缓存中。
@@ -333,7 +351,9 @@ class FrameCache:
             if frame_data.data is not None:
                 return frame_data.data.nbytes
             elif frame_data.planes:
-                return sum(p.nbytes for p in frame_data.planes)
+                visible_bytes = sum(p.nbytes for p in frame_data.planes)
+                retained = (frame_data.extra or {}).get('retained_plane_bytes')
+                return max(visible_bytes, retained) if isinstance(retained, int) else visible_bytes
             return 0
         elif isinstance(frame_data, np.ndarray):
             return frame_data.nbytes

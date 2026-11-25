@@ -292,6 +292,8 @@ class ImageEngine(QObject, WindowRasterizer):
         # P4-2 SAFETY: Reference to Canvas for paint/render cycle detection
         # Set by MainWindow after canvas.engine = self.engine
         self.canvas_ref = None
+        self.drawn_video_frame: tuple[int, int] | None = None
+        self.scrub_paint_generation: int | None = None
 
         self.img_full_original = None # BGR uint8 (Phase 3.5 Optimization)
         self.img_source_full = None   # Original source image for non-destructive crop
@@ -739,6 +741,8 @@ class ImageEngine(QObject, WindowRasterizer):
         """Initializes the background render thread with a shared context."""
         if self.renderer is None:
             self.renderer = AsyncRenderer(main_context)
+            self.drawn_video_frame = None
+            self.scrub_paint_generation = None
             self.renderer.frame_ready.connect(self.frame_ready.emit)
             self.renderer.grade_set_preview_ready.connect(self.grade_set_preview_ready.emit)
             self.renderer.scope_snapshot_ready.connect(self.scope_snapshot_ready.emit)
@@ -3273,6 +3277,10 @@ class ImageEngine(QObject, WindowRasterizer):
                         forget(render_params['render_request_id'])
                     raise
             else:
+                # The clip's initial CPU image establishes geometry and the
+                # reference. Only the graded video command may present it.
+                if self._is_video_mode and getattr(self.renderer, "video_texture_pending", False) is True:
+                    return None
                 if not self._is_video_mode and self.img_full_original is not None:
                     if render_reason != 'viewport_refresh':
                         self._still_grade_revision += 1
@@ -4065,8 +4073,28 @@ class ImageEngine(QObject, WindowRasterizer):
             )
             return True
 
+    @property
+    def scrub_viewer_frames(self) -> tuple[tuple[int, int] | None, tuple[int, int] | None] | None:
+        """Drawn and published (generation, source frame) in the GL viewer."""
+        renderer = self.renderer
+        if renderer is None or renderer.__dict__.get("_color_metal_preview") is not None:
+            return None
+        if renderer.video_texture_pending:
+            return None, None
+        return self.drawn_video_frame, renderer.current_front_video_frame
+
+    @property
+    def retired_scrub_front(self) -> bool:
+        """The previous drag published a video texture the canvas never drew."""
+        generation = self.scrub_paint_generation
+        if generation is None or self.renderer is None or generation != self.renderer._video_generation_id:
+            return False
+        published = self.renderer.current_front_video_frame
+        return published is not None and published[0] < generation and published != self.drawn_video_frame
+
     def _draw_background_tex_id(self, tex_id, viewport_size, src_rect=None, rotation_angle=0.0,
-                                letterbox=False, presentation_size=None, *, desktop_display=None):
+                                letterbox=False, presentation_size=None, *, desktop_display=None,
+                                viewer_paint: bool = False):
         """Draw background texture with optional rotation for crop preview.
 
         Args:
@@ -4092,9 +4120,11 @@ class ImageEngine(QObject, WindowRasterizer):
             current_tex_id = getattr(self.renderer, 'current_front_tex_id', None)
             if current_tex_id is None or current_tex_id <= 0:
                 return False
+            if viewer_paint and self.retired_scrub_front:
+                return False
             if not self._wait_for_front_texture_fence(self.renderer, current_tex_id):
                 return False
-            self._do_draw_background_tex_id(
+            did_draw = self._do_draw_background_tex_id(
                 current_tex_id,
                 viewport_size,
                 src_rect,
@@ -4103,12 +4133,14 @@ class ImageEngine(QObject, WindowRasterizer):
                 presentation_size,
                 **({"desktop_display": desktop_display} if desktop_display is not None else {}),
             )
-            return True
+            if did_draw and viewer_paint:
+                self.drawn_video_frame = self.renderer.current_front_video_frame
+            return bool(did_draw)
         finally:
             mutex.unlock()
 
     def _do_draw_background_tex_id(self, tex_id, viewport_size, src_rect=None, rotation_angle=0.0,
-                                   letterbox=False, presentation_size=None, *, desktop_display=None) -> None:
+                                   letterbox=False, presentation_size=None, *, desktop_display=None) -> bool:
         """Blit a GL texture to the current context's default framebuffer.
 
         调用方必须已持有共享 GL mutex（见 _draw_background_tex_id）。
@@ -4120,7 +4152,7 @@ class ImageEngine(QObject, WindowRasterizer):
         context = QOpenGLContext.currentContext()
         if not context:
             logger.warning("_do_draw_background_tex_id: No current OpenGL context")
-            return
+            return False
         # PyQt6 只提供 QOpenGLFunctions_4_1_Core (OpenGL 4.1 是 3.3 的超集)
         from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core
         gl = QOpenGLFunctions_4_1_Core()
@@ -4133,7 +4165,7 @@ class ImageEngine(QObject, WindowRasterizer):
             gl = QOpenGLFunctions(context)
             if not gl.initializeOpenGLFunctions():
                 logger.error("Even QOpenGLFunctions failed to initialize!")
-                return
+                return False
         
         # Disable SRGB conversion for the default framebuffer to avoid double-gamma
         # when displaying images that are already sRGB-encoded.
@@ -4253,7 +4285,7 @@ class ImageEngine(QObject, WindowRasterizer):
                 vao.render(moderngl.TRIANGLE_STRIP)
                 gl.glActiveTexture(0x84C1); gl.glBindTexture(0x0DE1, 0)
                 gl.glActiveTexture(0x84C0); gl.glBindTexture(0x0DE1, 0)
-                return
+                return True
         
         gl.glActiveTexture(0x84C0); gl.glBindTexture(0x0DE1, tex_id)
         
@@ -4283,6 +4315,7 @@ class ImageEngine(QObject, WindowRasterizer):
                 self.quad_vao.render(moderngl.TRIANGLE_STRIP)
 
         gl.glBindTexture(0x0DE1, 0)
+        return True
 
     def render_scope_view(self, max_dim: int = 512) -> Optional[np.ndarray]:
         """Read back the visible viewport region for legacy CPU scopes.

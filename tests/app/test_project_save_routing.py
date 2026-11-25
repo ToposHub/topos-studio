@@ -162,8 +162,10 @@ def test_canceling_window_close_keeps_the_mixer_recording_active() -> None:
     host._finish_mixer_timeline_recordings.assert_not_called()
 
 
-def test_closing_project_discards_its_recovery_file_and_detaches_autosave() -> None:
+def test_closing_project_discards_its_recovery_file_and_detaches_autosave(monkeypatch) -> None:
     """Discarding a project must not leave a recovery prompt for it behind."""
+    from PyQt6.QtWidgets import QMessageBox
+
     from src.app.controllers.edit_controller import EditControllerMixin
 
     project_path = "/tmp/closing-project.topos"
@@ -187,8 +189,29 @@ def test_closing_project_discards_its_recovery_file_and_detaches_autosave() -> N
         status_bar=SimpleNamespace(showMessage=MagicMock()),
     )
 
+    host._release_edit_source_viewer = MagicMock()
+    host._color_program_monitor_active = True
+    host.set_color_timeline_composite_monitor = MagicMock()
+
+    def release_preview() -> None:
+        assert host._current_edit_project is None
+        host._release_edit_source_viewer.assert_called_once_with()
+        host.set_color_timeline_composite_monitor.assert_called_once_with(False)
+        host.edit_page.set_timeline.assert_not_called()
+
+    host._release_timeline_preview_renderer = MagicMock(side_effect=release_preview)
+    host._has_unsaved_changes = lambda: True
+    monkeypatch.setattr(QMessageBox, "question", lambda *args: QMessageBox.StandardButton.Cancel)
+    assert not EditControllerMixin._close_current_project(host)
+    host._release_timeline_preview_renderer.assert_not_called()
+    host._release_edit_source_viewer.assert_not_called()
+    host.set_color_timeline_composite_monitor.assert_not_called()
+
+    host._has_unsaved_changes = lambda: False
     assert EditControllerMixin._close_current_project(host)
 
+    assert EditControllerMixin._close_current_project(host)  # Already closed.
+    host._release_timeline_preview_renderer.assert_called_once_with()
     project_io.discard_autosave.assert_called_once_with(project_path)
     project_io.set_current_filepath.assert_called_once_with(None)
     assert host._current_edit_project is None

@@ -7,7 +7,7 @@ Only standard QSlider state and signals are changed; no media work lives here.
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt
+from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QMouseEvent, QPaintEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSlider, QWidget
 
@@ -86,6 +86,10 @@ def paint_monitor_scrubber(slider: QSlider) -> None:
 class MonitorScrubber(QSlider):
     """Horizontal preview ruler with ordinary QSlider keyboard semantics."""
 
+    scrub_started_at = pyqtSignal(int)
+    scrub_finished_at = pyqtSignal(int)
+    scrub_cancelled = pyqtSignal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.setFixedHeight(24)
@@ -100,18 +104,20 @@ class MonitorScrubber(QSlider):
         self.update()
 
     def event(self, event: QEvent) -> bool:
-        result = super().event(event)
         if event.type() in {QEvent.Type.Hide, QEvent.Type.UngrabMouse} or (
             event.type() == QEvent.Type.EnabledChange and not self.isEnabled()
         ):
+            was_dragging = self.isSliderDown()
             cancel_monitor_scrub(self)
-        return result
+            if was_dragging:
+                self.scrub_cancelled.emit()
+        return super().event(event)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         paint_monitor_scrubber(self)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if not scrubber_mouse_press(self, event):
+        if not scrubber_mouse_press(self, event, on_start=self.scrub_started_at.emit):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
@@ -119,5 +125,7 @@ class MonitorScrubber(QSlider):
             super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if not scrubber_mouse_release(self, event):
+        if scrubber_mouse_release(self, event):
+            self.scrub_finished_at.emit(self.value())
+        else:
             super().mouseReleaseEvent(event)

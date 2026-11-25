@@ -161,6 +161,12 @@ class _SourceViewerDecodeWorker:
                     )
                 else:
                     decoded_frame, frame_type = self._manager.get_frame(asset_path, frame)
+                with self._lock:
+                    retired = not self._running
+                if retired:
+                    if decoded_frame is not None:
+                        safe_release_gpu_frame(decoded_frame)
+                    continue
                 if decoded_frame is None:
                     # Interactive abort or decode failure: let the widget show
                     # its last good frame; do not force a CPU seek decode.
@@ -2742,6 +2748,39 @@ class FileOpsMixin:
     # Timeline preview renderer
     # ------------------------------------------------------------------
 
+    def _sync_timeline_idle_prebuffer(self) -> None:
+        set_active = getattr(getattr(self, "timeline_preview_renderer", None), "set_idle_prebuffer_active", None)
+        if callable(set_active):
+            set_active(
+                getattr(self, "current_page", None) != "Color"
+                or bool(getattr(self, "_color_program_monitor_active", False))
+            )
+
+    def _release_timeline_preview_renderer(self) -> None:
+        """Return the viewer leases and stop the project's preview/decode workers."""
+        renderer = getattr(self, "timeline_preview_renderer", None)
+        if renderer is None:
+            return
+        self.timeline_preview_renderer = None
+        self._gpu_pipeline_initialized = False
+        self._gpu_decode_manager = None
+        self._disconnect_timeline_preview_renderer_signals(renderer)
+        _disable_native_program_viewport(self)
+        self.program_viewer_widget.clear_texture()
+        self.program_viewer_widget.set_realtime_mode(False)
+
+        # Source shares the timeline's decode manager. Stop its requests
+        # before renderer shutdown closes the manager's decoder sessions.
+        source_worker = getattr(self, "_source_decode_worker", None)
+        if source_worker is not None:
+            self.source_viewer_widget.set_gpu_frame_provider(None)
+            source_worker.signals.cpu_fallback_requested.disconnect(
+                self.source_viewer_widget.request_cpu_fallback)
+            source_worker.stop()
+            self._source_decode_worker = None
+        renderer.shutdown()
+        renderer.deleteLater()
+
     def _init_timeline_preview_renderer(self) -> None:
         """
         Initialize or recreate TimelinePreviewRenderer.
@@ -2755,13 +2794,7 @@ class FileOpsMixin:
         - Cache management
         - Signal connections to ProgramViewer
         """
-        # Shutdown existing renderer first
-        if self.timeline_preview_renderer:
-            old_renderer = self.timeline_preview_renderer
-            self._disconnect_timeline_preview_renderer_signals(old_renderer)
-            old_renderer.shutdown()
-            old_renderer.deleteLater()
-            self.timeline_preview_renderer = None
+        self._release_timeline_preview_renderer()
 
         # Check prerequisites
         if not self._current_edit_project:
@@ -2818,6 +2851,7 @@ class FileOpsMixin:
                 }
             )
 
+            self._sync_timeline_idle_prebuffer()
             # P1-02: 注入嵌套序列子序列解析器（渲染嵌套片段时按 id 取子序列，
             # 子序列被编辑后父序列画面在下一次渲染即时反映）。
             if hasattr(self.timeline_preview_renderer, "set_sequence_resolver"):
@@ -2834,6 +2868,11 @@ class FileOpsMixin:
 
             # Connect signals
             self._connect_timeline_preview_renderer_signals()
+            # The monitor already has a size when the first drop creates its
+            # renderer. Apply it before the first preview or transport request.
+            budget = getattr(self, "_viewport_budget_executor", None)
+            if budget is not None and self.current_page == "Edit":
+                budget.refresh()
 
             # Set timeline to EditPage
             self.edit_page.set_timeline(sequence)
@@ -2842,7 +2881,9 @@ class FileOpsMixin:
             if self.program_viewer_widget:
                 viewer = self.program_viewer_widget.get_viewer()
                 if viewer is not None:
-                    viewer.gl_initialized.connect(self._init_gpu_pipeline)
+                    if getattr(self, "_program_gl_viewer", None) is not viewer:
+                        viewer.gl_initialized.connect(self._init_gpu_pipeline)
+                        self._program_gl_viewer = viewer
                     # If GL is already initialized, trigger immediately
                     if viewer._gl_initialized:
                         ctx = viewer.context()
@@ -3016,9 +3057,6 @@ class FileOpsMixin:
         try:
             from src.features.edit import facade as edit_facade
 
-            # Initialize Source GPU renderer reference
-            self._source_gpu_renderer = None
-
             # Check pipeline mode
             try:
                 from src.shared.video.pipeline_decision import resolve_video_pipeline_mode
@@ -3093,6 +3131,11 @@ class FileOpsMixin:
         if self.source_viewer_widget is None:
             return
 
+        source_renderer = getattr(self, "_source_gpu_renderer", None)
+        if source_renderer is not None:
+            self._setup_source_gpu_provider(gpu_decode_manager, source_renderer)
+            return
+
         # Try to get SourceViewer's GL context immediately (already initialized)
         viewer = self.source_viewer_widget.viewer
         if viewer is None:
@@ -3102,11 +3145,16 @@ class FileOpsMixin:
             ctx = viewer.context()
             if ctx is not None:
                 self._create_source_gpu_renderer(gpu_decode_manager, ctx)
-        else:
-            # Wait for SourceViewer's GL context to be initialized
-            viewer.gl_initialized.connect(
-                lambda ctx: self._create_source_gpu_renderer(gpu_decode_manager, ctx)
-            )
+        elif getattr(self, "_source_gl_viewer", None) is not viewer:
+            # The first show may follow a project change. Resolve the current
+            # manager when GL becomes available instead of capturing the old one.
+            viewer.gl_initialized.connect(self._on_source_gl_initialized)
+            self._source_gl_viewer = viewer
+
+    def _on_source_gl_initialized(self, gl_context: object) -> None:
+        manager = getattr(self, "_gpu_decode_manager", None)
+        if manager is not None:
+            self._create_source_gpu_renderer(manager, gl_context)
 
     def _create_source_gpu_renderer(self, gpu_decode_manager: object, gl_context: object) -> None:
         """
@@ -3425,6 +3473,8 @@ class FileOpsMixin:
             setattr(self.program_viewer_widget, "_timeline_scrub_active_for_trace", scrub_active)
             try:
                 self.program_viewer_widget.set_frame(frame, result)
+                if getattr(self, "_color_program_monitor_active", False):
+                    self._show_color_program_output_kind(result)
                 offline_media = ()
                 renderer = getattr(self, "timeline_preview_renderer", None)
                 get_offline = getattr(renderer, "offline_media_for_frame", None)
@@ -3446,6 +3496,24 @@ class FileOpsMixin:
             self.program_viewer_widget.set_timecode(timecode, fps)
 
         logger.debug(f"[TimelinePreviewRenderer] Frame {frame} ready")
+
+    def _show_color_program_output_kind(self, result: object) -> None:
+        """Identify the delivered timeline image independently of the clip canvas."""
+        if isinstance(result, QImage):
+            kind = "image" if self.timeline_preview_renderer.gpu_preview_ready else "cpu"
+        elif ((isinstance(result, dict) and result.get("present_frame") is not None)
+              or getattr(result, "texture_id", 0)
+              or (isinstance(result, tuple) and len(result) == 3 and result[0])):
+            kind = "gpu"
+        else:
+            kind = "empty"
+        if kind == self._color_program_output_kind:
+            return
+        self._color_program_output_kind = kind
+        labels = {"gpu": "GPU texture", "image": "Image frame",
+                  "cpu": "CPU image preview", "empty": "No timeline picture"}
+        self.edit_viewport.timeline_monitor_status.setText(
+            I18N.tr("viewport.monitor_" + kind, labels[kind]))
 
     def _submit_program_monitor_frame(self, frame: int, result: object) -> None:
         """Submit Program Viewer frames to optional external monitoring output."""
@@ -4687,6 +4755,9 @@ class FileOpsMixin:
             error_msg: Error message
         """
         logger.warning(f"[TimelinePreviewRenderer] Error at frame {frame}: {error_msg}")
+        if getattr(self, "_color_program_monitor_active", False):
+            self._color_program_output_kind = None
+            self.edit_viewport.timeline_monitor_status.setText(error_msg)
 
         # Show an error overlay through the same ProgramViewer endpoint.
         # ProgramViewer preserves the last good frame for transient failures.
@@ -5005,6 +5076,8 @@ class FileOpsMixin:
             return
 
         project, ui_state, timeline_sequences = result
+        if getattr(self, "_color_program_monitor_active", False):
+            self.set_color_timeline_composite_monitor(False)
         asset = next(
             (candidate for candidate in project.assets.values() if candidate.media_type == "image"),
             None,
@@ -5735,6 +5808,7 @@ class FileOpsMixin:
         path: str,
         *,
         for_timeline_clip: bool = False,
+        initial_frame: int = 0,
         display_size: Optional[tuple[int, int]] = None,
     ):
         """
@@ -5744,6 +5818,7 @@ class FileOpsMixin:
             path: 视频文件路径
             for_timeline_clip: True when loading video source for a timeline clip
                 (skips single asset session creation and rejection logic).
+            initial_frame: Source frame under the Edit playhead when opening a clip.
             display_size: Optional explicit source-display coordinate size.
                 Timeline dimensions must not be passed here: Color displays
                 and grades the source clip, while timeline composition belongs
@@ -5771,6 +5846,10 @@ class FileOpsMixin:
         # P0-1: 使用 resolve_video_pipeline_mode() 决策函数决定管线路径
         if self.video_controller is None:
             self.video_controller = EnhancedVideoPlaybackEngine(self.engine)
+            if for_timeline_clip:
+                # The page could not arm the guard before the first controller existed.
+                self.video_controller.begin_clip_switch_preview_guard()
+                self._color_clip_switch_guard_armed = True
             # P0-1: 获取管线决策结果并启用对应路径
             pipeline_decision = self.video_controller.get_pipeline_decision()
             if pipeline_decision:
@@ -5838,7 +5917,8 @@ class FileOpsMixin:
         self.current_file_is_video = True
 
         # 加载视频
-        if self.video_controller.load_video(path):
+        load_options = {"initial_frame": initial_frame} if initial_frame else {}
+        if self.video_controller.load_video(path, **load_options):
             grade_set_panel = getattr(self, "grade_set_panel", None)
             if grade_set_panel is not None:
                 grade_set_panel.set_active_path(None)
@@ -6614,6 +6694,10 @@ class FileOpsMixin:
 
     def _sync_color_timeline_playhead(self, local_frame: int) -> None:
         """Reflect Color transport movement in the Edit timeline playhead."""
+        if getattr(self, "_color_program_monitor_active", False) is True:
+            # Selecting or hydrating a clip can complete a source seek after
+            # the user has already moved the independent Program playhead.
+            return
         timeline_frame = self._color_local_frame_to_timeline_frame(local_frame)
         if timeline_frame is None:
             return
@@ -6798,6 +6882,10 @@ class FileOpsMixin:
         tracks.  Gated on the Color timeline-clip context so Composite or
         Library usage of the shared video_controller never starts audio.
         """
+        if is_playing and getattr(self, "_color_program_monitor_active", False):
+            timeline_controller = self.timeline_panel.get_playback_controller()
+            if timeline_controller.is_playing:
+                timeline_controller.pause()
         priority = getattr(getattr(self, "timeline_panel", None), "set_background_media_priority", None)
         if callable(priority) and (getattr(self, "current_page", None) == "Color" or not is_playing):
             priority("color_playback", is_playing)
@@ -7313,10 +7401,28 @@ class FileOpsMixin:
         if self._color_timeline_playback_controller() is not None:
             self.on_video_seek(int(frame_number))
             return
+        immediate_turn = False
         if getattr(self, "current_page", None) == "Color":
             playback_trace("viewport.scrub_pointer", frame=int(frame_number))
+            # A peak can fall between two coalesced seeks. Consume it before
+            # the first reverse input, so the old leg loses its paint generation
+            # before Qt can draw another frame from it.
+            emitted = getattr(self, "_viewport_scrub_last_emit_frame", None)
+            pending = getattr(self, "_viewport_scrub_pending_frame", None)
+            if emitted is not None:
+                previous = emitted if pending is None else pending
+                direction = previous - emitted or getattr(self, "_viewport_scrub_direction", 0)
+                immediate_turn = (int(frame_number) - previous) * direction < 0
+                if immediate_turn:
+                    self._viewport_scrub_timer_token = getattr(self, "_viewport_scrub_timer_token", 0) + 1
+                    self._viewport_scrub_timer_pending = False
+                    if pending is not None and pending != emitted:
+                        self._emit_pending_viewport_scrub()
         self._viewport_scrub_active = True
         self._viewport_scrub_pending_frame = int(frame_number)
+        if immediate_turn:
+            self._emit_pending_viewport_scrub()
+            return
         now_ms = time.monotonic() * 1000.0
         last_emit_ms = float(getattr(self, "_viewport_scrub_last_emit_ms", 0.0) or 0.0)
         interval_ms = int(getattr(self, "_viewport_scrub_interval_ms", 8) or 8)
@@ -7357,6 +7463,9 @@ class FileOpsMixin:
         self._end_viewport_scrub(settle=True)
 
     def on_video_scrub_cancelled(self) -> None:
+        controller = getattr(self, "video_controller", None)
+        if controller is not None:
+            controller.end_scrub_paint_guard()
         self._end_viewport_scrub(settle=False)
 
     def _end_viewport_scrub(self, *, settle: bool) -> None:
@@ -7461,7 +7570,7 @@ class FileOpsMixin:
             source_frame = self._color_local_frame_to_source_frame(frame)
             if (
                 source_frame == self._viewport_scrub_latest_source_target
-                and source_frame == getattr(controller, "_last_submitted_video_frame_index", None)
+                and controller.is_scrub_frame_presented(source_frame)
             ):
                 return
             self._viewport_scrub_hold_exact = True
@@ -8317,6 +8426,8 @@ class FileOpsMixin:
         if not self._confirm_save_before_close():
             event.ignore()
             return
+        if getattr(self, "_color_program_monitor_active", False):
+            self.set_color_timeline_composite_monitor(False)
 
         # Metal 迁移 2.1–2.3：原生视口先于一切线程收回。握手需要预览渲染
         # 线程仍在轮询，所以放在保存确认之后、第一个线程停止之前。

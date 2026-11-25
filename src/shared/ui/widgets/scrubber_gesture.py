@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtWidgets import QSlider
@@ -36,6 +37,7 @@ def cancel_monitor_scrub(slider: QSlider) -> None:
 def scrubber_mouse_press(
     slider: QSlider, event: QMouseEvent, *, margin: float | None = None,
     start_at_pointer: bool = False,
+    on_start: Callable[[int], None] | None = None,
 ) -> bool:
     """Start one direct seek gesture before delivering its first frame value."""
     if not slider.isEnabled() or event.button() != Qt.MouseButton.LeftButton:
@@ -46,6 +48,8 @@ def scrubber_mouse_press(
     if not slider.property(_DRAG_PROPERTY) or not slider.isSliderDown():
         slider.setProperty(_DRAG_PROPERTY, True)
         slider.setFocus(Qt.FocusReason.MouseFocusReason)
+        if on_start is not None:
+            on_start(value)
         if start_at_pointer:
             slider.setValue(value)
         slider.setSliderDown(True)

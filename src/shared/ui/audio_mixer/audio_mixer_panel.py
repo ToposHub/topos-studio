@@ -14,7 +14,7 @@ import logging
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QScrollArea,
-    QFrame, QApplication, QVBoxLayout, QMenu
+    QDialog, QFrame, QApplication, QVBoxLayout, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPoint, QObject, QEvent
 
@@ -780,6 +780,11 @@ class AudioMixerPanel(QWidget):
         return self._armed_track
 
     # ========== 批量同步（供 controller 在 timeline 变化后整体刷新）==========
+
+    def can_defer_track_initialization(self) -> bool:
+        """A hidden, unused console can build its first strips when opened."""
+        return (not self._track_mixers and not self.isVisible()
+                and not any(dialog.isVisible() for dialog in self.findChildren(QDialog)))
 
     def sync_tracks(self, tracks: list) -> None:
         """根据 timeline 的音频轨列表做 diff 同步：新增 register、移除 deregister、

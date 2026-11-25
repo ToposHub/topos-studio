@@ -314,6 +314,10 @@ class AsyncRenderer(QThread):
         self.identity_lut = None
         self.current_front_tex_id = None
         self.current_front_size = (0, 0)
+        # (source upload generation, source frame), kept with the published
+        # front slot even while the next frame is uploading or grading.
+        self.current_front_video_frame: tuple[int, int] | None = None
+        self._uploaded_video_generation: int | None = None
         # The Color canvas presents this texture from a different shared GL
         # context. A raw texture id is not enough during realtime rendering:
         # the UI can otherwise sample a double-buffer slot before the render
@@ -1124,12 +1128,15 @@ class AsyncRenderer(QThread):
         elif cmd_type == RenderCommand.CLEAR_REFERENCE:
             self._do_clear_reference()
         elif cmd_type == RenderCommand.UPLOAD_VIDEO_FRAME:
+            self._uploaded_video_generation = None
             self._do_upload_video_frame(data)
         elif cmd_type == RenderCommand.UPLOAD_DECODED_VIDEO_FRAME:
             # P4.A: Upload packed RGB/RGBA from DecodedFrame
+            self._uploaded_video_generation = None
             self._do_upload_decoded_video_frame(data)
         elif cmd_type == RenderCommand.UPLOAD_VIDEO_PLANES:
             # P4.A: Upload YUV/NV12/P010 planes from DecodedFrame
+            self._uploaded_video_generation = None
             self._do_upload_video_planes(data)
         elif cmd_type == RenderCommand.UPDATE_UNIFORMS:
             self._do_update_uniforms(data)
@@ -3748,6 +3755,13 @@ class AsyncRenderer(QThread):
             self.write_idx = 1 - front_idx
             self.current_front_tex_id = self.tex_pair[front_idx].glo
             self.current_front_size = (w, h)
+            upload_generation = self.__dict__.get('_uploaded_video_generation')
+            self.current_front_video_frame = (
+                (upload_generation, self.current_video_frame_index)
+                if (has_video_planes or has_video_texture) and not has_source_override
+                and upload_generation is not None and self.current_video_frame_index >= 0
+                else None
+            )
             self.debug_last_front_tex_id = self.current_front_tex_id
             self.debug_last_render_reason = render_reason
             self._update_front_present_sync(
@@ -6332,6 +6346,7 @@ class AsyncRenderer(QThread):
                 return
 
         # 2. Render using cached render_params
+        self._uploaded_video_generation = generation_id
         # AUD-0212: 浅拷贝——``data['render_params']`` 是 UI 线程构造并被调用方
         # 持有的 dict，渲染线程不得就地改写（下方 viewport_size 修正会写入该
         # dict）；拷贝后再修正，避免跨线程写共享对象。
@@ -6563,6 +6578,7 @@ class AsyncRenderer(QThread):
             return
 
         _bind_ms = (time.perf_counter() - _bind_start) * 1000.0
+        self._uploaded_video_generation = generation_id
 
         logger.debug(
             f"RENDER_VIDEO_GPU_FRAME: bound external planes "

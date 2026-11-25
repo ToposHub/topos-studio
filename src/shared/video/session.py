@@ -58,6 +58,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional, Callable, TYPE_CHECKING
 
+from ..media.gpu_frame import is_gpu_decoded_frame
+
 if TYPE_CHECKING:
     from ..media.frame import DecodedFrame
     from ..media.metadata import VideoMetadata
@@ -1142,19 +1144,27 @@ class VideoSession:
             self._worker_manager.start_master_worker()
         self._request_master_frame(int(frame_index), reason='pause')
 
-    def take_ready_master_frame(self, frame_index: int) -> Optional[DecodedFrame]:
+    def take_ready_master_frame(self, frame_index: int, *, retry_submission: bool = False) -> Optional[DecodedFrame]:
         """Return an exact decoded master frame if it is already available."""
         frame_index = int(frame_index)
         if (
             self._current_master_frame is not None
             and self._current_master_frame.frame_index == frame_index
+            # The renderer owns a GPU lease after delivery, including across
+            # a seek to the same index. Only CPU frames may be reused here.
+            and not is_gpu_decoded_frame(self._current_master_frame)
         ):
             return self._current_master_frame
 
         if self._frame_queue is None:
             return None
         entry = self._frame_queue.dequeue(is_master=True, frame_index=frame_index)
-        if entry is None:
+        if entry is None or (is_gpu_decoded_frame(entry.frame)
+                             and (entry.frame is self._current_master_frame or entry.frame.release.is_released)):
+            if retry_submission:
+                # A previous GPU submission owns its lease. Ask the worker
+                # for another frame instead of resubmitting that same lease.
+                self.request_master_frame(frame_index)
             return None
         self._current_master_frame = entry.frame
         return entry.frame
@@ -1178,10 +1188,12 @@ class VideoSession:
             first = max(frame_range[0], current_target - max_frame_distance)
             last = min(frame_range[1], current_target + max_frame_distance)
             entry = self._frame_queue.take_master_for_scrub(current_target, first, last)
-            if entry is None:
-                return None
-            self._current_master_frame = entry.frame
-            return entry.frame
+            frame = entry.frame if entry is not None else None
+            if frame is None and self._source_manager is not None:
+                frame = self._source_manager.get_cached_scrub_frame(current_target, first, last)
+            if frame is not None:
+                self._current_master_frame = frame
+            return frame
         newest = None
         while True:
             entry = self._frame_queue.dequeue(is_master=True)

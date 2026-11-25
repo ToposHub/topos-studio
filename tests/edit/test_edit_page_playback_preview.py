@@ -2,12 +2,48 @@ from __future__ import annotations
 
 import time
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
 
 class DummyAudioManager(QObject):
     frame_changed = pyqtSignal(int)
+
+
+def test_cold_scrub_play_parks_pcm_until_landing_and_cancels_on_pause(qapp) -> None:
+    from src.features.edit.ui.edit_page import EditPage
+
+    class Renderer(QObject):
+        playback_start_ready = pyqtSignal(int)
+        waiting = True
+
+        def is_waiting_for_playback_start(self, frame: int) -> bool:
+            return self.waiting and frame == 628
+
+    page = EditPage()
+    renderer = Renderer()
+    page._main_window = SimpleNamespace(timeline_preview_renderer=renderer, current_page="Edit")
+    page._current_transport_frame = lambda: 628
+    page._set_thumbnail_playback = Mock()
+    page._audio_active = True
+    audio = Mock()
+    page._audio_manager = audio
+    page._on_playback_state_for_audio("playing")
+    page._on_playback_reanchored_for_audio(628)
+    audio.seek.assert_not_called()
+    audio.play.assert_not_called()
+    renderer.playback_start_ready.emit(628)
+    audio.play.assert_called_once_with(start_frame=628)
+    audio.reset_mock()
+
+    page._on_playback_state_for_audio("playing")
+    page._on_playback_state_for_audio("paused")
+    renderer.playback_start_ready.emit(628)
+    audio.play.assert_not_called()
+    renderer.waiting = False
+    page._on_playback_state_for_audio("playing")
+    audio.play.assert_called_once_with(start_frame=628)
 
 
 def _process_events_for(qapp, ms: int = 30) -> None:
