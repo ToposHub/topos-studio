@@ -60,6 +60,30 @@ class TestConstruction:
         assert src.active_decoder == HardwareDecoder.NVDEC
 
 
+def test_interactive_gop_seek_yields_and_reanchors_the_decoder_cursor(monkeypatch: pytest.MonkeyPatch) -> None:
+    src = WindowsHwPlanarSource('fake.mp4')
+    pictures = [SimpleNamespace(pts=i, frame_index=i, is_corrupt=False) for i in range(8)]
+    seek_calls = []
+    src._is_open = True
+    src._current_frame = 5
+    src._container = SimpleNamespace(seek=lambda *args, **kwargs: seek_calls.append(args[0]),
+                                     decode=lambda stream: iter(pictures), close=lambda: None)
+    src._video_stream = SimpleNamespace()
+    src._metadata = SimpleNamespace(codec_name='h264', total_frames=len(pictures))
+    monkeypatch.setattr(src, '_ensure_gop_index', lambda: None)
+    monkeypatch.setattr(src, '_frame_to_pts', lambda frame: frame)
+    monkeypatch.setattr(src, '_pts_to_frame', lambda pts: pts)
+    monkeypatch.setattr(src, '_convert_frame_planar', lambda frame: frame)
+
+    assert src.read_frame_planar_interactive(4, is_stale=lambda: src._current_frame == 2) is None
+    assert seek_calls == [4]
+    assert src.current_frame == -1
+    assert src._pending_av_frame is None
+    assert src.read_frame_planar(2) is pictures[2]
+    assert src.read_frame_planar(3) is pictures[3]
+    assert seek_calls == [4, 2]
+
+
 # =========================================================================
 # open() 门控（全部 mock，不触碰真实 PyAV HWAccel）
 # =========================================================================

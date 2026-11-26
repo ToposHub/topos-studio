@@ -25,7 +25,8 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+import time
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -35,7 +36,7 @@ from src.shared.media.color_metadata import (
     normalize_color_space,
     normalize_color_transfer,
 )
-from src.shared.media.ffmpeg_source import FFmpegMediaSource
+from src.shared.media.ffmpeg_source import FFmpegMediaSource, _SeekCancelled
 from src.shared.media.frame import DecodedFrame, PlaneInfo
 from src.shared.media.frame_path import DecodePath
 from src.shared.media.hwaccel import HardwareCapability, HardwareDecoder
@@ -296,6 +297,34 @@ class WindowsHwPlanarSource(FFmpegMediaSource):
     # planar 帧转换（覆盖 FFmpegMediaSource 的唯一转换点）
     # ------------------------------------------------------------------
 
+    def read_frame_planar_interactive(
+        self, frame_index: int, *, is_stale: Callable[[], bool] | None = None,
+        deadline_at: float | None = None, prefer_seek: bool = False,
+    ) -> DecodedFrame | None:
+        """Permit an obsolete edit scrub to yield during the GOP walk.
+
+        ``prefer_seek`` lets the caller skip a long sequential read. The seek
+        itself may still use the short forward path.
+        """
+        def should_abort() -> bool:
+            return ((is_stale is not None and is_stale())
+                    or (deadline_at is not None and time.perf_counter() >= deadline_at))
+
+        if should_abort():
+            return None
+        try:
+            self.seek_frame(frame_index, should_abort=should_abort)
+        except _SeekCancelled:
+            return None
+        return self._read_next_frame_planar()
+
+    def is_exact_scrub_frame(self, frame: DecodedFrame, frame_index: int) -> bool:
+        """Verify a downloaded frame before it is retained for later seeks."""
+        extra = frame.extra or {}
+        return (frame.frame_index == frame_index and extra.get('source') == 'windows_hw_planar'
+                and not extra.get('is_corrupt') and frame.pts is not None
+                and frame.pts == self._frame_to_pts(frame_index))
+
     def _convert_frame_planar(self, frame: Any) -> DecodedFrame:
         """硬解半平面帧 → 契约 DecodedFrame；其他格式走父类通用路径。
 
@@ -363,6 +392,7 @@ class WindowsHwPlanarSource(FFmpegMediaSource):
                 'source': 'windows_hw_planar',
                 'hw_decoder': self._hw_decoder.value if self._hw_decoder else None,
                 'hw_output_format': fmt,
+                'is_corrupt': bool(getattr(frame, 'is_corrupt', False)),
                 # p016le 契约携带的是 p010 MSB 对齐码值（未 >>6）
                 'msb_aligned_p010': fmt == 'p010le',
             },
@@ -401,6 +431,6 @@ class WindowsHwPlanarSource(FFmpegMediaSource):
 # hwaccel.py 尾注）。硬解/读帧进行中 ffsrc-closer 不再提前关容器。
 from src.shared.media.av_concurrency import av_locked_operation as _av_op_dec  # noqa: E402
 
-if "open" in WindowsHwPlanarSource.__dict__:
-    setattr(WindowsHwPlanarSource, "open",
-            _av_op_dec(WindowsHwPlanarSource.__dict__["open"]))
+for _av_entry in ("open", "read_frame_planar_interactive"):
+    setattr(WindowsHwPlanarSource, _av_entry,
+            _av_op_dec(WindowsHwPlanarSource.__dict__[_av_entry]))

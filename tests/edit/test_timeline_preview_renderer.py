@@ -3613,6 +3613,56 @@ class TestTimelinePreviewRenderer:
         finally:
             renderer.shutdown()
 
+    @pytest.mark.parametrize('source_route', ['software', 'disk_proxy', 'render_cache'])
+    def test_scrub_resume_keeps_only_the_selected_decode_stream(
+        self, simple_sequence: TimelineSequence, mock_frame_provider: Mock, source_route: str,
+    ) -> None:
+        metadata = dict(
+            width=3840, height=2160, fps=25.0, codec='h264', pixel_format='yuv420p', bit_depth=8,
+            color_range='limited', color_matrix='bt709', color_transfer='bt709', color_primaries='bt709',
+        )
+        asset = MediaAsset('asset-001', '/tmp/master.mov', 'video', 'master.mov', metadata)
+        project = EditProject.create('Test').with_media_asset_added(asset)
+        track = simple_sequence.video_tracks[0]
+        first = replace(track.clips[0], timeline_duration=20, source_duration=20)
+        second = replace(first, clip_id='clip-002', timeline_start=20, source_start=20)
+        third = replace(first, clip_id='clip-003', timeline_start=40, source_start=60)
+        sequence = replace(simple_sequence, video_tracks=(replace(track, clips=(first, second, third)),))
+        renderer = TimelinePreviewRenderer(
+            project=project, sequence=sequence, frame_provider=mock_frame_provider, viewport_size=(32, 18),
+        )
+        renderer._windows_h264_software_scrub = True
+        manager = Mock()
+        manager.can_use_software_scrub_source.return_value = source_route != 'disk_proxy'
+        decisions = ({'clip-001': SimpleNamespace(source_kind=SourceKind.RENDER_CACHE)}
+                     if source_route == 'render_cache' else {})
+        use_software = source_route == 'software'
+        try:
+            with patch.object(renderer._worker, '_gpu_decode_manager', manager), \
+                    patch.object(renderer._worker, 'enqueue', return_value=True) as enqueue, \
+                    patch.object(renderer, '_is_controller_playing', return_value=False) as playing, \
+                    patch.object(renderer, '_pop_source_decisions_for_frame', return_value=decisions):
+                renderer.finish_scrub(19)
+                assert enqueue.call_args.kwargs.get('software_seek', False) == use_software
+                playing.return_value = True
+                for frame, software in ((19, use_software), (20, use_software), (21, use_software), (40, False)):
+                    if frame == 21:
+                        with patch.object(renderer, 'get_playhead', return_value=20):
+                            renderer.notify_playback_state(False, _sync_engine=False)
+                        renderer._invalidate_render_generation_for_quality('paused_full')
+                        renderer._invalidate_render_generation_for_quality('playback_started')
+                        renderer.request_render(20)
+                        if renderer._render_in_flight:
+                            renderer._on_frame_rendered(20, _WorkerFrameResult(renderer._generation_id, image))
+                    enqueue.reset_mock()
+                    renderer.request_render(frame)
+                    assert enqueue.call_args.args[0] == frame
+                    assert enqueue.call_args.kwargs.get('software_seek', False) == software
+                    image = QImage(32, 18, QImage.Format.Format_RGB32)
+                    renderer._on_frame_rendered(frame, _WorkerFrameResult(renderer._generation_id, image))
+        finally:
+            renderer.shutdown()
+
     def test_gpu_scrub_exact_render_reuses_playback_decode_target(
         self,
         mock_project,
@@ -4257,6 +4307,7 @@ class TestTimelinePreviewRenderer:
         mock_project,
         simple_sequence,
         mock_frame_provider,
+        monkeypatch,
     ):
         """Mouse release leaves scrub mode and queues exactly the final frame."""
         renderer = TimelinePreviewRenderer(
@@ -4266,14 +4317,25 @@ class TestTimelinePreviewRenderer:
             viewport_size=(1920, 1080),
         )
 
-        renderer.begin_scrub(10)
+        import src.features.edit.core.timeline_preview_renderer as renderer_module
+
+        monkeypatch.setattr(renderer_module, "sys", SimpleNamespace(platform="win32"))
+        retired = []
+
+        def retire_pending(generation: int, token_floor: int) -> None:
+            assert renderer._generation_id == generation
+            retired.append((generation, token_floor))
+
+        renderer.begin_scrub(10, viewer_turn=retire_pending)
         scrub_generation = renderer._generation_id
+        scrub_token = renderer._scrub_request_serial
         renderer.finish_scrub(18)
 
         assert renderer._scrub_active is False
         assert renderer._scrub_exact_frame == 18
         assert renderer._generation_id > scrub_generation
         assert renderer._worker._queue.qsize() >= 1
+        assert retired == [(scrub_generation, scrub_token + 1)]
 
         renderer.shutdown()
 

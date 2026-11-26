@@ -2909,6 +2909,7 @@ class FileOpsMixin:
                     # silently fall back to a blurry 720p frame.
                     "max_preview_edge": 3840,
                     "scrub_preview_edge": 3840,
+                    "windows_h264_software_scrub": True,
                     "cache_size": 16,
                 }
             )

@@ -578,6 +578,7 @@ class _PlaybackStart:
     frame: int
     deadline: float
     hold_preview: bool
+    reuse_scrub_frame: bool = False
 
 
 class PreviewRenderWorker(QThread):
@@ -1020,6 +1021,8 @@ class PreviewRenderWorker(QThread):
         scrub_request_token: Optional[int] = None,
         request_started_at: Optional[float] = None,
         scrub_settled: bool = False,
+        reuse_scrub_frame: bool = False,
+        software_seek: bool = False,
         scrub_coarse: bool = False,
         queued_scrub: bool = False,
         trace_id: int = 0,
@@ -1043,6 +1046,7 @@ class PreviewRenderWorker(QThread):
             scrub_request_token: Latest-only scrub token, when request_kind=scrub.
             request_started_at: Monotonic input time for latency tracing.
             scrub_settled: True for a delayed repair pass after the playhead stops.
+            reuse_scrub_frame: Allow the first playback frame to use the release decode.
 
         Returns:
             True if task was queued, False otherwise.
@@ -1076,6 +1080,10 @@ class PreviewRenderWorker(QThread):
             task_meta["request_started_at"] = float(request_started_at)
         if scrub_settled:
             task_meta["scrub_settled"] = True
+        if reuse_scrub_frame:
+            task_meta["reuse_scrub_frame"] = True
+        if software_seek:
+            task_meta["software_seek"] = True
         if scrub_coarse:
             task_meta["scrub_coarse"] = True
         if queued_scrub:
@@ -1129,6 +1137,8 @@ class PreviewRenderWorker(QThread):
                 request_kind=task_meta.get("request_kind", ""),
                 scrub_token=task_meta.get("scrub_request_token", ""),
                 scrub_settled=task_meta.get("scrub_settled", False),
+                reuse_scrub_frame=task_meta.get("reuse_scrub_frame", False),
+                software_seek=task_meta.get("software_seek", False),
                 scrub_coarse=task_meta.get("scrub_coarse", False),
             )
             return True
@@ -1345,6 +1355,7 @@ class PreviewRenderWorker(QThread):
                     source_frame,
                     target_size=target_size,
                     stream_key=stream_key,
+                    **({"software_seek": True} if (task_meta or {}).get("software_seek") else {}),
                 )
                 deadline_ms = float(estimated)
             except Exception as e:
@@ -2570,7 +2581,8 @@ class PreviewRenderWorker(QThread):
             # __new__ to exercise pure GPU task assembly.  Treat that as the
             # scheduler being absent, just like a headless renderer.
             scheduler = None
-        if scheduler is not None and realtime_now and task_meta.get("request_kind") != "scrub":
+        if (scheduler is not None and realtime_now and task_meta.get("request_kind") != "scrub"
+                and not task_meta.get("software_seek")):
             try:
                 scheduler_clip_ids = set(scheduler.layer_clip_ids)
                 ordinary_jobs = [
@@ -2687,6 +2699,8 @@ class PreviewRenderWorker(QThread):
             decode_stream_key = getattr(layer, "decoder_stream_key", None) or clip_id
             decision = decisions_map.get(clip_id) if clip_id else None
             is_interactive_scrub = task_meta.get("request_kind") == "scrub"
+            reuse_options = {"reuse_scrub_frame": True} if task_meta.get("reuse_scrub_frame") else {}
+            software_options = {"software_seek": True} if task_meta.get("software_seek") else {}
             scheduler_handle = scheduler_handles_by_clip.pop(str(clip_id), None)
             if scheduler_handle is not None:
                 decoded_frame = scheduler_handle.payload
@@ -2757,6 +2771,7 @@ class PreviewRenderWorker(QThread):
                     deadline_at=deadline_at,
                     coarse=bool(task_meta.get("scrub_coarse", False)),
                     **scrub_options,
+                    **software_options,
                 )
             elif decision is not None and hasattr(self._gpu_decode_manager, "get_frame_with_policy"):
                 decoded_frame, frame_type = self._gpu_decode_manager.get_frame_with_policy(
@@ -2765,13 +2780,22 @@ class PreviewRenderWorker(QThread):
                     target_size=self._decode_target_size,
                     stream_key=decode_stream_key,
                     source_decision=decision,
+                    **reuse_options,
+                    **software_options,
                 )
             else:
+                settle_options = (
+                    {"scrub_settled": True}
+                    if sys.platform == 'win32' and task_meta.get('scrub_settled') else {}
+                )
                 decoded_frame, frame_type = self._gpu_decode_manager.get_frame(
                     asset_path,
                     source_frame,
                     target_size=self._decode_target_size,
                     stream_key=decode_stream_key,
+                    **settle_options,
+                    **reuse_options,
+                    **software_options,
                 )
 
             if (
@@ -6879,6 +6903,7 @@ class TimelinePreviewRenderer(QObject):
         cache_size: int = 256,
         max_preview_edge: int = 3840,
         scrub_preview_edge: int = 3840,
+        windows_h264_software_scrub: bool = False,
     ) -> None:
         """
         初始化预览渲染器。
@@ -6905,6 +6930,16 @@ class TimelinePreviewRenderer(QObject):
         self._sequence_render_signature = self._build_sequence_render_signature(sequence)
         self._max_preview_edge = max(1, int(max_preview_edge))
         self._scrub_preview_edge = max(64, int(scrub_preview_edge))
+        self._windows_h264_software_scrub = False
+        if windows_h264_software_scrub and sys.platform == 'win32' and (os.cpu_count() or 0) >= 16:
+            from src.shared.media.hwaccel import HardwareCapability
+            from src.shared.media.windows_hw.cuda_resident import resident_decode_enabled
+
+            self._windows_h264_software_scrub = (
+                HardwareCapability.has_nvidia_gpu() and not resident_decode_enabled()
+                and not os.environ.get('TOPOS_FORCE_WIN_HW_DECODE')
+                and not os.environ.get('TOPOS_DISABLE_WIN_HW_DECODE')
+            )
         self._raw_viewport_size = viewport_size
         self._viewport_size = self._fit_viewport_to_sequence_aspect(viewport_size)
         # Edit-page preview defaults to an 8-bit, 4K-capped playback path.
@@ -7144,6 +7179,8 @@ class TimelinePreviewRenderer(QObject):
         self._scrub_latest_request_started_at: float = 0.0
         self._scrub_request_started_by_frame: Dict[tuple[int, int], float] = {}
         self._scrub_finish_exact_frame: int | None = None
+        self._software_resume: tuple[int, int, tuple[str, str]] | None = None
+        self._software_playback_stream: tuple[str, str] | None = None
         # Fast-drag detection (with hysteresis): when scrub inputs arrive
         # faster than ~24ms apart, exact GOP-walking decodes can never keep
         # up, so dispatches switch to coarse keyframe-anchored decodes until
@@ -7453,6 +7490,10 @@ class TimelinePreviewRenderer(QObject):
 
     def _invalidate_render_generation_for_quality(self, reason: str) -> None:
         """Invalidate queued/in-flight work when decode quality changes."""
+        resume = getattr(self, '_software_resume', None)
+        if resume is not None and resume[0] == self._generation_id:
+            # This native-plane source keeps the same cursor at either monitor quality.
+            self._software_resume = (self._generation_id + 1, resume[1], resume[2])
         self._generation_id += 1
         self._clear_offline_media_diagnostics()
         self._dispatched_generation_id = self._generation_id - 1
@@ -9349,6 +9390,12 @@ class TimelinePreviewRenderer(QObject):
         if not is_playing:
             self._playback_start_wait = None
             self._playback_session_started = False
+            software_stream = getattr(self, '_software_playback_stream', None)
+            if software_stream is not None:
+                controller = self._playback_controller
+                pause_frame = controller.current_frame if controller is not None else self.get_playhead()
+                self._software_resume = (self._generation_id, int(pause_frame), software_stream)
+            self._software_playback_stream = None
         if is_playing:
             # Any paused FULL request becomes stale as soon as playback starts.
             self._cancel_full_quality_refresh()
@@ -9599,6 +9646,7 @@ class TimelinePreviewRenderer(QObject):
         self._scrub_start_frame = int(frame)
         self._scrub_finish_exact_frame = None
         self._scrub_exact_frame = None
+        self._software_resume = None
         self._scrub_exact_request_token += 1
         self._scrub_exact_pending_frame = None
         self._scrub_exact_in_flight_frame = None
@@ -10070,6 +10118,7 @@ class TimelinePreviewRenderer(QObject):
 
         layer_count = len(getattr(plan, "layers", ()) or ())
         decode_target_size = self._scrub_render_decode_target_size()
+        software_seek = TimelinePreviewRenderer._software_seek_stream(self, plan, decode_target_size) is not None
         scrub_request_token = int(self._scrub_request_serial)
         request_started_at = float(self._scrub_latest_request_started_at or time.perf_counter())
         started = self._scrub_request_started_by_frame
@@ -10082,6 +10131,7 @@ class TimelinePreviewRenderer(QObject):
         self._publish_interactive_scrub_state(frame, active=True)
         self._warmup_gpu_decode_sources(
             plan, target_size=decode_target_size, warm_interactive_pool=layer_count <= 2,
+            **({"software_seek": True} if software_seek else {}),
         )
         if self._worker is None:
             return False
@@ -10115,6 +10165,7 @@ class TimelinePreviewRenderer(QObject):
             "scrub_coarse": coarse,
             "request_started_at": request_started_at,
             "queued_scrub": queued_scrub,
+            "software_seek": software_seek,
         }
         use_engine = (
             engine is not None and hasattr(engine, "request_scrub_present")
@@ -10184,6 +10235,7 @@ class TimelinePreviewRenderer(QObject):
             trace_id=int(trace_id or 0),
             dispatch_channel="scrub",
             **({"queued_scrub": True} if payload.get("queued_scrub") else {}),
+            **({"software_seek": True} if payload.get("software_seek") else {}),
         )
         return queued
 
@@ -10212,6 +10264,13 @@ class TimelinePreviewRenderer(QObject):
     def finish_scrub(self, frame: int, *, settle: bool = True) -> None:
         """Retire scrub work and refine the release point on a normal mouse-up."""
         frame = int(frame)
+        viewer_turn = getattr(self, '_scrub_viewer_turn', None)
+        if sys.platform == 'win32' and viewer_turn is not None:
+            try:
+                viewer_turn(self._generation_id, self._scrub_request_serial + 1)
+            except RuntimeError:
+                # The viewport can be destroyed while the gesture is ending.
+                pass
         self._scrub_active = False
         self._scrub_viewer_turn = None
         self._scrub_latest_frame = frame
@@ -10577,11 +10636,17 @@ class TimelinePreviewRenderer(QObject):
                 self._playback_session_emitted = False
                 refine = getattr(self, "_scrub_exact_frame", None)
                 last_frame = getattr(self, "_last_emitted_frame", -1)
-                if last_frame != frame or refine is not None:
+                resume = getattr(self, '_software_resume', None)
+                # Keep the release cursor while the same timeline decode stream is active.
+                software_stream = resume[2] if resume and resume[:2] == (self._generation_id, frame) else None
+                self._software_resume = None
+                self._software_playback_stream = software_stream
+                if last_frame != frame or refine is not None or software_stream is not None:
                     self._playback_start_wait = _PlaybackStart(
                         frame=frame,
                         deadline=time.monotonic() + TimelinePreviewRenderer._PLAYBACK_RELEASE_WATCHDOG_S,
                         hold_preview=refine is not None or last_frame >= 0,
+                        reuse_scrub_frame=sys.platform == 'win32' and (refine == frame or software_stream is not None),
                     )
                 if refine is not None:
                     # A late paused exact result must not constrain the next
@@ -10594,6 +10659,9 @@ class TimelinePreviewRenderer(QObject):
                 playback_trace("renderer.playback_resume_reset_guard")
         else:
             self._playback_session_started = False
+            resume = getattr(self, '_software_resume', None)
+            if resume and resume[:2] != (self._generation_id, frame):
+                self._software_resume = None
 
         # Final-1: 播放态经 engine 热路径入口（request_present_via_engine）。
         # _render_from_engine 标记来自 engine delegate 的递归调用，直接执行核心逻辑。
@@ -10813,17 +10881,42 @@ class TimelinePreviewRenderer(QObject):
         # increments generation and drops this task, so an in-flight FULL
         # request cannot be relabeled as AUTO_2K (or vice versa).
         decode_target_size = self._decode_target_size
+        startup = getattr(self, '_playback_start_wait', None)
+        reuse_scrub_frame = (
+            is_currently_playing and startup is not None and startup.frame == frame
+            and getattr(startup, 'reuse_scrub_frame', False)
+        )
+        decisions_map = self._pop_source_decisions_for_frame(frame)
+        ready_sources = any(
+            getattr(getattr(decision, 'source_kind', None), 'is_realtime_ready', False)
+            for decision in decisions_map.values()
+        )
+        if is_currently_playing:
+            software_stream = getattr(self, '_software_playback_stream', None)
+        else:
+            resume = getattr(self, '_software_resume', None)
+            software_stream = resume[2] if resume else None
+        seek_stream = (
+            TimelinePreviewRenderer._software_seek_stream(self, plan, decode_target_size)
+            if not ready_sources and (suppress_scrub_finish_placeholder or software_stream is not None) else None
+        )
+        if software_stream is not None and software_stream != seek_stream:
+            self._software_playback_stream = None
+            self._software_resume = None
+        software_seek = seek_stream is not None and (suppress_scrub_finish_placeholder or seek_stream == software_stream)
 
         # Pre-warm GPU decode sources in background (non-blocking).
         # This starts av.open() + codec probe early so the worker thread
         # finds the source already cached when it processes the render task.
-        self._prime_current_frame_prefetch(plan, target_size=decode_target_size)
+        if not software_seek:
+            self._prime_current_frame_prefetch(plan, target_size=decode_target_size)
         # Preserve hardware decode capacity for playback and wide composites.
         self._warmup_gpu_decode_sources(
             plan,
             target_size=decode_target_size,
             for_playback=is_currently_playing,
             warm_interactive_pool=not is_currently_playing and layer_count <= 2,
+            **({"software_seek": True} if software_seek else {}),
         )
         # Keep the initial playback window resident while the timeline is
         # paused. This makes pressing Play consume the same exact-frame ring
@@ -10857,8 +10950,6 @@ class TimelinePreviewRenderer(QObject):
         # 加入渲染队列
         if self._worker:
             skip_cpu_fallback_on_gpu_miss = self._should_skip_cpu_fallback_on_gpu_miss()
-            # Final-2: 取出 engine 为本帧暂存的 SourceDecision 列表（按 clip_id 索引）。
-            decisions_map = self._pop_source_decisions_for_frame(frame)
             # P0-01/P0-02: 取出 engine 为本帧暂存的 (trace_id, deadline_ns)
             # （非 engine 路径为 (0, 0)）；取出后转移到在飞字典供 drop 归因。
             trace_id = 0
@@ -10887,8 +10978,12 @@ class TimelinePreviewRenderer(QObject):
                 request_kind=request_kind,
                 scrub_settled=suppress_scrub_finish_placeholder,
                 dispatch_channel=channel or "direct",
+                **({"reuse_scrub_frame": True} if reuse_scrub_frame else {}),
+                **({"software_seek": True} if software_seek else {}),
             )
             if queued:
+                if suppress_scrub_finish_placeholder and seek_stream is not None:
+                    self._software_resume = (self._generation_id, frame, seek_stream)
                 # Record which generation was dispatched so that
                 # _on_frame_rendered / _on_render_error can detect stale results.
                 self._dispatched_generation_id = self._generation_id
@@ -10933,6 +11028,39 @@ class TimelinePreviewRenderer(QObject):
         self._playhead_mutex.unlock()
         return frame
 
+    def _software_seek_stream(
+        self, plan: FrameRenderPlan, target_size: tuple[int, int] | None,
+    ) -> tuple[str, str] | None:
+        """Use the measured software seek path for a single UHD Rec.709 AVC layer."""
+        if not getattr(self, '_windows_h264_software_scrub', False):
+            return None
+        if len(plan.layers) != 1 or plan.transitions:
+            return None
+        layer = plan.layers[0]
+        if layer.composite_id or layer.is_in_transition:
+            return None
+        resolver = self._worker._asset_resolver if self._worker else None
+        if resolver is None or resolver.get_asset_type(layer.asset_id) != 'video':
+            return None
+        metadata = resolver.get_asset_metadata(layer.asset_id) or {}
+        fps = metadata.get('fps')
+        eligible = (
+            metadata.get('codec') == 'h264' and metadata.get('pixel_format') == 'yuv420p'
+            and metadata.get('bit_depth') == 8 and (metadata.get('width'), metadata.get('height')) == (3840, 2160)
+            and isinstance(fps, (int, float)) and 0 < fps <= 30 and not metadata.get('is_vfr')
+            and metadata.get('field_order') in (None, 'progressive') and not metadata.get('is_hdr')
+            and metadata.get('color_range') == 'limited'
+            and all(metadata.get(field) == 'bt709' for field in ('color_matrix', 'color_transfer', 'color_primaries'))
+        )
+        if not eligible:
+            return None
+        asset_path = resolver.get_asset_path(layer.asset_id)
+        stream_key = layer.decoder_stream_key or layer.clip_id
+        manager = getattr(self._worker, '_gpu_decode_manager', None)
+        if asset_path and manager is not None and manager.can_use_software_scrub_source(asset_path, target_size, stream_key):
+            return (asset_path, stream_key)
+        return None
+
     def _warmup_gpu_decode_sources(
         self,
         plan: Any,
@@ -10940,6 +11068,7 @@ class TimelinePreviewRenderer(QObject):
         target_size: Optional[Tuple[int, int]] = None,
         for_playback: bool = False,
         warm_interactive_pool: bool = True,
+        software_seek: bool = False,
     ) -> None:
         """
         Pre-warm GPU decode sources for all layers in a render plan.
@@ -10983,6 +11112,7 @@ class TimelinePreviewRenderer(QObject):
                     ),
                     for_playback=for_playback,
                     warm_interactive_pool=warm_interactive_pool,
+                    **({"software_seek": True} if software_seek else {}),
                 )
 
     def _prime_current_frame_prefetch(
@@ -11722,6 +11852,8 @@ class TimelinePreviewRenderer(QObject):
             pass
 
         # 递增 generation ID
+        self._software_resume = None
+        self._software_playback_stream = None
         self._generation_id += 1
         self._clear_offline_media_diagnostics()
 
@@ -11915,6 +12047,8 @@ class TimelinePreviewRenderer(QObject):
         self._asset_resolver = AssetResolver(project)
 
         # 递增 generation ID
+        self._software_resume = None
+        self._software_playback_stream = None
         self._generation_id += 1
         self._clear_offline_media_diagnostics()
 
@@ -13540,6 +13674,7 @@ def create_timeline_preview_renderer(
         cache_size=config.get("cache_size", 256),
         max_preview_edge=config.get("max_preview_edge", 3840),
         scrub_preview_edge=config.get("scrub_preview_edge", 3840),
+        windows_h264_software_scrub=config.get("windows_h264_software_scrub", False),
     )
 
     return renderer

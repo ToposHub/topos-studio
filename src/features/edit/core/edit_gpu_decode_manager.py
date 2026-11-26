@@ -23,6 +23,9 @@ import os
 import sys
 import threading
 import time
+from collections import OrderedDict
+from copy import copy
+from functools import partial
 from pathlib import Path
 from dataclasses import dataclass, replace
 from typing import Callable, Optional, Dict, Any, Tuple
@@ -33,6 +36,7 @@ from src.features.edit.core.realtime_playback.decode_metrics import (
     DecodeMetrics,
 )
 from src.shared.media.hwaccel import HardwareCapability
+from src.shared.media.frame import DecodedFrame
 from src.shared.media.seek import estimate_seek_cost, is_intra_codec
 
 logger = logging.getLogger(__name__)
@@ -44,6 +48,9 @@ _INTERACTIVE_DECODE_MAX_DEADLINE_MS = 160.0
 _INTERACTIVE_SOURCE_POOL_SIZE = 3
 _INTERACTIVE_POOL_FORWARD_MAX_FRAMES = 120
 _INTERACTIVE_PROGRESS_MAX_DISTANCE = 2
+_SETTLED_SCRUB_CACHE_BYTES = 96 * 1024 * 1024
+_SETTLED_SCRUB_CACHE_FRAMES = 12
+_WINDOWS_SOFTWARE_SCRUB_POLICY = 'windows_h264_scrub'
 
 # P2-09 会话池上限：主解码会话（_sources）的最大存活数。覆盖典型工程
 # （~5 条可见轨 × 播放/scrub 两种 vt_policy 会话）并留余量；超限时按 LRU
@@ -175,6 +182,11 @@ class EditGpuDecodeManager:
         self._sources: Dict[_SourceKey, Any] = {}
         self._source_types: Dict[_SourceKey, str] = {}
         self._lock = threading.Lock()
+        # Store exact downloaded source planes, never preview textures or
+        # composite results. A single budget covers all timeline streams.
+        self._settled_scrub_frames: OrderedDict[tuple[int, int], tuple[DecodedFrame, int]] = OrderedDict()
+        self._settled_scrub_bytes = 0
+        self._settled_scrub_lock = threading.Lock()
         # M16.2：分域指标（锁等待/解码时长/缓存命中/重复开源——离屏
         # harness 与真实窗口复测同一口径，纯计数零行为影响）
         self._metrics = DecodeMetrics()
@@ -278,6 +290,10 @@ class EditGpuDecodeManager:
         frame_index: int,
         target_size: Optional[Tuple[int, int]] = None,
         stream_key: Optional[str] = None,
+        *,
+        scrub_settled: bool = False,
+        reuse_scrub_frame: bool = False,
+        software_seek: bool = False,
     ) -> Tuple[Optional[Any], str]:
         """
         Get a decoded frame for the given asset at the given frame index.
@@ -285,6 +301,9 @@ class EditGpuDecodeManager:
         Args:
             asset_path: Absolute path to the media file
             frame_index: Frame number to decode (0-based)
+            scrub_settled: Retain verified native planes from an exact scrub release.
+            reuse_scrub_frame: Check those planes when starting playback at the release frame.
+            software_seek: Select the native-plane AVC software session for this stream.
 
         Returns:
             (frame, frame_type) tuple:
@@ -292,12 +311,17 @@ class EditGpuDecodeManager:
             - frame_type: 'vt_pixel_buffer' | 'vt_planar' | 'gpu' | 'planar' | 'cpu' | ''
         """
         normalized_target_size = self._normalize_target_size(target_size)
-        for_playback = self._playback_active
+        for_playback = self._playback_active and not scrub_settled
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
         source_spec = self._resolve_stream_source(
             asset_path, normalized_target_size, decode_stream_key, for_playback=for_playback,
         )
+        if software_seek:
+            source_spec = self._resolve_software_scrub_source(source_spec, decode_stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
+        decode = self._decode_frame
+        if scrub_settled or reuse_scrub_frame:
+            decode = partial(self._decode_settled_scrub_frame, retain=scrub_settled)
 
         # Hot path: use cached source info. The cache itself is protected
         # because multi-track preview can decode layer streams in parallel.
@@ -318,7 +342,7 @@ class EditGpuDecodeManager:
                 with DecodeMetrics.timed_stream_lock(
                         self._stream_lock(source_key), "display",
                         self._metrics):
-                    result = self._decode_frame(source, source_type, frame_index, source_spec.target_size, start)
+                    result = decode(source, source_type, frame_index, source_spec.target_size, start)
                     self._metrics.record_decode(
                         "display",
                         time.perf_counter_ns() - int(start * 1e9))
@@ -326,6 +350,9 @@ class EditGpuDecodeManager:
                 self._release_source(source_key)
             if for_playback:
                 self._kick_playback_prefetch(source, source_key, frame_index, result)
+            if result[0] is None and source_spec.vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY:
+                self._record_source_failure(source_key, expected_source=source)
+                return self.get_frame(asset_path, frame_index, target_size, stream_key, scrub_settled=scrub_settled)
             return result
 
         self._metrics.record_cache("display", hit=False)
@@ -338,6 +365,8 @@ class EditGpuDecodeManager:
             source_spec=source_spec,
         )
         if source is None:
+            if source_spec.vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY:
+                return self.get_frame(asset_path, frame_index, target_size, stream_key, scrub_settled=scrub_settled)
             playback_trace(
                 "decode_manager.get_frame_no_source",
                 frame=frame_index,
@@ -360,7 +389,7 @@ class EditGpuDecodeManager:
             with DecodeMetrics.timed_stream_lock(
                     self._stream_lock(source_key), "display",
                     self._metrics):
-                result = self._decode_frame(source, source_type, frame_index, source_spec.target_size, start)
+                result = decode(source, source_type, frame_index, source_spec.target_size, start)
                 self._metrics.record_decode(
                     "display",
                     time.perf_counter_ns() - int(start * 1e9))
@@ -368,6 +397,9 @@ class EditGpuDecodeManager:
             self._release_source(source_key)
         if for_playback:
             self._kick_playback_prefetch(source, source_key, frame_index, result)
+        if result[0] is None and source_spec.vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY:
+            self._record_source_failure(source_key, expected_source=source)
+            return self.get_frame(asset_path, frame_index, target_size, stream_key, scrub_settled=scrub_settled)
         return result
 
     def _kick_playback_prefetch(
@@ -548,6 +580,9 @@ class EditGpuDecodeManager:
         target_size: Optional[Tuple[int, int]] = None,
         stream_key: Optional[str] = None,
         source_decision: Optional[Any] = None,
+        *,
+        reuse_scrub_frame: bool = False,
+        software_seek: bool = False,
     ) -> Tuple[Optional[Any], str]:
         """
         Policy-aware decode: gate master decode using a SourceDecision.
@@ -591,7 +626,11 @@ class EditGpuDecodeManager:
                     reason=getattr(source_decision, "reason", ""),
                 )
 
-        return self.get_frame(asset_path, frame_index, target_size=target_size, stream_key=stream_key)
+        return self.get_frame(
+            asset_path, frame_index, target_size=target_size, stream_key=stream_key,
+            **({"reuse_scrub_frame": True} if reuse_scrub_frame else {}),
+            **({"software_seek": True} if software_seek else {}),
+        )
 
     def get_frame_interactive(
         self,
@@ -605,6 +644,7 @@ class EditGpuDecodeManager:
         coarse: bool = False,
         background: bool = False,
         scrub_clip: ScrubClipRange | None = None,
+        software_seek: bool = False,
     ) -> Tuple[Optional[Any], str]:
         """
         Decode a frame for interactive scrub, aborting work that is already stale.
@@ -622,6 +662,8 @@ class EditGpuDecodeManager:
         normalized_target_size = self._normalize_target_size(target_size)
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
         source_spec = self._resolve_stream_source(asset_path, normalized_target_size, decode_stream_key)
+        if software_seek and not background:
+            source_spec = self._resolve_software_scrub_source(source_spec, decode_stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
         if self._interactive_decode_should_abort(is_stale, deadline_at):
@@ -685,6 +727,7 @@ class EditGpuDecodeManager:
                 asset_path,
                 target_size=normalized_target_size,
                 stream_key=decode_stream_key,
+                **({"software_seek": True} if software_seek and not background else {}),
             )
             with self._lock:
                 warmup_event = self._warmup_events.get(source_key)
@@ -702,6 +745,15 @@ class EditGpuDecodeManager:
                 if cached is not None or source is not None:
                     self._lease_source(source_key)
             if source is None:
+                if source_spec.vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY:
+                    with self._lock:
+                        failed = source_key in self._failed_source_keys
+                    if failed:
+                        # The default route checks the original deadline and token again.
+                        return self.get_frame_interactive(
+                            asset_path, frame_index, target_size, stream_key,
+                            is_stale=is_stale, deadline_at=deadline_at, coarse=coarse, scrub_clip=scrub_clip,
+                        )
                 playback_trace(
                     "decode_manager.interactive_source_warmup_pending",
                     frame=frame_index,
@@ -735,6 +787,10 @@ class EditGpuDecodeManager:
             if not stream_lock.acquire(blocking=not background):
                 return None, 'interactive_stale'
             try:
+                if not background and sys.platform == 'win32' and source_type in ('vt_planar', 'planar'):
+                    retained = self._take_settled_scrub_frame(source, frame_index)
+                    if retained is not None:
+                        return retained, source_type
                 if background:
                     current = getattr(source, 'current_frame', None)
                     buffered = getattr(source, 'has_buffered_frame', None)
@@ -760,7 +816,10 @@ class EditGpuDecodeManager:
                     and (is_stale is None or not is_stale())
                 ):
                     reverse_window.observe(source_key, asset_path, scrub_clip, source, decoded)
-                return decoded, frame_type
+                if decoded is not None or frame_type == 'interactive_stale' or (
+                    source_spec.vt_policy != _WINDOWS_SOFTWARE_SCRUB_POLICY
+                ):
+                    return decoded, frame_type
             finally:
                 stream_lock.release()
         finally:
@@ -768,6 +827,11 @@ class EditGpuDecodeManager:
                 self._end_interactive_decode()
             self._release_interactive_source(source)
             self._release_source(source_key)
+        self._record_source_failure(source_key, expected_source=source)
+        return self.get_frame_interactive(
+            asset_path, frame_index, target_size, stream_key,
+            is_stale=is_stale, deadline_at=deadline_at, coarse=coarse, scrub_clip=scrub_clip,
+        )
 
     def get_frame_background(
         self, asset_path: str, frame_index: int, *,
@@ -1025,6 +1089,8 @@ class EditGpuDecodeManager:
         frame_index: int,
         target_size: Optional[Tuple[int, int]] = None,
         stream_key: Optional[str] = None,
+        *,
+        software_seek: bool = False,
     ) -> float:
         """
         Estimate the decode budget for a latest-only interactive scrub request.
@@ -1037,6 +1103,8 @@ class EditGpuDecodeManager:
         normalized_target_size = self._normalize_target_size(target_size)
         decode_stream_key = self._normalize_stream_key(asset_path, stream_key)
         source_spec = self._resolve_stream_source(asset_path, normalized_target_size, decode_stream_key)
+        if software_seek:
+            source_spec = self._resolve_software_scrub_source(source_spec, decode_stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
         with self._lock:
@@ -1110,6 +1178,7 @@ class EditGpuDecodeManager:
         *,
         for_playback: bool = False,
         warm_interactive_pool: bool = True,
+        software_seek: bool = False,
     ) -> None:
         """
         Pre-create the decode source in a background thread (non-blocking).
@@ -1139,6 +1208,8 @@ class EditGpuDecodeManager:
         source_spec = self._resolve_stream_source(
             asset_path, normalized_target_size, decode_stream_key, for_playback=for_playback,
         )
+        if software_seek:
+            source_spec = self._resolve_software_scrub_source(source_spec, decode_stream_key)
         source_key = self._make_source_key(decode_stream_key, source_spec)
 
         existing_source_type: Optional[str] = None
@@ -1186,6 +1257,8 @@ class EditGpuDecodeManager:
                     vt_policy=source_spec.vt_policy,
                 )
                 if source is None:
+                    if source_spec.vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY:
+                        self._record_source_failure(source_key, warmup_generation=generation)
                     return
                 should_close_source = False
                 victims: list = []
@@ -1218,6 +1291,8 @@ class EditGpuDecodeManager:
                         generation=generation,
                     )
             except Exception as e:
+                if source is None and source_spec.vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY:
+                    self._record_source_failure(source_key, warmup_generation=generation)
                 logger.debug(f"Decode warmup failed for {asset_path}: {e}")
             finally:
                 with self._lock:
@@ -2010,6 +2085,41 @@ class EditGpuDecodeManager:
             source_spec.no_deblock,
         )
 
+    def can_use_software_scrub_source(
+        self, asset_path: str, target_size: Optional[Tuple[int, int]], stream_key: str,
+    ) -> bool:
+        """Check routing on the UI thread without opening or probing a decoder."""
+        if self._normalize_target_size(target_size) is not None and self._ready_disk_proxy_path(asset_path):
+            return False
+        if self._is_topos_movie_path(asset_path):
+            return False
+        original = _DecodeSourceSpec(asset_path, asset_path, None, 'original')
+        selected = self._resolve_software_scrub_source(original, stream_key)
+        return selected.vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY
+
+    def _resolve_software_scrub_source(self, spec: _DecodeSourceSpec, stream_key: str) -> _DecodeSourceSpec:
+        if spec.source_kind not in ('original', 'original_downscaled', 'original_native_planar'):
+            return spec
+        # Both Windows decode routes supply native planes to the same GPU scaler.
+        software = replace(spec, vt_policy=_WINDOWS_SOFTWARE_SCRUB_POLICY, target_size=None)
+        with self._lock:
+            failed = self._make_source_key(stream_key, software) in self._failed_source_keys
+        return spec if failed else software
+
+    def _record_source_failure(
+        self, source_key: _SourceKey, *, warmup_generation: int | None = None, expected_source: Any = None,
+    ) -> None:
+        with self._lock:
+            if warmup_generation is not None and (
+                warmup_generation != self._warmup_generation or source_key in self._sources
+            ):
+                return
+            if expected_source is not None and self._sources.get(source_key) is not expected_source:
+                return
+            if len(self._failed_source_keys) >= _MAX_FAILED_SOURCE_KEYS:
+                self._failed_source_keys.clear()
+            self._failed_source_keys.add(source_key)
+
     def _resolve_stream_source(
         self, asset_path: str, target_size: Optional[Tuple[int, int]], stream_key: str,
         *, for_playback: bool = False,
@@ -2072,27 +2182,14 @@ class EditGpuDecodeManager:
                 vt_policy=self._playback_vt_policy(asset_path) if for_playback else 'auto',
             )
 
-        try:
-            info = self._get_disk_proxy_info(asset_path)
-        except Exception as e:
-            logger.debug(f"EditGpuDecodeManager: disk proxy query failed for {asset_path}: {e}")
-            info = None
-
-        if info is not None:
-            proxy_path = getattr(info, "proxy_path", None)
-            if getattr(info, "is_ready", False) and proxy_path and os.path.isfile(proxy_path):
-                return _DecodeSourceSpec(
-                    original_path=asset_path,
-                    decode_path=proxy_path,
-                    target_size=None,
-                    source_kind="disk_proxy",
-                )
-
-            # Source selection runs once per rendered layer and must stay
-            # read-only. Starting an ffmpeg proxy transcode here competes with
-            # the realtime decoder for CPU, hardware decode and disk bandwidth,
-            # which turns an otherwise smooth master preview into dropped
-            # frames. Proxy creation remains an explicit media-pool/cache job.
+        proxy_path = self._ready_disk_proxy_path(asset_path)
+        if proxy_path:
+            return _DecodeSourceSpec(
+                original_path=asset_path,
+                decode_path=proxy_path,
+                target_size=None,
+                source_kind="disk_proxy",
+            )
 
         # Topos MOV is a private TPIC stream inside a QuickTime container. It
         # must keep the requested box for the native reduced decoder and must
@@ -2270,6 +2367,18 @@ class EditGpuDecodeManager:
 
         return get_disk_proxy_service().get_disk_proxy_info(asset_path)
 
+    def _ready_disk_proxy_path(self, asset_path: str) -> str | None:
+        # Proxy creation remains an explicit media-pool/cache job.
+        try:
+            info = self._get_disk_proxy_info(asset_path)
+        except Exception as e:
+            logger.debug(f"EditGpuDecodeManager: disk proxy query failed for {asset_path}: {e}")
+            return None
+        proxy_path = getattr(info, 'proxy_path', None)
+        if getattr(info, 'is_ready', False) and proxy_path and os.path.isfile(proxy_path):
+            return proxy_path
+        return None
+
     @staticmethod
     def _interactive_warmup_wait_timeout(deadline_at: Optional[float]) -> float:
         """Return a short wait budget for interactive source warmup."""
@@ -2291,6 +2400,49 @@ class EditGpuDecodeManager:
         if deadline_at is not None and time.perf_counter() >= float(deadline_at):
             return True
         return False
+
+    def _take_settled_scrub_frame(self, source: Any, frame_index: int) -> DecodedFrame | None:
+        key = (id(source), frame_index)
+        with self._settled_scrub_lock:
+            entry = self._settled_scrub_frames.get(key)
+            if entry is None:
+                return None
+            self._settled_scrub_frames.move_to_end(key)
+        playback_trace("decode_manager.settled_scrub_cache_hit", frame=frame_index)
+        return entry[0]
+
+    def _decode_settled_scrub_frame(
+        self, source: Any, source_type: str, frame_index: int,
+        target_size: tuple[int, int] | None, start: float, *, retain: bool,
+    ) -> tuple[Any | None, str]:
+        if source_type not in ('vt_planar', 'planar') or sys.platform != 'win32':
+            return self._decode_frame(source, source_type, frame_index, target_size, start)
+        retained = self._take_settled_scrub_frame(source, frame_index)
+        if retained is not None:
+            return retained, source_type
+
+        frame, frame_type = self._decode_frame(source, source_type, frame_index, target_size, start)
+        is_exact = getattr(source, 'is_exact_scrub_frame', None)
+        if retain and isinstance(frame, DecodedFrame) and callable(is_exact) and is_exact(frame, frame_index):
+            size = sum(plane.nbytes for plane in frame.planes)
+            if 0 < size <= _SETTLED_SCRUB_CACHE_BYTES:
+                # Detach from PyAV plane buffers and account for the exact
+                # number of CPU bytes held after the decoder advances.
+                # Some decoders attach per-picture signal metadata dynamically.
+                retained = copy(frame)
+                retained.planes = tuple(plane.copy() for plane in frame.planes)
+                with self._settled_scrub_lock:
+                    key = (id(source), frame_index)
+                    previous = self._settled_scrub_frames.pop(key, None)
+                    if previous is not None:
+                        self._settled_scrub_bytes -= previous[1]
+                    self._settled_scrub_frames[key] = (retained, size)
+                    self._settled_scrub_bytes += size
+                    while (self._settled_scrub_bytes > _SETTLED_SCRUB_CACHE_BYTES
+                            or len(self._settled_scrub_frames) > _SETTLED_SCRUB_CACHE_FRAMES):
+                        _, (_, old_size) = self._settled_scrub_frames.popitem(last=False)
+                        self._settled_scrub_bytes -= old_size
+        return frame, frame_type
 
     def _decode_frame(
         self,
@@ -2729,7 +2881,7 @@ class EditGpuDecodeManager:
         frame_index: int,
     ) -> Optional[Any]:
         current_frame = getattr(source, "current_frame", None)
-        if isinstance(current_frame, int):
+        if isinstance(current_frame, int) and current_frame >= 0:
             gap = frame_index - current_frame
             if 0 <= gap <= _SEQUENTIAL_CATCHUP_MAX_FRAMES:
                 decoded = None
@@ -2782,7 +2934,7 @@ class EditGpuDecodeManager:
         """Read a source frame while allowing scrub to abort between steps."""
         prefer_seek = self._interactive_should_prefer_seek(source, source_type, frame_index)
         current_frame = getattr(source, "current_frame", None)
-        if isinstance(current_frame, int):
+        if isinstance(current_frame, int) and current_frame >= 0:
             gap = frame_index - current_frame
             if not prefer_seek and 0 <= gap <= _SEQUENTIAL_CATCHUP_MAX_FRAMES:
                 decoded = None
@@ -2989,12 +3141,7 @@ class EditGpuDecodeManager:
             vt_policy=source_spec.vt_policy,
         )
         if source is None:
-            with self._lock:
-                if len(self._failed_source_keys) >= _MAX_FAILED_SOURCE_KEYS:
-                    # 规模护栏：负缓存只防"每帧重试失败 open"，超限整体
-                    # 清空，让后续请求重新探测（文件可能已修复/补装）。
-                    self._failed_source_keys.clear()
-                self._failed_source_keys.add(source_key)
+            self._record_source_failure(source_key)
             return None
 
         loser: Optional[Any] = None
@@ -3069,6 +3216,11 @@ class EditGpuDecodeManager:
     def _close_source_object(self, source: Any, key: Any) -> None:
         if source is None:
             return
+        with self._settled_scrub_lock:
+            for entry in tuple(self._settled_scrub_frames):
+                if entry[0] == id(source):
+                    _, size = self._settled_scrub_frames.pop(entry)
+                    self._settled_scrub_bytes -= size
         try:
             source.close()
         except Exception as e:
@@ -3110,6 +3262,8 @@ class EditGpuDecodeManager:
             return self._create_topos_source(asset_path, target_size,
                                              self._no_deblock)
         codec = self._probe_codec(asset_path)
+        if vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY and codec != 'h264':
+            return None, ''
         native_vt_preview = (
             sys.platform != 'darwin'
             or (
@@ -3400,6 +3554,18 @@ class EditGpuDecodeManager:
                 output_mode="planar_yuv" if prefer_planar else "packed_rgb",
             )
             source.open()
+            if vt_policy == _WINDOWS_SOFTWARE_SCRUB_POLICY:
+                metadata = source.metadata
+                if not (
+                    metadata is not None and metadata.codec_name == 'h264'
+                    and (metadata.width, metadata.height) == (3840, 2160)
+                    and metadata.pixel_format == 'yuv420p' and metadata.bit_depth == 8
+                    and 0 < metadata.fps.to_float() <= 30 and metadata.field_order in (None, 'progressive')
+                    and metadata.color_range == 'limited'
+                    and (metadata.color_matrix, metadata.color_transfer, metadata.color_primaries) == ('bt709',) * 3
+                ):
+                    source.close()
+                    return None, ''
 
             if any(c in codec for c in _PLANAR_PREFERRED_CODECS):
                 playback_trace(
@@ -3666,17 +3832,14 @@ class EditGpuDecodeManager:
             event.set()
 
         seen: set[int] = set()
-        for _key, source in close_now:
+        for key, source in close_now:
             if source is None:
                 continue
             source_id = id(source)
             if source_id in seen:
                 continue
             seen.add(source_id)
-            try:
-                source.close()
-            except Exception as e:
-                logger.warning(f"EditGpuDecodeManager: close error for {asset_path}: {e}")
+            self._close_source_object(source, key)
 
     def close_all(self) -> None:
         """Close all sources."""
@@ -3743,10 +3906,7 @@ class EditGpuDecodeManager:
             if source_id in seen:
                 continue
             seen.add(source_id)
-            try:
-                source.close()
-            except Exception as e:
-                logger.warning(f"EditGpuDecodeManager: close error for {key}: {e}")
+            self._close_source_object(source, key)
 
     def invalidate_all_sources(self) -> None:
         """Close and clear all cached decode sources (e.g. when preview quality changes)."""
@@ -3810,10 +3970,7 @@ class EditGpuDecodeManager:
             if source_id in seen:
                 continue
             seen.add(source_id)
-            try:
-                source.close()
-            except Exception as e:
-                logger.warning(f"EditGpuDecodeManager: invalidate close error for {key}: {e}")
+            self._close_source_object(source, key)
 
         logger.debug(f"EditGpuDecodeManager: invalidated all sources ({len(seen)} closed)")
 

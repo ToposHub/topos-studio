@@ -5,11 +5,14 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
+import numpy as np
 import pytest
 
 from src.features.edit.core import edit_gpu_decode_manager as decode_manager_mod
 from src.features.edit.core.edit_gpu_decode_manager import EditGpuDecodeManager
+from src.shared.media.frame import DecodedFrame
 
 
 @dataclass
@@ -144,6 +147,170 @@ def test_planar_large_forward_gap_falls_back_to_precise_read() -> None:
     assert frame.frame_index == 90
     assert source.read_next_calls == []
     assert source.read_frame_planar_calls == [90]
+
+
+def test_aborted_planar_cursor_reanchors_before_nearby_reads() -> None:
+    manager = EditGpuDecodeManager()
+    source = _FakeInteractivePlanarSource(current_frame=-1)
+
+    assert manager._read_source_frame(source, 'vt_planar', 3).frame_index == 3
+    source.current_frame = -1
+    assert manager._read_source_frame_interactive(
+        source, 'vt_planar', 4, is_stale=None, deadline_at=None,
+    ).frame_index == 4
+    assert source.read_next_calls == []
+    assert source.read_frame_planar_calls == [3, 4]
+
+
+@pytest.mark.parametrize('close_method', ['close_source', 'invalidate_all_sources', 'close_all'])
+def test_windows_scrub_reuses_only_exact_planes_from_open_source(
+    monkeypatch: pytest.MonkeyPatch, close_method: str,
+) -> None:
+    monkeypatch.setattr(decode_manager_mod, 'sys', SimpleNamespace(platform='win32'))
+    manager = EditGpuDecodeManager()
+    monkeypatch.setattr(manager, '_get_disk_proxy_info', lambda path: None)
+
+    class Source(_CloseTrackingSource):
+        def read_frame_planar(self, frame_index: int) -> DecodedFrame:
+            self.read_frame_planar_calls.append(frame_index)
+            frame = DecodedFrame(frame_index, frame_index, frame_index / 25,
+                                 planes=(np.full((2, 2), len(self.read_frame_planar_calls), np.uint8),))
+            frame.color_range = 'full'
+            frame.color_matrix = 'bt2020nc'
+            frame.color_primaries = 'bt2020'
+            frame.color_transfer = 'smpte2084'
+            return frame
+
+        def is_exact_scrub_frame(self, frame: DecodedFrame, requested: int) -> bool:
+            return frame.frame_index == requested and requested != 88
+
+    source = Source(current_frame=-1)
+    monkeypatch.setattr(manager, '_create_source', lambda *args, **kwargs: (source, 'vt_planar'))
+    path = 'test-h264.mov'
+    frame, _ = manager.get_frame(path, 80, scrub_settled=True)
+    frame.planes[0].fill(0)
+    cached, kind = manager.get_frame_interactive(path, 80)
+    assert kind == 'vt_planar'
+    assert (cached.planes[0] == 1).all()
+    assert (cached.color_range, cached.color_matrix, cached.color_primaries, cached.color_transfer) == (
+        'full', 'bt2020nc', 'bt2020', 'smpte2084',
+    )
+    manager.get_frame(path, 80, scrub_settled=True)
+    assert manager.get_frame_with_policy(path, 80, reuse_scrub_frame=True)[0] is cached
+    manager.get_frame(path, 80)
+    manager.get_frame(path, 88, scrub_settled=True)
+    manager.get_frame(path, 88, scrub_settled=True)
+    assert source.read_frame_planar_calls == [80, 80, 88, 88]
+
+    if close_method == 'close_source':
+        manager.close_source(path)
+    else:
+        getattr(manager, close_method)()
+    assert source.closed
+    assert not manager._settled_scrub_frames
+    assert manager._settled_scrub_bytes == 0
+
+
+def test_software_seek_resumes_the_same_clip_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(decode_manager_mod, 'sys', SimpleNamespace(platform='win32'))
+    manager = EditGpuDecodeManager()
+    monkeypatch.setattr(manager, '_get_disk_proxy_info', lambda path: None)
+    monkeypatch.setattr(manager, '_probe_codec', lambda path: 'h264')
+
+    class Source(_CloseTrackingSource):
+        def read_frame_planar(self, frame_index: int) -> DecodedFrame:
+            self.read_frame_planar_calls.append(frame_index)
+            return DecodedFrame(frame_index, frame_index, frame_index / 25,
+                                 planes=(np.full((2, 2), 7, np.uint8),))
+
+        def is_exact_scrub_frame(self, frame: DecodedFrame, requested: int) -> bool:
+            return frame.frame_index == requested
+
+    opened: list[tuple[str, tuple[int, int] | None, Source]] = []
+
+    def create(path: str, size: tuple[int, int] | None, *, vt_policy: str) -> tuple[Source, str]:
+        source = Source(current_frame=-1)
+        opened.append((vt_policy, size, source))
+        return source, 'planar' if vt_policy == 'windows_h264_scrub' else 'vt_planar'
+
+    monkeypatch.setattr(manager, '_create_source', create)
+    path, clip, size = 'test-h264.mov', 'clip-1', (1152, 648)
+    try:
+        assert manager.get_frame(path, 76, size, clip)[1] == 'vt_planar'
+        assert manager.get_frame(path, 80, size, clip, scrub_settled=True, software_seek=True)[1] == 'planar'
+        manager.set_playback_active(True)
+        resume, kind = manager.get_frame_with_policy(path, 80, size, clip,
+                                                      reuse_scrub_frame=True, software_seek=True)
+        assert kind == 'planar' and resume.frame_index == 80
+        assert manager.get_frame(path, 81, size, clip, software_seek=True)[1] == 'planar'
+        assert manager.get_frame(path, 82, size, 'clip-2')[1] == 'vt_planar'
+        assert opened[1][0:2] == ('windows_h264_scrub', None)
+        assert opened[1][2].read_frame_planar_calls == [80, 81]
+        assert [entry[0] for entry in opened] == ['auto', 'windows_h264_scrub', 'auto']
+    finally:
+        manager.close_all()
+
+
+def test_software_scrub_keeps_ready_disk_proxy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    manager = EditGpuDecodeManager()
+    proxy = tmp_path / 'ready-proxy.mov'
+    proxy.touch()
+    monkeypatch.setattr(manager, '_get_disk_proxy_info', lambda path: SimpleNamespace(
+        proxy_path=str(proxy), is_ready=True,
+    ))
+    opened = Mock(return_value=(_FakeInteractivePlanarSource(current_frame=-1), 'vt_planar'))
+    monkeypatch.setattr(manager, '_create_source', opened)
+    try:
+        path, size, stream = 'master.mov', (1152, 648), 'clip-1'
+        assert not manager.can_use_software_scrub_source(path, size, stream)
+        assert manager.get_frame(path, 80, size, stream, software_seek=True, scrub_settled=True)[1] == 'vt_planar'
+        opened.assert_called_once_with(str(proxy), None, vt_policy='auto')
+    finally:
+        manager.close_all()
+
+
+def test_failed_software_scrub_warmup_falls_back_to_default_interactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = EditGpuDecodeManager()
+    monkeypatch.setattr(manager, '_get_disk_proxy_info', lambda path: None)
+    default_source = _FakeInteractivePlanarSource(current_frame=-1)
+
+    def create(path: str, size: tuple[int, int] | None, *, vt_policy: str = 'auto') -> tuple[object | None, str]:
+        return (None, '') if vt_policy == 'windows_h264_scrub' else (default_source, 'vt_planar')
+
+    opened = Mock(side_effect=create)
+    monkeypatch.setattr(manager, '_create_source', opened)
+    try:
+        # A relink can leave AVC metadata in the project while the new file opens as HEVC.
+        path, size, stream = 'relinked-hevc.mov', (1152, 648), 'clip-1'
+        assert manager.can_use_software_scrub_source(path, size, stream)
+        frame, kind = manager.get_frame_interactive(path, 80, size, stream, software_seek=True)
+        assert kind == 'vt_planar' and frame.frame_index == 80
+        assert not manager.can_use_software_scrub_source(path, size, stream)
+        assert manager.get_frame_interactive(path, 81, size, stream, software_seek=True)[1] == 'vt_planar'
+        assert sum(call.kwargs.get('vt_policy') == 'windows_h264_scrub' for call in opened.call_args_list) == 1
+    finally:
+        manager.close_all()
+
+
+def test_software_read_failure_disables_the_stream_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = EditGpuDecodeManager()
+    default_source = _FakeInteractivePlanarSource(current_frame=-1)
+    failed_source = _FakeInteractivePlanarSource(current_frame=-1)
+    monkeypatch.setattr(failed_source, 'read_frame_planar', lambda frame: None)
+    monkeypatch.setattr(manager, '_create_source', lambda *args, vt_policy: (
+        (failed_source, 'planar') if vt_policy == 'windows_h264_scrub' else (default_source, 'vt_planar')
+    ))
+    try:
+        path, size, stream = 'failed-read.mov', None, 'clip-1'
+        assert manager.can_use_software_scrub_source(path, size, stream)
+        frame, kind = manager.get_frame(path, 80, size, stream, software_seek=True)
+        assert kind == 'vt_planar' and frame.frame_index == 80
+        assert not manager.can_use_software_scrub_source(path, size, stream)
+        assert manager.get_frame(path, 81, size, stream, software_seek=True)[1] == 'vt_planar'
+    finally:
+        manager.close_all()
 
 
 def test_stream_key_keeps_same_asset_clips_on_independent_sources() -> None:

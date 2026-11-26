@@ -30,7 +30,7 @@ import threading
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Any, Generator, Tuple, Literal
+from typing import TYPE_CHECKING, Optional, Any, Callable, Generator, Tuple, Literal
 
 import numpy as np
 
@@ -60,6 +60,10 @@ from .color_metadata import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class _SeekCancelled(Exception):
+    """A preview no longer needs the frame currently being sought."""
 
 
 # =============================================================================
@@ -1727,7 +1731,7 @@ class FFmpegMediaSource:
                 source_path=self._path
             ) from e
 
-    def seek_frame(self, frame_index: int) -> None:
+    def seek_frame(self, frame_index: int, *, should_abort: Callable[[], bool] | None = None) -> None:
         """
         定位到指定帧。
 
@@ -1807,10 +1811,15 @@ class FFmpegMediaSource:
                 self._seek_intra(frame_index)
             else:
                 # GOP codec: keyframe seek + decode forward
-                self._seek_gop(frame_index)
+                if should_abort is None:
+                    self._seek_gop(frame_index)
+                else:
+                    self._seek_gop(frame_index, should_abort=should_abort)
 
             logger.debug(f"Seek complete, current frame: {self._current_frame}")
 
+        except _SeekCancelled:
+            raise
         except Exception as e:
             logger.error(f"Seek failed: target={frame_index}, actual={self._current_frame}, error={e}")
             raise SeekError(
@@ -1908,7 +1917,7 @@ class FFmpegMediaSource:
         # Seek 后没有帧
         self._current_frame = frame_index
 
-    def _seek_gop(self, frame_index: int) -> None:
+    def _seek_gop(self, frame_index: int, *, should_abort: Callable[[], bool] | None = None) -> None:
         """
         GOP codec 的精确 seek。
 
@@ -1958,7 +1967,10 @@ class FFmpegMediaSource:
             distance = index.decode_distance(frame_index)
             if distance is not None:
                 max_frames = min(500, max(16, distance + 4))
-        self._decode_to_target(frame_index, max_frames=max_frames)
+        if should_abort is None:
+            self._decode_to_target(frame_index, max_frames=max_frames)
+        else:
+            self._decode_to_target(frame_index, max_frames=max_frames, should_abort=should_abort)
 
     # =========================================================================
     # P2-05: GOP 持久化索引 + SLICE seek 会话
@@ -2199,7 +2211,9 @@ class FFmpegMediaSource:
     def _decode_to_target(
         self,
         target_frame: int,
-        max_frames: int = 500
+        max_frames: int = 500,
+        *,
+        should_abort: Callable[[], bool] | None = None,
     ) -> None:
         """
         从当前位置解码到目标帧。
@@ -2238,6 +2252,12 @@ class FFmpegMediaSource:
                             )
                         return
 
+                    if should_abort is not None and should_abort():
+                        # The partial GOP walk has no verified landing frame.
+                        # Re-anchor the next read even if its target is nearby.
+                        self._current_frame = -1
+                        self._frame_iterator = None
+                        raise _SeekCancelled
                     self._remember_scrub_seek_frame(self._current_frame, frame)
                     frames_decoded += 1
 
@@ -2246,7 +2266,7 @@ class FFmpegMediaSource:
 
             except StopIteration:
                 break
-            except SeekError:
+            except (SeekError, _SeekCancelled):
                 # AUD-34701：overshoot 的 SeekError 直接向上传递，
                 # 不落入通用解码错误分支（避免误日志 + 语义混淆）
                 raise
@@ -2684,6 +2704,13 @@ class FFmpegMediaSource:
         # 读取下一帧（planar 模式）
         return self._read_next_frame_planar()
 
+    def is_exact_scrub_frame(self, frame: DecodedFrame, frame_index: int) -> bool:
+        """Accept native AVC planes only when their decoded timestamp matches."""
+        return (frame.frame_index == frame_index and frame.pts is not None and not frame.is_proxy
+                and frame.pixel_format == 'yuv420p' and not (frame.extra or {}).get('is_corrupt')
+                and frame.metadata is not None and frame.metadata.codec_name == 'h264'
+                and frame.pts == self._frame_to_pts(frame_index))
+
     def _read_next_frame_planar(self) -> DecodedFrame:
         """
         读取下一帧（保留 planar 格式）。
@@ -2873,6 +2900,8 @@ class FFmpegMediaSource:
 
         # 构建额外元数据（记录 reformat 状态）
         extra_metadata = {}
+        if getattr(frame, 'is_corrupt', False):
+            extra_metadata['is_corrupt'] = True
         if not is_proxy and pix_fmt == 'yuv420p' and getattr(frame, 'planes', None):
             # Any zero-copy plane keeps the whole AVFrame alive. Chroma planes
             # with padded rows can also own separate contiguous NumPy copies.
