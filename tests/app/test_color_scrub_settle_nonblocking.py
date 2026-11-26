@@ -6,6 +6,7 @@ Tests for the non-blocking Color scrub-release settle seek.
 seek + 就绪轮询上屏精确帧。
 """
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -162,8 +163,73 @@ class TestScrubSettleNonBlocking:
         # 轮询停止（只可能有拖拽启动路径自身的一次调用，不应持续增长）
         assert present.call_count <= count_after_cancel + 1
 
+    def test_windows_settle_retries_until_the_exact_frame_is_swapped(self) -> None:
+        fc = _make_controller()
+        fc.engine = SimpleNamespace(drawn_video_frame=(4, 107))
+        viewport = SimpleNamespace(swapped_video_frame=(3, 107), video_swap_count=8,
+                                   isVisible=lambda: True, request_video_recompose=MagicMock())
+        fc.canvas = SimpleNamespace(gl_viewport=viewport)
+        fc._on_scope_demand_changed = MagicMock()
+        fc._viewport_scrub_scope_wait = 0
+        callbacks = []
+        clock = [0.0]
+        with (
+            patch("src.app.controllers.file_controller.time.monotonic", side_effect=lambda: clock[0]),
+            patch("src.app.controllers.file_controller.QTimer.singleShot",
+                  side_effect=lambda delay, callback: callbacks.append((delay, callback))),
+        ):
+            fc._poll_settle_exact_frame(7, await_composition=True)
+            callbacks.pop()[1]()  # Decoded and drawn, so await a new window swap.
+            assert fc._viewport_scrub_scope_wait == 0
+            clock[0] = 0.040
+            callbacks.pop()[1]()
+            viewport.request_video_recompose.assert_called_once_with()
+            assert fc._viewport_scrub_scope_wait == 0
+            viewport.swapped_video_frame = (4, 107)
+            viewport.video_swap_count += 1
+            callbacks.pop()[1]()
+            assert fc._viewport_scrub_scope_wait is None
+            callbacks.pop()[1]()
+            fc._on_scope_demand_changed.assert_called_once_with()
+            fc.video_controller.present_ready_scrub_frame.assert_called_once_with(107)
+
+    def test_windows_settle_does_not_retry_after_a_new_transport_generation(self) -> None:
+        fc = _make_controller()
+        fc.video_controller._generation_id = 4
+        fc.engine = SimpleNamespace(drawn_video_frame=(4, 107))
+        viewport = SimpleNamespace(swapped_video_frame=(3, 107), video_swap_count=8,
+                                   isVisible=lambda: True, request_video_recompose=MagicMock())
+        fc.canvas = SimpleNamespace(gl_viewport=viewport)
+        fc._viewport_scrub_scope_wait = 0
+        with patch("src.app.controllers.file_controller.QTimer.singleShot") as schedule:
+            fc._poll_settle_exact_frame(7, await_composition=True)
+            schedule.call_args.args[1]()
+            fc.video_controller._generation_id += 1
+            retry = schedule.call_args.args[1]
+            schedule.reset_mock()
+            retry()
+        schedule.assert_not_called()
+        fc.video_controller.present_ready_scrub_frame.assert_called_once_with(107)
+        viewport.request_video_recompose.assert_not_called()
+        assert fc._viewport_scrub_scope_wait is None
+
+    def test_windows_release_reuses_the_swapped_exact_target(self) -> None:
+        fc = _make_controller()
+        fc._viewport_scrub_settle_pending = True
+        fc._viewport_scrub_latest_source_target = 107
+        fc.engine = SimpleNamespace(drawn_video_frame=(4, 107))
+        fc.canvas = SimpleNamespace(gl_viewport=SimpleNamespace(swapped_video_frame=(4, 107)))
+        fc.video_controller.can_complete_scrub_without_seek.return_value = True
+        with patch("src.app.controllers.file_controller.sys", SimpleNamespace(platform="win32")):
+            fc.on_video_seek(7)
+
+        fc.video_controller.can_complete_scrub_without_seek.assert_called_once_with(107)
+        fc.video_controller.seek_to_frame.assert_not_called()
+        assert not fc._viewport_scrub_settle_pending
+
     def test_held_fast_scrub_refines_without_releasing_mouse(self, qapp) -> None:
         fc = _make_controller()
+        fc.video_controller.is_scrub_frame_presented.return_value = False
         fc.on_video_scrub_started(16)
         fc._viewport_scrub_pending_frame = 23
 
@@ -220,6 +286,7 @@ class TestScrubSettleNonBlocking:
     ) -> None:
         fc = _make_controller()
         fc._color_timeline_clip_playback_context = {"clip": object()}
+        fc.video_controller.is_scrub_frame_presented.return_value = False
         fc.on_video_scrub_started(16)
         fc._viewport_scrub_pending_frame = 23
 
@@ -354,10 +421,19 @@ class TestScrubReadyFramePump:
             target, scrub_origin=origin, scrub_direction=direction,
         )
 
-    def test_color_reversal_keeps_a_monotonic_target_when_stride_changes(self) -> None:
+    @pytest.mark.parametrize(("platform", "targets"), [
+        ("win32", [120, 151, 149, 148, 144]),
+        ("darwin", [120, 148, 151, 148, 144]),
+    ])
+    def test_color_reversal_keeps_a_monotonic_target_when_stride_changes(
+        self, platform: str, targets: list[int],
+    ) -> None:
         fc = _make_controller()
         fc._color_static_preview_token = 9
-        with patch("src.app.controllers.file_controller.QTimer.singleShot"):
+        with (
+            patch("src.app.controllers.file_controller.QTimer.singleShot"),
+            patch("src.app.controllers.file_controller.sys", SimpleNamespace(platform=platform)),
+        ):
             fc.on_video_scrub_started(20)
             for frame, stride in ((51, 16), (49, 16), (45, 8), (43, 16), (41, 4)):
                 fc._viewport_scrub_pending_frame = frame
@@ -366,7 +442,7 @@ class TestScrubReadyFramePump:
 
         assert fc._color_static_preview_token == 10
         calls = fc.video_controller.seek_to_frame.call_args_list
-        assert [c.args[0] for c in calls] == [120, 148, 151, 148, 144]
+        assert [c.args[0] for c in calls] == targets
         assert [c.kwargs["scrub_origin"] for c in calls] == [120, 120, 151, 151, 151]
         assert [c.kwargs["scrub_direction"] for c in calls] == [0, 1, -1, -1, -1]
         assert [c.kwargs["scrub_reset"] for c in calls] == [True, False, True, False, False]

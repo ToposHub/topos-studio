@@ -367,11 +367,6 @@ class SourceManager:
                 # 旧签名不支持 target_size/preserve_planes，只用 path
                 self._master_source = self._source_factory(self._path)
             self._master_source.open()
-            scrub_history = False
-            if self._interactive_scrub:
-                tune_scrub = getattr(self._master_source, 'tune_interactive_scrub', None)
-                if callable(tune_scrub):
-                    scrub_history = tune_scrub() is True
 
             # 探测元数据
             self._metadata = self._master_source.probe()
@@ -534,11 +529,13 @@ class SourceManager:
             )
             proxy_planar_mode = getattr(self._proxy_source, 'is_planar_mode', False) if self._proxy_source else False
             master_planar_mode = bool(getattr(self._master_source, 'is_planar_mode', False))
-            if scrub_history and master_planar_mode and not self._shares_master_proxy_source:
-                # A turnaround often revisits frames already delivered during the
-                # previous leg. Keep those exact frames within the master byte cap.
-                self._cache.master_cache.policy = replace(self._master_cache_policy, max_frames=24)
-                self._scrub_master_cache = self._cache.master_cache
+            if self._interactive_scrub:
+                tune_scrub = getattr(self._master_source, 'tune_interactive_scrub', None)
+                retain_history = master_planar_mode and not self._shares_master_proxy_source
+                if callable(tune_scrub) and tune_scrub(retain_history=retain_history) is True:
+                    # A turnaround often revisits frames delivered on the previous leg.
+                    self._cache.master_cache.policy = replace(self._master_cache_policy, max_frames=24)
+                    self._scrub_master_cache = self._cache.master_cache
             self._is_open = True
             hwaccel_info = f"hwaccel={self._hwaccel_status.decoder_type}" if self._hwaccel_status else "hwaccel=unknown"
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -7340,16 +7341,35 @@ class FileOpsMixin:
                 # UI 不再冻结。
                 self._viewport_scrub_settle_pending = False
                 seek_kwargs = {"blocking": False}
-                if getattr(self, "current_page", None) == "Color":
+                is_color = getattr(self, "current_page", None) == "Color"
+                if is_color:
                     seek_kwargs["allow_proxy_fallback"] = False
                     seek_kwargs["scrub_reset"] = True
+                await_composition = is_color and sys.platform == "win32"
+                if await_composition:
+                    viewport = getattr(getattr(self, "canvas", None), "gl_viewport", None)
+                    drawn = getattr(getattr(self, "engine", None), "drawn_video_frame", None)
+                    can_reuse = getattr(self.video_controller, "can_complete_scrub_without_seek", None)
+                    if (getattr(self, "_viewport_scrub_latest_source_target", None) == source_frame
+                            and drawn is not None and getattr(viewport, "swapped_video_frame", None) == drawn
+                            and callable(can_reuse) and can_reuse(source_frame) is True):
+                        self._resume_color_scrub_scopes(getattr(self, "_viewport_scrub_scope_wait", None))
+                        self._schedule_video_denoise_window()
+                        return
+                    self._defer_color_scrub_scopes(250)
+                    freeze_scope = getattr(self, "_freeze_curves_scope_for_interaction", None)
+                    if callable(freeze_scope):
+                        freeze_scope()
                 try:
                     self.video_controller.seek_to_frame(source_frame, **seek_kwargs)
                 except TypeError:
                     seek_kwargs.pop("allow_proxy_fallback", None)
                     seek_kwargs.pop("scrub_reset", None)
                     self.video_controller.seek_to_frame(source_frame, **seek_kwargs)
-                self._poll_settle_exact_frame(int(frame_number))
+                if await_composition:
+                    self._poll_settle_exact_frame(int(frame_number), await_composition=True)
+                else:
+                    self._poll_settle_exact_frame(int(frame_number))
                 self._schedule_video_denoise_window()
                 return
             self.video_controller.seek_to_frame(source_frame)
@@ -7357,6 +7377,7 @@ class FileOpsMixin:
 
     def on_video_scrub_started(self, frame_number: int) -> None:
         """Start low-latency viewport scrub preview for Color/Composite bars."""
+        self._viewport_scrub_scope_wait = None
         priority = getattr(getattr(self, "timeline_panel", None), "set_background_media_priority", None)
         if getattr(self, "current_page", None) == "Color" and callable(priority):
             priority("color_scrub", True)
@@ -7393,6 +7414,9 @@ class FileOpsMixin:
         self._viewport_scrub_preview_token = int(
             getattr(self, "_viewport_scrub_preview_token", 0) or 0
         ) + 1
+        if sys.platform == "win32" and getattr(self, "current_page", None) == "Color":
+            # Give the initial preview a chance to paint before scope panels queue updates.
+            self._defer_color_scrub_scopes(72)
         # 就绪帧泵的作废键：token 会被每个拖拽目标翻新（作废旧式精确等待
         # 链），泵必须整轮拖拽存活，故用独立的拖拽代数。
         self._viewport_scrub_drag_generation = int(
@@ -7481,6 +7505,7 @@ class FileOpsMixin:
         self._end_viewport_scrub(settle=True)
 
     def on_video_scrub_cancelled(self) -> None:
+        self._viewport_scrub_scope_wait = None
         controller = getattr(self, "video_controller", None)
         if controller is not None:
             controller.end_scrub_paint_guard()
@@ -7512,8 +7537,22 @@ class FileOpsMixin:
         ) + 1
         self._viewport_scrub_pump_armed = False
 
+    def _defer_color_scrub_scopes(self, milliseconds: int) -> None:
+        token = getattr(self, "_viewport_scrub_preview_token", 0)
+        self._viewport_scrub_scope_wait = token
+        QTimer.singleShot(milliseconds, lambda: self._resume_color_scrub_scopes(token))
+
+    def _resume_color_scrub_scopes(self, token: int | None) -> None:
+        if token is None or getattr(self, "_viewport_scrub_scope_wait", None) != token:
+            return
+        self._viewport_scrub_scope_wait = None
+        refresh = getattr(self, "_on_scope_demand_changed", None)
+        if callable(refresh):
+            QTimer.singleShot(0, refresh)
+
     def _poll_settle_exact_frame(
         self, local_frame: int, *, is_current: Callable[[], bool] | None = None,
+        await_composition: bool = False,
     ) -> None:
         """Present the exact master frame after a non-blocking settle seek.
 
@@ -7524,25 +7563,57 @@ class FileOpsMixin:
         """
         video_controller = getattr(self, "video_controller", None)
         present_ready = getattr(video_controller, "present_ready_scrub_frame", None)
+        token = int(getattr(self, "_viewport_scrub_preview_token", 0) or 0)
+
+        def _resume_scopes() -> None:
+            if await_composition:
+                self._resume_color_scrub_scopes(token)
+
         if not callable(present_ready):
+            _resume_scopes()
             return
 
         source_frame = self._color_local_frame_to_source_frame(int(local_frame))
-        token = int(getattr(self, "_viewport_scrub_preview_token", 0) or 0)
+        viewport = getattr(getattr(self, "canvas", None), "gl_viewport", None) if await_composition else None
+        recompose = getattr(viewport, "request_video_recompose", None)
+        swap_floor = getattr(viewport, "video_swap_count", 0)
+        video_generation = getattr(video_controller, "_generation_id", None)
+        waiting_for_swap: tuple[int, int] | None = None
+        next_retry_ms: float | None = None
+        retries = 0
         deadline_ms = time.monotonic() * 1000.0 + 2000.0
 
         def _present_when_ready() -> None:
-            if token != getattr(self, "_viewport_scrub_preview_token", 0):
-                return
-            if is_current is not None and not is_current():
-                return
-            if time.monotonic() * 1000.0 > deadline_ms:
+            nonlocal next_retry_ms, retries, waiting_for_swap
+            now_ms = time.monotonic() * 1000.0
+            if (token != getattr(self, "_viewport_scrub_preview_token", 0)
+                    or self.video_controller is not video_controller
+                    or getattr(video_controller, "_generation_id", None) != video_generation
+                    or (await_composition and getattr(self, "current_page", None) != "Color")
+                    or (is_current is not None and not is_current())
+                    or now_ms > deadline_ms):
+                _resume_scopes()
                 return
             try:
-                if present_ready(source_frame):
-                    return
+                if waiting_for_swap is None and present_ready(source_frame):
+                    waiting_for_swap = getattr(getattr(self, "engine", None), "drawn_video_frame", None)
+                    if not callable(recompose) or waiting_for_swap is None:
+                        _resume_scopes()
+                        return
+                if waiting_for_swap is not None:
+                    if (not viewport.isVisible()
+                            or (viewport.video_swap_count > swap_floor and viewport.swapped_video_frame == waiting_for_swap)):
+                        _resume_scopes()
+                        return
+                    if next_retry_ms is None:
+                        next_retry_ms = now_ms + 32.0
+                    elif retries < 3 and now_ms >= next_retry_ms:
+                        recompose()
+                        retries += 1
+                        next_retry_ms = now_ms + 64.0
             except (AttributeError, RuntimeError, TypeError) as exc:
                 logger.debug("Settle exact-frame poll failed: %s", exc)
+                _resume_scopes()
                 return
             QTimer.singleShot(12, _present_when_ready)
 
@@ -7669,6 +7740,11 @@ class FileOpsMixin:
                         source_direction = 1 if raw_source > previous_source else -1
                     if previous_source is None or source_direction != old_source_direction:
                         self._viewport_scrub_origin = raw_source if previous_source is None else previous_source
+                    if sys.platform == "win32" and source_direction and source_direction != old_source_direction:
+                        # A quick click-drag-release can end before one GOP seek
+                        # completes. Make that first seek useful to the exact release.
+                        target_frame = int(frame)
+                        self._viewport_scrub_last_target = target_frame
                     self._viewport_scrub_last_source_position = raw_source
                     self._viewport_scrub_source_direction = source_direction
                     directional_seek = {

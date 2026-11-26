@@ -109,8 +109,9 @@ class TestPlanarMaster:
 @pytest.mark.parametrize('shared', [False, True])
 def test_interactive_master_history_is_scoped_to_the_open_source(shared: bool) -> None:
     class ScrubSource(PlanarProbeSource):
-        def tune_interactive_scrub(self) -> bool:
-            return True
+        def tune_interactive_scrub(self, *, retain_history: bool) -> bool:
+            assert retain_history is (not shared)
+            return retain_history
 
     master = ScrubSource('yuv420p')
 
