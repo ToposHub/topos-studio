@@ -45,6 +45,7 @@ from src.shared.assets.icon_manager import (
     icon_3d_model, icon_3d_point, icon_3d_edge, icon_3d_polygon,
 )
 from src.shared.ui.widgets.viewport_toolbar_base import ViewportToolBarBase
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGB
 from src.features.composite.ui.viewport3d_state import (
     Viewer3DToolMode, ComponentMode, OrbitCenterMode,
     TOOL3D_MODE_LABELS, TOOL3D_MODE_SHORTCUTS, ORBIT_CENTER_LABELS,
@@ -9782,18 +9783,15 @@ class CompositeViewer(QOpenGLWidget):
         self.background_mode_changed.emit(normalized)
         self.update()
 
-    def _viewport_clear_color_rgb(self) -> tuple:
-        """B2-4: clear colour for the 2D single-image path.
-
-        Checker mode keeps the user's 3D-scene viewport colour; black/white
-        override it (matte inspection against a flat field). The quad/3D
-        paths always use the scene colour regardless of this mode.
-        """
+    def _viewport_clear_color_rgb(self) -> tuple[float, float, float]:
+        """Resolve the 2D surround, matte inspection, or 3D scene color."""
+        if self._view_mode == "3d":
+            return self._viewport_bg_color_rgb()
         if self._background_mode == "black":
             return (0.0, 0.0, 0.0)
         if self._background_mode == "white":
             return (1.0, 1.0, 1.0)
-        return self._viewport_bg_color_rgb()
+        return VIEWER_BACKGROUND_RGB
 
     def clear_split_snapshot(self) -> None:
         """Drop the captured A/B textures and leave split mode inactive."""
@@ -11582,21 +11580,19 @@ class CompositeViewer(QOpenGLWidget):
                 pass
         return merged_viewer3d_scene_settings()
 
-    def _viewport_bg_color_rgb(self) -> tuple:
-        """视口 clear color（letterbox/未填满区底色），来自全局 3D Scene Settings。
-
-        复用 _viewer3d_overlay_settings 的合并逻辑；失败时退回原硬编码 0.15 灰。
-        """
+    def _viewport_bg_color_rgb(self) -> tuple[float, float, float]:
+        """Resolve the 3D surround from the global scene settings."""
+        default_r, default_g, default_b = VIEWER_BACKGROUND_RGB
         try:
             settings = self._viewer3d_overlay_settings()
-            r = float(settings.get("viewport_bg_r", 0.15))
-            g = float(settings.get("viewport_bg_g", 0.15))
-            b = float(settings.get("viewport_bg_b", 0.15))
+            r = float(settings.get("viewport_bg_r", default_r))
+            g = float(settings.get("viewport_bg_g", default_g))
+            b = float(settings.get("viewport_bg_b", default_b))
             return (max(0.0, min(1.0, r)),
                     max(0.0, min(1.0, g)),
                     max(0.0, min(1.0, b)))
         except Exception:
-            return (0.15, 0.15, 0.15)
+            return VIEWER_BACKGROUND_RGB
 
     def _emit_viewer3d_content_size_changed(self) -> None:
         """Notify the page when the live 3D render target should be recreated."""

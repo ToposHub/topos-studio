@@ -69,7 +69,7 @@ def test_single_frame_scrub_and_marks_render_without_division_by_zero(qapp, widg
     assert slider.value() == 0
     image = slider.grab().toImage()
     assert image.height() == 24
-    assert image.pixelColor(100, 1).name() == "#202024"
+    assert image.pixelColor(100, 1).name() == "#27272b"
 
 
 def test_monitor_scrubber_keeps_qslider_keyboard_navigation(qapp, widget_shelter) -> None:

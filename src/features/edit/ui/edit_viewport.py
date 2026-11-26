@@ -22,6 +22,7 @@ from src.shared.i18n.i18n import I18N
 from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
 from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
+from src.shared.video.viewer_colors import VIEWER_TRANSPORT_BACKGROUND
 from src.shared.ui.widgets.viewport_toolbar_base import ViewerZoomMenuButton
 from src.shared.assets.icon_manager import (
     IconColors, icon_jump_start, icon_step_back, icon_play, icon_pause,
@@ -39,7 +40,6 @@ HEADER_HEIGHT = 30
 HEADER_TITLE_GAP = 8
 HEADER_TITLE_RESERVE = 144
 TRANSPORT_HEIGHT = 34
-MONITOR_BACKGROUND = "#191919"
 
 # I03：本容器的动作键 → viewer_capabilities 注册表动作名（单一事实源）。
 _CAPABILITY_REGISTRY_KEYS = {
@@ -57,10 +57,10 @@ QToolButton:checked { background: #343439; color: #e0e0e2; }
 QToolButton:disabled { color: #555559; background: transparent; }
 QToolButton::menu-indicator { image: none; width: 0; }
 """
-_SLIDER_STYLE = """
-QSlider { background: #202024; border: none; margin: 0; }
-QSlider::groove:horizontal { margin: 0 20px; height: 4px; background: #111113; }
-QSlider::handle:horizontal { width: 8px; margin: -6px 0; background: transparent; }
+_SLIDER_STYLE = f"""
+QSlider {{ background: {VIEWER_TRANSPORT_BACKGROUND}; border: none; margin: 0; }}
+QSlider::groove:horizontal {{ margin: 0 20px; height: 4px; background: #111113; }}
+QSlider::handle:horizontal {{ width: 8px; margin: -6px 0; background: transparent; }}
 """
 
 
@@ -150,7 +150,10 @@ class _MonitorFooter(QFrame):
         self.setObjectName("editMonitorTransport")
         self.setFixedHeight(TRANSPORT_HEIGHT)
         self.setMinimumWidth(280)
-        self.setStyleSheet("QFrame#editMonitorTransport { background: #202024; border-top: 1px solid #151518; }" + _BUTTON_STYLE)
+        self.setStyleSheet(
+            f"QFrame#editMonitorTransport {{ background: {VIEWER_TRANSPORT_BACKGROUND}; "
+            "border-top: 1px solid #151518; }" + _BUTTON_STYLE
+        )
         self.left_group = QWidget(self)
         self.center_group = QWidget(self)
         self.right_group = QWidget(self)

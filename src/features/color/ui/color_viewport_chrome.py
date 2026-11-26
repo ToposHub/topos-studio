@@ -17,6 +17,7 @@ from src.features.color.ui.panel_chrome import (
 )
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
+from src.shared.video.viewer_colors import VIEWER_TRANSPORT_BACKGROUND
 from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
 from src.shared.ui.widgets.viewport_toolbar_base import ViewerZoomMenuButton
 from src.shared.ui.widgets.scrubber_gesture import (
@@ -73,7 +74,7 @@ def paint_color_scrubber(slider: QSlider) -> None:
     """Color's quiet grey ruler and white playhead, using logical pixels."""
     painter = QPainter(slider)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.fillRect(slider.rect(), QColor(C.COLOR_PANEL_INSET))
+    painter.fillRect(slider.rect(), QColor(VIEWER_TRANSPORT_BACKGROUND))
     left, right = scrubber_track_bounds(slider, _SCRUBBER_MARGIN)
     top = slider.height() / 2.0
     painter.setPen(QPen(QColor("#101013"), 1.0))
@@ -550,7 +551,7 @@ class ColorViewportChrome(QObject):
         bar.setMaximumHeight(56)
         bar.setStyleSheet(f"""
             QFrame#videoControlBar, QWidget#videoControlRow {{
-                background: {C.COLOR_PANEL_INSET}; border: none;
+                background: {VIEWER_TRANSPORT_BACKGROUND}; border: none;
             }}
             QToolButton {{ background: transparent; border: 0; padding: 3px; margin: 1px; }}
             QToolButton:hover {{ background: {C.COLOR_PANEL_RAISED}; }}

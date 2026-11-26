@@ -73,10 +73,12 @@ class TestClearColorMapping:
         viewer._background_mode = "white"
         assert viewer._viewport_clear_color_rgb() == (1.0, 1.0, 1.0)
 
-    def test_checker_keeps_scene_colour(self, qapp):
+    def test_checker_uses_default_surround_and_3d_keeps_scene_colour(self, qapp):
         viewer = next(_make_viewer(qapp))
         viewer._viewport_bg_color_rgb = lambda: (0.2, 0.3, 0.4)
         viewer._background_mode = "checker"
+        assert viewer._viewport_clear_color_rgb() == (25 / 255,) * 3
+        viewer._view_mode = "3d"
         assert viewer._viewport_clear_color_rgb() == (0.2, 0.3, 0.4)
 
 

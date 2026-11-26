@@ -37,6 +37,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 import numpy as np
 
 from src.shared.gpu.metal.context import _autoreleasepool
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGBA
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ fragment float4 present_fragment(PresentVertexOut in [[stage_in]],
 """
 
 # The viewer background the GL path clears to.
-DEFAULT_BACKGROUND = (0.0980392157, 0.0980392157, 0.0980392157, 1.0)
+DEFAULT_BACKGROUND = VIEWER_BACKGROUND_RGBA
 
 # rect(4) + background(4) + flip_y(1) + pad(3) as float32 / int32.
 _PRESENT_PARAMS = np.dtype(

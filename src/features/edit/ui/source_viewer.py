@@ -102,6 +102,9 @@ from src.features.edit.ui.viewport_scrubber import (
 from src.shared.gpu.metal.present_port import normalized_rect
 from src.features.edit.ui.edit_style import EDIT_COLORS
 from src.shared.ui.style_sheet import UI_MONO_FONT_FAMILIES
+from src.shared.video.viewer_colors import (
+    VIEWER_BACKGROUND_HEX, VIEWER_BACKGROUND_RGBA, VIEWER_TRANSPORT_BACKGROUND,
+)
 from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 from src.shared.ui.widgets.video_display_color import VideoDisplayColor
 
@@ -472,10 +475,10 @@ class SourceViewerBar(QFrame):
 
     def _apply_style(self) -> None:
         """Apply style sheet — matches TransportControlBar clean look."""
-        self.setStyleSheet("""
-            QFrame#sourceViewerBar {
-                background-color: #1a1a1c;
-            }
+        self.setStyleSheet(f"""
+            QFrame#sourceViewerBar {{
+                background-color: {VIEWER_TRANSPORT_BACKGROUND};
+            }}
         """)
 
         # Clean transport button style (no heavy backgrounds/borders)
@@ -899,7 +902,7 @@ class SourceViewer(QOpenGLWidget):
             self._create_quad_vbo()
 
             # Set clear color
-            _gl.glClearColor(0.0980392157, 0.0980392157, 0.0980392157, 1.0)
+            _gl.glClearColor(*VIEWER_BACKGROUND_RGBA)
 
             self._gl_initialized = True
             self._gl_paint_failed = False
@@ -1085,6 +1088,7 @@ class SourceViewer(QOpenGLWidget):
                 self._pending_display_size = None
 
         # Clear background
+        _gl.glClearColor(*VIEWER_BACKGROUND_RGBA)
         _gl.glClear(GL_COLOR_BUFFER_BIT)
 
         w = self.width()
@@ -1923,7 +1927,7 @@ class SourceViewerWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("SourceViewerWidget")
-        self.setStyleSheet("QWidget#SourceViewerWidget { background-color: #1a1a1c; }")
+        self.setStyleSheet(f"QWidget#SourceViewerWidget {{ background-color: {VIEWER_BACKGROUND_HEX}; }}")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # State

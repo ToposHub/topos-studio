@@ -71,14 +71,17 @@ def test_library_defaults_expanded_and_collapsed_sections_reclaim_space(
     smart = pool.smart_bin_tree.topLevelItem(1)
     smart_height = pool.smart_bin_tree.visualItemRect(smart).height()
     library_height = browser.tree.visualItemRect(browser.heading).height()
+    assert tuple(pool.sidebar.widget(index) for index in range(pool.sidebar.count())) == (
+        pool.bin_tree, browser.tree, pool.smart_bin_tree,
+    )
     assert not smart.isExpanded()
     assert browser.heading.isExpanded()
     assert not browser.heading.child(0).isExpanded()
-    assert pool.sidebar.sizes()[2] > library_height
+    assert pool.sidebar.sizes()[1] > library_height
     browser.heading.setExpanded(False)
     collapsed_sizes = pool.sidebar.sizes()
     assert not browser.heading.isExpanded()
-    assert collapsed_sizes[1:] == [smart_height, library_height]
+    assert collapsed_sizes[1:] == [library_height, smart_height]
     assert pool.smart_bin_tree.height() == smart_height
     assert browser.tree.height() == library_height
 
@@ -86,8 +89,8 @@ def test_library_defaults_expanded_and_collapsed_sections_reclaim_space(
                      pos=QPoint(pool.smart_bin_tree.indentation() // 2, smart_height // 2))
     qtbot.mouseClick(browser.tree.viewport(), Qt.MouseButton.LeftButton,
                      pos=QPoint(browser.tree.indentation() // 2, library_height // 2))
-    assert pool.sidebar.sizes()[1] > smart_height
-    assert pool.sidebar.sizes()[2] > library_height
+    assert pool.sidebar.sizes()[1] > library_height
+    assert pool.sidebar.sizes()[2] > smart_height
 
     pool._refresh_bin_tree()
     smart = pool.smart_bin_tree.topLevelItem(1)
@@ -102,8 +105,8 @@ def test_library_defaults_expanded_and_collapsed_sections_reclaim_space(
 
     browser.heading.setExpanded(True)
     smart.setExpanded(False)
-    assert pool.sidebar.sizes()[1] == smart_height
-    assert pool.sidebar.sizes()[2] > library_height
+    assert pool.sidebar.sizes()[1] > library_height
+    assert pool.sidebar.sizes()[2] == smart_height
 
     browser.heading.setExpanded(False)
     assert pool.sidebar.sizes() == collapsed_sizes

@@ -12,6 +12,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QMenu, QPushButton
 
 from src.features.edit.core.project import EditProject, MediaAsset
+from src.features.edit.ui.edit_style import get_color
 from src.features.edit.ui.media_pool_panel import (
     AssetListModel, BinTreeWidget, MediaPoolPanel, SearchFilterMode, ViewMode,
     build_media_pool_drag_mime,
@@ -678,7 +679,7 @@ def test_slider_surface_blends_into_toolbar_with_global_theme(pool, qapp) -> Non
         qapp.processEvents()
         image = panel.grab().toImage()
         corner = panel.thumb_slider.mapTo(panel, QPoint(2, 2))
-        assert image.pixelColor(corner).name() == C.BG_DARK
+        assert image.pixelColor(corner).name() == get_color("timeline_toolbar_bg")
     finally:
         qapp.setStyleSheet(old_style)
 

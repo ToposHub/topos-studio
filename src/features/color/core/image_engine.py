@@ -66,6 +66,7 @@ from src.features.color.core.x_grade_domain import (
     x_grade_preview_graph, x_grade_working_supported,
 )
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGBA
 
 if TYPE_CHECKING:
     from src.shared.color.color_space_descriptor import ColorSpaceDescriptor
@@ -4233,6 +4234,7 @@ class ImageEngine(QObject, WindowRasterizer):
                 rotation_angle,
                 letterbox,
                 presentation_size,
+                viewer_paint=viewer_paint,
                 **({"desktop_display": desktop_display} if desktop_display is not None else {}),
             )
             if did_draw and viewer_paint:
@@ -4242,14 +4244,15 @@ class ImageEngine(QObject, WindowRasterizer):
             mutex.unlock()
 
     def _do_draw_background_tex_id(self, tex_id, viewport_size, src_rect=None, rotation_angle=0.0,
-                                   letterbox=False, presentation_size=None, *, desktop_display=None) -> bool:
+                                   letterbox=False, presentation_size=None, *, desktop_display=None,
+                                   viewer_paint: bool = False) -> bool:
         """Blit a GL texture to the current context's default framebuffer.
 
         调用方必须已持有共享 GL mutex（见 _draw_background_tex_id）。
         依据状态选择着色器：split 开启时用 split_prog 做 wipe 对比；
         非零 rotation_angle 用旋转预览着色器（裁剪预览）；否则走
         passthrough。letterbox 分支按 presentation_size/纹理实际尺寸
-        做宽高比适配并清屏为 #141414（ProgramViewer 对齐）。
+        做宽高比适配。视图窗口使用共享底色，示波器保留原来的清屏值。
         """
         context = QOpenGLContext.currentContext()
         if not context:
@@ -4281,7 +4284,8 @@ class ImageEngine(QObject, WindowRasterizer):
         # so it was left black while Edit's ProgramViewer cleared it to its
         # dark-gray viewer colour.  Clear the final presentation framebuffer
         # here, immediately before the quad is drawn, for every Color source.
-        gl.glClearColor(0.08, 0.08, 0.08, 1.0)  # #141414, ProgramViewer parity
+        clear_color = VIEWER_BACKGROUND_RGBA if viewer_paint else (0.08, 0.08, 0.08, 1.0)
+        gl.glClearColor(*clear_color)
         gl.glClear(0x00004000)  # GL_COLOR_BUFFER_BIT
 
         if letterbox:

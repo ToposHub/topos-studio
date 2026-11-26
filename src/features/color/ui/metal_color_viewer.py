@@ -43,6 +43,7 @@ from src.shared.gpu.metal.present_port import (
     normalized_rect,
 )
 from src.shared.gpu.present_frame import GpuPresentFrame
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGBA
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ MTL_PIXEL_FORMAT_BGRA8_UNORM = 80
 MTL_PIXEL_FORMAT_RGBA16_FLOAT = 115
 
 #: SDR 背景与 GL 视口一致（Color chrome 的 #191919）
-VIEWER_BACKGROUND = (25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0, 1.0)
+VIEWER_BACKGROUND = VIEWER_BACKGROUND_RGBA
 
 
 def color_metal_viewer_enabled() -> Tuple[bool, str]:

@@ -24,6 +24,7 @@ from src.shared.ui.style_sheet import (
 )
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.drag_value import DragValue
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGB
 
 
 DEFAULT_VIEWER3D_SCENE_SETTINGS = {
@@ -52,9 +53,9 @@ DEFAULT_VIEWER3D_SCENE_SETTINGS = {
     "bg_opaque": True,
     # ── 视口外框底色（letterbox/未填满区，paintGL clear color，
     #    与上面的 bg_* 渲染背景分离：bg_* 烘焙进画面，viewport_bg_* 是画面外的底色）──
-    "viewport_bg_r": 0.15,
-    "viewport_bg_g": 0.15,
-    "viewport_bg_b": 0.15,
+    "viewport_bg_r": VIEWER_BACKGROUND_RGB[0],
+    "viewport_bg_g": VIEWER_BACKGROUND_RGB[1],
+    "viewport_bg_b": VIEWER_BACKGROUND_RGB[2],
     "show_grid": True,
     "show_axes": True,
     # ── 地面网格视觉参数（show_grid=True 时生效，仅视口预览，不进合成输出）──

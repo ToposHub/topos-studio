@@ -55,7 +55,7 @@ from src.shared.ui.style_sheet import C
 from .media_pool_icons import pool_icon
 from src.shared.i18n.i18n import I18N
 from src.shared.media.thumbnail_provider import ThumbnailProvider
-from src.shared.assets.icon_manager import icon_grid, icon_list, icon_folder, icon_smart, icon_search, icon_arrow_up, icon_arrow_down, icon_warning, icon_video_track, icon_audio_track, icon_image
+from src.shared.assets.icon_manager import get_icon, icon_grid, icon_list, icon_folder, icon_smart, icon_search, icon_arrow_up, icon_arrow_down, icon_warning, icon_video_track, icon_audio_track, icon_image
 from src.features.edit.core.project import (
     EditProject, MediaAsset, ProjectBin, TimelineSequenceRef,
     probe_media_metadata,
@@ -938,13 +938,12 @@ class BinTreeWidget(QTreeWidget):
         # Appended below the bin tree so Root stays on top.
         smart_root = QTreeWidgetItem(self)
         smart_root.setText(0, I18N.tr("edit.media_pool.smart_bins", "Smart Bins"))
-        smart_root.setIcon(0, icon_smart())
+        smart_root.setIcon(0, icon_smart(C.TEXT_HINT))
         smart_root.setData(0, self.BIN_ID_ROLE, "__smart_bins__")
         smart_root.setData(0, self.BIN_TYPE_ROLE, "section")
         smart_root.setExpanded(not self.property("smartBinsOnly"))
         smart_root.setFlags(smart_root.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
-        # Smart Bin 条目 — DaVinci 风格：柔和灰蓝图标
         smart_bins = EditProject.get_default_smart_bins()
         smart_bin_icons = {
             SMART_BIN_ALL_VIDEO: "fa5s.film",
@@ -953,18 +952,13 @@ class BinTreeWidget(QTreeWidget):
             SMART_BIN_OFFLINE_MEDIA: "fa5s.unlink",
             SMART_BIN_RECENT_IMPORTS: "fa5s.clock",
         }
-        _muted_icon_color = "#7a8899"  # 柔和灰蓝
         for sb in smart_bins:
             item = QTreeWidgetItem(smart_root)
             item.setText(0, sb.name)
             item.setData(0, self.BIN_ID_ROLE, sb.bin_id)
             item.setData(0, self.BIN_TYPE_ROLE, "smart_bin")
-            # 设置图标 — 柔和色调
             icon_name = smart_bin_icons.get(sb.bin_id, "fa5s.filter")
-            try:
-                item.setIcon(0, qta.icon(icon_name, color=_muted_icon_color))
-            except Exception:
-                item.setIcon(0, icon_smart())
+            item.setIcon(0, get_icon(icon_name, color=C.TEXT_HINT))
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
         # P1-12: 用户自建 Smart Bin（已保存搜索），带 bookmark 图标以示区分
@@ -974,10 +968,7 @@ class BinTreeWidget(QTreeWidget):
             item.setData(0, self.BIN_ID_ROLE, sb.bin_id)
             item.setData(0, self.BIN_TYPE_ROLE, "smart_bin")
             item.setData(0, self.BIN_USER_ROLE, True)
-            try:
-                item.setIcon(0, qta.icon("fa5s.bookmark", color=_muted_icon_color))
-            except Exception:
-                item.setIcon(0, icon_smart())
+            item.setIcon(0, get_icon("fa5s.bookmark", color=C.TEXT_HINT))
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
 
     def contextMenuEvent(self, event: Any) -> None:  # noqa: N802
@@ -5101,23 +5092,23 @@ class MediaPoolPanel(QWidget):
         layout.setSpacing(0)
 
         self.setObjectName("mediaPoolPanel")
-        # Keep panel surfaces on the application's global theme. No local
-        # slider/scrollbar subcontrols inherit the shared application QSS.
+        # Match the timeline toolbar across the media pool's static surfaces.
+        surface = get_color("timeline_toolbar_bg")
         self.setStyleSheet(f"""
-            QWidget#mediaPoolPanel, QWidget#mediaPoolContent {{ background: {C.BG_PANEL}; }}
-            QWidget#mediaPoolToolbar {{ background: {C.BG_DARK}; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QWidget#mediaPoolPanel, QWidget#mediaPoolContent {{ background: {surface}; }}
+            QWidget#mediaPoolToolbar {{ background: {surface}; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
             QToolButton {{ border: none; background: transparent; padding: 2px; margin: 0; border-radius: 2px; }}
             QToolButton:hover {{ background: {C.BG_ACTIVE}; }}
             QToolButton:checked {{ background: {C.BG_BUTTON}; }}
             QToolButton::menu-indicator {{ image: none; }}
-            QTreeWidget, QListView {{ background: {C.BG_PANEL}; color: {C.TEXT_SECONDARY}; border: none; }}
-            QTreeWidget {{ alternate-background-color: {C.BG_INPUT}; }}
+            QTreeWidget, QListView {{ background: {surface}; color: {C.TEXT_SECONDARY}; border: none; }}
+            QTreeWidget {{ alternate-background-color: {surface}; }}
             QTreeWidget::item {{ height: 23px; padding: 0 4px; border: none; }}
             QTreeWidget::item:selected {{ background: {C.BG_DARKEST}; color: {C.TEXT_PRIMARY}; }}
-            QHeaderView::section {{ background: {C.BG_INPUT}; color: {C.TEXT_LABEL}; border: none;
+            QHeaderView::section {{ background: {surface}; color: {C.TEXT_LABEL}; border: none;
                 border-right: 1px solid {C.BORDER}; border-bottom: 1px solid {C.PANEL_DIVIDER}; padding: 3px 6px; }}
             QLabel {{ color: {C.TEXT_LABEL}; background: transparent; }}
-            QFrame#mediaPoolBreadcrumb {{ background: {C.BG_PANEL}; border: none; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QFrame#mediaPoolBreadcrumb {{ background: {surface}; border: none; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
             QFrame#mediaPoolBreadcrumb QPushButton {{ padding: 0; font-size: 12px; }}
             QFrame#mediaPoolBreadcrumb QLabel {{ font-size: 12px; }}
             QToolButton#mediaPoolPathBack {{ border-right: 1px solid {C.PANEL_DIVIDER}; border-radius: 0; padding: 0; }}
@@ -5276,17 +5267,20 @@ class MediaPoolPanel(QWidget):
         self._setup_pool_menus()
         self._update_breadcrumb()
 
-    def _add_sidebar_section(self, tree: QTreeWidget, expanded_height: int) -> None:
+    def _add_sidebar_section(
+        self, tree: QTreeWidget, expanded_height: int, *, before: QTreeWidget | None = None,
+    ) -> None:
         """Keep a collapsed tree at its heading height and reclaim its splitter space."""
-        self.sidebar.addWidget(tree)
-        index = self.sidebar.indexOf(tree)
-        self.sidebar.setStretchFactor(index, 0)
+        index = self.sidebar.indexOf(before) if before is not None else self.sidebar.count()
+        self.sidebar.insertWidget(index, tree)
+        self.sidebar.setStretchFactor(self.sidebar.indexOf(tree), 0)
 
         row_height = _POOL_SIDEBAR_ROW_HEIGHT + 2 * tree.frameWidth()
         tree.setFixedHeight(row_height)
 
         def resize_section(expanded: bool) -> None:
             nonlocal expanded_height
+            index = self.sidebar.indexOf(tree)
             sizes = self.sidebar.sizes()
             if expanded:
                 tree.setMinimumHeight(0)
@@ -5327,7 +5321,7 @@ class MediaPoolPanel(QWidget):
         """Mount the host's global library without sharing project bin state."""
         self._library_view = view
         tree.setStyleSheet(self._pool_tree_style())
-        self._add_sidebar_section(tree, 140)
+        self._add_sidebar_section(tree, 140, before=self.smart_bin_tree)
         self._pool_content.addWidget(view)
         self.library_presentation_changed.connect(set_presentation)
         set_presentation(self._view_mode, self.get_thumb_size())
@@ -5387,7 +5381,7 @@ class MediaPoolPanel(QWidget):
         """Scope view styling without overriding global scrollbars."""
         from .media_pool_presentation import pool_tree_style
 
-        return pool_tree_style(_POOL_SIDEBAR_ROW_HEIGHT)
+        return pool_tree_style(_POOL_SIDEBAR_ROW_HEIGHT, sidebar=True)
 
     def _setup_pool_menus(self) -> None:
         """Expose existing actions through Resolve-style compact menus."""

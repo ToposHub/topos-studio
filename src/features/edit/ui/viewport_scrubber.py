@@ -12,6 +12,7 @@ from PyQt6.QtGui import QColor, QMouseEvent, QPaintEvent, QPainter, QPainterPath
 from PyQt6.QtWidgets import QSlider, QWidget
 
 from src.features.edit.ui.timeline_edit_affordances import paint_range_grip
+from src.shared.video.viewer_colors import VIEWER_TRANSPORT_BACKGROUND
 from src.shared.ui.widgets.scrubber_gesture import (
     cancel_monitor_scrub, scrubber_mouse_move, scrubber_mouse_press,
     scrubber_mouse_release, scrubber_track_bounds,
@@ -59,7 +60,7 @@ def paint_monitor_scrubber(slider: QSlider) -> None:
     """Draw the 24px monitor ruler using logical pixels at the native DPR."""
     painter = QPainter(slider)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.fillRect(slider.rect(), QColor("#202024"))
+    painter.fillRect(slider.rect(), QColor(VIEWER_TRANSPORT_BACKGROUND))
     left, right = scrubber_track_bounds(slider)
     groove = QRectF(left, 11.0, max(0.0, right - left), 4.0)
     painter.setPen(QPen(QColor("#0c0c0f"), 1.0))
@@ -76,7 +77,7 @@ def paint_monitor_scrubber(slider: QSlider) -> None:
     current_pen = QPen(QColor("#dc5b50" if slider.isEnabled() else "#72514f"), 1.0)
     current_pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
     painter.setPen(current_pen)
-    painter.setBrush(QColor("#202024"))
+    painter.setBrush(QColor(VIEWER_TRANSPORT_BACKGROUND))
     flag = QPainterPath(QPointF(current_x - 4.0, 3.0))
     flag.lineTo(current_x + 4.0, 3.0)
     flag.lineTo(current_x + 4.0, 7.0)

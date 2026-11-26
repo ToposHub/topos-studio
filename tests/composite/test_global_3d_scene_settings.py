@@ -126,11 +126,7 @@ class TestDefaultSettingsFields:
         from src.features.composite.ui.viewer3d_settings_section import (
             DEFAULT_VIEWER3D_SCENE_SETTINGS)
         for key in ("viewport_bg_r", "viewport_bg_g", "viewport_bg_b"):
-            assert key in DEFAULT_VIEWER3D_SCENE_SETTINGS, f"{key} missing"
-        # 默认 0.15 = 原 paintGL 硬编码值，保证现有观感不变
-        assert DEFAULT_VIEWER3D_SCENE_SETTINGS["viewport_bg_r"] == 0.15
-        assert DEFAULT_VIEWER3D_SCENE_SETTINGS["viewport_bg_g"] == 0.15
-        assert DEFAULT_VIEWER3D_SCENE_SETTINGS["viewport_bg_b"] == 0.15
+            assert DEFAULT_VIEWER3D_SCENE_SETTINGS[key] == 25 / 255
 
     def test_render_region_opacity_defaults(self):
         """render region mask/border opacity 默认值。"""

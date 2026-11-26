@@ -80,6 +80,9 @@ from src.shared.color.desktop_video_color import DISPLAY_COLOR_GLSL, set_metal_v
 from src.shared.ui.widgets.video_display_color import VideoDisplayColor
 from src.features.edit.ui.edit_style import EDIT_COLORS
 from src.shared.ui.style_sheet import UI_FONT_FAMILIES, UI_MONO_FONT_FAMILIES
+from src.shared.video.viewer_colors import (
+    VIEWER_BACKGROUND_HEX, VIEWER_BACKGROUND_RGBA, VIEWER_TRANSPORT_BACKGROUND,
+)
 from src.features.edit.core.playback_debug import playback_trace
 from src.features.edit.ui.subtitle_handle_controller import SubtitleHandleController
 from src.features.edit.ui.clip_transform_handle_controller import (
@@ -620,11 +623,11 @@ class TransportControlBar(QFrame):
         PLAY_BTN_SIZE = 32
 
         # Apply background style
-        self.setStyleSheet("""
-            QFrame#transportControlBar {
-                background-color: #1a1a1c;
+        self.setStyleSheet(f"""
+            QFrame#transportControlBar {{
+                background-color: {VIEWER_TRANSPORT_BACKGROUND};
                 border-top: 1px solid #2a2a2a;
-            }
+            }}
         """)
 
         # --- Transport Controls ---
@@ -1032,7 +1035,7 @@ class ProgramViewer(QOpenGLWidget):
             self._create_quad_vbo()
 
             # Set clear color (dark background)
-            _gl.glClearColor(0.0980392157, 0.0980392157, 0.0980392157, 1.0)
+            _gl.glClearColor(*VIEWER_BACKGROUND_RGBA)
 
             self._gl_initialized = True
             logger.info("ProgramViewer GL initialized")
@@ -1402,7 +1405,7 @@ class ProgramViewer(QOpenGLWidget):
         # Clear background
         self._reset_copy_gl_state()
         _gl.glViewport(*viewport)
-        _gl.glClearColor(0.0980392157, 0.0980392157, 0.0980392157, 1.0)
+        _gl.glClearColor(*VIEWER_BACKGROUND_RGBA)
         _gl.glClear(GL_COLOR_BUFFER_BIT)
 
         if not size.isEmpty():
@@ -2603,7 +2606,7 @@ class ProgramViewer(QOpenGLWidget):
         # Create fullscreen window
         self._fullscreen_window = QWidget()
         self._fullscreen_window.setObjectName("ProgramViewerFullscreen")
-        self._fullscreen_window.setStyleSheet("background-color: #1a1a1a;")
+        self._fullscreen_window.setStyleSheet(f"background-color: {VIEWER_BACKGROUND_HEX};")
         # 置顶：播放监视期间不被主窗口/效果器面板压底（Da Vinci 全屏监看语义）
         self._fullscreen_window.setWindowFlags(
             Qt.WindowType.Window |
@@ -3483,6 +3486,8 @@ class ProgramViewerWidget(QWidget):
         # Viewer container (for fullscreen parent tracking)
         self._viewer_container = QWidget()
         self._viewer_container.setObjectName("viewerContainer")
+        self._viewer_container.setStyleSheet(
+            f"QWidget#viewerContainer {{ background-color: {VIEWER_BACKGROUND_HEX}; }}")
         viewer_layout = QVBoxLayout(self._viewer_container)
         viewer_layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._viewer_container, stretch=1)

@@ -13,6 +13,7 @@ from PyQt6.QtGui import (
 )
 from typing import Any, List, Tuple, Optional
 from src.shared.ui.widgets.video_display_color import VideoDisplayColor
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_HEX, VIEWER_TRANSPORT_BACKGROUND
 from src.features.color.ui.gl_viewport import GLCanvasViewport
 from src.features.color.ui.tracker_overlay import TrackerOverlay, OverlayState
 from src.features.color.core.layer import MaskGroup
@@ -3207,46 +3208,42 @@ class VideoControlBar(QFrame):
 
     def _apply_style(self) -> None:
         """Apply styling to the control bar."""
-        self.setStyleSheet("""
-            QFrame#videoControlBar {
-                /* Match Edit's Program TransportControlBar surface. */
-                background-color: #1a1a1c;
+        self.setStyleSheet(f"""
+            QFrame#videoControlBar {{
+                background-color: {VIEWER_TRANSPORT_BACKGROUND};
                 border-top: 1px solid #2a2a2a;
-            }
-            QWidget#videoControlRow {
-                background-color: #1a1a1c;
-                border: none;
-            }
-            QSlider#colorTransportSlider {
-                background-color: #1a1a1c;
-            }
-            QToolButton {
+            }}
+            QWidget#videoControlRow, QSlider#colorTransportSlider {{
+                background-color: {VIEWER_TRANSPORT_BACKGROUND};
+            }}
+            QWidget#videoControlRow {{ border: none; }}
+            QToolButton {{
                 background: transparent;
                 border: none;
                 border-radius: 4px;
                 padding: 3px;
                 margin: 1px;
-            }
-            QToolButton:hover {
+            }}
+            QToolButton:hover {{
                 background-color: rgba(255, 255, 255, 18);
-            }
-            QToolButton:pressed {
+            }}
+            QToolButton:pressed {{
                 background-color: rgba(255, 255, 255, 10);
-            }
-            QLabel {
+            }}
+            QLabel {{
                 background: none;
                 border: none;
                 color: #aaa;
                 font-size: 11px;
-            }
-            QLabel#rangeFrameBox {
+            }}
+            QLabel#rangeFrameBox {{
                 background-color: #111215;
                 border: 1px solid #36383e;
                 border-radius: 3px;
                 color: #ededed;
                 font-weight: 600;
                 font-size: 11px;
-            }
+            }}
         """)
         
         self.layout().setContentsMargins(0, 0, 0, 0)
@@ -4112,7 +4109,7 @@ class Canvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         # Match the Color viewer's #191919 native letterbox surround. This is
         # UI backdrop styling; the rendered media's color values are untouched.
-        self.setBackgroundBrush(QBrush(QColor(25, 25, 25)))
+        self.setBackgroundBrush(QBrush(QColor(VIEWER_BACKGROUND_HEX)))
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -6890,7 +6887,7 @@ class Canvas(QGraphicsView):
                 # to clear a QOpenGLWidget framebuffer.  Explicitly paint the
                 # whole exposed rect; otherwise the uninitialised GL buffer
                 # leaks as bright-green bands around the fitted QImage.
-                painter.fillRect(rect, QColor(25, 25, 25))
+                painter.fillRect(rect, QColor(VIEWER_BACKGROUND_HEX))
                 self._record_presented_preview_frame()
                 return
             if self.engine and self.engine.renderer:

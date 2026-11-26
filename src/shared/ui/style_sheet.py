@@ -1294,7 +1294,7 @@ QToolBar QWidget {
 QMenu, QToolBar QMenu {
     background-color: #27272b;
     border: 1px solid #505050;
-    padding: 4px 0px;
+    padding: 4px 0px 4px 8px;
     color: #ccc;
     font-size: 12px;
 }

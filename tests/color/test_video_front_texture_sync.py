@@ -184,6 +184,7 @@ def test_ui_presents_current_texture_when_playback_replaces_captured_texture() -
         0.0,
         False,
         None,
+        viewer_paint=True,
     )
     assert mutex.unlocked is True
 

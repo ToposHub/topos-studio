@@ -4,12 +4,10 @@ from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import QGraphicsScene
 from PyQt6.QtCore import pyqtSignal, QTimer
 from src.shared.gpu.gl_backend import GLContextManager
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGBA
 
 logger = logging.getLogger(__name__)
 
-# Color's viewer chrome uses #191919 for the empty canvas / letterbox surround.
-# This affects only the UI backdrop, never the media's HDR/color processing.
-VIEWER_BACKGROUND = (25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0, 1.0)
 
 class GLCanvasViewport(QOpenGLWidget):
     """
@@ -172,7 +170,7 @@ class GLCanvasViewport(QOpenGLWidget):
             # A paused seek can briefly retain the widget framebuffer while
             # the renderer owns the shared context.  Clear it to the exact
             # same #191919 surround used by Color's Qt background brush.
-            self.gl_manager.ctx.clear(*VIEWER_BACKGROUND)
+            self.gl_manager.ctx.clear(*VIEWER_BACKGROUND_RGBA)
             if engine is not None:
                 engine.drawn_video_frame = None
 
