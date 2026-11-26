@@ -27,10 +27,11 @@ if TYPE_CHECKING:
     from src.features.edit.ui.program_viewer import ProgramViewer
 
 import logging
+from dataclasses import replace
 from typing import Optional
 
 from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QPainter
+from PyQt6.QtGui import QColor, QPainter, QPen
 
 from src.features.composite.ui.viewer_handles import (
     TransformHandlesData,
@@ -43,6 +44,8 @@ from src.features.composite.ui.viewer_handles import (
 from src.features.edit.core.clip_params import TransformParams
 
 logger = logging.getLogger(__name__)
+
+EDGE_SNAP_DISTANCE = 8.0  # Logical pixels in the monitor, independent of preview zoom.
 
 
 def _point_in_polygon(x: float, y: float,
@@ -98,6 +101,7 @@ class ClipTransformHandleController:
         self._drag_start_screen: Optional[QPointF] = None
         self._drag_current_screen: Optional[QPointF] = None
         self._original_params: Optional[TransformParams] = None
+        self._snapped_edges: tuple[str, ...] = ()
 
         # Callbacks (injected by viewer; all optional).
         # on_drag_updated(clip_id, new_transform: TransformParams)
@@ -178,7 +182,8 @@ class ClipTransformHandleController:
         delta keys match TransformParams fields (translate_x/y, scale_x/y,
         rotation, pivot_mode, pivot_x/y). Missing keys keep ``base``'s value.
         """
-        return TransformParams(
+        return replace(
+            base,
             translate_x=float(delta.get("translate_x", base.translate_x)),
             translate_y=float(delta.get("translate_y", base.translate_y)),
             scale_x=float(delta.get("scale_x", base.scale_x)),
@@ -189,11 +194,11 @@ class ClipTransformHandleController:
             pivot_y=float(delta.get("pivot_y", base.pivot_y)),
         )
 
-    def _compute_handles(self) -> Optional[TransformHandlesData]:
-        """Compute handle positions for the current clip's transform."""
-        if self._transform is None:
+    def _compute_handles(self, transform: TransformParams | None = None) -> Optional[TransformHandlesData]:
+        """Compute handle positions for the live or proposed transform."""
+        t = self._transform if transform is None else transform
+        if t is None:
             return None
-        t = self._transform
         try:
             return compute_transform_handles(
                 translate_x=float(t.translate_x),
@@ -318,6 +323,10 @@ class ClipTransformHandleController:
             return
 
         new_transform = self._delta_to_transform(delta, self._original_params)
+        self._snapped_edges = ()
+        if (self._active_handle in {"move", "center"}
+                and not (modifiers & Qt.KeyboardModifier.AltModifier.value)):
+            new_transform = self._snap_translation(new_transform)
         # Keep the live transform in sync so the next frame's handles track.
         self._transform = new_transform
         # Repaint the lightweight overlay before the host applies the
@@ -333,6 +342,35 @@ class ClipTransformHandleController:
                 self.on_drag_updated(self._clip_id, new_transform)
             except Exception:
                 logger.exception("on_drag_updated callback failed")
+
+    def _snap_translation(self, transform: TransformParams) -> TransformParams:
+        """Align the nearest transformed clip edge on each axis to the canvas."""
+        handles = self._compute_handles(transform)
+        if handles is None:
+            return transform
+        x0, y0, x1, y1 = self._get_image_ndc_rect()
+        left, top = self._ndc_to_view_px(x0, y1)
+        right, bottom = self._ndc_to_view_px(x1, y0)
+        if right <= left or bottom <= top:
+            return transform
+        x0, y0, x1, y1 = handles.bbox_rect
+        clip_left, clip_top = self._ndc_to_view_px(x0, y1)
+        clip_right, clip_bottom = self._ndc_to_view_px(x1, y0)
+        dx, horizontal_edge = min(((left - clip_left, "left"), (right - clip_right, "right")),
+                                  key=lambda match: round(abs(match[0]), 9))
+        dy, vertical_edge = min(((top - clip_top, "top"), (bottom - clip_bottom, "bottom")),
+                                key=lambda match: round(abs(match[0]), 9))
+        translate_x, translate_y = transform.translate_x, transform.translate_y
+        # Round away geometry round-off so a full-frame clip returns to 0.
+        if abs(dx) <= EDGE_SNAP_DISTANCE:
+            self._snapped_edges += (horizontal_edge,)
+            translate_x = round(translate_x + dx * self._canvas_width / (right - left), 9)
+        if abs(dy) <= EDGE_SNAP_DISTANCE:
+            self._snapped_edges += (vertical_edge,)
+            translate_y = round(translate_y + dy * self._canvas_height / (bottom - top), 9)
+        if not self._snapped_edges:
+            return transform
+        return replace(transform, translate_x=translate_x, translate_y=translate_y)
 
     def end_drag(self) -> None:
         """End the drag. Notifies the viewer with the final transform for the
@@ -364,6 +402,9 @@ class ClipTransformHandleController:
         self._drag_start_screen = None
         self._drag_current_screen = None
         self._original_params = None
+        if self._snapped_edges:
+            self._snapped_edges = ()
+            self._viewer.update()
 
     # ── Coordinate conversion ──
 
@@ -418,7 +459,22 @@ class ClipTransformHandleController:
         # several macOS drivers.
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self._draw_frame_outline(painter, handles_data)
+        self._draw_snap_guides(painter)
         self._draw_handle_points(painter, handles_data)
+
+    def _draw_snap_guides(self, painter: QPainter) -> None:
+        if not self._snapped_edges:
+            return
+        x0, y0, x1, y1 = self._get_image_ndc_rect()
+        left, top = self._ndc_to_view_px(x0, y1)
+        right, bottom = self._ndc_to_view_px(x1, y0)
+        tl, tr, bl, br = QPointF(left, top), QPointF(right, top), QPointF(left, bottom), QPointF(right, bottom)
+        lines = {"left": (tl, bl), "right": (tr, br), "top": (tl, tr), "bottom": (bl, br)}
+        painter.save()
+        painter.setPen(QPen(QColor(0, 255, 204, 215), 1.5))
+        for edge in self._snapped_edges:
+            painter.drawLine(*lines[edge])
+        painter.restore()
 
     def _ndc_to_view_px(self, ndc_x: float, ndc_y: float) -> tuple[float, float]:
         """NDC → widget pixel coordinates for QPainter drawing."""
@@ -440,7 +496,7 @@ class ClipTransformHandleController:
         through the 4 transformed corners, plus a thin line from the pivot to
         the rotate handle so the rotation axis is visually clear.
         """
-        from PyQt6.QtGui import QColor, QPen, QPainterPath
+        from PyQt6.QtGui import QPainterPath
         corners = handles_data.frame_corners  # (TL, TR, BR, BL) NDC
         # Rotated frame outline — thin, semi-transparent white (matches
         # composite's transform frame, not the bright bbox).
@@ -479,7 +535,7 @@ class ClipTransformHandleController:
         Center/pivot/rotate use a slightly larger radius (4.7) than edge/
         corner handles (3.3), matching composite's sizing.
         """
-        from PyQt6.QtGui import QColor, QBrush, QRadialGradient
+        from PyQt6.QtGui import QBrush, QRadialGradient
 
         # handle_id → (ndc_pos, is_large_radius).  The composite Transform
         # node displays one centre dot: the pivot / rotation-and-scale anchor.

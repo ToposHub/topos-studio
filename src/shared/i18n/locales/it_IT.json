@@ -1638,7 +1638,6 @@
       "remove_from_project": "Rimuovi dal progetto",
       "move_to_trash": "Sposta nel cestino",
       "trash_failed": "Impossibile spostare il file nel cestino. L'asset è stato rimosso dal progetto, ma il file resta sul disco.",
-      "quick_look_hint": "Spazio per chiudere · Doppio clic per aprire",
       "import_folder": "Importa cartella...",
       "select_folder": "Seleziona una cartella da importare",
       "shot": "Scena:",

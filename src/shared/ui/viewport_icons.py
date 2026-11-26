@@ -27,7 +27,7 @@ VIEWER_ICON_NAMES = frozenset({
     "source_clip", "source_tape", "timeline", "single_view", "dual_view",
     "more", "chevron_down", "previous", "next", "reverse", "play", "pause",
     "stop", "record", "record_active", "loop", "step_back", "step_forward", "transform", "guides",
-    "match_frame", "mark_in", "mark_out", "source_patch", "proxy", "resolution",
+    "match_frame", "mark_in", "mark_out", "clear_range", "source_patch", "proxy", "resolution",
     "bypass", "marker", "previous_marker", "next_marker", "video_only", "audio_only",
     "image_wipe", "split_screen", "highlight", "power_window", "unmix", "mute", "enhanced_viewer",
 })
@@ -189,10 +189,19 @@ class _ViewerIconEngine(QIconEngine):
             if name == "mark_out":
                 painter.translate(20.0, 0.0)
                 painter.scale(-1.0, 1.0)
-            _line(painter, (6.5, 4.0), (6.5, 15.5), (15.0, 15.5))
-            painter.setBrush(color)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawPolygon(QPolygonF([QPointF(8.6, 5.0), QPointF(12.6, 7.7), QPointF(8.6, 10.4)]))
+            pen = painter.pen()
+            pen.setWidthF(1.65)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            _line(painter, (7.0, 3.7), (3.7, 3.7), (3.7, 16.3), (7.0, 16.3))
+            _line(painter, (7.7, 10.0), (16.3, 10.0))
+            _line(painter, (13.0, 6.7), (16.3, 10.0), (13.0, 13.3))
+        elif name == "clear_range":
+            _line(painter, (5.9, 4.0), (3.0, 4.0), (3.0, 16.0), (5.9, 16.0))
+            _line(painter, (14.1, 4.0), (17.0, 4.0), (17.0, 16.0), (14.1, 16.0))
+            _line(painter, (7.3, 7.3), (12.7, 12.7))
+            _line(painter, (12.7, 7.3), (7.3, 12.7))
         elif name == "source_patch":
             _film(painter, QRectF(2.0, 3.5, 10.5, 8.0))
             _line(painter, (7.5, 12.7), (7.5, 17.0), (10.0, 17.0), (12.4, 15.0), (12.4, 12.7))

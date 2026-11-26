@@ -106,6 +106,31 @@ def test_scrollbars_stay_at_region_edges_through_native_scroll_and_layout_change
     _assert_anchors(view)
 
 
+def test_horizontal_scrollbar_blends_with_canvas_and_vertical_keeps_track(
+    qapp: QApplication, qtbot: QtBot,
+) -> None:
+    host, view = _hosted_view(qtbot)
+    qapp.processEvents()
+    horizontal = view.horizontalScrollBar()
+    vertical = view._video_v_scroll
+    assert horizontal.isVisible() and vertical.isVisible()
+    horizontal.setValue(horizontal.maximum())
+    vertical.setValue(vertical.minimum())
+    qapp.processEvents()
+
+    pixmap = host.grab()
+    image = pixmap.toImage()
+    ratio = pixmap.devicePixelRatio()
+
+    def rendered_color(bar: QScrollBar, point: QPoint) -> str:
+        pos = bar.mapTo(host, point)
+        return image.pixelColor(round(pos.x() * ratio), round(pos.y() * ratio)).name()
+
+    assert rendered_color(horizontal, QPoint(5, horizontal.height() // 2)) == "#27272b"
+    assert rendered_color(horizontal, QPoint(horizontal.width() - 8, horizontal.height() // 2)) == "#34363e"
+    assert rendered_color(vertical, QPoint(vertical.width() // 2, vertical.height() - 3)) == "#1b1c21"
+
+
 @pytest.mark.parametrize("region", ["video", "audio", "subtitle"])
 def test_native_scrollbar_drag_changes_only_its_own_region(
     qapp: QApplication, qtbot: QtBot, region: str,

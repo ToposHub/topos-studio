@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from PyQt6.QtCore import QEvent, QPointF, Qt
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
 from PyQt6.QtGui import QMouseEvent
 from PyQt6.QtTest import QTest
 
@@ -79,6 +79,43 @@ def test_monitor_scrubber_keeps_qslider_keyboard_navigation(qapp, widget_shelter
     QTest.keyClick(slider, Qt.Key.Key_Right)
     assert slider.value() == 11
     assert not slider.isSliderDown()
+
+
+@pytest.mark.parametrize("edge, cancel", [("in", False), ("out", False), ("in", True)])
+def test_source_range_grip_drags_from_wide_hit_area_without_seeking(widget_shelter, edge, cancel) -> None:
+    slider = SourceSlider(widget_shelter)
+    slider.setProperty("resolveMonitorScrubber", True)
+    slider.set_range_editable(True)
+    slider.setFixedHeight(24)
+    slider.resize(341, 24)
+    slider.setRange(0, 100)
+    slider.setValue(55)
+    slider.set_in_out_points(20, 70)
+    commits: list[tuple[int, int]] = []
+    slider.range_edit_finished.connect(lambda start, end: commits.append((start, end)))
+    presses: list[bool] = []
+    slider.sliderPressed.connect(lambda: presses.append(True))
+
+    point = QPoint(20 + (20 if edge == "in" else 70) * 3 + 10, 19)
+    QTest.mouseMove(slider, point)
+    QTest.mousePress(slider, Qt.MouseButton.LeftButton, pos=point)
+    assert slider._range_drag is not None
+    QTest.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=point)
+    assert not commits  # Clicking off-center must leave the mark where it was.
+    QTest.mousePress(slider, Qt.MouseButton.LeftButton, pos=point)
+    target = point + QPoint(30, 0)
+    QTest.mouseMove(slider, target)
+    expected = (30, 70) if edge == "in" else (20, 80)
+    assert slider._range_preview == expected
+    if cancel:
+        QTest.keyClick(slider, Qt.Key.Key_Escape)
+    QTest.mouseRelease(slider, Qt.MouseButton.LeftButton, pos=target)
+    assert commits == ([] if cancel else [expected])
+    assert slider._range_preview is None
+    assert slider.value() == 55 and not presses
+    # The red playhead's flag remains selectable above the grip hit band.
+    QTest.mouseClick(slider, Qt.MouseButton.LeftButton, pos=QPoint(point.x(), 9))
+    assert presses == [True]
 
 
 def test_played_segment_stays_dark_and_only_marked_range_is_filled(qapp, widget_shelter) -> None:

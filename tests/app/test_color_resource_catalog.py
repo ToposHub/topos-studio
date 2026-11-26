@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -135,6 +136,23 @@ def test_category_and_name_changes_never_change_ids() -> None:
     second = {e["id"]: e for e in catalog.entries()}
     assert set(first) == set(second) == {"grain"}
     assert second["grain"]["name"] == "New Name"
+
+
+def test_bundled_glsl_filters_have_library_categories() -> None:
+    plugins_dir = Path(__file__).resolve().parents[2] / "plugins"
+    plugins = {path.stem: _dctl(path.stem) for path in plugins_dir.glob("*.tglsl")}
+    plugins["custom"] = _dctl("custom")
+    plugins["custom_group"] = dict(_dctl("custom_group"), category="Custom")
+    plugins["ai"] = _ai("ai", "models/ai.onnx")
+    entries = {e["id"]: e for e in _catalog(FakePluginManager(plugins)).entries()}
+    assert {entries[path.stem]["category"] for path in plugins_dir.glob("*.tglsl")} == {
+        "color", "film", "focus", "lens_and_light", "local", "retouch", "stylize",
+    }
+    assert entries["Film_Grain"]["category"] == "film"
+    assert entries["Film_Grain"]["content_hash"] == plugins["Film_Grain"]["content_hash"]
+    assert entries["custom"]["category"] == "plugin"
+    assert entries["custom_group"]["category"] == "Custom"
+    assert entries["ai"]["category"] == "upscale"
 
 
 # ═══ 能力状态 ════════════════════════════════════════════════════════

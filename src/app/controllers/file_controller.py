@@ -2717,33 +2717,23 @@ class FileOpsMixin:
         if focus and source_canvas is not None:
             source_canvas.setFocus()
 
-    def _on_asset_selected(self, asset_id: str) -> None:
-        """Handle single-click asset selection from MediaPoolPanel.
-
-        Loads the asset into the Source Viewer for quick preview without
-        raising the dock or switching pages — the double-click handler
-        (_on_asset_double_clicked) does the full "open + focus + switch".
-
-        This mirrors Finder/NLE behavior where a single click shows a
-        lightweight preview and a double-click fully opens the item.
-        """
+    def _on_asset_selected(self, asset_id: str) -> bool:
+        """Load the selected asset into Source while preserving monitor focus."""
         if not self._current_edit_project:
-            return
+            return False
         asset = self._current_edit_project.assets.get(asset_id)
-        if not asset:
-            return
-        if getattr(asset, "is_motion_graphic", False):
-            return
-        # Only load if the Source Viewer is not already showing this asset,
-        # avoiding redundant decodes when re-selecting the same item.
-        current = getattr(self.source_viewer_widget, "current_asset", None)
-        if current is not None and getattr(current, "asset_id", None) == asset_id:
-            return
+        viewer = self.source_viewer_widget
+        if not asset or viewer is None or getattr(asset, "is_motion_graphic", False):
+            return False
+        current = viewer.current_asset
+        if (current is not None and current.asset_id == asset_id
+                and not getattr(viewer, "preview_only", False)):
+            return True
         try:
             from src.features.edit.core.interpretation import (
                 effective_asset_fps,
             )
-            self.source_viewer_widget.open_asset(
+            viewer.open_asset(
                 asset,
                 interpretation_fps=effective_asset_fps(
                     asset,
@@ -2751,7 +2741,7 @@ class FileOpsMixin:
                             "interpretation_overrides", None)))
         except Exception:
             logger.exception("Failed to preview asset on select: %s", asset_id)
-            return
+            return False
         # I01：单击预览同样是内容入口——同步快照（不激活，不抢焦点）。
         coordinator = getattr(self, "_viewport_playback_coordinator", None)
         if coordinator is not None:
@@ -2762,6 +2752,14 @@ class FileOpsMixin:
             except Exception:
                 logger.debug("open_source_asset bookkeeping failed",
                              exc_info=True)
+        return True
+
+    def _on_asset_preview_requested(self, asset_id: str) -> None:
+        """Reveal Source for a pool click, including clicks on the same asset."""
+        viewport = getattr(self, "edit_viewport", None)
+        if (self.current_page == "Edit" and viewport is not None
+                and FileOpsMixin._on_asset_selected(self, asset_id)):
+            viewport.show_source(focus=False)
 
     # ------------------------------------------------------------------
     # Timeline preview renderer

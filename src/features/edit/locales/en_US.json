@@ -10,6 +10,8 @@
   },
   "edit": {
     "adr": {
+      "record_cue": "Record Cue",
+      "select_cue": "Select a cue",
       "list_tab": "Cues",
       "record_tab": "Record",
       "setup_tab": "Setup",
@@ -31,28 +33,34 @@
       "state_saving": "Saving take…",
       "recording_busy": "Finish the current recording first.",
       "recording_failed": "Unable to start the selected input.",
-      "audition": "▶ Audition",
+      "destination_locked": "The recording track is locked.",
+      "no_destination_track": "No audio destination track.",
+      "take_status": {
+        "recording": "Recording",
+        "completed": "Saved",
+        "completed_partial": "Partial",
+        "discarded": "Discarded",
+        "failed": "Failed"
+      },
+      "audition": "Audition",
       "calibrate": "Calibrate",
       "calibrated": "Latency: {ms:.1f} ms input",
       "channels": "Channels",
       "default_device": "System default",
       "device": "Input device",
       "loop": "Loop record",
-      "mark_best": "★ Mark Best",
+      "loop_cue": "Loop cue recording",
+      "mark_best": "Mark Best",
       "monitor": "Input monitor",
       "mono": "Mono",
       "post_roll": "Post-roll",
       "pre_roll": "Pre-roll",
       "refresh": "⟳",
       "refresh_tip": "Refresh devices",
-      "replace_clip": "Replace Selected Clip",
+      "replace_clip": "Replace Clip",
       "settings": "ADR Input",
       "stereo": "Stereo",
       "uncalibrated": "Latency: not calibrated"
-    },
-    "trim": {
-      "monitor_unavailable": "Preview unavailable",
-      "monitor_unavailable_hint": "The source is unavailable or this edit cannot be previewed yet."
     },
     "retime_menu": {
       "add_point": "Add Speed Point",
@@ -332,6 +340,86 @@
       "pick_asset": "Pick a real asset:"
     },
     "effects": {
+      "effects": "Effects",
+      "text": "Text",
+      "subtitles": "Subtitles",
+      "voiceover": "Voiceover",
+      "subtitle_animation": "Animation",
+      "recording_setup": "Setup",
+      "record_at_playhead": "Record at Playhead",
+      "record_at_playhead_tip": "Record to the selected audio track, or use the timeline's audio target.",
+      "caption_animation_hint": "Double-click an animation to apply it to the selected subtitle.",
+      "subtitle_selected_hint": "Subtitle {clip} selected. Double-click an animation in Subtitles to apply it.",
+    "video_effects": "Video",
+    "transitions": "Transitions",
+    "audio_effects": "Audio",
+    "favorites": "Favorites",
+    "search_placeholder": "Search effects…",
+    "audio_transitions": "Audio Transitions",
+    "transition_icon_preview": "Icon Preview",
+    "transition_animated_preview": "Animated Preview",
+    "rename_template": "Rename…",
+    "delete_template": "Delete",
+    "no_favorites": "No favorites yet. Right-click an effect to add it to Favorites.",
+    "add_favorite": "Add to Favorites",
+    "remove_favorite": "Remove from Favorites",
+    "categories": {
+      "audio_hosted": "Third-Party Audio Plug-ins"
+    },
+    "caption_templates": {
+      "fade": {
+        "name": "Fade In and Out",
+        "description": "A subtle fade for dialogue and documentary captions."
+      },
+      "typewriter": {
+        "name": "Typewriter",
+        "description": "Reveals text from left to right, then fades it out."
+      },
+      "scale_pop": {
+        "name": "Scale Pop",
+        "description": "Scales in with a controlled bounce for social captions and callouts."
+      },
+      "slide_up": {
+        "name": "Slide Up",
+        "description": "Slides in from below the caption position."
+      },
+      "slide_down": {
+        "name": "Slide Down",
+        "description": "Slides in from above the caption position."
+      },
+      "slide_left": {
+        "name": "Slide In From Left",
+        "description": "Enters from the left and exits to the right."
+      },
+      "slide_right": {
+        "name": "Slide In From Right",
+        "description": "Enters from the right and exits to the left."
+      },
+      "wipe_reveal": {
+        "name": "Wipe Reveal",
+        "description": "A directional mask reveals the text in its original style."
+      }
+    },
+    "title_presets": {
+      "title_main": {
+        "description": "Large, bold centered main title with a soft shadow."
+      },
+      "title_section": {
+        "description": "Section title aligned to the top left."
+      },
+      "title_accent": {
+        "description": "Centered title with an orange accent."
+      },
+      "callout_note": {
+        "description": "Small outlined note at the top right."
+      },
+      "callout_warning": {
+        "description": "Centered red warning callout."
+      },
+      "credit_roll": {
+        "description": "Centered credits in small light gray text."
+      }
+    },
       "incompatible_target": "This effect cannot be applied to the selected clip.",
       "adjust_track_panner": "Adjust Spatial Panner in the Audio Mixer track strip.",
       "titles": "Titles",
@@ -355,7 +443,6 @@
       "preview_only_suffix": " (Preview Only)",
       "caption_select_first": "Select a subtitle clip on the timeline first, then double-click a caption effect.",
       "caption_applied": "Caption effect applied: {name}",
-      "subtitle_selected_hint": "Subtitle {clip} selected: double-click under Titles > Caption Effects to apply.",
       "search_tooltip": "Search effects",
       "hide_search_tooltip": "Hide effect search",
       "caption_in_frames_tooltip": "Frames used by the selected subtitle effect to enter.",
@@ -601,7 +688,8 @@
     },
     "view_options": "Timeline View Options",
     "keyframe_tray": "Show Keyframe Tray",
-    "voiceover": "Voiceover",
+    "recording_mode": "Recording Mode",
+    "recording_mode_active": "Recording Mode · Shift+Space to record",
     "advanced_tools": "More Editing Tools",
     "position_lock": "Position Lock",
     "position_locked": "Position Lock is enabled",
@@ -612,6 +700,8 @@
     "show_waveforms": "Audio Waveforms",
     "video_track_height": "Video Track Height",
     "audio_track_height": "Audio Track Height",
+    "clip_height": "Clip Height",
+    "monitor_volume": "Monitor Volume",
     "follow_playhead": "Follow Playhead",
     "insert_drop": "Ripple Insert When Dropping Media",
     "add_marker": "Add Marker (M)",

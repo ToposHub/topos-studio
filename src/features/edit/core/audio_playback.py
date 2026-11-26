@@ -78,7 +78,7 @@ import sys
 import time
 import threading
 import queue
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from itertools import count as _it_count
 from typing import TYPE_CHECKING, Iterator, Optional, Callable, Dict, List, Tuple, Any
@@ -5976,6 +5976,7 @@ class AudioPlaybackManager(QObject):
     # MX-09: 引擎采样率下发（设备/工程切换时 EQ 曲线与频谱轴同步重算）
     sample_rate_changed = pyqtSignal(float)
     control_room_output_failed = pyqtSignal(str)
+    monitor_gain_changed = pyqtSignal(float)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -6028,6 +6029,7 @@ class AudioPlaybackManager(QObject):
 
     def set_control_room(self, state: MonitorSessionState, patch: ControlRoomPatch) -> None:
         """Publish an immutable listening state without editing the programme."""
+        previous = self.control_room_state
         if patch != self.control_room_patch:
             if self._clock.is_playing:
                 raise ValueError("Stop playback before changing the output patch")
@@ -6039,14 +6041,23 @@ class AudioPlaybackManager(QObject):
             self._scrub_preview_output = None
             self.control_room_patch = patch
             self._stopped_input_failed = False
-        if state != self.control_room_state and (
-            state.source_tap != "input" or self.control_room_state.source_tap != "input"
-            or state.selected_listen_ids != self.control_room_state.selected_listen_ids
+        if replace(state, gain_db=previous.gain_db) != previous and (
+            state.source_tap != "input" or previous.source_tap != "input"
+            or state.selected_listen_ids != previous.selected_listen_ids
             or self._stopped_input_monitor is None
         ):
             self._stop_scrub_preview_output()
             self._invalidate_scrub_previews()
         self.control_room_state = state
+        if state.gain_db != previous.gain_db:
+            # A paused preroll may contain PCM rendered at the old level.
+            self._prepared_frame = None
+            self._prepared_fps = 0.0
+            self.monitor_gain_changed.emit(state.gain_db)
+
+    def set_monitor_gain_db(self, gain_db: float) -> None:
+        """Set listening gain before the speaker output, outside the programme mix."""
+        self.set_control_room(replace(self.control_room_state, gain_db=gain_db), self.control_room_patch)
 
     def control_room_sample_rate(self) -> int:
         return self._sample_rate

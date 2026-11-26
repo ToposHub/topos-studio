@@ -26,12 +26,6 @@ Reference:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from src.features.edit.ui.trim_numeric_dialog import TrimMonitorDialog
-    from src.features.edit.ui.program_viewer import ProgramViewerWidget
-
 import logging
 import json
 import math
@@ -269,6 +263,7 @@ from src.features.edit.ui.timeline_layout import (
 from src.shared.i18n.i18n import I18N
 from src.shared.track_colors import next_track_color, resolve_track_color
 from src.shared.ui.style_sheet import (
+    C,
     COMPACT_HORIZONTAL_SCROLLBAR_STYLE,
     UI_FONT_FAMILIES,
     UI_MONO_FONT_FAMILIES,
@@ -411,14 +406,7 @@ MULTI_FRAME_STEP = 10  # Multi-frame step for Shift+left/right
 PAGE_STEP_SECONDS = 1.0  # Page Up/Down step in seconds
 PLAYHEAD_FOLLOW_ENABLED = False  # Playhead centering during playback (default off, avoid disrupting manual viewing)
 
-BACKGROUND_COLOR = QColor(get_color("timeline_canvas_bg"))
-GRID_COLOR = QColor(40, 40, 50)
-TRACK_AREA_COLOR = QColor(get_color("timeline_canvas_bg"))
-# V/A distinction comes from clips and headers, never from mismatched canvas
-# blocks. The shared neutral canvas is lifted to match the Color page's panel
-# hierarchy instead of reading as a near-black void.
-TRACK_AREA_VIDEO_BG = QColor(get_color("timeline_canvas_bg"))
-TRACK_AREA_AUDIO_BG = QColor(get_color("timeline_canvas_bg"))
+BACKGROUND_COLOR = QColor(C.BG_PANEL)
 
 # Drag and drop MIME type (same as in media_pool_panel.py)
 MIME_TYPE_MEDIA_POOL_ASSETS = "application/x-topos-media-pool-assets"
@@ -850,15 +838,14 @@ class TimelineView(QGraphicsView):
 
     # Signals
     playhead_changed = pyqtSignal(int)  # frame
-    # P1-04：trim 进行中的帧预览请求（cut 邻近帧），上层接到 scrub 预览管线
+    # Preview the edit boundary through the regular Program Viewer scrub path.
     trim_frame_preview_requested = pyqtSignal(int)
-    # F2.3：trim 会话结束（提交/取消/失焦）——让复用的 scrub 管线退出
-    # 量化态（finish_scrub），否则 renderer 滞留 scrub 态到下次拖拽。
     trim_frame_preview_finished = pyqtSignal(int)
     scrub_started = pyqtSignal(int)  # frame
     scrub_moved = pyqtSignal(int)  # frame
     scrub_finished = pyqtSignal(int)  # frame
     scrub_cancelled = pyqtSignal(int)
+    range_display_changed = pyqtSignal(int, object, object, object)  # duration, fps, inclusive In/Out
     selection_changed = pyqtSignal(object)  # TimelineSelection
     tool_changed = pyqtSignal(str)  # tool name
     snap_changed = pyqtSignal(bool)  # enabled
@@ -925,7 +912,7 @@ class TimelineView(QGraphicsView):
     subtitle_clip_edit_text_requested = pyqtSignal(str, str, str)  # clip_id, track_id, new_text
     # Top-left DaVinci-like timecode panel, painted in the same view as the ruler.
     corner_timecode_clicked = pyqtSignal()
-    audio_track_heights_changed = pyqtSignal()
+    track_heights_changed = pyqtSignal()
     # B8: global edit mode switched ("overwrite" | "insert")
     edit_mode_changed = pyqtSignal(str)
 
@@ -973,9 +960,7 @@ class TimelineView(QGraphicsView):
         self._project_transaction_sequences: dict[str, TimelineSequence] = {}
         self._transaction_project_provider: Optional[Callable[[], Any]] = None
         self._transaction_sequences_provider: Optional[Callable[[], Mapping[str, TimelineSequence]]] = None
-        # A passive Tool monitor may already have taken focus from this view
-        # on some platforms. A later real window switch then sends no second
-        # focusOutEvent here, so also observe the application window boundary.
+        # Cancel active gestures even if the window switch skips widget focus events.
         QApplication.instance().focusWindowChanged.connect(
             self._on_application_focus_window_changed)
         QApplication.instance().applicationStateChanged.connect(
@@ -987,7 +972,7 @@ class TimelineView(QGraphicsView):
         # Retime controls are transient presentation state, just as in
         # Resolve.  The speed points themselves are persisted in SpeedParams.
         self._retime_control_clip_ids: set[str] = set()
-        self._trim_monitor_host: Optional[ProgramViewerWidget] = None
+        self._last_trim_preview_frame: int | None = None
         self._corner_timecode_text: str = "00:00:00:00"
         self._pixels_per_frame = DEFAULT_ZOOM
         self._zoom_fit_restore: tuple[float, int] | None = None
@@ -1165,12 +1150,15 @@ class TimelineView(QGraphicsView):
         self.setScene(self._scene)
 
         # View settings
+        self.setStyleSheet(f"TimelineView {{ background: {C.BG_PANEL}; border: none; }}")
         self.setBackgroundBrush(QBrush(BACKGROUND_COLOR))
         self.setRenderHint(QPainter.RenderHint.Antialiasing, False)  # Faster
         self.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.horizontalScrollBar().setStyleSheet(COMPACT_HORIZONTAL_SCROLLBAR_STYLE)
+        self.horizontalScrollBar().setStyleSheet(
+            COMPACT_HORIZONTAL_SCROLLBAR_STYLE + "QScrollBar:horizontal { background: transparent; }"
+        )
         self.setDragMode(QGraphicsView.DragMode.NoDrag)  # We handle drag manually
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -1350,6 +1338,7 @@ class TimelineView(QGraphicsView):
         self._scene.addItem(self._range_item)
         self._range_item.range_handle_dragged.connect(self._on_range_handle_dragged)
         self._range_item.range_change_finished.connect(self._on_range_change_finished)
+        self._range_item.range_drag_cancelled.connect(self._on_range_drag_cancelled)
 
         # There is no model timeline yet, but the Edit page should still show
         # a complete, useful empty workspace instead of only a short ruler.
@@ -1473,6 +1462,7 @@ class TimelineView(QGraphicsView):
             self._ruler_item.update_duration(duration)
             self._update_ruler_viewport()
         self._update_scene_rect()
+        self._update_range_visuals(self._timeline)
         self.timeline_duration_extended.emit(duration)
 
     def set_audio_only(self, enabled: bool) -> None:
@@ -2287,7 +2277,7 @@ class TimelineView(QGraphicsView):
             self._external_target = None
             if not self._interaction.is_idle:
                 self._cancel_current_interaction()
-            self._hide_trim_monitor()
+            self._finish_trim_frame_preview()
             self._timeline_command_stacks.clear()
             self._timeline_history_snapshots.clear()
             self._project_transaction_sequences.clear()
@@ -2360,14 +2350,9 @@ class TimelineView(QGraphicsView):
         if self._updating:
             return
 
-        # F2.3：切换序列——旧素材双帧解码器不跨序列复用（切源不显示旧
-        # generation：bump + 关解码器，线程保留待下次会话）。
         if self._playhead_dragging or not self._interaction.is_idle:
             self._cancel_current_interaction()
-        self._hide_trim_monitor()
-        provider = getattr(self, "_trim_frame_provider_instance", None)
-        if provider is not None:
-            provider.close_decoders()
+        self._finish_trim_frame_preview()
 
         scroll = self.horizontalScrollBar().value()
         self._updating = True
@@ -2895,7 +2880,7 @@ class TimelineView(QGraphicsView):
             self.horizontalScrollBar().setValue(scroll)
             self._update_clip_visibility()
             self._rebind_selection_tracks(force=True)
-        self.audio_track_heights_changed.emit()
+        self.track_heights_changed.emit()
 
     def _clear_items(self) -> None:
         """Clear all timeline items from scene."""
@@ -3047,9 +3032,24 @@ class TimelineView(QGraphicsView):
 
         self._apply_scene_rect(0.0, 0.0, width, height)
 
+    def get_range_presentation(
+        self, timeline: TimelineSequence | None,
+    ) -> tuple[int, int | None, int | None]:
+        """Resolve both the ruler and monitor range against the same canvas."""
+        if timeline is None:
+            return 0, None, None
+        duration = self._effective_timeline_duration(timeline)
+        marks = resolve_timeline_in_out(timeline.range_start, timeline.range_end, duration)
+        if marks is None and timeline.duration_frames <= 0:
+            # The empty canvas shows a full range before markers are set.
+            marks = (0, duration - 1)
+        start, end = marks or (None, None)
+        return duration, start, end
+
     def _update_range_visuals(self, timeline: TimelineSequence) -> None:
         """Refresh In/Out handles and the non-interactive track highlight."""
-        duration = self._effective_timeline_duration(timeline)
+        duration, range_start, range_end = self.get_range_presentation(timeline)
+        self.range_display_changed.emit(duration, timeline.fps, range_start, range_end)
         if self._deliver_range_visibility is False:
             if self._range_item is not None:
                 self._range_item.set_range(None, None)
@@ -3064,20 +3064,6 @@ class TimelineView(QGraphicsView):
                     track_area.height(),
                 )
             return
-
-        resolved_range = resolve_timeline_in_out(
-            timeline.range_start,
-            timeline.range_end,
-            duration,
-        )
-        if resolved_range is None and int(getattr(timeline, "duration_frames", 0) or 0) <= 0:
-            # Visual-only default for a newly created empty sequence.  Do not
-            # mutate the model until the user moves a handle or marks In/Out.
-            # This exposes the full black canvas as an immediately usable
-            # output range while preserving the model's ``None`` semantics.
-            range_start, range_end = 0, duration - 1
-        else:
-            range_start, range_end = resolved_range or (None, None)
 
         if self._range_item is not None:
             self._range_item.set_pixels_per_frame(self._pixels_per_frame)
@@ -3386,7 +3372,7 @@ class TimelineView(QGraphicsView):
         self._update_scene_rect()
         self._sync_scene_cut_overlay()
         self.viewport().update()
-        self.audio_track_heights_changed.emit()
+        self.track_heights_changed.emit()
 
     def zoom_in(self) -> None:
         """Zoom in by one step."""
@@ -5053,6 +5039,15 @@ class TimelineView(QGraphicsView):
 
     def set_track_height_for_type(self, track_type: str, height: int, *, relative: bool = False) -> None:
         """Resize a track group in one layout pass using the shared engine."""
+        self._set_track_heights((track_type,), height, relative=relative)
+
+    def set_media_track_height(self, height: int) -> None:
+        """Set the visual height of video and audio clips together."""
+        self._set_track_heights(("video", "audio"), height)
+
+    def _set_track_heights(
+        self, track_types: tuple[str, ...], height: int, *, relative: bool = False,
+    ) -> None:
         from src.features.edit.ui.timeline_layout import (
             MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
             MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT,
@@ -5062,22 +5057,23 @@ class TimelineView(QGraphicsView):
             "audio": (MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT),
             "subtitle": (MIN_SUBTITLE_TRACK_HEIGHT, MAX_SUBTITLE_TRACK_HEIGHT),
         }
-        if track_type not in limits:
-            raise ValueError(f"Unknown track type: {track_type!r}")
         if self._timeline is None:
             return
-        lo, hi = limits[track_type]
-        tracks = getattr(self._timeline, f"{track_type}_tracks")
-        for track in tracks:
-            current = self._layout_state.track_heights.get(track.track_id, self._default_track_height(track))
-            requested = current + height if relative else height
-            clamped = max(lo, min(hi, int(requested)))
-            self._layout_state.track_heights[track.track_id] = clamped
-            self._layout_engine.set_track_height(track.track_id, clamped)
+        for track_type in track_types:
+            if track_type not in limits:
+                raise ValueError(f"Unknown track type: {track_type!r}")
+            lo, hi = limits[track_type]
+            for track in getattr(self._timeline, f"{track_type}_tracks"):
+                current = self._layout_state.track_heights.get(
+                    track.track_id, self._default_track_height(track),
+                )
+                requested = current + height if relative else height
+                clamped = max(lo, min(hi, int(requested)))
+                self._layout_state.track_heights[track.track_id] = clamped
+                self._layout_engine.set_track_height(track.track_id, clamped)
         self._layout_track_items()
         self.viewport().update()
-        if track_type == "audio":
-            self.audio_track_heights_changed.emit()
+        self.track_heights_changed.emit()
 
     def source_patch_track_id(self, track_type: str) -> Optional[str]:
         """Paint the same effective destination the source-edit resolver uses."""
@@ -5194,128 +5190,8 @@ class TimelineView(QGraphicsView):
         """Check if snap is currently enabled."""
         return self._snap_enabled
 
-    # ------------------------------------------------------------------
-    # P1-04: Trim Monitor / 数值 trim
-    # ------------------------------------------------------------------
-
-    def _tc(self, frame: int) -> str:
-        """帧号 → SMPTE 时间码字符串（随序列帧率，DF 自动判定）。"""
-        if self._timeline is None:
-            return ""
-        from src.features.edit.core.interchange import frames_to_timecode
-        from src.features.edit.core.recording_manager import is_drop_frame_rate
-        fps = getattr(self._timeline, "fps", 24) or 24
-        try:
-            return frames_to_timecode(max(0, int(frame)), fps,
-                                      is_drop_frame_rate(fps))
-        except (TypeError, ValueError):
-            return str(frame)
-
-    def set_trim_monitor_host(self, host: Optional[ProgramViewerWidget]) -> None:
-        """Bind a viewer presentation host; a timeline alone never opens a window."""
-        if host is self._trim_monitor_host:
-            return
-        if not self._interaction.is_idle:
-            self._cancel_current_interaction()
-        self._hide_trim_monitor()
-        old = self._trim_monitor_host
-        if old is not None:
-            old.set_trim_monitor(None)
-            old.destroyed.disconnect(self._on_trim_monitor_host_destroyed)
-        monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is not None:
-            monitor.setParent(self)
-        self._trim_monitor_host = host
-        if host is not None:
-            host.destroyed.connect(self._on_trim_monitor_host_destroyed)
-            if monitor is not None:
-                host.set_trim_monitor(monitor)
-
-    def _on_trim_monitor_host_destroyed(self) -> None:
-        """A host's children are being deleted; never invoke it during teardown."""
-        from PyQt6 import sip
-        monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is not None and not sip.isdeleted(monitor):
-            # The canvas may currently live in a fullscreen window, outside
-            # the host's child tree. Retire that overlay explicitly as well.
-            monitor.hide()
-            # Retired overlays must not clear the cache of a replacement
-            # attached before this deferred deletion reaches the event loop.
-            monitor.destroyed.disconnect(self._on_trim_monitor_destroyed)
-            monitor.deleteLater()
-        self._trim_monitor_host = None
-        self._trim_monitor_dialog = None
-        if not self._interaction.is_idle:
-            self._cancel_current_interaction()
-        self._hide_trim_monitor()
-
-    def _on_trim_monitor_destroyed(self) -> None:
-        self._trim_monitor_dialog = None
-
-    def _trim_monitor(self) -> "TrimMonitorDialog":
-        """Lazily create a viewer child, hidden when no viewer is attached."""
-        monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is None:
-            from src.features.edit.ui.trim_numeric_dialog import TrimMonitorWidget
-            monitor = TrimMonitorWidget(self)
-            monitor.hide()
-            monitor.destroyed.connect(self._on_trim_monitor_destroyed)
-            # Delete an externally parented overlay when its timeline is gone.
-            self.destroyed.connect(monitor.deleteLater)
-            self._trim_monitor_dialog = monitor
-            if self._trim_monitor_host is not None:
-                self._trim_monitor_host.set_trim_monitor(monitor)
-        return monitor
-
-    def _hide_trim_monitor(self) -> None:
-        monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is not None:
-            monitor.hide()
-        # F2.3：会话结束——bump generation 丢弃在途双帧请求与迟到投递；
-        # 并通知 scrub 管线 finish（清除快速拖拽量化步长）。
-        self._invalidate_trim_frame_requests()
-        last_frame = getattr(self, "_last_trim_preview_frame", None)
-        if last_frame is not None:
-            self._last_trim_preview_frame = None
-            # Trim previews do not move the playhead. Restore its actual
-            # program frame through the existing exact scrub-finish path.
-            self.trim_frame_preview_finished.emit(int(self._playhead_frame))
-
-    def _trim_frame_provider(self):
-        """F2.3：惰性启动双帧供应器（会话期间常驻，close 时 stop）。"""
-        provider = getattr(self, "_trim_frame_provider_instance", None)
-        if provider is None:
-            from src.features.edit.ui.trim_frame_provider import (
-                TrimDualFrameProvider,
-            )
-            provider = TrimDualFrameProvider()
-            provider.signals.frame_ready.connect(self._on_trim_frame_ready)
-            provider.signals.decode_failed.connect(self._on_trim_frame_failed)
-            provider.start()
-            # 视图销毁时停线程（daemon 线程持有 self 引用，不 stop 会
-            # 随视图实例泄漏常驻轮询）
-            self.destroyed.connect(provider.stop)
-            self._trim_frame_provider_instance = provider
-            self._trim_frame_generation = 1
-        return provider
-
-    def _invalidate_trim_frame_requests(self) -> None:
-        """bump generation + 清空待处理请求（取消/结束/切源）。"""
-        provider = getattr(self, "_trim_frame_provider_instance", None)
-        self._trim_frame_generation = \
-            getattr(self, "_trim_frame_generation", 0) + 1
-        if provider is not None:
-            provider.invalidate()
-
-    def _authoritative_boundary(self, clip, offset_from_clip_start: int):
-        """R07：clip 起点偏移 offset 个时间线 tick 处的**显示**源帧。
-
-        走与播放/预览/导出相同的权威映射 ``timeline_to_source_frame``
-        （虚拟延伸几何覆盖越界 offset——roll/trim 拖拽查询会越过提交
-        几何）。恒速/混fps/相位、reverse、速度点曲线、冻结帧全部给出
-        与导出采样一致的帧；映射失败（ValueError）诚实退 None 保持
-        占位，不冒充。
-        """
+    def _authoritative_boundary(self, clip: ClipInstance, offset_from_clip_start: int) -> int | None:
+        """Map a clip-local offset using the playback and export frame clock."""
         from dataclasses import replace as _dc_replace
         try:
             virtual = _dc_replace(
@@ -5326,220 +5202,27 @@ class TimelineView(QGraphicsView):
         except (ValueError, ZeroDivisionError, OverflowError):
             return None
 
-    def _request_trim_dual_frames(
-        self, left_clip, right_clip, delta: int,
-        *, left_offset: int | None = None, right_offset: int | None = None,
-    ) -> None:
-        """F2.3/R07：请求左右侧真实保留边界帧（权威映射 + 请求身份）。
+    def _request_trim_frame_preview(self, frame: int) -> None:
+        """Scrub the program picture without moving the timeline playhead."""
+        frame = max(0, int(frame))
+        if frame != self._last_trim_preview_frame:
+            self._last_trim_preview_frame = frame
+            self.trim_frame_preview_requested.emit(frame)
 
-        roll：左 = 左片新 cut 前一帧（offset = duration+delta−1），
-        右 = 右片新 cut 处（offset = delta）；单边 trim/slip 由调用方
-        显式给 ``left_offset``/``right_offset``。每条请求携带单调递增
-        ``request_id``——同 generation 内慢请求迟到不得覆盖新位置。
-        素材缺失/映射失败侧传 None 保持占位。
-        """
-        if self._timeline is None:
-            return
-        provider = self._trim_frame_provider()
-        monitor = self._trim_monitor()
+    def _finish_trim_frame_preview(self) -> None:
+        """Retire scrub work and restore the picture at the actual playhead."""
+        if self._last_trim_preview_frame is not None:
+            self._last_trim_preview_frame = None
+            self.trim_frame_preview_finished.emit(self._playhead_frame)
 
-        def _asset_path(clip):
-            if self._project is None:
-                return None
-            asset = self._project.assets.get(clip.asset_id)
-            return getattr(asset, "path", None) if asset is not None else None
-
-        left_frame = self._authoritative_boundary(
-            left_clip, left_clip.timeline_duration + delta - 1
-            if left_offset is None else left_offset)
-        right_frame = self._authoritative_boundary(
-            right_clip, delta if right_offset is None else right_offset)
-
-        monitor.set_frames_pending()
-        left_path = _asset_path(left_clip) if left_frame is not None else None
-        right_path = _asset_path(right_clip) if right_frame is not None else None
-        if left_path is None:
-            monitor.set_frame_unavailable("left")
-        if right_path is None:
-            monitor.set_frame_unavailable("right")
-        request_id = getattr(self, "_trim_frame_request_seq", 0) + 1
-        self._trim_frame_request_seq = request_id
-        provider.request(
-            left_path,
-            left_frame,
-            right_path,
-            right_frame,
-            self._trim_frame_generation,
-            request_id)
-
-    def _on_trim_frame_ready(
-        self, side: str, frame: int, image, generation: int,
-        request_id: int | None = None,
-    ):
-        """双帧到达：generation + request_id 双重校验（旧帧不覆盖新位置）。"""
-        if generation != getattr(self, "_trim_frame_generation", 0):
-            return
-        if (request_id is not None
-                and request_id != getattr(self, "_trim_frame_request_seq", None)):
-            return
-        monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is None or not monitor.isVisible():
-            return
-        monitor.update_frame(side, image)
-
-    def _on_trim_frame_failed(
-        self, side: str, reason: str, generation: int,
-        request_id: int | None = None,
-    ) -> None:
-        """Keep a failed decoder from leaving the in-view panel loading forever."""
-        if generation != getattr(self, "_trim_frame_generation", 0):
-            return
-        if (request_id is not None
-                and request_id != getattr(self, "_trim_frame_request_seq", None)):
-            return
-        monitor = getattr(self, "_trim_monitor_dialog", None)
-        if monitor is not None and monitor.isVisible():
-            logger.debug("Trim preview unavailable (%s): %s", side, reason)
-            monitor.set_frame_unavailable(side)
-
-    def _show_roll_trim_monitor(self, left_clip, right_clip,
-                                cut_frame: int, delta: int) -> None:
-        """roll trim 的双画面上下文（TC A/B + Δ + 手柄余量 + 真实边界帧）。"""
-        try:
-            from src.features.edit.core.timeline_ops import clip_handle_headroom
-            monitor = self._trim_monitor()
-            left_item = self._items_map.get(left_clip.clip_id)
-            left_max = getattr(left_item, "_max_source_frames", 0) or 0
-            left_tail = clip_handle_headroom(left_clip, left_max)[1]
-            right_head = max(0, int(right_clip.source_start))
-            monitor.update_roll(
-                self._tc(cut_frame - 1), self._tc(cut_frame + max(0, delta)),
-                delta, headroom=(left_tail, right_head))
-            self._last_trim_preview_frame = cut_frame + max(0, delta)
-            if self._trim_monitor_host is not None and monitor.isHidden():
-                monitor.show()
-                monitor.raise_()
-            # F2.3：请求双画面真实边界帧（latest-wins，generation 校验）
-            self._request_trim_dual_frames(left_clip, right_clip, delta)
-        except Exception as e:
-            logger.debug("Trim monitor update skipped: %s", e)
-
-    def _show_single_trim_monitor(
-        self, clip, edge: str, new_edge: int,
-    ) -> None:
-        """R07①：单边 trim 监视器——被修边真实帧 + 邻片/空位。
-
-        模式定义（与 roll 的双邻片模式相对）：
-
-        - 左修（``edge="left"``，new_edge=新入点帧）：A 面板 = 被修片
-          新入点首帧；B 面板 = 覆盖 cut−1 帧的左邻片边界帧，无邻片
-          覆盖（空位）时显式占位；
-        - 右修（``edge="right"``，new_edge=新出点帧）：A 面板 = 被修片
-          最后保留帧（new_edge−1）；B 面板 = 覆盖 new_edge 的右邻片
-          首帧，空位显式占位。
-
-        边界帧经权威映射（``_authoritative_boundary``），与导出采样
-        一致；被修侧的源窗用方向感知的 ``with_*_edge_source_values``
-        （RI-07/R18 同源）。
-        """
-        from dataclasses import replace as _dc_replace
-        from src.features.edit.core.timeline_ops import clip_handle_headroom
-        if self._timeline is None:
-            return
-        track = self._timeline.get_track_by_id(clip.track_id)
-        if track is None:
-            return
-        if edge == "left":
-            delta = new_edge - clip.timeline_start
-            if delta == 0:
-                return
-            new_duration = clip.timeline_end - new_edge
-            if new_duration <= 0:
-                return
-            src_start, src_dur = clip.with_left_edge_source_values(new_edge)
-            left_offset = 0
-            neighbor = next((
-                c for c in track.clips
-                if c.clip_id != clip.clip_id
-                and c.timeline_start <= new_edge - 1 < c.timeline_end), None)
-            right_offset = (
-                new_edge - 1 - neighbor.timeline_start
-                if neighbor is not None else None)
-            tc = self._tc(new_edge)
-        else:
-            delta = new_edge - clip.timeline_end
-            if delta == 0:
-                return
-            new_duration = new_edge - clip.timeline_start
-            if new_duration <= 0:
-                return
-            src_start, src_dur = clip.with_right_edge_source_values(new_duration)
-            left_offset = new_duration - 1
-            neighbor = next((
-                c for c in track.clips
-                if c.clip_id != clip.clip_id
-                and c.timeline_start <= new_edge < c.timeline_end), None)
-            right_offset = (
-                new_edge - neighbor.timeline_start
-                if neighbor is not None else None)
-            tc = self._tc(new_edge - 1)
-        try:
-            edited = _dc_replace(
-                clip, timeline_start=0, timeline_duration=new_duration,
-                source_start=src_start, source_duration=src_dur,
-                fade_in_duration=min(clip.fade_in_duration, new_duration),
-                fade_out_duration=min(clip.fade_out_duration, new_duration),
-                **clip.source_window_mapping_updates(
-                    src_start, src_dur, delta if edge == "left" else 0,
-                ),
-            )
-            monitor = self._trim_monitor()
-            item = self._items_map.get(clip.clip_id)
-            max_frames = getattr(item, "_max_source_frames", 0) or 0
-            head, tail = clip_handle_headroom(clip, max_frames)
-            monitor.update_trim(tc, delta, headroom=(head, tail))
-            self._last_trim_preview_frame = new_edge
-            if self._trim_monitor_host is not None and monitor.isHidden():
-                monitor.show()
-                monitor.raise_()
-            self._request_trim_dual_frames(
-                edited, neighbor if neighbor is not None else clip, delta,
-                left_offset=left_offset, right_offset=right_offset)
-        except Exception as e:
-            logger.debug("Trim monitor update skipped: %s", e)
-
-    def _show_slip_monitor(self, clip, delta: int) -> None:
-        """R07①：slip 监视器——新源窗首末帧（同片双画面）。
-
-        slip 只平移源窗（时间线几何不动）：A = 新窗口首帧、B = 新窗口
-        末帧，Δ = 源帧位移。滑出可用范围由 slip 边界预检在预览层拒绝，
-        这里不做第二次钳制。
-        """
-        from dataclasses import replace as _dc_replace
-        from src.features.edit.core.timeline_ops import clip_handle_headroom
-        if self._timeline is None or clip is None or delta == 0:
-            return
-        try:
-            slipped = _dc_replace(
-                clip, source_start=max(0, clip.source_start + delta))
-            monitor = self._trim_monitor()
-            item = self._items_map.get(clip.clip_id)
-            max_frames = getattr(item, "_max_source_frames", 0) or 0
-            head, tail = clip_handle_headroom(clip, max_frames)
-            last = max(0, slipped.source_start + slipped.source_duration - 1)
-            monitor.update_roll(
-                self._tc(slipped.source_start), self._tc(last),
-                delta, headroom=(head, tail))
-            self._last_trim_preview_frame = clip.timeline_end
-            if self._trim_monitor_host is not None and monitor.isHidden():
-                monitor.show()
-                monitor.raise_()
-            self._request_trim_dual_frames(
-                slipped, slipped, delta,
-                left_offset=0,
-                right_offset=clip.timeline_duration - 1)
-        except Exception as e:
-            logger.debug("Slip monitor update skipped: %s", e)
+    def _request_trim_edge_preview(self, clip: ClipInstance, side: str, edge: int) -> None:
+        """Sample the retained side of the edge in the current program timeline."""
+        frame = edge if side == "left" else edge - 1
+        # The renderer reads the committed sequence. Hold its closest clip
+        # frame while extending past the current range into source handles.
+        self._request_trim_frame_preview(
+            max(clip.timeline_start, min(frame, clip.timeline_end - 1))
+        )
 
     def _on_clip_numeric_trim_requested(self, clip_id: str, track_id: str) -> None:
         """Open frame-accurate trim with bounds for the actual selected edge."""
@@ -5807,6 +5490,8 @@ class TimelineView(QGraphicsView):
         ):
             self._finish_playhead_drag(cancelled=True)
         interaction = getattr(self, "_interaction", None)
+        if event.type() == QEvent.Type.Hide and getattr(self, "_last_trim_preview_frame", None) is not None:
+            self._cancel_current_interaction()
         if (event.type() == QEvent.Type.ShortcutOverride and isinstance(event, QKeyEvent)
                 and interaction is not None and interaction.state == InteractionState.ROLLING
                 and getattr(self, "_roll_preview_state", None) is not None
@@ -6086,7 +5771,9 @@ class TimelineView(QGraphicsView):
 
         # Escape: Cancel interaction if active, otherwise clear selection
         elif key == Qt.Key.Key_Escape:
-            if self._playhead_dragging or not self._interaction.is_idle:
+            if self._range_item is not None and self._range_item.cancel_drag():
+                event.accept()
+            elif self._playhead_dragging or not self._interaction.is_idle:
                 self._cancel_current_interaction()
             else:
                 self._clear_selection()
@@ -6133,7 +5820,6 @@ class TimelineView(QGraphicsView):
         """INT-02：拖拽/修剪中失焦（窗口切换、浮动面板抢焦点）时取消
         当前片段交互并恢复预览，避免 release 时提交一个已被中断的操作。
         INT-03：平移会话同样在此收尾并恢复光标。
-        Trim Monitor 是不接收焦点的 viewer 子控件；真正失焦继续取消。
         """
         if self._playhead_dragging or self._interaction.is_dragging:
             self._cancel_current_interaction()
@@ -6918,6 +6604,8 @@ class TimelineView(QGraphicsView):
                 if not self._interaction.is_idle:
                     self._interaction.finish()
                 self._current_drag_session = None
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._finish_trim_frame_preview()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         """Handle double-click for splitter reset."""
@@ -10314,7 +10002,7 @@ class TimelineView(QGraphicsView):
             item._update_geometry()
             item.setPos(self._layout_engine.frame_to_x(start), item.y())
             item.update()
-        self._show_single_trim_monitor(clip, side, boundary + delta)
+        self._request_trim_edge_preview(clip, side, boundary + delta)
 
     def _finish_edge_trim(self, clip_id: str, track_id: str, side: str, target: int) -> None:
         drag = self._edge_trim
@@ -10478,9 +10166,13 @@ class TimelineView(QGraphicsView):
             item.setPos(self._layout_engine.frame_to_x(clip.timeline_start), item.y())
             item.update()
         self._items_map[clip_id]._slip_delta = delta
-        # R07①：slip 监视器——新源窗首末帧（slide 不改源窗，不进监视器）
-        if not slide:
-            self._show_slip_monitor(preview.get_clip_by_id(clip_id), delta)
+        if not slide and (delta or self._last_trim_preview_frame is not None):
+            original = self._timeline.get_clip_by_id(clip_id)
+            slipped = preview.get_clip_by_id(clip_id)
+            source_frame = slipped.timeline_to_source_frame(slipped.timeline_start)
+            source_frame = max(original.source_start, min(source_frame, original.source_end))
+            frame = original.source_to_timeline_frame(source_frame)
+            self._request_trim_edge_preview(original, "left", frame)
 
     def _finish_source_edit(
         self, clip_id: str, track_id: str, delta_frames: int, *, slide: bool,
@@ -10504,6 +10196,7 @@ class TimelineView(QGraphicsView):
         finally:
             self._reproject_preview_affected_items()
             self._interaction.finish()
+            self._finish_trim_frame_preview()
 
     def _on_clip_slip(self, clip_id: str, track_id: str, delta_frames: int) -> None:
         """Preview Slip with the common linked source-frame offset."""
@@ -10613,10 +10306,8 @@ class TimelineView(QGraphicsView):
             f"between {left_clip_id} and {right_clip_id}"
         )
 
-        # P1-04 Trim Monitor：cut 两侧 TC + 手柄诊断 + 帧预览请求
         self._roll_preview_state["cut_frame"] = int(cut_frame)
-        self._show_roll_trim_monitor(left_clip, right_clip, int(cut_frame), 0)
-        self.trim_frame_preview_requested.emit(int(cut_frame))
+        self._request_trim_frame_preview(cut_frame)
 
     def _on_roll_trim_dragged(
         self, delta_frames: int, bypass_snap: bool = False, *, snap: bool = True,
@@ -10672,9 +10363,7 @@ class TimelineView(QGraphicsView):
             return
         state["delta"] = clamped_delta
 
-        # P1-04：Trim Monitor 跟随 + cut 邻近帧预览
-        self._show_roll_trim_monitor(left_clip, right_clip, cut_frame, clamped_delta)
-        self.trim_frame_preview_requested.emit(cut_frame + clamped_delta)
+        self._request_trim_frame_preview(cut_frame + clamped_delta)
 
         left_item._duration_frames = left_clip.timeline_duration + clamped_delta
         left_item.update_trim_preview_source_range(
@@ -10786,7 +10475,7 @@ class TimelineView(QGraphicsView):
                 self._roll_preview_state = None
             if self._snap_indicator:
                 self._snap_indicator.hide_indicator()
-            self._hide_trim_monitor()
+            self._finish_trim_frame_preview()
             self._interaction.finish()
 
     def _on_roll_trim_finished_active(
@@ -10806,7 +10495,6 @@ class TimelineView(QGraphicsView):
             delta_frames = int(state.get("delta", delta_frames))
             self._restore_roll_preview()
             self._roll_preview_state = None
-        self._hide_trim_monitor()
 
         if delta_frames == 0:
             return
@@ -11067,6 +10755,7 @@ class TimelineView(QGraphicsView):
         for clip_id in drag.shifted_followers.keys() - shifted.keys():
             self._project_ripple_follower(drag.shifted_followers[clip_id], 0)
         drag.shifted_followers = shifted
+        self._request_trim_edge_preview(primary, drag.side, original_edge + delta)
 
     def _project_ripple_follower(self, clip: ClipInstance, delta: int) -> None:
         """Move only the existing graphics item; the project is unchanged."""
@@ -11085,7 +10774,6 @@ class TimelineView(QGraphicsView):
             return
         drag, self._ripple_trim_drag = self._ripple_trim_drag, None
         self._reproject_preview_affected_items()
-        self._hide_trim_monitor()
         if self._snap_indicator is not None:
             self._snap_indicator.hide_indicator()
         try:
@@ -11124,6 +10812,8 @@ class TimelineView(QGraphicsView):
             self._execute_command(command)
         except (ValueError, RuntimeError) as exc:
             self.status_message_requested.emit(str(exc))
+        finally:
+            self._finish_trim_frame_preview()
 
     def _on_ripple_trim_left(
         self, clip_id: str, track_id: str, new_start: int, bypass_snap: bool,
@@ -11579,7 +11269,6 @@ class TimelineView(QGraphicsView):
                 handle.cancel_drag()
             self._restore_roll_preview()
             self._roll_preview_state = None
-            self._hide_trim_monitor()
 
         # RI-02/R14：修剪/Slide 预览直接改写的伙伴/邻片/跟随片段统一从
         # 不可变模型重投影（此前只恢复 primary，linked trim/Slide 取消
@@ -11616,6 +11305,7 @@ class TimelineView(QGraphicsView):
             self.setCursor(self._pan_prev_cursor)
             self._pan_prev_cursor = None
         self._interaction.cancel()
+        self._finish_trim_frame_preview()
         self.viewport().update()
 
     def _select_all_clips(self) -> None:
@@ -12033,16 +11723,21 @@ class TimelineView(QGraphicsView):
 
     def _on_range_change_finished(self, new_start: int, new_end: int) -> None:
         """Commit a ruler-handle range edit as one undoable timeline command."""
-        if self._timeline is None:
+        timeline = self._timeline
+        if timeline is None:
             return
         from src.features.edit.core.commands import SetTimelineRangeCommand
         cmd = SetTimelineRangeCommand.create(
             new_start=new_start,
             new_end=new_end,
-            old_start=self._timeline.range_start,
-            old_end=self._timeline.range_end,
+            old_start=timeline.range_start,
+            old_end=timeline.range_end,
         )
-        self._execute_command(cmd)
+        try:
+            self._execute_command(cmd)
+        finally:
+            if self._timeline is timeline:
+                self._update_range_visuals(timeline)
 
     def _on_range_handle_dragged(self, edge: str, frame: int) -> None:
         """Update range handles and mask live; commit only on mouse release."""
@@ -12052,6 +11747,7 @@ class TimelineView(QGraphicsView):
         end = frame if edge == "out" else self._range_item._range_end
         if start is None or end is None:
             return
+        duration = max(self._effective_timeline_duration(self._timeline), end + 1)
         self._range_item.set_range(start, end)
         if self._range_mask_item is not None:
             self._configure_layout_engine()
@@ -12059,10 +11755,15 @@ class TimelineView(QGraphicsView):
             self._range_mask_item.set_range(
                 start,
                 end,
-                self._effective_timeline_duration(self._timeline),
+                duration,
                 track_area.top(),
                 track_area.height(),
             )
+        self.range_display_changed.emit(duration, self._timeline.fps, start, end)
+
+    def _on_range_drag_cancelled(self) -> None:
+        if self._timeline is not None:
+            self._update_range_visuals(self._timeline)
 
     # ==================== Transition Handlers ====================
 
@@ -14568,16 +14269,7 @@ class TimelineView(QGraphicsView):
         painter.restore()
 
     def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
-        """
-        Draw timeline grid background with V/A area split and alternating track colors.
-
-        Layout:
-        - Video area (top): V3, V2, V1 (V1 near splitter)
-        - Splitter (middle): draggable divider
-        - Audio area (bottom): A1, A2, A3 (A1 near splitter)
-
-        Reference: DaVinci-like V/A area split design
-        """
+        """Draw the neutral canvas and dim locked tracks."""
         super().drawBackground(painter, rect)
 
         if self._timeline is None:
@@ -14586,35 +14278,9 @@ class TimelineView(QGraphicsView):
 
         self._configure_layout_engine()
         engine = self._layout_engine
-        area = engine.area_layout()
-
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-
-        # Draw video area background (P1: DaVinci-like slightly warm gray)
-        va = area.video_area
-        if va.isValid():
-            painter.setBrush(QBrush(TRACK_AREA_VIDEO_BG))
-            painter.drawRect(QRectF(
-                max(TRACK_HEADER_WIDTH, rect.left()),
-                max(va.top(), rect.top()),
-                min(rect.right(), va.right()) - max(TRACK_HEADER_WIDTH, rect.left()),
-                min(rect.bottom(), va.bottom()) - max(va.top(), rect.top()),
-            ))
-
-        # Draw audio area background (P1: DaVinci-like slightly cooler gray)
-        aa = area.audio_area
-        if aa.isValid():
-            painter.setBrush(QBrush(TRACK_AREA_AUDIO_BG))
-            painter.drawRect(QRectF(
-                max(TRACK_HEADER_WIDTH, rect.left()),
-                max(aa.top(), rect.top()),
-                min(rect.right(), aa.right()) - max(TRACK_HEADER_WIDTH, rect.left()),
-                min(rect.bottom(), aa.bottom()) - max(aa.top(), rect.top()),
-            ))
 
         # Draw locked track overlays (only locked tracks need per-track rects)
-        all_ordered = engine.all_ordered_tracks()
-        for vis_idx, tinfo in enumerate(all_ordered):
+        for tinfo in engine.all_ordered_tracks():
             track_top = engine.track_top(tinfo.track_id)
             track_h = engine.track_height(tinfo.track_id)
 
@@ -14638,25 +14304,8 @@ class TimelineView(QGraphicsView):
                 painter.setPen(QPen(Qt.PenStyle.NoPen))
                 painter.drawRect(track_rect)
 
-        # Keep the V/A splitter's existing layout and generous hit target.
-        # Its two boundaries are drawn above items by the foreground pass.
-        sr = area.splitter_rect
-        if sr.isValid() and rect.intersects(sr):
-            # The interior blends into the timeline canvas; only its two
-            # boundaries should be visible.
-            painter.setBrush(QBrush(TRACK_AREA_COLOR))
-            painter.drawRect(QRectF(
-                max(TRACK_HEADER_WIDTH, rect.left()),
-                sr.top(),
-                min(rect.right(), sr.right()) - max(TRACK_HEADER_WIDTH, rect.left()),
-                sr.height(),
-            ))
-
-        # Draw vertical time markers
-        self._draw_vertical_time_markers(painter, rect)
-
     def _draw_empty_timeline_background(self, painter: QPainter, rect: QRectF) -> None:
-        """Draw V/A lanes and an instructional empty-state message."""
+        """Draw the instructional empty-state message over the canvas."""
         content_left = max(float(TRACK_HEADER_WIDTH), rect.left())
         content_right = rect.right()
         if content_right <= content_left:
@@ -14665,21 +14314,6 @@ class TimelineView(QGraphicsView):
         viewport_height = max(1, self.viewport().height())
         track_top = float(RULER_HEIGHT)
         track_bottom = max(float(rect.bottom()), float(viewport_height))
-        split_y = track_top if self._audio_only else track_top + max(0.0, track_bottom - track_top) * 0.5
-
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(TRACK_AREA_VIDEO_BG))
-        painter.drawRect(
-            QRectF(content_left, track_top, content_right - content_left, split_y - track_top)
-        )
-        painter.setBrush(QBrush(TRACK_AREA_AUDIO_BG))
-        painter.drawRect(
-            QRectF(content_left, split_y, content_right - content_left, track_bottom - split_y)
-        )
-
-        self._draw_vertical_time_markers(
-            painter, QRectF(content_left, track_top, content_right - content_left, track_bottom - track_top)
-        )
 
         visible_rect = self.mapToScene(self.viewport().rect()).boundingRect()
         center_x = min(max(visible_rect.center().x(), content_left + 220.0), content_right - 220.0)
@@ -14705,18 +14339,6 @@ class TimelineView(QGraphicsView):
             I18N.tr("timeline.empty_hint", "创建时间线或将素材拖到此处开始编辑"),
         )
 
-    def _draw_vertical_time_markers(self, painter: QPainter, rect: QRectF) -> None:
-        """Align the track grid with the ruler's labeled timecode ticks."""
-        if self._ruler_item is None:
-            return
-        interval = self._ruler_item.major_tick_interval
-        first = max(0, int((rect.left() - TRACK_HEADER_WIDTH) / self._pixels_per_frame))
-        last = math.ceil((rect.right() - TRACK_HEADER_WIDTH) / self._pixels_per_frame)
-        painter.setPen(QPen(QColor(90, 95, 105, 42), 1))
-        for frame in range((first // interval) * interval, last + 1, interval):
-            x = int(TRACK_HEADER_WIDTH + frame * self._pixels_per_frame)
-            painter.drawLine(x, int(rect.top()), x, int(rect.bottom()))
-
     # ==================== Clear ====================
 
     def show_provisional_timeline(self) -> TimelineSequence:
@@ -14741,11 +14363,12 @@ class TimelineView(QGraphicsView):
         """Clear the timeline view."""
         if not self._interaction.is_idle:
             self._cancel_current_interaction()
-        self._hide_trim_monitor()
+        self._finish_trim_frame_preview()
         self._clear_recording_previews()
         self._clear_items()
         self._remove_persistent_items()
         self._timeline = None
+        self.range_display_changed.emit(0, EMPTY_TIMELINE_FPS, None, None)
         self._provisional_timeline = False
         self._runtime_duration_frames = 0
         self._playhead_frame = 0
@@ -15138,8 +14761,7 @@ class TimelineView(QGraphicsView):
 
         # Re-layout all tracks (engine handles cumulative positioning)
         self._layout_track_items()
-        if track.track_type == "audio":
-            self.audio_track_heights_changed.emit()
+        self.track_heights_changed.emit()
 
         logger.debug(f"Track {track_id} height changed to {new_height}")
 
@@ -15177,7 +14799,7 @@ class TimelineView(QGraphicsView):
 
         self._layout_track_items()
         self.viewport().update()
-        self.audio_track_heights_changed.emit()
+        self.track_heights_changed.emit()
 
     def reset_splitter_ratio(self) -> None:
         """Reset V/A area splitter to 50/50."""
@@ -16250,6 +15872,9 @@ class TimelineView(QGraphicsView):
             if payload is None or asset is None:
                 event.ignore()
                 return
+            if (self._audio_only and payload.stream_intent == "av"
+                    and mime_data.hasFormat(MIME_TYPE_MEDIA_POOL_ASSETS)):
+                payload = replace(payload, stream_intent="audio")
             # I04-2：进入即按可信 metadata 校验（指纹/区间/流）——
             # 跨工程同名 ID、越界区间、不存在的流在 enter 处即拒。
             reason = self._validate_source_drag_payload(payload, asset)
@@ -16444,11 +16069,27 @@ class TimelineView(QGraphicsView):
             if self._audio_only else
             [asset.media_type for asset in self._drag_assets]
         )
+        payload = self._drag_source_payload
+        if payload is not None:
+            timeline_fps = fps or float(self._timeline.fps)
+            asset_fps = first.fps
+            if self._edit_mode == "insert":
+                from src.features.edit.core.interpretation import effective_asset_fps
+                asset_fps = effective_asset_fps(first, getattr(self._project, "interpretation_overrides", None))
+            source_fps = float(asset_fps or timeline_fps)
+            if not math.isfinite(source_fps) or source_fps <= 0:
+                source_fps = timeline_fps
+            duration = max(1, round((payload.out_frame - payload.in_frame + 1) * timeline_fps / source_fps))
+            durations = [duration]
+            if payload.stream_intent == "audio":
+                media_types = ["audio"]
+        else:
+            durations = [self._get_asset_duration_frames(asset, fps=fps) for asset in self._drag_assets]
         self._show_media_drop_preview(
             event,
             [asset.display_name for asset in self._drag_assets],
             media_types,
-            [self._get_asset_duration_frames(asset, fps=fps) for asset in self._drag_assets],
+            durations,
             thumbnail_path=first.path if not first.is_virtual else None,
             allow_overlap=self._edit_mode == "insert",
         )

@@ -1638,7 +1638,6 @@
       "remove_from_project": "Retirer du projet",
       "move_to_trash": "Mettre à la corbeille",
       "trash_failed": "Impossible de déplacer le fichier à la corbeille. La ressource a été retirée du projet, mais le fichier reste sur le disque.",
-      "quick_look_hint": "Espace pour fermer · Double-clic pour ouvrir",
       "import_folder": "Importer un dossier...",
       "select_folder": "Sélectionnez un dossier à importer",
       "shot": "Plan :",

@@ -1638,7 +1638,6 @@
       "remove_from_project": "Remover do Projeto",
       "move_to_trash": "Mover para a Lixeira",
       "trash_failed": "Não foi possível mover o arquivo para a lixeira. O ativo foi removido do projeto, mas o arquivo permanece no disco.",
-      "quick_look_hint": "Espaço para fechar · Duplo clique para abrir",
       "import_folder": "Importar Pasta...",
       "select_folder": "Selecione uma pasta para importar",
       "shot": "Cena:",

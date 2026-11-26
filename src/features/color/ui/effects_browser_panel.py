@@ -6,13 +6,11 @@ is an intent, so this panel can be used before command/render integration exists
 from __future__ import annotations
 
 from copy import deepcopy
-from functools import cache
 import math
-from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QModelIndex, QMimeData, QRect, QSignalBlocker, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QDrag, QIcon, QPaintEvent, QPainter, QPen, QResizeEvent
+from PyQt6.QtGui import QColor, QDrag, QFont, QIcon, QPaintEvent, QPainter, QResizeEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel,
     QLineEdit, QListView, QListWidget, QListWidgetItem, QMenu, QPushButton,
@@ -31,16 +29,38 @@ from src.features.color.ui.panel_chrome import (
 )
 from src.shared.assets.icon_manager import icon_grid, icon_list
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.effect_icons import color_effect_icon
 from src.shared.ui.style_sheet import C, TOOLBAR_FLAT_BTN_STYLE
 from src.shared.ui.widgets.color_picker_control import ColorPickerControl, qcolor_to_linear_rgba
+from src.shared.ui.widgets.compact_scrollbar import CompactVerticalScrollBar
 from src.shared.ui.widgets.toggle_switch import ToggleSwitch
 
 
-_EFFECT_ICON_DIR = Path(__file__).with_name('effect_icons')
+_EFFECT_ICON_SIZE = 14
+_EFFECT_CATEGORY_LABELS = {
+    'color': 'Color Adjustments',
+    'film': 'Film Looks',
+    'focus': 'Blur and Sharpen',
+    'lens_and_light': 'Lens and Light',
+    'local': 'Local Adjustments',
+    'plugin': 'Other Plug-ins',
+    'retouch': 'Portrait Retouching',
+    'stylize': 'Creative Effects',
+    'upscale': 'AI Upscaling',
+}
 
 
 def _tr(key: str, fallback: str) -> str:
     return I18N.tr('resource_browser.' + key, fallback)
+
+
+def _category_key(entry: dict[str, Any]) -> str:
+    return str(entry.get('category') or _tr('other', 'Other'))
+
+
+def _category_label(key: str) -> str:
+    fallback = _EFFECT_CATEGORY_LABELS.get(key)
+    return _tr(f'effect_categories.{key}', fallback) if fallback is not None else key
 
 
 def _number(value: Any, fallback: float) -> float:
@@ -49,18 +69,6 @@ def _number(value: Any, fallback: float) -> float:
     except (TypeError, ValueError):
         return fallback
     return result if math.isfinite(result) else fallback
-
-
-@cache
-def _effect_icon_paths() -> dict[str, Path]:
-    return {path.stem: path for path in _EFFECT_ICON_DIR.glob('*.svg')}
-
-
-def _effect_icon(resource_id: str) -> QIcon:
-    """Match the catalog's stable ID independently of the display language."""
-    plugin_id = resource_id.partition('@')[0]
-    path = _effect_icon_paths().get(plugin_id, _EFFECT_ICON_DIR / 'generic.svg')
-    return QIcon(str(path))
 
 
 class _EffectsTabs(QTabWidget):
@@ -127,47 +135,51 @@ class _ResourceList(QListWidget):
         drag.exec(Qt.DropAction.CopyAction)
 
 
-class _ResolveEffectDelegate(QStyledItemDelegate):
-    """Compact Resolve-style group headers and outlined effect rows."""
+class _EffectLibraryDelegate(QStyledItemDelegate):
+    """Paint compact group headings and indented effect rows."""
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem,
               index: QModelIndex) -> None:
-        category = index.data(Qt.ItemDataRole.UserRole + 1)
+        is_heading = isinstance(index.data(Qt.ItemDataRole.UserRole + 1), str)
         painter.save()
         rect = option.rect
-        if isinstance(category, str):
-            painter.setPen(QColor(C.PANEL_DIVIDER))
-            painter.drawLine(rect.left() + 4, rect.bottom(), rect.right() - 4, rect.bottom())
-            painter.setPen(QColor(C.TEXT_PRIMARY))
-            font = painter.font()
-            font.setBold(True)
-            painter.setFont(font)
-            painter.drawText(rect.adjusted(5, 0, -22, 0),
-                             Qt.AlignmentFlag.AlignVCenter, category)
+        font = QFont(option.font)
+        font.setPixelSize(12)
+        font.setWeight(QFont.Weight.DemiBold if is_heading else QFont.Weight.Normal)
+        painter.setFont(font)
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or '')
+        if is_heading:
             collapsed = bool(index.data(Qt.ItemDataRole.UserRole + 2))
             painter.setPen(QColor(C.TEXT_LABEL))
-            painter.drawText(rect.adjusted(0, 0, -8, 0),
-                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                             '⌄' if collapsed else '⌃')
+            x = rect.left() + 12
+            y = rect.center().y()
+            if collapsed:
+                painter.drawLine(x - 2, y - 3, x + 1, y)
+                painter.drawLine(x + 1, y, x - 2, y + 3)
+            else:
+                painter.drawLine(x - 3, y - 1, x, y + 2)
+                painter.drawLine(x, y + 2, x + 3, y - 1)
+            painter.setPen(QColor(C.TEXT_PRIMARY))
+            text_rect = rect.adjusted(23, 0, -8, 0)
         else:
-            row = rect.adjusted(5, 2, -6, -2)
             entry = index.data(Qt.ItemDataRole.UserRole)
             available = isinstance(entry, dict) and entry.get('available', True)
             selected = bool(option.state & QStyle.StateFlag.State_Selected)
-            painter.setPen(QPen(QColor(C.TEXT_LABEL if selected else C.PANEL_DIVIDER), 1))
-            painter.setBrush(QColor(C.COLOR_PANEL_RAISED if selected else C.BG_PANEL))
-            painter.drawRoundedRect(row, 2, 2)
-            well = QRect(row.left(), row.top(), 43, row.height())
-            painter.setPen(QColor(C.PANEL_DIVIDER))
-            painter.drawLine(well.right(), well.top(), well.right(), well.bottom())
+            if selected or option.state & QStyle.StateFlag.State_MouseOver:
+                background = C.BG_BUTTON if selected else C.COLOR_PANEL_RAISED
+                painter.fillRect(rect.adjusted(4, 0, -4, 0), QColor(background))
             icon = index.data(Qt.ItemDataRole.DecorationRole)
             if isinstance(icon, QIcon):
-                icon.paint(painter, well.adjusted(8, 3, -8, -3), mode=(
-                    QIcon.Mode.Normal if available else QIcon.Mode.Disabled))
-            painter.setPen(QColor(C.TEXT_PRIMARY if available else C.TEXT_HINT))
-            painter.drawText(row.adjusted(53, 0, -5, 0),
-                             Qt.AlignmentFlag.AlignVCenter,
-                             str(index.data(Qt.ItemDataRole.DisplayRole) or ''))
+                size = _EFFECT_ICON_SIZE
+                icon_rect = QRect(rect.left() + 24, rect.top() + (rect.height() - size) // 2, size, size)
+                painter.setOpacity(1.0 if selected else 0.75)
+                icon.paint(painter, icon_rect, mode=QIcon.Mode.Normal if available else QIcon.Mode.Disabled)
+                painter.setOpacity(1.0)
+            color = C.TEXT_SECONDARY if selected else C.TEXT_LABEL
+            painter.setPen(QColor(color if available else C.TEXT_HINT))
+            text_rect = rect.adjusted(44, 0, -8, 0)
+        text = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, text_rect.width())
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter, text)
         painter.restore()
 
 
@@ -242,8 +254,12 @@ class ColorEffectsBrowser(QWidget):
         self.resource_list = _ResourceList()
         self.resource_list.setObjectName('effects_resource_list')
         self.resource_list.setFrameShape(QFrame.Shape.NoFrame)
-        self.resource_list.setItemDelegate(_ResolveEffectDelegate(self.resource_list))
-        self.resource_list.setIconSize(QSize(30, 22))
+        self.resource_list.setItemDelegate(_EffectLibraryDelegate(self.resource_list))
+        self.resource_list.setIconSize(QSize(_EFFECT_ICON_SIZE, _EFFECT_ICON_SIZE))
+        self.resource_list.setMouseTracking(True)
+        self.resource_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.resource_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.resource_list.setVerticalScrollBar(CompactVerticalScrollBar())
         self.resource_list.setDragEnabled(True)
         self.resource_list.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.resource_list.setDefaultDropAction(Qt.DropAction.CopyAction)
@@ -337,7 +353,7 @@ class ColorEffectsBrowser(QWidget):
         self._refresh_resources()
 
     def _collapse_all(self) -> None:
-        self._collapsed = {str(entry.get('category') or _tr('other', 'Other')) for entry in self._resources}
+        self._collapsed = {_category_key(entry) for entry in self._resources}
         self._refresh_resources()
 
     def set_resources(self, entries: list[dict[str, Any]]) -> None:
@@ -351,9 +367,9 @@ class ColorEffectsBrowser(QWidget):
         self.category_combo.blockSignals(True)
         self.category_combo.clear()
         self.category_combo.addItem(_tr('all_effects', 'All Effects'), '')
-        categories = sorted({str(entry.get('category') or _tr('other', 'Other')) for entry in self._resources})
+        categories = sorted({_category_key(entry) for entry in self._resources}, key=str.casefold)
         for category in categories:
-            self.category_combo.addItem(category, category)
+            self.category_combo.addItem(_category_label(category), category)
         index = self.category_combo.findData(current_category)
         self.category_combo.setCurrentIndex(max(0, index))
         self.category_combo.blockSignals(False)
@@ -452,33 +468,36 @@ class ColorEffectsBrowser(QWidget):
         self.resource_list.clear()
         previous_category = None
         visible_count = 0
-        for entry in sorted(self._resources, key=lambda e: (str(e.get('category', '')).casefold(), str(e.get('name', '')).casefold())):
-            entry_category = str(entry.get('category') or _tr('other', 'Other'))
+        entries = sorted(self._resources, key=lambda e: (
+            _category_key(e).casefold(), _category_key(e), str(e.get('name', '')).casefold(),
+        ))
+        for entry in entries:
+            entry_category = _category_key(entry)
             if category and entry_category != category:
                 continue
             if self.favorites_button.isChecked() and entry['id'] not in self._favorites:
                 continue
-            if query and query not in ' '.join(str(entry.get(k, '')) for k in ('name', 'category', 'description')).casefold():
+            category_label = _category_label(entry_category)
+            name = str(entry.get('name', entry['id']))
+            description = str(entry.get('description', ''))
+            if query and query not in ' '.join((name, entry_category, category_label, description)).casefold():
                 continue
+            collapsed = entry_category in self._collapsed and not query
             if not self._grid and entry_category != previous_category:
-                header = QListWidgetItem(('▸  ' if entry_category in self._collapsed and not query else '▾  ') + entry_category)
+                header = QListWidgetItem(category_label)
                 header.setFlags(Qt.ItemFlag.ItemIsEnabled)
                 header.setData(Qt.ItemDataRole.UserRole + 1, entry_category)
-                header.setData(Qt.ItemDataRole.UserRole + 2, entry_category in self._collapsed and not query)
-                header.setSizeHint(QSize(0, 35))
-                font = header.font()
-                font.setBold(True)
-                header.setFont(font)
+                header.setData(Qt.ItemDataRole.UserRole + 2, collapsed)
+                header.setSizeHint(QSize(0, 25))
                 self.resource_list.addItem(header)
                 previous_category = entry_category
             visible_count += 1
-            if not self._grid and entry_category in self._collapsed and not query:
+            if not self._grid and collapsed:
                 continue
-            name = str(entry.get('name', entry['id']))
-            item = QListWidgetItem(_effect_icon(entry['id']), ('★  ' if entry['id'] in self._favorites else '') + name)
-            item.setSizeHint(QSize(0, 36))
+            item = QListWidgetItem(color_effect_icon(entry['id']), ('★  ' if entry['id'] in self._favorites else '') + name)
+            item.setSizeHint(QSize(0, 22))
             item.setData(Qt.ItemDataRole.UserRole, entry)
-            item.setToolTip(name + '\n' + entry_category + '\n' + str(entry.get('description', '')))
+            item.setToolTip(name + '\n' + category_label + '\n' + description)
             if not entry.get('available', True):
                 item.setToolTip(item.toolTip() + '\n' + _tr('unavailable', 'Unavailable'))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
@@ -501,8 +520,9 @@ class ColorEffectsBrowser(QWidget):
         item = self.resource_list.currentItem()
         entry = item.data(Qt.ItemDataRole.UserRole) if item else None
         self.add_button.setEnabled(bool(self._editable and entry and entry.get('available', True)))
-        self.description_label.setText(str(entry.get('description') or entry.get('category', '')) if entry else
-                                       _tr('effects_hint', 'Drag an effect onto a node or an image connection.'))
+        description = (str(entry.get('description') or _category_label(_category_key(entry))) if entry else
+                       _tr('effects_hint', 'Drag an effect onto a node or an image connection.'))
+        self.description_label.setText(description)
 
     def _double_clicked(self, _item: QListWidgetItem) -> None:
         if not self._production_mode:

@@ -1638,7 +1638,6 @@
       "remove_from_project": "프로젝트에서 제거",
       "move_to_trash": "휴지통으로 이동",
       "trash_failed": "파일을 휴지통으로 이동하지 못했습니다. 에셋은 프로젝트에서 제거되었지만 파일은 디스크에 남아 있습니다.",
-      "quick_look_hint": "Space로 닫기 · 더블클릭으로 열기",
       "import_folder": "폴더 가져오기...",
       "select_folder": "가져올 폴더 선택",
       "shot": "샷:",

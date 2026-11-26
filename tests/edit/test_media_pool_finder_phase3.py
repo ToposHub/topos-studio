@@ -3,7 +3,6 @@
 Covers:
 - UpdateAssetProductionInfoCommand + EditProject.update_asset_production_info
 - Folder import filtering (_filter_valid_media_files expands directories)
-- Quick Look dialog construction
 - Bin properties dialog construction
 """
 
@@ -27,7 +26,6 @@ from features.edit.ui.media_pool_panel import (
     AssetPropertiesDialog,
     BinPropertiesDialog,
     MediaPoolPanel,
-    QuickLookDialog,
 )
 
 
@@ -106,18 +104,6 @@ class TestFolderImport:
         QTest.qWait(80)
         result = panel._filter_valid_media_files([str(tmp_path)])
         assert any(p.endswith("deep.png") for p in result)
-
-
-# ---------------------------------------------------------------------------
-# Quick Look dialog
-# ---------------------------------------------------------------------------
-
-def test_quick_look_dialog_constructs(qapp) -> None:
-    project, asset_id = _import(EditProject.create("P"), "ql.mp4")
-    asset = project.assets[asset_id]
-    dlg = QuickLookDialog(asset)
-    assert dlg.windowTitle() == "ql.mp4"
-    dlg.deleteLater()
 
 
 # ---------------------------------------------------------------------------

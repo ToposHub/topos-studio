@@ -216,16 +216,15 @@
     },
     "console": {
       "search": "Find channel",
-      "search_tip": "Search names or channel tags · Enter to locate · Esc to clear",
+      "search_prompt": "Channel name or tag",
+      "clear_search": "Clear channel search",
       "filter": "Channel view",
-      "filter_tip": "Filter the view; audio, routing and recording stay active",
       "all": "All",
       "audio": "Audio",
       "bus": "Buses",
       "solo": "Solo",
       "armed": "Armed",
       "count": "Visible channels / total",
-      "clear_solo": "Clear all Solo",
       "reset_peaks": "Reset all peak holds and clip indicators",
       "no_match": "No matching channels",
       "reset_view": "Reset channel view"

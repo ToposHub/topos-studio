@@ -40,7 +40,7 @@ from PyQt6.QtCore import (
     Qt, pyqtSignal, QUrl, QTimer, QSize, QRect, QModelIndex, QPoint,
     QAbstractListModel, QSortFilterProxyModel, QMimeData, QByteArray,
     QThreadPool, QObject, QRunnable, pyqtSlot, QItemSelectionModel,
-    QItemSelection, QEvent, QSettings,
+    QItemSelection, QEvent, QSettings, QPersistentModelIndex,
 )
 from PyQt6.QtGui import (
     QDragEnterEvent, QDragMoveEvent, QDropEvent, QMouseEvent,
@@ -74,7 +74,9 @@ from src.features.edit.core.timeline_v2 import (
     MEDIA_POOL_PREVIEW_ASSET_ID_KEY,
     MEDIA_POOL_PREVIEW_FRAME_KEY,
 )
+from src.features.edit.core.asset_source_range import get_asset_in_out
 from src.features.edit.core.asset_usage_index import build_asset_usage_index
+from src.features.edit.core.source_drag_payload import MIME_TYPE_SOURCE_CLIP
 from src.features.edit.core.library_reference import (
     LIBRARY_REFERENCE_MIME, deserialize_reference, excerpt_frame_range, source_matches,
 )
@@ -145,6 +147,7 @@ from src.shared.ui.dock_context_menu import (
 )
 
 if TYPE_CHECKING:
+    from src.features.edit.ui.source_viewer import SourceViewerWidget
     from .media_pool_presentation import ResolvePoolDelegate
 
 logger = logging.getLogger(__name__)
@@ -236,6 +239,7 @@ def build_media_pool_drag_mime(
     asset_ids: Optional[List[str]] = None,
     asset_paths: Optional[List[str]] = None,
     timeline_ids: Optional[List[str]] = None,
+    *, source_clip: bytes | None = None,
 ) -> QMimeData:
     """
     构建媒体池拖拽 MIME 数据 (统一 list/grid 模式).
@@ -244,6 +248,7 @@ def build_media_pool_drag_mime(
         asset_ids: Asset ID 列表（可选）
         asset_paths: Asset 路径列表（可选，用于 urls fallback）
         timeline_ids: Timeline ID 列表（可选，用于拖入 bin）
+        source_clip: 单个素材标记范围的 Source 剪辑载荷（可选）
 
     Returns:
         QMimeData 包含:
@@ -253,6 +258,8 @@ def build_media_pool_drag_mime(
         - text/uri-list: 文件 URLs（如果提供了 paths）
     """
     mime = QMimeData()
+    if source_clip is not None:
+        mime.setData(MIME_TYPE_SOURCE_CLIP, QByteArray(source_clip))
 
     # Asset MIME（保持向后兼容）
     if asset_ids:
@@ -1283,13 +1290,6 @@ class BinTreeWidget(QTreeWidget):
                 and item.flags() & Qt.ItemFlag.ItemIsEditable
             ):
                 self.editItem(item, 0)
-                event.accept()
-                return
-        # Space — toggle Quick Look on the selected asset (Finder behavior).
-        if event.key() == Qt.Key.Key_Space and event.modifiers() == Qt.KeyboardModifier.NoModifier:
-            panel = self._find_media_pool_panel()
-            if panel is not None:
-                panel._show_quick_look()
                 event.accept()
                 return
         # Escape — clear selection (Finder behavior).
@@ -2348,7 +2348,7 @@ class GridDelegate(QStyledItemDelegate):
             and asset.media_type == "video"
             and not is_subclip
         ):
-            hover_pixmap = self.view.hover_frame_for(asset.path)
+            hover_pixmap = self.view.hover_frame_for(asset)
         if hover_pixmap is not None:
             self._draw_thumbnail(painter, rect, hover_pixmap)
             return
@@ -3113,13 +3113,6 @@ class AssetTreeWidget(QTreeWidget):
             self.selectAll()
             event.accept()
             return
-        # Space — toggle Quick Look on the selected asset (Finder behavior).
-        if event.key() == Qt.Key.Key_Space and event.modifiers() == Qt.KeyboardModifier.NoModifier:
-            panel = self._find_media_pool_panel()
-            if panel is not None:
-                panel._show_quick_look()
-                event.accept()
-                return
         # Escape — clear selection (Finder behavior).
         if event.key() == Qt.Key.Key_Escape:
             self.clearSelection()
@@ -3366,6 +3359,7 @@ class AssetTreeWidget(QTreeWidget):
             asset_ids=asset_ids or None,
             asset_paths=asset_paths or None,
             timeline_ids=timeline_ids or None,
+            source_clip=panel.source_clip_for_drag(asset_ids, timeline_ids) if panel else None,
         )
 
         # Create drag pixmap (thumbnail preview)
@@ -3490,12 +3484,24 @@ class AssetListView(QListView):
         # video card.
         self._thumb_provider = ThumbnailProvider.instance()
         self._thumb_provider.frame_thumbnail_ready.connect(self._on_hover_frame_ready)
+        self._thumb_provider.work_suspended_changed.connect(self._on_hover_work_suspended)
         self._hover_path: Optional[str] = None
         self._hover_frame_index: Optional[int] = None
         # map path -> {frame_index: QPixmap} for the currently hovered asset.
         # AUD-20201: per-path cache is bounded below; only the currently
         # hovered video keeps frames (see _handle_hover_scrub/leaveEvent).
         self._hover_frames: dict[str, dict[int, QPixmap]] = {}
+        self._hover_preview_frame: int | None = None
+        self._hover_target: tuple[MediaAsset, int, int, int] | None = None
+        self._hover_inflight: tuple[str, int] | None = None
+        self._hover_last_request: tuple[str, int] | None = None
+        self._hover_index = QPersistentModelIndex()
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setInterval(40)
+        self._hover_timer.timeout.connect(self._request_hover_frame)
+        self.live_preview_enabled = True
+        self._range_drag: tuple[QPersistentModelIndex, bool, float] | None = None
+        self._range_preview_frame: int | None = None
         self.setMouseTracking(True)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -3505,6 +3511,10 @@ class AssetListView(QListView):
         normal click-select / drag-initiate flow still works.
         """
         if event.button() == Qt.MouseButton.LeftButton:
+            self._clear_hover_preview()
+            if event.modifiers() == Qt.KeyboardModifier.NoModifier and self._begin_range_drag(event.pos()):
+                event.accept()
+                return
             info_index = self._info_index_at(event.pos())
             if info_index.isValid():
                 self._info_pressed_key = (info_index.data(AssetListModel.ITEM_TYPE_ROLE), info_index.data(AssetListModel.ITEM_ID_ROLE))
@@ -3556,6 +3566,10 @@ class AssetListView(QListView):
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         """Grow the rubber band; the selection update is throttled."""
+        if self._range_drag is not None:
+            self._update_range_drag(event.pos())
+            event.accept()
+            return
         if self._info_pressed_key is not None:
             event.accept()
             return
@@ -3571,14 +3585,13 @@ class AssetListView(QListView):
             event.accept()
             return
         self._update_info_hover(event.pos())
-        # Inspecting the information badge must not scrub the underlying media.
         if event.buttons() == Qt.MouseButton.NoButton:
-            if self._info_index_at(event.pos()).isValid():
+            if self._range_handle_at(event.pos()) is not None:
+                self.viewport().setCursor(Qt.CursorShape.SizeHorCursor)
+                self._clear_hover_preview()
+            elif self._info_index_at(event.pos()).isValid():
                 self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
-                if self._hover_path is not None:
-                    self._hover_path = None
-                    self._hover_frame_index = None
-                    self.viewport().update()
+                self._clear_hover_preview()
             else:
                 self.viewport().unsetCursor()
                 self._handle_hover_scrub(event.pos())
@@ -3621,6 +3634,13 @@ class AssetListView(QListView):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         """End the rubber-band marquee."""
+        if self._range_drag is not None and event.button() == Qt.MouseButton.LeftButton:
+            self._update_range_drag(event.pos(), final=True)
+            self._range_drag = None
+            self._range_preview_frame = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
         if self._info_pressed_key is not None and event.button() == Qt.MouseButton.LeftButton:
             expected = self._info_pressed_key
             self._info_pressed_key = None
@@ -3669,96 +3689,185 @@ class AssetListView(QListView):
             return
         super().mouseDoubleClickEvent(event)
 
-    def leaveEvent(self, event: Any) -> None:
-        """Clear hover-scrub state when the cursor leaves the view."""
+    def leaveEvent(self, event: QEvent) -> None:
         self.viewport().unsetCursor()
         self._update_info_hover(None)
-        self._hover_path = None
-        self._hover_frame_index = None
-        # AUD-20201: the cursor left the view — release every cached scrub
-        # frame so long sessions don't accumulate pixmaps across assets.
-        self._hover_frames.clear()
-        self._update_for_hover_change()
+        self._clear_hover_preview()
         super().leaveEvent(event)
 
+    def hideEvent(self, event: QEvent) -> None:
+        self._clear_hover_preview()
+        self._range_drag = None
+        self._range_preview_frame = None
+        super().hideEvent(event)
+
+    def _clear_hover_preview(self) -> None:
+        self._hover_timer.stop()
+        self._hover_target = None
+        self._hover_last_request = None
+        if self._hover_path is not None:
+            self._hover_path = None
+            self._hover_frame_index = None
+            self._hover_preview_frame = None
+            self._hover_frames.clear()
+            if self._hover_index.isValid():
+                self.viewport().update(self.visualRect(QModelIndex(self._hover_index)))
+            self._hover_index = QPersistentModelIndex()
+
     def _handle_hover_scrub(self, pos: QPoint) -> None:
-        """Request the video frame under ``pos`` for hover-scrub preview."""
-        if not getattr(self, "live_preview_enabled", True):
-            return
-        model = self.model()
-        if model is None or self._project is None:
-            return
+        """Sample the poster under the pointer and keep only the latest request."""
         index = self.indexAt(pos)
-        if not index.isValid():
-            self._hover_path = None
-            self._hover_frame_index = None
-            return
         asset = index.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(asset, MediaAsset) or asset.media_type != "video":
-            self._hover_path = None
-            self._hover_frame_index = None
+        total = (asset.total_frames or asset.metadata.get("frame_count")) if isinstance(asset, MediaAsset) else None
+        delegate = self.itemDelegateForIndex(index) if index.isValid() else None
+        if (not self.live_preview_enabled or not isinstance(asset, MediaAsset)
+                or asset.media_type != "video" or asset.metadata.get("is_subclip")
+                or asset.is_offline or not isinstance(total, int) or total < 2
+                or not hasattr(delegate, "poster_rect")):
+            self._clear_hover_preview()
             return
-        total_frames = asset.metadata.get("frame_count") or asset.metadata.get("total_frames")
-        try:
-            total_frames = int(total_frames)
-        except (TypeError, ValueError):
-            total_frames = 0
-        if total_frames <= 0:
+        poster = delegate.poster_rect(self.visualRect(index))
+        if not poster.contains(pos) or poster.width() < 2:
+            self._clear_hover_preview()
             return
-        # Map horizontal position within the card to a frame index.
-        rect = self.visualRect(index)
-        if rect.width() <= 0:
+        if QPersistentModelIndex(index) != self._hover_index:
+            self._clear_hover_preview()
+            self._hover_path = asset.path
+            self._hover_index = QPersistentModelIndex(index)
+
+        fraction = (pos.x() - poster.left()) / (poster.width() - 1)
+        samples = min(total - 1, max(1, poster.width() // 3))
+        frame = round(round(fraction * samples) * (total - 1) / samples)
+        if frame != self._hover_frame_index:
+            self._hover_frame_index = frame
+            self._hover_target = (asset, frame, total, max(poster.width(), 128))
+            self.viewport().update(self.visualRect(index))
+        if not self._hover_timer.isActive():
+            self._hover_timer.start()
+            self._request_hover_frame()
+
+    def _request_hover_frame(self) -> None:
+        """Limit the view to one queued decoder request while coalescing motion."""
+        if self._hover_target is None or self._thumb_provider.is_thumbnail_work_suspended:
+            self._hover_timer.stop()
             return
-        ratio = max(0.0, min(1.0, (pos.x() - rect.left()) / rect.width()))
-        frame_index = int(ratio * (total_frames - 1))
-        if self._hover_path == asset.path and self._hover_frame_index == frame_index:
-            return  # Already showing this frame.
-        if self._hover_path is not None and self._hover_path != asset.path:
-            # AUD-20201: hover moved to another asset — drop the previous
-            # asset's scrub frames (bounded, single-path cache).
-            self._hover_frames.pop(self._hover_path, None)
-        self._hover_path = asset.path
-        self._hover_frame_index = frame_index
-        # If cached, update immediately; otherwise request async.
-        cached = self._hover_frames.get(asset.path, {}).get(frame_index)
-        if cached is None:
-            self._thumb_provider.get_frame_thumbnail(
-                asset.path, frame_index, total_frames,
-                icon_size=max(self.iconSize().width(), 128),
-                asset_id=asset.asset_id,
-            )
-        self._update_for_hover_change()
+        if self._hover_inflight in self._thumb_provider.pending_frame_requests:
+            return
+        self._hover_inflight = None
+        asset, frame, total, size = self._hover_target
+        key = (asset.path, frame)
+        if frame in self._hover_frames.get(asset.path, {}) or key == self._hover_last_request:
+            self._hover_timer.stop()
+            return
+        self._hover_inflight = key
+        self._hover_last_request = key
+        self._thumb_provider.get_frame_thumbnail(asset.path, frame, total, icon_size=size, asset_id=asset.asset_id)
+
+    def _on_hover_work_suspended(self, suspended: bool) -> None:
+        if suspended:
+            self._hover_timer.stop()
+            self._hover_inflight = None
+            self._hover_last_request = None
+        elif self._hover_target is not None:
+            self._hover_timer.start()
+            self._request_hover_frame()
 
     def _on_hover_frame_ready(self, path: str, frame_index: int, pixmap: QPixmap) -> None:
-        """Cache a frame thumbnail delivered by the provider and repaint."""
-        if pixmap is None:
+        """Keep useful frames and discard completions for a previous poster."""
+        if path != self._hover_path or pixmap is None or pixmap.isNull():
             return
         frames = self._hover_frames.setdefault(path, {})
         frames[frame_index] = pixmap
-        # AUD-20201: bound the per-path cache (FIFO by insertion order).
-        # Unbounded growth used to retain a full-size QPixmap for every frame
-        # ever scrubbed across, leaking tens of MB per long video.
         while len(frames) > self._HOVER_FRAMES_PER_PATH:
-            oldest_index = next(iter(frames))
-            frames.pop(oldest_index, None)
-        if self._hover_path == path and self._hover_frame_index == frame_index:
-            self._update_for_hover_change()
+            frames.pop(next(iter(frames)))
+        target = self._hover_frame_index
+        preview = self._hover_preview_frame
+        if target is not None and (preview not in frames or abs(frame_index - target) <= abs(preview - target)):
+            self._hover_preview_frame = frame_index
+            if self._hover_index.isValid():
+                self.viewport().update(self.visualRect(QModelIndex(self._hover_index)))
 
-    def hover_frame_for(self, path: str) -> Optional[QPixmap]:
-        """Return the cached hover-scrub frame for ``path``, if any."""
-        if self._hover_path != path:
+    def hover_frame_for(self, asset: MediaAsset) -> Optional[QPixmap]:
+        """Hold the last useful preview while the current target decodes."""
+        if self._hover_target is None or asset.asset_id != self._hover_target[0].asset_id:
             return None
-        frames = self._hover_frames.get(path)
-        if frames is None or self._hover_frame_index is None:
-            return None
-        return frames.get(self._hover_frame_index)
+        frames = self._hover_frames.get(asset.path, {})
+        return frames.get(self._hover_frame_index) or frames.get(self._hover_preview_frame)
 
-    def _update_for_hover_change(self) -> None:
-        """Repaint the viewport so the delegate picks up the new hover frame."""
-        self.viewport().update()
+    def hover_position_for(self, asset: MediaAsset) -> float | None:
+        if self._hover_target is None or asset.asset_id != self._hover_target[0].asset_id:
+            return None
+        _asset, frame, total, _size = self._hover_target
+        return frame / (total - 1)
+
+    def asset_range(self, index: QModelIndex) -> tuple[int, int, int] | None:
+        selection = self.selectionModel()
+        if selection is None or not selection.isSelected(index):
+            return None
+        panel = self._find_media_pool_panel()
+        asset = index.data(Qt.ItemDataRole.UserRole)
+        if panel is None or not isinstance(asset, MediaAsset):
+            return None
+        marks = panel.active_source_range(asset)
+        return marks if marks is not None and len(selection.selectedRows()) == 1 else None
+
+    def _range_handle_at(self, pos: QPoint) -> tuple[QModelIndex, bool, float] | None:
+        index = self.indexAt(pos)
+        marks = self.asset_range(index) if index.isValid() else None
+        if marks is None:
+            return None
+        delegate = self.itemDelegateForIndex(index)
+        if not hasattr(delegate, "range_rect"):
+            return None
+        bounds = delegate.range_rect(delegate.poster_rect(self.visualRect(index)), marks)
+        if abs(pos.y() - bounds.center().y()) > 11:
+            return None
+        right = abs(pos.x() - bounds.right()) < abs(pos.x() - bounds.left())
+        offset = pos.x() - (bounds.right() if right else bounds.left())
+        return (index, right, offset) if abs(offset) <= 6 else None
+
+    def _begin_range_drag(self, pos: QPoint) -> bool:
+        handle = self._range_handle_at(pos)
+        if handle is None:
+            return False
+        index, right, offset = handle
+        panel = self._find_media_pool_panel()
+        self._range_drag = (QPersistentModelIndex(index), right, offset)
+        self._range_preview_frame = None
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        self.viewport().setCursor(Qt.CursorShape.SizeHorCursor)
+        panel.source_range_edit_started.emit()
+        panel._source_range_viewer.pause()
+        return True
+
+    def _update_range_drag(self, pos: QPoint, *, final: bool = False) -> None:
+        if self._range_drag is None:
+            return
+        persistent, right, offset = self._range_drag
+        index = QModelIndex(persistent)
+        marks = self.asset_range(index) if index.isValid() else None
+        if marks is None:
+            return
+        total, first, last = marks
+        delegate = self.itemDelegateForIndex(index)
+        full = delegate.range_rect(delegate.poster_rect(self.visualRect(index)), (total, 0, total - 1))
+        if full.width() <= 0:
+            return
+        edge = round((pos.x() - offset - full.left()) * total / full.width())
+        start = first if right else max(0, min(last, edge))
+        end = max(first, min(total - 1, edge - 1)) if right else last
+        frame = end if right else start
+        viewer = self._find_media_pool_panel()._source_range_viewer
+        if (start, end) != (first, last) and viewer.set_source_range(start, end):
+            self._range_preview_frame = frame
+            viewer.preview_range_boundary(frame, final=final)
+        elif final and self._range_preview_frame is not None:
+            viewer.preview_range_boundary(self._range_preview_frame, final=True)
 
     def set_project(self, project: Optional[EditProject]) -> None:
         """Set the project reference for accessing asset data."""
+        if self._project is not project:
+            self._clear_hover_preview()
         self._project = project
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -3869,13 +3978,6 @@ class AssetListView(QListView):
                 self.selectAll()
             event.accept()
             return
-        # Space — toggle Quick Look on the selected asset (Finder behavior).
-        if event.key() == Qt.Key.Key_Space and event.modifiers() == Qt.KeyboardModifier.NoModifier:
-            panel = self._find_media_pool_panel()
-            if panel is not None:
-                panel._show_quick_look()
-                event.accept()
-                return
         # Escape — clear selection (Finder behavior).
         if event.key() == Qt.Key.Key_Escape:
             self.clearSelection()
@@ -4039,11 +4141,13 @@ class AssetListView(QListView):
         if not asset_ids and not timeline_ids:
             return
 
-        # Create MIME data using helper function (统一格式)
+        # Keep media pool formats for bins and add the explicit source range for the timeline.
+        panel = self._find_media_pool_panel()
         mime_data = build_media_pool_drag_mime(
             asset_ids=asset_ids or None,
             asset_paths=asset_paths or None,
             timeline_ids=timeline_ids or None,
+            source_clip=panel.source_clip_for_drag(asset_ids, timeline_ids) if panel else None,
         )
 
         # Create drag pixmap (thumbnail preview)
@@ -4655,92 +4759,6 @@ class ConsolidateOptionsDialog(QDialog):
         )
 
 
-class QuickLookDialog(QDialog):
-    """macOS-Finder-style Quick Look floating preview.
-
-    Shows a large thumbnail of the asset plus its name and key metadata.
-    Space or Escape closes it (toggle behavior). Double-clicking the
-    thumbnail defers to the full Source Viewer open.
-    """
-
-    def __init__(self, asset: MediaAsset, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(asset.display_name)
-        self.setModal(False)
-        self.setWindowFlags(
-            Qt.WindowType.Tool
-            | Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Dialog
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
-        self._asset = asset
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-
-        # Thumbnail label (scaled large).
-        self._image_label = QLabel()
-        self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._image_label.setMinimumSize(480, 320)
-        self._image_label.setStyleSheet("background-color: #1a1b1e; border-radius: 6px;")
-        layout.addWidget(self._image_label, 1)
-
-        # Name + meta line.
-        self._name_label = QLabel(asset.display_name)
-        self._name_label.setStyleSheet("color: #e8e8e8; font-size: 14px; font-weight: bold;")
-        layout.addWidget(self._name_label)
-
-        meta_parts: list[str] = []
-        res = asset.resolution_str
-        if res and res != "-":
-            meta_parts.append(res)
-        if asset.duration_seconds is not None:
-            meta_parts.append(self._format_duration(asset.duration_seconds))
-        if asset.fps is not None:
-            meta_parts.append(f"{asset.fps:.2f} fps")
-        self._meta_label = QLabel("  ·  ".join(meta_parts) if meta_parts else asset.media_type)
-        self._meta_label.setStyleSheet("color: #999;")
-        layout.addWidget(self._meta_label)
-
-        # Hint.
-        hint = QLabel(I18N.tr("edit.media_pool.quick_look_hint", "Space to close · Double-click to open"))
-        hint.setStyleSheet("color: #666; font-size: 11px;")
-        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(hint)
-
-        self.setStyleSheet("QuickLookDialog { background-color: #2a2b2e; }")
-
-        self._thumb_provider = ThumbnailProvider.instance()
-        self._thumb_provider.thumbnail_ready.connect(self._on_thumb_ready)
-        self._thumb_provider.get_thumbnail(asset.path, 512)
-
-    def _on_thumb_ready(self, path: str, pixmap: QPixmap) -> None:
-        if path != self._asset.path or pixmap is None:
-            return
-        scaled = pixmap.scaled(
-            640, 480,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self._image_label.setPixmap(scaled)
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        # Space or Escape closes the Quick Look (Finder behavior).
-        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape, Qt.Key.Key_Return):
-            self.close()
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    @staticmethod
-    def _format_duration(seconds: float) -> str:
-        minutes = int(seconds // 60)
-        secs = seconds % 60
-        if minutes > 0:
-            return f"{minutes}:{secs:05.2f}"
-        return f"{secs:.2f}s"
-
-
 class BinPropertiesDialog(QDialog):
     """Read-only properties for a bin (Finder 'Get Info' for a folder).
 
@@ -4834,6 +4852,7 @@ class MediaPoolPanel(QWidget):
         timeline_settings_requested: User requested to edit an existing timeline
         timeline_delete_requested: User requested to delete an existing timeline
         asset_selected: An asset was selected in the pool (asset_id)
+        asset_preview_requested: User clicked a single selected asset, including the current one
         timeline_selected: A timeline was selected in the pool (timeline_id)
         project_changed: Project data changed (EditProject instance)
 
@@ -4861,6 +4880,9 @@ class MediaPoolPanel(QWidget):
     # survive the undo/redo cycle. Payload: (timeline_ids, callback).
     timeline_command_snapshot_requested = pyqtSignal(list, object)
     asset_selected = pyqtSignal(str)           # asset_id
+    asset_preview_requested = pyqtSignal(str)  # asset_id
+    source_range_edit_started = pyqtSignal()
+    _source_range_viewer: SourceViewerWidget | None = None
     timeline_selected = pyqtSignal(str)        # timeline_id (inspect only)
     project_changed = pyqtSignal(object)       # EditProject
     # F2.7：解释覆盖已提交（asset_ids, fps）——控制器可提示应用到当前
@@ -4933,10 +4955,6 @@ class MediaPoolPanel(QWidget):
         self._proxy_session_generation: int = 0
         self._proxy_job_generations: Dict[str, int] = {}
         self._proxy_job_signatures: dict[str, tuple[int, int]] = {}
-        # AUD-20200: the panel tracks its Quick Look dialog explicitly.
-        # findChild(QuickLookDialog) never matched because the dialog's QObject
-        # parent is the top-level window, not this panel (nested in a dock).
-        self._quick_look_dialog: Optional[QuickLookDialog] = None
         self._pool_info_popup: Optional[QWidget] = None
         self._pool_info_key: Optional[tuple[str, str]] = None
         self._offline_status_signature: Optional[tuple[tuple[str, str, bool, bool], ...]] = None
@@ -5236,6 +5254,7 @@ class MediaPoolPanel(QWidget):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._on_tree_context_menu)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.itemClicked.connect(self._on_tree_asset_clicked)
         self.tree.itemDoubleClicked.connect(self._on_tree_double_clicked)
         self.tree.itemChanged.connect(self.tree._on_item_data_changed)
         self.tree.setDragEnabled(True)
@@ -5461,13 +5480,70 @@ class MediaPoolPanel(QWidget):
         self._refresh_tree()
 
     def _set_live_preview(self, enabled: bool) -> None:
-        if self.grid_view is not None:
-            self.grid_view.live_preview_enabled = enabled
-            if not enabled:
-                self.grid_view._hover_path = None
-                self.grid_view._hover_frame_index = None
-                self.grid_view._hover_frames.clear()
-                self.grid_view.viewport().update()
+        for view in (self.grid_view, self.metadata_shelf):
+            if view is not None:
+                view.live_preview_enabled = enabled
+                if not enabled:
+                    view._clear_hover_preview()
+
+    def bind_source_range_viewer(self, viewer: SourceViewerWidget) -> None:
+        if self._source_range_viewer is viewer:
+            return
+        if self._source_range_viewer is not None:
+            self._source_range_viewer.range_changed.disconnect(self._repaint_source_range)
+        self._source_range_viewer = viewer
+        viewer.range_changed.connect(self._repaint_source_range)
+        self._repaint_source_range()
+
+    def _repaint_source_range(self, *_marks: int | None) -> None:
+        for view in (self.grid_view, self.metadata_shelf):
+            if view is not None and view.isVisible():
+                for index in view.selectionModel().selectedRows():
+                    view.viewport().update(view.visualRect(index))
+
+    def active_source_range(self, asset: MediaAsset) -> tuple[int, int, int] | None:
+        viewer = self._source_range_viewer
+        if (viewer is None or viewer.preview_only or viewer.current_asset is None
+                or viewer.current_asset.asset_id != asset.asset_id
+                or asset.media_type not in ("video", "audio", "image_sequence")
+                or asset.metadata.get("is_subclip") or asset.is_offline or viewer.total_frames < 2):
+            return None
+        total = viewer.total_frames
+        first = viewer.in_point if viewer.in_point is not None else 0
+        last = viewer.out_point if viewer.out_point is not None else total - 1
+        return total, first, last
+
+    def _append_clear_source_range_action(self, menu: QMenu, asset: MediaAsset) -> None:
+        if asset.media_type not in ("video", "audio", "image_sequence") or asset.metadata.get("is_subclip"):
+            return
+        action = menu.addAction(I18N.tr("timeline.range.clear", "Clear Range"))
+        action.setObjectName("clearSourceRange")
+        viewer = self._source_range_viewer
+        action.setEnabled(
+            viewer is not None and self.active_source_range(asset) is not None
+            and (viewer.in_point is not None or viewer.out_point is not None)
+        )
+        action.triggered.connect(lambda: self._clear_source_range(asset))
+
+    def _clear_source_range(self, asset: MediaAsset) -> None:
+        viewer = self._source_range_viewer
+        if viewer is not None and self.active_source_range(asset) is not None:
+            viewer.clear_in_out()
+
+    def source_clip_for_drag(self, asset_ids: list[str], timeline_ids: list[str]) -> bytes | None:
+        viewer = self._source_range_viewer
+        if len(asset_ids) != 1 or timeline_ids or self._project is None or viewer is None:
+            return None
+        asset = self._project.assets.get(asset_ids[0])
+        if asset is None or self.active_source_range(asset) is None:
+            return None
+        if (viewer.in_point is None and viewer.out_point is None
+                and get_asset_in_out(asset) == (None, None)):
+            return None
+        # An explicitly cleared monitor range overrides any stored asset
+        # marks for this drag, just as a newly marked monitor range does.
+        payload, _reason = viewer.source_drag_payload_for_intent("av")
+        return payload
 
     def _set_search_scope(self, all_bins: bool) -> None:
         self._search_all_bins = all_bins
@@ -5632,6 +5708,7 @@ class MediaPoolPanel(QWidget):
             self.grid_view.selectionModel().selectionChanged.connect(
                 self._on_grid_selection_changed
             )
+            self.grid_view.clicked.connect(self._on_grid_asset_clicked)
             self.grid_view.doubleClicked.connect(self._on_grid_double_clicked)
 
     def _connect_thumbnail_signals(self) -> None:
@@ -7255,6 +7332,11 @@ class MediaPoolPanel(QWidget):
         asset_id = getattr(asset, "asset_id", None)
         if asset_id:
             self.asset_selected.emit(asset_id)
+
+    def _on_grid_asset_clicked(self, index: QModelIndex) -> None:
+        if (not self._updating and index.data(AssetListModel.ITEM_TYPE_ROLE) == "asset"
+                and self.grid_view.selectionModel().selectedIndexes() == [index]):
+            self.asset_preview_requested.emit(index.data(AssetListModel.ITEM_ID_ROLE))
 
     def _on_grid_double_clicked(self, index: QModelIndex) -> None:
         """Handle grid view item double-click - asset: open in Source Viewer, comp_clip: open Composite, timeline: switch, bin: enter（V-09）"""
@@ -9125,6 +9207,11 @@ class MediaPoolPanel(QWidget):
         if asset_id:
             self.asset_selected.emit(asset_id)
 
+    def _on_tree_asset_clicked(self, item: QTreeWidgetItem, _column: int) -> None:
+        if (not self._updating and item.data(0, Qt.ItemDataRole.UserRole + 1) == "asset"
+                and self.tree.selectedItems() == [item]):
+            self.asset_preview_requested.emit(item.data(0, Qt.ItemDataRole.UserRole))
+
     def _selected_pool_item_key(self) -> Optional[tuple[str, str]]:
         """Capture the current asset/timeline selection before a model reset."""
         if self._view_mode == ViewMode.LIST:
@@ -9404,6 +9491,7 @@ class MediaPoolPanel(QWidget):
             if item_type == "asset":
                 asset = self._project.assets.get(item_id) if self._project else None
                 if asset:
+                    self._append_clear_source_range_action(menu, asset)
                     self._append_professional_audio_editor_action(menu, asset)
                     # Relink (for all assets, emphasized for offline)
                     if asset.is_offline:
@@ -9797,6 +9885,7 @@ class MediaPoolPanel(QWidget):
         if item_type == "asset":
             asset = self.asset_model.data(index, Qt.ItemDataRole.UserRole)
             if isinstance(asset, MediaAsset):
+                self._append_clear_source_range_action(menu, asset)
                 self._append_professional_audio_editor_action(menu, asset)
                 # Relink (for all assets, emphasized for offline)
                 if asset.is_offline:
@@ -10806,58 +10895,6 @@ class MediaPoolPanel(QWidget):
             self._project.bins[bin_id], self._project, self._get_top_level_widget()
         )
         dialog.exec()
-
-    def _show_quick_look(self) -> None:
-        """Toggle the Quick Look floating preview for the selected asset.
-
-        Finder-style: press Space on a selected asset to pop a large preview;
-        press Space again (or Esc) to close.
-        """
-        if not self._project:
-            return
-        # AUD-20200: toggle via the panel-tracked instance (Space closes the
-        # open Quick Look, Finder-style). The old findChild() lookup searched
-        # only this panel's subtree while the dialog's parent is the top-level
-        # window, so it never found the open dialog — every Space press leaked
-        # another QuickLookDialog.
-        existing = self._quick_look_dialog
-        if existing is not None:
-            self._quick_look_dialog = None
-            was_visible = False
-            try:
-                was_visible = existing.isVisible()
-                existing.close()
-                existing.deleteLater()
-            except RuntimeError:
-                pass  # underlying C++ object already destroyed elsewhere
-            if was_visible:
-                return
-        asset_id = None
-        if self._view_mode != ViewMode.LIST and self.grid_view is not None:
-            sel = self.grid_view.selectionModel()
-            if sel is not None:
-                for idx in sel.selectedRows():
-                    if idx.data(AssetListModel.ITEM_TYPE_ROLE) == "asset":
-                        asset_id = idx.data(AssetListModel.ITEM_ID_ROLE)
-                        break
-        elif self.tree is not None:
-            for item in self.tree.selectedItems():
-                if item.data(0, Qt.ItemDataRole.UserRole + 1) == "asset":
-                    asset_id = item.data(0, Qt.ItemDataRole.UserRole)
-                    break
-        if not asset_id:
-            return
-        asset = self._project.assets.get(asset_id)
-        if asset is None:
-            return
-        dlg = QuickLookDialog(asset, self._get_top_level_widget())
-        dlg.destroyed.connect(self._on_quick_look_destroyed)
-        dlg.show()
-        self._quick_look_dialog = dlg
-
-    def _on_quick_look_destroyed(self, _obj: object = None) -> None:
-        """Drop the Quick Look reference when the dialog is destroyed."""
-        self._quick_look_dialog = None
 
     def _on_new_bin_clicked(self) -> None:
         """Handle New Bin button click."""

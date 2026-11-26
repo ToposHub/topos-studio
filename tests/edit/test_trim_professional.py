@@ -5,7 +5,6 @@
 - 键盘 ,/. 单帧步进（Shift=入点、Alt=多帧），Trim/Ripple 工具分流
 - 手柄余量诊断（head/tail）供 UI 与钳制共用
 - "对齐到最近标记" snap 语义
-- Trim Monitor 显示 cut 两侧 TC + Δ + 手柄
 """
 
 from __future__ import annotations
@@ -453,19 +452,3 @@ class TestTrimNumericDialog:
         dialog = TrimNumericDialog(None, bounds_for=lambda e, m: (-9, 9),
                                    can_roll=False)
         assert dialog._mode_combo.count() == 2
-
-
-class TestTrimMonitorDialog:
-
-    def test_roll_and_trim_update(self, qapp):
-        from src.features.edit.ui.trim_numeric_dialog import TrimMonitorDialog
-        monitor = TrimMonitorDialog()
-        monitor.update_roll("00:00:04:00", "00:00:04:02", 2, headroom=(30, 10))
-        assert monitor._label_a.text() == "00:00:04:00"
-        assert monitor._label_b.text() == "00:00:04:02"
-        assert "+2" in monitor._delta_label.text()
-        assert "30" in monitor._info_label.text()
-        monitor.update_trim("00:00:01:00", -5, headroom=(3, 7))
-        assert monitor._label_a.text() == "00:00:01:00"
-        assert monitor._label_b.text() == "—"
-        assert "-5" in monitor._delta_label.text()

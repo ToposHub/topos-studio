@@ -550,11 +550,11 @@ class DockLayoutMixin:
                     self.edit_viewport.program_stop_requested.connect(stop)
                     controller.frame_changed.connect(self.edit_viewport.set_program_position)
                 self.edit_page.timeline_display_changed.connect(self._sync_edit_viewport_timeline)
-                self.edit_viewport.bind_timeline_widget(
-                    self.timeline_panel.get_timeline_view().viewport()
-                )
+                self.edit_viewport.bind_timeline_widget(self.timeline_panel)
+                timeline_view = self.timeline_panel.get_timeline_view()
+                timeline_view.range_display_changed.connect(self.edit_viewport.set_program_range)
                 self._sync_edit_viewport_timeline(
-                    self.timeline_panel.get_timeline_view().get_timeline()
+                    timeline_view.get_timeline()
                 )
 
             # I01（复查计划）：全入口播放仲裁。协调器一次性安装（所有权归
@@ -661,9 +661,8 @@ class DockLayoutMixin:
         # Connect MediaPoolPanel double-click to Source Viewer (P3.1)
         if self._edit_available and self.media_pool_panel is not None:
             self.media_pool_panel.asset_double_clicked.connect(self._on_asset_double_clicked)
-            # Single-click preview: load asset into Source Viewer without
-            # stealing focus or switching pages (Finder-like quick preview).
             self.media_pool_panel.asset_selected.connect(self._on_asset_selected)
+            self.media_pool_panel.asset_preview_requested.connect(self._on_asset_preview_requested)
 
         # Connect MediaPoolPanel right-click "Add to Timeline"
         if self._edit_available and self.media_pool_panel is not None:
@@ -857,13 +856,15 @@ class DockLayoutMixin:
                 # Tabify with properties so the three right-area panels stack.
                 self.tabifyDockWidget(self.dock_properties, self.dock_caption_workspace)
 
-            # P1-10: ADR Take Sheet - Right area, tabified with Properties
-            # (same stack as Captions; default hidden, open via Panels menu or
-            # the Audio workspace preset).
+            # Mixer hosts the same ADR widget that Edit embeds in Subtitles.
             if self.adr_take_sheet_panel is not None:
+                adr_host = QWidget()
+                adr_layout = QVBoxLayout(adr_host)
+                adr_layout.setContentsMargins(0, 0, 0, 0)
+                adr_layout.addWidget(self.adr_take_sheet_panel)
                 self.dock_adr_take_sheet = create_custom_dock(
                     I18N.tr("panel.adr_take_sheet", "ADR / Takes"),
-                    self.adr_take_sheet_panel, "dockAdrTakeSheet"
+                    adr_host, "dockAdrTakeSheet"
                 )
                 self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
                                    self.dock_adr_take_sheet)
@@ -1420,6 +1421,9 @@ class DockLayoutMixin:
         self._timeline_recording_view = view
         view.track_record_requested.connect(self._on_mixer_timeline_record_requested)
         view.track_recording_input_requested.connect(self._on_mixer_input_requested)
+        recording_mode = getattr(self, "_on_timeline_recording_mode_requested", None)
+        if callable(recording_mode) and hasattr(timeline, "recording_mode_requested"):
+            timeline.recording_mode_requested.connect(recording_mode)
         viewport = getattr(self, "edit_viewport", None)
         if viewport is not None:
             viewport.program_record_requested.connect(record)
@@ -1616,9 +1620,19 @@ class DockLayoutMixin:
         self.timeline_panel.get_timeline_view().setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _show_audio_adr_dock(self) -> None:
-        dock = getattr(self, "dock_adr_take_sheet", None)
-        if dock is None or self.current_page not in ("Edit", "Mixer"):
+        if self.current_page == "Edit":
+            effects = getattr(self, "edit_effects_panel", None)
+            effects_dock = getattr(self, "dock_edit_effects", None)
+            if effects is not None and effects_dock is not None:
+                self._sync_adr_panel_host()
+                effects.select_subtitles()
+                effects_dock.show()
+                effects_dock.raise_()
             return
+        dock = getattr(self, "dock_adr_take_sheet", None)
+        if dock is None or self.current_page != "Mixer":
+            return
+        self._sync_adr_panel_host()
         # Qt drops tab group membership while every dock in the group is
         # hidden, so tabifiedDockWidgets() cannot tell where the ADR dock
         # lives. Fall back to its area: on Mixer the right stack is reserved
@@ -1627,6 +1641,27 @@ class DockLayoutMixin:
             self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
         dock.show()
         dock.raise_()
+
+    def _sync_adr_panel_host(self) -> None:
+        panel = getattr(self, "adr_take_sheet_panel", None)
+        dock = getattr(self, "dock_adr_take_sheet", None)
+        if panel is None or dock is None:
+            return
+        effects = getattr(self, "edit_effects_panel", None)
+        if self.current_page == "Edit" and effects is not None:
+            # Layouts saved before the move can still open the standalone ADR dock.
+            reopen_subtitles = not dock.isHidden()
+            dock.hide()
+            effects.host_voiceover_panel(panel)
+            self._wire_adr_panel()
+            if reopen_subtitles and (effects_dock := getattr(self, "dock_edit_effects", None)) is not None:
+                effects.select_subtitles()
+                effects_dock.show()
+                effects_dock.raise_()
+        elif self.current_page == "Mixer" and panel.parentWidget() is not dock.widget():
+            panel.leave_caption_workspace()
+            dock.widget().layout().addWidget(panel)
+            panel.show()
 
     def _on_adr_dock_visibility_changed(self, visible: bool) -> None:
         if visible:
@@ -3265,16 +3300,21 @@ class DockLayoutMixin:
         """
         if self._is_image_library_page():
             return
-        if dock.objectName() in ("dockEditEffects", "dockAudioClipEditor"):
-            panel = (getattr(self, "edit_effects_panel", None) if dock.objectName() == "dockEditEffects"
-                     else dock.widget())
-            show_menu = getattr(panel, "show_unified_context_menu", None)
-            if callable(show_menu):
-                show_menu(dock.mapToGlobal(pos))
-                return
+        name = dock.objectName()
+        panel = None
+        if name == "dockEditEffects":
+            panel = getattr(self, "edit_effects_panel", None)
+        elif name == "dockAudioClipEditor":
+            panel = dock.widget()
+        elif dock in (getattr(self, "dock_audio_mixer", None), getattr(self, "dock_audio_console", None)):
+            panel = getattr(self, "audio_mixer_panel", None)
+        show_menu = getattr(panel, "show_unified_context_menu", None)
+        if callable(show_menu):
+            show_menu(dock.mapToGlobal(pos))
+            return
 
         # Skip context menu for docks that have their own internal menus
-        if dock.objectName() in ("dockCurves", "dockMasks", "dockEditTimeline"):
+        if name in ("dockCurves", "dockMasks", "dockEditTimeline"):
             return
 
         menu = QMenu(self)
@@ -3804,6 +3844,8 @@ class DockLayoutMixin:
         focus = dock_map.get(preset.focus_dock) if preset.focus_dock else None
         if focus is not None:
             focus.raise_()
+        if preset_id == "audio" and (effects := getattr(self, "edit_effects_panel", None)) is not None:
+            effects.select_subtitles()
 
         # 6) 持久化到两套布局系统 + 遵守页面 dock 可见性契约。
         self._enforce_page_dock_visibility()
@@ -4332,7 +4374,11 @@ class DockLayoutMixin:
         mixer_active = self.current_page == "Mixer"
         adr = getattr(self, "dock_adr_take_sheet", None)
         if adr is not None:
-            adr.toggleViewAction().setEnabled(self.current_page in ("Edit", "Mixer"))
+            self._sync_adr_panel_host()
+            adr.toggleViewAction().setEnabled(mixer_active)
+            adr.toggleViewAction().setVisible(mixer_active)
+            if not mixer_active:
+                adr.hide()
         if getattr(getattr(self, "mixer_page", None), "project_backed", False):
             self.dock_audio_mixer.toggleViewAction().setEnabled(not mixer_active)
         for dock in mixer_docks:
@@ -4497,10 +4543,8 @@ class DockLayoutMixin:
         viewport = getattr(self, "edit_viewport", None)
         if viewport is None:
             return
-        from src.features.edit.core.timeline_v2 import effective_timeline_duration_frames
-
-        duration = effective_timeline_duration_frames(timeline) if timeline is not None else 0
-        viewport.set_program_range(duration, getattr(timeline, "fps", 24.0))
+        duration, start, end = self.timeline_panel.get_timeline_view().get_range_presentation(timeline)
+        viewport.set_program_range(duration, getattr(timeline, "fps", 24.0), start, end)
 
     def _setup_edit_viewport_preferences(self) -> None:
         """Restore the versioned display preference before observing UI changes."""

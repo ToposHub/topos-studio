@@ -6,8 +6,8 @@ from collections.abc import Collection, Mapping
 from typing import Any
 
 from PyQt6.QtCore import QPoint, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QShortcut
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtGui import QActionGroup, QColor, QKeySequence, QShortcut
+from PyQt6.QtWidgets import QHBoxLayout, QInputDialog, QLabel, QMenu, QSizePolicy, QToolButton, QWidget
 
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer import AudioMixerPanel
@@ -18,10 +18,11 @@ from src.shared.ui.audio_mixer.track_mixer_widget import (
     TrackMixerWidget,
     linear_to_db,
 )
+from src.shared.ui.dock_context_menu import add_dock_management_actions, find_parent_dock
 from src.shared.ui.style_sheet import C
 
 from .console_controls import ACCENT_CYAN, EditableValuePill, LevelMeter, StudioFader, format_db
-from .workspace_style import compact_combo, TOOL_QSS
+from .workspace_style import compact_combo
 
 
 STUDIO_STRIP_WIDTH = 96
@@ -37,7 +38,7 @@ class StudioChannelStrip(TrackMixerWidget):
 
     def __init__(
         self, track_id: str, track_name: str, track_tag: str, parent: QWidget,
-        *, is_master: bool,
+        *, is_master: bool, require_recording_mode: bool = False,
     ) -> None:
         self._drag_start_db: float | None = None
         self._meter_gr = 0.0
@@ -54,6 +55,7 @@ class StudioChannelStrip(TrackMixerWidget):
         self._recording_bus = False
         self._recording_busy = False
         self._recording_workflow_active = False
+        self._requires_recording_mode = require_recording_mode
         self._legacy_arm_enabled = not is_master and self._monitor_btn.isEnabledTo(self)
         self._legacy_arm_tooltip = "" if is_master else self._monitor_btn.toolTip()
         self._recording_input_row = QWidget(self)
@@ -169,9 +171,13 @@ class StudioChannelStrip(TrackMixerWidget):
         if not self._recording_workflow_active:
             if not self._is_master:
                 self._monitor_btn.show()
-                self._monitor_btn.setEnabled(self._legacy_arm_enabled)
-                self._monitor_btn.setToolTip(self._legacy_arm_tooltip)
-                self._monitor_btn.setAccessibleName(self._legacy_arm_tooltip)
+                self._monitor_btn.setEnabled(self._legacy_arm_enabled and not self._requires_recording_mode)
+                tooltip = (
+                    I18N.tr("mixer.record.enable_mode", "Enable Recording Mode in the timeline")
+                    if self._requires_recording_mode else self._legacy_arm_tooltip
+                )
+                self._monitor_btn.setToolTip(tooltip)
+                self._monitor_btn.setAccessibleName(tooltip)
             return
 
         button = self.recording_input_button
@@ -355,7 +361,8 @@ class StudioAudioMixerPanel(AudioMixerPanel):
     track_solo_safe_requested = pyqtSignal(str, bool)
     recover_recording_requested = pyqtSignal()
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, require_recording_mode: bool = False) -> None:
+        self.requires_recording_mode = require_recording_mode
         self._recording_inputs: dict[str, str] = {}
         self._record_armed_ids: frozenset[str] = frozenset()
         self._recording_busy = False
@@ -364,103 +371,64 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         self._bus_channel_ids: set[str] = set()
         self._routing_view_tracks: list[dict[str, Any]] = []
         self._routing_overview = None
+        self._channel_query = ""
+        self._channel_view = "all"
         super().__init__(parent)
-        self._init_channel_navigation()
-
-    def _init_channel_navigation(self) -> None:
-        toolbar = QWidget(self)
-        toolbar.setObjectName("mixerChannelNavigation")
-        toolbar_layout = QVBoxLayout(toolbar)
-        toolbar_layout.setContentsMargins(4, 3, 4, 3)
-        toolbar_layout.setSpacing(2)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(4)
-        toolbar_layout.addLayout(row)
-        view_row = QHBoxLayout()
-        view_row.setSpacing(4)
-        toolbar_layout.addLayout(view_row)
-        self.channel_search = QLineEdit(toolbar)
-        self.channel_search.setObjectName("mixerChannelSearch")
-        search_label = I18N.tr("mixer.console.search", "Find channel")
-        self.channel_search.setPlaceholderText(search_label)
-        self.channel_search.setAccessibleName(search_label)
-        self.channel_search.setToolTip(I18N.tr("mixer.console.search_tip", "Search names or channel tags · Enter to locate · Esc to clear"))
-        self.channel_search.setClearButtonEnabled(True)
-        self.channel_search.setMinimumWidth(45)
-        self.channel_search.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
-        self.channel_search.textChanged.connect(self._apply_channel_filter)
-        self.channel_search.returnPressed.connect(self._locate_first_channel)
-        row.addWidget(self.channel_search, 1)
-        routing_button = QToolButton(toolbar)
-        routing_button.setText("⇄")
-        routing_button.setAccessibleName(I18N.tr("mixer.routing.overview", "Routing overview"))
-        routing_button.setToolTip(routing_button.accessibleName())
-        routing_button.clicked.connect(self.open_routing_overview)
-        self.routing_overview_button = routing_button
-        row.addWidget(routing_button)
-        self.channel_filter = compact_combo()
-        self.channel_filter.setObjectName("mixerChannelFilter")
-        self.channel_filter.setAccessibleName(I18N.tr("mixer.console.filter", "Channel view"))
-        self.channel_filter.setToolTip(I18N.tr("mixer.console.filter_tip", "Filter the view; audio, routing and recording stay active"))
-        for key, fallback in (("all", "All"), ("audio", "Audio"), ("bus", "Buses"),
-                              ("solo", "Solo"), ("armed", "Armed")):
-            self.channel_filter.addItem(I18N.tr(f"mixer.console.{key}", fallback), key)
-        self.channel_filter.setFixedWidth(76)
-        self.channel_filter.currentIndexChanged.connect(self._apply_channel_filter)
-        view_row.addWidget(self.channel_filter)
-        self.channel_count = QLabel(toolbar)
-        self.channel_count.setAccessibleName(I18N.tr("mixer.console.count", "Visible channels / total"))
-        view_row.addWidget(self.channel_count)
-        view_row.addStretch()
-        self.clear_solo_button = QToolButton(toolbar)
-        self.clear_solo_button.setText("S×")
-        self.clear_solo_button.setAccessibleName(I18N.tr("mixer.console.clear_solo", "Clear all Solo"))
-        self.clear_solo_button.setToolTip(self.clear_solo_button.accessibleName())
-        self.clear_solo_button.clicked.connect(self.clear_all_solo)
-        view_row.addWidget(self.clear_solo_button)
-        self.reset_peaks_button = QToolButton(toolbar)
-        self.reset_peaks_button.setText("↺")
-        self.reset_peaks_button.setAccessibleName(I18N.tr("mixer.console.reset_peaks", "Reset all peak holds and clip indicators"))
-        self.reset_peaks_button.setToolTip(self.reset_peaks_button.accessibleName())
-        self.reset_peaks_button.clicked.connect(self.reset_peak_holds)
-        view_row.addWidget(self.reset_peaks_button)
-        self.console_options_button = QToolButton(toolbar)
-        self.console_options_button.setText("⋯")
-        self.console_options_button.setAccessibleName(I18N.tr("audio.mixer.options", "Mixer options"))
-        self.console_options_button.setToolTip(self.console_options_button.accessibleName())
-        self.console_options_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu = QMenu(self.console_options_button)
-        menu.aboutToShow.connect(lambda: self._refresh_navigation_menu(menu))
-        self.console_options_button.setMenu(menu)
-        row.addWidget(self.console_options_button)
-        for button in (routing_button, self.clear_solo_button, self.reset_peaks_button, self.console_options_button):
-            button.setFixedSize(24, 24)
-            button.setStyleSheet(TOOL_QSS + f"QToolButton {{ color: {C.TEXT_PRIMARY}; }}")
-        self.layout().insertWidget(0, toolbar)
         self.channel_empty_label = QLabel(I18N.tr("mixer.console.no_match", "No matching channels"))
         self.channel_empty_label.setWordWrap(True)
         self.channel_empty_label.setMaximumWidth(180)
         self._tracks_layout.addWidget(self.channel_empty_label)
         self._find_channel_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
         self._find_channel_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
-        self._find_channel_shortcut.activated.connect(self._focus_channel_search)
-        self._clear_search_shortcut = QShortcut(QKeySequence("Escape"), self.channel_search)
-        self._clear_search_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
-        self._clear_search_shortcut.activated.connect(self._clear_channel_search)
+        self._find_channel_shortcut.activated.connect(self._open_channel_search)
         self._apply_channel_filter()
 
-    def _refresh_navigation_menu(self, menu: QMenu) -> None:
-        menu.clear()
-        self._populate_mixer_menu(menu)
+    def _open_channel_search(self) -> None:
+        title = I18N.tr("mixer.console.search", "Find channel")
+        prompt = I18N.tr("mixer.console.search_prompt", "Channel name or tag")
+        text, accepted = QInputDialog.getText(self, title, prompt, text=self._channel_query)
+        if accepted:
+            self._set_channel_query(text)
+            self._locate_first_channel()
+
+    def _set_channel_query(self, text: str) -> None:
+        self._channel_query = text.strip()
+        self._apply_channel_filter()
+
+    def _set_channel_view(self, view: str) -> None:
+        self._channel_view = view
+        self._apply_channel_filter()
+
+    def _populate_channel_view_menu(self, menu: QMenu) -> None:
+        group = QActionGroup(menu)
+        for key, fallback in (("all", "All"), ("audio", "Audio"), ("bus", "Buses"),
+                              ("solo", "Solo"), ("armed", "Armed")):
+            action = menu.addAction(I18N.tr(f"mixer.console.{key}", fallback))
+            action.setData(key)
+            action.setCheckable(True)
+            action.setChecked(key == self._channel_view)
+            group.addAction(action)
+        group.triggered.connect(lambda action: self._set_channel_view(action.data()))
+
+        visible = sum(not strip.isHidden() for strip in self._track_mixers.values())
+        count_label = I18N.tr("mixer.console.count", "Visible channels / total")
         menu.addSeparator()
-        menu.addAction(I18N.tr("mixer.vca.title", "VCA groups"), self.vca_groups_requested.emit)
-        menu.addAction(I18N.tr("mixer.health.title", "Audio engine health"), self.health_requested.emit)
-        menu.addAction(I18N.tr("mixer.monitor.title", "Control room"), self.control_room_requested.emit)
-        menu.addAction(I18N.tr("mixer.reference.title", "Reference Mix A/B"), self.reference_mix_requested.emit)
-        menu.addAction(I18N.tr("mixer.recovery.title", "Recover interrupted recording…"), self.recover_recording_requested.emit)
-        reset = menu.addAction(I18N.tr("mixer.console.reset_view", "Reset channel view"))
-        reset.triggered.connect(self.reset_channel_view)
+        count = menu.addAction(f"{count_label} · {visible}/{len(self._track_mixers)}")
+        count.setObjectName("mixer_channel_count")
+        count.setEnabled(False)
+        reset = menu.addAction(I18N.tr("mixer.console.reset_view", "Reset channel view"), self.reset_channel_view)
+        reset.setObjectName("mixer_reset_channel_view")
+
+    def show_unified_context_menu(self, global_pos: QPoint) -> None:
+        """Provide mixer commands and dock actions from either workspace's title bar."""
+        menu = QMenu(self)
+        self._populate_mixer_menu(menu)
+        dock = find_parent_dock(self)
+        if dock is not None:
+            menu.addSeparator()
+            add_dock_management_actions(menu, dock)
+        menu.exec(global_pos)
+        menu.deleteLater()
 
     def open_routing_overview(self) -> None:
         from .routing_overview import RoutingOverviewDialog
@@ -473,19 +441,12 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         self._routing_overview.raise_()
         self._routing_overview.activateWindow()
 
-    def _focus_channel_search(self) -> None:
-        self.channel_search.setFocus()
-        self.channel_search.selectAll()
-
-    def _clear_channel_search(self) -> None:
-        self.channel_search.clear()
-        self.channel_search.clearFocus()
-
     def reset_channel_view(self) -> None:
         """Restore all strips without touching their sound or project state."""
-        self.channel_search.clear()
-        self.channel_filter.setCurrentIndex(0)
+        self._channel_query = ""
+        self._channel_view = "all"
         self.show_all_tracks()
+        self._apply_channel_filter()
 
     def reset_peak_holds(self) -> None:
         """Clear display holds, preserving live level, GR and engine generation."""
@@ -505,10 +466,10 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         self._master_separator.raise_()
 
     def _apply_channel_filter(self) -> None:
-        if not hasattr(self, "channel_search"):
+        if not hasattr(self, "channel_empty_label"):
             return
-        words = self.channel_search.text().casefold().split()
-        kind = self.channel_filter.currentData()
+        words = self._channel_query.casefold().split()
+        kind = self._channel_view
         visible = 0
         for track_id, strip in self._track_mixers.items():
             text = f"{strip._track_name} {strip._track_tag}".casefold()
@@ -522,9 +483,6 @@ class StudioAudioMixerPanel(AudioMixerPanel):
             strip.setVisible(shown)
             self._track_separators[track_id].setVisible(shown)
             visible += int(shown)
-        self.channel_count.setText(f"{visible}/{len(self._track_mixers)}")
-        self.channel_count.setToolTip(self.channel_count.accessibleName())
-        self.clear_solo_button.setEnabled(bool(self._solo_tracks))
         self.channel_empty_label.setVisible(visible == 0)
         self._update_minimum_width()
 
@@ -591,7 +549,10 @@ class StudioAudioMixerPanel(AudioMixerPanel):
     def _create_strip(
         self, track_id: str, track_name: str, track_tag: str, *, is_master: bool = False,
     ) -> StudioChannelStrip:
-        strip = StudioChannelStrip(track_id, track_name, track_tag, self, is_master=is_master)
+        strip = StudioChannelStrip(
+            track_id, track_name, track_tag, self,
+            is_master=is_master, require_recording_mode=self.requires_recording_mode,
+        )
         strip.output_bus_requested.connect(self.track_output_requested)
         strip.recording_input_requested.connect(self.track_input_requested)
         strip.solo_safe_requested.connect(self.track_solo_safe_requested)
@@ -645,7 +606,7 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         self._apply_channel_filter()
 
     def set_recording_workflow_active(self, active: bool) -> None:
-        """Use the Studio arm workflow when the panel moves to Mixer."""
+        """Show input routing and arming while the recording workflow is active."""
         if self._recording_workflow_active == active:
             return
         self._recording_workflow_active = active
@@ -660,11 +621,24 @@ class StudioAudioMixerPanel(AudioMixerPanel):
         """The host owns the full set of armed tracks."""
         if self._recording_workflow_active:
             self.track_record_arm_toggled.emit(track_id, armed)
-        else:
+        elif not self.requires_recording_mode:
             super()._on_record_arm_toggled(track_id, armed)
         self._apply_channel_filter()
 
     def _populate_mixer_menu(self, menu: QMenu) -> None:
+        search = menu.addAction(I18N.tr("mixer.console.search", "Find channel") + "…", self._open_channel_search)
+        search.setObjectName("mixer_find_channel")
+        clear = menu.addAction(I18N.tr("mixer.console.clear_search", "Clear channel search"))
+        clear.setObjectName("mixer_clear_channel_search")
+        clear.setEnabled(bool(self._channel_query))
+        clear.triggered.connect(lambda: self._set_channel_query(""))
+        channel_view = menu.addMenu(I18N.tr("mixer.console.filter", "Channel view"))
+        channel_view.setObjectName("mixer_channel_view")
+        self._populate_channel_view_menu(channel_view)
+        routing = menu.addAction(I18N.tr("mixer.routing.overview", "Routing overview"), self.open_routing_overview)
+        routing.setObjectName("mixer_routing_overview")
+        menu.addSeparator()
+
         super()._populate_mixer_menu(menu)
         menu.addSeparator()
         menu.addAction(I18N.tr("mixer.routing.add_bus", "Add Bus"), self.add_bus_requested.emit)
@@ -675,6 +649,17 @@ class StudioAudioMixerPanel(AudioMixerPanel):
             adr = menu.addAction(I18N.tr("panel.adr_take_sheet", "ADR / Takes") + "…")
             adr.setObjectName("mixer_adr")
             adr.triggered.connect(self.adr_requested.emit)
+        menu.addSeparator()
+        peaks = menu.addAction(
+            I18N.tr("mixer.console.reset_peaks", "Reset all peak holds and clip indicators"),
+            self.reset_peak_holds,
+        )
+        peaks.setObjectName("mixer_reset_peaks")
+        menu.addAction(I18N.tr("mixer.vca.title", "VCA groups"), self.vca_groups_requested.emit)
+        menu.addAction(I18N.tr("mixer.health.title", "Audio engine health"), self.health_requested.emit)
+        menu.addAction(I18N.tr("mixer.monitor.title", "Control room"), self.control_room_requested.emit)
+        menu.addAction(I18N.tr("mixer.reference.title", "Reference Mix A/B"), self.reference_mix_requested.emit)
+        menu.addAction(I18N.tr("mixer.recovery.title", "Recover interrupted recording…"), self.recover_recording_requested.emit)
 
     def close_effect_editors(self) -> None:
         if self._routing_overview is not None:

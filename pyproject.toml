@@ -107,7 +107,10 @@ include = ["src*", "apps*"]
 exclude = ["src.app.integrations.file_explorer*"]
 
 [tool.setuptools.package-data]
-"src.shared.assets" = ["icons/viewer/*.svg", "icons/curves/*.svg", "icons/tracker/*.svg", "icons/warper/*.svg"]
+"src.shared.assets" = [
+    "icons/viewer/*.svg", "icons/curves/*.svg", "icons/tracker/*.svg", "icons/warper/*.svg",
+    "icons/effects/color/*.svg", "icons/effects/audio/*.svg",
+]
 "src.features.color.core" = [
     "data/primary_calibration_rec709_g24_v1.npz",
     "data/primary_calibration_rec709_g24_v2.npz",
@@ -136,7 +139,6 @@ exclude = ["src.app.integrations.file_explorer*"]
     "locales/*.json",
 ]
 "src.features.color.ui" = [
-    "effect_icons/*.svg",
     "mixer_icons/*.svg",
     "node_badges/*.svg",
 ]

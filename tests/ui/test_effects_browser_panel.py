@@ -1,12 +1,15 @@
 """Library and dynamic settings UI with explicit target gating."""
 from __future__ import annotations
+import json
 from pathlib import Path
 from typing import Any
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtSvg import QSvgRenderer
-from src.features.color.ui.effects_browser_panel import ColorEffectsBrowser, _effect_icon
+from src.features.color.ui.effects_browser_panel import ColorEffectsBrowser
 from src.features.color.ui.node_resource_mime import decode_resource_mime
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.effect_icons import COLOR_EFFECT_ICON_DIR, color_effect_icon
 from src.shared.ui.widgets.param_slider_row import ParamSliderRow
 from src.shared.ui.style_sheet import C
 
@@ -30,6 +33,27 @@ def test_search_favorite_and_collapsible_categories(qtbot: Any) -> None:
     assert panel.resource_list.item(1).text().endswith('Glow')
     panel.search_edit.setText('missing')
     assert panel.resource_list.count() == 0
+
+
+def test_category_labels_translate_without_changing_saved_keys(qtbot: Any, monkeypatch: Any) -> None:
+    locale_dir = Path(__file__).resolve().parents[2] / 'src' / 'features' / 'color' / 'locales'
+    monkeypatch.setattr(I18N, '_translations', json.loads((locale_dir / 'zh_CN.json').read_text(encoding='utf-8')))
+    panel = ColorEffectsBrowser()
+    qtbot.addWidget(panel)
+    panel.set_resources([dict(resource(), category='lens_and_light')])
+    assert panel.resource_list.item(0).text() == '镜头与光效'
+    panel._collapse_all()
+    saved = panel.browser_state()
+    assert saved['collapsed'] == ['lens_and_light']
+    panel.search_edit.setText('镜头')
+    assert panel.resource_list.count() == 2
+    assert '镜头与光效' in panel.resource_list.item(1).toolTip()
+
+    monkeypatch.setattr(I18N, '_translations', json.loads((locale_dir / 'en_US.json').read_text(encoding='utf-8')))
+    panel.search_edit.clear()
+    panel.set_browser_state(saved)
+    assert panel.resource_list.count() == 1
+    assert panel.resource_list.item(0).text() == 'Lens and Light'
 
 
 def test_add_requires_target_but_drag_does_not(qtbot: Any) -> None:
@@ -146,17 +170,14 @@ def test_production_library_omits_other_page_effects_and_double_click_is_inert(q
 
 
 def test_bundled_plugins_have_distinct_renderable_svg_icons(qtbot: Any) -> None:
-    from src.features.color.ui import effects_browser_panel
-
     root = Path(__file__).resolve().parents[2]
-    icon_dir = Path(effects_browser_panel.__file__).with_name('effect_icons')
-    fallback = _effect_icon('unknown_plugin').pixmap(24, 24).toImage()
+    fallback = color_effect_icon('unknown_plugin').pixmap(24, 24).toImage()
     rendered = set()
     for plugin in (root / 'plugins').iterdir():
         if plugin.suffix not in {'.tglsl', '.tai'}:
             continue
-        assert QSvgRenderer(str(icon_dir / f'{plugin.stem}.svg')).isValid(), plugin.stem
-        image = _effect_icon(plugin.stem).pixmap(24, 24).toImage()
+        assert QSvgRenderer(str(COLOR_EFFECT_ICON_DIR / f'{plugin.stem}.svg')).isValid(), plugin.stem
+        image = color_effect_icon(plugin.stem).pixmap(24, 24).toImage()
         assert not image.isNull()
         assert image != fallback
         pixels = image.constBits().asstring(image.sizeInBytes())
@@ -167,4 +188,4 @@ def test_bundled_plugins_have_distinct_renderable_svg_icons(qtbot: Any) -> None:
     qtbot.addWidget(panel)
     panel.set_resources([dict(resource(), id='Film_Grain@abcd1234', name='胶片颗粒')])
     assert panel.resource_list.item(1).icon().pixmap(24, 24).toImage() == (
-        _effect_icon('Film_Grain').pixmap(24, 24).toImage())
+        color_effect_icon('Film_Grain').pixmap(24, 24).toImage())

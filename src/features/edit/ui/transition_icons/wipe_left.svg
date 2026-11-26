@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 28"><rect width="48" height="28" rx="3" fill="#252a32"/><path d="M5 6h38v16H5z" fill="#697380"/><path d="M5 6h20v16H5z" fill="#a5adb8"/><path d="M25 6v16" stroke="#eef0f4" stroke-width="1.5"/><path d="M18 14h13m-4-4 4 4-4 4" fill="none" stroke="#e6e9ee" stroke-width="1.2"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <g fill="none" stroke="#c4cad4" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="rotate(0 12 12)">
+      <rect x="4" y="5" width="16" height="14" rx="2"/>
+      <path d="M10 5v14" opacity=".58"/>
+      <path d="M8 12h8m-3-3 3 3-3 3"/>
+    </g>
+  </g>
+</svg>

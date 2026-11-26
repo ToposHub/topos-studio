@@ -7,6 +7,7 @@ from collections.abc import Iterator, Set
 from src.features.edit.core.effect_registry import (
     AUDIO_MIXER_EFFECT_TYPES, EffectDefinition, get_effect_registry,
 )
+from src.shared.i18n.audio_effects import audio_effect_display_name
 from src.shared.i18n.i18n import I18N
 
 
@@ -24,20 +25,8 @@ _GROUPS = (
     ("other", "Other Audio Effects", ()),
 )
 
-_NAME_KEYS = {
-    "strip_eq": "audio.fx.parametric_eq",
-    "expander": "audio.fx.expander_gate",
-    "reverb": "audio.fx.acoustic_reverb",
-    "delay": "audio.fx.stereo_delay",
-    "voice_changer": "mixer.effects_browser.voice_changer",
-    "spectral_mangler": "mixer.effects_browser.spectral_mangler",
-}
-
-
 def audio_effect_name(effect: EffectDefinition) -> str:
-    effect_type = effect.effect_type
-    name = I18N.tr(_NAME_KEYS.get(effect_type, f"audio.fx.{effect_type}"), effect.name)
-    return I18N.tr(f"audio.fx.name.{effect_type}", name)
+    return audio_effect_display_name(effect.effect_type, effect.name)
 
 
 def audio_effect_groups(

@@ -39,6 +39,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Optional, Any, Callable
+from weakref import ReferenceType, ref
 
 from PyQt6.QtWidgets import (
     QWidget,
@@ -54,6 +55,7 @@ from src.features.edit.core.audio_sync import resolve_audio_source
 from src.features.edit.core.clip_pcm import resolve_source_channel_map
 from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
 from src.features.edit.core.source_patch import patch_for_asset
+from src.shared.i18n.i18n import I18N
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +289,7 @@ class EditPage(QWidget):
         # can never trigger a second execution.
         self._panel_request_connections: list[tuple[Any, Any]] = []
         self._panel_request_generation: int = 0
+        self._playhead_voiceover: tuple[str, ReferenceType[Any]] | None = None
 
         # W08: current audio_level_changed → panel.update_audio_levels
         # connection, so re-attaching a panel drops the stale panel's feed
@@ -410,7 +413,6 @@ class EditPage(QWidget):
 
             self._sync_program_guide_from_timeline()
 
-        self._connect_trim_monitor_to_viewer()
         # Connect transport bar (ProgramViewerWidget <-> TimelinePanel)
         self._connect_transport_to_timeline()
 
@@ -437,16 +439,14 @@ class EditPage(QWidget):
                     timeline_view.scrub_finished.connect(self._on_scrub_finished)
                 if hasattr(timeline_view, 'scrub_cancelled'):
                     timeline_view.scrub_cancelled.connect(self._on_scrub_cancelled)
-                # P1-04：trim 进行中的 cut 邻近帧预览（节目监视器显示，
-                # 不移动播放头——复用 scrub 渲染管线）
+                # Trim gestures use the same Program Viewer render path as scrubbing.
                 if hasattr(timeline_view, 'trim_frame_preview_requested'):
                     timeline_view.trim_frame_preview_requested.connect(
-                        self.timeline_scrub_frame_requested.emit
+                        self._on_trim_frame_preview_requested
                     )
-                # F2.3：trim 会话结束转发 finish（renderer 清除 scrub 量化态）
                 if hasattr(timeline_view, 'trim_frame_preview_finished'):
                     timeline_view.trim_frame_preview_finished.connect(
-                        self.timeline_scrub_finished.emit
+                        self._on_trim_frame_preview_finished
                     )
                 # P9.2: Connect open in composite request
                 timeline_view.open_in_composite_requested.connect(self._on_open_in_composite_requested)
@@ -520,31 +520,15 @@ class EditPage(QWidget):
 
             logger.debug("TimelinePanel connected to EditPage")
 
-        self._connect_trim_monitor_to_viewer()
         # Connect transport bar (ProgramViewerWidget <-> TimelinePanel)
         self._connect_transport_to_timeline()
 
         # W08：manager 已存在时，把电平订阅换到新附着的 panel 上
         if self._audio_manager is not None:
             self._reconnect_timeline_level_meter()
-
-    def _connect_trim_monitor_to_viewer(self) -> None:
-        """Register the canvas host in either panel/viewer attachment order."""
-        from PyQt6 import sip
-        def alive(value: Any) -> bool:
-            return not isinstance(value, QObject) or not sip.isdeleted(value)
-        previous = getattr(self, "_trim_monitor_timeline_view", None)
-        panel = self._timeline_panel
-        current = panel.get_timeline_view() if panel is not None and alive(panel) else None
-        if previous is not None and previous is not current and alive(previous):
-            previous.set_trim_monitor_host(None)
-        viewer = self._program_viewer
-        host = viewer if alive(viewer) and callable(getattr(viewer, "set_trim_monitor", None)) else None
-        if current is not None and alive(current) and callable(getattr(current, "set_trim_monitor_host", None)):
-            current.set_trim_monitor_host(host)
-            self._trim_monitor_timeline_view = current
-        else:
-            self._trim_monitor_timeline_view = None
+            state = getattr(self._audio_manager, "control_room_state", None)
+            if state is not None:
+                self._on_monitor_gain_changed(state.gain_db)
 
     # ==================== W09: Centralized Toolbar Request Binding ====================
 
@@ -569,8 +553,8 @@ class EditPage(QWidget):
             ("source_replace_requested", self._on_timeline_source_replace),
             ("source_patch_changed", self._on_timeline_source_patch_changed),
             ("keyframe_tray_requested", self._on_timeline_keyframe_tray_requested),
-            ("voiceover_requested", self._on_timeline_voiceover_requested),
             ("flag_requested", self._on_timeline_flag_requested),
+            ("monitor_gain_requested", self._on_monitor_gain_requested),
             ("clip_speed_settings_requested",
              self._on_timeline_clip_speed_settings),
         )
@@ -648,69 +632,72 @@ class EditPage(QWidget):
             return
         panel.set_keyframe_tray_visible(visible)
 
-    def _on_timeline_voiceover_requested(self) -> None:
-        """W04：Voiceover——桥接既有 ADR/录音链（不做"立即采默认麦克风"）。
-
-        目标音轨 = 有效音频目的轨（W02 蓝路由，无显式路由回退红 target；
-        均无轨时经既有 AddTrackCommand 创建）。展示 ADR Take Sheet 面板
-        （设备/预卷/监听/电平的既有入口），启动复用 controller 的
-        ``_start_recording``（时间码打点 = 当前播放头帧）；再次触发同轨
-        → ``_stop_recording_and_import``（take 完成唯一事件源仍是
-        ``_on_take_recorded`` 回调，停止一次只导入一次）。录音会话的
-        project/timeline/track 绑定与跨工程防错投由既有链保证。
-        """
+    def record_voiceover_at_playhead(self, track_id: str = "") -> None:
+        """Start a take on the chosen track or the current audio destination."""
         panel = self._timeline_panel
         view = panel.get_timeline_view() if panel is not None else None
-        if view is None or view.get_timeline() is None:
+        timeline = view.get_timeline() if view is not None else None
+        if timeline is None:
             logger.warning("Voiceover: no active timeline context")
             return
         main = self._main_window
         if main is None or not hasattr(main, "_start_recording"):
             logger.warning("Voiceover: host controller unavailable")
             return
-        track_id = view.resolve_source_destination_track_id("audio")
+        if getattr(main, "_adr_pass", None) is not None or getattr(main, "_mixer_timeline_recorders", None) or any(
+            manager.is_recording for manager in getattr(main, "_recording_managers", {}).values()
+        ):
+            self.waveform_status_message.emit(
+                I18N.tr("edit.adr.recording_busy", "Finish the current recording first."), 4000
+            )
+            return
+        if track_id:
+            track = timeline.get_track_by_id(track_id)
+            if track is None or track.track_type != "audio" or track.is_bus:
+                self.waveform_status_message.emit(
+                    I18N.tr("edit.adr.no_destination_track", "No audio destination track."), 4000
+                )
+                return
+        else:
+            track_id = view.resolve_source_destination_track_id("audio")
         if track_id is not None and view.is_track_locked(track_id):
-            # B02④：锁定的目的轨明确拒绝，不进入录音会话。
             logger.warning("Voiceover: destination track %s is locked", track_id)
-            self.waveform_status_message.emit(self.tr(
-                "Voiceover destination track is locked"), 4000)
+            self.waveform_status_message.emit(
+                I18N.tr("edit.adr.destination_locked", "The recording track is locked."), 4000
+            )
             return
         created_track = False
         if track_id is None:
-            # 蓝徽章显式关闭/时间线无音频轨：B02② 录音上下文（宿主
-            # controller）已在上方确认可用，此时才允许建轨；B02① 按
-            # track ID 契约消费 ensure_target_audio_track 的返回值。
             track_id = view.ensure_target_audio_track()
             if track_id is None:
                 logger.warning("Voiceover: no audio destination track")
-                self.waveform_status_message.emit(self.tr(
-                    "Voiceover: no audio destination track"), 4000)
+                self.waveform_status_message.emit(
+                    I18N.tr("edit.adr.no_destination_track", "No audio destination track."), 4000
+                )
                 return
             created_track = True
-        # 打开既有 ADR 入口（设备选择/监听/输入电平都在该面板）
-        dock = getattr(main, "dock_adr_take_sheet", None)
-        if dock is not None:
-            dock.setVisible(True)
-            dock.raise_()
-        managers = getattr(main, "_recording_managers", {})
-        active = managers.get(track_id)
-        if active is not None and getattr(active, "is_recording", False):
+        manager = None
+        try:
+            # Use the timeline recording lifecycle for asynchronous take
+            # saving and to finish capture when the project or window closes.
+            manager = main._start_recording(track_id, voiceover=True, from_mixer_timeline=True)
+        finally:
+            if manager is None and created_track and view.can_undo():
+                view.undo()
+        if manager is not None:
+            self._playhead_voiceover = (track_id, ref(manager))
+
+    def stop_playhead_voiceover(self) -> None:
+        """Finish the same take even if the timeline destination has changed."""
+        session = self._playhead_voiceover
+        self._playhead_voiceover = None
+        if session is None:
+            return
+        track_id, manager_ref = session
+        manager = manager_ref()
+        main = self._main_window
+        if manager is not None and getattr(main, "_recording_managers", {}).get(track_id) is manager:
             main._stop_recording_and_import(track_id)
-        else:
-            try:
-                # B10：时间线 Voiceover 入口——capture 会话，take 完成后
-                # 落 clip 到该轨锚点（ADR 素材采集路径不受影响）
-                main._start_recording(track_id, voiceover=True)
-            except Exception:
-                # B02③：启动失败不留下"不明轨"——仅撤销本次手势创建的
-                # 轨道，反馈后重新抛出让宿主继续处理真实设备错误。
-                if created_track and view.can_undo():
-                    try:
-                        view.undo()
-                    except Exception:
-                        logger.exception(
-                            "Voiceover: failed to roll back created track")
-                raise
 
     def _on_timeline_clip_speed_settings(
         self, clip_id: str, track_id: str, settings: object) -> None:
@@ -781,6 +768,10 @@ class EditPage(QWidget):
             )
         if panel and hasattr(panel, "timeline_selected"):
             panel.timeline_selected.connect(self.signal_hub.timeline_selected.emit)
+        if panel and hasattr(panel, "source_range_edit_started"):
+            panel.source_range_edit_started.connect(self._show_source_for_pool_range)
+            if self._source_viewer is not None:
+                panel.bind_source_range_viewer(self._source_viewer)
 
         # Scene Cut Detection (P9): connect media pool scene cut request
         if hasattr(panel, 'scene_cut_detect_requested'):
@@ -819,6 +810,9 @@ class EditPage(QWidget):
 
         # Connect edit signals to handlers (P3.2)
         if viewer:
+            bind_pool_range = getattr(self._media_pool_panel, "bind_source_range_viewer", None)
+            if callable(bind_pool_range):
+                bind_pool_range(viewer)
             viewer.insert_requested.connect(self._on_insert_requested)
             viewer.overwrite_requested.connect(self._on_overwrite_requested)
             viewer.append_requested.connect(self._on_append_requested)
@@ -835,6 +829,13 @@ class EditPage(QWidget):
             viewer.range_changed.connect(lambda *_: self._sync_source_edit_buttons())
 
             logger.debug("SourceViewerWidget connected to EditPage")
+
+    def _show_source_for_pool_range(self) -> None:
+        """Show the synchronized range in the Source monitor while trimming a card."""
+        host = self._main_window
+        viewport = getattr(host, "edit_viewport", None)
+        if viewport is not None and getattr(host, "current_page", None) == "Edit":
+            viewport.show_source(focus=False)
 
     def set_main_window(self, main_win: Any) -> None:
         """
@@ -1204,6 +1205,7 @@ class EditPage(QWidget):
                 AudioSyncMode,
             )
             self._audio_manager = AudioPlaybackManager(parent=self)
+            self._audio_manager.monitor_gain_changed.connect(self._on_monitor_gain_changed)
             self._audio_manager.set_sample_rate(48000)
             self._audio_manager.set_sync_mode(AudioSyncMode.AUDIO_MASTER)
 
@@ -1227,6 +1229,16 @@ class EditPage(QWidget):
         except Exception as e:
             logger.warning(f"AudioPlaybackManager unavailable: {e}")
             return None
+
+    def _on_monitor_gain_requested(self, gain_db: float) -> None:
+        manager = self._ensure_audio_manager()
+        if manager is not None:
+            manager.set_monitor_gain_db(gain_db)
+
+    def _on_monitor_gain_changed(self, gain_db: float) -> None:
+        setter = getattr(self._timeline_panel, "set_monitor_gain_db", None)
+        if callable(setter):
+            setter(gain_db)
 
     def _reconnect_timeline_level_meter(self) -> None:
         """W08：电平信号跟随当前 timeline panel（先断旧连新，幂等）。
@@ -2988,6 +3000,24 @@ class EditPage(QWidget):
         self.timeline_scrub_started.emit(frame)
         self._emit_scrub_frame_request(frame, source="scrub_started")
         self._request_scrub_audio_preview(frame, force=True)
+
+    def _on_trim_frame_preview_requested(self, frame: int) -> None:
+        """Reveal the Program Viewer without interrupting the timeline gesture."""
+        panel = self._timeline_panel
+        if panel is not None and panel.is_playing():
+            panel.pause_playback()
+        host = self._main_window
+        viewport = getattr(host, "edit_viewport", None)
+        if viewport is not None and getattr(host, "current_page", None) == "Edit":
+            if not viewport.dual_view and viewport.active_monitor == "source":
+                viewport.show_program(focus=False)
+        self._update_subtitle_overlays(frame)
+        self.timeline_scrub_frame_requested.emit(frame)
+
+    def _on_trim_frame_preview_finished(self, frame: int) -> None:
+        """Restore subtitles and the picture at the actual playhead."""
+        self._update_subtitle_overlays(frame)
+        self.timeline_scrub_finished.emit(frame)
 
     def _emit_scrub_frame_request_now(self, frame: int, *, source: str) -> None:
         """Emit one scrub preview request immediately after per-frame dedupe."""
