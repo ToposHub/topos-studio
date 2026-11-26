@@ -40,10 +40,8 @@ EDIT_COLORS = {
     "success": "#73b66b",       # 成功
 
     # 时间线专用色
-    # Keep the timeline near the Color page's neutral panel hierarchy rather
-    # than treating the entire editing canvas as the application's darkest
-    # surface. Semantic clip colors remain intentionally distinct.
     "timeline_canvas_bg": "#242429",
+    "timeline_toolbar_bg": "#202024",
     "video_clip": "#285C78",    # 视频片段（低饱和专业蓝）
     "video_clip_label_bar": "#1B4259",  # 视频片段标签栏底色
     "video_clip_selected": "#E29227",   # 视频片段选中边框
@@ -67,8 +65,6 @@ EDIT_COLORS = {
     "ruler_major_tick": "#5C606A",      # 主刻度线
     "ruler_medium_tick": "#3C4049",     # 中刻度线
     "ruler_minor_tick": "#2D3037",      # 小刻度线
-    "ruler_major_grid": "rgba(90, 95, 105, 0.22)",  # 主网格线
-    "ruler_minor_grid": "rgba(70, 74, 82, 0.12)",   # 副网格线
     "ruler_text": "#9DA2AC",            # 时间码文字
     "ruler_active_text": "#E29227",     # 播放头位置高亮
 

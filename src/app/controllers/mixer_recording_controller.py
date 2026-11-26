@@ -73,6 +73,23 @@ class MixerRecordingControllerMixin:
     _mixer_transport_starting = False
     _mixer_transport_playing = False
 
+    def _on_timeline_recording_mode_requested(self, active: bool) -> None:
+        """Show the Edit mixer and enable its shared recording controls."""
+        if getattr(self, "current_page", None) != "Edit":
+            self._refresh_mixer_recording_controls()
+            return
+        if getattr(self, "_adr_pass", None) is not None or (
+            getattr(self, "_mixer_timeline_recorders", None) and not self._mixer_transport_playing
+        ):
+            self._show_mixer_recording_message(I18N.tr("mixer.record.busy", "Finish the current recording first"))
+            self._refresh_mixer_recording_controls()
+            return
+        self._set_mixer_recording_workflow(active)
+        dock = getattr(self, "dock_audio_mixer", None)
+        if active and dock is not None:
+            dock.show()
+            dock.raise_()
+
     def _set_mixer_recording_workflow(self, active: bool) -> None:
         self._mixer_recording_workflow_active = active
         view = self._edit_timeline_view()
@@ -96,6 +113,10 @@ class MixerRecordingControllerMixin:
 
     def _refresh_mixer_recording_controls(self) -> None:
         active = self._mixer_recording_workflow_active
+        timeline_panel = getattr(self, "timeline_panel", None)
+        reflect_mode = getattr(timeline_panel, "set_recording_mode_checked", None)
+        if callable(reflect_mode):
+            reflect_mode(active)
         view = self._edit_timeline_view()
         timeline = view.get_timeline() if view is not None else None
         project = getattr(self, "_current_edit_project", None)
@@ -260,7 +281,7 @@ class MixerRecordingControllerMixin:
         panel = getattr(self, "audio_mixer_panel", None)
         if self._mixer_recording_workflow_active and hasattr(panel, "set_recording_workflow_active"):
             self._set_mixer_track_armed(track_id, armed)
-        else:
+        elif not getattr(panel, "requires_recording_mode", False):
             self._legacy_mixer_record_arm(track_id, armed)
 
     def _on_mixer_timeline_record_requested(self, track_id: str) -> None:

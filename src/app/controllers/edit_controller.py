@@ -5327,6 +5327,7 @@ class EditControllerMixin:
             dialog.patch_requested.connect(self._on_mixer_control_room_patch)
             self._mixer_control_room_dialog = dialog
             manager.sample_rate_changed.connect(self._on_mixer_control_room_rate_changed)
+            manager.monitor_gain_changed.connect(dialog.set_monitor_gain_db)
         self._sync_mixer_control_room(timeline, refresh_devices=True)
         dialog.show()
         dialog.raise_()

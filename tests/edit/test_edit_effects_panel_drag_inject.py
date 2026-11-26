@@ -15,13 +15,12 @@ This test verifies the injection happens at panel construction time.
 from __future__ import annotations
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QMovie
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QColor, QFont, QMovie, QPalette
 
 from src.features.edit.ui.edit_effects_panel import (
     EditEffectsPanel,
     _MotionGraphicPreviewButton,
-    _ResponsiveEffectSection,
 )
 from src.features.teaching_animation.core.motion_graphic_generator_registry import (
     get_motion_graphic_generator_registry,
@@ -29,6 +28,7 @@ from src.features.teaching_animation.core.motion_graphic_generator_registry impo
 from src.features.teaching_animation.core.motion_graphic_template_library import (
     discover_motion_graphic_template_packages,
 )
+from src.shared.ui.effect_icons import audio_effect_icon, color_effect_icon
 from src.shared.ui.style_sheet import C
 
 
@@ -55,12 +55,6 @@ def test_audio_tree_startdrag_is_replaced(qapp):
     assert sd.__name__ == "custom_start_drag"
 
 
-def test_favorites_tree_startdrag_is_replaced(qapp):
-    panel = EditEffectsPanel()
-    sd = panel.favorites_tree.startDrag
-    assert sd.__name__ == "custom_start_drag"
-
-
 def test_transitions_tree_startdrag_is_replaced(qapp):
     panel = EditEffectsPanel()
     sd = panel.transitions_tree.startDrag
@@ -72,7 +66,6 @@ def test_drag_enabled_on_all_trees(qapp):
     panel = EditEffectsPanel()
     assert panel.video_effects_tree.dragEnabled() is True
     assert panel.audio_effects_tree.dragEnabled() is True
-    assert panel.favorites_tree.dragEnabled() is True
     assert panel.transitions_tree.dragEnabled() is True
 
 
@@ -143,35 +136,73 @@ def test_audio_effect_tree_uses_svg_preview_icons(qapp):
     assert all(not item.icon(0).isNull() for item in effect_items)
 
 
-def test_effect_section_adapts_between_one_two_and_three_columns(qapp):
-    """The responsive grid uses the expected Resolve-style breakpoints."""
-    section = _ResponsiveEffectSection("Audio")
-    section.show()
-    section.resize(320, 100)
-    qapp.processEvents()
-    assert section.column_count == 1
-    section.resize(520, 100)
-    qapp.processEvents()
-    assert section.column_count == 2
-    section.resize(720, 100)
-    qapp.processEvents()
-    assert section.column_count == 3
+def test_edit_cards_reuse_color_and_mixer_icons(qapp: QApplication) -> None:
+    panel = EditEffectsPanel()
+    size = QSize(24, 24)
+    generic_video = color_effect_icon("").pixmap(size).toImage()
+    generic_audio = audio_effect_icon("").pixmap(size).toImage()
+
+    video = panel.video_effects_tree
+    for index in range(video.topLevelItemCount()):
+        section = video.itemWidget(video.topLevelItem(index), 0)
+        for card in section._cards:
+            image = card.icon().pixmap(size).toImage()
+            assert not image.isNull() and image != generic_video, card.effect_type
+            if card.effect_type.startswith("plugin:"):
+                plugin_id = card.effect_type.removeprefix("plugin:")
+                assert image == color_effect_icon(plugin_id).pixmap(size).toImage()
+
+    audio = panel.audio_effects_tree
+    section = audio.itemWidget(audio.topLevelItem(0), 0)
+    for card in section._cards:
+        image = card.icon().pixmap(size).toImage()
+        assert not image.isNull() and image != generic_audio, card.effect_type
+        assert image == audio_effect_icon(card.effect_type).pixmap(size).toImage()
+    panel.close()
 
 
-def test_effect_panel_uses_the_global_edit_panel_background(qapp):
-    """All visible effect surfaces must use the shared Edit panel token."""
+def test_effect_section_adapts_between_one_two_and_three_columns(qapp: QApplication) -> None:
+    """Resizing the library reflows the cards in the visible tree."""
+    panel = EditEffectsPanel()
+    tree = panel.video_effects_tree
+    section = tree.itemWidget(tree.topLevelItem(0), 0)
+    panel.show()
+    for width, columns in ((320, 1), (520, 2), (720, 3), (320, 1)):
+        panel.resize(width, 500)
+        qapp.processEvents()
+        assert section.column_count == columns
+        assert section.grid.itemAtPosition(0, columns - 1).widget() is section._cards[columns - 1]
+        assert section.grid.itemAtPosition(1, 0).widget() is section._cards[columns]
+    panel.close()
+
+
+def test_effect_panel_uses_the_shared_library_style(qapp: QApplication) -> None:
+    """Cards and titles share the Color library's typography and palette."""
     panel = EditEffectsPanel()
     panel_color = C.BG_PANEL
     section = panel.video_effects_tree.itemWidget(
         panel.video_effects_tree.topLevelItem(0), 0
     )
     card = section._cards[0]
+    heading = section.title_label
+    heading.ensurePolished()
+    card.ensurePolished()
 
     assert panel_color in panel.styleSheet()
     assert panel_color in panel.video_effects_tree.styleSheet()
     assert panel_color in panel.tabs.styleSheet()
     assert panel_color in section.styleSheet()
     assert panel_color in card.styleSheet()
+    assert heading.font().pixelSize() == card.font().pixelSize() == 12
+    assert heading.font().weight() == QFont.Weight.DemiBold
+    assert card.font().weight() == QFont.Weight.Normal
+    assert heading.palette().color(QPalette.ColorRole.WindowText) == QColor(C.TEXT_PRIMARY)
+    assert card.palette().color(QPalette.ColorRole.ButtonText) == QColor(C.TEXT_LABEL)
+    title_group = panel.titles_tree.topLevelItem(0)
+    assert title_group.font(0).pixelSize() == 12
+    assert title_group.font(0).weight() == QFont.Weight.DemiBold
+    assert title_group.foreground(0).color() == QColor(C.TEXT_PRIMARY)
+    panel.close()
 
 
 def test_mg_generators_are_video_cards_with_hover_gif_preview(qapp):
@@ -198,7 +229,7 @@ def test_mg_generators_are_video_cards_with_hover_gif_preview(qapp):
     )
     # C1: Titles tab 加入效果面板
     assert [panel.tabs.tabText(index) for index in range(panel.tabs.count())] == [
-        "Video", "Transitions", "Titles", "Audio", "Favorites",
+        "Effects", "Transitions", "Text", "Audio", "Subtitles",
     ]
     sections = [
         panel.video_effects_tree.itemWidget(

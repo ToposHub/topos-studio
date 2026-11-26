@@ -316,9 +316,11 @@ def test_single_in_or_out_resolves_to_the_other_timeline_edge() -> None:
     assert resolve_timeline_in_out(None, 144, 240) == (0, 144)
 
 
-@pytest.mark.parametrize("target_frame, expected_start", [(64, 64), (156, 144)])
+@pytest.mark.parametrize("target_frame, expected_start, cancel, grab_offset", [
+    (64, 64, None, 12), (156, 144, None, 0), (64, 64, "ungrab", 0), (64, 64, "escape", 0),
+])
 def test_range_handles_drag_and_update_track_highlight(
-    qapp, target_frame: int, expected_start: int
+    qapp, target_frame: int, expected_start: int, cancel: str | None, grab_offset: int,
 ) -> None:
     """The range handle gets ruler clicks and commits its drag through commands."""
     timeline = TimelineSequence(timeline_id="tl-drag", name="Drag", fps=24.0)
@@ -348,13 +350,15 @@ def test_range_handles_drag_and_update_track_highlight(
         range_item._bar_y,
     )
     assert range_item._hit_edge(out_handle_scene) == "out"
+    preview_marks: list[tuple[int, int]] = []
+    view.range_display_changed.connect(lambda _duration, _fps, start, end: preview_marks.append((start, end)))
 
     start_handle_scene = QPointF(
-        TRACK_HEADER_WIDTH + 48 * view._pixels_per_frame,
+        TRACK_HEADER_WIDTH + 48 * view._pixels_per_frame + grab_offset,
         range_item._bar_y,
     )
     drag_target_scene = QPointF(
-        TRACK_HEADER_WIDTH + target_frame * view._pixels_per_frame,
+        TRACK_HEADER_WIDTH + target_frame * view._pixels_per_frame + grab_offset,
         range_item._bar_y,
     )
     QTest.mousePress(
@@ -364,6 +368,14 @@ def test_range_handles_drag_and_update_track_highlight(
         view.mapFromScene(start_handle_scene),
     )
     QTest.mouseMove(view.viewport(), view.mapFromScene(drag_target_scene))
+    assert preview_marks[-1] == (expected_start, 144)
+    assert view._timeline.range_start == 48
+    if cancel == "escape":
+        QTest.keyClick(view, Qt.Key.Key_Escape)
+    elif cancel == "ungrab":
+        range_item.ungrabMouse()
+    if cancel:
+        expected_start = 48
     QTest.mouseRelease(
         view.viewport(),
         Qt.MouseButton.LeftButton,
@@ -374,6 +386,7 @@ def test_range_handles_drag_and_update_track_highlight(
 
     assert view._timeline.range_start == expected_start
     assert view._timeline.range_end == 144
+    assert preview_marks[-1] == (expected_start, 144)
     assert mask_item.isVisible()
     view.close()
 

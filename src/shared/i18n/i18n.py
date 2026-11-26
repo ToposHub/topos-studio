@@ -147,19 +147,25 @@ class I18N:
             cls._fallback_translations = {}
     
     @classmethod
-    def tr(cls, key: str, default: Optional[str] = None, **kwargs) -> str:
+    def tr(cls, key: str, default: Optional[str] = None, *, use_english: bool = False, **kwargs) -> str:
         """
         Get translated text for a given key.
 
         Args:
             key: Dot-separated key path (e.g., "menu.file", "panel.layers")
             default: Default text if key not found. If None, returns English fallback.
+            use_english: Resolve text in the English locale regardless of the active locale.
             **kwargs: Format arguments for string interpolation
 
         Returns:
             Translated text, or English fallback/default if not found
         """
-        if not cls._translations:
+        translations = (
+            cls._fallback_translations
+            if use_english and cls._current_locale != cls._fallback_locale
+            else cls._translations
+        )
+        if not translations:
             if default is None:
                 return key
             # The untranslated default may still carry placeholders (e.g.
@@ -174,7 +180,7 @@ class I18N:
 
         # Navigate through nested dictionary using dot notation
         keys = key.split(".")
-        value = cls._translations
+        value = translations
 
         try:
             for k in keys:
@@ -199,7 +205,7 @@ class I18N:
         except (KeyError, TypeError):
             # Translation key not found in current locale
             # Try fallback (English) translations
-            if cls._fallback_translations:
+            if cls._fallback_translations and translations is not cls._fallback_translations:
                 try:
                     fallback_value = cls._fallback_translations
                     for k in keys:

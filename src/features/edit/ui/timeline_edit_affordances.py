@@ -8,7 +8,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 
 EditCursorKind = Literal[
@@ -16,6 +16,19 @@ EditCursorKind = Literal[
     "roll", "slip", "slide", "fade",
 ]
 TrimEdge = Literal["left", "right"]
+
+
+def paint_range_grip(painter: QPainter, x: float, y: float, *, active: bool, enabled: bool = True) -> None:
+    """Draw a slim, rounded range handle centered on its frame boundary."""
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#94979d" if active else "#57595e" if enabled else "#39393e"))
+    painter.drawRoundedRect(QRectF(x - 3.5, y - 7.5, 7.0, 15.0), 2.5, 2.5)
+    painter.setBrush(QColor("#e4e5e7" if enabled else "#717278"))
+    for offset in (-4.0, 0.0, 4.0):
+        painter.drawEllipse(QPointF(x, y + offset), 0.85, 0.85)
+    painter.restore()
+
 
 _CURSOR_KINDS: tuple[EditCursorKind, ...] = (
     "trim_left", "trim_right", "ripple_left", "ripple_right",

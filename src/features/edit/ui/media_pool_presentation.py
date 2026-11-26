@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from PyQt6.QtCore import QModelIndex, QPoint, QRect, QRectF, QSize, Qt
+from PyQt6.QtCore import QModelIndex, QPoint, QPointF, QRect, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QHelpEvent, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QPolygon
 from PyQt6.QtWidgets import QAbstractItemView, QLineEdit, QListView, QStyle, QStyleOptionViewItem, QToolTip, QTreeWidget, QWidget
 
@@ -140,6 +140,33 @@ class ResolvePoolDelegate(GridDelegate):
         name = QRect(rect.left() + 3, poster.bottom() + 1,
                      max(0, rect.width() - 6), 20)
         return poster, name
+
+    def poster_rect(self, cell: QRect) -> QRect:
+        return self._item_rects(cell)[0]
+
+    @staticmethod
+    def range_rect(poster: QRect, marks: tuple[int, int, int]) -> QRectF:
+        """Map inclusive frames onto the visible boundaries of the poster."""
+        total, first, last = marks
+        box = QRectF(poster).adjusted(1.0, 1.0, -1.0, -1.0)
+        left = box.left()
+        box.setLeft(left + box.width() * first / total)
+        box.setRight(left + (poster.width() - 2.0) * (last + 1) / total)
+        return box
+
+    def _paint_source_range(self, painter: QPainter, poster: QRect, marks: tuple[int, int, int]) -> None:
+        box = self.range_rect(poster, marks)
+        matte = QColor(0, 0, 0, 96)
+        painter.fillRect(QRectF(poster.x(), poster.y(), box.left() - poster.x(), poster.height()), matte)
+        painter.fillRect(QRectF(box.right(), poster.y(), poster.right() + 1 - box.right(), poster.height()), matte)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(C.ORANGE), 1.5))
+        painter.drawRoundedRect(box, 3.0, 3.0)
+        for x in (box.left(), box.right()):
+            grip = QRectF(x - 2.5, box.center().y() - 8.0, 5.0, 16.0)
+            painter.fillRect(grip, QColor(C.ORANGE))
+            painter.setPen(QPen(QColor("#222225"), 1.0))
+            painter.drawLine(QPointF(x, grip.top() + 4), QPointF(x, grip.bottom() - 4))
 
     @staticmethod
     def _text(painter: QPainter, rect: QRect, text: str, *,
@@ -348,6 +375,21 @@ class ResolvePoolDelegate(GridDelegate):
             painter.drawRoundedRect(QRectF(poster).adjusted(.4, .4, -.4, -.4), 4, 4)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
         hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+        read_range = getattr(self.view, "asset_range", None)
+        marks = read_range(index) if item_type == "asset" and selected and callable(read_range) else None
+        if marks is not None:
+            painter.save()
+            clip = QPainterPath()
+            clip.addRoundedRect(QRectF(poster).adjusted(-3, 0, 3, 0), 4, 4)
+            painter.setClipPath(clip, Qt.ClipOperation.IntersectClip)
+            self._paint_source_range(painter, poster, marks)
+            painter.restore()
+        read_hover = getattr(self.view, "hover_position_for", None)
+        hover = read_hover(data) if item_type == "asset" and data is not None and callable(read_hover) else None
+        if hover is not None:
+            x = poster.left() + 2 + (poster.width() - 4) * hover
+            painter.setPen(QPen(QColor(255, 255, 255, 190), 1))
+            painter.drawLine(QPointF(x, poster.top() + 2), QPointF(x, poster.bottom() - 2))
         panel = self._get_panel()
         if item_type == "timeline" and panel is not None:
             timeline_id = index.data(AssetListModel.ITEM_ID_ROLE)
@@ -356,16 +398,19 @@ class ResolvePoolDelegate(GridDelegate):
         drop_target = (item_type == "bin" and panel is not None and
                        getattr(panel, "_drop_target_bin_id", None) ==
                        index.data(AssetListModel.ITEM_ID_ROLE))
-        if selected or hovered or drop_target:
+        if marks is None and (selected or hovered or drop_target):
             painter.setPen(QPen(QColor(C.ORANGE if selected or drop_target
                                       else C.BORDER_HOVER), 1.5 if drop_target else 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(poster.adjusted(-1, -1, 1, 1), 4, 4)
         font = QFont(option.font)
-        font.setPixelSize(11)
+        asset_caption = item_type == "asset" and not self.metadata_mode
+        font.setPixelSize(10 if asset_caption else 11)
+        if asset_caption:
+            font.setWeight(QFont.Weight.Light)
         painter.setFont(font)
         self._text(painter, name, str(index.data(Qt.ItemDataRole.DisplayRole) or ""),
-                   centered=not self.metadata_mode)
+                   centered=not self.metadata_mode, muted=asset_caption)
         if self.metadata_mode:
             for row, text in enumerate(self._metadata_lines(str(item_type), data)):
                 self._text(painter, QRect(name.left(), name.bottom() + 1 + row * 20,

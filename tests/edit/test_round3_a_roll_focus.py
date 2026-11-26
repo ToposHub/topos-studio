@@ -1,4 +1,4 @@
-"""第三轮复查批A回归：Roll 正常提交与 TrimMonitor 抢焦（N15）+ 链接
+"""第三轮复查批A回归：Roll 正常提交与预览失焦（N15）+ 链接
 锁轨 trim release 收敛（N09，视图层）。
 
 对应 topos_round3_interaction_report.md T3-07 / extended_tools 证据。
@@ -60,42 +60,33 @@ def _linked_timeline(audio_locked: bool = False) -> TimelineSequence:
 
 # ------------------------------------------------------------------ N15
 
-def test_n15_trim_monitor_is_non_activating(qtbot: Any) -> None:
-    """Trim Monitor 构造即带 WA_ShowWithoutActivating（被动显示窗）。"""
-    from src.features.edit.ui.trim_numeric_dialog import TrimMonitorDialog
-
-    monitor = TrimMonitorDialog()
-    qtbot.addWidget(monitor)
-    assert monitor.testAttribute(
-        Qt.WidgetAttribute.WA_ShowWithoutActivating)
-
-
-def test_embedded_monitor_has_no_focus_exception_for_external_window(qtbot: Any) -> None:
-    """A viewer child never activates a Tool window; real focus loss still cancels."""
+def test_n15_focus_loss_cancels_roll_and_restores_program(qtbot: Any) -> None:
     from src.features.edit.ui.timeline_view import TimelineView
     view = TimelineView()
     qtbot.addWidget(view)
     view.load_timeline(_three_clip_timeline())
+    view.set_playhead(35)
+    finished: list[int] = []
+    view.trim_frame_preview_finished.connect(finished.append)
     view._on_roll_trim_started("a", "b", 100)
-    monitor = view._trim_monitor()
-    assert not monitor.isWindow()
-    assert monitor.focusPolicy() == Qt.FocusPolicy.NoFocus
-    assert monitor.isHidden()  # Standalone timelines do not open a monitor window.
     view.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.ActiveWindowFocusReason))
     assert view._interaction.is_idle
+    assert finished == [35]
 
 
-def test_n15_normal_roll_commits_after_monitor_shown(
+def test_n15_normal_roll_commits_after_program_preview(
         qtbot: Any) -> None:
-    """监视器已显示的完整 Roll：preview → release 正常提交一次。"""
+    """Roll preview does not interrupt a single commit on release."""
     from src.features.edit.ui.timeline_view import TimelineView
 
     view = TimelineView()
     qtbot.addWidget(view)
     view.load_timeline(_three_clip_timeline())
 
+    requests: list[int] = []
+    view.trim_frame_preview_requested.connect(requests.append)
     view._on_roll_trim_started("a", "b", 100)
-    assert view._trim_monitor_dialog is not None
+    assert requests == [100]
     view._on_roll_trim_dragged(10)
     view._on_roll_trim_finished("a", "b", 10)
 

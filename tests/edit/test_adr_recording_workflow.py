@@ -130,3 +130,8 @@ def test_adr_record_tab_rehearses_then_records_selected_cue(qtbot: QtBot) -> Non
     sheet.add_take(TakeInfo(take_id="other-take", scene_name="other-cue"))
     panel.set_take_sheet(sheet)
     assert panel._table.rowCount() == 1
+
+    panel.host_caption_tools(QWidget(), "Animation")
+    assert panel._table.rowCount() == 2
+    panel.leave_caption_workspace()
+    assert panel._table.rowCount() == 1

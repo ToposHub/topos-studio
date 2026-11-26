@@ -1667,3 +1667,30 @@ def test_edit_source_shortcut_reveals_source_inside_unified_viewport(monkeypatch
     viewport.show_program.assert_not_called()
     source.toggle_playback.assert_called_once_with()
     dock.raise_.assert_called_once_with()
+
+
+@pytest.mark.parametrize("monitor,selection,allow_media_pool,expected", [
+    ("source", ("camera",), True, True),
+    ("source", ("camera",), False, False),
+    ("program", ("camera",), True, False),
+    ("source", ("other",), True, False),
+    ("source", ("camera", "other"), True, False),
+])
+def test_edit_space_from_media_pool_uses_matching_active_source(
+    monkeypatch: pytest.MonkeyPatch, monitor: str, selection: tuple[str, ...],
+    allow_media_pool: bool, expected: bool,
+) -> None:
+    focus = object()
+    source = SimpleNamespace(current_asset=SimpleNamespace(asset_id="camera"),
+                             toggle_playback=MagicMock(return_value=True))
+    pool = SimpleNamespace(grid_view=_FocusContainer(focus), tree=None, get_selected_asset_ids=lambda: selection)
+    viewport = SimpleNamespace(active_monitor=monitor, show_source=MagicMock())
+    host = SimpleNamespace(current_page="Edit", source_viewer_widget=source, media_pool_panel=pool,
+                           edit_viewport=viewport, dock_program_viewer=MagicMock())
+    monkeypatch.setattr("src.app.main_window.QApplication.focusWidget", lambda: focus)
+    assert MainWindow._handle_edit_space_playback_shortcut(host, allow_media_pool=allow_media_pool) is expected
+    if expected:
+        source.toggle_playback.assert_called_once_with()
+        viewport.show_source.assert_called_once_with(focus=False)
+    else:
+        source.toggle_playback.assert_not_called()

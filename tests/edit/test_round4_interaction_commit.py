@@ -79,14 +79,14 @@ def test_real_roll_release_commits_preview_and_undo(
     assert view._timeline.get_clip_by_id("right") == sequence.get_clip_by_id("right")
 
 
-def test_roll_click_finishes_without_history_or_monitor(qtbot: Any) -> None:
+def test_roll_click_finishes_without_history_or_active_preview(qtbot: Any) -> None:
     view = _roll_view(qtbot, _sequence())
     handle = next(iter(view._roll_handles.values()))
     point = view.mapFromScene(handle.mapToScene(handle.boundingRect().center()))
     QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
     assert view._interaction.is_idle
     assert view._roll_preview_state is None
-    assert not view._trim_monitor_dialog.isVisible()
+    assert view._last_trim_preview_frame is None
     assert not view._command_stack.can_undo()
 
 

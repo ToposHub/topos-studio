@@ -1638,7 +1638,6 @@
       "remove_from_project": "プロジェクトから削除",
       "move_to_trash": "ゴミ箱へ移動",
       "trash_failed": "ファイルをゴミ箱へ移動できませんでした。アセットはプロジェクトから削除されましたが、ファイルはディスクに残っています。",
-      "quick_look_hint": "Space で閉じる · ダブルクリックで開く",
       "import_folder": "フォルダーを読み込む...",
       "select_folder": "読み込むフォルダーを選択",
       "shot": "ショット:",

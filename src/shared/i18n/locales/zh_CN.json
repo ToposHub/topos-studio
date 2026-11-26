@@ -535,6 +535,9 @@
       "compact_tip": "收窄通道条，在有限空间内显示更多轨道",
       "options": "混音器选项",
       "show_all_tracks": "显示全部轨道",
+      "clear_solo": "取消全部独奏",
+      "mute_all": "全部静音",
+      "unmute_all": "取消全部静音",
       "visible_tracks": "可见音频轨道数",
       "gain": "通道增益",
       "gain_tip": "通道增益（dB）· 双击推子恢复 0 dB",
@@ -727,6 +730,12 @@
       "p_flyby": "3D Overhead Flyby",
       "p_lfe": "Subwoofer LFE Send",
       "name": {
+        "voice_changer": "变声器",
+        "spectral_mangler": "频谱塑形",
+        "exciter": "谐波激励器",
+        "subharmonic": "次谐波增强器",
+        "noise_gate": "噪声门",
+        "vst3_hosted": "VST3 插件",
         "de_esser": "齿音消除",
         "true_peak_limiter": "真峰值限制器",
         "dynamic_eq": "动态 EQ",
@@ -1224,6 +1233,7 @@
       "settings_menu": "录音设置…",
       "settings_saved": "录音设置已保存。",
       "arm": "为录音 Arm 该轨道",
+      "enable_mode": "请在时间线上开启录音模式",
       "disarm": "取消 Arm",
       "first_channel": "第一声道",
       "input": "录音输入",
@@ -2267,6 +2277,27 @@
     "reset_rotation_tooltip": "重置旋转角度为 0 (快捷键：R)"
   },
   "plugins": {
+  "AI_Upscale_4X": {
+    "name": "AI 4 倍超分辨率"
+  },
+  "Frequency_Split": {
+    "name": "频率分离"
+  },
+  "God_Rays": {
+    "name": "体积光"
+  },
+  "LIB1_Gradient_Map": {
+    "name": "渐变映射"
+  },
+  "LIB1_Median_Rank": {
+    "name": "中值排序"
+  },
+  "Sky_Replace_Matte": {
+    "name": "天空替换蒙版"
+  },
+  "warm_tint": {
+    "name": "暖色调"
+  },
     "bilateral_skin_smooth": {
       "name": "双边皮肤平滑",
       "params": {
@@ -2766,7 +2797,6 @@
       "remove_from_project": "从项目中移除",
       "move_to_trash": "移到废纸篓",
       "trash_failed": "无法将文件移到废纸篓。素材已从项目中移除，但文件仍保留在磁盘上。",
-      "quick_look_hint": "空格关闭 · 双击打开",
       "import_folder": "导入文件夹...",
       "select_folder": "选择要导入的文件夹",
       "shot": "镜头:",

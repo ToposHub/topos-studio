@@ -62,6 +62,8 @@ def test_editing_preset_matches_factory_edit_layout():
 def test_task_presets_swap_panels_meaningfully():
     audio = get_workspace_preset("audio")
     assert "dockAudioMixer" in audio.visible_docks
+    assert "dockEditEffects" in audio.visible_docks
+    assert "dockAdrTakeSheet" not in audio.visible_docks
     assert "dockProperties" not in audio.visible_docks
     assert audio.focus_dock == "dockAudioMixer"
 

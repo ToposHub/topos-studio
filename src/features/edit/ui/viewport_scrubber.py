@@ -11,6 +11,7 @@ from PyQt6.QtCore import QEvent, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QMouseEvent, QPaintEvent, QPainter, QPainterPath, QPen
 from PyQt6.QtWidgets import QSlider, QWidget
 
+from src.features.edit.ui.timeline_edit_affordances import paint_range_grip
 from src.shared.ui.widgets.scrubber_gesture import (
     cancel_monitor_scrub, scrubber_mouse_move, scrubber_mouse_press,
     scrubber_mouse_release, scrubber_track_bounds,
@@ -32,6 +33,28 @@ def _mark(slider: QSlider, name: str) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def monitor_range_marks(slider: QSlider) -> tuple[int | None, int | None]:
+    preview = getattr(slider, "_range_preview", None)
+    return preview if preview is not None else (_mark(slider, "_in_point"), _mark(slider, "_out_point"))
+
+
+def monitor_range_grip_at(slider: QSlider, pos: QPointF) -> str | None:
+    """Find the nearest endpoint within the lower part of the scrubber."""
+    if not 11.0 <= pos.y() <= slider.height():
+        return None
+    left, right = scrubber_track_bounds(slider)
+    start, end = monitor_range_marks(slider)
+    x_in = _value_x(slider, slider.minimum() if start is None else start, left, right)
+    x_out = _value_x(slider, slider.maximum() if end is None else end, left, right)
+    in_distance, out_distance = abs(pos.x() - x_in), abs(pos.x() - x_out)
+    if min(in_distance, out_distance) > 12.0:
+        return None
+    if x_in == x_out:
+        on_left = pos.x() <= x_in
+        return "in" if on_left != slider.invertedAppearance() else "out"
+    return "in" if in_distance <= out_distance else "out"
+
+
 def paint_monitor_scrubber(slider: QSlider) -> None:
     """Draw the 24px monitor ruler using logical pixels at the native DPR."""
     painter = QPainter(slider)
@@ -43,29 +66,11 @@ def paint_monitor_scrubber(slider: QSlider) -> None:
     painter.setBrush(QColor("#151518"))
     painter.drawRoundedRect(groove, 1.0, 1.0)
 
-    in_point, out_point = _mark(slider, "_in_point"), _mark(slider, "_out_point")
-    if in_point is not None and out_point is not None and in_point <= out_point:
-        start = _value_x(slider, in_point, left, right)
-        end = _value_x(slider, out_point, left, right)
-        painter.fillRect(QRectF(min(start, end), 12.0, max(1.0, abs(end - start)), 2.0), QColor("#707074"))
-
-    # Small range handles sit beneath the track; an unset endpoint uses the
-    # full source extent.  No current-position progress fill is drawn.
-    handle_pen = QPen(QColor("#8a8a8e" if slider.isEnabled() else "#505054"), 0.8)
-    handle_pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
-    painter.setPen(handle_pen)
-    painter.setBrush(QColor("#555559" if slider.isEnabled() else "#39393e"))
+    in_point, out_point = monitor_range_marks(slider)
     first = _value_x(slider, in_point if in_point is not None else slider.minimum(), left, right)
     last = _value_x(slider, out_point if out_point is not None else slider.maximum(), left, right)
-    for x in (first, last):
-        handle = QPainterPath(QPointF(x, 14.8))
-        handle.lineTo(x - 2.7, 17.0)
-        handle.lineTo(x - 2.7, 21.0)
-        handle.lineTo(x + 2.7, 21.0)
-        handle.lineTo(x + 2.7, 17.0)
-        handle.closeSubpath()
-        painter.drawPath(handle)
-        painter.drawLine(QPointF(x, 17.3), QPointF(x, 20.0))
+    if in_point is not None or out_point is not None:
+        painter.fillRect(QRectF(min(first, last), 12.0, max(1.0, abs(last - first)), 2.0), QColor("#707074"))
 
     current_x = _value_x(slider, slider.value(), left, right)
     current_pen = QPen(QColor("#dc5b50" if slider.isEnabled() else "#72514f"), 1.0)
@@ -80,6 +85,11 @@ def paint_monitor_scrubber(slider: QSlider) -> None:
     flag.closeSubpath()
     painter.drawPath(flag)
     painter.drawLine(QPointF(current_x, 10.0), QPointF(current_x, 17.0))
+    for edge, x in (("in", first), ("out", last)):
+        paint_range_grip(
+            painter, x, 15.5, active=edge == getattr(slider, "_range_hover_edge", None),
+            enabled=slider.isEnabled(),
+        )
     painter.end()
 
 
@@ -99,9 +109,10 @@ class MonitorScrubber(QSlider):
         self._out_point: int | None = None
 
     def set_in_out_points(self, in_point: int | None, out_point: int | None) -> None:
-        """Update the displayed source range without changing the playhead."""
-        self._in_point, self._out_point = in_point, out_point
-        self.update()
+        """Update the displayed range without changing the playhead."""
+        if (in_point, out_point) != (self._in_point, self._out_point):
+            self._in_point, self._out_point = in_point, out_point
+            self.update()
 
     def event(self, event: QEvent) -> bool:
         if event.type() in {QEvent.Type.Hide, QEvent.Type.UngrabMouse} or (

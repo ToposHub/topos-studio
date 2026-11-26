@@ -448,7 +448,6 @@ def test_set_timeline_panel_wires_scrub_moved_to_preview_request(qapp) -> None:
         source_replace_requested = pyqtSignal()
         source_patch_changed = pyqtSignal(str, str, bool)
         keyframe_tray_requested = pyqtSignal(bool)
-        voiceover_requested = pyqtSignal()
         flag_requested = pyqtSignal(str)
 
         def __init__(self, view: DummyTimelineView) -> None:

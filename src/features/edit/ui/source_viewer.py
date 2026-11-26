@@ -63,11 +63,11 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import (
     Qt, QObject, pyqtSignal, pyqtSlot, QPoint, QSize, QTimer, QEvent,
-    QByteArray, QMimeData,
+    QByteArray, QMimeData, QSignalBlocker,
 )
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QImage, QImageReader,
-    QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QIcon, QDrag,
+    QKeyEvent, QKeySequence, QMouseEvent, QShortcut, QWheelEvent, QIcon, QDrag,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -87,8 +87,13 @@ from src.features.edit.core.source_drag_payload import (
     MIME_TYPE_SOURCE_CLIP,
     build_source_drag_payload,
 )
+from src.features.edit.core.asset_source_range import get_asset_in_out
 from src.shared.media.timecode import Timecode
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
+from src.features.edit.ui.viewport_scrubber import (
+    cancel_monitor_scrub, monitor_range_grip_at, paint_monitor_scrubber,
+    scrubber_mouse_move, scrubber_mouse_press, scrubber_mouse_release, scrubber_track_bounds,
+)
 from src.shared.gpu.metal.present_port import normalized_rect
 from src.features.edit.ui.edit_style import EDIT_COLORS
 from src.shared.ui.style_sheet import UI_MONO_FONT_FAMILIES
@@ -595,13 +600,25 @@ class SourceSlider(QSlider):
     - Selection range: Orange shaded area
     """
 
-    def __init__(self, parent=None):
+    range_edit_finished = pyqtSignal(int, int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._in_point: Optional[int] = None
         self._out_point: Optional[int] = None
+        self._range_editable = False
+        self._range_hover_edge: str | None = None
+        self._range_drag: tuple[str, float, int, int] | None = None
+        self._range_preview: tuple[int, int] | None = None
         self.setMinimum(0)
         self.setMaximum(100)
         self.setFixedHeight(16)
+
+    def set_range_editable(self, enabled: bool) -> None:
+        self._range_editable = enabled
+        self.setMouseTracking(enabled)
+        if not enabled:
+            self._cancel_range_drag()
 
     def set_in_out_points(self, in_point: Optional[int], out_point: Optional[int]) -> None:
         """Set the In/Out point positions."""
@@ -615,14 +632,13 @@ class SourceSlider(QSlider):
             event.type() in (QEvent.Type.Hide, QEvent.Type.UngrabMouse)
             or (event.type() == QEvent.Type.EnabledChange and not self.isEnabled())
         ):
-            from src.features.edit.ui.viewport_scrubber import cancel_monitor_scrub
+            self._cancel_range_drag()
             cancel_monitor_scrub(self)
         return super().event(event)
 
     def paintEvent(self, event) -> None:
         """Custom paint to show In/Out markers."""
         if self.property("resolveMonitorScrubber"):
-            from src.features.edit.ui.viewport_scrubber import paint_monitor_scrubber
             paint_monitor_scrubber(self)
             return
         super().paintEvent(event)
@@ -657,24 +673,86 @@ class SourceSlider(QSlider):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """Keep the original slider signals for direct monitor scrubbing."""
         if self.property("resolveMonitorScrubber"):
-            from src.features.edit.ui.viewport_scrubber import scrubber_mouse_press
+            if self._range_editable and self.isEnabled() and event.button() == Qt.MouseButton.LeftButton:
+                edge = monitor_range_grip_at(self, event.position())
+                if edge is not None:
+                    start = self.minimum() if self._in_point is None else self._in_point
+                    end = self.maximum() if self._out_point is None else self._out_point
+                    self.setFocus(Qt.FocusReason.MouseFocusReason)
+                    self._range_drag = (edge, event.position().x(), start, end)
+                    self._set_range_hover(edge)
+                    event.accept()
+                    return
             if scrubber_mouse_press(self, event):
                 return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self.property("resolveMonitorScrubber"):
-            from src.features.edit.ui.viewport_scrubber import scrubber_mouse_move
+            if self._range_drag is not None:
+                self._range_preview = self._range_at_pointer(event.position().x())
+                self.update()
+                event.accept()
+                return
             if scrubber_mouse_move(self, event):
                 return
+            if self._range_editable:
+                self._set_range_hover(monitor_range_grip_at(self, event.position()))
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self.property("resolveMonitorScrubber"):
-            from src.features.edit.ui.viewport_scrubber import scrubber_mouse_release
+            if self._range_drag is not None and event.button() == Qt.MouseButton.LeftButton:
+                marks = self._range_at_pointer(event.position().x())
+                original = self._range_drag[2:]
+                self._cancel_range_drag()
+                if marks != original:
+                    self.range_edit_finished.emit(*marks)
+                self._set_range_hover(monitor_range_grip_at(self, event.position()))
+                event.accept()
+                return
             if scrubber_mouse_release(self, event):
                 return
         super().mouseReleaseEvent(event)
+
+    def _range_at_pointer(self, x: float) -> tuple[int, int]:
+        assert self._range_drag is not None
+        edge, press_x, start, end = self._range_drag
+        left, right = scrubber_track_bounds(self)
+        delta = round((x - press_x) * (self.maximum() - self.minimum()) / (right - left)) if right > left else 0
+        if self.invertedAppearance():
+            delta = -delta
+        if edge == "in":
+            return max(self.minimum(), min(start + delta, end)), end
+        return start, max(start, min(end + delta, self.maximum()))
+
+    def _set_range_hover(self, edge: str | None) -> None:
+        if edge != self._range_hover_edge:
+            self._range_hover_edge = edge
+            if edge is None:
+                self.unsetCursor()
+            else:
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            self.update()
+
+    def _cancel_range_drag(self) -> None:
+        self._range_drag = None
+        if self._range_preview is not None:
+            self._range_preview = None
+            self.update()
+        self._set_range_hover(None)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        if self._range_drag is None:
+            self._set_range_hover(None)
+        super().leaveEvent(event)
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape and self._range_drag is not None:
+            self._cancel_range_drag()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 # ================================================================
@@ -2002,6 +2080,7 @@ class SourceViewerWidget(QWidget):
         self.slider.sliderPressed.connect(self._on_slider_pressed)
         self.slider.sliderReleased.connect(self._on_slider_released)
         self.slider.valueChanged.connect(self._on_slider_changed)
+        self.slider.range_edit_finished.connect(self.set_source_range)
         layout.addWidget(self.slider)
 
         # Toolbar (bottom — playback controls, timecode, edit buttons)
@@ -2096,6 +2175,14 @@ class SourceViewerWidget(QWidget):
         self._out_point = None
         self._is_playing = False
 
+        metadata = getattr(asset, "metadata", None)
+        if metadata and not metadata.get("is_subclip"):
+            start, end = get_asset_in_out(asset)
+            if (start is None or self._reject_half_range(start, (start, start)) is None) and (
+                end is None or self._reject_half_range(end, (end, end)) is None
+            ) and (start is None or end is None or start <= end):
+                self._in_point, self._out_point = start, end
+
         # I02-3：按 asset_id + 媒体指纹 + 帧数恢复监看状态（换版自动作
         # 废，不回填假位置）。恢复值经时间域再校验；恢复发生在 generation
         # 提升（下方）与末尾单次 _load_frame 之间——顺序保证迟到的旧资产
@@ -2105,6 +2192,7 @@ class SourceViewerWidget(QWidget):
                 asset.asset_id, self._time_domain.media_fingerprint,
                 self._total_frames)
             if restored is not None:
+                self._in_point, self._out_point = None, None
                 self._current_frame = max(
                     0, min(int(restored.frame), self._total_frames - 1))
                 if restored.in_point is not None and \
@@ -2157,10 +2245,13 @@ class SourceViewerWidget(QWidget):
         self.viewer.set_playback_state(False, self._fps)
         self.toolbar.update_in_out_state(self._in_point, self._out_point)
 
-        # Update slider
-        self.slider.setRange(0, self._total_frames - 1 if self._total_frames > 1 else 100)
-        self.slider.setValue(self._current_frame)
-        self.slider.set_in_out_points(self._in_point, self._out_point)
+        # Restoring controls is one projection of the saved source state.
+        # A clamped slider value must not seek before the restored frame is set.
+        with QSignalBlocker(self.slider):
+            self.slider.setRange(0, self._total_frames - 1 if self._total_frames > 1 else 100)
+            self.slider.setValue(self._current_frame)
+            self.slider.set_in_out_points(self._in_point, self._out_point)
+        self.slider.set_range_editable(self._total_frames > 1)
         # FE-B05：切源范围状态信号（I02：可能携带恢复的 In/Out）
         self.range_changed.emit(self._in_point, self._out_point)
 
@@ -2304,6 +2395,7 @@ class SourceViewerWidget(QWidget):
         self.slider.setRange(0, 100)
         self.slider.setValue(0)
         self.slider.set_in_out_points(None, None)
+        self.slider.set_range_editable(False)
 
         # E22: source_closed 信号已删除（无接收者）
 
@@ -2775,6 +2867,28 @@ class SourceViewerWidget(QWidget):
         self.in_point_changed.emit(frame)
         self.range_changed.emit(self._in_point, self._out_point)
         logger.debug(f"In point set: {frame}")
+
+    def set_source_range(self, start: int, end: int) -> bool:
+        """Apply both endpoints together for a direct manipulation gesture."""
+        reason = (self._reject_half_range(start, (start, start))
+                  or self._reject_half_range(end, (start, end)))
+        if reason is not None:
+            self.range_rejected.emit(reason)
+            return False
+        if (start, end) != (self._in_point, self._out_point):
+            self._in_point, self._out_point = start, end
+            self.toolbar.update_in_out_state(start, end)
+            self.slider.set_in_out_points(start, end)
+            self.range_changed.emit(start, end)
+        return True
+
+    def preview_range_boundary(self, frame: int, *, final: bool = False) -> None:
+        """Follow a moving range edge on the existing coalesced scrub path."""
+        if final:
+            self._scrub_pending_frame = None
+            self.seek(frame, force=True)
+        else:
+            self._request_scrub_video_frame(frame)
 
     def set_out_point(self, frame: int) -> None:
         """Set the Out point（I02：经时间域校验；拒绝时零写入并回因）。"""

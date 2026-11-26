@@ -155,28 +155,28 @@ EDITING_PRESET = WorkspacePreset(
 )
 
 # 音频混音工作区：Audio Mixer（EditTrack 轨道混音器）取代右侧属性区，
-# 时间线保持可用，媒体池收窄；ADR Take Sheet 与混音器同栈（P1-10）。
+# 时间线保持可用，媒体池收窄；效果面板的字幕页与混音器同栈。
 AUDIO_PRESET = WorkspacePreset(
     preset_id="audio",
     label="音频",
     label_en="Audio",
-    description="混音布局：音频混音器 + ADR take sheet + 时间线 + 节目监视器，弱化剪辑面板",
+    description="混音布局：音频混音器、字幕配音、时间线和节目监视器",
     visible_docks=(
         "dockEditMediaPool",
         "dockProgramViewer",
         "dockEditTimeline",
         "dockAudioMixer",
-        "dockAdrTakeSheet",
+        "dockEditEffects",
     ),
     dock_areas=(
         ("dockEditMediaPool", "left"),
         ("dockProgramViewer", "top"),
         ("dockEditTimeline", "bottom"),
         ("dockAudioMixer", "right"),
-        ("dockAdrTakeSheet", "right"),
+        ("dockEditEffects", "right"),
     ),
     tabify_groups=(
-        ("dockAudioMixer", "dockAdrTakeSheet"),
+        ("dockAudioMixer", "dockEditEffects"),
     ),
     focus_dock="dockAudioMixer",
     h_sizes=(

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QToolButton
 
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
 from src.features.edit.ui.timeline_items import EditTool
@@ -108,6 +109,54 @@ def test_view_options_change_display_and_height(panel: TimelinePanel) -> None:
     view.set_thumbnail_display_mode("auto")
 
 
+def test_clip_height_follows_zoom_and_preserves_mixer_audio_scope(panel: TimelinePanel) -> None:
+    assert panel._tools_bar.indexOf(panel.zoom_slider) < panel._tools_bar.indexOf(panel._track_height_control)
+    assert panel._track_height_control.isVisible()
+    view = panel.timeline_view
+    sequence = view.get_timeline()
+    panel._track_height_slider.setValue(125)
+    assert view.layout_state()["track_heights"] == {"v1": 125, "a1": 120}
+    assert view.get_timeline() is sequence
+    assert not view._command_stack.can_undo()
+
+    panel.set_display_mode("mixer")
+    assert panel._track_height_slider.value() == 120
+    panel._track_height_slider.setValue(58)
+    assert view.layout_state()["track_heights"] == {"v1": 125, "a1": 58}
+    panel.set_display_mode("edit")
+    assert panel._track_height_slider.value() == 125
+    view.set_layout_state({"track_heights": {"v1": 96, "a1": 51}})
+    assert panel._track_height_slider.value() == 96
+
+
+def test_toolbar_monitor_volume_follows_local_control_room_state(panel: TimelinePanel, qtbot: Any) -> None:
+    from src.features.edit.ui.edit_page import EditPage
+    from src.features.mixer.ui.control_room import ControlRoomDialog
+
+    page = EditPage()
+    qtbot.addWidget(page)
+    page.set_timeline_panel(panel)
+    assert page._audio_manager is None
+    assert panel._tools_bar.indexOf(panel._audio_level_meter) < panel._tools_bar.indexOf(panel._monitor_gain_control)
+    assert not panel._monitor_gain_icon.pixmap().isNull()
+
+    slider = panel._monitor_gain_slider
+    slider.setValue(-123)
+    manager = page._audio_manager
+    assert manager.control_room_state.gain_db == -12.3
+    assert manager._output is None and manager._playback_thread is None
+
+    dialog = ControlRoomDialog()
+    qtbot.addWidget(dialog)
+    dialog.set_session(None, manager.control_room_state, manager.control_room_patch, {})
+    manager.monitor_gain_changed.connect(dialog.set_monitor_gain_db)
+    dialog.state_requested.connect(lambda state: manager.set_control_room(state, manager.control_room_patch))
+    dialog.gain.setValue(-22.7)
+    assert slider.value() == -227
+    slider.setValue(-310)
+    assert dialog.gain.value() == -31.0
+
+
 def test_overflow_uses_original_enabled_state_and_signal(panel: TimelinePanel) -> None:
     inserted: list[bool] = []
     panel.source_insert_requested.connect(lambda: inserted.append(True))
@@ -146,16 +195,19 @@ def test_annotation_and_source_requests_are_explicit(panel: TimelinePanel) -> No
     requests: list[tuple[str, Any]] = []
     panel.source_replace_requested.connect(lambda: requests.append(("replace", None)))
     panel.keyframe_tray_requested.connect(lambda visible: requests.append(("keyframes", visible)))
-    panel.voiceover_requested.connect(lambda: requests.append(("voiceover", None)))
+    panel.recording_mode_requested.connect(lambda active: requests.append(("recording_mode", active)))
     panel.flag_requested.connect(lambda color: requests.append(("flag", color)))
     panel.set_source_edit_buttons_enabled(True)
     panel.btn_replace.click()
     panel.btn_keyframe_tray.click()
-    panel.btn_voiceover.click()
+    panel.btn_recording_mode.click()
+    panel.set_recording_mode_checked(False)
     panel._flag_actions["#E06B66"].trigger()
     panel.btn_flag.click()
-    assert requests == [("replace", None), ("keyframes", True), ("voiceover", None),
+    assert requests == [("replace", None), ("keyframes", True), ("recording_mode", True),
                         ("flag", "#E06B66"), ("flag", "#E06B66")]
+    assert not panel.btn_recording_mode.isChecked()
+    assert panel.findChild(QToolButton, "timelineVoiceover") is None
 
 
 def test_marker_primary_action_adds_marker_instead_of_opening_list(panel: TimelinePanel) -> None:

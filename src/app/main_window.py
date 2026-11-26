@@ -608,9 +608,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         if not self._test_mode:
             self.restore_layout_state()
-            if self.current_page == "Edit" and not self._mixer_recording_workflow_active:
-                self._set_mixer_recording_workflow(True)
-
             self.layer_panel.update_layers(self.engine.layers, self.engine.active_layer_index)
 
             # Phase 6: Initialize ColorFacade for other modules
@@ -938,7 +935,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                     self._handle_motion_graphic_space_playback()
                     or self._handle_color_space_playback_shortcut()
                     or self._handle_composite_space_playback_shortcut()
-                    or self._handle_edit_space_playback_shortcut()
+                    or self._handle_edit_space_playback_shortcut(
+                        allow_media_pool=(
+                            key == Qt.Key.Key_Space
+                            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                        )
+                    )
                 ):
                     event.accept()
                     return True
@@ -1169,12 +1171,12 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             return False
         return True
 
-    def _handle_edit_space_playback_shortcut(self) -> bool:
+    def _handle_edit_space_playback_shortcut(self, *, allow_media_pool: bool = True) -> bool:
         """Route Space to the focused Edit playback surface.
 
         Timeline and Program Viewer control the timeline (Program) monitor;
-        Source Viewer controls the selected media asset.  Raising the matching
-        dock first keeps tabified monitors in sync with the active transport.
+        Source Viewer and its selected media-pool asset control source playback.
+        Raise the matching dock to keep tabified monitors in sync with transport.
         """
         page = getattr(self, "current_page", None)
         if page not in ("Edit", "Mixer"):
@@ -1186,16 +1188,22 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox),
         ):
             return False
-        if page == "Mixer" and getattr(self, "_mixer_timeline_recorders", None):
+        if (page == "Mixer" or getattr(self, "_mixer_transport_playing", False)) and getattr(
+            self, "_mixer_timeline_recorders", None
+        ):
             return self._stop_mixer_transport_recording()
         if getattr(self, "_adr_pass", None) is not None:
             self._stop_adr_session()
             return True
 
         source_viewer = getattr(self, "source_viewer_widget", None)
-        if page == "Edit" and MainWindow._focus_is_within(focus, source_viewer):
-            if getattr(source_viewer, "current_asset", None) is None:
-                return False
+        source_asset = getattr(source_viewer, "current_asset", None)
+        if page == "Edit" and source_asset is not None and (
+            MainWindow._focus_is_within(focus, source_viewer)
+            or (allow_media_pool and MainWindow._media_pool_has_source_focus(
+                self, focus, getattr(source_asset, "asset_id", None),
+            ))
+        ):
             toggle_source = getattr(source_viewer, "toggle_playback", None)
             if not callable(toggle_source):
                 return False
@@ -1227,6 +1235,21 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             reset_jkl()
         toggle_timeline()
         return True
+
+    def _media_pool_has_source_focus(self, focus: QWidget | None, asset_id: str | None) -> bool:
+        """Keep Space on the loaded source when its asset row still has focus."""
+        viewport = getattr(self, "edit_viewport", None)
+        pool = getattr(self, "media_pool_panel", None)
+        return (
+            asset_id is not None
+            and getattr(viewport, "active_monitor", None) == "source"
+            and pool is not None
+            and (
+                MainWindow._focus_is_within(focus, pool.grid_view)
+                or MainWindow._focus_is_within(focus, pool.tree)
+            )
+            and pool.get_selected_asset_ids() == (asset_id,)
+        )
 
     def _create_pages_from_registry(self) -> bool:
         """
@@ -1611,7 +1634,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         )
         if self._mixer_available and self.mixer_page is not None:
             from src.features.mixer.ui.studio_console import StudioAudioMixerPanel
-            self.audio_mixer_panel = StudioAudioMixerPanel()
+            self.audio_mixer_panel = StudioAudioMixerPanel(require_recording_mode=True)
         else:
             self.audio_mixer_panel = AudioMixerPanel()
 

@@ -84,8 +84,7 @@ def install_paint_trace() -> None:
     # 定位 paintEvent 内部具体耗时段）。
     for name in (
         "drawBackground", "_configure_layout_engine",
-        "_draw_vertical_time_markers", "_paint_fixed_header_column",
-        "drawForeground",
+        "_paint_fixed_header_column", "drawForeground",
     ):
         wrap(TimelineView, name, f"TV.{name}")
     for name in (

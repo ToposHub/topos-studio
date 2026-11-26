@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from PyQt6.QtCore import QMimeData, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QKeySequence, QShortcut, QShowEvent
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QShortcut, QShowEvent
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QLabel, QLineEdit, QStackedWidget, QTreeWidget,
+    QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QStackedWidget, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -15,10 +15,12 @@ from src.features.edit.ui.edit_effects_panel import MIME_TYPE_EFFECT
 from src.features.mixer.effects import EffectInstance, EffectWindowManager, effect_catalog
 from src.features.mixer.effects.browser_catalog import audio_effect_groups, audio_effect_name
 from src.features.mixer.effects.production_dialog import PRODUCTION_BINDINGS
-from src.shared.assets.icon_manager import icon_fx, icon_search
+from src.shared.assets.icon_manager import icon_search
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
+from src.shared.ui.effect_icons import audio_effect_icon
 from src.shared.ui.style_sheet import C
+from src.shared.ui.widgets.compact_scrollbar import CompactVerticalScrollBar
 
 
 _EFFECT_ROLE = Qt.ItemDataRole.UserRole
@@ -35,7 +37,7 @@ QLineEdit#MixerEffectsSearch {{
 }}
 QLineEdit#MixerEffectsSearch:focus {{ border-color: {C.ORANGE}; }}
 QTreeWidget#MixerEffectsTree {{
-    background: {C.BG_PANEL}; color: {C.TEXT_PRIMARY}; border: none;
+    background: {C.BG_PANEL}; color: {C.TEXT_LABEL}; border: none;
     outline: none; font-size: 12px;
 }}
 QTreeWidget#MixerEffectsTree::item {{ padding: 0 5px; }}
@@ -99,10 +101,12 @@ class MixerEffectsPanel(QWidget):
         self.tree.setAccessibleName(I18N.tr("panel.audio_effects", "Audio Effects"))
         self.tree.setHeaderHidden(True)
         self.tree.setIndentation(15)
-        self.tree.setIconSize(QSize(14, 14))
+        self.tree.setIconSize(QSize(16, 16))
         self.tree.setUniformRowHeights(True)
         self.tree.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tree.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.tree.setVerticalScrollBar(CompactVerticalScrollBar())
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
         self.tree.setSupportedDragActions(Qt.DropAction.CopyAction)
@@ -116,14 +120,18 @@ class MixerEffectsPanel(QWidget):
         self._empty.setObjectName("MixerEffectsEmpty")
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty.setWordWrap(True)
+        self._empty.setContentsMargins(0, 0, 8, 0)
         self._content = QStackedWidget(self)
         self._content.addWidget(self.tree)
         self._content.addWidget(self._empty)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 4)
+        layout.setContentsMargins(8, 8, 0, 4)
         layout.setSpacing(6)
-        layout.addWidget(self.search)
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 8, 0)
+        search_row.addWidget(self.search)
+        layout.addLayout(search_row)
         layout.addWidget(self._content, 1)
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 - Qt API
@@ -134,7 +142,6 @@ class MixerEffectsPanel(QWidget):
             self._filter(self.search.text())
 
     def _populate(self) -> None:
-        row_icon = icon_fx(C.TEXT_HINT)
         for label, group_name, entries in audio_effect_groups(include_track_effects=True):
             heading = self._add_group(label)
             for effect in entries:
@@ -147,7 +154,7 @@ class MixerEffectsPanel(QWidget):
                 item.setData(0, _SEARCH_ROLE, " ".join((
                     name, effect.name, effect_type, effect.description, label, group_name,
                 )).casefold())
-                item.setIcon(0, row_icon)
+                item.setIcon(0, audio_effect_icon(effect_type))
                 item.setToolTip(0, f"{name}\n{self._target_hint(effect_type)}")
 
         live_panels = {panel_id for panel_id, _fields in PRODUCTION_BINDINGS.values()}
@@ -165,7 +172,9 @@ class MixerEffectsPanel(QWidget):
             item.setData(0, _SEARCH_ROLE, " ".join((
                 descriptor.name_en, descriptor.name_zh, descriptor.effect_id, heading.text(0),
             )).casefold())
-            item.setIcon(0, row_icon)
+            item.setIcon(0, audio_effect_icon(descriptor.effect_id))
+            if not clip_tool:
+                item.setForeground(0, QColor(C.TEXT_DIM))
             item.setToolTip(0, _tr(
                 "open_clip_tool", "Double-click to open the selected audio clip in the editor.",
             ) if clip_tool else _tr(
@@ -175,9 +184,9 @@ class MixerEffectsPanel(QWidget):
     def _add_group(self, label: str) -> QTreeWidgetItem:
         heading = QTreeWidgetItem(self.tree, [label])
         heading.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        heading.setForeground(0, QColor(C.TEXT_SECONDARY))
+        heading.setForeground(0, QColor(C.TEXT_PRIMARY))
         font = self.tree.font()
-        font.setBold(True)
+        font.setWeight(QFont.Weight.DemiBold)
         heading.setFont(0, font)
         heading.setSizeHint(0, QSize(0, 25))
         heading.setExpanded(True)

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import TimelineSequence
 
 import numpy as np
-from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QObject, QSignalBlocker, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -24,7 +24,10 @@ from PyQt6.QtWidgets import (
 from src.features.edit.core.adr_cues import AdrCue, read_adr_cues
 from src.features.edit.core.interchange import frames_to_timecode, timecode_to_frames
 from src.features.edit.core.recording_manager import is_drop_frame_rate
+from src.shared.assets.icon_manager import icon_refresh
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.style_sheet import C
+from src.shared.ui.widgets.compact_scrollbar import CompactVerticalScrollBar
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +321,7 @@ class AdrTakeSheetPanel(QWidget):
     cue_selected = pyqtSignal(object)             # AdrCue
     rehearse_requested = pyqtSignal(object)       # AdrCue
     record_requested = pyqtSignal(object)         # AdrCue
+    playhead_record_requested = pyqtSignal(str)   # optional destination track ID
     stop_requested = pyqtSignal()
 
     _COLS = ("#", "Take", "Length", "Peak", "In TC", "Status", "Best")
@@ -331,18 +335,80 @@ class AdrTakeSheetPanel(QWidget):
         self._cues: tuple[AdrCue, ...] = ()
         self._record_state = "idle"
         self._current_frame = 0
+        self._caption_workspace = False
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(8, 8, 8, 8)
-        root.setSpacing(6)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(8, 8, 8, 8)
+        self._layout.setSpacing(6)
 
-        tabs = QTabWidget(self)
-        tabs.addTab(self._build_cue_list(), I18N.tr("edit.adr.list_tab", "Cues"))
-        tabs.addTab(self._build_record_tab(), I18N.tr("edit.adr.record_tab", "Record"))
-        tabs.addTab(self._build_settings_group(), I18N.tr("edit.adr.setup_tab", "Setup"))
-        root.addWidget(tabs)
+        self._tabs = QTabWidget(self)
+        self._tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+        self._cue_page = self._build_cue_list()
+        self._record_page = self._build_record_tab()
+        self._tabs.addTab(self._cue_page, I18N.tr("edit.adr.list_tab", "Cues"))
+        self._tabs.addTab(self._record_page, I18N.tr("edit.adr.record_tab", "Record"))
+        self._settings_page = self._build_settings_group()
+        self._tabs.addTab(self._settings_page, I18N.tr("edit.adr.setup_tab", "Setup"))
+        self._layout.addWidget(self._tabs)
 
         self.set_recording_state("idle")
+
+    def host_caption_tools(self, page: QWidget, label: str) -> None:
+        """Present the Edit subtitle controls beside the shared ADR pages."""
+        self._caption_workspace = True
+        if self._tabs.indexOf(page) < 0:
+            self._tabs.addTab(page, label)
+        self._tabs.setTabVisible(self._tabs.indexOf(page), True)
+        self._tabs.tabBar().moveTab(self._tabs.indexOf(self._record_page), 0)
+        self._tabs.tabBar().moveTab(self._tabs.indexOf(page), 1)
+        record_index = self._tabs.indexOf(self._record_page)
+        use_english = I18N.get_current_locale() != "zh_CN"
+        self._tabs.setTabText(record_index, I18N.tr(
+            "edit.effects.voiceover", "Voiceover", use_english=use_english
+        ))
+        self._tabs.setTabText(self._tabs.indexOf(self._settings_page), I18N.tr(
+            "edit.effects.recording_setup", "Setup", use_english=use_english
+        ))
+        self._playhead_record_btn.show()
+        self._tabs.setCurrentWidget(self._record_page)
+        self._layout.setContentsMargins(4, 0, 0, 0)
+        self._tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
+        self._tabs.tabBar().setUsesScrollButtons(False)
+        self._tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: 0; }}
+            QTabBar {{ font-size: 12px; }}
+            QTabBar::tab {{
+                background: {C.BG_PANEL}; color: {C.TEXT_LABEL};
+                border: 0; border-bottom: 2px solid transparent;
+                border-radius: 0; padding: 3px 6px;
+            }}
+            QTabBar::tab:selected {{
+                color: {C.TEXT_PRIMARY}; border-bottom: 2px solid {C.BORDER_MID};
+            }}
+            QPushButton {{ padding: 4px 7px; font-size: 12px; }}
+            QPushButton:disabled {{ color: {C.TEXT_HINT}; }}
+            QTableWidget::item:selected {{
+                color: {C.TEXT_PRIMARY}; background: {C.BG_BUTTON};
+            }}
+        """)
+        self._refresh_table()
+
+    def leave_caption_workspace(self) -> None:
+        """Restore the standalone ADR tabs for the Mixer dock."""
+        self._caption_workspace = False
+        self._tabs.setCurrentWidget(self._cue_page)
+        for index in range(self._tabs.count()):
+            page = self._tabs.widget(index)
+            self._tabs.setTabVisible(index, page in (self._cue_page, self._record_page, self._settings_page))
+        self._tabs.tabBar().moveTab(self._tabs.indexOf(self._cue_page), 0)
+        self._tabs.setTabText(self._tabs.indexOf(self._record_page), I18N.tr("edit.adr.record_tab", "Record"))
+        self._tabs.setTabText(self._tabs.indexOf(self._settings_page), I18N.tr("edit.adr.setup_tab", "Setup"))
+        self._playhead_record_btn.hide()
+        self._layout.setContentsMargins(8, 8, 8, 8)
+        self._tabs.tabBar().setElideMode(Qt.TextElideMode.ElideRight)
+        self._tabs.tabBar().setUsesScrollButtons(True)
+        self._tabs.setStyleSheet("")
+        self._refresh_table()
 
     # ── 构建 UI ──
 
@@ -350,14 +416,12 @@ class AdrTakeSheetPanel(QWidget):
         box = QGroupBox(I18N.tr("edit.adr.settings", "ADR Input"), self)
         form = QFormLayout(box)
 
-        self._track_combo = QComboBox(box)
-        self._track_combo.currentIndexChanged.connect(self._update_session_actions)
-        form.addRow(I18N.tr("edit.adr.record_track", "Record Track"), self._track_combo)
-
         self._device_combo = QComboBox(box)
-        self._refresh_btn = QPushButton(I18N.tr("edit.adr.refresh", "⟳"), box)
+        self._refresh_btn = QPushButton(icon_refresh(C.TEXT_LABEL), "", box)
         self._refresh_btn.setFixedWidth(28)
+        self._refresh_btn.setIconSize(QSize(12, 12))
         self._refresh_btn.setToolTip(I18N.tr("edit.adr.refresh_tip", "Refresh devices"))
+        self._refresh_btn.setAccessibleName(self._refresh_btn.toolTip())
         self._refresh_btn.clicked.connect(self.reload_devices)
         device_row = QHBoxLayout()
         device_row.addWidget(self._device_combo, stretch=1)
@@ -384,15 +448,15 @@ class AdrTakeSheetPanel(QWidget):
         form.addRow(I18N.tr("edit.adr.post_roll", "Post-roll"), self._post_roll_spin)
 
         options_row = QHBoxLayout()
-        self._loop_check = QCheckBox(I18N.tr("edit.adr.loop", "Loop record"), box)
+        self._loop_check = QCheckBox(I18N.tr("edit.adr.loop_cue", "Loop cue recording"), box)
         self._monitor_check = QCheckBox(I18N.tr("edit.adr.monitor", "Input monitor"), box)
         options_row.addWidget(self._loop_check)
         options_row.addWidget(self._monitor_check)
         options_row.addStretch(1)
-        form.addRow("", options_row)
+        form.addRow(options_row)
 
         self._count_in_check = QCheckBox(I18N.tr("edit.adr.count_in_beeps", "Count-in beeps"), box)
-        form.addRow("", self._count_in_check)
+        form.addRow(self._count_in_check)
 
         calib_row = QHBoxLayout()
         self._calib_label = QLabel(I18N.tr("edit.adr.uncalibrated", "Latency: not calibrated"), box)
@@ -400,7 +464,7 @@ class AdrTakeSheetPanel(QWidget):
         self._calibrate_btn.clicked.connect(self.calibrate_requested.emit)
         calib_row.addWidget(self._calib_label, stretch=1)
         calib_row.addWidget(self._calibrate_btn)
-        form.addRow("", calib_row)
+        form.addRow(calib_row)
 
         self._pre_roll_spin.valueChanged.connect(
             lambda _v: self.settings_changed.emit())
@@ -423,6 +487,8 @@ class AdrTakeSheetPanel(QWidget):
         page = QWidget(self)
         layout = QVBoxLayout(page)
         self._cue_table = QTableWidget(0, 4, page)
+        self._cue_table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._cue_table.setVerticalScrollBar(CompactVerticalScrollBar())
         self._cue_table.setHorizontalHeaderLabels([
             I18N.tr("edit.adr.cue_in", "In"),
             I18N.tr("edit.adr.cue_out", "Out"),
@@ -430,7 +496,10 @@ class AdrTakeSheetPanel(QWidget):
             I18N.tr("edit.adr.dialog", "Dialog"),
         ])
         self._cue_table.verticalHeader().hide()
-        self._cue_table.horizontalHeader().setStretchLastSection(True)
+        cue_header = self._cue_table.horizontalHeader()
+        for column in range(3):
+            cue_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        cue_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self._cue_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._cue_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._cue_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -453,8 +522,39 @@ class AdrTakeSheetPanel(QWidget):
     def _build_record_tab(self) -> QWidget:
         page = QWidget(self)
         layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 8, 4, 4)
+        layout.setSpacing(6)
+
+        track_row = QFormLayout()
+        self._track_combo = QComboBox(page)
+        self._track_combo.currentIndexChanged.connect(self._update_session_actions)
+        track_row.addRow(I18N.tr("edit.adr.record_track", "Record Track"), self._track_combo)
+        layout.addLayout(track_row)
+
+        actions = QHBoxLayout()
+        self._playhead_record_btn = QPushButton(I18N.tr(
+            "edit.effects.record_at_playhead", "Record at Playhead",
+            use_english=I18N.get_current_locale() != "zh_CN",
+        ), page)
+        self._playhead_record_btn.setToolTip(I18N.tr(
+            "edit.effects.record_at_playhead_tip",
+            "Record to the selected audio track, or use the timeline's audio target.",
+            use_english=I18N.get_current_locale() != "zh_CN",
+        ))
+        self._playhead_record_btn.clicked.connect(
+            lambda: self.playhead_record_requested.emit(self._track_combo.currentData() or "")
+        )
+        self._playhead_record_btn.hide()
+        self._stop_btn = QPushButton(I18N.tr("edit.adr.stop", "Stop"), page)
+        self._stop_btn.clicked.connect(self.stop_requested.emit)
+        actions.addWidget(self._playhead_record_btn, 1)
+        actions.addWidget(self._stop_btn)
+        layout.addLayout(actions)
+        layout.addWidget(self._build_status_row())
+
         self._record_cue_combo = QComboBox(page)
         self._record_cue_combo.setAccessibleName(I18N.tr("edit.adr.list_tab", "Cues"))
+        self._record_cue_combo.setPlaceholderText(I18N.tr("edit.adr.select_cue", "Select a cue"))
         self._record_cue_combo.activated.connect(self._cue_table.selectRow)
         layout.addWidget(self._record_cue_combo)
         self._prompt_label = QLabel(page)
@@ -464,15 +564,12 @@ class AdrTakeSheetPanel(QWidget):
 
         actions = QHBoxLayout()
         self._rehearse_btn = QPushButton(I18N.tr("edit.adr.rehearse", "Rehearse"), page)
-        self._record_btn = QPushButton(I18N.tr("edit.adr.record_tab", "Record"), page)
-        self._stop_btn = QPushButton(I18N.tr("edit.adr.stop", "Stop"), page)
+        self._record_btn = QPushButton(I18N.tr("edit.adr.record_cue", "Record Cue"), page)
         self._rehearse_btn.clicked.connect(self._rehearse_cue)
         self._record_btn.clicked.connect(self._record_cue)
-        self._stop_btn.clicked.connect(self.stop_requested.emit)
-        for button in (self._rehearse_btn, self._record_btn, self._stop_btn):
+        for button in (self._rehearse_btn, self._record_btn):
             actions.addWidget(button)
         layout.addLayout(actions)
-        layout.addWidget(self._build_status_row())
         layout.addWidget(self._build_take_table(), stretch=1)
         layout.addLayout(self._build_action_row())
         return page
@@ -491,6 +588,8 @@ class AdrTakeSheetPanel(QWidget):
 
     def _build_take_table(self) -> QTableWidget:
         self._table = QTableWidget(0, len(self._COLS), self)
+        self._table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._table.setVerticalScrollBar(CompactVerticalScrollBar())
         self._table.setHorizontalHeaderLabels([
             I18N.tr(f"edit.adr.col_{key.lower().replace(' ', '_')}", key)
             for key in self._COLS
@@ -507,11 +606,11 @@ class AdrTakeSheetPanel(QWidget):
 
     def _build_action_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        self._audition_btn = QPushButton(I18N.tr("edit.adr.audition", "▶ Audition"), self)
+        self._audition_btn = QPushButton(I18N.tr("edit.adr.audition", "Audition"), self)
         self._audition_btn.clicked.connect(self._on_audition_clicked)
-        self._mark_best_btn = QPushButton(I18N.tr("edit.adr.mark_best", "★ Mark Best"), self)
+        self._mark_best_btn = QPushButton(I18N.tr("edit.adr.mark_best", "Mark Best"), self)
         self._mark_best_btn.clicked.connect(self._on_mark_best)
-        self._replace_btn = QPushButton(I18N.tr("edit.adr.replace_clip", "Replace Selected Clip"), self)
+        self._replace_btn = QPushButton(I18N.tr("edit.adr.replace_clip", "Replace Clip"), self)
         self._replace_btn.clicked.connect(self._on_replace_clip)
         for btn in (self._audition_btn, self._mark_best_btn, self._replace_btn):
             row.addWidget(btn)
@@ -588,6 +687,8 @@ class AdrTakeSheetPanel(QWidget):
         has_cue = self.current_cue() is not None
         self._cue_table.setEnabled(ready)
         self._record_cue_combo.setEnabled(ready)
+        self._track_combo.setEnabled(ready)
+        self._playhead_record_btn.setEnabled(ready and self._timeline is not None)
         self._add_cue_btn.setEnabled(ready and self._timeline is not None)
         self._edit_cue_btn.setEnabled(ready and has_cue)
         self._remove_cue_btn.setEnabled(ready and has_cue)
@@ -824,7 +925,7 @@ class AdrTakeSheetPanel(QWidget):
         sheet = self._take_sheet
         entries = sheet.entries if sheet is not None else []
         cue = self.current_cue()
-        if cue is not None:
+        if cue is not None and not self._caption_workspace:
             entries = [entry for entry in entries if entry.scene_name == cue.scene_name]
         # 审计修复：未指定选择目标时保持当前选择（重建后 ★/替换/试听
         # 按钮不至于静默失效）
@@ -836,13 +937,14 @@ class AdrTakeSheetPanel(QWidget):
             self._table.insertRow(row)
             peak = ("—" if entry.peak_dbfs == float("-inf")
                     else f"{entry.peak_dbfs:.1f}")
+            status = I18N.tr(f"edit.adr.take_status.{entry.status}", entry.status) if entry.status else "—"
             values = (
                 str(entry.take_number),
                 entry.name or entry.file_path,
                 f"{entry.duration_seconds:.1f}s",
                 peak,
                 entry.start_timecode or "—",
-                entry.status or "—",
+                status,
                 "★" if entry.is_best else "",
             )
             for col, value in enumerate(values):

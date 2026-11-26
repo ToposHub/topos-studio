@@ -1,9 +1,8 @@
 """Regression tests for remediation batch D fixes (wd12-g66).
 
-Covers 16 Major findings from the 2026-09-28 audit, edit UI c segment:
+Covers major findings from the 2026-09-28 audit, edit UI c segment:
 
 - AUD-20103: interchange diagnostics must be HTML-escaped before rich text.
-- AUD-20200: Quick Look Space toggle must find and close the open dialog.
 - AUD-20201: hover-scrub frame cache is bounded per path.
 - AUD-20202: offline availability scan runs off the UI thread.
 - AUD-20203: media pool must not take FrameProviderService private locks.
@@ -75,97 +74,6 @@ def test_interchange_diagnostics_escaped(qapp) -> None:
 
 
 # ===========================================================================
-# AUD-20200 — Quick Look Space toggle tracks the open dialog
-# ===========================================================================
-
-
-class _FakeQuickLookDialog:
-    instances: list["_FakeQuickLookDialog"] = []
-
-    def __init__(self, asset, parent=None) -> None:
-        self.asset = asset
-        self.parent = parent
-        self.visible = True
-        self.closed = False
-        self.deleted = False
-        self.destroyed = SimpleNamespace(connect=lambda slot: None)
-        _FakeQuickLookDialog.instances.append(self)
-
-    def isVisible(self) -> bool:
-        return self.visible
-
-    def close(self) -> None:
-        self.closed = True
-        self.visible = False
-
-    def show(self) -> None:
-        self.visible = True
-
-    def deleteLater(self) -> None:
-        self.deleted = True
-
-
-def _quick_look_shell(monkeypatch) -> SimpleNamespace:
-    asset = SimpleNamespace(display_name="clip.mov")
-    shell = SimpleNamespace()
-    shell._project = SimpleNamespace(assets={"a1": asset})
-    shell._quick_look_dialog = None
-    shell._view_mode = mpp.ViewMode.LIST
-    shell.grid_view = None
-
-    class _Item:
-        def data(self, _column, role):
-            if role == mpp.Qt.ItemDataRole.UserRole + 1:
-                return "asset"
-            if role == mpp.Qt.ItemDataRole.UserRole:
-                return "a1"
-            return None
-
-    class _Tree:
-        @staticmethod
-        def selectedItems():
-            return [_Item()]
-
-    shell.tree = _Tree()
-    shell._get_top_level_widget = lambda: None
-    shell._show_quick_look = mpp.MediaPoolPanel._show_quick_look.__get__(shell)
-    shell._on_quick_look_destroyed = (
-        mpp.MediaPoolPanel._on_quick_look_destroyed.__get__(shell)
-    )
-    _FakeQuickLookDialog.instances = []
-    monkeypatch.setattr(mpp, "QuickLookDialog", _FakeQuickLookDialog)
-    return shell
-
-
-def test_quick_look_space_presses_do_not_leak(qapp, monkeypatch) -> None:
-    shell = _quick_look_shell(monkeypatch)
-
-    shell._show_quick_look()  # open
-    assert len(_FakeQuickLookDialog.instances) == 1
-    assert shell._quick_look_dialog is _FakeQuickLookDialog.instances[0]
-
-    shell._show_quick_look()  # toggle close
-    assert len(_FakeQuickLookDialog.instances) == 1, "second press must not open another dialog"
-    first = _FakeQuickLookDialog.instances[0]
-    assert first.closed and first.deleted
-    assert shell._quick_look_dialog is None
-
-
-def test_quick_look_reopens_after_hidden_close(qapp, monkeypatch) -> None:
-    """Esc closes the dialog (hidden, not destroyed); next Space reopens."""
-    shell = _quick_look_shell(monkeypatch)
-    shell._show_quick_look()
-    first = shell._quick_look_dialog
-    first.visible = False  # user closed it via Esc earlier
-
-    shell._show_quick_look()
-    # Hidden zombie is destroyed and a new dialog opens in a single press.
-    assert first.deleted
-    assert shell._quick_look_dialog is not first
-    assert shell._quick_look_dialog is _FakeQuickLookDialog.instances[-1]
-
-
-# ===========================================================================
 # AUD-20201 — hover-scrub frame cache bounded per path
 # ===========================================================================
 
@@ -174,6 +82,7 @@ def test_hover_frame_cache_is_bounded(qapp) -> None:
     from PyQt6.QtGui import QPixmap
 
     view = mpp.AssetListView()
+    view._hover_path = "/a.mov"
     for index in range(view._HOVER_FRAMES_PER_PATH + 25):
         view._on_hover_frame_ready("/a.mov", index, QPixmap(8, 8))
     frames = view._hover_frames["/a.mov"]
@@ -189,13 +98,14 @@ def test_hover_frame_cache_switching_path_drops_previous(qapp) -> None:
     from PyQt6.QtGui import QPixmap
 
     view = mpp.AssetListView()
+    view._hover_path = "/a.mov"
     view._on_hover_frame_ready("/a.mov", 0, QPixmap(8, 8))
     assert "/a.mov" in view._hover_frames
 
     # Simulate the path switch performed by _handle_hover_scrub.
-    view._hover_path = "/a.mov"
-    view._hover_frames.pop("/a.mov", None)
+    view._clear_hover_preview()
     view._hover_path = "/b.mov"
+    view._on_hover_frame_ready("/a.mov", 2, QPixmap(8, 8))
     view._on_hover_frame_ready("/b.mov", 3, QPixmap(8, 8))
     assert "/a.mov" not in view._hover_frames
     assert "/b.mov" in view._hover_frames

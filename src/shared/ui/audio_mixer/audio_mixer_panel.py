@@ -405,11 +405,13 @@ class AudioMixerPanel(QWidget):
         compact.setChecked(self._narrow_layout)
         compact.toggled.connect(self.set_narrow_layout)
         menu.addSeparator()
-        act_clear_solo = menu.addAction(self.tr("Clear All Solo"))
+        act_clear_solo = menu.addAction(I18N.tr("audio.mixer.clear_solo", self.tr("Clear All Solo")))
+        act_clear_solo.setObjectName("mixer_clear_solo")
         act_clear_solo.setEnabled(bool(self._track_mixers) and bool(self._solo_tracks))
         act_clear_solo.triggered.connect(self.clear_all_solo)
-        for label, callback in (("Mute All", self.mute_all), ("Unmute All", self.unmute_all)):
-            action = menu.addAction(self.tr(label))
+        for key, label, callback in (("mute_all", "Mute All", self.mute_all),
+                                     ("unmute_all", "Unmute All", self.unmute_all)):
+            action = menu.addAction(I18N.tr(f"audio.mixer.{key}", self.tr(label)))
             action.setEnabled(bool(self._track_mixers))
             action.triggered.connect(callback)
         menu.addSeparator()
@@ -428,6 +430,7 @@ class AudioMixerPanel(QWidget):
         menu = QMenu(self)
         self._populate_mixer_menu(menu)
         menu.exec(self.mapToGlobal(pos))
+        menu.deleteLater()
 
     def set_track_name(self, track_id: str, name: str) -> None:
         """设置轨道名称"""

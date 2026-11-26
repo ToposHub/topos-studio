@@ -83,6 +83,24 @@ def _render(item: ClipItem) -> QImage:
     return image
 
 
+@pytest.mark.parametrize("clip_id,selected", [("v0", False), ("v0", True), ("a0", False)])
+def test_clip_content_stays_inside_rounded_corners(qtbot: Any, clip_id: str, selected: bool) -> None:
+    item = _view(qtbot)._items_map[clip_id]
+    item.set_selected(selected)
+    if clip_id == "v0":
+        item.set_comp_state(is_comp_clip=True, comp_cache_status="ready")
+    else:
+        item.set_enabled(False)
+
+    image = _render(item)
+    right, bottom = image.width() - 1, image.height() - 1
+    for x, y in ((0, 0), (right, 0), (0, bottom), (right, bottom)):
+        assert image.pixelColor(x, y).alpha() == 0
+    assert image.pixelColor(0, bottom // 2).alpha() > 0
+    assert image.pixelColor(right, bottom // 2).alpha() > 0
+    assert item.shape().contains(QPointF(0.5, 0.5))
+
+
 @pytest.mark.parametrize("tool", [EditTool.SELECT, EditTool.TRIM])
 @pytest.mark.parametrize("edge,clip_id,direction", [("left", "v0", 1), ("right", "v2", -1)])
 def test_top_corner_edits_fade_in_both_selection_and_trim_modes(

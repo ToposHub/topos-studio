@@ -813,9 +813,6 @@ class PageManagementMixin:
                         self._refresh_edit_preview_after_composite_change()
                     except Exception as e:
                         logger.warning(f"enter_page_hook: composite preview refresh failed: {e}")
-                workflow = getattr(self, "_set_mixer_recording_workflow", None)
-                if callable(workflow):
-                    workflow(True)
             # I01（复查计划）：回到 Edit 恢复页面仲裁模式与显示对齐。
             coordinator = getattr(self, "_viewport_playback_coordinator", None)
             if coordinator is not None:

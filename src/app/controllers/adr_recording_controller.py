@@ -46,7 +46,11 @@ class AdrRecordingControllerMixin:
         panel.cue_selected.connect(self._on_adr_cue_selected)
         panel.rehearse_requested.connect(self._on_adr_rehearse)
         panel.record_requested.connect(self._on_adr_record)
-        panel.stop_requested.connect(self._stop_adr_session)
+        panel.stop_requested.connect(self._on_adr_stop_requested)
+        edit_page = getattr(self, "edit_page", None)
+        start_voiceover = getattr(edit_page, "record_voiceover_at_playhead", None)
+        if callable(start_voiceover):
+            panel.playhead_record_requested.connect(start_voiceover)
         transport = getattr(self, "timeline_panel", None)
         if transport is not None:
             transport.playback_state_changed.connect(self._on_adr_playback_state)
@@ -61,6 +65,9 @@ class AdrRecordingControllerMixin:
         from src.features.edit.core.timeline_v2 import TimelineSequence
 
         timeline = timeline if isinstance(timeline, TimelineSequence) else None
+        sync_recordings = getattr(self, "_sync_mixer_timeline_recorders", None)
+        if callable(sync_recordings):
+            sync_recordings(timeline)
         timeline_id = timeline.timeline_id if timeline is not None else None
         session = self._adr_pass
         if session is not None and (timeline_id != session.timeline_id or (
@@ -230,6 +237,15 @@ class AdrRecordingControllerMixin:
     def _on_adr_playback_state(self, playing: bool, _speed: float, _direction: int) -> None:
         if not playing and self._adr_pass is not None and not self._adr_pass.ending:
             self._stop_adr_session()
+
+    def _on_adr_stop_requested(self) -> None:
+        if self._adr_pass is not None:
+            self._stop_adr_session()
+            return
+        edit_page = getattr(self, "edit_page", None)
+        stop_voiceover = getattr(edit_page, "stop_playhead_voiceover", None)
+        if callable(stop_voiceover):
+            stop_voiceover()
 
     def _stop_adr_session(self) -> None:
         self._adr_repeat_generation += 1

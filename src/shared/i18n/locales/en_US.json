@@ -535,6 +535,9 @@
       "compact_tip": "Compact strips · keep more tracks in view",
       "options": "Mixer options",
       "show_all_tracks": "Show all tracks",
+      "clear_solo": "Clear all solo",
+      "mute_all": "Mute All",
+      "unmute_all": "Unmute All",
       "visible_tracks": "Visible audio tracks",
       "gain": "Channel gain",
       "gain_tip": "Channel gain (dB) · double-click the fader to reset",
@@ -727,6 +730,12 @@
       "p_flyby": "3D Overhead Flyby",
       "p_lfe": "Subwoofer LFE Send",
       "name": {
+        "voice_changer": "Voice Changer",
+        "spectral_mangler": "Spectral Mangler",
+        "exciter": "Exciter",
+        "subharmonic": "Subharmonic",
+        "noise_gate": "Noise Gate",
+        "vst3_hosted": "VST3 Plug-in",
         "de_esser": "De-Esser",
         "true_peak_limiter": "True Peak Limiter",
         "dynamic_eq": "Dynamic EQ",
@@ -1182,6 +1191,7 @@
       "settings_menu": "Recording Settings…",
       "settings_saved": "Recording settings saved.",
       "arm": "Arm track for recording",
+      "enable_mode": "Enable Recording Mode in the timeline",
       "disarm": "Disarm track",
       "first_channel": "First channel",
       "input": "Recording input",
@@ -2226,6 +2236,27 @@
     "offline_mode": "Offline Cache Mode: Original image not found, some AI features locked"
   },
   "plugins": {
+  "AI_Upscale_4X": {
+    "name": "AI Upscale 4X"
+  },
+  "Frequency_Split": {
+    "name": "Frequency Split"
+  },
+  "God_Rays": {
+    "name": "God Rays"
+  },
+  "LIB1_Gradient_Map": {
+    "name": "Gradient Map"
+  },
+  "LIB1_Median_Rank": {
+    "name": "Median Rank"
+  },
+  "Sky_Replace_Matte": {
+    "name": "Sky Replace Matte"
+  },
+  "warm_tint": {
+    "name": "Warm Tint"
+  },
     "bilateral_skin_smooth": {
       "name": "Bilateral Skin Smooth",
       "params": {
@@ -2766,7 +2797,6 @@
       "remove_from_project": "Remove from Project",
       "move_to_trash": "Move to Trash",
       "trash_failed": "Could not move the file to trash. The asset was removed from the project, but the file remains on disk.",
-      "quick_look_hint": "Space to close · Double-click to open",
       "import_folder": "Import Folder...",
       "select_folder": "Select a folder to import",
       "shot": "Shot:",

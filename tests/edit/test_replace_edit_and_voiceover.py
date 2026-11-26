@@ -2,8 +2,7 @@
 
 W01：Replace 按源对齐帧替换——保留足迹/速度/效果/链接，仅换素材与
 源窗；linked 伙伴成对宏事务单步 undo；源不足/多选/无目标拒绝零写入。
-W04：Voiceover 桥接既有 ADR 链——目标音轨取有效音频目的轨，同轨
-再触发 = 停止导入，无上下文不操作。
+配音按钮通过 ADR 面板启动录音，停止后走原有导入链。
 """
 
 from __future__ import annotations
@@ -429,9 +428,14 @@ class _FakeRecordingMain(QObject):
         self._recording_managers: dict[str, Any] = {}
         self.dock_adr_take_sheet = None
 
-    def _start_recording(self, track_id: str, *, voiceover: bool = False) -> None:
+    def _start_recording(
+        self, track_id: str, *, voiceover: bool = False, from_mixer_timeline: bool = False,
+    ) -> _FakeManager:
+        assert from_mixer_timeline
         self.started.append((track_id, voiceover))
-        self._recording_managers[track_id] = _FakeManager()
+        manager = _FakeManager()
+        self._recording_managers[track_id] = manager
+        return manager
 
     def _stop_recording_and_import(self, track_id: str) -> None:
         self.stopped.append(track_id)
@@ -475,12 +479,54 @@ def test_voiceover_starts_on_effective_audio_track(
     # 蓝徽章选 a1 → 有效音频目的轨
     panel.get_timeline_view()._on_source_patch_requested("a1", True)
 
-    page._on_timeline_voiceover_requested()
+    page.record_voiceover_at_playhead()
     assert main.started == [("a1", True)]
-    # 同轨再触发 = 停止导入
-    page._on_timeline_voiceover_requested()
+    # Stop always finishes the recording started by this entry.
+    page.stop_playhead_voiceover()
     assert main.stopped == ["a1"]
     assert main.started == [("a1", True)]
+
+
+def test_subtitles_panel_starts_and_stops_voiceover_only_on_request(
+        qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.app.controllers.adr_recording_controller import AdrRecordingControllerMixin
+    from src.features.edit.ui.adr_take_sheet_panel import AdrTakeSheetPanel
+    from src.features.edit.ui.edit_effects_panel import EditEffectsPanel
+
+    page = _page(qtbot, monkeypatch)
+    timeline = _attach(qtbot, page)
+    effects = EditEffectsPanel()
+    qtbot.addWidget(effects)
+    adr = AdrTakeSheetPanel()
+
+    class _Host(_FakeRecordingMain, AdrRecordingControllerMixin):
+        def _adr_panel(self) -> AdrTakeSheetPanel:
+            return adr
+
+        def _start_recording(
+            self, track_id: str, *, voiceover: bool = False, from_mixer_timeline: bool = False,
+        ) -> _FakeManager:
+            manager = super()._start_recording(
+                track_id, voiceover=voiceover, from_mixer_timeline=from_mixer_timeline,
+            )
+            adr.set_recording_state("pre_roll")
+            return manager
+
+    host = _Host()
+    host.timeline_panel = timeline
+    host.edit_page = page
+    page._main_window = host
+    effects.host_voiceover_panel(adr)
+    host._wire_adr_session_controls(adr)
+    effects.tabs.setCurrentIndex(4)
+    assert host.started == []
+
+    adr._track_combo.setCurrentIndex(adr._track_combo.findData("a1"))
+    adr._playhead_record_btn.click()
+    assert host.started == [("a1", True)]
+    assert not adr._playhead_record_btn.isEnabled()
+    adr._stop_btn.click()
+    assert host.stopped == ["a1"]
 
 
 def test_voiceover_without_context_is_noop(
@@ -489,7 +535,7 @@ def test_voiceover_without_context_is_noop(
     main = _FakeRecordingMain()
     page._main_window = main
     # 无 panel：不启动
-    page._on_timeline_voiceover_requested()
+    page.record_voiceover_at_playhead()
     assert main.started == []
 
 
@@ -498,7 +544,7 @@ def test_voiceover_without_controller_is_noop(
     page = _page(qtbot, monkeypatch)
     _attach(qtbot, page)  # 有时间线上下文但无宿主 controller
     page._main_window = None
-    page._on_timeline_voiceover_requested()  # 不抛异常
+    page.record_voiceover_at_playhead()  # 不抛异常
 
 
 # ── B02：Voiceover 返回契约与边界分支 ────────────────────────────────
@@ -543,7 +589,7 @@ def test_b02_creates_track_by_id_contract_and_starts(
     main = _FakeRecordingMain()
     page._main_window = main
 
-    page._on_timeline_voiceover_requested()  # 原代码在此抛 AttributeError
+    page.record_voiceover_at_playhead()  # 原代码在此抛 AttributeError
 
     assert len(main.started) == 1
     created_id = main.started[0][0]
@@ -557,20 +603,26 @@ def test_b02_creates_track_by_id_contract_and_starts(
     assert view.get_timeline().get_track_by_id(created_id) is None
 
 
+@pytest.mark.parametrize("raises", [True, False])
 def test_b02_start_failure_rolls_back_created_track(
-        qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+        qtbot: Any, monkeypatch: pytest.MonkeyPatch, raises: bool) -> None:
     """B02③：启动失败不留下不明轨——本次手势创建的轨被撤销。"""
     page = _page(qtbot, monkeypatch)
     panel = _attach_no_audio(qtbot, page)
 
     class _FailingMain(_FakeRecordingMain):
-        def _start_recording(self, track_id: str,
-                             *, voiceover: bool = False) -> None:
-            raise OSError("device unavailable")
+        def _start_recording(
+            self, track_id: str, *, voiceover: bool = False, from_mixer_timeline: bool = False,
+        ) -> None:
+            if raises:
+                raise OSError("device unavailable")
 
     page._main_window = _FailingMain()
-    with pytest.raises(OSError):
-        page._on_timeline_voiceover_requested()
+    if raises:
+        with pytest.raises(OSError):
+            page.record_voiceover_at_playhead()
+    else:
+        page.record_voiceover_at_playhead()
     view = panel.get_timeline_view()
     assert not view.get_timeline().audio_tracks
     assert not view._command_stack._undo_stack
@@ -588,7 +640,7 @@ def test_b02_locked_destination_track_refused(
     main = _FakeRecordingMain()
     page._main_window = main
 
-    page._on_timeline_voiceover_requested()
+    page.record_voiceover_at_playhead()
 
     assert main.started == []
     assert len(view._command_stack._undo_stack) == 0

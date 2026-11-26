@@ -326,6 +326,17 @@
     "all_luts": "All LUTs",
     "apply_to_node": "Apply to selected node",
     "category": "Effect category",
+    "effect_categories": {
+      "color": "Color Adjustments",
+      "film": "Film Looks",
+      "focus": "Blur and Sharpen",
+      "lens_and_light": "Lens and Light",
+      "local": "Local Adjustments",
+      "plugin": "Other Plug-ins",
+      "retouch": "Portrait Retouching",
+      "stylize": "Creative Effects",
+      "upscale": "AI Upscaling"
+    },
     "current_lut": "Current LUT",
     "effects_hint": "Drag an effect onto a node or an image connection.",
     "enable_effect": "Enable effect",

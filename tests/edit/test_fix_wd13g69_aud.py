@@ -1055,13 +1055,6 @@ class TestMediaPoolHelpers:
         assert BatchAssetLogDialog._parse_keywords("a, b 、c, , d ") == (
             "a", "b", "c", "d")
 
-    @pytest.mark.parametrize("seconds,expected", [
-        (12.5, "12.50s"), (75.4, "1:15.40"), (0.0, "0.00s"),
-    ])
-    def test_format_duration(self, seconds: float, expected: str) -> None:
-        from src.features.edit.ui.media_pool_panel import QuickLookDialog
-        assert QuickLookDialog._format_duration(seconds) == expected
-
 
 # =====================================================================
 # GAP-009 — timeline_items.py 纯助手孤岛

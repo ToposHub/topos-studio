@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, Qt, pyqtSignal
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from src.features.edit.ui.edit_viewport import EditViewport
@@ -55,6 +56,8 @@ class _Program(QWidget):
 
 
 class _Source(QWidget):
+    range_changed = pyqtSignal(object, object)
+
     def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout(self)
@@ -194,15 +197,21 @@ def test_opening_another_source_resets_header_zoom_and_metadata(qapp, widget_she
 def test_existing_transport_and_guide_buttons_keep_signal_routes(viewport) -> None:
     played: list[bool] = []
     marked: list[bool] = []
+    cleared: list[bool] = []
     transformed: list[bool] = []
     viewport.program_viewer.transport_play.connect(lambda: played.append(True))
     viewport.source_viewer.toolbar.mark_in_requested.connect(lambda: marked.append(True))
+    viewport.source_viewer.toolbar.clear_in_out_requested.connect(lambda: cleared.append(True))
     viewport.program_viewer.get_toolbar().transform_tool_requested.connect(transformed.append)
     viewport.program_viewer.get_transport_bar().btn_play.click()
     viewport.source_viewer.toolbar.btn_mark_in.click()
+    viewport.source_viewer.toolbar.update_in_out_state(10, 35)
+    viewport.source_viewer.toolbar.btn_clear.click()
     viewport.program_viewer.get_toolbar().transform_btn.click()
     assert played == [True]
     assert marked == [True]
+    assert cleared == [True]
+    assert viewport.source_footer.right_group.isAncestorOf(viewport.source_viewer.toolbar.btn_clear)
     assert transformed == [True]
     assert viewport.program_viewer.isAncestorOf(viewport.program_viewer.get_transport_bar().btn_play)
     assert viewport.source_viewer.isAncestorOf(viewport.source_viewer.toolbar.btn_mark_in)
@@ -329,6 +338,7 @@ def test_color_monitor_keeps_program_controls_and_restores_edit_panes(viewport) 
 
 
 def test_program_scrubber_starts_at_pointer_and_distinguishes_lost_grab(viewport, qtbot) -> None:
+    viewport.set_program_only(True, color_monitor=True)
     slider = viewport.program_slider
     viewport.set_program_range(200)
     slider.setValue(5)
@@ -382,17 +392,80 @@ def test_split_restore_rejects_invalid_sizes(viewport, sizes) -> None:
         viewport.restore_splitter_sizes(sizes)
 
 
-def test_timeline_activation_does_not_follow_programmatic_position(viewport, qapp, widget_shelter) -> None:
+@pytest.mark.parametrize("dual", [False, True])
+def test_timeline_activation_hides_source_range_without_losing_marks(viewport, widget_shelter, dual) -> None:
     from PyQt6.QtWidgets import QGraphicsView
 
     timeline = QGraphicsView(widget_shelter)
     viewport.bind_timeline_widget(timeline)
-    viewport.show_source()
+    viewport.set_dual_view(dual)
+    source = viewport.source_viewer
+    source_slider = source.slider
+    viewport.show_source(focus=False)
+    assert source_slider.isHidden()
+    source.current_asset = SimpleNamespace(asset_id="clip")
+    source_slider.set_in_out_points(12, 77)
+    source.range_changed.emit(12, 77)
     viewport.set_program_range(100)
     viewport.set_program_position(50)
     assert viewport.active_monitor == "source"
+    assert not source_slider.isHidden()
+    assert viewport.program_slider.isHidden() is not dual
     QApplication.sendEvent(timeline.viewport(), QEvent(QEvent.Type.FocusIn))
     assert viewport.active_monitor == "program"
+    assert source_slider.isHidden() is not dual
+    assert viewport.program_slider.isHidden() is not dual
+    assert viewport.source_pane.isHidden() is not dual
+    viewport.show_source(focus=False)
+    assert not source_slider.isHidden()
+    assert (source_slider._in_point, source_slider._out_point) == (12, 77)
+    source.current_asset = None
+    source.range_changed.emit(None, None)
+    assert source_slider.isHidden()
+
+
+def test_dual_program_range_mirrors_timeline_marks_clear_and_undo(viewport, qtbot) -> None:
+    from src.app.controllers.dock_layout_controller import DockLayoutMixin
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+    from src.features.edit.ui.timeline_view import TimelineView
+
+    view = TimelineView()
+    qtbot.addWidget(view)
+    host = SimpleNamespace(edit_viewport=viewport, timeline_panel=SimpleNamespace(get_timeline_view=lambda: view))
+    sequence = TimelineSequence(video_tracks=(EditTrack(
+        "v", "V1", "video", 0, clips=(ClipInstance("clip", "asset", "v", 0, 120, 0, 120),)
+    ),), range_start=48)
+    view.load_timeline(sequence)
+    DockLayoutMixin._sync_edit_viewport_timeline(host, sequence)
+    view.timeline_changed.connect(lambda timeline: DockLayoutMixin._sync_edit_viewport_timeline(host, timeline))
+    view.range_display_changed.connect(viewport.set_program_range)
+    seeks: list[int] = []
+    viewport.program_seek_requested.connect(seeks.append)
+    viewport.set_program_position(60)
+    viewport.set_dual_view(True)
+    slider = viewport.program_slider
+    assert slider.isVisible()
+    assert slider.maximum() == 239
+    assert (slider._in_point, slider._out_point) == (48, 239)
+
+    view._mark_out_at_frame(144)
+    assert (slider._in_point, slider._out_point) == (48, 144)
+    view._clear_timeline_range()
+    assert (slider._in_point, slider._out_point) == (None, None)
+    view.undo()
+    assert (slider._in_point, slider._out_point) == (48, 144)
+    assert slider.value() == 60 and not seeks
+
+    view._on_range_handle_dragged("out", 259)
+    assert (slider.maximum(), slider._out_point) == (259, 259)
+    view._on_range_drag_cancelled()
+    assert (slider.maximum(), slider._out_point) == (239, 144)
+    view._extend_runtime_duration(250)
+    assert slider.maximum() == 479
+    view.clear()
+    assert (slider._in_point, slider._out_point) == (None, None)
+    viewport.set_dual_view(False)
+    assert slider.isHidden()
 
 
 def test_program_zoom_presets_keep_viewer_api(viewport) -> None:
@@ -408,6 +481,7 @@ def test_deliver_borrow_returns_complete_program_monitor(viewport, qapp, widget_
     viewport.set_dual_view(True)
     viewport.prepare_for_deliver()
     borrowed.addWidget(viewport.program_viewer)
+    assert not viewport.program_slider.isHidden()
     assert viewport.program_viewer.isAncestorOf(viewport.program_header)
     assert viewport.program_viewer.isAncestorOf(viewport.program_viewer.get_transport_bar().btn_play)
     assert viewport.program_header.dual_button.isHidden()
@@ -452,6 +526,66 @@ def test_reference_title_and_transport_are_centered_on_whole_monitor(viewport, q
     assert not header.dual_button.isHidden()
 
 
+def test_optional_header_controls_leave_room_for_the_timeline_title(viewport, qapp) -> None:
+    toolbar = viewport.program_viewer.get_toolbar()
+    header = viewport.program_header
+    name = "Timeline 1"
+    toolbar.set_timeline_choices({"one": SimpleNamespace(name=name)}, "one")
+
+    for width in (559, 560, 759, 760, 823, 824, 1000):
+        viewport.resize(width, 480)
+        qapp.processEvents()
+        title = header.title
+        assert title.fontMetrics().elidedText(name, Qt.TextElideMode.ElideRight, title.width() - 22) == name
+        assert abs(title.geometry().center().x() - header.rect().center().x()) <= 1
+        assert title.geometry().left() > header.left_group.geometry().right()
+        assert title.geometry().right() < header.right_group.x()
+
+    assert all(not control.isHidden() for control in header.extra_controls)
+
+
+def test_transform_drag_preserves_timeline_header(qapp, qtbot, widget_shelter, monkeypatch) -> None:
+    from src.features.edit.core.clip_params import TransformParams
+    from src.features.edit.ui.program_viewer import ProgramViewerWidget
+
+    program = ProgramViewerWidget()
+    viewport = EditViewport(program, _Source(), widget_shelter)
+    qtbot.addWidget(viewport)
+    viewport.setWindowFlag(Qt.WindowType.Window, True)
+    viewport.resize(760, 480)
+    viewport.show()
+    program.set_timeline_choices({"one": SimpleNamespace(name="Timeline 1")}, "one")
+    qapp.processEvents()
+
+    canvas = program.get_viewer()
+    program.get_toolbar().transform_btn.click()
+    canvas.set_selected_clip_transform("clip", TransformParams(), 1920, 1080)
+    qapp.processEvents()
+    header = viewport.program_header
+    title_geometry = header.title.geometry()
+    layout_passes: list[bool] = []
+    position_title = header.position_title
+
+    def record_layout_pass() -> None:
+        layout_passes.append(True)
+        position_title()
+
+    monkeypatch.setattr(header, "position_title", record_layout_pass)
+    transforms: list[TransformParams] = []
+    program.clip_transform_interaction_updated.connect(lambda _clip_id, transform: transforms.append(transform))
+    start = canvas.rect().center() + QPoint(45, 30)
+    QTest.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+    for offset in (15, 35, 55, 5):
+        QTest.mouseMove(canvas, start + QPoint(offset, 5))
+        QTest.qWait(40)
+        assert header.title.geometry() == title_geometry
+        assert header.title.currentText() == "Timeline 1"
+    QTest.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=start + QPoint(5, 5))
+    assert any(transform.translate_x > 0 for transform in transforms)
+    assert transforms[-1] == TransformParams()
+    assert not layout_passes
+
+
 @pytest.mark.parametrize("width", [280, 300, 320, 460, 700])
 @pytest.mark.parametrize("pane", ["program", "source"])
 def test_transport_groups_do_not_overlap_at_small_pane_widths(viewport, qapp, width, pane) -> None:
@@ -461,6 +595,8 @@ def test_transport_groups_do_not_overlap_at_small_pane_widths(viewport, qapp, wi
     qapp.processEvents()
     assert footer.left_group.geometry().right() < footer.center_group.geometry().left()
     assert footer.center_group.geometry().right() < footer.right_group.geometry().left()
+    if pane == "source":
+        assert not footer.right_group.isHidden()
 
 
 # ── I03：capability 动作回填与分发 ─────────────────────────────────

@@ -210,7 +210,6 @@ class _FakePanel(QObject):
     source_replace_requested = pyqtSignal()
     source_patch_changed = pyqtSignal(str, str, bool)
     keyframe_tray_requested = pyqtSignal(bool)
-    voiceover_requested = pyqtSignal()
     flag_requested = pyqtSignal(str)
 
 
@@ -256,13 +255,11 @@ def test_binder_binds_all_eight_requests_once(qtbot: Any,
     page = EditPage()
     qtbot.addWidget(page)
     panel = _FakePanel()
-    counts = {"insert": 0, "patch": 0, "tray": 0, "voice": 0, "flag": 0,
-              "replace": 0}
+    counts = {"insert": 0, "patch": 0, "tray": 0, "flag": 0, "replace": 0}
 
     page._on_timeline_source_insert = lambda: counts.__setitem__("insert", counts["insert"] + 1)  # type: ignore[assignment]
     page._on_timeline_source_patch_changed = lambda *a: counts.__setitem__("patch", counts["patch"] + 1)  # type: ignore[assignment]
     page._on_timeline_keyframe_tray_requested = lambda v: counts.__setitem__("tray", counts["tray"] + 1)  # type: ignore[assignment]
-    page._on_timeline_voiceover_requested = lambda: counts.__setitem__("voice", counts["voice"] + 1)  # type: ignore[assignment]
     page._on_timeline_flag_requested = lambda c: counts.__setitem__("flag", counts["flag"] + 1)  # type: ignore[assignment]
     page._on_timeline_source_replace = lambda: counts.__setitem__("replace", counts["replace"] + 1)  # type: ignore[assignment]
 
@@ -271,10 +268,8 @@ def test_binder_binds_all_eight_requests_once(qtbot: Any,
     panel.source_replace_requested.emit()
     panel.source_patch_changed.emit("video", "v2", True)
     panel.keyframe_tray_requested.emit(True)
-    panel.voiceover_requested.emit()
     panel.flag_requested.emit("#ff0000")
-    assert counts == {"insert": 1, "patch": 1, "tray": 1, "voice": 1,
-                      "flag": 1, "replace": 1}
+    assert counts == {"insert": 1, "patch": 1, "tray": 1, "flag": 1, "replace": 1}
 
 
 def test_patch_slot_without_context_is_noop(qtbot: Any,

@@ -34,6 +34,35 @@ from PyQt6.QtCore import QObject, pyqtSignal
 # 内建 Composite 效果走独立前缀，避免与插件文件名碰撞。
 _BUILTIN_ID_PREFIX = "effect:"
 
+# Library groups for bundled GLSL filters, keyed by plugin_id so shader and
+# project identity stay independent of presentation metadata.
+_PLUGIN_GROUPS = {
+    "color": (
+        "Channel_Mixer", "Color_Space_Transform", "Duotone_Toner", "LIB1_Gradient_Map",
+        "Three_Way_Tint", "Vibrance_Saturation", "White_Balance_Advanced", "warm_tint",
+    ),
+    "film": (
+        "Bleach_Bypass", "Cross_Process", "Day_Night_Converter", "Fake_Infrared", "Film_Grain",
+    ),
+    "focus": (
+        "Bokeh_Defocus", "LIB1_Median_Rank", "Motion_Blur_Linear", "Radial_Blur_Pro",
+        "Tilt_Shift_Focus", "Unsharp_Sharpen",
+    ),
+    "lens_and_light": (
+        "Anamorphic_Streak", "Film_Halation", "God_Rays", "Halation_Extended",
+        "Lens_Distortion", "Light_Leak_Corner", "Prism_Aberration", "Soft_Glow_Bloom",
+    ),
+    "local": ("Grad_Filter_Exposure", "Sky_Replace_Matte", "Vignette_Shapes"),
+    "retouch": (
+        "Frequency_Split", "HighPass_Retouch", "Skin_Even_Matte", "bilateral_skin_smooth",
+    ),
+    "stylize": (
+        "CRT_Scanlines", "Edge_Ink_Outline", "Glitch_Blocks", "Halftone_Print",
+        "Kaleido_Mirror", "Pixel_Blocks",
+    ),
+}
+_PLUGIN_CATEGORIES = {plugin_id: key for key, ids in _PLUGIN_GROUPS.items() for plugin_id in ids}
+
 #: 参数 ParamDef.ptype → 浏览器控件 kind（effects_browser_panel 契约）。
 _PARAMDEF_KIND_MAP = {
     "float": "slider",
@@ -235,7 +264,7 @@ class EffectsResourceCatalog(QObject):
             else:
                 available = bool(shader)
                 reason = "" if available else "plugin_shader_missing"
-                category = str(metadata.get("category") or "plugin")
+                category = str(metadata.get("category") or _PLUGIN_CATEGORIES.get(plugin_id, "plugin"))
                 realtime, bake = True, False
             entries.append({
                 "id": plugin_id,

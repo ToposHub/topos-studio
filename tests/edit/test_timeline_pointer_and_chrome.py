@@ -9,7 +9,7 @@ from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtTest import QTest
 
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
-from src.features.edit.ui.timeline_items import TimecodeRulerItem
+from src.features.edit.ui.timeline_items import TRACK_HEADER_WIDTH, TimecodeRulerItem
 from src.features.edit.ui.timeline_panel import TimelinePanel
 from src.shared.ui.style_sheet import DARK_THEME, PANEL_SLIDER_STYLE
 
@@ -87,6 +87,28 @@ def test_toolbar_separators_are_one_pixel_without_native_bevel(panel: Any) -> No
 
     assert all(line.width() == 1 for line in panel._toolbar_separators)
     assert all(line.frameShape() == QFrame.Shape.NoFrame for line in panel._toolbar_separators)
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_timeline_uses_flat_canvas_below_the_ruler(panel: TimelinePanel, qapp: Any, empty: bool) -> None:
+    view = panel.timeline_view
+    if empty:
+        view.clear()
+    qapp.processEvents()
+
+    viewport = view.viewport()
+    canvas = viewport.grab()
+    image = canvas.toImage()
+    ratio = canvas.devicePixelRatio()
+    y = round((viewport.height() - 18) * ratio)
+    assert {
+        image.pixelColor(x, y).name()
+        for x in range(round((TRACK_HEADER_WIDTH + 10) * ratio), image.width() - round(12 * ratio))
+    } == {"#27272b"}
+
+    toolbar = panel._tools_bar.parentWidget().grab()
+    ratio = toolbar.devicePixelRatio()
+    assert toolbar.toImage().pixelColor(round(ratio), round(10 * ratio)).name() == "#202024"
 
 
 @pytest.mark.parametrize("rect_method,shape", [

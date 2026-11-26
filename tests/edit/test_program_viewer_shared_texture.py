@@ -2,6 +2,35 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
+from pytest import MonkeyPatch
+from pytestqt.qtbot import QtBot
+
+
+def test_panned_viewer_uses_current_framebuffer_size(qtbot: QtBot, monkeypatch: MonkeyPatch) -> None:
+    from src.features.edit.ui import program_viewer
+
+    viewer = program_viewer.ProgramViewer()
+    qtbot.addWidget(viewer)
+    viewer.resize(322, 242)
+    viewer._gl_initialized = True
+    viewer._current_tex_id = 7
+    viewer._prog = 1
+    viewer.set_zoom(1.67)
+    viewer.set_pan(0.65, 0.4)
+    logical_rect = viewer._calculate_display_rect()
+
+    gl = Mock()
+    draw = Mock(return_value=False)
+    monkeypatch.setattr(program_viewer, "_gl", gl)
+    monkeypatch.setattr(viewer, "_render_texture", draw)
+    monkeypatch.setattr(viewer, "_paint_overlays", Mock())
+
+    for dpr, dimensions in ((1.0, (322, 242)), (2.0, (644, 484)), (1.25, (403, 303))):
+        monkeypatch.setattr(viewer, "devicePixelRatioF", lambda dpr=dpr: dpr)
+        viewer._paintGL_impl()
+        gl.glViewport.assert_called_with(0, 0, *dimensions)
+        draw.assert_called_with(logical_rect)
+
 
 def test_lease_identifies_only_a_successfully_drawn_texture(qapp, monkeypatch) -> None:
     from src.features.edit.ui import program_viewer
