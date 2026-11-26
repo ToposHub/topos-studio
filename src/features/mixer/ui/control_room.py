@@ -5,14 +5,16 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
 from PyQt6.QtMultimedia import QMediaDevices
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QPushButton, QSpinBox, QWidget,
 )
 
-from src.features.edit.core.monitor_service import ControlRoomPatch, MonitorSessionState
+from src.features.edit.core.monitor_service import (
+    ControlRoomPatch, MonitorSessionState, MIN_MONITOR_GAIN_DB, MAX_MONITOR_GAIN_DB,
+)
 from src.features.edit.core.channel_layout import ChannelLayout
 from src.shared.i18n.i18n import I18N
 
@@ -51,7 +53,7 @@ class ControlRoomDialog(QDialog):
         self.input_label = QLabel(_tr("input_track", "Input patch"))
         form.addRow(self.input_label, self.input_track)
         self.gain = QDoubleSpinBox()
-        self.gain.setRange(-90, 0)
+        self.gain.setRange(MIN_MONITOR_GAIN_DB, MAX_MONITOR_GAIN_DB)
         self.gain.setDecimals(1)
         self.gain.setSuffix(" dB")
         form.addRow(_tr("gain", "Monitor level"), self.gain)
@@ -146,6 +148,11 @@ class ControlRoomDialog(QDialog):
         form.labelForField(self.tracks).setVisible(source in ("pfl", "afl"))
         self.input_label.setVisible(source == "input")
         self.input_track.setVisible(source == "input")
+
+    def set_monitor_gain_db(self, gain_db: float) -> None:
+        """Mirror the timeline knob without republishing the dialog state."""
+        with QSignalBlocker(self.gain):
+            self.gain.setValue(gain_db)
 
     def _publish_state(self) -> None:
         if self._syncing:

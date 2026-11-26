@@ -29,6 +29,11 @@ class GLCanvasViewport(QOpenGLWidget):
         self._pending_render_after_show = False
         self._gl_initialized = False  # Track whether GL init has completed
         self._canvas_engine_ref = None
+        self._composing_video_frame: tuple[int, int] | None = None
+        self.swapped_video_frame: tuple[int, int] | None = None
+        self.video_swap_count = 0
+        self.aboutToCompose.connect(self._remember_composing_video_frame)
+        self.frameSwapped.connect(self._record_video_swap)
         # AUD-25411：show 后延迟渲染的重试计数（尺寸无效时有限重试）
         self._show_render_retries = 0
         
@@ -104,6 +109,20 @@ class GLCanvasViewport(QOpenGLWidget):
         # Trigger a repaint on the UI thread.
         self.update()
 
+    def _remember_composing_video_frame(self) -> None:
+        engine = self._canvas_engine_ref() if self._canvas_engine_ref is not None else None
+        self._composing_video_frame = engine.drawn_video_frame if engine is not None else None
+
+    def _record_video_swap(self) -> None:
+        self.swapped_video_frame = self._composing_video_frame
+        self.video_swap_count += 1
+
+    def request_video_recompose(self) -> None:
+        """Schedule a fresh viewport and window update for a stalled video swap."""
+        if self.isVisible():
+            self._on_frame_ready(None)
+            self.window().update()
+
     def resizeGL(self, width, height) -> None:
         """Called whenever the widget has been resized."""
         # Qt replaces its backing framebuffer on resize. Only a subsequent
@@ -111,6 +130,7 @@ class GLCanvasViewport(QOpenGLWidget):
         engine = self._canvas_engine_ref() if self._canvas_engine_ref is not None else None
         if engine is not None:
             engine.drawn_video_frame = None
+        self._composing_video_frame = self.swapped_video_frame = None
         if self.gl_manager.ctx:
             # Update viewport if needed
             self.gl_manager.ctx.viewport = (0, 0, width, height)
@@ -153,6 +173,8 @@ class GLCanvasViewport(QOpenGLWidget):
             # the renderer owns the shared context.  Clear it to the exact
             # same #191919 surround used by Color's Qt background brush.
             self.gl_manager.ctx.clear(*VIEWER_BACKGROUND)
+            if engine is not None:
+                engine.drawn_video_frame = None
 
     def showEvent(self, event) -> None:
         """Called when the widget is shown. Ensure GL context is active."""
@@ -221,4 +243,5 @@ class GLCanvasViewport(QOpenGLWidget):
     def hideEvent(self, event) -> None:
         """Called when the widget is hidden."""
         super().hideEvent(event)
+        self._composing_video_frame = self.swapped_video_frame = None
         self._needs_context_restore = True

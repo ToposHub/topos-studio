@@ -214,6 +214,10 @@ def generate_analysis(
                      mixer / "assets", mixer / "locales"):
             target = path if path.is_dir() else path.parent
             datas.append((str(path), target.relative_to(PROJECT_ROOT).as_posix()))
+    if "edit" not in exclude_feature_dirs:
+        for name in ("effect_icons", "transition_icons"):
+            target = f"src/features/edit/ui/{name}"
+            datas.append((os.path.join(PROJECT_ROOT, target), target))
     # Feature modules load their translations from <module>/locales at
     # runtime (register_i18n → I18N.load_module_translations); without these
     # entries every non-English feature string falls back to English in
@@ -241,8 +245,8 @@ def generate_analysis(
             ))
     datas += [
         (
-            os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "effect_icons"),
-            "src/features/color/ui/effect_icons",
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "effects"),
+            "src/shared/assets/icons/effects",
         ),
         (
             os.path.join(PROJECT_ROOT, "src", "features", "color", "ui", "mixer_icons"),

@@ -11,13 +11,11 @@ Features:
 - Search filtering
 - Double-click to apply effect to selected clip
 - Drag & drop to timeline clips
-- Favorites system with star button on each effect
 
 Architecture:
 - Uses EffectRegistry to get effect definitions
 - Emits signals for effect application
 - Independent of timeline data (UI only)
-- Favorites stored in ConfigManager
 
 Drag and Drop Support:
 - Effects can be dragged from the effects tree to the timeline
@@ -26,19 +24,18 @@ Drag and Drop Support:
 
 P7 Completion:
 - Audio Effects tab fully implemented
-- Favorites system with persistence
 """
 
 import json
 import logging
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Set, Dict, Any, List
+from typing import TYPE_CHECKING, Optional, Dict, Any, List
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QTreeWidget, QTreeWidgetItem, QLineEdit, QTabWidget, QSizePolicy,
     QAbstractItemView, QToolButton, QGridLayout, QApplication, QMenu,
-    QFormLayout, QSpinBox,
+    QFormLayout, QSlider, QSpinBox,
 )
 from PyQt6.QtCore import (
     Qt,
@@ -50,26 +47,28 @@ from PyQt6.QtCore import (
     QSize,
     QPoint,
     QRect,
+    QRectF,
     QEvent,
+    QSignalBlocker,
     QThread,
     QTimer,
 )
-from PyQt6.QtGui import QIcon, QDrag, QMovie, QPainter, QPixmap
-from PyQt6.QtSvg import QSvgRenderer
+from PyQt6.QtGui import QColor, QFont, QIcon, QDrag, QMovie, QPaintEvent, QPainter, QPainterPath
 
-from src.shared.i18n.i18n import I18N
 from src.shared.assets.icon_manager import (
-    icon_favorite,
-    icon_favorite_outline,
     icon_search,
     IconColors,
 )
 from src.shared.config.config_manager import ConfigManager
-from src.shared.ui.style_sheet import C
+from src.shared.i18n.audio_effects import audio_effect_display_name
+from src.shared.i18n.i18n import I18N
+from src.shared.ui.style_sheet import C, PANEL_SLIDER_STYLE
+from src.shared.ui.widgets.compact_scrollbar import CompactVerticalScrollBar
 from src.shared.ui.dock_context_menu import (
     add_dock_management_actions,
     find_parent_dock,
 )
+from src.shared.ui.effect_icons import audio_effect_icon, color_effect_icon
 from src.features.edit.core.effect_registry import (
     GENERATOR_EFFECT_TYPES,
     NON_ATTACHABLE_VIDEO_EFFECT_TYPES,
@@ -90,29 +89,37 @@ from src.features.teaching_animation.core.content_localization import (
     template_display_name,
 )
 
+if TYPE_CHECKING:
+    from src.features.edit.ui.adr_take_sheet_panel import AdrTakeSheetPanel
+
 logger = logging.getLogger(__name__)
 
 _TRANSITION_ICON_DIR = Path(__file__).with_name("transition_icons")
 _TRANSITION_PREVIEW_DIR = Path(__file__).with_name("transition_previews") / "generated"
 _MAX_ACTIVE_TRANSITION_PREVIEWS = 24
+_TRANSITION_CAPTION_HEIGHT = 18
+_TRANSITION_TILE_SPACING = 3
 _TRANSITION_PREVIEW_SIZE_OPTIONS = {
     # (GIF width, GIF height, card height)
-    "small": (96, 54, 78),
-    "medium": (128, 72, 100),
-    "large": (192, 108, 136),
+    "small": (96, 54, 54 + _TRANSITION_CAPTION_HEIGHT),
+    "medium": (128, 72, 72 + _TRANSITION_CAPTION_HEIGHT),
+    "large": (192, 108, 108 + _TRANSITION_CAPTION_HEIGHT),
 }
-_DEFAULT_TRANSITION_PREVIEW_SIZE = "medium"
+_TRANSITION_PREVIEW_SIZES = tuple(_TRANSITION_PREVIEW_SIZE_OPTIONS)
+_DEFAULT_TRANSITION_PREVIEW_SIZE = "small"
 _EFFECT_ICON_DIR = Path(__file__).with_name("effect_icons")
 _EFFECT_BG = C.BG_PANEL
 _EFFECT_BORDER = C.BORDER
 _EFFECT_BORDER_SUBTLE = C.BORDER_DARK
-_EFFECT_TEXT = C.TEXT_DIM
+_EFFECT_TEXT = C.TEXT_LABEL
+_EFFECT_FONT_SIZE = 12
+_EFFECT_ICON_SIZE = QSize(16, 16)
 _TITLE_PRESET_ROLE = int(Qt.ItemDataRole.UserRole)
 _CAPTION_EFFECT_ROLE = _TITLE_PRESET_ROLE + 1
 # AUD-19809: 标签页索引具名常量（addTab 顺序：0=Video、1=Transitions），
 # 上下文菜单不再用魔法数字判断当前是否转场页。
 _TAB_INDEX_TRANSITIONS = 1
-# addTab 顺序：0=Video、1=Transitions、2=Titles、3=Audio、4=Favorites。
+# addTab 顺序：0=Effects、1=Transitions、2=Text、3=Audio、4=Subtitles。
 # Mixer 工作区默认展示 Audio 页，回 Edit 恢复用户选择。
 _TAB_INDEX_AUDIO = 3
 
@@ -121,7 +128,7 @@ QTreeWidget {{
     background: {_EFFECT_BG};
     border: none;
     color: {_EFFECT_TEXT};
-    font-size: 11px;
+    font-size: {_EFFECT_FONT_SIZE}px;
     outline: none;
 }}
 QTreeWidget::viewport {{ background: {_EFFECT_BG}; }}
@@ -129,41 +136,53 @@ QTreeWidget::item {{ border: none; padding: 0px; }}
 QTreeWidget::item:selected {{ background: transparent; color: {_EFFECT_TEXT}; }}
 QTreeWidget::branch:selected {{ background: transparent; }}
 QTreeWidget::branch:!active {{ background: transparent; }}
-QScrollBar:vertical {{ width: 8px; background: transparent; }}
-QScrollBar::handle:vertical {{ background: {_EFFECT_BORDER_SUBTLE}; min-height: 24px; border-radius: 2px; }}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 """
 
 
+def _create_effect_tree() -> QTreeWidget:
+    tree = QTreeWidget()
+    tree.setHeaderHidden(True)
+    tree.setStyleSheet(_EFFECT_TREE_STYLE)
+    tree.setIconSize(_EFFECT_ICON_SIZE)
+    tree.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+    tree.setVerticalScrollBar(CompactVerticalScrollBar())
+    return tree
+
+
+def _style_tree_heading(tree: QTreeWidget, item: QTreeWidgetItem) -> None:
+    font = tree.font()
+    font.setPixelSize(_EFFECT_FONT_SIZE)
+    font.setWeight(QFont.Weight.DemiBold)
+    item.setFont(0, font)
+    item.setForeground(0, QColor(C.TEXT_PRIMARY))
+
+
+def _tr(key: str, default: str, **kwargs: object) -> str:
+    return I18N.tr(key, default, use_english=I18N.get_current_locale() != "zh_CN", **kwargs)
+
+
+def _effect_display_name(effect: EffectDefinition) -> str:
+    if effect.category in {"audio", "audio_hosted"}:
+        return audio_effect_display_name(
+            effect.effect_type, effect.name, use_english=I18N.get_current_locale() != "zh_CN"
+        )
+    if effect.effect_type.startswith("plugin:"):
+        plugin_id = effect.effect_type.removeprefix("plugin:")
+        # This bundled plugin declares a lower-case @i18n_name.
+        i18n_name = {"Color_Space_Transform": "color_space_transform"}.get(plugin_id, plugin_id)
+        return _tr(f"plugins.{i18n_name}.name", effect.name)
+    return _tr(f"edit.effects.effect_names.{effect.effect_type}", effect.name)
+
+
 @lru_cache(maxsize=512)
-def _effect_preview_icon(effect_type: str) -> QIcon:
-    """Load the Resolve-style SVG preview for an effect type.
-
-    Plugin IDs contain a colon, which is intentionally mapped to ``__`` in
-    filenames so the asset directory remains portable across platforms.
-
-    AUD-19803: the rasterized icon is cached per effect_type. A single tree
-    rebuild previously rasterized the same SVG twice per effect (tree item +
-    card) and re-``stat``-ed the file each time; QIcon is implicitly shared,
-    so returning a cached instance is cheap and safe.
-    """
-    filename = effect_type.replace(":", "__").lower() + ".svg"
-    path = _EFFECT_ICON_DIR / filename
-    return _dimmed_svg_icon(path) if path.is_file() else icon_favorite_outline()
-
-
-def _dimmed_svg_icon(path: Path, opacity: float = 0.62) -> QIcon:
-    """Render an SVG into a quiet monochrome icon for the compact library UI."""
-    renderer = QSvgRenderer(str(path))
-    if not renderer.isValid():
-        return QIcon()
-    pixmap = QPixmap(48, 28)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setOpacity(opacity)
-    renderer.render(painter)
-    painter.end()
-    return QIcon(pixmap)
+def _effect_preview_icon(effect_type: str, category: str = "") -> QIcon:
+    """Reuse the workspace icons for plugins and audio effects."""
+    if effect_type.startswith("plugin:"):
+        return color_effect_icon(effect_type.removeprefix("plugin:"))
+    if category in {"audio", "audio_hosted"}:
+        return audio_effect_icon(effect_type)
+    path = _EFFECT_ICON_DIR / f"{effect_type}.svg"
+    return QIcon(str(path)) if path.is_file() else color_effect_icon("")
 
 
 @lru_cache(maxsize=128)
@@ -171,7 +190,18 @@ def _transition_preview_icon(transition_type: str) -> QIcon:
     path = _TRANSITION_ICON_DIR / f"{transition_type}.svg"
     if not path.is_file():
         path = _TRANSITION_ICON_DIR / "generic_transition.svg"
-    return _dimmed_svg_icon(path)
+    return QIcon(str(path))
+
+
+class _EditEffectsTabs(QTabWidget):
+    """Paint the header through the gap between the tab bar and search button."""
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        height = self.tabBar().geometry().bottom() + 1
+        painter = QPainter(self)
+        painter.fillRect(0, 0, self.width(), height, QColor(C.COLOR_PANEL_HEADER))
+        painter.end()
 
 
 class _EffectPreviewButton(QToolButton):
@@ -195,19 +225,17 @@ class _EffectPreviewButton(QToolButton):
         self._drag_started = False
         self.setText(name)
         self.setIcon(icon)
-        self.setIconSize(QSize(40, 24))
+        self.setIconSize(_EFFECT_ICON_SIZE)
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.setToolTip(f"{name}\n{description}")
         self.setFixedHeight(31)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
-            f"QToolButton {{"
-            f" background: {_EFFECT_BG}; border: 1px solid {_EFFECT_BORDER_SUBTLE};"
-            f" border-radius: 1px; color: {_EFFECT_TEXT}; padding: 1px 4px;"
-            " font-size: 11px; font-weight: 400; text-align: left; }"
-            f"QToolButton:hover {{ background: {_EFFECT_BG};"
-            f" border-color: {_EFFECT_BORDER}; color: {C.TEXT_SECONDARY}; }}"
-            f"QToolButton:pressed {{ background: {_EFFECT_BG}; }}"
+            f"QToolButton {{ background: {_EFFECT_BG}; border: none;"
+            f" color: {_EFFECT_TEXT}; padding: 1px 7px;"
+            f" font-size: {_EFFECT_FONT_SIZE}px; font-weight: 400; text-align: left; }}"
+            f"QToolButton:hover, QToolButton:focus {{ background: {C.BG_HOVER};"
+            f" border-radius: 3px; color: {C.TEXT_SECONDARY}; }}"
         )
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._emit_context_menu)
@@ -286,7 +314,7 @@ class _MotionGraphicPreviewButton(_EffectPreviewButton):
         super().leaveEvent(event)
 
     def hideEvent(self, event) -> None:
-        # AUD-19801: ``QTreeWidget.clear()`` (search / favorites / registry
+        # AUD-19801: ``QTreeWidget.clear()`` (search / registry
         # refresh) deletes the cards without ever delivering ``leaveEvent``
         # to them. The hide event is the last reliable hook on that
         # destruction path, so use it to close the hover preview.
@@ -338,8 +366,6 @@ class _MotionGraphicPreviewButton(_EffectPreviewButton):
 class _TransitionPreviewButton(_EffectPreviewButton):
     """Transition card that can replace its SVG icon with a looping GIF."""
 
-    _ICON_SIZE = QSize(40, 24)
-
     def __init__(
         self,
         effect_type: str,
@@ -351,12 +377,15 @@ class _TransitionPreviewButton(_EffectPreviewButton):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(effect_type, name, description, icon, parent)
-        self._static_icon = icon
-        self._preview_mode = "icon"
+        self._preview_mode = "animated" if animated else "icon"
         self._preview_path = Path(preview_path) if preview_path else None
         self._preview_movie: QMovie | None = None
         self._preview_size = _DEFAULT_TRANSITION_PREVIEW_SIZE
-        self.set_preview_mode("animated" if animated else "icon")
+        if animated:
+            self._apply_animated_geometry()
+            self.setStyleSheet(
+                f"QToolButton {{ background: transparent; border: 0; font-size: {_EFFECT_FONT_SIZE}px; }}"
+            )
 
     def set_preview_size(self, size: str) -> None:
         """Apply one of the supported animated-card size presets."""
@@ -378,44 +407,42 @@ class _TransitionPreviewButton(_EffectPreviewButton):
             self._preview_size
         ]
         self.setIconSize(QSize(width, height))
-        self.setFixedHeight(card_height)
-        self.setMinimumWidth(width + 4)
+        self.setFixedSize(width, card_height)
+        if self._preview_movie is not None:
+            self._preview_movie.setScaledSize(self.iconSize())
 
-    def set_preview_mode(self, mode: str) -> None:
-        """Switch this card between the legacy icon and animated preview."""
-        self._preview_mode = (
-            "animated"
-            if mode == "animated" and self._preview_path is not None
-            else "icon"
-        )
-        tile_mode = self._preview_mode == "animated"
-        self.setToolButtonStyle(
-            Qt.ToolButtonStyle.ToolButtonTextUnderIcon
-            if tile_mode
-            else Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-        )
-        self.setIconSize(self._ICON_SIZE)
-        self.setFixedHeight(31)
-        self.setMinimumWidth(0)
-        if tile_mode:
-            self._apply_animated_geometry()
-        self.setStyleSheet(
-            f"QToolButton {{"
-            f" background: {_EFFECT_BG}; border: 1px solid {_EFFECT_BORDER_SUBTLE};"
-            f" border-radius: 1px; color: {_EFFECT_TEXT}; padding: "
-            f"{'2px' if tile_mode else '1px 4px'};"
-            f" font-size: {'10px' if tile_mode else '11px'}; font-weight: 400;"
-            f" text-align: {'center' if tile_mode else 'left'}; }}"
-            f"QToolButton:hover {{ background: {_EFFECT_BG};"
-            f" border-color: {_EFFECT_BORDER}; color: {C.TEXT_SECONDARY}; }}"
-            f"QToolButton:pressed {{ background: {_EFFECT_BG}; }}"
-        )
-        if tile_mode:
-            # The movie is created only when the card enters the visible
-            # playback set. Until then the SVG is a cheap placeholder.
-            self.setIcon(self._static_icon)
+    def _poster_rect(self) -> QRect:
+        return QRect(QPoint(), self.iconSize())
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        if self._preview_mode != "animated":
+            super().paintEvent(event)
+            return
+
+        painter = QPainter(self)
+        poster = self._poster_rect()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(poster), 4, 4)
+        painter.save()
+        painter.setClipPath(clip)
+        frame = self._preview_movie.currentPixmap() if self._preview_movie is not None else None
+        if frame is not None and not frame.isNull():
+            painter.drawPixmap(poster, frame)
         else:
-            self.release_preview_movie()
+            painter.fillRect(poster, QColor(C.COLOR_PANEL_INSET))
+            icon_rect = QRect(QPoint(), QSize(24, 24))
+            icon_rect.moveCenter(poster.center())
+            self.icon().paint(painter, icon_rect)
+        painter.restore()
+
+        caption = QRect(2, poster.height(), self.width() - 4, _TRANSITION_CAPTION_HEIGHT)
+        painter.setFont(self.font())
+        color = C.TEXT_SECONDARY if self.underMouse() or self.hasFocus() else _EFFECT_TEXT
+        painter.setPen(QColor(color))
+        label = painter.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, caption.width())
+        painter.drawText(caption, Qt.AlignmentFlag.AlignCenter, label)
+        painter.end()
 
     @property
     def has_preview(self) -> bool:
@@ -459,8 +486,7 @@ class _TransitionPreviewButton(_EffectPreviewButton):
             return None
         movie.frameChanged.connect(self._on_preview_frame_changed)
         self._preview_movie = movie
-        if movie.jumpToFrame(0):
-            self.setIcon(QIcon(movie.currentPixmap()))
+        movie.jumpToFrame(0)
         return movie
 
     def release_preview_movie(self) -> None:
@@ -470,12 +496,10 @@ class _TransitionPreviewButton(_EffectPreviewButton):
         if movie is not None:
             movie.stop()
             movie.deleteLater()
-        if self._preview_mode == "animated":
-            self.setIcon(self._static_icon)
+            self.update(self._poster_rect())
 
     def _on_preview_frame_changed(self, _frame_number: int) -> None:
-        if self._preview_mode == "animated" and self._preview_movie is not None:
-            self.setIcon(QIcon(self._preview_movie.currentPixmap()))
+        self.update(self._poster_rect())
 
     def closeEvent(self, event) -> None:
         self.release_preview_movie()
@@ -509,15 +533,20 @@ class _ResponsiveEffectSection(QWidget):
 
         self.title_label = QLabel(title)
         self.title_label.setStyleSheet(
-            f"color: {_EFFECT_TEXT}; font-size: 11px; font-weight: 500; padding: 1px 2px;"
+            f"color: {C.TEXT_PRIMARY}; font-size: {_EFFECT_FONT_SIZE}px;"
+            " font-weight: 600; padding: 1px 2px;"
         )
         self.title_label.setFixedHeight(16)
         layout.addWidget(self.title_label)
 
         self.grid = QGridLayout()
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(5)
-        self.grid.setVerticalSpacing(4)
+        if tile_mode:
+            self.grid.setSpacing(_TRANSITION_TILE_SPACING)
+            self.grid.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        else:
+            self.grid.setHorizontalSpacing(5)
+            self.grid.setVerticalSpacing(4)
         layout.addLayout(self.grid)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self._host_tree: Optional[QTreeWidget] = None
@@ -555,26 +584,26 @@ class _ResponsiveEffectSection(QWidget):
         self._reflow()
 
     def _desired_columns(self) -> int:
-        # Thumbnail cards use the same compact tile density as the Motion
-        # Graphic library; legacy icon cards keep their original breakpoints.
         width = max(1, self.width() - 8)
-        card_width = self._tile_card_width if self._tile_mode else 200
-        max_columns = 4 if self._tile_mode else 3
-        return max(1, min(max_columns, (width + 5) // card_width))
+        spacing = self.grid.horizontalSpacing()
+        if self._tile_mode:
+            return max(1, (width + spacing) // (self._tile_card_width + spacing))
+        return max(1, min(3, (width + spacing) // 200))
 
     def _reflow(self) -> None:
         desired = self._desired_columns()
         self.column_count = int(desired)
         for card in self._cards:
             self.grid.removeWidget(card)
-        for column in range(3):
-            self.grid.setColumnStretch(column, 1 if column < desired else 0)
+        if not self._tile_mode:
+            for column in range(3):
+                self.grid.setColumnStretch(column, 1 if column < desired else 0)
         for index, card in enumerate(self._cards):
             self.grid.addWidget(card, index // desired, index % desired)
         rows = (len(self._cards) + desired - 1) // desired
         card_height = self._tile_card_height if self._tile_mode else 31
         self.setFixedHeight(
-            29 + max(1, rows) * card_height + max(0, rows - 1) * 4
+            29 + max(1, rows) * card_height + max(0, rows - 1) * self.grid.verticalSpacing()
         )
         self.updateGeometry()
         self._sync_host_row_height()
@@ -613,9 +642,7 @@ class EditEffectsPanel(QWidget):
 
     P7 Completion:
         - Audio Effects tab with draggable effects
-        - Favorites system with star button toggle
-        - Favorites stored in ConfigManager
-    """
+            """
 
     # Signals for effect application
     effect_add_requested = pyqtSignal(str, str)  # effect_type, clip_id
@@ -652,11 +679,7 @@ class EditEffectsPanel(QWidget):
         self._search_debounce_timer.setInterval(200)
         self._search_debounce_timer.timeout.connect(self._apply_search_filter)
 
-        # Config manager for favorites persistence
         self._config_manager = ConfigManager()
-
-        # Favorites set (effect_types that are favorites)
-        self._favorites: Set[str] = self._load_favorites()
 
         # Current selected clip (for double-click apply)
         self._selected_clip_id: Optional[str] = None
@@ -681,22 +704,6 @@ class EditEffectsPanel(QWidget):
 
     # ==================== Favorites Management ====================
 
-    def _load_favorites(self) -> Set[str]:
-        """
-        Load favorites from ConfigManager.
-
-        Returns:
-            Set of effect_type strings that are favorites.
-        """
-        favorites_list = self._config_manager.get("effect_favorites")
-        if favorites_list is None:
-            return set()
-        return set(favorites_list)
-
-    def _save_favorites(self) -> None:
-        """Save favorites to ConfigManager."""
-        self._config_manager.set("effect_favorites", list(self._favorites))
-
     def _load_transition_preview_mode(self) -> str:
         """Load the transition library presentation mode from preferences."""
         mode = self._config_manager.get("transition_preview_mode") or "icon"
@@ -714,6 +721,7 @@ class EditEffectsPanel(QWidget):
         # with the icon/movie. Static mode keeps the existing compact layout;
         # animated mode uses the larger thumbnail tiles used by the MG library.
         self._populate_transitions(self.transitions_tree)
+        self._sync_transition_size_slider_visibility()
 
     def _load_transition_preview_size(self) -> str:
         """Load the animated-card size preset from user preferences."""
@@ -724,11 +732,22 @@ class EditEffectsPanel(QWidget):
 
     def _set_transition_preview_size(self, size: str) -> None:
         """Persist and apply an animated-card size preset."""
-        if size not in _TRANSITION_PREVIEW_SIZE_OPTIONS:
+        if size not in _TRANSITION_PREVIEW_SIZE_OPTIONS or size == self._transition_preview_size:
             return
         self._transition_preview_size = size
+        with QSignalBlocker(self.transition_size_slider):
+            self.transition_size_slider.setValue(_TRANSITION_PREVIEW_SIZES.index(size))
         self._config_manager.set("transition_preview_size", size)
         self._populate_transitions(self.transitions_tree)
+
+    def _on_transition_size_slider_changed(self, index: int) -> None:
+        self._set_transition_preview_size(_TRANSITION_PREVIEW_SIZES[index])
+
+    def _sync_transition_size_slider_visibility(self) -> None:
+        self.transition_size_slider.setVisible(
+            self.tabs.currentIndex() == _TAB_INDEX_TRANSITIONS
+            and self._transition_preview_mode == "animated"
+        )
 
     def _transition_preview_geometry(self) -> tuple[int, int, int]:
         """Return GIF width, GIF height and card height for the current size."""
@@ -749,19 +768,6 @@ class EditEffectsPanel(QWidget):
     ) -> QMenu:
         """Build one context menu shared by cards, trees and the dock title."""
         menu = QMenu(self)
-        favorite_action = None
-        if item_type and not is_transition:
-            is_favorite = self._is_favorite(item_type)
-            favorite_action = menu.addAction(
-                icon_favorite() if is_favorite else icon_favorite_outline(),
-                I18N.tr(
-                    "edit.effects.remove_favorite" if is_favorite
-                    else "edit.effects.add_favorite",
-                    "Remove from Favorites" if is_favorite
-                    else "Add to Favorites",
-                ),
-            )
-
         show_preview_controls = is_transition or not item_type
         preview_actions = None
         if show_preview_controls:
@@ -771,12 +777,12 @@ class EditEffectsPanel(QWidget):
                 else any(card.has_preview for card in self._transition_preview_cards)
             )
             icon_action = menu.addAction(
-                I18N.tr("edit.effects.transition_icon_preview", "Icon Preview")
+                _tr("edit.effects.transition_icon_preview", "Icon Preview")
             )
             icon_action.setCheckable(True)
             icon_action.setChecked(self._transition_preview_mode == "icon")
             animated_action = menu.addAction(
-                I18N.tr(
+                _tr(
                     "edit.effects.transition_animated_preview",
                     "Animated Preview",
                 )
@@ -786,14 +792,14 @@ class EditEffectsPanel(QWidget):
             animated_action.setEnabled(has_preview)
             if not has_preview:
                 animated_action.setToolTip(
-                    I18N.tr(
+                    _tr(
                         "edit.effects.transition_preview_unavailable",
                         "No generated GIF preview is available for this item",
                     )
                 )
             preview_actions = (icon_action, animated_action)
             size_menu = menu.addMenu(
-                I18N.tr("edit.effects.transition_preview_size", "GIF Preview Size")
+                _tr("edit.effects.transition_preview_size", "GIF Preview Size")
             )
             size_menu.setEnabled(has_preview)
             for size, label in (
@@ -802,7 +808,7 @@ class EditEffectsPanel(QWidget):
                 ("large", "Large"),
             ):
                 size_action = size_menu.addAction(
-                    I18N.tr(f"edit.effects.transition_preview_{size}", label)
+                    _tr(f"edit.effects.transition_preview_{size}", label)
                 )
                 size_action.setCheckable(True)
                 size_action.setChecked(self._transition_preview_size == size)
@@ -817,7 +823,6 @@ class EditEffectsPanel(QWidget):
         # Keep Python-side references on the menu so QAction data stays
         # private to this menu and the action handling remains straightforward.
         menu._preview_actions = preview_actions  # type: ignore[attr-defined]
-        menu._favorite_action = favorite_action  # type: ignore[attr-defined]
         return menu
 
     def _show_library_context_menu_for_type(
@@ -842,8 +847,6 @@ class EditEffectsPanel(QWidget):
             self._set_transition_preview_mode("animated")
         elif action is not None and action.data() in _TRANSITION_PREVIEW_SIZE_OPTIONS:
             self._set_transition_preview_size(str(action.data()))
-        elif action == getattr(menu, "_favorite_action", None) and item_type:
-            self._toggle_favorite(item_type)
 
     def show_unified_context_menu(self, global_pos: QPoint) -> None:
         """Show the same menu for blank space and the Effects dock title."""
@@ -872,41 +875,9 @@ class EditEffectsPanel(QWidget):
             preview_stem=preview_stem,
         )
 
-    def _is_favorite(self, effect_type: str) -> bool:
-        """Check if an effect is favorited."""
-        return effect_type in self._favorites
-
-    def _toggle_favorite(self, effect_type: str) -> None:
-        """
-        Toggle favorite status for an effect.
-
-        Args:
-            effect_type: The effect type to toggle.
-        """
-        if effect_type in self._favorites:
-            self._favorites.remove(effect_type)
-            logger.debug(f"Removed favorite: {effect_type}")
-        else:
-            self._favorites.add(effect_type)
-            logger.debug(f"Added favorite: {effect_type}")
-
-        # Save to config
-        self._save_favorites()
-
-        # Refresh all trees to update star icons
-        self._refresh_all_trees()
-
-    def _refresh_all_trees(self) -> None:
-        """Refresh all effect trees to update favorite icons."""
-        self._populate_video_effects(self.video_effects_tree)
-        self._populate_audio_effects(self.audio_effects_tree)
-        self._populate_favorites(self.favorites_tree)
-
     def _show_effect_context_menu(self, pos: QPoint) -> None:
         """
         Show context menu for effect items.
-
-        P7 Completion: Right-click menu to toggle favorite status.
 
         Args:
             pos: Position where context menu was requested.
@@ -969,25 +940,25 @@ class EditEffectsPanel(QWidget):
             lambda pos: self.show_unified_context_menu(self.mapToGlobal(pos))
         )
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setContentsMargins(0, 0, 0, 4)
         layout.setSpacing(4)
 
         # Search is opt-in from the small button at the right side of the tab bar.
         self.search_container = QWidget()
         self.search_container.setFixedHeight(28)
         search_bar = QHBoxLayout(self.search_container)
-        search_bar.setContentsMargins(0, 0, 0, 0)
+        search_bar.setContentsMargins(4, 0, 4, 0)
         search_bar.setSpacing(4)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(
-            I18N.tr("edit.effects.search_placeholder", "Search effects...")
+            _tr("edit.effects.search_placeholder", "Search effects...")
         )
         self.search_input.setFixedHeight(28)
         self.search_input.setStyleSheet(
             f"QLineEdit {{ background: {_EFFECT_BG}; border: 1px solid {_EFFECT_BORDER};"
-            f" border-radius: 2px; color: {_EFFECT_TEXT}; padding: 3px 7px;"
-            " font-size: 11px; }"
+            f" border-radius: 2px; color: {C.TEXT_PRIMARY}; padding: 3px 7px;"
+            f" font-size: {_EFFECT_FONT_SIZE}px; }}"
             f"QLineEdit:focus {{ border-color: {_EFFECT_BORDER}; }}"
         )
         search_bar.addWidget(self.search_input)
@@ -995,66 +966,82 @@ class EditEffectsPanel(QWidget):
         layout.addWidget(self.search_container)
 
         # Tab widget for categories
-        self.tabs = QTabWidget()
+        self.tabs = _EditEffectsTabs()
+        self.tabs.setObjectName("EditEffectsTabs")
         tab_bar = self.tabs.tabBar()
+        tab_bar.setObjectName("EditEffectsTabBar")
         tab_bar.setExpanding(True)
         tab_bar.setUsesScrollButtons(False)
-        tab_bar.setElideMode(Qt.TextElideMode.ElideNone)
-        tab_bar.setMinimumWidth(250)
+        tab_bar.setElideMode(Qt.TextElideMode.ElideRight)
         self.tabs.setStyleSheet(f"""
-            QTabWidget::pane {{
-                border: none;
+            QTabWidget#EditEffectsTabs::tab-bar {{ alignment: left; }}
+            QTabWidget#EditEffectsTabs::pane {{
+                border: 0;
+                border-top: 1px solid {C.PANEL_DIVIDER};
                 background-color: {_EFFECT_BG};
             }}
-            QTabBar {{
-                background-color: {_EFFECT_BG};
-                border-bottom: 1px solid {C.BORDER_DARK};
+            QTabBar#EditEffectsTabBar {{
+                background-color: {C.COLOR_PANEL_HEADER};
+                font-size: {_EFFECT_FONT_SIZE}px;
             }}
-            QTabBar::tab {{
+            QTabBar#EditEffectsTabBar::tab {{
                 background: transparent;
                 color: {_EFFECT_TEXT};
                 border: 1px solid transparent;
-                padding: 4px 12px;
+                border-radius: 0;
+                padding: 4px;
                 margin: 0px 1px 0px 0px;
-                font-size: 11px;
-                font-weight: 500;
+                font-size: {_EFFECT_FONT_SIZE}px;
                 min-height: 20px;
             }}
-            QTabBar::tab:hover {{
-                background-color: {C.BG_HOVER};
+            QTabBar#EditEffectsTabBar::tab:hover {{
                 color: {C.TEXT_SECONDARY};
             }}
-            QTabBar::tab:selected {{
-                background-color: {C.BG_HOVER};
+            QTabBar#EditEffectsTabBar::tab:selected {{
+                background-color: {_EFFECT_BG};
                 color: {C.TEXT_PRIMARY};
-                border-bottom: 2px solid {C.BORDER_MID};
+                font-weight: 600;
             }}
         """)
         self.search_toggle_button = QToolButton()
         self.search_toggle_button.setIcon(icon_search(IconColors.DEFAULT))
         self.search_toggle_button.setIconSize(QSize(14, 14))
-        self.search_toggle_button.setToolTip(I18N.tr("edit.effects.search_tooltip", "Search effects"))
+        self.search_toggle_button.setToolTip(_tr("edit.effects.search_tooltip", "Search effects"))
         self.search_toggle_button.setAutoRaise(True)
         self.search_toggle_button.setStyleSheet(
             f"QToolButton {{ background: transparent; border: none;"
             f" padding: 3px; color: {_EFFECT_TEXT}; }}"
-            f"QToolButton:hover {{ background: {_EFFECT_BG}; border: none; }}"
         )
-        self.tabs.setCornerWidget(
-            self.search_toggle_button,
-            Qt.Corner.TopRightCorner,
+        header_actions = QWidget()
+        header_actions.setObjectName("EditEffectsHeaderActions")
+        header_actions.setStyleSheet(
+            f"QWidget#EditEffectsHeaderActions {{ background: {C.COLOR_PANEL_HEADER}; border: 0; }}"
         )
+        actions_layout = QHBoxLayout(header_actions)
+        actions_layout.setContentsMargins(4, 0, 2, 0)
+        actions_layout.setSpacing(8)
+        self.transition_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.transition_size_slider.setFixedWidth(64)
+        self.transition_size_slider.setRange(0, len(_TRANSITION_PREVIEW_SIZES) - 1)
+        self.transition_size_slider.setValue(_TRANSITION_PREVIEW_SIZES.index(self._transition_preview_size))
+        self.transition_size_slider.setTracking(False)
+        size_label = _tr("edit.effects.transition_preview_size", "GIF Preview Size")
+        self.transition_size_slider.setAccessibleName(size_label)
+        self.transition_size_slider.setToolTip(size_label)
+        self.transition_size_slider.setStyleSheet(PANEL_SLIDER_STYLE)
+        self.transition_size_slider.valueChanged.connect(self._on_transition_size_slider_changed)
+        self.transition_size_slider.hide()
+        actions_layout.addWidget(self.transition_size_slider)
+        actions_layout.addWidget(self.search_toggle_button)
+        self.tabs.setCornerWidget(header_actions, Qt.Corner.TopRightCorner)
 
         # Video Effects tab
         video_effects_tab = QWidget()
         video_effects_tab.setStyleSheet(f"background-color: {_EFFECT_BG};")
         video_layout = QVBoxLayout(video_effects_tab)
-        video_layout.setContentsMargins(4, 4, 4, 4)
+        video_layout.setContentsMargins(4, 4, 0, 4)
 
-        self.video_effects_tree = QTreeWidget()
-        self.video_effects_tree.setHeaderHidden(True)
-        self.video_effects_tree.setStyleSheet(_EFFECT_TREE_STYLE)
-        self.video_effects_tree.setIconSize(QSize(48, 28))
+        self.video_effects_tree = _create_effect_tree()
         self.video_effects_tree.setColumnCount(1)
         self.video_effects_tree.setIndentation(0)
         self.video_effects_tree.header().setStretchLastSection(True)
@@ -1074,19 +1061,16 @@ class EditEffectsPanel(QWidget):
 
         self.tabs.addTab(
             video_effects_tab,
-            I18N.tr("edit.effects.video_effects", "Video")
+            _tr("edit.effects.effects", "Effects")
         )
 
         # Transitions tab
         transitions_tab = QWidget()
         transitions_tab.setStyleSheet(f"background-color: {_EFFECT_BG};")
         trans_layout = QVBoxLayout(transitions_tab)
-        trans_layout.setContentsMargins(4, 4, 4, 4)
+        trans_layout.setContentsMargins(4, 4, 0, 4)
 
-        self.transitions_tree = QTreeWidget()
-        self.transitions_tree.setHeaderHidden(True)
-        self.transitions_tree.setStyleSheet(_EFFECT_TREE_STYLE)
-        self.transitions_tree.setIconSize(QSize(48, 28))
+        self.transitions_tree = _create_effect_tree()
         self.transitions_tree.setSelectionMode(
             QAbstractItemView.SelectionMode.NoSelection
         )
@@ -1103,19 +1087,16 @@ class EditEffectsPanel(QWidget):
 
         self.tabs.addTab(
             transitions_tab,
-            I18N.tr("edit.effects.transitions", "Transitions")
+            _tr("edit.effects.transitions", "Transitions")
         )
 
-        # Titles tab: title templates plus reusable animated caption effects.
+        # Text templates create styled title clips.
         titles_tab = QWidget()
         titles_tab.setStyleSheet(f"background-color: {_EFFECT_BG};")
         titles_layout = QVBoxLayout(titles_tab)
-        titles_layout.setContentsMargins(4, 4, 4, 4)
+        titles_layout.setContentsMargins(4, 4, 0, 4)
 
-        self.titles_tree = QTreeWidget()
-        self.titles_tree.setHeaderHidden(True)
-        self.titles_tree.setStyleSheet(_EFFECT_TREE_STYLE)
-        self.titles_tree.setIconSize(QSize(48, 28))
+        self.titles_tree = _create_effect_tree()
         self.titles_tree.setColumnCount(1)
         self.titles_tree.setIndentation(0)
         self.titles_tree.header().setStretchLastSection(True)
@@ -1128,83 +1109,18 @@ class EditEffectsPanel(QWidget):
             self._on_title_template_context_menu)
         titles_layout.addWidget(self.titles_tree)
 
-        caption_effect_controls = QWidget()
-        caption_effect_controls.setStyleSheet(
-            f"background: {_EFFECT_BG}; border-top: 1px solid {_EFFECT_BORDER_SUBTLE};"
-        )
-        controls_layout = QFormLayout(caption_effect_controls)
-        controls_layout.setContentsMargins(8, 6, 8, 4)
-        controls_layout.setHorizontalSpacing(8)
-        controls_layout.setVerticalSpacing(3)
-
-        self.caption_effect_in_frames = QSpinBox(caption_effect_controls)
-        self.caption_effect_in_frames.setRange(1, 60)
-        self.caption_effect_in_frames.setValue(10)
-        self.caption_effect_in_frames.setSuffix(I18N.tr("edit.frames_suffix", " f"))
-        self.caption_effect_in_frames.setToolTip(
-            I18N.tr(
-                "edit.effects.caption_in_frames_tooltip",
-                "Frames used by the selected subtitle effect to enter.")
-        )
-        controls_layout.addRow(
-            I18N.tr("edit.effects.caption_in_frames", "Enter Duration"),
-            self.caption_effect_in_frames,
-        )
-
-        self.caption_effect_out_frames = QSpinBox(caption_effect_controls)
-        self.caption_effect_out_frames.setRange(0, 60)
-        self.caption_effect_out_frames.setValue(8)
-        self.caption_effect_out_frames.setSuffix(I18N.tr("edit.frames_suffix", " f"))
-        self.caption_effect_out_frames.setToolTip(
-            I18N.tr(
-                "edit.effects.caption_out_frames_tooltip",
-                "Frames used by the selected subtitle effect to exit; 0 holds to the end.")
-        )
-        controls_layout.addRow(
-            I18N.tr("edit.effects.caption_out_frames", "Exit Duration"),
-            self.caption_effect_out_frames,
-        )
-
-        self.caption_effect_distance = QSpinBox(caption_effect_controls)
-        self.caption_effect_distance.setRange(10, 250)
-        self.caption_effect_distance.setValue(100)
-        self.caption_effect_distance.setSuffix(" %")
-        self.caption_effect_distance.setToolTip(
-            I18N.tr(
-                "edit.effects.caption_distance_tooltip",
-                "Travel distance for slide effects, measured relative to the subtitle size.")
-        )
-        controls_layout.addRow(
-            I18N.tr("edit.effects.caption_distance", "Travel Distance"),
-            self.caption_effect_distance,
-        )
-        titles_layout.addWidget(caption_effect_controls)
-
-        titles_hint = QLabel(I18N.tr(
-            "edit.effects.titles_hint",
-            "Double-click a title template to create a subtitle at the "
-            "playhead; with a subtitle selected, double-click a caption "
-            "effect to apply its animation.",
-        ))
-        titles_hint.setWordWrap(True)
-        titles_hint.setStyleSheet("color: #9aa0a6; font-size: 10px;")
-        titles_layout.addWidget(titles_hint)
-
         self.tabs.addTab(
             titles_tab,
-            I18N.tr("edit.effects.titles", "Titles")
+            _tr("edit.effects.text", "Text")
         )
 
         # Audio Effects tab (P7 Completion - full implementation)
         audio_effects_tab = QWidget()
         audio_effects_tab.setStyleSheet(f"background-color: {_EFFECT_BG};")
         audio_layout = QVBoxLayout(audio_effects_tab)
-        audio_layout.setContentsMargins(4, 4, 4, 4)
+        audio_layout.setContentsMargins(4, 4, 0, 4)
 
-        self.audio_effects_tree = QTreeWidget()
-        self.audio_effects_tree.setHeaderHidden(True)
-        self.audio_effects_tree.setStyleSheet(_EFFECT_TREE_STYLE)
-        self.audio_effects_tree.setIconSize(QSize(48, 28))
+        self.audio_effects_tree = _create_effect_tree()
         self.audio_effects_tree.setColumnCount(1)
         self.audio_effects_tree.setIndentation(0)
         self.audio_effects_tree.header().setStretchLastSection(True)
@@ -1218,39 +1134,101 @@ class EditEffectsPanel(QWidget):
 
         self.tabs.addTab(
             audio_effects_tab,
-            I18N.tr("edit.effects.audio_effects", "Audio")
+            _tr("edit.effects.audio_effects", "Audio")
         )
 
         layout.addWidget(self.tabs, stretch=1)
 
-        # Favorites tab (P7 Completion - replaces placeholder section)
-        favorites_tab = QWidget()
-        favorites_tab.setStyleSheet(f"background-color: {_EFFECT_BG};")
-        fav_layout = QVBoxLayout(favorites_tab)
-        fav_layout.setContentsMargins(4, 4, 4, 4)
-
-        self.favorites_tree = QTreeWidget()
-        self.favorites_tree.setHeaderHidden(True)
-        self.favorites_tree.setStyleSheet(_EFFECT_TREE_STYLE)
-        self.favorites_tree.setIconSize(QSize(48, 28))
-        self.favorites_tree.setColumnCount(1)
-        self.favorites_tree.setIndentation(0)
-        self.favorites_tree.header().setStretchLastSection(True)
-        self.favorites_tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.favorites_tree.setDragEnabled(True)
-        self.favorites_tree.setDragDropMode(QAbstractItemView.DragDropMode.DragOnly)
-        self.favorites_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.favorites_tree.customContextMenuRequested.connect(self._show_effect_context_menu)
-        self._populate_favorites(self.favorites_tree)
-        fav_layout.addWidget(self.favorites_tree)
-
-        self.tabs.addTab(
-            favorites_tab,
-            I18N.tr("edit.effects.favorites", "Favorites")
-        )
+        self._subtitle_tab = QWidget()
+        self._subtitle_layout = QVBoxLayout(self._subtitle_tab)
+        self._subtitle_layout.setContentsMargins(0, 4, 0, 4)
+        self._caption_tools = self._build_caption_tools()
+        self._subtitle_layout.addWidget(self._caption_tools)
+        self.tabs.addTab(self._subtitle_tab, _tr("edit.effects.subtitles", "Subtitles"))
         # Kept as a non-visual state sink for existing empty-selection messages.
         self.info_label = QLabel()
         self.info_label.setVisible(False)
+
+    def _build_caption_tools(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(8, 4, 0, 4)
+        layout.setSpacing(6)
+        self.caption_effects_tree = _create_effect_tree()
+        self.caption_effects_tree.setIndentation(12)
+        self._populate_caption_effects(self.caption_effects_tree)
+        self.caption_effects_tree.itemDoubleClicked.connect(self._on_caption_item_double_clicked)
+        layout.addWidget(self.caption_effects_tree, 1)
+
+        caption_effect_controls = QWidget()
+        caption_effect_controls.setStyleSheet(
+            f"background: {_EFFECT_BG}; border-top: 1px solid {_EFFECT_BORDER_SUBTLE};"
+        )
+        controls_layout = QFormLayout(caption_effect_controls)
+        controls_layout.setContentsMargins(8, 6, 8, 4)
+        controls_layout.setHorizontalSpacing(8)
+        controls_layout.setVerticalSpacing(3)
+
+        self.caption_effect_in_frames = QSpinBox(caption_effect_controls)
+        self.caption_effect_in_frames.setRange(1, 60)
+        self.caption_effect_in_frames.setValue(10)
+        self.caption_effect_in_frames.setSuffix(_tr("edit.frames_suffix", " f"))
+        self.caption_effect_in_frames.setToolTip(
+            _tr(
+                "edit.effects.caption_in_frames_tooltip",
+                "Frames used by the selected subtitle effect to enter.")
+        )
+        controls_layout.addRow(
+            _tr("edit.effects.caption_in_frames", "Enter Duration"),
+            self.caption_effect_in_frames,
+        )
+
+        self.caption_effect_out_frames = QSpinBox(caption_effect_controls)
+        self.caption_effect_out_frames.setRange(0, 60)
+        self.caption_effect_out_frames.setValue(8)
+        self.caption_effect_out_frames.setSuffix(_tr("edit.frames_suffix", " f"))
+        self.caption_effect_out_frames.setToolTip(
+            _tr(
+                "edit.effects.caption_out_frames_tooltip",
+                "Frames used by the selected subtitle effect to exit; 0 holds to the end.")
+        )
+        controls_layout.addRow(
+            _tr("edit.effects.caption_out_frames", "Exit Duration"),
+            self.caption_effect_out_frames,
+        )
+
+        self.caption_effect_distance = QSpinBox(caption_effect_controls)
+        self.caption_effect_distance.setRange(10, 250)
+        self.caption_effect_distance.setValue(100)
+        self.caption_effect_distance.setSuffix(" %")
+        self.caption_effect_distance.setToolTip(
+            _tr(
+                "edit.effects.caption_distance_tooltip",
+                "Travel distance for slide effects, measured relative to the subtitle size.")
+        )
+        controls_layout.addRow(
+            _tr("edit.effects.caption_distance", "Travel Distance"),
+            self.caption_effect_distance,
+        )
+        layout.addWidget(caption_effect_controls)
+
+        self._caption_hint = QLabel(self._caption_selection_hint(), page)
+        self._caption_hint.setWordWrap(True)
+        self._caption_hint.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 11px; padding-right: 8px;")
+        layout.addWidget(self._caption_hint)
+        return page
+
+    def host_voiceover_panel(self, panel: "AdrTakeSheetPanel") -> None:
+        """Embed the shared recording workspace in the Subtitles tab."""
+        if self._subtitle_layout.indexOf(panel) < 0:
+            self._subtitle_layout.addWidget(panel)
+            panel.host_caption_tools(
+                self._caption_tools, _tr("edit.effects.subtitle_animation", "Animation")
+            )
+            panel.show()
+
+    def select_subtitles(self) -> None:
+        self.tabs.setCurrentWidget(self._subtitle_tab)
 
     def _connect_signals(self) -> None:
         """Connect internal signals."""
@@ -1261,7 +1239,6 @@ class EditEffectsPanel(QWidget):
         # Double-click to apply effect
         self.video_effects_tree.itemDoubleClicked.connect(self._on_effect_double_clicked)
         self.audio_effects_tree.itemDoubleClicked.connect(self._on_effect_double_clicked)
-        self.favorites_tree.itemDoubleClicked.connect(self._on_effect_double_clicked)
 
         # Transitions double-click (placeholder)
         self.transitions_tree.itemDoubleClicked.connect(self._on_transition_double_clicked)
@@ -1284,7 +1261,6 @@ class EditEffectsPanel(QWidget):
         _inject_drag_support(self)
         _inject_transition_drag_support(self)
         _inject_audio_drag_support(self)
-        _inject_favorites_drag_support(self)
         self.video_effects_tree.itemDoubleClicked.connect(
             self._on_motion_graphic_generator_double_clicked
         )
@@ -1322,6 +1298,7 @@ class EditEffectsPanel(QWidget):
 
     def _on_effect_tab_changed(self, _index: int) -> None:
         """Stop previews when the Transitions tab is not the active page."""
+        self._sync_transition_size_slider_visibility()
         self._schedule_transition_preview_sync()
         # F2.9：切到 Titles 页时重列模板——保存/删除/重命名后无需重启面板
         if self.titles_tree is not None and self.titles_tree.isVisible():
@@ -1348,14 +1325,14 @@ class EditEffectsPanel(QWidget):
             return  # 内置模板不可管理（仅用户模板落盘可改）
         menu = QMenu(self.titles_tree)
         rename_action = menu.addAction(
-            I18N.tr("edit.effects.rename_template", "重命名…"))
+            _tr("edit.effects.rename_template", "Rename…"))
         delete_action = menu.addAction(
-            I18N.tr("edit.effects.delete_template", "删除"))
+            _tr("edit.effects.delete_template", "Delete"))
         selected = menu.exec(self.titles_tree.viewport().mapToGlobal(pos))
         if selected == rename_action:
             name, ok = QInputDialog.getText(
-                self, I18N.tr("edit.effects.rename_template", "重命名…"),
-                I18N.tr("timeline.subtitle.template_name", "Template name:"),
+                self, _tr("edit.effects.rename_template", "Rename…"),
+                _tr("timeline.subtitle.template_name", "Template name:"),
                 text=preset.label)
             if ok and name.strip():
                 try:
@@ -1420,7 +1397,7 @@ class EditEffectsPanel(QWidget):
         if self._search_visible:
             self.search_input.setFocus()
             self.search_toggle_button.setToolTip(
-                I18N.tr("edit.effects.hide_search_tooltip", "Hide effect search"))
+                _tr("edit.effects.hide_search_tooltip", "Hide effect search"))
         else:
             # AUD-19804: 程序化清空须持有 _updating 状态锁，抑制 textChanged
             # 重入导致的 _populate_video_effects 额外全量重建。
@@ -1431,7 +1408,7 @@ class EditEffectsPanel(QWidget):
                 self._updating = False
             self._search_debounce_timer.stop()
             self.search_toggle_button.setToolTip(
-                I18N.tr("edit.effects.search_tooltip", "Search effects"))
+                _tr("edit.effects.search_tooltip", "Search effects"))
 
     def _start_effect_drag_for_type(self, effect_type: str) -> None:
         """Start the same timeline-compatible drag used by the legacy trees."""
@@ -1451,7 +1428,7 @@ class EditEffectsPanel(QWidget):
         """Apply an effect card using the same rules as tree double-clicks."""
         if effect_type in GENERATOR_EFFECT_TYPES:
             self.info_label.setText(
-                I18N.tr(
+                _tr(
                     "edit.effects.generator_drag_hint",
                     "Drag generators onto the timeline to create a clip",
                 )
@@ -1461,7 +1438,7 @@ class EditEffectsPanel(QWidget):
             self.effect_add_requested.emit(effect_type, self._selected_clip_id)
             return
         self.info_label.setText(
-            I18N.tr(
+            _tr(
                 "edit.effects.no_clip_selected",
                 "Select a clip first, then double-click effect",
             )
@@ -1477,7 +1454,9 @@ class EditEffectsPanel(QWidget):
         if not effects:
             return
 
-        category_display = self._registry.get_category_display_name(category)
+        category_display = _tr(
+            f"edit.effects.categories.{category}", self._registry.get_category_display_name(category)
+        )
         category_item = QTreeWidgetItem(tree, [category_display])
         category_item.setData(0, Qt.ItemDataRole.UserRole, "category")
         category_item.setData(0, Qt.ItemDataRole.UserRole + 1, category)
@@ -1488,6 +1467,10 @@ class EditEffectsPanel(QWidget):
 
         section = _ResponsiveEffectSection(category_display, tree)
         for effect_def in effects:
+            name = _effect_display_name(effect_def)
+            description = _tr(
+                f"edit.effects.effect_descriptions.{effect_def.effect_type}", effect_def.description
+            )
             # T-P1-20: preview_only effects (e.g. Edit plugins) get an
             # explicit delivery restriction badge in the UI — same source
             # of truth as Deliver preflight / AI manifest
@@ -1508,21 +1491,19 @@ class EditEffectsPanel(QWidget):
             except Exception:  # noqa: BLE001 — badge failure must not break listing
                 restriction_code, restriction_message = "", ""
             suffix = (
-                I18N.tr("edit.effects.preview_only_suffix", " (Preview Only)")
+                _tr("edit.effects.preview_only_suffix", " (Preview Only)")
                 if restriction_code else ""
             )
             effect_item = QTreeWidgetItem(
-                category_item, [effect_def.name + suffix])
+                category_item, [name + suffix])
             effect_item.setData(0, Qt.ItemDataRole.UserRole, "effect")
             effect_item.setData(0, Qt.ItemDataRole.UserRole + 1, effect_def.effect_type)
             effect_item.setData(0, Qt.ItemDataRole.UserRole + 2, effect_def.description)
-            tooltip = f"{effect_def.name}\n{effect_def.description}"
+            tooltip = f"{name}\n{description}" if description else name
             if restriction_code:
                 tooltip += f"\n⚠ {restriction_message}（{restriction_code}）"
             effect_item.setToolTip(0, tooltip)
-            # AUD-19803: rasterize the effect's icon once and reuse it in
-            # both places (served by _effect_preview_icon's lru_cache).
-            icon = _effect_preview_icon(effect_def.effect_type)
+            icon = _effect_preview_icon(effect_def.effect_type, effect_def.category)
             effect_item.setIcon(0, icon)
             # Keep source items for keyboard/API compatibility; cards are the
             # responsive presentation of the same definitions.
@@ -1534,13 +1515,12 @@ class EditEffectsPanel(QWidget):
 
             card = _EffectPreviewButton(
                 effect_def.effect_type,
-                effect_def.name,
-                effect_def.description,
+                name,
+                description,
                 icon,
                 section,
             )
-            if self._is_favorite(effect_def.effect_type):
-                card.setToolTip(f"★ {effect_def.name}\n{effect_def.description}")
+            card.setToolTip(tooltip)
             card.double_clicked.connect(self._on_effect_card_double_clicked)
             card.drag_requested.connect(self._start_effect_drag_for_type)
             card.context_menu_requested.connect(self._show_effect_context_menu_for_type)
@@ -1569,7 +1549,6 @@ class EditEffectsPanel(QWidget):
         Populate video effects tree from registry.
 
         Groups effects by category.
-        P7 Completion: Shows favorite icon on favorited effects.
         """
         self._close_motion_graphic_hover_previews(tree)
         self._unbind_responsive_sections(tree)
@@ -1607,7 +1586,7 @@ class EditEffectsPanel(QWidget):
         if not templates:
             return
 
-        mg_section_title = I18N.tr("edit.effects.mg_section", "MG Generators")
+        mg_section_title = _tr("edit.effects.mg_section", "MG Generators")
         category_item = QTreeWidgetItem(tree, [mg_section_title])
         category_item.setData(0, Qt.ItemDataRole.UserRole, "category")
         category_item.setFlags(category_item.flags() & ~Qt.ItemFlag.ItemIsDragEnabled)
@@ -1625,7 +1604,9 @@ class EditEffectsPanel(QWidget):
             card = _MotionGraphicPreviewButton(
                 f"motion_graphic_template:{template.template_id}",
                 template_display_name(template),
-                template_description(template) or "Reusable HTML/CSS/Canvas generator",
+                template_description(template) or _tr(
+                    "edit.effects.mg_description", "Reusable HTML/CSS/Canvas generator"
+                ),
                 self._motion_graphic_registry.preview_path(
                     template.template_id, template.version,
                 ),
@@ -1717,7 +1698,7 @@ class EditEffectsPanel(QWidget):
         if template is None:
             return
         self.info_label.setText(
-            I18N.tr(
+            _tr(
                 "edit.effects.mg_section_hint",
                 "{name}: drag to the timeline to create a generator clip; "
                 "adjust it in the MG editor",
@@ -1742,7 +1723,6 @@ class EditEffectsPanel(QWidget):
 
         P7 Completion - Audio Effects tab implementation.
         Groups effects by category (all audio effects under "Audio" category).
-        Shows favorite icon on favorited effects.
 
         P1-07: an empty registry no longer renders a generic "coming soon"
         placeholder — that read as a missing product capability. Instead the
@@ -1778,7 +1758,7 @@ class EditEffectsPanel(QWidget):
 
         health = get_effect_registry_health(self._registry)
 
-        header_text = I18N.tr(
+        header_text = _tr(
             "edit.effects.audio_registry_problem",
             "Audio effects failed to load — details below",
         )
@@ -1786,11 +1766,12 @@ class EditEffectsPanel(QWidget):
             # Registry probes are healthy yet nothing is registered under
             # the "audio" category: a filtered/derived view issue, not a
             # missing capability.
-            header_text = I18N.tr(
+            header_text = _tr(
                 "edit.effects.audio_registry_filtered",
                 "Audio effects are hidden by the current filter",
             )
         header = QTreeWidgetItem(tree, [header_text])
+        _style_tree_heading(tree, header)
         header.setFlags(header.flags() & ~Qt.ItemFlag.ItemIsSelectable)
 
         if health.registry_error:
@@ -1802,44 +1783,6 @@ class EditEffectsPanel(QWidget):
                 header, [f"{status.effect_type}: {status.reason}"]
             )
             row.setFlags(row.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-
-        tree.expandAll()
-
-    def _populate_favorites(self, tree: QTreeWidget) -> None:
-        """
-        Populate favorites tree from saved favorites.
-
-        P7 Completion - Favorites tab implementation.
-        Shows all favorited effects from any category.
-        """
-        # R23 复查补齐：favorites 树同样经 _build_effect_section 承载
-        # 响应式 section，clear 前必须解绑（星标增删触发的重建路径）。
-        self._unbind_responsive_sections(tree)
-        tree.clear()
-
-        if not self._favorites:
-            # Show placeholder when no favorites
-            placeholder = QTreeWidgetItem(
-                tree,
-                [I18N.tr("edit.effects.no_favorites", "No favorites yet. Click the star icon to add.")]
-            )
-            placeholder.setFlags(placeholder.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            return
-
-        # Group favorites by category
-        favorites_by_category: Dict[str, List[EffectDefinition]] = {}
-
-        for effect_type in self._favorites:
-            effect_def = self._registry.get_definition(effect_type)
-            if effect_def:
-                category = effect_def.category
-                if category not in favorites_by_category:
-                    favorites_by_category[category] = []
-                favorites_by_category[category].append(effect_def)
-
-        # Build tree with responsive category grids
-        for category, effects in favorites_by_category.items():
-            self._build_effect_section(tree, category, effects)
 
         tree.expandAll()
 
@@ -1896,7 +1839,7 @@ class EditEffectsPanel(QWidget):
             category,
             tree,
             tile_mode=tile_mode,
-            tile_card_width=preview_width + 4,
+            tile_card_width=preview_width,
             tile_card_height=preview_card_height,
         )
         for label, transition_type, icon_stem, direction in entries:
@@ -1917,10 +1860,10 @@ class EditEffectsPanel(QWidget):
             card = _TransitionPreviewButton(
                 payload,
                 label,
-                "Transition",
+                _tr("edit.effects.transition", "Transition"),
                 _transition_preview_icon(icon_stem),
                 self._transition_preview_path(preview_stem),
-                self._transition_preview_mode == "animated",
+                tile_mode,
                 section,
             )
             card.set_preview_size(self._transition_preview_size)
@@ -1945,12 +1888,15 @@ class EditEffectsPanel(QWidget):
                 section.unbind_from_tree()
         self._transition_preview_cards = []
         tree.clear()
-        tree.setIconSize(QSize(40, 24))
+        tree.setRootIsDecorated(self._transition_preview_mode == "icon")
 
         grouped: Dict[str, List[tuple[str, str, str, Optional[str]]]] = {}
         for definition in TRANSITION_DEFINITIONS:
             grouped.setdefault(definition.category, []).append(
-                (definition.label, definition.transition_type, definition.transition_type, None)
+                (
+                    _tr(f"edit.effects.transition_names.{definition.transition_type}", definition.label),
+                    definition.transition_type, definition.transition_type, None,
+                )
             )
 
         # Keep the two useful Wipe presets from the original palette. The
@@ -1958,10 +1904,14 @@ class EditEffectsPanel(QWidget):
         # value after the drop.
         grouped.setdefault("Motion", []).extend(
             (
-                ("Wipe From Left", "wipe", "wipe_left", "left"),
-                ("Wipe From Top", "wipe", "wipe_up", "up"),
+                (_tr("edit.effects.transition_names.wipe_left", "Wipe From Left"), "wipe", "wipe_left", "left"),
+                (_tr("edit.effects.transition_names.wipe_up", "Wipe From Top"), "wipe", "wipe_up", "up"),
             )
         )
+        for category, entries in grouped.items():
+            key = category.lower().replace(" ", "_")
+            label = _tr(f"edit.effects.transition_categories.{key}", category)
+            self._build_transition_section(tree, label, entries)
 
         # C2: user-defined transition group ("My Transitions"); type ids
         # are registered into the MIME routing table.
@@ -1973,52 +1923,41 @@ class EditEffectsPanel(QWidget):
             for entry in user_transition_registry().values()
         ]
         if user_entries:
-            grouped[I18N.tr(
-                "edit.effects.my_transitions", "My Transitions")] = user_entries
+            self._build_transition_section(
+                tree, _tr("edit.effects.my_transitions", "My Transitions"), user_entries
+            )
 
         # Audio transitions — crossfades between adjacent audio clips. They share
         # one preview icon (audio_crossfade) since the difference is the curve,
         # not the visual. Payload is the full "audio:<curve>" transition_type,
         # which the card drag handler routes to MIME_TYPE_AUDIO_TRANSITION.
         audio_entries: List[tuple[str, str, str, Optional[str]]] = [
-            (d.label, d.transition_type, "audio_crossfade", None)
+            (
+                _tr(f"edit.effects.transition_names.{d.transition_type}", d.label),
+                d.transition_type, "audio_crossfade", None,
+            )
             for d in AUDIO_TRANSITION_DEFINITIONS
         ]
-        grouped[I18N.tr("edit.effects.audio_transitions", "Audio Transitions")] = audio_entries
-
-        for category, entries in grouped.items():
-            self._build_transition_section(tree, category, entries)
+        self._build_transition_section(
+            tree, _tr("edit.effects.audio_transitions", "Audio Transitions"), audio_entries
+        )
 
         tree.expandAll()
         self._schedule_transition_preview_sync()
 
     def _populate_titles(self, tree: QTreeWidget) -> None:
-        """Populate title templates and the reusable caption-effect library."""
+        """Populate the library of built-in and user title templates."""
         # AUD-19807: CaptionStylePreset 与 BUILTIN_PRESETS 一并局部导入，
         # 1908 行的局部注解此前引用了未导入的名字（静态检查报 undefined-name）。
         from src.features.edit.core.captions.style_preset import (
             BUILTIN_PRESETS,
             CaptionStylePreset,
         )
-        from src.features.edit.core.captions.graphics import (
-            DEFAULT_CAPTION_GRAPHIC_TEMPLATES,
-        )
         from src.features.edit.core.title_templates import (
             list_user_title_templates,
         )
 
         tree.clear()
-        effect_root = QTreeWidgetItem([
-            I18N.tr("edit.effects.caption_effects", "Caption Effects")
-        ])
-        tree.addTopLevelItem(effect_root)
-        for template in DEFAULT_CAPTION_GRAPHIC_TEMPLATES.all():
-            item = QTreeWidgetItem([template.label or template.template_id])
-            item.setData(0, _CAPTION_EFFECT_ROLE, template.template_id)
-            item.setToolTip(0, template.description or template.template_id)
-            effect_root.addChild(item)
-        effect_root.setExpanded(True)
-
         grouped: Dict[str, List[CaptionStylePreset]] = {}
         for preset in BUILTIN_PRESETS:
             if preset.category in (None, "subtitle"):
@@ -2026,52 +1965,73 @@ class EditEffectsPanel(QWidget):
             grouped.setdefault(preset.category, []).append(preset)
         user_templates = list_user_title_templates()
         if user_templates:
-            grouped[I18N.tr("edit.effects.my_templates", "My Templates")] = user_templates
+            grouped[_tr("edit.effects.my_templates", "My Templates")] = user_templates
 
         category_labels = {
-            "title": I18N.tr("edit.effects.titles_cat_title", "Title"),
-            "lower_third": I18N.tr("edit.effects.titles_cat_lower", "Lower Third"),
-            "callout": I18N.tr("edit.effects.titles_cat_callout", "Callout"),
-            "credit": I18N.tr("edit.effects.titles_cat_credit", "Credits"),
-            "social": I18N.tr("edit.effects.titles_cat_social", "Social Vertical"),
-            I18N.tr("edit.effects.my_templates", "My Templates"):
-                I18N.tr("edit.effects.my_templates", "My Templates"),
+            "title": _tr("edit.effects.titles_cat_title", "Title"),
+            "lower_third": _tr("edit.effects.titles_cat_lower", "Lower Third"),
+            "callout": _tr("edit.effects.titles_cat_callout", "Callout"),
+            "credit": _tr("edit.effects.titles_cat_credit", "Credits"),
+            "social": _tr("edit.effects.titles_cat_social", "Social Vertical"),
+            _tr("edit.effects.my_templates", "My Templates"):
+                _tr("edit.effects.my_templates", "My Templates"),
         }
         for category, presets in grouped.items():
             label = category_labels.get(category, str(category))
             top = QTreeWidgetItem([label])
             tree.addTopLevelItem(top)
+            _style_tree_heading(tree, top)
             for preset in presets:
-                item = QTreeWidgetItem([preset.label])
+                name, description = preset.label, preset.description or preset.label
+                if preset.is_builtin:
+                    key = f"edit.effects.title_presets.{preset.preset_id.removeprefix('builtin.')}"
+                    name = _tr(f"{key}.name", name)
+                    description = _tr(f"{key}.description", description)
+                item = QTreeWidgetItem([name])
                 item.setData(0, _TITLE_PRESET_ROLE, preset.preset_id)
-                item.setToolTip(0, preset.description or preset.label)
+                item.setToolTip(0, description)
                 top.addChild(item)
             top.setExpanded(True)
 
-    def _on_title_item_double_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
-        """Apply a selected caption effect, or create a title from a template."""
-        effect_id = item.data(0, _CAPTION_EFFECT_ROLE)
-        if effect_id:
-            clip_id = self._selected_subtitle_clip_id
-            if not clip_id:
-                self.info_label.setText(I18N.tr(
-                    "edit.effects.caption_select_first",
-                    "Select a subtitle clip on the timeline first, then "
-                    "double-click a caption effect.",
-                ))
-                return
-            self.caption_effect_apply_requested.emit(
-                str(effect_id), clip_id, self._caption_effect_parameters()
-            )
-            self.info_label.setText(I18N.tr(
-                    "edit.effects.caption_applied",
-                    "Caption effect applied: {name}", name=item.text(0),
-                ))
-            return
+    def _populate_caption_effects(self, tree: QTreeWidget) -> None:
+        from src.features.edit.core.captions.graphics import DEFAULT_CAPTION_GRAPHIC_TEMPLATES
 
+        effect_root = QTreeWidgetItem([
+            _tr("edit.effects.caption_effects", "Caption Effects")
+        ])
+        tree.addTopLevelItem(effect_root)
+        _style_tree_heading(tree, effect_root)
+        for template in DEFAULT_CAPTION_GRAPHIC_TEMPLATES.all():
+            key = f"edit.effects.caption_templates.{template.template_id}"
+            item = QTreeWidgetItem([_tr(f"{key}.name", template.label or template.template_id)])
+            item.setData(0, _CAPTION_EFFECT_ROLE, template.template_id)
+            item.setToolTip(0, _tr(f"{key}.description", template.description or template.template_id))
+            effect_root.addChild(item)
+        effect_root.setExpanded(True)
+
+    def _on_title_item_double_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
+        """Create a title from the selected template."""
         preset_id = item.data(0, _TITLE_PRESET_ROLE)
         if preset_id:
             self.title_template_selected.emit(str(preset_id))
+
+    @staticmethod
+    def _caption_selection_hint() -> str:
+        return _tr(
+            "edit.effects.caption_select_first",
+            "Select a subtitle clip on the timeline, then double-click an animation.",
+        )
+
+    def _on_caption_item_double_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
+        """Apply the chosen animation to the selected subtitle."""
+        effect_id = item.data(0, _CAPTION_EFFECT_ROLE)
+        if not effect_id:
+            return
+        clip_id = self._selected_subtitle_clip_id
+        if not clip_id:
+            self._caption_hint.setText(self._caption_selection_hint())
+            return
+        self.caption_effect_apply_requested.emit(str(effect_id), clip_id, self._caption_effect_parameters())
 
     def _caption_effect_parameters(self) -> dict[str, Any]:
         """Return explicit user overrides for an effect application."""
@@ -2102,18 +2062,19 @@ class EditEffectsPanel(QWidget):
             self._populate_video_effects(self.video_effects_tree)
             return
 
-        # Search effects
-        matching_effects = self._registry.search(text)
-
         # Rebuild tree with only matching effects in the same responsive grid
         self._close_motion_graphic_hover_previews(self.video_effects_tree)
         self._unbind_responsive_sections(self.video_effects_tree)
         self.video_effects_tree.clear()
+        query = text.casefold()
         matching_effects = [
             effect_def
-            for effect_def in matching_effects
+            for effect_def in self._registry.get_all_definitions()
             if effect_def.category != "audio"
             and effect_def.effect_type not in NON_ATTACHABLE_VIDEO_EFFECT_TYPES
+            and any(query in value.casefold() for value in (
+                _effect_display_name(effect_def), effect_def.name, effect_def.description, effect_def.effect_type,
+            ))
         ]
         self._build_effect_section(self.video_effects_tree, "filter", matching_effects)
         self._append_motion_graphic_generators(self.video_effects_tree, filter_text=text)
@@ -2143,7 +2104,7 @@ class EditEffectsPanel(QWidget):
                 f"prompting drag-to-timeline"
             )
             self.info_label.setText(
-                I18N.tr(
+                _tr(
                     "edit.effects.generator_drag_hint",
                     "Drag generators onto the timeline to create a clip",
                 )
@@ -2162,7 +2123,7 @@ class EditEffectsPanel(QWidget):
             )
             # Update info label to prompt user
             self.info_label.setText(
-                I18N.tr(
+                _tr(
                     "edit.effects.no_clip_selected",
                     "Select a clip first, then double-click effect"
                 )
@@ -2260,19 +2221,21 @@ class EditEffectsPanel(QWidget):
         """
         self._selected_clip_id = clip_id
         self._selected_subtitle_clip_id = None
+        self._caption_hint.setText(self._caption_selection_hint())
 
         if clip_id:
             # Show short clip ID (first 8 chars)
             short_id = clip_id[:8] if len(clip_id) > 8 else clip_id
             self.info_label.setText(
-                I18N.tr(
+                _tr(
                     "edit.effects.info_with_clip",
-                    f"Double-click or drag to apply to clip {short_id}..."
+                    "Double-click or drag to apply to clip {clip}...",
+                    clip=short_id,
                 )
             )
         else:
             self.info_label.setText(
-                I18N.tr(
+                _tr(
                     "edit.effects.info",
                     "Double-click or drag to apply effect"
                 )
@@ -2282,16 +2245,19 @@ class EditEffectsPanel(QWidget):
         """Set the subtitle cue targeted by the Titles-tab effect library."""
         self._selected_subtitle_clip_id = clip_id
         self._selected_clip_id = None
+        self._caption_hint.setText(self._caption_selection_hint() if not clip_id else _tr(
+            "edit.effects.caption_animation_hint", "Double-click an animation to apply it to the selected subtitle."
+        ))
         if clip_id:
             short_id = clip_id[:8] if len(clip_id) > 8 else clip_id
-            self.info_label.setText(I18N.tr(
+            self.info_label.setText(_tr(
                 "edit.effects.subtitle_selected_hint",
-                "Subtitle {clip} selected: double-click under Titles > "
-                "Caption Effects to apply.", clip=short_id,
+                "Subtitle {clip} selected: double-click an animation in Subtitles to apply it.",
+                clip=short_id,
             ))
         else:
             self.info_label.setText(
-                I18N.tr(
+                _tr(
                     "edit.effects.info",
                     "Double-click or drag to apply effect"
                 )
@@ -2301,6 +2267,7 @@ class EditEffectsPanel(QWidget):
         """Clear the effects panel state."""
         self._selected_clip_id = None
         self._selected_subtitle_clip_id = None
+        self._caption_hint.setText(self._caption_selection_hint())
         # AUD-19804: search_input.clear() 是程序化更新，必须在 _updating 锁内
         # 进行（否则 textChanged("") 重入触发一次额外全量重建），随后停掉
         # debounce 定时器，仅保留下面这一次显式重建。
@@ -2312,7 +2279,7 @@ class EditEffectsPanel(QWidget):
         self._search_debounce_timer.stop()
         self._populate_video_effects(self.video_effects_tree)
         self.info_label.setText(
-            I18N.tr("edit.effects.info", "Double-click or drag to apply effect")
+            _tr("edit.effects.info", "Double-click or drag to apply effect")
         )
         logger.debug("EditEffectsPanel.clear() called")
 
@@ -2496,30 +2463,3 @@ def _inject_audio_drag_support(panel: EditEffectsPanel) -> None:
         logger.debug(f"Started drag for audio effect: {effect_type}")
 
     panel.audio_effects_tree.startDrag = custom_start_drag
-
-
-# P7 Completion: Inject drag support for favorites tree
-def _inject_favorites_drag_support(panel: EditEffectsPanel) -> None:
-    """Inject custom drag support into panel's favorites tree."""
-    def custom_start_drag(supported_actions: Qt.DropAction) -> None:
-        selected_items = panel.favorites_tree.selectedItems()
-        if not selected_items:
-            return
-
-        item = selected_items[0]
-        item_type = item.data(0, Qt.ItemDataRole.UserRole)
-
-        if item_type != "effect":
-            return
-
-        effect_type = item.data(0, Qt.ItemDataRole.UserRole + 1)
-
-        drag = QDrag(panel)
-        mime_data = QMimeData()
-        mime_data.setData(MIME_TYPE_EFFECT, QByteArray(effect_type.encode('utf-8')))
-        drag.setMimeData(mime_data)
-        drag.exec(Qt.DropAction.CopyAction)
-
-        logger.debug(f"Started drag for favorite effect: {effect_type}")
-
-    panel.favorites_tree.startDrag = custom_start_drag

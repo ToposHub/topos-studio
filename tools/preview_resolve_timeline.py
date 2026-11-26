@@ -101,6 +101,13 @@ def _show_preview(args: argparse.Namespace) -> int:
     from src.features.edit.ui.timeline_panel import TimelinePanel
     from src.shared.ui.style_sheet import DARK_THEME
 
+    if args.viewer:
+        from PyQt6.QtGui import QSurfaceFormat
+
+        surface = QSurfaceFormat()
+        surface.setVersion(4, 1)
+        surface.setProfile(QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+        QSurfaceFormat.setDefaultFormat(surface)
     app = QApplication(sys.argv[:1])
     app.setStyle("Fusion")
     app.setStyleSheet(DARK_THEME)
@@ -143,17 +150,27 @@ def _show_preview(args: argparse.Namespace) -> int:
     panel.load_timeline(sequence)
     if args.viewer:
         from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton
+        from src.features.edit.core.timeline_preview_renderer import create_timeline_preview_renderer
         from src.features.edit.ui.program_viewer import ProgramViewerWidget
         central = QWidget(window)
         column = QVBoxLayout(central)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(0)
         viewer = ProgramViewerWidget(central)
-        panel.timeline_view.set_trim_monitor_host(viewer)
+        renderer = create_timeline_preview_renderer(
+            project=project, sequence=sequence, main_context=None,
+            config={"viewport_size": (1280, 720), "cache_size": 8},
+        )
+        view = panel.timeline_view
+        view.timeline_changed.connect(renderer.set_sequence)
+        view.playhead_changed.connect(renderer.request_render)
+        view.trim_frame_preview_requested.connect(renderer.request_scrub_preview)
+        view.trim_frame_preview_finished.connect(renderer.finish_scrub)
+        renderer.frame_ready.connect(viewer.set_frame)
+        app.aboutToQuit.connect(renderer.shutdown)
         trigger = QPushButton("Trim preview", central)
         trigger.setMaximumWidth(120)
         def begin_trim_preview() -> None:
-            view = panel.timeline_view
             view.setFocus()
             clip = view.get_timeline().get_clip_by_id("v1-0")
             view._on_roll_trim_started("v1-0", "v1-1", clip.timeline_end)

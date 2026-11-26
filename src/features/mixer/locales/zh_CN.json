@@ -216,16 +216,15 @@
     },
     "console": {
       "search": "查找通道",
-      "search_tip": "搜索名称或通道编号 · 回车定位 · Esc 清空",
+      "search_prompt": "名称或通道编号",
+      "clear_search": "清除通道搜索",
       "filter": "通道视图",
-      "filter_tip": "仅筛选显示，音频、路由与录音继续工作",
       "all": "全部",
       "audio": "音轨",
       "bus": "总线",
       "solo": "独奏",
       "armed": "待录音",
       "count": "可见通道 / 总通道",
-      "clear_solo": "取消全部独奏",
       "reset_peaks": "重置全部峰值保持与削波灯",
       "no_match": "没有匹配的通道",
       "reset_view": "恢复全部通道视图"

@@ -326,6 +326,17 @@
     "all_luts": "全部 LUT",
     "apply_to_node": "应用到选中节点",
     "category": "效果分类",
+    "effect_categories": {
+      "color": "色彩调整",
+      "film": "胶片与风格",
+      "focus": "模糊与锐化",
+      "lens_and_light": "镜头与光效",
+      "local": "局部调整",
+      "plugin": "其他插件",
+      "retouch": "人像修饰",
+      "stylize": "创意特效",
+      "upscale": "AI 超分辨率"
+    },
     "current_lut": "当前 LUT",
     "effects_hint": "将效果拖到节点或图像连线上。",
     "enable_effect": "启用效果",

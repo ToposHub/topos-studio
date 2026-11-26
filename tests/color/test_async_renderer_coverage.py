@@ -1669,7 +1669,7 @@ class TestPersistentRenderTexturesRealMethod:
         created: List[MagicMock] = []
 
         def fake_texture(*args: Any, **kwargs: Any) -> MagicMock:
-            tex = MagicMock()
+            tex = MagicMock(dtype=kwargs["dtype"])
             created.append(tex)
             return tex
 

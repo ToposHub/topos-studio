@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from PyQt6.QtCore import QModelIndex, QPointF, QRect, QSettings, Qt, QItemSelection, QItemSelectionModel
-from PyQt6.QtGui import QDropEvent, QImage, QPainter
-from PyQt6.QtWidgets import QMenu, QPushButton
+from PyQt6.QtCore import QModelIndex, QPoint, QPointF, QRect, QSettings, Qt, QItemSelection, QItemSelectionModel
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QImage, QPainter, QPixmap
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QMenu, QPushButton
 
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.ui.media_pool_panel import (
@@ -53,7 +55,7 @@ def pool(qapp, tmp_path: Path, monkeypatch):
         path = tmp_path / f"clip-{number}.mp4"
         path.write_bytes(b"test")
         project = project.import_asset(
-            str(path), "video", {"duration_seconds": 2.0, "fps": 25.0,
+            str(path), "video", {"duration_seconds": 2.0, "fps": 25.0, "total_frames": 50,
                                  "width": 1920, "height": 1080, "codec": "h264"})
         asset_ids.append(project.get_asset_by_path(str(path)).asset_id)
     project = project.create_bin("Footage", project.root_bin_id)
@@ -140,6 +142,28 @@ def test_metadata_shelf_shares_selection_and_separates_visible_rows(pool) -> Non
     panel.timeline_switch_requested.connect(switches.append)
     panel.metadata_shelf.doubleClicked.emit(index)
     assert switches == [timelines[0]]
+
+
+@pytest.mark.parametrize("mode", [ViewMode.GRID, ViewMode.LIST, ViewMode.METADATA])
+def test_space_on_pool_asset_opens_no_preview_window(pool, mode: ViewMode) -> None:
+    panel, asset_ids, *_ = pool
+    panel.set_view_mode(mode)
+    asset_id = asset_ids[0]
+    if mode == ViewMode.LIST:
+        view = panel.tree
+        item = next(view.topLevelItem(row) for row in range(view.topLevelItemCount())
+                    if view.topLevelItem(row).data(0, Qt.ItemDataRole.UserRole) == asset_id)
+        view.setCurrentItem(item)
+    else:
+        view = panel.grid_view
+        view.setCurrentIndex(_index(panel, "asset", asset_id))
+    view.setFocus()
+    windows = {window for window in QApplication.topLevelWidgets() if window.isVisible()}
+
+    QTest.keyClick(view, Qt.Key.Key_Space)
+
+    assert panel.get_selected_asset_ids() == (asset_id,)
+    assert {window for window in QApplication.topLevelWidgets() if window.isVisible()} == windows
 
 
 def test_metadata_bin_drop_uses_shelf_coordinates(pool, qapp, monkeypatch) -> None:
@@ -411,6 +435,237 @@ def test_info_badge_hover_does_not_request_live_preview(pool, monkeypatch) -> No
     monkeypatch.setattr(panel.grid_view, "_handle_hover_scrub", scrub)
     QTest.mouseMove(panel.grid_view.viewport(), position)
     assert not scrub.called
+
+
+@pytest.mark.parametrize("mode", [ViewMode.GRID, ViewMode.LIST, ViewMode.METADATA])
+def test_media_pool_click_reveals_source_and_restores_per_clip_range(pool, qapp, qtbot, monkeypatch, mode) -> None:
+    from src.app.controllers.file_controller import FileOpsMixin
+    from src.features.edit.ui.source_viewer import SourceViewerWidget
+
+    panel, asset_ids, *_ = pool
+    panel.set_view_mode(mode)
+    source = SourceViewerWidget()
+    qtbot.addWidget(source)
+    loads = MagicMock()
+    monkeypatch.setattr(source, "_load_frame", loads)
+    monkeypatch.setattr(source, "_sync_scrub_audio_for_asset", lambda: None)
+    viewport = SimpleNamespace(show_source=MagicMock())
+    host = SimpleNamespace(current_page="Edit", edit_viewport=viewport,
+                           _current_edit_project=panel._project, source_viewer_widget=source)
+    panel.bind_source_range_viewer(source)
+    panel.asset_selected.connect(lambda aid: FileOpsMixin._on_asset_selected(host, aid))
+    panel.asset_preview_requested.connect(lambda aid: FileOpsMixin._on_asset_preview_requested(host, aid))
+
+    def click(asset_id: str) -> None:
+        if mode == ViewMode.LIST:
+            view = panel.tree
+            item = next(view.topLevelItem(row) for row in range(view.topLevelItemCount())
+                        if view.topLevelItem(row).data(0, Qt.ItemDataRole.UserRole) == asset_id)
+            point = view.visualItemRect(item).center()
+        else:
+            view = panel.grid_view
+            cell = view.visualRect(_index(panel, "asset", asset_id))
+            point = panel.grid_delegate.poster_rect(cell).center()
+        QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    first, second = asset_ids[:2]
+    qapp.processEvents()
+    click(first)
+    assert source.current_asset.asset_id == first
+    viewport.show_source.assert_called_once_with(focus=False)
+    assert source.set_source_range(12, 29)
+    source.seek(20)
+
+    viewport.show_source.reset_mock()
+    loads.reset_mock()
+    click(first)
+    viewport.show_source.assert_called_once_with(focus=False)
+    loads.assert_not_called()
+    assert (source.slider._in_point, source.slider._out_point, source.slider.value()) == (12, 29, 20)
+
+    click(second)
+    assert source.current_asset.asset_id == second
+    assert (source.slider._in_point, source.slider._out_point) == (None, None)
+    assert source.set_source_range(3, 42)
+
+    loads.reset_mock()
+    click(first)
+    assert source.current_asset.asset_id == first
+    assert (source.slider._in_point, source.slider._out_point, source.slider.value()) == (12, 29, 20)
+    loads.assert_called_once_with(20)
+
+
+def test_card_range_tracks_source_and_only_drops_the_marked_frames(pool, qapp, qtbot, monkeypatch) -> None:
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, Rational, TimelineSequence
+    from src.features.edit.ui.source_viewer import SourceViewerWidget
+    from src.features.edit.ui.timeline_view import TimelineView
+
+    panel, asset_ids, *_ = pool
+    asset = panel._project.assets[asset_ids[0]]
+    source = SourceViewerWidget()
+    qtbot.addWidget(source)
+    monkeypatch.setattr(source, "_load_frame", lambda _frame: None)
+    monkeypatch.setattr(source, "_sync_scrub_audio_for_asset", lambda: None)
+    panel.bind_source_range_viewer(source)
+    panel.asset_selected.connect(lambda value: source.open_asset(panel._project.assets[value]))
+    index = _index(panel, "asset", asset.asset_id)
+    grid = panel.grid_view
+    poster = panel.grid_delegate.poster_rect(grid.visualRect(index))
+    QTest.mouseClick(grid.viewport(), Qt.MouseButton.LeftButton, pos=poster.center())
+    qapp.processEvents()
+    assert grid.asset_range(index) == (50, 0, 49)
+
+    def drag_edge(right: bool, frames: int) -> None:
+        bounds = panel.grid_delegate.range_rect(poster, grid.asset_range(index))
+        edge = bounds.right() if right else bounds.left()
+        point = QPoint(round(edge), round(bounds.center().y()))
+        target = point + QPoint(round(frames * (poster.width() - 2) / 50), 0)
+        QTest.mousePress(grid.viewport(), Qt.MouseButton.LeftButton, pos=point)
+        QTest.mouseMove(grid.viewport(), target)
+        QTest.mouseRelease(grid.viewport(), Qt.MouseButton.LeftButton, pos=target)
+
+    drag_edge(False, 10)
+    assert (source.in_point, source.out_point) == (10, 49)
+    drag_edge(True, -20)
+    assert (source.slider._in_point, source.slider._out_point) == (10, 29)
+    assert source.current_frame == 29
+    source.set_out_point(24)
+    assert grid.asset_range(index) == (50, 10, 24)
+
+    captured = []
+
+    class Drag:
+        def __init__(self, _parent) -> None:
+            pass
+
+        def setMimeData(self, mime) -> None:
+            captured.append(mime)
+
+        def setPixmap(self, _pixmap: QPixmap) -> None:
+            pass
+
+        def setHotSpot(self, _pos: QPoint) -> None:
+            pass
+
+        def exec(self, _action: Qt.DropAction) -> None:
+            pass
+
+    monkeypatch.setattr("src.features.edit.ui.media_pool_panel.QDrag", Drag)
+    grid.startDrag(Qt.DropAction.CopyAction)
+    mime, = captured
+    assert mime.hasFormat("application/x-topos-media-pool-assets")
+
+    timeline = TimelineView()
+    qtbot.addWidget(timeline)
+    timeline.resize(1000, 460)
+    timeline.set_project(panel._project)
+    timeline.load_timeline(TimelineSequence("range", "Range", fps=Rational(30, 1), video_tracks=(
+        EditTrack("v1", "V1", "video", 0, clips=(ClipInstance("existing", asset.asset_id, "v1", 0, 24, 0, 20),)),
+    )))
+    timeline.show()
+    qapp.processEvents()
+    engine = timeline._layout_engine
+    pos = timeline.mapFromScene(QPointF(engine.frame_to_x(150), engine.track_rect("v1").center().y()))
+    actions = (Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    enter = QDragEnterEvent(pos, *actions)
+    timeline.dragEnterEvent(enter)
+    assert enter.isAccepted()
+    assert timeline._drag_preview_item._total_duration == 18
+    drop = QDropEvent(QPointF(pos), *actions)
+    timeline.dropEvent(drop)
+    assert drop.isAccepted()
+    track = timeline.get_timeline().get_track_by_id("v1")
+    selected = next(clip for clip in track.clips if clip.clip_id != "existing")
+    assert (selected.source_start, selected.source_duration, selected.timeline_duration) == (10, 15, 18)
+
+
+@pytest.mark.parametrize("mode", [ViewMode.GRID, ViewMode.LIST])
+@pytest.mark.parametrize("saved_marks", [False, True])
+def test_pool_context_menu_clears_source_range_and_keeps_asset_selected(
+    pool, qtbot, monkeypatch, mode, saved_marks,
+) -> None:
+    from src.features.edit.core.asset_source_range import set_asset_in_out
+    from src.features.edit.core.source_drag_payload import decode_source_drag_payload
+    from src.features.edit.ui.source_viewer import SourceViewerWidget
+
+    panel, asset_ids, *_ = pool
+    asset_id = asset_ids[0]
+    if saved_marks:
+        panel.set_project(set_asset_in_out(panel._project, asset_id, 12, 30))
+        _refresh(panel)
+    panel.set_view_mode(mode)
+    asset = panel._project.assets[asset_id]
+    source = SourceViewerWidget()
+    qtbot.addWidget(source)
+    monkeypatch.setattr(source, "_load_frame", lambda _frame: None)
+    monkeypatch.setattr(source, "_sync_scrub_audio_for_asset", lambda: None)
+    panel.bind_source_range_viewer(source)
+    source.open_asset(asset)
+    assert source.set_source_range(12, 30)
+    calls: list[bool] = []
+
+    def choose_clear(menu: QMenu, _global_pos: QPoint) -> None:
+        action = next(action for action in menu.actions() if action.objectName() == "clearSourceRange")
+        calls.append(action.isEnabled())
+        action.trigger()
+
+    monkeypatch.setattr(QMenu, "exec", choose_clear)
+    if mode == ViewMode.LIST:
+        tree = panel.tree
+        item = next(tree.topLevelItem(row) for row in range(tree.topLevelItemCount())
+                    if tree.topLevelItem(row).data(0, Qt.ItemDataRole.UserRole) == asset_id)
+        panel._on_tree_context_menu(tree.visualItemRect(item).center())
+    else:
+        panel._on_grid_context_menu(panel.grid_view.visualRect(_index(panel, "asset", asset_id)).center())
+    assert calls == [True]
+    assert panel.get_selected_asset_ids() == (asset_id,)
+    assert (source.slider._in_point, source.slider._out_point) == (None, None)
+    encoded = panel.source_clip_for_drag([asset_id], [])
+    if saved_marks:
+        payload = decode_source_drag_payload(encoded)
+        assert payload is not None
+        assert (payload.in_frame, payload.out_frame) == (0, 49)
+    else:
+        assert encoded is None
+
+
+def test_hover_preview_coalesces_mouse_motion_and_holds_the_previous_frame(pool, monkeypatch) -> None:
+    panel, asset_ids, *_ = pool
+    grid = panel.grid_view
+    index = _index(panel, "asset", asset_ids[0])
+    poster = panel.grid_delegate.poster_rect(grid.visualRect(index))
+    asset = panel._project.assets[asset_ids[0]]
+    requests: list[tuple[str, int]] = []
+    pending: set[tuple[str, int]] = set()
+
+    def request(path: str, frame: int, _total: int, **_kwargs) -> None:
+        requests.append((path, frame))
+        pending.add((path, frame))
+
+    monkeypatch.setattr(grid._thumb_provider, "pending_frame_requests", pending)
+    monkeypatch.setattr(grid._thumb_provider, "get_frame_thumbnail", request)
+    for offset in (6, 20, 40, 65):
+        grid._handle_hover_scrub(QPoint(poster.left() + offset, poster.center().y()))
+        grid._request_hover_frame()
+    assert len(requests) == 1
+    pending.clear()
+    first = QPixmap(16, 9)
+    grid._on_hover_frame_ready(asset.path, requests[0][1], first)
+    grid._request_hover_frame()
+    assert len(requests) == 2
+    assert requests[-1][1] == grid._hover_frame_index
+    assert grid.hover_frame_for(asset).cacheKey() == first.cacheKey()
+
+    pending.clear()
+    grid._thumb_provider.work_suspended_changed.emit(True)
+    assert not grid._hover_timer.isActive()
+    grid._thumb_provider.work_suspended_changed.emit(False)
+    assert requests[-1] == requests[-2]
+    assert len(requests) == 3
+
+    grid._clear_hover_preview()
+    grid._on_hover_frame_ready(asset.path, requests[-1][1], first)
+    assert not grid._hover_frames
 
 
 def test_slider_surface_blends_into_toolbar_with_global_theme(pool, qapp) -> None:

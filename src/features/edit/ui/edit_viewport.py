@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     from src.features.edit.ui.source_viewer import SourceViewerWidget
 
 HEADER_HEIGHT = 30
+HEADER_TITLE_GAP = 8
+HEADER_TITLE_RESERVE = 144
 TRANSPORT_HEIGHT = 34
 MONITOR_BACKGROUND = "#191919"
 
@@ -157,6 +159,7 @@ class _MonitorFooter(QFrame):
         self.optional_controls: list[QWidget] = []
         self.narrow_controls: list[QWidget] = []
         self.compact_controls: list[QWidget] = []
+        self.range_buttons: tuple[QToolButton, ...] = ()
         self.groups: list[QHBoxLayout] = []
         for group in (self.left_group, self.center_group, self.right_group, self.marker_group):
             group.setObjectName("monitorControlGroup")
@@ -189,6 +192,13 @@ class _MonitorFooter(QFrame):
         for control in self.compact_controls:
             control.setVisible(self.width() >= 300)
         center_width = self.center_group.sizeHint().width()
+        if self.range_buttons:
+            space = (self.width() - center_width) // 2 - 10
+            button_width = max(1, min(26, space // len(self.range_buttons)))
+            icon_size = min(20, button_width)
+            for button in self.range_buttons:
+                button.setFixedWidth(button_width)
+                button.setIconSize(QSize(icon_size, icon_size))
         left_width = self.left_group.sizeHint().width()
         right_width = self.right_group.sizeHint().width()
         y = (self.height() - 28) // 2
@@ -305,19 +315,35 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
 
     def position_title(self) -> None:
         """Keep the title at the exact monitor center without covering tools."""
+        width = self.width()
         for button in (self.source_button, self.timeline_button):
             button.setVisible(self.show_monitor_switches)
-        self.source_tape_button.setVisible(self.show_monitor_switches and self.width() >= 560)
-        self.duration.setVisible(not self.mixer_mode and self.width() >= 560)
+        self.source_tape_button.setVisible(self.show_monitor_switches and width >= 560)
+
+        # Reserve room for the centered title before showing optional cells.
+        # All header cells are fixed-width, so this is independent of the
+        # previous layout pass, the selected timeline name, and frame updates.
+        side_budget = (width - HEADER_TITLE_RESERVE) // 2 - HEADER_TITLE_GAP
+        left_tools = (self.source_button, self.source_tape_button, self.timeline_button, self.zoom_button)
+        left_width = sum(tool.minimumWidth() for tool in left_tools if not tool.isHidden())
+        duration_width = self.duration.minimumWidth()
+        show_duration = not self.mixer_mode and width >= 560 and left_width + duration_width <= side_budget
+        self.duration.setVisible(show_duration)
+        right_tools = (self.timecode, self.single_button, self.dual_button, self.options_button)
+        right_width = sum(tool.minimumWidth() for tool in right_tools if not tool.isHidden())
+        extra_width = sum(tool.minimumWidth() for tool in self.extra_controls)
+        show_extras = not self.mixer_mode and width >= 760 and right_width + extra_width <= side_budget
         for control in self.extra_controls:
-            control.setVisible(not self.mixer_mode and self.width() >= 760)
-        self.layout().activate()
-        center = self.width() / 2.0
-        available = max(0, int(2 * min(center - self.left_group.geometry().right() - 8,
-                                      self.right_group.x() - center - 8)))
-        width = min(320, available)
-        self.title.setGeometry((self.width() - width) // 2, 0, width, HEADER_HEIGHT)
-        self.title.setVisible(width >= 48)
+            control.setVisible(show_extras)
+
+        occupied = max(left_width + (duration_width if show_duration else 0),
+                       right_width + (extra_width if show_extras else 0))
+        title_width = min(320, max(0, width - 2 * (occupied + HEADER_TITLE_GAP)))
+        # The combo's delayed AdjustToContents resize must retain the size
+        # assigned by the header. Standalone toolbars still size to contents.
+        self.title.setFixedSize(title_width, HEADER_HEIGHT)
+        self.title.move((width - title_width) // 2, 0)
+        self.title.setVisible(title_width >= 48)
         self.title.raise_()
 
     def _style_timecode(self) -> None:
@@ -392,6 +418,7 @@ class EditViewport(QWidget):
             self.splitter.addWidget(pane)
         self.source_header = self._install_source_chrome()
         self.program_header = self._install_program_chrome()
+        source_viewer.range_changed.connect(self._sync_scrubber_visibility)
         for header in (self.source_header, self.program_header):
             header.source_button.clicked.connect(lambda: self.show_source())
             header.timeline_button.clicked.connect(lambda: self.show_program())
@@ -434,7 +461,8 @@ class EditViewport(QWidget):
         header.zoom_button.setMenu(zoom_menu)
         viewer.viewer.zoom_changed.connect(lambda value: header.zoom_button.setText(f"{value * 100.0:.0f}%"))
         options = QMenu(header)
-        clear_action = options.addAction(bar.btn_clear.text(), bar.btn_clear.click)
+        clear_label = I18N.tr("timeline.range.clear", "Clear Range")
+        clear_action = options.addAction(viewer_icon("clear_range"), clear_label, bar.btn_clear.click)
         options.aboutToShow.connect(lambda: clear_action.setEnabled(bar.btn_clear.isEnabled()))
         options.addAction(I18N.tr("edit.viewport.source_patch", "Source Patch"), bar.btn_source_patch.click)
         options.addAction(bar.btn_prev.toolTip(), bar.btn_prev.click)
@@ -488,6 +516,9 @@ class EditViewport(QWidget):
             "source.match_frame"))
         _adopt(right, bar.btn_mark_in, "mark_in", 26)
         _adopt(right, bar.btn_mark_out, "mark_out", 26)
+        bar.btn_clear.setToolTip(clear_label)
+        _adopt(right, bar.btn_clear, "clear_range", 26)
+        footer.range_buttons = (bar.btn_mark_in, bar.btn_mark_out, bar.btn_clear)
         viewer.slider.setProperty("resolveMonitorScrubber", True)
         viewer.slider.setAccessibleName(I18N.tr("edit.viewport.source_scrub", "Scrub Source Clip"))
         viewer.slider.setStyleSheet(_SLIDER_STYLE)
@@ -797,8 +828,9 @@ class EditViewport(QWidget):
 
     def _activate(self, monitor: str, focus: bool) -> None:
         changed = self._active_monitor != monitor
-        self._active_monitor = monitor
-        self._apply_mode()
+        if changed:
+            self._active_monitor = monitor
+            self._apply_mode()
         if focus:
             viewer = self.source_viewer if monitor == "source" else self.program_viewer.get_viewer()
             viewer.setFocus(Qt.FocusReason.OtherFocusReason)
@@ -808,7 +840,20 @@ class EditViewport(QWidget):
     def _apply_mode(self) -> None:
         self.source_pane.setVisible(not self._program_only and (self._dual_view or self._active_monitor == "source"))
         self.program_pane.setVisible(self._program_only or self._dual_view or self._active_monitor == "program")
+        self._sync_scrubber_visibility()
         self._sync_buttons()
+
+    def _sync_scrubber_visibility(self) -> None:
+        """Show the timeline range alongside Source in dual-monitor mode."""
+        self.source_viewer.slider.setVisible(
+            not self._program_only and not self._deliver_mode
+            and self.source_viewer.current_asset is not None
+            and (self._dual_view or self._active_monitor == "source")
+        )
+        self.program_slider.setVisible(
+            not self.program_header.mixer_mode
+            and (self._dual_view or self._program_only or self._deliver_mode)
+        )
 
     def _sync_buttons(self) -> None:
         switches_locked = self._deliver_mode or self._program_only
@@ -852,7 +897,6 @@ class EditViewport(QWidget):
             I18N.tr("mixer.monitor.picture_options", "Picture Options") if mixer
             else I18N.tr("edit.viewport.options", "Viewer Options"))
         header.options_button.setAccessibleName(header.options_button.toolTip())
-        self.program_slider.setVisible(not mixer)
         self.timeline_monitor_status.setVisible(enabled and color_monitor)
         self.program_footer.mixer_mode = mixer
         self._place_program_transport(mixer)
@@ -864,6 +908,7 @@ class EditViewport(QWidget):
     def set_deliver_mode(self, enabled: bool) -> None:
         """Hide workspace-only switches while Deliver borrows Program."""
         self._deliver_mode = bool(enabled)
+        self._sync_scrubber_visibility()
         self._sync_buttons()
 
     def prepare_for_deliver(self) -> None:
@@ -888,13 +933,17 @@ class EditViewport(QWidget):
         for child in widget.findChildren(QWidget):
             child.installEventFilter(self)
 
-    def set_program_range(self, total_frames: int, fps: float | Rational = 24.0) -> None:
+    def set_program_range(
+        self, total_frames: int, fps: float | Rational = 24.0,
+        start: int | None = None, end: int | None = None,
+    ) -> None:
         """Present the host's timeline duration without changing its playhead."""
         self._program_fps = float(fps) if float(fps) > 0.0 else 24.0
         frames = max(0, int(total_frames))
         blocker = QSignalBlocker(self.program_slider)
         self.program_slider.setRange(0, max(0, frames - 1))
         self.program_slider.setEnabled(frames > 0)
+        self.program_slider.set_in_out_points(start, end)
         del blocker
         rate = fps if isinstance(fps, Rational) and float(fps) > 0.0 else Rational.from_float(self._program_fps)
         try:

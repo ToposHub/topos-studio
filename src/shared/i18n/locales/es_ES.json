@@ -1638,7 +1638,6 @@
       "remove_from_project": "Quitar del proyecto",
       "move_to_trash": "Mover a la papelera",
       "trash_failed": "No se pudo mover el archivo a la papelera. El recurso se quitó del proyecto, pero el archivo permanece en el disco.",
-      "quick_look_hint": "Espacio para cerrar · Doble clic para abrir",
       "import_folder": "Importar carpeta...",
       "select_folder": "Selecciona una carpeta para importar",
       "shot": "Plano:",

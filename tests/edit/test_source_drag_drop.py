@@ -124,6 +124,22 @@ def test_b08_drag_enter_prefers_source_payload_over_assets_mime(qtbot, qapp):
     assert view._drag_file_paths == []          # URI fallback 不再抢路由
 
 
+def test_media_pool_marked_av_drop_in_audio_workspace_keeps_only_audio(qtbot: Any, qapp: Any) -> None:
+    view, _ = _setup(qtbot, qapp)
+    view.set_audio_only(True)
+    qapp.processEvents()
+    payload = build_source_drag_payload("src-1", 10, 29, "av")
+    assert payload is not None
+    mime = _mime(payload.encode(), with_assets_mime=True)
+    assert _enter(view, mime, "A1").isAccepted()
+    assert view._drag_source_payload.stream_intent == "audio"
+    assert _drop(view, mime, "A1").isAccepted()
+    timeline = view.get_timeline()
+    clip, = timeline.audio_tracks[0].clips
+    assert (clip.source_start, clip.source_duration) == (10, 20)
+    assert not any(track.clips for track in timeline.video_tracks)
+
+
 def test_b08_drag_enter_unknown_asset_rejected(qtbot, qapp):
     view, _ = _setup(qtbot, qapp)
     payload = build_source_drag_payload("not-in-project", 0, 9)

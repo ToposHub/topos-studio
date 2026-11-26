@@ -3810,6 +3810,9 @@ class AsyncRenderer(QThread):
                 )
                 or render_reason == 'viewport_refresh'
                 or is_exact_static_video_preview
+                # Windows Color scrubbing can expose the prior contents of a
+                # shared FBO slot even after Qt reports a window swap.
+                or params.get('require_render_complete', False)
                 or force_finish
             ):
                 self.ctx.finish()
@@ -6491,6 +6494,8 @@ class AsyncRenderer(QThread):
         self.video_texture_pending = False
         render_params = self._apply_task_frame_identity(render_params,
                                                         frame_index)
+        if data.get('require_render_complete', False):
+            render_params['require_render_complete'] = True
         self._do_render(render_params, allow_during_playback=True)
         if drop_if_stale and generation_id < self._video_generation_id:
             return
@@ -6696,6 +6701,8 @@ class AsyncRenderer(QThread):
         self.video_texture_pending = False
         render_params = self._apply_task_frame_identity(render_params,
                                                         frame_index)
+        if data.get('require_render_complete', False):
+            render_params['require_render_complete'] = True
         if drop_if_stale and 'generation_id' in data:
             render_params['video_generation'] = generation_id
         self._do_render(render_params, allow_during_playback=True)

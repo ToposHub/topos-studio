@@ -2198,6 +2198,8 @@ class LayerOpsMixin:
         150 ms quiet window we submit one demand at the high-quality
         analysis size (768x432) so the final scope is crisp.
         """
+        if getattr(self, '_viewport_scrub_scope_wait', None) is not None:
+            return
         try:
             is_playing = is_playing or self._scope_playback_is_active()
             engine = self.engine
@@ -2458,6 +2460,8 @@ class LayerOpsMixin:
 
     def on_gpu_scope_ready(self, frame) -> None:
         """Forward a ``ScopeGpuFrame`` to the panel if still visible."""
+        if getattr(self, '_viewport_scrub_scope_wait', None) is not None:
+            return
         if not (self._is_scope_panel_visible() or self._is_curves_panel_visible()) or frame is None:
             _scope_diag().record("panel", "not_visible_on_return",
                                  revision=getattr(frame, "revision", None))

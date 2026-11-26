@@ -1638,7 +1638,6 @@
       "remove_from_project": "Aus Projekt entfernen",
       "move_to_trash": "In den Papierkorb verschieben",
       "trash_failed": "Die Datei konnte nicht in den Papierkorb verschoben werden. Das Asset wurde aus dem Projekt entfernt, die Datei bleibt aber auf der Festplatte.",
-      "quick_look_hint": "Leertaste zum Schließen · Doppelklick zum Öffnen",
       "import_folder": "Ordner importieren...",
       "select_folder": "Wählen Sie einen Ordner zum Importieren",
       "shot": "Szene:",

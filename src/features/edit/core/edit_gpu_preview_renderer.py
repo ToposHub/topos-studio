@@ -5948,9 +5948,8 @@ void main() {
         # occluded): its frames hold native slots, so new frames take the GL
         # path until the GPU reports back.
         self._native_stalled: bool = False
-        # Flipped off by the viewer while its Metal layer cannot be on screen
-        # (fullscreen viewer window, Trim monitor on top): new frames then
-        # take the GL path so the viewer keeps showing pictures.
+        # The viewer switches new frames to the GL path when its Metal layer
+        # is unavailable, including in a separate fullscreen window.
         self._native_frames_wanted: bool = True
         # Native frames the viewer could not hand over; the render thread
         # returns them (it owns the slot pool).

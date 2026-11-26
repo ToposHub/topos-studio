@@ -33,6 +33,8 @@ MONITOR_SOURCES = ("program", "pfl", "afl", "sip", "input")
 
 DEFAULT_DIM_DB = -20.0
 DEFAULT_RAMP_MS = 5.0
+MIN_MONITOR_GAIN_DB = -90.0
+MAX_MONITOR_GAIN_DB = 0.0
 
 
 @dataclass(frozen=True)

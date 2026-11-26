@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import pytest
 from PyQt6.QtCore import QPointF, Qt
-from PyQt6.QtGui import QDropEvent
+from PyQt6.QtGui import QColor, QDropEvent, QPalette
+from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import QTreeWidgetItem
 from pytestqt.qtbot import QtBot
 
@@ -13,6 +14,8 @@ from src.features.edit.ui.edit_effects_panel import MIME_TYPE_EFFECT
 from src.features.mixer.effects.panels.doubler import StudioDoublerWidget
 from src.features.mixer.ui.effects_panel import MixerEffectsPanel, _PANEL_ROLE
 from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
+from src.shared.ui.effect_icons import AUDIO_EFFECT_ICON_DIR
+from src.shared.ui.style_sheet import C
 
 
 def _effects(browser: MixerEffectsPanel) -> dict[str, QTreeWidgetItem]:
@@ -45,6 +48,31 @@ def test_lists_supported_audio_inserts_and_uses_project_mime(browser: MixerEffec
     assert payload.hasFormat(MIME_TYPE_EFFECT)
     assert bytes(payload.data(MIME_TYPE_EFFECT)) == b"convolution_reverb"
     assert not browser.tree.mimeData([effect.parent()]).formats()
+
+
+def test_effects_and_panel_tools_have_distinct_svg_icons(browser: MixerEffectsPanel) -> None:
+    items = _effects(browser)
+    for group_index in range(browser.tree.topLevelItemCount()):
+        group = browser.tree.topLevelItem(group_index)
+        for row in range(group.childCount()):
+            item = group.child(row)
+            if panel_id := item.data(0, _PANEL_ROLE):
+                items[panel_id] = item
+
+    rendered = set()
+    for effect_id, item in items.items():
+        assert QSvgRenderer(str(AUDIO_EFFECT_ICON_DIR / f"{effect_id}.svg")).isValid(), effect_id
+        image = item.icon(0).pixmap(browser.tree.iconSize()).toImage()
+        assert not image.isNull(), effect_id
+        pixels = image.constBits().asstring(image.sizeInBytes())
+        assert pixels not in rendered, effect_id
+        rendered.add(pixels)
+
+
+def test_effect_group_titles_are_brighter_than_effect_names(browser: MixerEffectsPanel) -> None:
+    group = _effects(browser)["strip_eq"].parent()
+    assert group.foreground(0).color() == QColor(C.TEXT_PRIMARY)
+    assert browser.tree.palette().color(QPalette.ColorRole.Text) == QColor(C.TEXT_LABEL)
 
 
 def test_pending_panels_open_locally_without_inserting_audio(browser: MixerEffectsPanel, qtbot: QtBot) -> None:

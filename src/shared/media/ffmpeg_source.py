@@ -829,19 +829,27 @@ class FFmpegMediaSource:
             # uses the full logical core count alongside export rendering.
             decoder.thread_count = min(thread_count, decoder.thread_count or thread_count)
 
-    def tune_interactive_scrub(self) -> bool:
+    def tune_interactive_scrub(self, *, retain_history: bool = True) -> bool:
         """Tune short UHD H.264 seeks. Return whether CPU planar history is available."""
         metadata = self._metadata
         stream = self._video_stream
-        if (sys.platform != 'darwin' or platform.machine() != 'x86_64'
+        intel_mac = (sys.platform == 'darwin' and platform.machine() == 'x86_64'
+                     and (os.cpu_count() or 1) > 8)
+        # The Windows hardware planar source also inherits this class.
+        windows_cpu = sys.platform == 'win32' and type(self) is FFmpegMediaSource
+        if (not (intel_mac or windows_cpu)
                 or not self._disable_hwaccel or self._target_size is not None or stream is None
-                or metadata is None or max(metadata.width, metadata.height) < 3840
-                or (os.cpu_count() or 1) <= 8):
+                or metadata is None or max(metadata.width, metadata.height) < 3840):
             return False
         decoder = stream.codec_context
         if decoder.name == 'h264' and not decoder.is_open:
-            decoder.thread_count = min(8, decoder.thread_count or 8)
-            if metadata.pixel_format == 'yuv420p':
+            if intel_mac:
+                decoder.thread_count = min(8, decoder.thread_count or 8)
+            # Windows keeps FFmpeg's auto thread count and only retains history
+            # when stream timing is consistent with constant-rate frame addressing.
+            if (retain_history and metadata.pixel_format == 'yuv420p'
+                    and (intel_mac or (stream.average_rate is not None
+                                      and stream.average_rate == stream.base_rate))):
                 frame_bytes = metadata.width * metadata.height * 3 // 2
                 if frame_bytes > 0:
                     self._scrub_seek_frame_limit = min(10, _SCRUB_HISTORY_BYTES // frame_bytes)
@@ -868,14 +876,8 @@ class FFmpegMediaSource:
     def _remember_scrub_seek_frame(self, index: int, frame: Any) -> None:
         if not self._scrub_seek_frame_limit or not self._is_planar_mode:
             return
-        if frame.pts != self._frame_to_pts(index) or frame.is_corrupt:
+        if not self._check_scrub_frame_pts(index, frame):
             return
-        if frame.pts == self._scrub_seek_last_pts:
-            # A timestamp alone cannot identify a unique frame on this source.
-            self._scrub_seek_frame_limit = 0
-            self._scrub_seek_frames.clear()
-            return
-        self._scrub_seek_last_pts = frame.pts
         self._scrub_seek_frames.pop(index, None)
         self._scrub_seek_frames[index] = frame
         # A backward walk already decoded the prefix of this GOP. Keep it
@@ -884,6 +886,17 @@ class FFmpegMediaSource:
         plane_bytes = sum(plane.buffer_size for plane in frame.planes)
         self._scrub_largest_plane_bytes = max(self._scrub_largest_plane_bytes, plane_bytes)
         self._trim_scrub_history()
+
+    def _check_scrub_frame_pts(self, index: int, frame: Any) -> bool:
+        exact = frame.pts == self._frame_to_pts(index) and not frame.is_corrupt
+        if exact and frame.pts != self._scrub_seek_last_pts:
+            self._scrub_seek_last_pts = frame.pts
+            return True
+        if exact or sys.platform == 'win32':
+            # Repeated or rounded timestamps can give multiple pictures the same index.
+            self._scrub_seek_frame_limit = 0
+            self._scrub_seek_frames.clear()
+        return False
 
     def _trim_scrub_history(self) -> None:
         history = self._scrub_seek_frames
@@ -1498,6 +1511,7 @@ class FFmpegMediaSource:
             self._proxy_reformatter = None
             self._main_resync_pts = None
             self._scrub_seek_frames.clear()
+            self._scrub_seek_frame_limit = 0
             self._scrub_seek_last_pts = None
             self._scrub_previous_request = None
             self._scrub_reverse_window = False
@@ -2746,6 +2760,9 @@ class FFmpegMediaSource:
         # 获取元数据
         if self._metadata is None:
             self._metadata = self.probe()
+
+        if self._scrub_seek_frame_limit and sys.platform == 'win32' and frame_index is None:
+            self._check_scrub_frame_pts(self._current_frame, frame)
 
         # PTS 和时间
         pts = frame.pts

@@ -335,30 +335,6 @@ class TestLeaseAndAccounting:
         assert presented == [31]
 
 
-class TestLayerCannotShow:
-    def test_trim_monitor_on_top_returns_the_frame_and_redirects_new_ones(self, widget, qapp) -> None:
-        renderer = _FakeRenderer()
-        _arm(widget, renderer)
-        monitor = QWidget(widget._viewer_container)
-        monitor.setGeometry(widget._viewer.geometry())
-        monitor.show()
-        widget._trim_monitor_widget = monitor
-        ack = _Ack()
-        frame = _native_present(frame=3)
-        widget.set_frame(3, _result(frame, ack))
-        assert ack.slots == [3]
-        assert renderer.submits == []
-        assert [(f, r) for f, r in renderer.released] == [(frame, "layer_not_on_screen")]
-        # New frames are told to take the GL path so the viewer keeps moving.
-        assert renderer.wanted[-1] is False
-
-        monitor.hide()
-        qapp.processEvents()
-        widget.set_frame(4, _result(_native_present(frame=4), _Ack()))
-        assert len(renderer.submits) == 1
-        assert renderer.wanted[-1] is True
-
-
 class TestStateEffects:
     def test_a_native_frame_clears_stale_error_feedback_like_the_gl_viewer(self, widget) -> None:
         """A fresh picture must not keep an old error overlay on screen."""
@@ -525,6 +501,7 @@ class TestCoveredViewer:
         viewer = widget._viewer
         viewer._gl_initialized = True
         calls: list = []
+        monkeypatch.setattr(viewer, "devicePixelRatioF", lambda: 2.0)
         monkeypatch.setattr(_module, "_gl", SimpleNamespace(
             glViewport=lambda *args: calls.append(("viewport", args)),
             glClearColor=lambda *args: calls.append(("clear_colour", args)),
@@ -538,6 +515,7 @@ class TestCoveredViewer:
         viewer._paintGL_impl()
 
         assert [name for name, _args in calls] == ["reset", "viewport", "clear_colour", "clear"]
+        assert calls[1][1] == (0, 0, viewer.width() * 2, viewer.height() * 2)
 
 
 class TestFileControllerHooks:

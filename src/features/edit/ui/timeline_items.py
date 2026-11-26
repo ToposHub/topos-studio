@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
     QGraphicsItem,
     QGraphicsObject,
     QGraphicsRectItem,
+    QGraphicsSceneHoverEvent,
     QStyleOptionGraphicsItem,
 )
 from PyQt6.QtCore import (
@@ -67,7 +68,7 @@ from PyQt6.QtGui import (
 )
 
 from src.features.edit.ui.edit_style import EDIT_SIZES, get_color
-from src.features.edit.ui.timeline_edit_affordances import edit_cursor, paint_trim_bracket
+from src.features.edit.ui.timeline_edit_affordances import edit_cursor, paint_range_grip, paint_trim_bracket
 from src.features.edit.ui.timeline_icons import icon_link, icon_unlink
 from src.features.edit.ui.timeline_layout import TRACK_HEADER_WIDTH
 from src.shared.assets.icon_manager import get_icon
@@ -117,6 +118,7 @@ RULER_HEIGHT = EDIT_SIZES["ruler_h"]  # 时间码标尺高度 (36)
 TRACK_AREA_TOP = EDIT_SIZES["track_area_top"]  # 轨道内容区起始 y 坐标 (36)
 
 # Clip visual settings
+CLIP_CORNER_RADIUS = 4.0
 CLIP_BORDER_WIDTH = 1
 CLIP_SELECTED_BORDER_WIDTH = 1  # Thin accent outline for selected clips
 HANDLE_SIZE = 10  # Size of trim handles on clip edges
@@ -1779,7 +1781,7 @@ class ClipItem(QGraphicsObject):
         # Position is set by TimelineView._layout_track_items() only.
         painter.save()
         is_move_drag = self._is_dragging and self._drag_mode == "move"
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, not is_move_drag)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self._apply_track_area_clip(painter)
 
         # LOD: Level of detail based on clip width (DaVinci-like adaptive rendering)
@@ -1883,6 +1885,9 @@ class ClipItem(QGraphicsObject):
         if content_rect.width() <= 0 or content_rect.height() <= 0:
             painter.restore()
             return
+        radius = min(CLIP_CORNER_RADIUS, content_rect.width() / 2.0, content_rect.height() / 2.0)
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(content_rect, radius, radius)
 
         # Create and draw gradient background (DaVinci-like vertical gradient)
         gradient = QLinearGradient(0, 0, 0, content_rect.height())
@@ -1892,17 +1897,16 @@ class ClipItem(QGraphicsObject):
         painter.setBrush(QBrush(gradient))
         if self._is_selected and self._selected_edit_edge is None:
             painter.setPen(QPen(border_color, border_width))
-            painter.drawRoundedRect(content_rect, 2, 2)
         else:
-            painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.drawRoundedRect(content_rect, 2, 2)
+            painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPath(clip_path)
 
         # A restrained upper edge gives un-thumbnailed clips depth without
         # turning every clip into a glossy card.
         painter.setPen(QPen(QColor(255, 255, 255, 12), 1))
         painter.drawLine(
-            QPointF(content_rect.left() + 2.0, content_rect.top() + 0.5),
-            QPointF(content_rect.right() - 2.0, content_rect.top() + 0.5),
+            QPointF(content_rect.left() + radius, content_rect.top() + 0.5),
+            QPointF(content_rect.right() - radius, content_rect.top() + 0.5),
         )
 
         # One subtle cut line, owned by the clip on its left.  It stays clear
@@ -1913,9 +1917,15 @@ class ClipItem(QGraphicsObject):
                 seam_pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(seam_pen)
             painter.drawLine(
-                QPointF(content_rect.right(), content_rect.top() + 1.0),
-                QPointF(content_rect.right(), content_rect.bottom() - 1.0),
+                QPointF(content_rect.right(), content_rect.top() + radius),
+                QPointF(content_rect.right(), content_rect.bottom() - radius),
             )
+
+        # The drag frame label sits above the clip. Keep the in-clip layers
+        # inside the same outline so overlays cannot fill in the corners.
+        if self._drag_frame_label_visible and not is_move_drag and not is_narrow:
+            self._draw_drag_frame_label(painter, clip_rect)
+        painter.setClipPath(clip_path, Qt.ClipOperation.IntersectClip)
 
         # During a move drag, paint only a lightweight card. Thumbnails,
         # waveforms, badges and fade handles are expensive and do not help the
@@ -2129,10 +2139,6 @@ class ClipItem(QGraphicsObject):
         # Phase 6: Draw cache status line at bottom of clip
         if self._comp_cache_status != "none" and self._comp_cache_status:
             self._draw_comp_cache_status(painter, clip_rect)
-
-        # Phase 2.5: Draw drag frame label (if visible during dragging)
-        if self._drag_frame_label_visible:
-            self._draw_drag_frame_label(painter, clip_rect)
 
         # P1-4 余项：片段音量包络叠加在音频波形上（模型驱动、只读可视化；
         # 编辑入口在 Clip Editor 画布，提交命令后此处随重建刷新）。
@@ -5474,7 +5480,7 @@ class ClipItem(QGraphicsObject):
         if not link_editable:
             link_action.setToolTip(I18N.tr("edit.clip.locked_track_tooltip", "轨道已锁定，无法编辑"))
 
-        # P1-04: 数值修剪（Trim Monitor 语义的键盘/数值入口）
+        # P1-04: 逐帧输入修剪量。
         numeric_trim_action = menu.addAction(
             I18N.tr("edit.clip.numeric_trim", "Numeric Trim…")
         )
@@ -11654,11 +11660,11 @@ class TimelineRangeItem(QGraphicsObject):
 
     range_handle_dragged = pyqtSignal(str, int)  # edge ('in'/'out'), frame
     range_change_finished = pyqtSignal(int, int)  # new_start, new_end
+    range_drag_cancelled = pyqtSignal()
 
     BAR_HEIGHT = 4
-    HANDLE_RADIUS = 3.5
-    HANDLE_WIDTH = 9
-    HANDLE_HEIGHT = 16
+    HANDLE_HIT_HALF_WIDTH = 14
+    HANDLE_HIT_HEIGHT = 22
     Z_VALUE = 1001  # Above ruler and playhead so handles always win the hit test.
 
     def __init__(
@@ -11673,8 +11679,11 @@ class TimelineRangeItem(QGraphicsObject):
         self._range_start: Optional[int] = None
         self._range_end: Optional[int] = None
         self._dragging_edge: Optional[str] = None  # 'in' or 'out'
+        self._hovered_edge: str | None = None
+        self._drag_origin_x = 0.0
+        self._drag_origin_frame = 0
         self._ruler_height = RULER_HEIGHT
-        self._bar_y = self._ruler_height - self.BAR_HEIGHT - 3
+        self._bar_y = self._ruler_height - 12
         self.setZValue(self.Z_VALUE)
         self.setAcceptHoverEvents(True)
         self.setVisible(False)
@@ -11699,62 +11708,76 @@ class TimelineRangeItem(QGraphicsObject):
     def boundingRect(self) -> QRectF:
         if self._range_start is None or self._range_end is None:
             return QRectF()
-        x_start = TRACK_HEADER_WIDTH + self._range_start * self._pixels_per_frame - self.HANDLE_WIDTH
-        x_end = TRACK_HEADER_WIDTH + (self._range_end + 1) * self._pixels_per_frame + self.HANDLE_WIDTH
-        handle_top = self._bar_y - (self.HANDLE_HEIGHT - self.BAR_HEIGHT) / 2
-        return QRectF(
-            x_start,
-            handle_top,
-            x_end - x_start,
-            self.HANDLE_HEIGHT,
-        )
+        x_start, x_end = self._edge_positions(self._range_start, self._range_end)
+        hit_pad = self.HANDLE_HIT_HALF_WIDTH
+        return QRectF(x_start - hit_pad, self._ruler_height - self.HANDLE_HIT_HEIGHT,
+                      x_end - x_start + 2 * hit_pad, self.HANDLE_HIT_HEIGHT)
+
+    def _edge_positions(self, start: int, end: int) -> tuple[float, float]:
+        return (TRACK_HEADER_WIDTH + start * self._pixels_per_frame,
+                TRACK_HEADER_WIDTH + (end + 1) * self._pixels_per_frame)
 
     def paint(self, painter: QPainter, option: Any, widget: Optional[Any] = None) -> None:
         if self._range_start is None or self._range_end is None:
             return
 
-        x_start = TRACK_HEADER_WIDTH + self._range_start * self._pixels_per_frame
-        x_end = TRACK_HEADER_WIDTH + (self._range_end + 1) * self._pixels_per_frame
+        x_start, x_end = self._edge_positions(self._range_start, self._range_end)
 
         bar_rect = QRectF(x_start, self._bar_y, x_end - x_start, self.BAR_HEIGHT)
-        painter.fillRect(bar_rect, QColor("#82848B"))
+        painter.fillRect(bar_rect, QColor("#676970"))
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         for x, edge in ((x_start, "in"), (x_end, "out")):
-            color = QColor("#D0D1D5" if edge == self._dragging_edge else "#A4A6AC")
-            painter.setBrush(color)
-            painter.setPen(QPen(QColor("#313237"), 1))
-            painter.drawEllipse(
-                QPointF(x, bar_rect.center().y()), self.HANDLE_RADIUS, self.HANDLE_RADIUS
-            )
+            paint_range_grip(painter, x, bar_rect.center().y(),
+                             active=edge == (self._dragging_edge or self._hovered_edge))
         painter.restore()
 
     def _hit_edge(self, pos: QPointF) -> Optional[str]:
-        if self._range_start is None or self._range_end is None:
+        if self._range_start is None or self._range_end is None or not self.boundingRect().contains(pos):
             return None
-        x_start = TRACK_HEADER_WIDTH + self._range_start * self._pixels_per_frame
-        x_end = TRACK_HEADER_WIDTH + (self._range_end + 1) * self._pixels_per_frame
+        x_start, x_end = self._edge_positions(self._range_start, self._range_end)
         in_distance = abs(pos.x() - x_start)
         out_distance = abs(pos.x() - x_end)
-        if min(in_distance, out_distance) < self.HANDLE_WIDTH:
+        if min(in_distance, out_distance) <= self.HANDLE_HIT_HALF_WIDTH:
             return "in" if in_distance <= out_distance else "out"
         return None
+
+    def _update_hovered_edge(self, edge: str | None) -> None:
+        if self._hovered_edge != edge:
+            self._hovered_edge = edge
+            if edge is None:
+                self.unsetCursor()
+            else:
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            self.update()
+
+    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self._update_hovered_edge(self._hit_edge(event.pos()))
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:
+        self._update_hovered_edge(None)
+        super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event: Any) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             edge = self._hit_edge(event.pos())
             if edge:
+                frame = self._range_start if edge == "in" else self._range_end
+                assert frame is not None
                 self._dragging_edge = edge
+                self._drag_origin_x = event.pos().x()
+                self._drag_origin_frame = frame
                 self.update()
                 event.accept()
                 return
         super().mousePressEvent(event)
 
     def _dragged_frame_at(self, x: float) -> int:
-        frame = max(0, int((x - TRACK_HEADER_WIDTH) / self._pixels_per_frame))
+        frame = max(0, self._drag_origin_frame + round((x - self._drag_origin_x) / self._pixels_per_frame))
         if self._dragging_edge == "out" and self._range_start is not None:
-            return max(self._range_start, frame - 1)
+            return max(self._range_start, frame)
         if self._range_end is not None:
             return min(self._range_end, frame)
         return frame
@@ -11773,8 +11796,28 @@ class TimelineRangeItem(QGraphicsObject):
             new_end = frame if self._dragging_edge == "out" else self._range_end
             self._dragging_edge = None
             self.update()
-            if new_start is not None and new_end is not None:
+            if frame == self._drag_origin_frame:
+                self.range_drag_cancelled.emit()
+            elif new_start is not None and new_end is not None:
                 self.range_change_finished.emit(new_start, new_end)
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def _reset_range_drag(self) -> None:
+        if self._dragging_edge is not None:
+            self._dragging_edge = None
+            self.range_drag_cancelled.emit()
+
+    def cancel_drag(self) -> bool:
+        if self._dragging_edge is None:
+            return False
+        self._reset_range_drag()
+        if self.scene() is not None and self.scene().mouseGrabberItem() is self:
+            self.ungrabMouse()
+        return True
+
+    def sceneEvent(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.UngrabMouse:
+            self._reset_range_drag()
+        return super().sceneEvent(event)

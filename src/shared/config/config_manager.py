@@ -57,7 +57,7 @@ class ConfigManager:
         "show_tooltips": True,
         "animated_transitions": True,
         "transition_preview_mode": "icon",
-        "transition_preview_size": "medium",
+        "transition_preview_size": "small",
         "accent_color": "#ff8800",
         "show_panel_titles": True,
         "grade_set_show_filenames": False,

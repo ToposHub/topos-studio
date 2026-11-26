@@ -55,6 +55,7 @@ Video Playback Engine Module
 """
 
 import logging
+import sys
 import numpy as np
 import time
 import traceback
@@ -1502,6 +1503,7 @@ class VideoPlaybackEngine(QObject):
         reason: str = "playback",
         drop_if_stale: bool = True,
         render_at_source_resolution: Optional[bool] = None,
+        require_render_complete: bool = False,
     ) -> None:
         """
         S2.A: 直接提交 DecodedFrame 到渲染器，避免 UI 线程 BGR/RGBA 转换。
@@ -1521,6 +1523,7 @@ class VideoPlaybackEngine(QObject):
                 pending playback frames.
             render_at_source_resolution: Override the render-target resolution
                 policy for precision previews. ``None`` follows ``quality``.
+            require_render_complete: Finish GPU work on the render thread before publishing.
         """
         # P0.A: 记录处理开始时间
         process_start = time.perf_counter()
@@ -1528,6 +1531,7 @@ class VideoPlaybackEngine(QObject):
         renderer = self.engine.renderer
         if renderer is None:
             return
+        sync_options = {'require_render_complete': True} if require_render_complete else {}
         _flash_diag.event(
             'submit', frame_num=int(frame_num), reason=str(reason),
             gen=int(getattr(self, '_generation_id', 0) or 0),
@@ -1588,6 +1592,7 @@ class VideoPlaybackEngine(QObject):
                 'color_range': decoded_frame_color_tag(gpu_frame, 'color_range'),
                 'quality': quality,
                 'reason': reason,
+                **sync_options,
             })
 
             process_ms = (time.perf_counter() - process_start) * 1000.0
@@ -1671,6 +1676,7 @@ class VideoPlaybackEngine(QObject):
                 'use_yuv_gpu_upload': self.should_use_yuv_gpu_upload(),
                 'quality': quality,
                 'reason': reason,
+                **sync_options,
             })
 
             render_end = time.perf_counter()
@@ -1736,6 +1742,7 @@ class VideoPlaybackEngine(QObject):
                 'drop_if_stale': drop_if_stale,
                 'quality': quality,
                 'reason': reason,
+                **sync_options,
             })
 
             render_end = time.perf_counter()
@@ -4143,8 +4150,18 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                     self._scrub_anchor if scrub_origin is not None else None,
                 )
                 can_present = frame_range is None or frame_range[0] <= frame_range[1]
+                # A press at the held position can reuse its retained CPU master.
+                # Check before queuing so a cold seek for the press cannot block the drag.
+                take_master = getattr(self._coordinator, 'take_ready_master_frame', None)
+                take_exact_first = (sys.platform == "win32" and not allow_proxy_fallback and scrub_reset
+                                    and (scrub_origin is None or (master_only_scrub and not scrub_direction)))
+                if take_exact_first and callable(take_master):
+                    candidate = take_master(frame_number)
+                    if getattr(candidate, "frame_index", None) == frame_number:
+                        frame = candidate
+
                 request_master = getattr(self._coordinator, 'request_master_frame', None)
-                if callable(request_master):
+                if frame is None and callable(request_master):
                     if can_present:
                         if scrub_origin is None or frame_number != self._scrub_prefetch_target:
                             request_master(frame_number)
@@ -4160,9 +4177,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                         ):
                             self._scrub_prefetch_target = candidate
                             request_master(candidate)
-                # 2) 非阻塞取"已就绪"的帧：优先精确 master（take_ready）。
-                take_master = getattr(self._coordinator, 'take_ready_master_frame', None)
-                if callable(take_master) and scrub_origin is None:
+                if not take_exact_first and callable(take_master) and scrub_origin is None:
                     candidate = take_master(frame_number)
                     if getattr(candidate, "frame_index", None) == frame_number:
                         frame = candidate
@@ -4195,6 +4210,8 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                         and _last_scrub_submission(self, scrub_origin is not None) == display_index
                     ):
                         return
+                sync_preview = (sys.platform == "win32" and not allow_proxy_fallback
+                                and (master_only_scrub or scrub_reset))
                 self._submit_decoded_frame_playback(
                     frame,
                     display_index,
@@ -4205,6 +4222,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                     ),
                     reason="seek" if blocking_seek else "playback",
                     drop_if_stale=True,
+                    **({"require_render_complete": True} if sync_preview else {}),
                 )
                 if scrub_origin is not None and self._last_displayed_frame_index == display_index:
                     self._scrub_anchor = display_index
@@ -4274,6 +4292,11 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         identity = (self._generation_id, frame_number)
         return viewer_frames == (identity, identity)
 
+    def can_complete_scrub_without_seek(self, frame_number: int) -> bool:
+        """Check that the exact target is both the drawn front and latest submission."""
+        return (_last_scrub_submission(self, True) == frame_number
+                and self.is_scrub_frame_presented(frame_number))
+
     def end_scrub_paint_guard(self) -> None:
         """Resume ordinary canvas paints after an interrupted drag."""
         if self.engine is not None:
@@ -4330,6 +4353,11 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
         # Keep this in the coalescing playback lane: scrubbing can produce many
         # frames per second, and only the latest visual preview matters.  The
         # release path still submits an exact retained seek frame.
+        image_engine = self.__dict__.get("engine")
+        sync_preview = (
+            sys.platform == "win32" and image_engine is not None
+            and image_engine.__dict__.get("scrub_paint_generation") == self._generation_id
+        )
         self._force_source_resolution_submit = True
         try:
             self._submit_decoded_frame_playback(
@@ -4338,6 +4366,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 quality="proxy",
                 reason="playback",
                 drop_if_stale=True,
+                **({"require_render_complete": True} if sync_preview else {}),
             )
         finally:
             self._force_source_resolution_submit = False
@@ -4392,6 +4421,7 @@ class EnhancedVideoPlaybackEngine(VideoPlaybackEngine):
                 quality="proxy",
                 reason="playback",
                 drop_if_stale=True,
+                **({"require_render_complete": True} if sys.platform == "win32" and scrub_origin is not None else {}),
             )
         finally:
             self._force_source_resolution_submit = False

@@ -18,8 +18,10 @@ import pytest
 import os
 import json
 import logging
+from types import SimpleNamespace
 from typing import Optional
 
+from src.shared.media import ffmpeg_source
 from src.shared.media.ffmpeg_source import (
     FFmpegMediaSource,
     _is_gop_codec,
@@ -35,9 +37,70 @@ from src.shared.media.seek import (
     SeekInfo,
 )
 from src.shared.media.errors import SeekError
-from src.shared.media.metadata import Rational
+from src.shared.media.metadata import Rational, VideoMetadata
 
 logger = logging.getLogger(__name__)
+
+
+@pytest.mark.parametrize(
+    ('plat', 'codec', 'pixel_format', 'rate', 'target_size', 'threads', 'enabled'),
+    [
+        ('win32', 'h264', 'yuv420p', 25, None, 0, True),
+        ('win32', 'h264', 'yuv420p', 24, None, 0, False),
+        ('win32', 'h264', 'yuv420p', 25, (1920, 1080), 0, False),
+        ('win32', 'hevc', 'yuv420p', 25, None, 0, False),
+        ('win32', 'h264', 'yuv420p10le', 25, None, 0, False),
+        ('darwin', 'h264', 'yuv420p', 25, None, 8, True),
+    ],
+)
+def test_interactive_scrub_tuning_preserves_platform_thread_policy(
+    monkeypatch: pytest.MonkeyPatch, plat: str, codec: str, pixel_format: str,
+    rate: int, target_size: tuple[int, int] | None, threads: int, enabled: bool,
+) -> None:
+    monkeypatch.setattr(ffmpeg_source, 'sys', SimpleNamespace(platform=plat))
+    monkeypatch.setattr(ffmpeg_source.platform, 'machine', lambda: 'x86_64')
+    monkeypatch.setattr(ffmpeg_source.os, 'cpu_count', lambda: 16)
+    source = FFmpegMediaSource('memory', target_size=target_size)
+    decoder = SimpleNamespace(name=codec, is_open=False, thread_count=0)
+    source._video_stream = SimpleNamespace(codec_context=decoder, average_rate=rate, base_rate=25)
+    source._metadata = SimpleNamespace(width=3840, height=2160, pixel_format=pixel_format)
+    try:
+        assert source.tune_interactive_scrub() is enabled
+        assert decoder.thread_count == threads
+    finally:
+        source._video_stream = None
+
+
+@pytest.mark.parametrize(('target_read', 'first_pts'), [(False, 29), (True, 29), (True, 30)])
+def test_windows_scrub_history_invalidates_ambiguous_frame_mapping(
+    monkeypatch: pytest.MonkeyPatch, target_read: bool, first_pts: int,
+) -> None:
+    av = pytest.importorskip('av')
+    monkeypatch.setattr(ffmpeg_source, 'sys', SimpleNamespace(platform='win32'))
+    source = FFmpegMediaSource('memory', preserve_planes=True)
+    source._is_open = source._is_planar_mode = True
+    source._metadata = VideoMetadata(width=16, height=16, fps=Rational(25, 1),
+                                     total_frames=10, codec_name='h264',
+                                     codec_profile=None, pixel_format='yuv420p', bit_depth=8)
+    source._scrub_seek_frame_limit = 9
+    monkeypatch.setattr(source, '_frame_to_pts', lambda index: index * 10)
+    frame = av.VideoFrame(16, 16, 'yuv420p')
+    frame.pts = 20
+    source._remember_scrub_seek_frame(2, frame)
+    assert source._scrub_seek_frames.keys() == {2}
+
+    ambiguous = av.VideoFrame(16, 16, 'yuv420p')
+    ambiguous.pts = first_pts
+    if target_read:
+        source._current_frame = 3
+        assert source._convert_frame_planar(ambiguous).pts == first_pts
+    else:
+        source._remember_scrub_seek_frame(3, ambiguous)
+    exact = av.VideoFrame(16, 16, 'yuv420p')
+    exact.pts = 30
+    source._remember_scrub_seek_frame(3, exact)
+    assert not source._scrub_seek_frames
+    assert source.read_recent_scrub_frame(2) is None
 
 
 # =============================================================================

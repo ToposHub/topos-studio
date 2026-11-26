@@ -363,6 +363,29 @@ def test_scrub_press_refreshes_grade_then_turn_uses_frame_that_reached_canvas() 
     coordinator.take_latest_ready_master_frame.assert_called_with(17, frame_range=(17, 19))
 
 
+def test_windows_scrub_press_uses_the_ready_master_before_requesting_decode() -> None:
+    from src.shared.video.video_playback import EnhancedVideoPlaybackEngine
+
+    coordinator = MagicMock()
+    ready = SimpleNamespace(frame_index=50)
+    coordinator.take_ready_master_frame.return_value = ready
+    playback = SimpleNamespace(
+        _use_dual_path=True, _coordinator=coordinator, is_playing=False,
+        _last_displayed_frame_index=50, _generation_id=3,
+        _begin_static_preview_generation=MagicMock(), _set_static_preview_frame_hold=MagicMock(),
+        _submit_decoded_frame_playback=MagicMock(),
+    )
+    with patch("src.shared.video.video_playback.sys", SimpleNamespace(platform="win32")):
+        EnhancedVideoPlaybackEngine.seek_to_frame(
+            playback, 50, blocking=False, allow_proxy_fallback=False,
+            fast_scrub=True, scrub_origin=50, scrub_reset=True,
+        )
+
+    coordinator.request_master_frame.assert_not_called()
+    assert playback._submit_decoded_frame_playback.call_args.args[:2] == (ready, 50)
+    assert playback._submit_decoded_frame_playback.call_args.kwargs["require_render_complete"] is True
+
+
 def test_present_latest_ready_scrub_frame_dedup_and_miss() -> None:
     """队列空 → False 不提交；已完成帧与上次显示相同 → 去重不重复提交。"""
     from src.shared.video.video_playback import EnhancedVideoPlaybackEngine

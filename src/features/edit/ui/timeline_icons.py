@@ -117,7 +117,7 @@ _PATHS: dict[str, str] = {
         '<path d="m6.6 5.2 3.6 4.6-3.6 4.6L3 9.8z" fill="currentColor" stroke="none"/>'
         '<path d="m16.8 5.2 3.6 4.6-3.6 4.6-3.6-4.6z"/>'
     ),
-    "voiceover": (
+    "microphone": (
         '<rect x="8.8" y="2" width="6.4" height="12.1" rx="3.2" fill="currentColor" stroke="none"/>'
         '<path d="M5.3 10.8v.8a6.7 6.7 0 0 0 13.4 0v-.8M12 18.4v3.2m-3.4 0h6.8"/>'
     ),
@@ -149,6 +149,7 @@ _PATHS: dict[str, str] = {
         '<path d="M5 3v18M12 3v18M19 3v18" stroke-width="1.5"/>'
         '<path d="M3.3 8h3.4m3.6 7h3.4m3.6-5h3.4" stroke-width="3.5"/>'
     ),
+    "speaker": '<path d="M3.5 9h4l5-4v14l-5-4h-4zM16 8.5a5 5 0 0 1 0 7m2.8-9.5a8.5 8.5 0 0 1 0 12"/>',
     "more": '<g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.85"/><circle cx="12" cy="12" r="1.85"/><circle cx="19" cy="12" r="1.85"/></g>',
 }
 

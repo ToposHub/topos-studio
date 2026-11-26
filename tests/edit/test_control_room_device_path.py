@@ -104,6 +104,26 @@ def test_real_device_feed_uses_pre_and_post_taps_without_changing_programme() ->
     assert renderer._programme_peaks == pytest.approx((0.12, 0.08))
 
 
+def test_monitor_gain_changes_device_pcm_with_master_levels_unchanged(qapp, monkeypatch) -> None:
+    monkeypatch.setattr(ControlRoomPatch, "load_local", ControlRoomPatch)
+    manager = AudioPlaybackManager()
+    mixer = manager._mixer
+    mixer.add_track("A", ConstantSource(0.2, -0.1))
+    renderer = AudioPlaybackThread()
+    renderer.setup(AudioClock(), mixer, None, 24.0)
+    renderer.control_room_state = lambda: manager.control_room_state
+    before, before_levels = renderer._render_output_block(0, 500, 2)
+    manager._prepared_frame = 20
+    generation = manager._scrub_preview_generation
+    manager.set_monitor_gain_db(-20.0)
+    after, after_levels = renderer._render_output_block(1, 500, 2)
+
+    np.testing.assert_allclose(after[:, -1], before[:, -1] * 0.1)
+    assert before_levels[MASTER_BUS_KEY].peak_l == after_levels[MASTER_BUS_KEY].peak_l
+    assert manager._scrub_preview_generation == generation
+    assert manager._prepared_frame is None
+
+
 def test_bus_taps_keep_fader_and_master_processing_boundaries() -> None:
     mixer = AudioMixer()
     mixer.add_track("A", ConstantSource(0.2, 0.1))

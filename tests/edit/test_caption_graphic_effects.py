@@ -181,7 +181,7 @@ def test_effects_panel_lists_and_emits_selected_caption_effect(qapp) -> None:
     )
     panel.set_selected_subtitle_clip("cue-1")
 
-    root = panel.titles_tree.topLevelItem(0)
+    root = panel.caption_effects_tree.topLevelItem(0)
     assert root.text(0) == I18N.tr("edit.effects.caption_effects", "Caption Effects")
     effect = next(
         root.child(index)
@@ -189,7 +189,7 @@ def test_effects_panel_lists_and_emits_selected_caption_effect(qapp) -> None:
         if root.child(index).text(0) == "向上滑入"
     )
     panel.caption_effect_in_frames.setValue(14)
-    panel._on_title_item_double_clicked(effect, 0)
+    panel.caption_effects_tree.itemDoubleClicked.emit(effect, 0)
     assert selected == [("slide_up", "cue-1", {
         "in_frames": 14, "out_frames": 8, "distance": 1.0,
     })]

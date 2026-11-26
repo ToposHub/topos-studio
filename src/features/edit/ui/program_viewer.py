@@ -1358,11 +1358,17 @@ class ProgramViewer(QOpenGLWidget):
         self._painted_present_key = None
         if not self._gl_initialized:
             return
+
+        # The framebuffer is sized in device pixels. The display rect and
+        # pan/zoom controls below still use the widget's logical coordinates.
+        size = self.size()
+        framebuffer_size = size * self.devicePixelRatioF()
+        viewport = (0, 0, max(1, framebuffer_size.width()), max(1, framebuffer_size.height()))
         if self._native_layer_covers():
             # Repainted for another reason (expose, resize): nothing of this
             # widget is visible under the layer.  Do not copy the stale frame.
             self._reset_copy_gl_state()
-            _gl.glViewport(0, 0, max(1, self.width()), max(1, self.height()))
+            _gl.glViewport(*viewport)
             _gl.glClearColor(0.0, 0.0, 0.0, 0.0)
             _gl.glClear(GL_COLOR_BUFFER_BIT)
             return
@@ -1395,15 +1401,11 @@ class ProgramViewer(QOpenGLWidget):
 
         # Clear background
         self._reset_copy_gl_state()
-        _gl.glViewport(0, 0, max(1, self.width()), max(1, self.height()))
+        _gl.glViewport(*viewport)
         _gl.glClearColor(0.0980392157, 0.0980392157, 0.0980392157, 1.0)
         _gl.glClear(GL_COLOR_BUFFER_BIT)
 
-        # Get viewport dimensions
-        w = self.width()
-        h = self.height()
-
-        if w > 0 and h > 0:
+        if not size.isEmpty():
             # Calculate display rect preserving aspect ratio
             display_rect = self._calculate_display_rect()
 
@@ -3488,7 +3490,6 @@ class ProgramViewerWidget(QWidget):
         # OpenGL Viewer
         self._viewer = ProgramViewer(self._viewer_container)
         viewer_layout.addWidget(self._viewer)
-        self._trim_monitor_widget: Optional[QWidget] = None
         self._viewer.installEventFilter(self)
 
         # Transport Control Bar (bottom)
@@ -3539,36 +3540,8 @@ class ProgramViewerWidget(QWidget):
         # Set minimum size
         self.setMinimumSize(200, 150)
 
-    def set_trim_monitor(self, monitor: Optional[QWidget]) -> None:
-        """Attach a passive trim overlay to the actual canvas, including fullscreen."""
-        if monitor is self._trim_monitor_widget:
-            return
-        old = self._trim_monitor_widget
-        self._trim_monitor_widget = None
-        if old is not None:
-            old.destroyed.disconnect(self._on_trim_overlay_destroyed)
-            old.hide()
-            old.setParent(self)
-        self._trim_monitor_widget = monitor
-        if monitor is not None:
-            monitor.hide()
-            monitor.setParent(self._viewer)
-            monitor.setGeometry(self._viewer.rect())
-            monitor.destroyed.connect(self._on_trim_overlay_destroyed)
-
-    def _on_trim_overlay_destroyed(self) -> None:
-        # Old overlays disconnect this slot when detached. SIP may expose a
-        # different QObject wrapper while emitting destroyed, so sender identity
-        # cannot safely decide whether the current child has gone away.
-        self._trim_monitor_widget = None
-
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self._viewer and event.type() in {QEvent.Type.Resize, QEvent.Type.Show}:
-            monitor = self._trim_monitor_widget
-            if monitor is not None:
-                monitor.setGeometry(self._viewer.rect())
-                if not monitor.isHidden():
-                    monitor.raise_()
             if self.__dict__.get("_metal_host") is not None:
                 self._schedule_native_refresh()
         return super().eventFilter(watched, event)
@@ -4035,18 +4008,15 @@ class ProgramViewerWidget(QWidget):
     def _native_host_can_show(self) -> bool:
         """Whether the layer can cover the viewer right now.
 
-        The layer is a sibling inside the viewer container; wherever the
-        viewer is shown differently (its own fullscreen window, the Trim
-        monitor on top) the GL viewer presents instead.
+        The layer sits inside the viewer container. The viewer presents
+        directly when it moves into its own fullscreen window.
         """
         viewer = self._viewer
-        monitor = getattr(self, "_trim_monitor_widget", None)
         return bool(
             viewer is not None
             and viewer.isVisible()
             and viewer.parentWidget() is self._viewer_container
             and not viewer.isFullScreen()
-            and (monitor is None or monitor.isHidden())
         )
 
     def _native_layer_is_showing(self) -> bool:
@@ -4106,9 +4076,8 @@ class ProgramViewerWidget(QWidget):
         if renderer is None or host is None:
             return "no_native_viewport"
         if not self._native_host_can_show():
-            # Re-evaluate on every frame: the layer may have been pushed off
-            # screen (Trim monitor, fullscreen viewer) without an event we
-            # saw.  New frames must now take the GL path.
+            # Recheck every frame in case visibility changed without an
+            # event. New frames then take the GL path.
             self._layout_native_host()
             return "layer_not_on_screen"
         viewer = self._viewer
