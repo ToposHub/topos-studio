@@ -31,6 +31,7 @@ from src.features.color.core.composition_uniforms import (
     build_composition_uniform_manifest,
 )
 from src.features.color.core.base_grade_runtime import base_grade_glsl_source, base_grade_shader_call
+from src.features.color.core.chromogen_runtime import chromogen_glsl_source, chromogen_shader_call
 from src.features.color.core.mist import MIST_GLSL
 from src.features.shared.effects.effect_spec import EffectSpec, PluginBinding, ShaderKind
 
@@ -377,6 +378,7 @@ class ShaderPipeline:
         *,
         has_primary_calibration: bool = False,
         has_base_grade: bool = False,
+        has_chromogen: bool = False,
         request_id: Any = None,
         layer_id: Any = None,
     ) -> "moderngl.Program | None":
@@ -422,7 +424,7 @@ class ShaderPipeline:
              binding.enabled, _binding_structural_params(binding))
             for binding in bindings
         ) if bindings else ()
-        key = (has_curves, has_warper, warper_space if has_warper else 0, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, has_primary_calibration, has_base_grade, plugin_key)
+        key = (has_curves, has_warper, warper_space if has_warper else 0, has_lut3d, has_soft_clip, grain_enabled, has_qualifier, has_hsl_curve, has_mixer, has_curves_soft_clip, has_primary_calibration, has_base_grade, has_chromogen, plugin_key)
         if key in self.comp_cache:
             # AUD-0831：LRU 命中刷新新旧顺序
             self.comp_cache.move_to_end(key)
@@ -437,7 +439,7 @@ class ShaderPipeline:
             has_warper=has_warper, has_lut3d=has_lut3d,
             warper_space=warper_space,
             grain_enabled=grain_enabled, has_primary_calibration=has_primary_calibration,
-            has_base_grade=has_base_grade,
+            has_base_grade=has_base_grade, has_chromogen=has_chromogen,
             bindings=bindings)
 
         calibrated_warper = has_warper and warper_space in WARPER_PREPARED_SPACES
@@ -486,6 +488,8 @@ class ShaderPipeline:
             shader_code.append(CURVES_SOFT_CLIP_CALIBRATION_SNIPPET)
             shader_code += uniform_manifest.declarations("curves_soft_clip")
         shader_code += uniform_manifest.declarations("body")
+        if has_chromogen:
+            shader_code.append(chromogen_glsl_source(include_transfer=not has_base_grade))
         # Phase 2: Qualifier uniforms removed - qualifier is now computed in matte generation
 
         # P0-COL-01：插件体内允许引用的 uniform 全集（manifest 含 header
@@ -610,6 +614,9 @@ class ShaderPipeline:
         shader_code.append(f"    graded = apply_grading(graded, {primary_input}, u_lift, u_gamma, u_gain, u_exposure, u_temp, u_tint, u_contrast, u_saturation, u_vibrance, u_shadow, u_highlights, u_mid_detail, u_sharpness, u_hue_shift, u_lift_saturation, u_gamma_saturation, u_gain_saturation, u_pivot, u_offset, u_log_shadow, u_log_midtone, u_log_highlight, u_log_offset, u_log_low_range, u_log_high_range, u_lum_mix);")
         if has_base_grade:
             grade_call = base_grade_shader_call("graded", "u_rec709_calibration_encoded")
+            shader_code.append(f"    graded = {grade_call};")
+        if has_chromogen:
+            grade_call = chromogen_shader_call("graded", "u_rec709_calibration_encoded")
             shader_code.append(f"    graded = {grade_call};")
 
         if has_curves: shader_code.append("    graded = apply_curves(graded, u_curves_tex);")

@@ -190,6 +190,7 @@ class ConfigManager:
         "color.aces.version": "1.3",
         "color.aces.input": "auto",
         "color.aces.reference_gamut_compression": "off",
+        "color.aces.external_monitor": "rec709-g24",
         "color.hdr.input": "auto",
         "color.hdr.reference_white": "100",
         "color.hdr.hlg_peak": "1000",

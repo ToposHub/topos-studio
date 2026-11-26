@@ -41,6 +41,35 @@ from src.features.edit.core.project import (
 
 
 @dataclass(frozen=True)
+class SetAssetInputColorSpaceCommand:
+    """Change input interpretation for all selected source assets in one step."""
+
+    label: str
+    asset_ids: tuple[str, ...]
+    selection: str | None
+    previous: tuple[tuple[str, str | None], ...] = ()
+
+    def apply(self, project: EditProject) -> tuple[EditProject, SetAssetInputColorSpaceCommand]:
+        from src.shared.color.project_video_signal import ACES_INPUT_SPACES
+
+        if self.selection is not None and self.selection not in ACES_INPUT_SPACES:
+            raise ValueError(f"Unknown ACES input color space: {self.selection!r}")
+        previous = tuple((asset_id, project.assets[asset_id].input_color_space)
+                         for asset_id in self.asset_ids if asset_id in project.assets)
+        assets = dict(project.assets)
+        for asset_id, _ in previous:
+            assets[asset_id] = assets[asset_id].with_input_color_space(self.selection)
+        return replace(project, assets=assets), replace(self, previous=previous)
+
+    def undo(self, project: EditProject) -> EditProject:
+        assets = dict(project.assets)
+        for asset_id, selection in self.previous:
+            if asset_id in assets:
+                assets[asset_id] = assets[asset_id].with_input_color_space(selection)
+        return replace(project, assets=assets)
+
+
+@dataclass(frozen=True)
 class CreateBinCommand:
     """
     Command to create a new bin in the project.

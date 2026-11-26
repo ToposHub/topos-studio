@@ -1760,6 +1760,36 @@ class AsyncRenderer(QThread):
         request = params["warper_sample"]
         rect = params.get("scene_visible_rect")
         encoded = bool(params.get("rec709_calibration_encoded"))
+        if len(request) == 4 and request[3] == "chromogen":
+            from src.features.color.core.base_grade_runtime import (
+                BASE_GRADE_SIGNAL_KEY, decode_linear_grade_input,
+            )
+            from src.features.color.core.chromogen import CHROMOGEN_KEY
+            from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
+            from src.features.color.core.color_node_color_space import (
+                apply_node_color_space_cpu, node_color_transform_spec,
+            )
+
+            payload = dict(layer or {})
+            signal = payload.get(BASE_GRADE_SIGNAL_KEY, params.get(BASE_GRADE_SIGNAL_KEY))
+            encoded = bool(payload.get("_rec709_calibration_encoded", encoded))
+            try:
+                if node_color := payload.get("_node_input_color"):
+                    signal, encoded = None, False
+                    if transform := node_color_transform_spec(*node_color):
+                        pixels = apply_node_color_space_cpu(pixels, transform)
+                if payload:
+                    grading = dict(payload.get("grading_params") or {})
+                    grading.pop(CHROMOGEN_KEY, None)
+                    payload["grading_params"] = grading
+                    pixels, _ = apply_layer_grading_cpu(
+                        pixels, payload, width=pixels.shape[1], height=pixels.shape[0])
+                pixels = decode_linear_grade_input(pixels, encoded_input=encoded, signal=signal)
+            except (KeyError, NotImplementedError, TypeError, ValueError):
+                logger.debug("Could not evaluate the Chromogen picker input", exc_info=True)
+                return
+            self.warper_input_ready.emit((request, rect, False, pixels))
+            return
         # One readback serves both panels, with a separate cache key per stage.
         self.warper_input_ready.emit((request[:3], rect, encoded, pixels))
         if len(request) == 4:
@@ -2086,18 +2116,20 @@ class AsyncRenderer(QThread):
 
     def _draw_project_output_quad(
         self, source_texture: Any, signal: Any, aces: Any = None, *, luminance: Any = None,
+        external_monitor: bool = False,
     ) -> None:
         """Write the output signal before display-device adaptation."""
         if aces is not None:
             from src.shared.color.aces_video_gl import AcesVideoGLPass, aces_shader_key
 
             key = aces_shader_key(aces)
-            current = self.__dict__.get("_aces_output_pass")
-            if current is None or self._aces_output_key != key:
+            cache_key = "_aces_monitor_output" if external_monitor else "_aces_viewer_output"
+            previous_key, current = self.__dict__.get(cache_key, (None, None))
+            if current is None or previous_key != key:
                 replacement = AcesVideoGLPass(self.ctx, aces)
                 if current is not None:
                     current.release()
-                self._aces_output_pass, self._aces_output_key = replacement, key
+                self.__dict__[cache_key] = (key, replacement)
                 current = replacement
             current.draw(source_texture, signal[0])
             return
@@ -3686,11 +3718,22 @@ class AsyncRenderer(QThread):
 
             # External monitoring receives project output. The desktop can
             # use a different reference view, and Composite receives working RGB.
-            self._draw_project_output_quad(
-                current_source_tex, viewer_signal if color_output_target == "monitor" else None,
-                viewer_aces if color_output_target == "monitor" else None,
-                luminance=project_luminance,
-            )
+            monitor = color_output_target == "monitor"
+            external_aces = None
+            if monitor and viewer_aces is not None:
+                from src.shared.color.project_video_signal import aces_external_monitor_settings
+
+                external_aces = aces_external_monitor_settings(viewer_aces)
+            if external_aces is not None:
+                self._draw_project_output_quad(
+                    current_source_tex, viewer_signal, external_aces,
+                    luminance=project_luminance, external_monitor=True,
+                )
+            else:
+                self._draw_project_output_quad(
+                    current_source_tex, viewer_signal if monitor else None,
+                    viewer_aces if monitor else None, luminance=project_luminance,
+                )
             # Composite/monitor consumers read this texture outside the current
             # render pass and therefore require immediate completion.  The
             # scope target is consumed next in the same GL context; command
@@ -3701,6 +3744,7 @@ class AsyncRenderer(QThread):
                 self._finish_call_count += 1
 
             if color_output_target == 'monitor':
+                self._published_aces_monitor_view = external_aces
                 self.monitor_color_output_ready.emit(color_output_tex.glo, w, h)
             elif color_output_target not in ('scope', 'full_res'):
                 self.color_output_ready.emit(color_output_tex.glo, w, h)
@@ -7230,9 +7274,10 @@ class AsyncRenderer(QThread):
         # Run this before the GL teardown while the render thread still owns
         # the context.  A queued zero-copy frame has no other release path once
         # ``run`` exits its command loop.
-        aces_output = self.__dict__.pop("_aces_output_pass", None)
-        if aces_output is not None:
-            aces_output.release()
+        for key in ("_aces_viewer_output", "_aces_monitor_output"):
+            _, aces_output = self.__dict__.pop(key, (None, None))
+            if aces_output is not None:
+                aces_output.release()
         metal_preview = self.__dict__.pop("_color_metal_preview", None)
         if metal_preview is not None:
             try:
@@ -7639,6 +7684,7 @@ class AsyncRenderer(QThread):
 
             from src.features.color.core.base_grade import base_grade_active
             from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
+            from src.features.color.core.chromogen import chromogen_active
             from src.features.color.core.primary_calibration import grade_uses_calibration
             from src.features.color.core.shader_compiler import (
                 plugin_bindings_from_instances,
@@ -7731,6 +7777,7 @@ class AsyncRenderer(QThread):
                         plugins=layer_plugins,
                         has_primary_calibration=grade_uses_calibration(prefix_layer),
                         has_base_grade=base_grade_active(grading or {}),
+                        has_chromogen=chromogen_active(grading or {}),
                         request_id=render_request_id,
                         layer_id=pl_id,
                     )

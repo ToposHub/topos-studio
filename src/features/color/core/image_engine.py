@@ -1998,11 +1998,16 @@ class ImageEngine(QObject, WindowRasterizer):
         layer = self.get_active_layer()
         if not layer:
             return
-        from src.features.color.core.layer import default_extended_grading_params
+        from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_compatibility_error
+        from src.features.color.core.layer import _mutable_layer_snapshot, default_extended_grading_params
         defaults = default_extended_grading_params()
         for key, value in patch.items():
             if key not in defaults:
                 continue  # 非扩展键一律拒绝：全量键走 grade_image
+            if key == CHROMOGEN_KEY:
+                if chromogen_compatibility_error(value) is None:
+                    layer.grading_params[key] = _mutable_layer_snapshot(value)
+                continue
             # 形状校验（与 Metal 侧 make_graph_grading_params 的 isfinite
             # 守卫同口径）：标量键收 tuple、vec3 键收标量都会污染下游
             # uniform 提取，入库前显式拒绝。
@@ -3728,7 +3733,7 @@ class ImageEngine(QObject, WindowRasterizer):
                             prog_comp, layer, temporary_textures=texture_garbage),
                         bindings=layer_plugins,
                     )
-                    if base_grade_signal and "u_base_grade_global" in values:
+                    if base_grade_signal and "u_base_grade_transfer" in values:
                         values.update(base_grade_signal_uniform_values(base_grade_signal))
                     upload_composition_uniforms(prog_comp, values)
 

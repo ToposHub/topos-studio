@@ -55,6 +55,10 @@ class ColorPrimaries(Enum):
     AP0 = 'ap0'
     AP1 = 'ap1'
     DAVINCI_WIDE_GAMUT = 'davinci-wide-gamut'
+    ARRI_WIDE_GAMUT3 = 'arri-wide-gamut3'
+    ARRI_WIDE_GAMUT4 = 'arri-wide-gamut4'
+    SONY_S_GAMUT3 = 'sony-s-gamut3'
+    SONY_S_GAMUT3_CINE = 'sony-s-gamut3-cine'
     UNKNOWN = 'unknown'
 
 
@@ -96,6 +100,9 @@ class ColorTransfer(Enum):
     ACESCC = 'acescc'
     ACESCCT = 'acescct'
     DAVINCI_INTERMEDIATE = 'davinci-intermediate'
+    ARRI_LOGC3_EI800 = 'arri-logc3-ei800'
+    ARRI_LOGC4 = 'arri-logc4'
+    SONY_S_LOG3 = 'sony-s-log3'
     TRAW_LOG0 = 'topos-traw-log0'  # TRAW PWL-log12（codec transfer id 20，v1.6）
     UNKNOWN = 'unknown'
 
@@ -106,7 +113,8 @@ def delivery_transfer_tag(transfer: ColorTransfer, *, native_topos: bool = False
         # Preserve the established TOPOS fallback for Gamma 2.4.
         return "bt709" if native_topos else "unknown"
     if transfer in (ColorTransfer.GAMMA26, ColorTransfer.ACESCC, ColorTransfer.ACESCCT,
-                    ColorTransfer.DAVINCI_INTERMEDIATE):
+                    ColorTransfer.DAVINCI_INTERMEDIATE, ColorTransfer.ARRI_LOGC3_EI800,
+                    ColorTransfer.ARRI_LOGC4, ColorTransfer.SONY_S_LOG3):
         return "unknown"
     return transfer.value
 

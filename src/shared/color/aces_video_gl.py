@@ -1,11 +1,15 @@
-"""OpenColorIO's analytical ACES display shader and context-owned tables."""
+"""ACES output and monitor shaders with context-owned lookup tables."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from math import isqrt
 from typing import Any
 
+import numpy as np
+
+from src.shared.color.aces_monitor_lut import ACES_MONITOR_LUT_SPACE, load_aces_monitor_lut
 from src.shared.color.color_space_descriptor import ACESCG_SCENE, ColorSpaceDescriptor
 from src.shared.color.color_transform_provider import aces_output_gpu_shader
 from src.shared.color.project_video_signal import ProjectAcesSettings
@@ -23,7 +27,7 @@ class AcesShaderTable:
 
 
 @lru_cache(maxsize=16)
-def aces_shader_source(
+def _reference_aces_shader(
     version: str, target: str,
 ) -> tuple[str, tuple[AcesShaderTable, ...]]:
     shader = aces_output_gpu_shader(version, target)
@@ -34,20 +38,82 @@ def aces_shader_source(
         table.getValues().size // (table.width * max(1, table.height)),
         table.getValues().astype("float32", copy=False).tobytes(),
     ) for table in shader.getTextures())
-    source = shader.getShaderText() + """
+    return shader.getShaderText(), tables
+
+
+def _glsl_vector(values: np.ndarray) -> str:
+    return "vec3(" + ", ".join(repr(float(value)) for value in values) + ")"
+
+
+@lru_cache(maxsize=2)
+def _monitor_cube_shader(lut_uri: str) -> tuple[str, tuple[AcesShaderTable, ...]]:
+    lut = load_aces_monitor_lut(lut_uri)
+    size = lut.size
+    columns = isqrt(size - 1) + 1
+    rows = (size + columns - 1) // columns
+    # Store blue slices as tiles, retaining the existing 2D binding in all viewers.
+    tiles = np.zeros((rows * columns, size, size, 3), dtype=np.float32)
+    tiles[:size] = lut.table
+    atlas = tiles.reshape(rows, columns, size, size, 3).transpose(0, 2, 1, 3, 4)
+    table = AcesShaderTable("topos_aces_monitor_cube", (columns * size, rows * size), 3, atlas.tobytes())
+
+    lower = np.asarray(lut.domain_min, dtype=np.float64)
+    span = np.asarray(lut.domain_max, dtype=np.float64) - lower
+    _, transfer, _ = video_signal_uniform_values(ACESCG_SCENE, ACES_MONITOR_LUT_SPACE)
+    source = f"""
+        uniform sampler2D topos_aces_monitor_cube;
+
+        vec3 topos_aces_cube_fetch(ivec3 index) {{
+            ivec2 tile = ivec2(index.b % {columns}, index.b / {columns});
+            return texelFetch(topos_aces_monitor_cube, tile * {size} + index.rg, 0).rgb;
+        }}
+
+        vec4 topos_aces_ocio(vec4 scene) {{
+            vec3 encoded = topos_video_encode(scene.rgb, {transfer}, vec3(0.0));
+            vec3 position = clamp((encoded - {_glsl_vector(lower)}) / {_glsl_vector(span)},
+                                  0.0, 1.0) * {float(size - 1)};
+            ivec3 cell = min(ivec3(position), ivec3({size - 2}));
+            vec3 f = position - vec3(cell);
+            int high = f.r >= f.g ? (f.r >= f.b ? 0 : 2) : (f.g >= f.b ? 1 : 2);
+            int low = f.r < f.g ? (f.r < f.b ? 0 : 2) : (f.g < f.b ? 1 : 2);
+            int middle = 3 - high - low;
+            ivec3 first = ivec3(0);
+            first[high] = 1;
+            ivec3 second = ivec3(1);
+            second[low] = 0;
+            vec3 a = topos_aces_cube_fetch(cell);
+            vec3 b = topos_aces_cube_fetch(cell + first);
+            vec3 c = topos_aces_cube_fetch(cell + second);
+            vec3 d = topos_aces_cube_fetch(cell + ivec3(1));
+            return vec4(a + (b - a) * f[high] + (c - b) * f[middle] + (d - c) * f[low], scene.a);
+        }}
+    """
+    return source, (table,)
+
+
+def aces_shader_source(
+    version: str, target: str, lut_uri: str = "",
+) -> tuple[str, tuple[AcesShaderTable, ...]]:
+    if lut_uri:
+        source, tables = _monitor_cube_shader(lut_uri)
+    else:
+        source, tables = _reference_aces_shader(version, target)
+    return source + """
         vec3 topos_render_aces(vec3 rgb) {
             return topos_aces_ocio(vec4(topos_convert_video_signal(rgb), 1.0)).rgb;
         }
-    """
-    return source, tables
+    """, tables
 
 
-def aces_shader_key(aces: ProjectAcesSettings) -> tuple[str, str]:
+def aces_shader_key(aces: ProjectAcesSettings) -> tuple[str, str] | tuple[str, str, str]:
+    monitor_lut = getattr(aces, "monitor_lut", "")
+    if monitor_lut:
+        return aces.version, aces.target, monitor_lut
     return aces.version, aces.target
 
 
 class AcesShaderTextures:
-    """Upload and bind OCIO's immutable 2D lookup tables in a ModernGL context."""
+    """Upload and bind immutable 2D output tables in a ModernGL context."""
 
     def __init__(self, context: Any, tables: tuple[AcesShaderTable, ...]) -> None:
         import moderngl

@@ -4,6 +4,7 @@ import logging
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY, apply_base_grade_working
+from src.features.color.core.chromogen_runtime import apply_chromogen_working
 from src.features.color.core.primary_calibration import grade_uses_calibration
 
 logger = logging.getLogger(__name__)
@@ -395,6 +396,8 @@ class GradingMath:
             res *= (dt.type(1.0) + blend * (ratio - dt.type(1.0)))[..., np.newaxis]
 
         res = apply_base_grade_working(
+            res, params, encoded_input=rec709_calibration_encoded, signal=base_grade_signal)
+        res = apply_chromogen_working(
             res, params, encoded_input=rec709_calibration_encoded, signal=base_grade_signal)
         return res if frame_shape is None else res.reshape(frame_shape)
 

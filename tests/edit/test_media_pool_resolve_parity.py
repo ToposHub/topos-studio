@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from PyQt6.QtCore import QModelIndex, QPointF, QRect, QSettings, Qt, QItemSelection, QItemSelectionModel
 from PyQt6.QtGui import QDropEvent, QImage, QPainter
-from PyQt6.QtWidgets import QPushButton
+from PyQt6.QtWidgets import QMenu, QPushButton
 
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.ui.media_pool_panel import (
@@ -75,6 +75,30 @@ def pool(qapp, tmp_path: Path, monkeypatch):
     panel.close()
     panel.deleteLater()
     qapp.processEvents()
+
+
+def test_media_pool_can_set_camera_input_for_several_sources(pool) -> None:
+    from src.features.edit.core.serialization import EditProjectSerializer
+
+    panel, assets, _, _, _ = pool
+    panel.set_project(panel._project.with_color_management({"color.timeline_space": "acescct"}))
+    menu = QMenu(panel)
+    panel._append_input_color_space_menu(menu, tuple(assets[:2]))
+    input_menu = menu.findChild(QMenu, "mediaInputColorSpace")
+    assert input_menu.actions()[0].isChecked()
+    sony = next(action.menu() for action in input_menu.actions() if action.text() == "Sony")
+    next(action for action in sony.actions() if action.data() == "sony-slog3-sgamut3cine").trigger()
+
+    assigned = panel._project
+    for asset_id in assets[:2]:
+        assert assigned.assets[asset_id].input_color_space == "sony-slog3-sgamut3cine"
+    assert assigned.assets[assets[2]].input_color_space is None
+    encoded = EditProjectSerializer.to_dict(assigned)["assets"][assets[0]]
+    assert EditProjectSerializer._dict_to_asset(encoded).input_color_space == "sony-slog3-sgamut3cine"
+    undo = panel.get_command_stack().undo(assigned)
+    assert [undo.assets[asset_id].input_color_space for asset_id in assets] == [None, None, None]
+    redone = panel.get_command_stack().redo(undo)
+    assert redone.assets[assets[0]].input_color_space == "sony-slog3-sgamut3cine"
 
 
 @pytest.mark.parametrize("mixed", [False, True])

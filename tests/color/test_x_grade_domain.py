@@ -76,7 +76,7 @@ def test_timeline_delivery_checks_working_space_before_backend_selection(with_x_
                                _export_video_signal_spaces=(pq, rec709), allow_degraded_grade=True)
     clip_layer = SimpleNamespace(clip=SimpleNamespace(color_stack_id="s"), clip_id="c01")
     if with_x_grade:
-        with pytest.raises(ExportGradeDegradedError, match="c01.*x-grade.*linear Rec.709"):
+        with pytest.raises(ExportGradeDegradedError, match="c01.*x-grade.*Selective Grade requires linear Rec.709"):
             TimelineExporter._clip_color_graph(exporter, clip_layer)
     else:
         assert TimelineExporter._clip_color_graph(exporter, clip_layer) == graph

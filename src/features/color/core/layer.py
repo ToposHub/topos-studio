@@ -31,6 +31,7 @@ except ModuleNotFoundError:
 
 from src.features.color.core.window_softness import normalize_edge_softness
 from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS, base_grade_active
+from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_active, chromogen_compatibility_error
 from src.features.color.core.primary_calibration import PRIMARY_CALIBRATION_VERSION_KEY
 from src.features.color.core.curves_calibration import (
     CURVES_CALIBRATION_VERSION_KEY,
@@ -536,6 +537,7 @@ DEFAULT_EXTENDED_GRADING_PARAMS: Dict[str, Any] = {
     "log_high_range": 0.550,
     "lum_mix": 100,
     **BASE_GRADE_DEFAULTS,
+    CHROMOGEN_KEY: None,
 }
 
 
@@ -1035,6 +1037,8 @@ class Layer:
             for k, v in patch["grading_params"].items():
                 if k in ("lift", "gamma", "gain") and isinstance(v, list):
                     self.grading_params[k] = tuple(v)
+                elif k == CHROMOGEN_KEY:
+                    self.grading_params[k] = _mutable_layer_snapshot(v)
                 else:
                     self.grading_params[k] = v
 
@@ -1157,7 +1161,8 @@ class Layer:
             return True
         if self.grading_params.get("log_high_range", 0.550) != 0.550:
             return True
-        if base_grade_active(self.grading_params):
+        if (base_grade_active(self.grading_params) or chromogen_active(self.grading_params)
+                or chromogen_compatibility_error(self.grading_params.get(CHROMOGEN_KEY)) is not None):
             return True
 
         # 检查曲线数据 - 只有当有实际的曲线数据时才认为有调色
@@ -1480,6 +1485,8 @@ class Layer:
                          "log_midtone", "log_highlight", "log_offset") \
                         and isinstance(v, list):
                     layer.grading_params[k] = tuple(v)
+                elif k == CHROMOGEN_KEY:
+                    layer.grading_params[k] = _mutable_layer_snapshot(v)
                 else:
                     layer.grading_params[k] = v
             

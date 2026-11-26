@@ -294,7 +294,8 @@ class WorkspacePanelBar(QToolBar):
 
     def _build_color_tools_menu(self) -> tuple[QDockWidget, ...]:
         docks = self._docks(
-            "dock_grading", "dock_base_grade", "dock_curves", "dock_masks", "dock_qualifier",
+            "dock_grading", "dock_base_grade", "dock_chromogen",
+            "dock_curves", "dock_masks", "dock_qualifier",
             "dock_warper", "dock_mixer", "dock_raw", "dock_denoise",
             "dock_effects", "dock_grain",
         )
@@ -318,20 +319,18 @@ class WorkspacePanelBar(QToolBar):
 
     def _select_color_tool(self, selected: QDockWidget, tools: tuple[QDockWidget, ...]) -> None:
         selected.show()
-        grade_tabs = self._docks("dock_grading", "dock_base_grade")
         peers = self._window.tabifiedDockWidgets(selected)
-        keep_grade_tabs = len(grade_tabs) == 2 and all(
-            dock is selected or dock in peers for dock in grade_tabs
-        )
+        grade_tabs = set(self._docks("dock_grading", "dock_base_grade", "dock_chromogen"))
+        keep_grade_tabs = len(grade_tabs.intersection((selected, *peers))) > 1
         for peer in peers:
             if peer in tools and not (keep_grade_tabs and peer in grade_tabs):
                 peer.hide()
         selected.raise_()
 
     def compact_default_color_tools(self) -> None:
-        """Show one tool per existing tab group in the default Color layout."""
+        """Keep primary grade tabs available while compacting other tools."""
         scopes = getattr(self._window, "dock_analysis", None)
-        grade_tabs = self._docks("dock_grading", "dock_base_grade")
+        grade_tabs = self._docks("dock_grading", "dock_base_grade", "dock_chromogen")
         for dock in self._color_tools:
             if dock.isHidden() or dock.isFloating():
                 continue

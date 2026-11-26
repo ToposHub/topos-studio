@@ -27,14 +27,17 @@ orientation, so the kernels only ever see image coordinates.
 from __future__ import annotations
 
 from src.features.color.core.base_grade_runtime import metal_graph_base_grade_source
+from src.features.color.core.chromogen_runtime import metal_managed_grading_source
 from src.features.color.core.shader_nodes_msl import MSL_LUT3D
 from src.shared.gpu.metal.kernels_color import build_metal_pointwise_grading_msl
 
 
-EDIT_PRIMARY_GRADE_MSL = """
+_EDIT_PRIMARY_HEADER = """
 #include <metal_stdlib>
 using namespace metal;
-""" + build_metal_pointwise_grading_msl(metal_graph_base_grade_source()) + """
+"""
+
+_EDIT_PRIMARY_BODY = """
 
 // Edit feeds the GL Color graph a quantized RGBA8 track. Only the final
 // Color graph output goes back to RGBA8, after all float32 Correctors.
@@ -54,6 +57,14 @@ kernel void edit_track_primary(
     out.write(color, px);
 }
 """
+
+EDIT_PRIMARY_GRADE_MSL = (_EDIT_PRIMARY_HEADER
+                          + build_metal_pointwise_grading_msl(metal_graph_base_grade_source())
+                          + _EDIT_PRIMARY_BODY)
+EDIT_PRIMARY_CHROMOGEN_MSL = ("#define edit_track_primary edit_track_primary_chromogen\n"
+                              + _EDIT_PRIMARY_HEADER
+                              + build_metal_pointwise_grading_msl(metal_managed_grading_source())
+                              + _EDIT_PRIMARY_BODY)
 
 
 EDIT_COMPOSITE_MSL = """

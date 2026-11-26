@@ -1,4 +1,4 @@
-"""Scene-referred Base Grade controls for the Color workspace."""
+"""Scene-referred Tonal Grade controls for the Color workspace."""
 
 from __future__ import annotations
 
@@ -41,6 +41,8 @@ _ZONE_LABELS = {
 _PIVOT_LABEL = ("base_grade.pivot", "Pivot")
 _SAT_LABEL = ("grading.sat", "Saturation")
 _EXPOSURE_DRAG_RATE = 0.01
+# The primary Gain ring moves 18% grey by about 0.27 EV over 60 logical pixels.
+_EXPOSURE_RING_EV_PER_PIXEL = 0.0045
 _TINT_DISK_RADIUS = 0.45
 _EV_MIN = -8.0
 _EV_MAX = 8.0
@@ -176,14 +178,17 @@ class _BaseGradeCanvas(_WheelCanvas):
                 self._set_hovered_arc(self._arc_at(event.position()))
             super().mouseMoveEvent(event)
             return
-        _, radius = self._geometry()
-        arc_height = (radius + self._ARC_GAP) * self._ARC_HEIGHT_FRACTION
         y = event.position().y()
         fine = 0.2 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0
-        movement = (self._last_y - y) * fine / arc_height
+        movement = (self._last_y - y) * fine
         self._last_y = y
-        if movement:
-            self._drag_position = max(-1.0, min(1.0, self._drag_position + movement))
+        if key == "exposure":
+            self._grade_wheel._drag_exposure(movement)
+        elif movement:
+            _, radius = self._geometry()
+            arc_height = (radius + self._ARC_GAP) * self._ARC_HEIGHT_FRACTION
+            position = self._drag_position + movement / arc_height
+            self._drag_position = max(-1.0, min(1.0, position))
             self._grade_wheel._set_arc_position(key, self._drag_position)
         event.accept()
 
@@ -362,8 +367,12 @@ class _BaseGradeWheel(QWidget):
             b=(-point.x() * sin_angle - point.y() * cos_angle) * _TINT_DISK_RADIUS,
         )
 
-    def _drag_master_ring(self, angle: float, _radius: float) -> None:
-        self._set_wheel_values(exposure=self._value("exposure") + angle * 0.45)
+    def _drag_exposure(self, pixels: float) -> None:
+        if pixels:
+            self._set_wheel_values(exposure=self._value("exposure") + pixels * _EXPOSURE_RING_EV_PER_PIXEL)
+
+    def _drag_master_ring(self, angle: float, radius: float) -> None:
+        self._drag_exposure(angle * radius)
 
     def _master_arc_position(self) -> float:
         return self._arc_position("exposure")
@@ -666,7 +675,7 @@ class BaseGradePanel(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
 
         header, layout = create_panel_layout(self, margins=(8, 8, 4), spacing=4)
-        title = QLabel(I18N.tr("base_grade.title", "Base Grade"))
+        title = QLabel(I18N.tr("base_grade.title", "Tonal Grade"))
         title.setStyleSheet(SECTION_TITLE_STYLE)
         header.addWidget(title)
         header.addStretch()
@@ -686,7 +695,7 @@ class BaseGradePanel(QWidget):
         header.addWidget(divider)
         self.reset_btn = QToolButton(self)
         style_reset_button(self.reset_btn, global_reset=True)
-        reset_label = I18N.tr("base_grade.reset", "Reset Base Grade")
+        reset_label = I18N.tr("base_grade.reset", "Reset Tonal Grade")
         self.reset_btn.setToolTip(reset_label)
         self.reset_btn.setAccessibleName(reset_label)
         self.reset_btn.clicked.connect(self.reset)

@@ -32,6 +32,7 @@ from typing import Optional, Protocol, runtime_checkable
 
 import numpy as np
 
+from src.shared.color.camera_input import CAMERA_LOG_CURVES, CAMERA_TO_AP0
 from src.shared.color.types import ColorPrimaries, ColorRange, ColorTransfer, is_hdr_transfer
 
 logger = logging.getLogger(__name__)
@@ -557,6 +558,10 @@ _VIDEO_BT709_TO_GAMUT = {
         [0.019330818716, 0.119194779795, 0.950532152250],
     ]),
 }
+_VIDEO_BT709_TO_GAMUT.update({
+    primaries: np.linalg.solve(to_ap0, _VIDEO_BT709_TO_GAMUT[ColorPrimaries.AP0])
+    for primaries, to_ap0 in CAMERA_TO_AP0.items()
+})
 
 
 @lru_cache(maxsize=49)
@@ -683,6 +688,9 @@ def _video_transfer(rgb: np.ndarray, transfer: ColorTransfer, *, to_linear: bool
                             np.exp2(rgb / 0.07329248 - 7.0) - 0.0075)
         power = 0.07329248 * (np.log2(np.maximum(rgb, 0.00262409) + 0.0075) + 7.0)
         return np.where(rgb <= 0.00262409, rgb * 10.44426855, power)
+    camera_curve = CAMERA_LOG_CURVES.get(transfer)
+    if camera_curve is not None:
+        return camera_curve.convert(rgb, to_linear=to_linear)
     if is_hdr_transfer(transfer):
         if luminance is None:
             raise ValueError("HDR conversion requires a reference white luminance")

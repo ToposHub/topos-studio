@@ -28,6 +28,35 @@ _MODULE_PATH = (
 )
 
 
+def test_source_viewer_worker_renders_per_asset_aces_input(qtbot, tmp_path: Path) -> None:
+    import cv2
+    import numpy as np
+
+    from src.features.edit.ui.source_viewer import _CpuFallbackDecodeWorker
+    from src.shared.color.color_space_descriptor import ACESCG_SCENE
+    from src.shared.color.project_video_signal import (
+        ProjectAcesSettings, aces_input_bgr, aces_input_descriptor, render_aces_bgr,
+    )
+
+    path = str(tmp_path / "camera.png")
+    pixels = np.tile(np.array([38931, 32768, 26850], np.uint16), (2, 2, 1))
+    assert cv2.imwrite(path, pixels)
+    aces = ProjectAcesSettings("2.0", "rec709-g24", "auto", False)
+    camera = "arri-logc4"
+    source = aces_input_descriptor(aces, input_override=camera)
+    scene = aces_input_bgr(pixels, source, ACESCG_SCENE)
+    expected = np.rint(np.clip(render_aces_bgr(scene, ACESCG_SCENE, aces)[0, 0, ::-1], 0, 1) * 255).astype(int)
+    worker = _CpuFallbackDecodeWorker()
+    worker.start()
+    try:
+        with qtbot.waitSignal(worker.signals.frame_ready, timeout=5000) as request:
+            worker.request(path, 0, generation=1, target_size=None, still=True, color=(aces, camera))
+        image = request.args[1]
+        assert image.pixelColor(0, 0).getRgb() == (*expected, 255)
+    finally:
+        worker.stop()
+
+
 def _gl_attribute_usages() -> set[str]:
     tree = ast.parse(_MODULE_PATH.read_text(encoding="utf-8"))
     names: set[str] = set()

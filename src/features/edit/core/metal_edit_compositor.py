@@ -526,14 +526,16 @@ class MetalEditCompositor:
     def _encode_primary_correctors(
         self, correctors: Tuple[np.ndarray, ...], source: Any, output: Any, size: Tuple[int, int],
     ) -> None:
-        if "edit_track_primary" not in self._kernels:
-            from src.features.edit.core.metal_composite_msl import EDIT_PRIMARY_GRADE_MSL
+        chromogen = any(params["chromogen_stage_count"][0] for params in correctors)
+        name = "edit_track_primary_chromogen" if chromogen else "edit_track_primary"
+        if name not in self._kernels:
+            from src.features.edit.core.metal_composite_msl import EDIT_PRIMARY_CHROMOGEN_MSL, EDIT_PRIMARY_GRADE_MSL
 
-            self._kernels["edit_track_primary"] = self._context.compile_kernel(
-                "edit_track_primary", EDIT_PRIMARY_GRADE_MSL)
+            source_code = EDIT_PRIMARY_CHROMOGEN_MSL if chromogen else EDIT_PRIMARY_GRADE_MSL
+            self._kernels[name] = self._context.compile_kernel(name, source_code)
         params = self._context.create_buffer_from_numpy(np.concatenate(correctors))
         count = self._buffer((len(correctors),), np.uint32)
-        self._dispatch("edit_track_primary", size=size, buffers={0: params, 1: count},
+        self._dispatch(name, size=size, buffers={0: params, 1: count},
                        textures={0: source, 1: output})
 
     @staticmethod

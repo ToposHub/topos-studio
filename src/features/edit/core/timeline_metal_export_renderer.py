@@ -191,7 +191,9 @@ _NV12_DELIVERY_BODY = """
 """
 
 
-def _nv12_delivery_shader(operations: tuple[tuple[str, ...], ...]) -> tuple[str, str]:
+def _nv12_delivery_shader(
+    operations: tuple[tuple[str, ...], ...], *, include_chromogen: bool = False,
+) -> tuple[str, str]:
     """Bind one or two video sources with a fixed grading sequence per side."""
     has_primary = any(op != "lut" for side in operations for op in side)
     kind = {"lut": "l", "primary": "g", "primary_lut": "b"}
@@ -199,7 +201,7 @@ def _nv12_delivery_shader(operations: tuple[tuple[str, ...], ...]) -> tuple[str,
         suffix = "_".join("".join(kind[op] for op in side) or "0" for side in operations)
     else:
         suffix = "_".join(str(len(side)) for side in operations)
-    name = "timeline_nv12_lut_" + suffix
+    name = "timeline_nv12_lut_" + suffix + ("_chromogen" if include_chromogen and has_primary else "")
     arguments = []
     grade_lines = []
     texture_index = strength_index = primary_index = 0
@@ -246,8 +248,10 @@ def _nv12_delivery_shader(operations: tuple[tuple[str, ...], ...]) -> tuple[str,
     helpers = ""
     if has_primary:
         from src.features.color.core.base_grade_runtime import metal_graph_base_grade_source
+        from src.features.color.core.chromogen_runtime import metal_managed_grading_source
         from src.shared.gpu.metal.kernels_color import build_metal_pointwise_grading_msl
-        helpers = build_metal_pointwise_grading_msl(metal_graph_base_grade_source())
+        managed = metal_managed_grading_source() if include_chromogen else metal_graph_base_grade_source()
+        helpers = build_metal_pointwise_grading_msl(managed)
         arguments.append("constant GraphGradingParams *grades [[buffer(1)]]")
     signature = f"kernel void {name}(\n" + ",\n    ".join(arguments) + ",\n"
     return name, _NV12_DELIVERY_MSL + helpers + signature + _NV12_DELIVERY_BODY.replace(
@@ -4607,13 +4611,15 @@ class TimelineMetalExportRenderer:
         return handles[0], handles[1]
 
     @_serialize_renderer_call
-    def prepare_nv12_lut(self, operations: tuple[tuple[str, ...], ...]) -> MetalKernel:
+    def prepare_nv12_lut(
+        self, operations: tuple[tuple[str, ...], ...], *, include_chromogen: bool = False,
+    ) -> MetalKernel:
         """Compile the isolated LUT pipeline before any output is submitted."""
         if not self._ensure_ready():
             raise RuntimeError("Metal LUT renderer is unavailable")
         ctx = self._context
         assert ctx is not None
-        name, msl = _nv12_delivery_shader(operations)
+        name, msl = _nv12_delivery_shader(operations, include_chromogen=include_chromogen)
         kernel = self._kernels.get(name)
         if kernel is None:
             kernel = ctx.compile_kernel(name, msl)

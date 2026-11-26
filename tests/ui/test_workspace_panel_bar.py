@@ -75,27 +75,30 @@ def _edit_window(qtbot, config: _Config) -> tuple[_Window, WorkspacePanelBar]:
     return window, window.create_panel_bar("Edit")
 
 
-def test_grading_tools_keep_color_wheel_and_base_grade_tabs_available(qtbot: QtBot) -> None:
+def test_grading_tools_keep_grade_tabs_available(qtbot: QtBot) -> None:
     window = _Window(_Config())
     qtbot.addWidget(window)
     bottom = Qt.DockWidgetArea.BottomDockWidgetArea
     wheels = window.add_panel("dock_grading", bottom)
     base_grade = window.add_panel("dock_base_grade", bottom)
+    chromogen = window.add_panel("dock_chromogen", bottom)
     raw = window.add_panel("dock_raw", bottom)
     window.tabifyDockWidget(wheels, base_grade)
+    window.tabifyDockWidget(base_grade, chromogen)
     window.tabifyDockWidget(wheels, raw)
     bar = window.create_panel_bar("Color")
     bar.compact_default_color_tools()
     window.show()
 
-    for expected in (base_grade, raw, wheels):
+    for expected in (base_grade, raw, chromogen, wheels):
         selected = next(action for action in bar._tools_menu.actions()
                         if action.text() == expected.windowTitle())
         selected.trigger()
         qtbot.waitUntil(lambda: not expected.visibleRegion().isEmpty())
         assert not wheels.isHidden()
         assert not base_grade.isHidden()
-        assert base_grade in window.tabifiedDockWidgets(wheels)
+        assert not chromogen.isHidden()
+        assert {base_grade, chromogen} <= set(window.tabifiedDockWidgets(wheels))
 
 
 def test_library_pool_toggle_switches_layout_and_imports_into_the_live_project(

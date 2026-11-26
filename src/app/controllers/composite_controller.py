@@ -290,6 +290,9 @@ class CompositeControllerMixin:
 
     def _on_composite_frame_ready(self, request_id: int, tex_id: int, width: int, height: int) -> None:
         """Handle composite frame ready — update CompositeViewer."""
+        ensure_monitor = getattr(self, "_ensure_program_monitor_output", None)
+        if getattr(self, "current_page", None) == "Composite" and callable(ensure_monitor):
+            ensure_monitor()
         if self._composite_adapter:
             self._composite_adapter.handle_frame_ready(request_id, tex_id, width, height)
         elif self.current_page == "Composite" and self.composite_viewer:

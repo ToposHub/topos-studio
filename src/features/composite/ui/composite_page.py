@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QEvent, QObject, QPointF, Qt, pyqtSignal, pyqtSlot, QThreadPool, QTimer
 from PyQt6.QtGui import QActionGroup, QCursor, QKeySequence, QShortcut
+from src.shared.color.project_video_signal import ProjectAcesSettings
 
 from src.features.composite.render.composite_renderer import CompositeRenderer, CompositeCommand
 from src.features.composite.render.thumbnail_policy import CompositeThumbnailPolicy, ThumbnailThrottleState, compute_thumbnail_requests
@@ -207,6 +208,7 @@ class CompositePage(QWidget):
 
     # Signal: composite frame ready (request_id for UI stale detection)
     composite_frame_ready = pyqtSignal(int, int, int, int)  # request_id, tex_id, width, height
+    composite_aces_monitor_ready = pyqtSignal(int, object, object)
     # Signal: overlay metadata ready (format/bbox for viewport display)
     composite_metadata_ready = pyqtSignal(dict)
     # Signal: status message for UI feedback
@@ -1485,6 +1487,8 @@ class CompositePage(QWidget):
             ai_compute_manager=self._ai_compute_manager,
         )
         self._renderer.frame_ready.connect(self._on_frame_ready)
+        self._renderer.aces_monitor_frame_ready.connect(self._on_aces_monitor_frame_ready)
+        self._renderer.set_aces_external_monitor(self.__dict__.get("_aces_external_monitor"))
         self._renderer.metadata_ready.connect(self._on_metadata_ready)
         self._renderer.error_occurred.connect(self._on_error)
         self._renderer.node_thumbnail_ready.connect(self._on_node_thumbnail_ready)
@@ -6747,6 +6751,21 @@ class CompositePage(QWidget):
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
     # ── Renderer Callbacks ──
+
+    def set_aces_external_monitor(self, view: ProjectAcesSettings | None) -> None:
+        """Refresh the visible composition when its independent monitor view changes."""
+        if view == self.__dict__.get("_aces_external_monitor"):
+            return
+        self._aces_external_monitor = view
+        if self._renderer is not None:
+            self._renderer.set_aces_external_monitor(view)
+            if view is not None and self._is_active:
+                self._evaluate_graph()
+
+    def _on_aces_monitor_frame_ready(self, request_id: int, view: object, pixels: object) -> None:
+        if (self._is_active and view == self.__dict__.get("_aces_external_monitor")
+                and request_id >= getattr(self, "_last_presented_frame_request_id", 0)):
+            self.composite_aces_monitor_ready.emit(request_id, view, pixels)
 
     def _on_frame_ready(self, request_id: int, tex_id: int, width: int, height: int) -> None:
         # Render completions can trail the newest submitted playhead request.

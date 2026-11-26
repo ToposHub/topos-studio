@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 import numpy as np
 
 from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
+from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_compatibility_error
 
 if TYPE_CHECKING:
     from src.shared.color.lut_loader import LoadedLut
@@ -531,6 +532,7 @@ def apply_layer_grading_cpu(
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Evaluate the primary grade stage for CPU rendering and pointwise bake."""
     from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY, apply_base_grade_working
+    from src.features.color.core.chromogen_runtime import apply_chromogen_working
     from src.features.color.core.composition_uniforms import composition_uniform_values
     from src.features.color.core.primary_calibration import (
         apply_calibration_grid, calibrated_grade_inputs,
@@ -553,9 +555,11 @@ def apply_layer_grading_cpu(
         color, values, source_color=source_color, detail_samples=detail_samples)
     grading = layer.get("grading_params")
     if isinstance(grading, Mapping):
+        signal = layer.get(BASE_GRADE_SIGNAL_KEY)
+        encoded = values["u_rec709_calibration_encoded"]
         color = apply_base_grade_working(
-            color, grading, encoded_input=values["u_rec709_calibration_encoded"],
-            signal=layer.get(BASE_GRADE_SIGNAL_KEY))
+            color, grading, encoded_input=encoded, signal=signal)
+        color = apply_chromogen_working(color, grading, encoded_input=encoded, signal=signal)
     return color, values
 
 
@@ -616,6 +620,7 @@ CPU_GRADING_BASIC_KEYS = frozenset({
     "log_offset", "log_low_range", "log_high_range", "lum_mix",
     "primary_calibration_version",
     *BASE_GRADE_DEFAULTS,
+    CHROMOGEN_KEY,
 })
 
 #: GL composition 忽略的别名死键（Layer 默认 dict 携带；CPU 同样忽略，
@@ -676,6 +681,8 @@ def production_layer_domain_errors(layer: Mapping[str, Any], *,
     errors: list[str] = []
     grading = layer.get("grading_params")
     grading = grading if isinstance(grading, Mapping) else {}
+    if error := chromogen_compatibility_error(grading.get(CHROMOGEN_KEY)):
+        errors.append(error)
     try:
         calibrated = grade_uses_calibration(layer)
     except ValueError as exc:

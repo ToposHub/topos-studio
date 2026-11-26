@@ -19,7 +19,7 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from src.features.color.core.color_graph_param_source import node_layer_payload
+from src.features.color.core.color_graph_param_source import graph_node_layer_provider
 from src.shared.project.color_graph import ColorGraphData, NodeType
 
 
@@ -31,6 +31,12 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
     LUT（复用 CPU oracle 的域错误表，另放行 LUT）。
     """
     errors: list[str] = []
+    from src.features.color.core.x_grade_domain import (
+        X_GRADE_WORKING_KEY, X_GRADE_WORKING_MESSAGE, active_x_grade_node,
+    )
+
+    if graph.working_color_context.get(X_GRADE_WORKING_KEY) is False and active_x_grade_node(graph):
+        errors.append(X_GRADE_WORKING_MESSAGE)
     chain: list[Any] = []
     current = graph
     # 结构走查：从 source 沿唯一 image 出边下行
@@ -70,8 +76,9 @@ def graph_pointwise_export_errors(graph: ColorGraphData) -> list[str]:
     from src.features.color.core.color_graph_cpu import (
         production_layer_domain_errors,
     )
+    layer_for = graph_node_layer_provider(graph)
     for candidate in chain:
-        payload = node_layer_payload(candidate)
+        payload = layer_for(candidate.node_id)
         if payload is None or payload.get("visible") is False:
             continue
         # N05：节点 Color Space/Gamma 变换未在 bake 数学内（v1）——
@@ -178,25 +185,26 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
         load_lut, resample_to_unit_domain, sample_lut_trilinear,
     )
     layer = dict(payload)
+    encoded = bool(layer.get("_rec709_calibration_encoded"))
     try:
         out, _ = apply_layer_grading_cpu(color, layer, width=1, height=1)
     except UnsupportedNode as exc:
         raise ValueError(str(exc)) from exc
     curves = layer.get("curves_lut")
     if curves is not None:
-        out = apply_curves_cpu(out, curves)
+        out = apply_curves_cpu(out, curves, encoded_input=encoded)
     hsl_curves = layer.get("hsl_curve_lut")
     if hsl_curves is not None:
         from src.features.color.core.advanced_grade_cpu import apply_hsl_curves_image
 
-        out = apply_hsl_curves_image(out, hsl_curves)
+        out = apply_hsl_curves_image(out, hsl_curves, encoded_input=encoded)
     from src.features.color.core.curves_soft_clip import uses_calibrated_soft_clip
 
     soft_clip = layer.get("curves_soft_clip")
     if uses_calibrated_soft_clip(soft_clip):
         from src.features.color.core.advanced_grade_cpu import apply_curves_soft_clip_image
 
-        out = apply_curves_soft_clip_image(out, dict(soft_clip))
+        out = apply_curves_soft_clip_image(out, dict(soft_clip), encoded_input=encoded)
     # CW-B09:warper 在 grading/curves 之后、LUT 之前(与 composition
     # 管线位序一致:... → mixer → WARPER → lut3d)
     warper = _pointwise_warper(layer)
@@ -208,9 +216,13 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
         )
         offsets, space = warper
         if space in WARPER_PREPARED_SPACES:
-            from src.features.color.core.warper_color import apply_resolve_hs709
+            from src.features.color.core.warper_color import (
+                apply_resolve_hs709_texture, prepare_resolve_hs709_texture,
+            )
 
-            out = apply_resolve_hs709(out, offsets, space).astype(np.float64, copy=False)
+            texture = prepare_resolve_hs709_texture(offsets, space)
+            out = apply_resolve_hs709_texture(out, texture, space, encoded_input=encoded).astype(
+                np.float64, copy=False)
         elif space == 0:
             out = np.stack([apply_warper_legacy_hsv(pixel, offsets) for pixel in out])
         else:
@@ -231,7 +243,9 @@ def _apply_pointwise_corrector(color: np.ndarray, payload: Mapping[str, Any],
 
 
 def bake_graph_lut(graph: ColorGraphData, size: int = 33,
-                   *, domain: tuple[float, float] = (0.0, 1.0)) -> str:
+                   *, domain: tuple[float, float] = (0.0, 1.0),
+                   rec709_calibration_encoded: bool = False,
+                   base_grade_signal: Mapping[str, Any] | None = None) -> str:
     """串行 pointwise 链 → 标准 .cube 文本（导出入口）。
 
     Raises:
@@ -249,6 +263,8 @@ def bake_graph_lut(graph: ColorGraphData, size: int = 33,
     lut_cache: dict = {}
     # 串行链（预检已保证结构）
     node_by_id = {n.node_id: n for n in graph.nodes}
+    layer_for = graph_node_layer_provider(
+        graph, rec709_calibration_encoded=rec709_calibration_encoded, base_grade_signal=base_grade_signal)
     node = node_by_id[graph.source_node_id]
     current = rgb
     while True:
@@ -261,9 +277,11 @@ def bake_graph_lut(graph: ColorGraphData, size: int = 33,
         nxt = node_by_id.get(image_outs[0].dst_node)
         if nxt is None or nxt.node_type == NodeType.OUTPUT.value:
             break
-        payload = node_layer_payload(nxt)
+        payload = layer_for(nxt.node_id)
         if payload is not None and payload.get("visible") is not False:
-            current = _apply_pointwise_corrector(current, payload, lut_cache)
+            graded = _apply_pointwise_corrector(current, payload, lut_cache)
+            opacity = float(payload.get("opacity", 1.0))
+            current = graded if opacity == 1.0 else current + opacity * (graded - current)
         node = nxt
     table = np.clip(current, dmin, dmax).reshape(size, size, size, 3)
     # .cube 行序：for b: for g: for r —— 与 parse_cube 一致

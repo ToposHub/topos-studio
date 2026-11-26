@@ -1,4 +1,4 @@
-"""Guard X Grade's Rec.709 working domain without modifying other grades."""
+"""Guard Selective Grade's Rec.709 working domain without modifying other grades."""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -14,7 +14,7 @@ from src.shared.project.color_graph import ColorGraphData
 
 
 X_GRADE_WORKING_KEY = "x_grade_working_supported"
-X_GRADE_WORKING_MESSAGE = "X Grade requires linear Rec.709 or Rec.709 Gamma 2.4."
+X_GRADE_WORKING_MESSAGE = "Selective Grade requires linear Rec.709 or Rec.709 Gamma 2.4."
 # The rectangular scope presents the stored chromaticities along these two axes.
 X_GRADE_SCOPE_AXES = np.array(((-0.88, -0.98), (1.06, -0.62)))
 _GAMMA24 = descriptor_for_space_preset("rec709-g24")

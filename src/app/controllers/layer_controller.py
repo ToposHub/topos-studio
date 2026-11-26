@@ -2831,8 +2831,9 @@ class LayerOpsMixin:
     @staticmethod
     def _patch_touches_legacy_primaries(patch: dict[str, Any]) -> bool:
         from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
+        from src.features.color.core.chromogen import CHROMOGEN_KEY
 
-        return not BASE_GRADE_DEFAULTS.keys() >= patch.keys()
+        return bool(patch.keys() - BASE_GRADE_DEFAULTS.keys() - {CHROMOGEN_KEY})
 
     def _begin_legacy_primary_grade(self, patch: dict[str, Any]) -> None:
         """Persist the displayed profile before the first real legacy-engine edit."""
@@ -2978,6 +2979,8 @@ class LayerOpsMixin:
 
     def _route_grading_extended_to_graph(self, graph_host, patch: dict) -> bool:
         """扩展参数的图手势路由（与 _route_grading_to_graph 同约定）。"""
+        from src.features.color.core.chromogen import CHROMOGEN_KEY
+
         node_id = graph_host.active_grade_node_id()
         if not node_id:
             return False
@@ -2991,10 +2994,16 @@ class LayerOpsMixin:
         for name, value in patch.items():
             if self._grade_value_equal(current.get(name, DEFAULT_EXTENDED_GRADING_PARAMS[name]), value):
                 continue
-            patch_value = (value if isinstance(value, (tuple, list))
+            patch_value = (value if name == CHROMOGEN_KEY or isinstance(value, (tuple, list))
                            else float(value))
-            accepted = graph_host.submit_grade_change(
-                node_id, name, patch_value, self._graph_gesture_tid) or accepted
+            submitted = graph_host.submit_grade_change(node_id, name, patch_value, self._graph_gesture_tid)
+            if name == CHROMOGEN_KEY and not submitted:
+                graph_host.cancel_grade_gesture()
+                panel = getattr(getattr(self, "grading_panel", None), "chromogen_panel", None)
+                if panel is not None:
+                    panel.set_params(current)
+                return True
+            accepted = submitted or accepted
         if not accepted:
             return True
         version = (self._pending_primary_calibration(current)
@@ -3017,6 +3026,8 @@ class LayerOpsMixin:
 
     def _maybe_record_grade_keyframes_extended(self, patch: dict) -> None:
         """扩展参数的关键帧录制（与 _maybe_record_grade_keyframes 同语义）。"""
+        from src.features.color.core.chromogen import CHROMOGEN_KEY
+
         if getattr(self, "_color_keyframes_host", None) is not None:
             return  # centralized recorder commits with the graph gesture
         engine = self.engine
@@ -3031,7 +3042,7 @@ class LayerOpsMixin:
         tracks = getattr(layer, 'grade_keyframes', None) or {}
         wrote = False
         for name, value in patch.items():
-            if name not in self._GRADING_EXTENDED_KEYS or name == PRIMARY_CALIBRATION_VERSION_KEY:
+            if name not in self._GRADING_EXTENDED_KEYS or name in (PRIMARY_CALIBRATION_VERSION_KEY, CHROMOGEN_KEY):
                 continue
             if record_mode or name in tracks:
                 if engine.record_grade_keyframe(frame, name, value):
@@ -3470,7 +3481,9 @@ class LayerOpsMixin:
             if layer is not None and (not result.get("ok") or phase != "update"):
                 panel.load_layer_state(layer, force=not result.get("ok"))
                 if not result.get("ok"):
-                    panel.notice_requested.emit(I18N.tr("x_grade.rejected", "Could not apply X Grade to this corrector."))
+                    panel.notice_requested.emit(I18N.tr(
+                        "x_grade.rejected", "Could not apply Selective Grade to this corrector.",
+                    ))
             elif layer is None and not result.get("ok"):
                 panel.clear_target()
         elif not result.get("ok") and calibrated:

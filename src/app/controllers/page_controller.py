@@ -422,9 +422,10 @@ class PageManagementMixin:
             if callable(close_lightbox):
                 close_lightbox()
         if from_page == "Color" and page_name != from_page:
-            base_grade = getattr(self, "dock_base_grade", None)
-            if base_grade is not None:
-                base_grade.widget().finish_edit(commit=True)
+            for attr in ("dock_base_grade", "dock_chromogen"):
+                dock = getattr(self, attr, None)
+                if dock is not None:
+                    dock.widget().finish_edit(commit=True)
             previews = getattr(self, "_grade_set_previews", None)
             if previews is not None:
                 previews.leave_page()
@@ -1189,7 +1190,7 @@ class PageManagementMixin:
             from src.shared.color.desktop_video_color import USE_DISPLAY_ICC
             from src.shared.color.hdr_video_signal import hdr_monitor_space, project_hdr_settings
             from src.shared.color.project_video_signal import (
-                aces_monitor_space, project_aces_settings, video_signal_spaces,
+                aces_desktop_monitor_settings, aces_monitor_space, project_aces_settings, video_signal_spaces,
             )
             from src.shared.color.types import ColorTransfer  # noqa: F401 — types 模块可用性探测（见下方 except 注释）
             # A timeline-clip composite (runtime_context set) is video;
@@ -1234,7 +1235,7 @@ class PageManagementMixin:
                     set_display_icc(self.config_manager.get(USE_DISPLAY_ICC, False) is True)
                 project = getattr(self, "_current_edit_project", None)
                 settings = getattr(project, "color_management", None)
-                aces = project_aces_settings(settings) if is_video else None
+                aces = aces_desktop_monitor_settings(project_aces_settings(settings)) if is_video else None
                 if aces is not None and set_project_output(aces_monitor_space(), aces=aces):
                     return
                 hdr = project_hdr_settings(settings) if is_video else None

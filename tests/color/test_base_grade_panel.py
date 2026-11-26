@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QLabel, QTabBar
 
 from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
 from src.features.color.ui.color_wheel import GradingPanel, KnurledJogWheel
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import DARK_THEME
 
 
@@ -25,6 +26,23 @@ def _show_base_grade(panel: GradingPanel, qtbot) -> None:
 def _arc_point(wheel, side: int, dy: int = 0) -> QPoint:
     center, radius = wheel.canvas._geometry()
     return center.toPoint() + QPoint(round(radius + wheel.canvas._ARC_GAP) * side, dy)
+
+
+@pytest.mark.parametrize(("locale", "title", "reset"), (
+    ("en_US", "Tonal Grade", "Reset Tonal Grade"),
+    ("zh_CN", "明暗调色", "重置明暗调色"),
+))
+def test_tonal_grade_title_and_reset_are_localized(qtbot, locale: str, title: str, reset: str) -> None:
+    original_locale = I18N.get_current_locale()
+    try:
+        assert I18N.load_locale(locale)
+        panel = GradingPanel()
+        qtbot.addWidget(panel)
+        base = panel.base_grade_panel
+        assert any(label.text() == title for label in base.findChildren(QLabel))
+        assert base.reset_btn.accessibleName() == reset
+    finally:
+        I18N.load_locale(original_locale)
 
 
 def test_base_grade_is_separate_from_primary_modes_and_has_header_icons(qtbot) -> None:
@@ -183,12 +201,44 @@ def test_exposure_arc_shift_adjusts_only_the_next_movement(qtbot) -> None:
     qtbot.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
     qtbot.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=end)
     normal_value = field.value()
-    assert normal_value > 0
+    assert normal_value == pytest.approx(0.135)
 
     qtbot.mouseDClick(canvas, Qt.MouseButton.LeftButton, pos=start)
     qtbot.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
     qtbot.mouseRelease(canvas, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, pos=end)
     assert field.value() == pytest.approx(normal_value * 0.2, abs=0.01)
+
+
+@pytest.mark.parametrize(("width", "zone"), ((496, "balance"), (820, "dim"), (820, "bright")))
+def test_exposure_arc_has_the_same_rate_across_wheel_sizes_and_ranges(qtbot, width: int, zone: str) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    _show_base_grade(panel, qtbot)
+    base = panel.base_grade_panel
+    base.resize(width, 350)
+    if zone == "bright":
+        base.zone_buttons.button(1).click()
+    wheel = base._wheels[zone]
+    start = _arc_point(wheel, 1)
+    qtbot.mousePress(wheel.canvas, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseRelease(wheel.canvas, Qt.MouseButton.LeftButton, pos=start - QPoint(0, 60))
+    assert wheel._value("exposure") == pytest.approx(0.27)
+
+
+def test_exposure_drag_can_reverse_immediately_at_limit(qtbot) -> None:
+    panel = GradingPanel()
+    qtbot.addWidget(panel)
+    _show_base_grade(panel, qtbot)
+    base = panel.base_grade_panel
+    base.set_params({"base_grade_balance_exposure": 7.99})
+    wheel = base._wheels["balance"]
+    start = _arc_point(wheel, 1)
+    canvas = wheel.canvas
+    qtbot.mousePress(canvas, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(canvas, start - QPoint(0, 30))
+    assert wheel._value("exposure") == 8.0
+    qtbot.mouseRelease(canvas, Qt.MouseButton.LeftButton, pos=start - QPoint(0, 20))
+    assert wheel._value("exposure") == pytest.approx(7.955)
 
 
 @pytest.mark.parametrize("key, side", (("exposure", 1), ("saturation", -1)))

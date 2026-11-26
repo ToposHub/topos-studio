@@ -33,6 +33,7 @@ from src.features.edit.core.playback_debug import playback_trace
 from src.shared.color.color_space_descriptor import ColorSpaceDescriptor, LINEAR_SCENE
 from src.shared.color.video_signal_gl import VIDEO_SIGNAL_GLSL, bind_video_signal_transform
 from src.shared.color.aces_video_gl import AcesVideoGLPass, aces_shader_key
+from src.shared.color.aces_monitor_readback import AcesMonitorReadback
 from src.shared.color.project_video_signal import ProjectAcesSettings
 from src.shared.color.color_transform_provider import VideoSignalLuminance
 from src.shared.gpu.present_frame import (
@@ -351,6 +352,7 @@ class EditRenderTask:
     # Immutable full-range timeline and output descriptors for the final pass.
     output_transform: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None = None
     aces: ProjectAcesSettings | None = None
+    monitor_aces: ProjectAcesSettings | None = None
     luminance: VideoSignalLuminance | None = None
     scrub_settled: bool = False
     scrub_source_frames: tuple[ScrubSourceFrame, ...] = ()
@@ -660,6 +662,7 @@ class EditGpuPreviewRenderer(QThread):
     # CPU 帧缓存，让"seek 回看刚看过的帧"无需重新解码。只在
     # arm_frame_snapshot() 布防后的下一帧触发，播放热路径零成本。
     snapshot_ready = pyqtSignal(int, int, object)  # frame, generation, QImage
+    aces_monitor_frame_ready = pyqtSignal(int, int, object)  # frame, generation, MonitorRGBAFrame
     # W03（计划 W-I02）：cuda 驻留帧 GL 导入失败——按素材上报
     # (asset_path, reason, generation_id)，TPR 转交 EditGpuDecodeManager
     # .note_resident_import_failure 拉起"停新驻留请求 → 租约归零关旧源
@@ -1438,10 +1441,13 @@ class EditGpuPreviewRenderer(QThread):
         # Task loop
         while self._running:
             self._poll_native_viewport()
+            self._poll_aces_monitor_readback()
             # With a native frame on the GPU, wake up as soon as it completes
             # instead of waiting for the next ~60 Hz poll.
             producer = self.__dict__.get("_native_producer")
-            poll_s = 0.002 if producer is not None and producer.in_flight else 0.016
+            monitor = self.__dict__.get("_aces_monitor_readback")
+            poll_s = 0.002 if ((producer is not None and producer.in_flight)
+                              or (monitor is not None and monitor.transfer_pending)) else 0.016
             try:
                 task = self._queue.get(timeout=poll_s)  # ~60Hz poll
             except queue.Empty:
@@ -1483,6 +1489,10 @@ class EditGpuPreviewRenderer(QThread):
 
             self._mutex.lock()
             try:
+                if not task.background and task.monitor_aces is None:
+                    monitor = self.__dict__.pop("_aces_monitor_readback", None)
+                    if monitor is not None:
+                        monitor.release()
                 playback_trace(
                     "gpu_renderer.process_start",
                     frame=task.frame,
@@ -2687,6 +2697,8 @@ class EditGpuPreviewRenderer(QThread):
                 self._composite_tex, self._composite_fbo = target, target_fbo
             if working is None:
                 return None
+            if task.monitor_aces is not None:
+                self._submit_aces_monitor_readback(task, working)
             if task.aces is None:
                 self._render_video_signal(working, target_fbo, task.output_transform,
                                           luminance=task.luminance)
@@ -2722,6 +2734,37 @@ class EditGpuPreviewRenderer(QThread):
             final_tex = _composite_for_presentation()
 
         self._publish_composited_frame(task, final_tex, w, h, len(track_textures))
+
+    def _submit_aces_monitor_readback(self, task: EditRenderTask, working: Any) -> None:
+        from OpenGL.error import GLError
+        from moderngl import Error as ModernGLError
+
+        monitor = self.__dict__.get("_aces_monitor_readback")
+        if monitor is None:
+            self._aces_monitor_readback = monitor = AcesMonitorReadback(self.ctx)
+        try:
+            monitor.submit(working, task.output_transform[0], task.monitor_aces,
+                           task.frame, task.generation_id, supersede=task.deadline_ns <= 0)
+        except (OSError, ValueError, RuntimeError, GLError, ModernGLError) as error:
+            logger.warning("External ACES monitor render failed: %s", error)
+
+    def _poll_aces_monitor_readback(self) -> None:
+        monitor = self.__dict__.get("_aces_monitor_readback")
+        if monitor is None or not monitor.transfer_pending:
+            return
+        from OpenGL.error import GLError
+        from moderngl import Error as ModernGLError
+
+        self._mutex.lock()
+        try:
+            if result := monitor.take(self._generation_id):
+                self.aces_monitor_frame_ready.emit(*result)
+        except (OSError, ValueError, RuntimeError, GLError, ModernGLError) as error:
+            logger.warning("External ACES monitor readback failed: %s", error)
+            monitor.release()
+            self._aces_monitor_readback = None
+        finally:
+            self._mutex.unlock()
 
     def _metal_preview_plan(self, task: EditRenderTask) -> Optional[tuple]:
         """Whether ``task`` may use the Metal preview: ``(layer, source, lut)``.
@@ -4852,15 +4895,15 @@ class EditGpuPreviewRenderer(QThread):
     @staticmethod
     def _grade_params_to_uniforms(grade: dict) -> dict:
         """Translate persisted ColorStack controls to shader-ready uniforms."""
-        from src.features.color.core.base_grade import base_grade_active
+        from src.features.color.core.base_grade_runtime import managed_primary_active
         from src.features.color.core.primary_calibration import grade_uses_calibration
         from src.features.color.core.the_decompiler import GradingMath
 
         if grade_uses_calibration(grade):
             raise ValueError("Measured primary calibration requires the color graph or CPU compositor")
         params = dict((grade or {}).get('grading_params', {}) or {})
-        if base_grade_active(params):
-            raise ValueError("Base Grade requires the color graph or CPU compositor")
+        if managed_primary_active(params):
+            raise ValueError("Tonal Grade and Look Dev require the color graph or CPU compositor")
 
         def scalar(name: str) -> float:
             try:
@@ -6565,6 +6608,9 @@ void main() {
 
     def _cleanup(self) -> None:
         """Release all GL resources."""
+        monitor = self.__dict__.pop("_aces_monitor_readback", None)
+        if monitor is not None:
+            monitor.release()
         graph_renderer = getattr(self, "_color_graph_texture_renderer", None)
         if graph_renderer is not None:
             graph_renderer.release()

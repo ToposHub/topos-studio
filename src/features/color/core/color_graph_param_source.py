@@ -85,6 +85,8 @@ def node_layer_payload(node: Any, *,
         if isinstance(overlay, Mapping) and overlay:
             merged = dict(payload.get(dto_key) or {})
             merged.update(overlay)
+            if graph_key == "grade" and "chromogen" in overlay:
+                merged["chromogen"] = unfreeze_params(overlay["chromogen"])
             payload[dto_key] = merged
     # 标量域：enabled/opacity/blend_mode（project_legacy_layers 同式）
     payload["visible"] = node.enabled
@@ -239,11 +241,13 @@ def graph_node_layer_provider(
         payload = node_layer_payload(node)
         if payload is not None and not x_grade_supported:
             bypass_x_grade(payload)
-        if payload is not None and (rec709_calibration_encoded or signal):
+        if payload is not None:
             color = node.params.get("color")
-            if not isinstance(color, Mapping) or node_color_is_identity(
+            if isinstance(color, Mapping) and not node_color_is_identity(
                 color.get("color_space"), color.get("gamma"),
             ):
+                payload["_node_input_color"] = color.get("color_space"), color.get("gamma")
+            else:
                 if rec709_calibration_encoded:
                     payload["_rec709_calibration_encoded"] = True
                 if signal:

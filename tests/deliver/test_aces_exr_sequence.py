@@ -91,6 +91,46 @@ def test_timeline_aces_exr_sequence_reimport_and_delivery(tmp_path: Path) -> Non
             np.testing.assert_allclose(actual, np.broadcast_to(pixel, actual.shape), atol=6e-6)
 
 
+def test_aces_exr_delivery_uses_each_asset_input_even_when_files_are_shared(tmp_path: Path) -> None:
+    import cv2
+    import OpenEXR
+    import PyOpenColorIO as ocio
+
+    from src.features.edit.core.project import EditProject, MediaAsset
+    from src.features.edit.core.timeline_export import ExportCodec, TimelineExportConfig, create_timeline_exporter
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+    from src.shared.media.metadata import Rational
+
+    source = str(tmp_path / "log.png")
+    code = np.array([25290, 32768, 39211], dtype=np.uint16)
+    assert cv2.imwrite(source, np.broadcast_to(code[::-1], (16, 16, 3)).copy())
+    selections = (("arri-logc4", "ARRI LogC4"), ("sony-slog3-sgamut3cine", "S-Log3 S-Gamut3.Cine"))
+    assets = {str(i): MediaAsset(str(i), source, "image", "Camera", {}).with_input_color_space(choice)
+              for i, (choice, _) in enumerate(selections)}
+    project = EditProject("project", "Camera conversions", assets=assets).with_color_management({
+        "color.timeline_space": "acescct", "color.output_space": "acescg", "color.aces.version": "2.0",
+    })
+    clips = tuple(ClipInstance(f"clip{i}", str(i), "track", i, 1, 0, 1) for i in range(2))
+    timeline = TimelineSequence(
+        timeline_id="sequence", name="ACES", width=16, height=16, fps=Rational(24, 1),
+        video_tracks=(EditTrack("track", "V1", "video", 0, clips=clips),),
+    )
+    config = TimelineExportConfig(
+        output_path=str(tmp_path / "camera.exr"), codec=ExportCodec.EXR_SEQUENCE,
+        bit_depth=32, timeline_id=timeline.timeline_id, include_audio=False, burn_subtitles=False,
+    )
+    result = create_timeline_exporter(project, timeline).export_timeline(config)
+    assert result.success, result.cause
+    ocio_config = ocio.Config.CreateFromBuiltinConfig("studio-config-v4.0.0_aces-v2.0_ocio-v2.5")
+    for path, (_, ocio_space) in zip(sorted(tmp_path.glob("*.exr")), selections, strict=True):
+        processor = ocio_config.getProcessor(ocio_space, "ACEScg").getDefaultCPUProcessor()
+        expected = code.astype(np.float32) / 65535.0
+        processor.applyRGB(expected)
+        with OpenEXR.File(str(path)) as file:
+            actual = file.channels()["RGB"].pixels
+            np.testing.assert_allclose(actual, np.broadcast_to(expected, actual.shape), rtol=5e-5, atol=4e-6)
+
+
 @pytest.mark.parametrize(("space", "depth", "dtype"), [
     ("aces2065-1", 16, np.float16), ("acescg", 32, np.float32),
 ])

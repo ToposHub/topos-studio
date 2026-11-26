@@ -205,13 +205,19 @@ resolution_readbacks` 在命令循环里轮询，fence 就绪后 emit）；PBO �
   （if u_sc_enabled）→ mixer → warper → 3D LUT → 插件 `process_P{i}` →
   blend_mode → `mix(color, blended, mask * u_opacity)` → film grain → 输出
   `vec4(color, tex_color.a)`。
-- Base Grade 与色轮并列停靠，标题栏图标切换影调区间，响应曲线随面板宽度自动显隐。
-  Base Grade 使用当前 Corrector 的 `grading_params`，标量字段以
+- 明暗调色（Tonal Grade）与色轮并列停靠，标题栏图标切换影调区间，响应曲线随面板宽度自动显隐。
+  明暗调色使用当前 Corrector 的 `grading_params`，标量字段以
   `base_grade_` 开头，旧工程缺少字段时使用中性参数，现有关键帧和撤销机制继续处理这些标量。
-  Base Grade 在一级调色之后、曲线之前执行，随后与该节点的限定器、蒙版和不透明度一同合成。
+  明暗调色在一级调色之后、曲线之前执行，随后与该节点的限定器、蒙版和不透明度一同合成。
   CPU、OpenGL 和 Metal 使用相同的曝光与影调区间响应。参数非中性时按工作域转换至线性
   Rec.709 执行，再恢复到节点输入域。LUT 导出沿用采样域的同一转换。
   [Baselight TIFF 对照](../validation/baselight_base_grade_calibration.md)
+- Look Dev（风格设计）在当前 Corrector 的 `grading_params.chromogen` 保存版本 1 的调色阶段、顺序、启停和总强度。
+  缺少该键时按中性处理，未来版本保留工程内容并报告不支持的渲染状态。它接在明暗调色之后、
+  曲线之前，在线性 Rec.709 中依序应用阶段，然后恢复到节点输入域。OpenGL 通过一个 uniform 数组接收
+  有序参数，Metal 使用相同的定长缓冲区。重排与参数拖动更新数值，无需重新编译。CPU 时间线回退、
+  图 LUT 烘焙和图层 LUT 导出共用同一阶段顺序与数学。
+  [Baselight TIFF 对照](../validation/baselight_chromogen_calibration.md)
 - 色彩扭曲器保存各面板的控制数据和算法版本。色相–饱和度与色度–亮度可以叠加，
   色度扭曲使用自己的笔画和固定点。执行 DTO 根据当前模式派生控制载荷，CPU、OpenGL
   和 Metal 在既有 warper 阶段采样同一响应纹理。查看器暂停取样在 Corrector 的
@@ -222,12 +228,12 @@ resolution_readbacks` 在命令循环里轮询，fence 就绪后 emit）；PBO �
   Warper 手势的逐步预览只提交到调色合并队列，松手再提交节点的完整状态。
   同一节点和视频帧内的采样刷新保留已有分布，新的已确认样本一次性替换旧分布。
   [色彩扭曲器实测](../validation/resolve_warper_calibration.md)
-- X Grade 在 `warper_state.x_grade` 按子 schema 版本 1 保存有序颜色笔画、保护点和中性保护。
+- 选色调节（Selective Grade）在 `warper_state.x_grade` 按子 schema 版本 1 保存有序颜色笔画、保护点和中性保护。
   UI 通过色彩扭曲器的模式图标切换，色度图的弧形底图独立于 Rec.709 取色坐标并适配横向面板。
   可见且启用取色的模式独占查看器取色手势，
   切换或隐藏工具时会取消预览并清除取色标记。
   旧工程可以省略该字段。渲染线程将颜色位移与曝光档位求解为共享响应纹理，
-  供 OpenGL、Metal 和 CPU 采样。X Grade 在同一校色节点内接在原有色彩扭曲器之后，
+  供 OpenGL、Metal 和 CPU 采样。选色调节在同一校色节点内接在原有色彩扭曲器之后，
   与它共用渲染纹理槽位。工作域为线性 Rec.709 或 Rec.709 Gamma 2.4。
   亮度分区采用对数采样，曝光乘数作用于场景线性数据并保留超白信号。
   点态 LUT 导出从同一响应求值。[Baselight 手感和 TIFF 对照](../validation/baselight_x_grade_calibration.md)
@@ -632,9 +638,15 @@ ImageEngine.bake_layer → submit(BAKE_LAYER)              [关键命令]
 
 ## 9. 视频工程的 ACES 边界
 
+视频工程首选项与工程色彩设置在「色彩科学」中选择 TOPOS Color Manager 或 ACES。ACES 首次切入时使用 ACEScct 工作空间和 Rec.709 输出变换。工程的时间线预设同时确定色彩科学模式，ACES 版本、输入和输出各自保存为工程设置。
+
 选择 ACES 时间线后，剪辑、调色和交付在调色前把素材转换到所选工作编码。ACES 1.3 可在这个边界应用参考色域压缩。ACES 输入和调色缓冲保留浮点负值和高光。合成图内部使用场景线性 RGB，时间线输入节点在进入图之前解码素材或调色输出，返回剪辑时再编码到时间线空间。
 
-三处查看器以线性 AP1 为共同输入调用固定版本的 OpenColorIO Rec.709 输出变换。OpenGL 使用 OCIO 生成的解析着色器和它的查表纹理。CPU 回退与 Rec.709 交付使用同版 OCIO 处理器。macOS 显示器 ICC 在桌面呈现时应用。AP0 和 AP1 OpenEXR 的输出阶段写入场景线性浮点像素、色度及关联 Alpha，预览继续使用 Rec.709 输出变换。
+媒体池右键「输入色彩空间」从工程默认或单个摄影机预设解释素材。多选时一次提交给撤销栈。ARRI 的 LogC3 EI800、LogC4 和 Sony 的 S-Log3 两个色域预设各自包含原始基色与传递函数。素材解释保存在资产上，同一资产在时间线、源查看器和交付中共用该输入。
+
+桌面监看、外接监看和文件交付从调色后的工作空间数据分流。桌面内置变换为 Rec.709。外接监看可选 Rec.709 或影院 DCI-P3，影院使用 P3-DCI Gamma 2.6、48 nit，通过 DeckLink 原生 8 位 RGB 路径发送给配置了相同目标的上屏设备。内置影院变换适用于 ACES 1.3。工程可以为桌面和外接各载入一个独立的 ACEScct 输入 3D `.cube`，替换该路内置监看变换。LUT 文件以内嵌资源保存，桌面 LUT 的输出匹配 Rec.709 Gamma 2.4，外接 LUT 的输出匹配所选外接信号。ACES 2.0 可使用自带的影院输出 LUT。
+
+三处桌面查看器以线性 AP1 为共同输入，内置变换使用固定版本的 OpenColorIO，macOS 显示器 ICC 在桌面呈现时应用。OpenGL 使用 OCIO 生成的解析着色器和查表纹理，自定义监看 LUT 在 CPU 和 OpenGL 上采用四面体插值。Rec.709 交付继续使用工程的 OCIO 输出变换，AP0 和 AP1 OpenEXR 写入场景线性浮点像素、色度及关联 Alpha。
 
 - [工程设置、输入和 CPU 路径](../../src/shared/color/project_video_signal.py)
 - [OpenGL 输出变换](../../src/shared/color/aces_video_gl.py)

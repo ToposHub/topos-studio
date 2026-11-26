@@ -48,6 +48,8 @@ from src.features.color.core.base_grade_runtime import (
     BASE_GRADE_SIGNAL_KEY, BASE_GRADE_SIGNAL_UNIFORMS, BASE_GRADE_UNIFORMS,
     base_grade_signal_uniform_values, base_grade_uniform_values,
 )
+from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_active, chromogen_compatibility_error
+from src.features.color.core.chromogen_runtime import CHROMOGEN_UNIFORM_ROWS, chromogen_uniform_values
 from src.features.color.core.layer import Layer
 from src.features.color.core.curves_soft_clip import soft_clip_calibration_version
 from src.features.color.core.mist import mist_is_calibrated, mist_render_params
@@ -98,11 +100,13 @@ class UniformDecl:
     msl_type: str = "float"
     components: int = 1
     offset: int = -1  # -1 = 未布局（sampler）
+    array_size: int = 0
 
     def glsl_declaration(self) -> str:
         """生成单条 GLSL uniform 声明行（sampler 以 ``kind`` 作类型名）。"""
         if self.kind == "value":
-            return f"uniform {self.glsl_type} {self.name};"
+            array = f"[{self.array_size}]" if self.array_size else ""
+            return f"uniform {self.glsl_type} {self.name}{array};"
         return f"uniform {self.kind} {self.name};"
 
 
@@ -140,7 +144,9 @@ class CompositionUniformManifest:
         lines = [f"struct {struct_name} {{"]
         for d in self.value_decls():
             base, ncomp, _ = _MSL_SCALAR[d.glsl_type]
-            if ncomp == 1:
+            if d.array_size:
+                lines.append(f"    {base} {d.name}[{d.array_size * ncomp}];")
+            elif ncomp == 1:
                 lines.append(f"    {base} {d.name};")
             else:
                 for i in range(ncomp):
@@ -155,7 +161,9 @@ class CompositionUniformManifest:
         fields = []
         for d in self.value_decls():
             base, ncomp, np_base = _MSL_SCALAR[d.glsl_type]
-            if ncomp == 1:
+            if d.array_size:
+                fields.append((d.name, f"<{np_base}", (d.array_size, ncomp)))
+            elif ncomp == 1:
                 fields.append((d.name, f"<{np_base}"))
             else:
                 for i in range(ncomp):
@@ -177,9 +185,10 @@ def _layout(decls: List[UniformDecl]) -> List[UniformDecl]:
     for d in ordered:
         if d.kind == "value":
             _, ncomp, _ = _MSL_SCALAR[d.glsl_type]
+            components = ncomp * (d.array_size or 1)
             d = replace(d, msl_type=_MSL_SCALAR[d.glsl_type][0],
-                        components=ncomp, offset=offset)
-            offset += 4 * ncomp
+                        components=components, offset=offset)
+            offset += 4 * components
         laid_out.append(d)
     return laid_out
 
@@ -285,6 +294,7 @@ def build_composition_uniform_manifest(
     grain_enabled: bool = False,
     has_primary_calibration: bool = False,
     has_base_grade: bool = False,
+    has_chromogen: bool = False,
     bindings: Sequence[PluginBinding] = (),
 ) -> CompositionUniformManifest:
     """组装 composition 管线的完整 uniform manifest。
@@ -347,7 +357,14 @@ def build_composition_uniform_manifest(
     decls.append(UniformDecl(name="u_mist_calibrated", glsl_type="bool", section="header"))
     if has_base_grade:
         decls.extend(UniformDecl(name=name, glsl_type=glsl_type)
-                     for name, glsl_type in (*BASE_GRADE_UNIFORMS, *BASE_GRADE_SIGNAL_UNIFORMS))
+                     for name, glsl_type in BASE_GRADE_UNIFORMS)
+    if has_base_grade or has_chromogen:
+        decls.extend(UniformDecl(name=name, glsl_type=glsl_type)
+                     for name, glsl_type in BASE_GRADE_SIGNAL_UNIFORMS)
+    if has_chromogen:
+        decls.append(UniformDecl(name="u_chromogen_stage_count", glsl_type="int"))
+        decls.append(UniformDecl(name="u_chromogen_amount", glsl_type="float"))
+        decls.append(UniformDecl(name="u_chromogen_stages", glsl_type="vec4", array_size=CHROMOGEN_UNIFORM_ROWS))
     return CompositionUniformManifest(_layout(decls), warper_space=warper_space if has_warper else 0)
 
 
@@ -488,6 +505,8 @@ def composition_uniform_values(
          else _layer_get(layer, "grading_params"))
     if not isinstance(p, Mapping):
         p = {}
+    if error := chromogen_compatibility_error(p.get(CHROMOGEN_KEY)):
+        raise ValueError(error)
     values["u_lift"] = _wheel_rgb(p, "lift")
     values["u_gamma"] = _wheel_rgb(p, "gamma")
     values["u_gain"] = _wheel_rgb(p, "gain")
@@ -522,9 +541,14 @@ def composition_uniform_values(
     values["u_log_low_range"] = _get_scalar(p, "log_low_range", 0.333)
     values["u_log_high_range"] = _get_scalar(p, "log_high_range", 0.550)
     values["u_lum_mix"] = min(max(_get_scalar(p, "lum_mix", 100.0), 0.0), 100.0)
-    if base_grade_active(p):
+    has_base_grade = base_grade_active(p)
+    has_chromogen = chromogen_active(p)
+    if has_base_grade:
         values.update(base_grade_uniform_values(p))
+    if has_base_grade or has_chromogen:
         values.update(base_grade_signal_uniform_values(_layer_get(layer, BASE_GRADE_SIGNAL_KEY)))
+    if has_chromogen:
+        values.update(chromogen_uniform_values(p))
 
     m = _layer_get(layer, "mixer_params")
     if not isinstance(m, Mapping):
@@ -661,6 +685,10 @@ def upload_composition_uniforms(prog: Any, values: Mapping[str, Any]) -> None:
         return
     for name, value in values.items():
         if name not in prog:
+            continue
+        if name == "u_chromogen_stages":
+            # Required stage data must never quietly reuse stale program values.
+            prog[name].value = value
             continue
         try:
             prog[name].value = value

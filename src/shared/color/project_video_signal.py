@@ -10,12 +10,13 @@ video encoder so RGB buffers always use full normalized values.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from src.shared.color.camera_input import CAMERA_INPUTS
 from src.shared.color.color_space_descriptor import (
     ACESCG_SCENE,
     LEGACY_SPACE,
@@ -38,11 +39,15 @@ _SIGNAL_PROVIDER = BuiltinColorProvider()
 ACES_VERSION_KEY = "color.aces.version"
 ACES_INPUT_KEY = "color.aces.input"
 ACES_RGC_KEY = "color.aces.reference_gamut_compression"
+ACES_EXTERNAL_MONITOR_KEY = "color.aces.external_monitor"
+ACES_DESKTOP_LUT_KEY = "color.aces.desktop_monitor_lut"
+ACES_EXTERNAL_LUT_KEY = "color.aces.external_monitor_lut"
+ACES_DCI_P3_MONITOR = "dci-p3-g26"
 ACES_LINEAR_SPACES = ("aces2065-1", "acescg")
 ACES_WORKING_SPACES = ("acescct", "acescc", *ACES_LINEAR_SPACES)
 ACES_DISPLAY_TARGETS = ("rec709-g24",)
 ACES_INPUT_SPACES = ("auto", *ACES_WORKING_SPACES, "rec709-g24", "rec709-bt709",
-                     "srgb", "linear-rec709")
+                     "srgb", "linear-rec709", *CAMERA_INPUTS)
 ACES_EXR_CHROMATICITIES = {
     "aces2065-1": (0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767),
     "acescg": (0.7130, 0.2930, 0.1650, 0.8300, 0.1280, 0.0440, 0.32168, 0.33767),
@@ -55,6 +60,10 @@ class ProjectAcesSettings:
     target: str
     input: str
     reference_gamut_compression: bool
+    external_monitor: str = "rec709-g24"
+    desktop_lut: str = ""
+    external_lut: str = ""
+    monitor_lut: str = ""
 
 
 def project_aces_settings(settings: Mapping[str, Any] | None) -> ProjectAcesSettings | None:
@@ -64,18 +73,47 @@ def project_aces_settings(settings: Mapping[str, Any] | None) -> ProjectAcesSett
     input_space = settings.get(ACES_INPUT_KEY, "auto")
     if version not in ("1.3", "2.0") or input_space not in ACES_INPUT_SPACES:
         raise ValueError("Invalid ACES project version or input color space")
+    external = settings.get(ACES_EXTERNAL_MONITOR_KEY, "rec709-g24")
+    if external not in ("rec709-g24", ACES_DCI_P3_MONITOR):
+        raise ValueError("Invalid ACES external monitoring target")
+    desktop_lut, external_lut = (settings.get(key, "") for key in (ACES_DESKTOP_LUT_KEY, ACES_EXTERNAL_LUT_KEY))
+    for reference in (desktop_lut, external_lut):
+        if not isinstance(reference, str) or (reference and not reference.startswith("topos-res://lut_")):
+            raise ValueError("Invalid ACES monitor LUT reference")
     return ProjectAcesSettings(
         version, "rec709-g24", input_space,
         version == "1.3" and settings.get(ACES_RGC_KEY) in (True, "on"),
+        external if version == "1.3" or external_lut else "rec709-g24",
+        desktop_lut=desktop_lut, external_lut=external_lut,
     )
+
+
+def aces_desktop_monitor_settings(aces: ProjectAcesSettings | None) -> ProjectAcesSettings | None:
+    """Use the desktop LUT on the viewer branch while leaving delivery settings intact."""
+    return replace(aces, monitor_lut=aces.desktop_lut) if aces is not None and aces.desktop_lut else aces
+
+
+def aces_external_monitor_settings(aces: ProjectAcesSettings | None) -> ProjectAcesSettings | None:
+    """Return the independent external view when it differs from the desktop."""
+    if aces is None:
+        return None
+    dci = aces.external_monitor == ACES_DCI_P3_MONITOR
+    if not dci and not (aces.external_lut or aces.desktop_lut):
+        return None
+    target = "dci-p3-g26-d60-sim" if dci else "rec709-g24"
+    return replace(aces, target=target, monitor_lut=aces.external_lut)
 
 
 def aces_input_descriptor(
     aces: ProjectAcesSettings, path: str = "", *, media_type: str = "",
     exr_header: Mapping[str, Any] | None = None,
+    input_override: str | None = None,
 ) -> ColorSpaceDescriptor:
     """Use explicit input interpretation, or EXR chromaticities / SDR defaults."""
-    selection = aces.input
+    selection = input_override or aces.input
+    if selection in CAMERA_INPUTS:
+        _, primaries, transfer = CAMERA_INPUTS[selection]
+        return ColorSpaceDescriptor(primaries, transfer)
     if selection == "auto":
         if Path(path).suffix.lower() == ".exr":
             if exr_header is None:
@@ -99,12 +137,14 @@ def aces_input_descriptor(
     return LINEAR_SCENE if selection == "linear-rec709" else descriptor_for_space_preset(selection)
 
 
-def read_aces_exr(path: str, aces: ProjectAcesSettings) -> tuple[np.ndarray, ColorSpaceDescriptor]:
+def read_aces_exr(
+    path: str, aces: ProjectAcesSettings, *, input_override: str | None = None,
+) -> tuple[np.ndarray, ColorSpaceDescriptor]:
     """Read an RGB(A) EXR into straight float BGR(A), including signed values."""
     from src.shared.io.openexr_io import read_exr_header
 
     header = read_exr_header(path)
-    source = aces_input_descriptor(aces, path, media_type="image", exr_header=header)
+    source = aces_input_descriptor(aces, path, media_type="image", exr_header=header, input_override=input_override)
     return _read_straight_exr_bgr(path, header), source
 
 
@@ -120,10 +160,13 @@ def _read_straight_exr_bgr(path: str, header: Mapping[str, Any]) -> np.ndarray:
     return pixels
 
 
-def read_aces_still(path: str, aces: ProjectAcesSettings) -> tuple[np.ndarray, ColorSpaceDescriptor]:
+def read_aces_still(
+    path: str, aces: ProjectAcesSettings, *, input_override: str | None = None,
+) -> tuple[np.ndarray, ColorSpaceDescriptor]:
     if Path(path).suffix.lower() == ".exr":
-        return read_aces_exr(path, aces)
-    return read_video_still_bgr(path), aces_input_descriptor(aces, path, media_type="image")
+        return read_aces_exr(path, aces, input_override=input_override)
+    return read_video_still_bgr(path), aces_input_descriptor(
+        aces, path, media_type="image", input_override=input_override)
 
 
 def read_video_still_bgr(path: str) -> np.ndarray:
@@ -182,9 +225,14 @@ def render_aces_bgr(
     """Apply the same display transform used by the project viewers."""
     result = normalized_video_bgr(frame).copy()
     scene_rgb = _SIGNAL_PROVIDER.transform_signal(result[..., 2::-1], source, ACESCG_SCENE)
-    rgb = apply_aces_output_transform(
-        scene_rgb, ACESCG_SCENE, aces_version=aces.version, target=aces.target,
-    )
+    if aces.monitor_lut:
+        from src.shared.color.aces_monitor_lut import apply_aces_monitor_lut
+
+        rgb = apply_aces_monitor_lut(scene_rgb, aces.monitor_lut)
+    else:
+        rgb = apply_aces_output_transform(
+            scene_rgb, ACESCG_SCENE, aces_version=aces.version, target=aces.target,
+        )
     result[..., :3] = rgb[..., ::-1]
     return result
 

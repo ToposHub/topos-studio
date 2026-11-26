@@ -1194,7 +1194,7 @@ class MenuToolbarMixin:
 
     def _show_project_color_spaces(self) -> None:
         """Edit and publish the video project's persisted color spaces."""
-        from PyQt6.QtWidgets import QDialogButtonBox, QVBoxLayout
+        from PyQt6.QtWidgets import QDialogButtonBox, QMessageBox, QVBoxLayout
         from src.features.color.preferences import ColorSpaceControls
         from src.features.edit.core.commands.project_color_spaces import (
             SetProjectColorSpacesCommand,
@@ -1210,7 +1210,7 @@ class MenuToolbarMixin:
         dialog.setWindowTitle(I18N.tr(
             "preferences.color_management.project_color_spaces", "Project Color Spaces"))
         layout = QVBoxLayout(dialog)
-        controls = ColorSpaceControls(dialog)
+        controls = ColorSpaceControls(dialog, project_monitor_luts=True)
         shown = {
             TIMELINE_SPACE_KEY: LEGACY_SPACE, OUTPUT_SPACE_KEY: LEGACY_SPACE,
             **original.color_management,
@@ -1224,17 +1224,26 @@ class MenuToolbarMixin:
         buttons.accepted.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        project = self._current_edit_project
-        if (project is None or project.project_id != original.project_id
-                or not controls.changes()):
-            return
-        pool = self.media_pool_panel
-        command = SetProjectColorSpacesCommand(dialog.windowTitle(), tuple(controls.settings().items()))
-        updated = pool.get_command_stack().execute(command, project)
-        pool.set_project(updated, check_offline=False)
-        pool.project_changed.emit(updated)
+        try:
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            project = self._current_edit_project
+            if (project is None or project.project_id != original.project_id
+                    or not controls.changes()):
+                return
+            try:
+                controls.commit_monitor_luts()
+            except OSError as exc:
+                QMessageBox.warning(self, dialog.windowTitle(), str(exc))
+                return
+            pool = self.media_pool_panel
+            command = SetProjectColorSpacesCommand(dialog.windowTitle(), tuple(controls.settings().items()))
+            updated = pool.get_command_stack().execute(command, project)
+            pool.set_project(updated, check_offline=False)
+            pool.project_changed.emit(updated)
+        finally:
+            controls.discard_monitor_luts()
+            dialog.deleteLater()
 
     def _show_project_manager(self, startup: bool = False) -> None:
         """Show the video-mode Project Manager.

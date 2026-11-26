@@ -51,7 +51,7 @@ from src.features.color.core.color_graph_metal import (
     graph_grading_params_for_layer,
 )
 from src.features.color.core.metal_texture_kernels import (
-    METAL_TEX_GRAPH_OPS_MSL,
+    METAL_TEX_GRAPH_CHROMOGEN_MSL, METAL_TEX_GRAPH_OPS_MSL,
     make_tex_extra_params,
     make_tex_qualifier_params,
 )
@@ -128,9 +128,13 @@ def texture_layer_domain_errors(layer: Mapping[str, Any]) -> list[str]:
         CPU_GRADING_BASIC_KEYS,
         _fx_params_neutral,
     )
+    from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_compatibility_error
+
     errors: list[str] = []
     grading = layer.get("grading_params")
     grading = grading if isinstance(grading, Mapping) else {}
+    if error := chromogen_compatibility_error(grading.get(CHROMOGEN_KEY)):
+        errors.append(error)
     try:
         grade_uses_calibration(layer)
     except ValueError as exc:
@@ -751,8 +755,9 @@ class ColorGraphMetalTextureExecutor:
         out = pool.acquire(self._rgba16f, width, height)
         matte_tex = (matte if matte is not None
                      else self._white_matte(width, height))
+        kernel_name = "tg_corrector_chromogen" if grading["chromogen_stage_count"][0] else "tg_corrector"
         self._dispatch(
-            "tg_corrector",
+            kernel_name,
             textures={
                 0: input_tex, 1: matte_tex, 2: out,
                 3: self._hsl_texture(hsl_lut),
@@ -899,8 +904,9 @@ class ColorGraphMetalTextureExecutor:
                   size: tuple[int, int]) -> None:
         kernel = self._kernels.get(kernel_name)
         if kernel is None:
-            kernel = self.ctx.compile_kernel(kernel_name,
-                                             METAL_TEX_GRAPH_OPS_MSL)
+            source = (METAL_TEX_GRAPH_CHROMOGEN_MSL if kernel_name == "tg_corrector_chromogen"
+                      else METAL_TEX_GRAPH_OPS_MSL)
+            kernel = self.ctx.compile_kernel(kernel_name, source)
             self._kernels[kernel_name] = kernel
         self.ctx.dispatch(kernel, buffers=buffers, textures=textures,
                           threads=(size[0], size[1], 1))

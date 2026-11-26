@@ -504,12 +504,13 @@ class LutExportWorker(QObject):
             from src.features.color.core.base_grade_runtime import (
                 BASE_GRADE_SIGNAL_KEY, apply_base_grade_working,
             )
+            from src.features.color.core.chromogen_runtime import apply_chromogen_working
 
             result = self._apply_basic_grading(result, gp)
-            result = apply_base_grade_working(
-                result, gp, encoded_input=bool(layer_data.get("base_grade_encoded_input")),
-                signal=layer_data.get(BASE_GRADE_SIGNAL_KEY),
-            )
+            encoded = bool(layer_data.get("base_grade_encoded_input"))
+            signal = layer_data.get(BASE_GRADE_SIGNAL_KEY)
+            result = apply_base_grade_working(result, gp, encoded_input=encoded, signal=signal)
+            result = apply_chromogen_working(result, gp, encoded_input=encoded, signal=signal)
 
         # 2. Apply curves
         curves_lut = layer_data.get('curves_lut')
@@ -567,11 +568,12 @@ class LutExportWorker(QObject):
         layer = {"grading_params": params}
         if grade_uses_calibration(layer):
             from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
+            from src.features.color.core.chromogen import CHROMOGEN_KEY
             from src.features.color.core.color_graph_cpu import apply_layer_grading_cpu
 
-            # The LUT applies Base Grade separately in the sampled signal domain.
+            # The LUT applies managed primary tools separately in the sampled domain.
             layer["grading_params"] = {key: value for key, value in params.items()
-                                       if key not in BASE_GRADE_DEFAULTS}
+                                       if key not in BASE_GRADE_DEFAULTS and key != CHROMOGEN_KEY}
             return apply_layer_grading_cpu(color, layer, width=1, height=1)[0]
         result = color.copy()
 
@@ -1247,8 +1249,7 @@ class LutExporter:
         if format_type not in self.FORMATS:
             raise ValueError(f"Invalid format: {format_type}. Must be one of {self.FORMATS}")
 
-        from src.features.color.core.base_grade import base_grade_active
-        from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY
+        from src.features.color.core.base_grade_runtime import BASE_GRADE_SIGNAL_KEY, managed_primary_active
 
         signal_snapshot = copy.deepcopy(dict(base_grade_signal)) if base_grade_signal else None
         layers_data = []
@@ -1256,7 +1257,7 @@ class LutExporter:
             if not getattr(layer, 'visible', True):
                 continue
             layer_params = self._extract_exportable_params(layer)
-            if base_grade_active(layer_params.get("grading_params", {})):
+            if managed_primary_active(layer_params.get("grading_params", {})):
                 if signal_snapshot is not None:
                     layer_params[BASE_GRADE_SIGNAL_KEY] = signal_snapshot
                 if base_grade_encoded_input:

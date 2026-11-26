@@ -341,12 +341,12 @@ class XGradeCanvas(ChromaWarpCanvas):
 class XGradePanel(WarperPanel):
     """Share the viewer sampler and gesture lifecycle with Color Warper."""
 
-    palette_title = "X Grade"
     _consume_viewer_hover = True
     notice_requested = pyqtSignal(str)
 
     def init_ui(self) -> None:
         self.setObjectName("xGradePanel")
+        self.palette_title = _tr("title", "Selective Grade")
         self.setMinimumWidth(365)
         self.mode = "chroma_warp"
         self._palette_hosted = True
@@ -370,7 +370,7 @@ class XGradePanel(WarperPanel):
         top = QHBoxLayout(header)
         top.setContentsMargins(8, 0, 3, 0)
         top.setSpacing(3)
-        title = QLabel(I18N.tr("panel.x_grade", "X Grade"))
+        title = QLabel(self.palette_title)
         title.setStyleSheet(SECTION_TITLE_STYLE)
         top.addWidget(title, 1)
         self.viewer_controls = QWidget()
@@ -387,7 +387,7 @@ class XGradePanel(WarperPanel):
         style_header_button(expand, width=32)
         expand.clicked.connect(self.toggle_expanded)
         top.addWidget(expand)
-        reset = reset_button(_tr("reset", "Reset X Grade"), global_reset=True)
+        reset = reset_button(_tr("reset", "Reset Selective Grade"), global_reset=True)
         reset.clicked.connect(self.on_reset)
         actions.addWidget(reset)
         options = tool_button("more", _tr("options", "Options"))
@@ -423,7 +423,7 @@ class XGradePanel(WarperPanel):
         self.chroma_warp.edit_requested.connect(self._request_palette)
         self.chroma_warp.selection_changed.connect(self._sync_tools)
         self.chroma_warp.limit_reached.connect(lambda: self.notice_requested.emit(
-            _tr("limit", "This corrector has reached the X Grade adjustment limit.")))
+            _tr("limit", "This corrector has reached the Selective Grade adjustment limit.")))
         body.addWidget(self.chroma_warp, 1)
         body.addWidget(create_panel_divider(Qt.Orientation.Vertical))
 
@@ -443,7 +443,7 @@ class XGradePanel(WarperPanel):
         scroll.setWidget(sidebar)
         body.addWidget(scroll)
         layout.addLayout(body, 1)
-        self.expanded_placeholder = QPushButton(_tr("show_expanded", "Show X Grade"))
+        self.expanded_placeholder = QPushButton(_tr("show_expanded", "Show Selective Grade"))
         self.expanded_placeholder.clicked.connect(self._raise_expanded)
         self.expanded_placeholder.hide()
         self._host_layout.addWidget(self.expanded_placeholder)

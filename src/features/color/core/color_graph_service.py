@@ -1458,8 +1458,14 @@ class ColorGraphService:
                 return self._fail(graph, "illegal_param_key",
                                   "grade_patch 需要 (param_name, value) 元组",
                                   node_id=node_id)
+            from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_compatibility_error
+
+            param_name, param_value = value
+            if param_name == CHROMOGEN_KEY:
+                if error := chromogen_compatibility_error(param_value):
+                    return self._fail(graph, "invalid_chromogen", error, node_id=node_id)
             grade = dict(node.params.get("grade") or {})
-            grade[str(value[0])] = value[1]
+            grade[str(param_name)] = param_value
             params = dict(node.params)
             params["grade"] = grade
             new_node = replace(node, params=params)

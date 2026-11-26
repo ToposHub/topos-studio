@@ -651,6 +651,9 @@ struct GraphGradingParams {
     int32_t base_grade_transfer;
     float base_grade[31];
     float base_grade_signal[21];
+    uint32_t chromogen_stage_count;
+    float chromogen_amount;
+    float chromogen_stages[576];  // 24 ordered stages, 24 float parameters each
 };
 """
 
@@ -1044,6 +1047,9 @@ static inline float3 graph_grading_after_detail(
 #ifdef TOPOS_GRAPH_BASE_GRADE
     color = graph_apply_base_grade(color, p);
 #endif
+#ifdef TOPOS_GRAPH_CHROMOGEN
+    color = graph_apply_chromogen(color, p);
+#endif
     return color;
 }
 
@@ -1221,6 +1227,9 @@ GRAPH_GRADING_PARAMS_DTYPE = np.dtype([
     ("base_grade_transfer", "<i4"),
     ("base_grade", "<f4", (31,)),
     ("base_grade_signal", "<f4", (21,)),
+    ("chromogen_stage_count", "<u4"),
+    ("chromogen_amount", "<f4"),
+    ("chromogen_stages", "<f4", (144, 4)),
 ])
 
 
@@ -1254,6 +1263,9 @@ def make_graph_grading_params(
     base_grade_encoded: bool = False,
     base_grade_transfer: int = -1,
     base_grade_signal: tuple[float, ...] = (),
+    chromogen_stage_count: int = 0,
+    chromogen_amount: float = 0.0,
+    chromogen_stages: tuple[tuple[float, ...], ...] = (),
 ) -> np.ndarray:
     """打包 MSL ``GraphGradingParams``（字段与 struct 逐一对齐）。"""
     scalars = [exposure, temp, tint, contrast, saturation, vibrance, shadow,
@@ -1289,15 +1301,26 @@ def make_graph_grading_params(
     params["has_curves"] = 2 if calibrated_curves else int(has_curves)
     if base_grade:
         if len(base_grade) != 31 or not all(np.isfinite(value) for value in base_grade):
-            raise ValueError("Base Grade requires 31 finite values")
+            raise ValueError("Tonal Grade requires 31 finite values")
         params["base_grade"] = base_grade
         params["base_grade_enabled"] = 1
+    if base_grade or chromogen_stage_count:
         params["base_grade_encoded"] = int(base_grade_encoded)
-        params["base_grade_transfer"] = int(base_grade_transfer)
+        # Store zero for the unmanaged sentinel so the packed word stays finite
+        # in the direct Metal pipeline's existing float-buffer validation.
+        params["base_grade_transfer"] = int(base_grade_transfer) + 1
         if base_grade_transfer >= 0:
             if len(base_grade_signal) != 21 or not all(np.isfinite(value) for value in base_grade_signal):
-                raise ValueError("Base Grade working signal requires 21 finite values")
+                raise ValueError("Tonal Grade working signal requires 21 finite values")
             params["base_grade_signal"] = base_grade_signal
+    if chromogen_stage_count:
+        stages = np.asarray(chromogen_stages, dtype=np.float32)
+        if (not 0 < chromogen_stage_count <= 24 or stages.shape != (144, 4)
+                or not np.isfinite(stages).all() or not 0.0 <= chromogen_amount <= 1.0):
+            raise ValueError("Look Dev requires up to 24 ordered stages of 24 finite values each")
+        params["chromogen_stages"] = stages
+        params["chromogen_stage_count"] = chromogen_stage_count
+        params["chromogen_amount"] = chromogen_amount
     return params
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.shared.color.camera_input import CAMERA_LOG_CURVES
 from src.shared.color.color_space_descriptor import ACESCG_SCENE, ColorSpaceDescriptor
 from src.shared.color.color_transform_provider import VideoSignalLuminance, video_signal_gamut_matrix
 from src.shared.color.types import ColorRange, ColorTransfer
@@ -25,6 +26,7 @@ _TRANSFER_MODES = {
     "st2084": 10,
     "arib-std-b67": 11,
     "davinci-intermediate": 12,
+    **{transfer.value: curve.mode for transfer, curve in CAMERA_LOG_CURVES.items()},
 }
 
 
@@ -96,6 +98,7 @@ vec3 topos_video_decode(vec3 rgb, int transfer, vec3 luminance) {
         return mix(exp2(rgb / 0.07329248 - 7.0) - 0.0075, rgb / 10.44426855,
                    lessThanEqual(rgb, vec3(0.02740668)));
     }
+    __CAMERA_DECODE__
     return rgb;
 }
 
@@ -147,9 +150,26 @@ vec3 topos_video_encode(vec3 rgb, int transfer, vec3 luminance) {
         return mix(0.07329248 * (log2(max(rgb, 0.00262409) + 0.0075) + 7.0),
                    rgb * 10.44426855, lessThanEqual(rgb, vec3(0.00262409)));
     }
+    __CAMERA_ENCODE__
     return rgb;
 }
 """
+
+VIDEO_SIGNAL_TRANSFER_GLSL = VIDEO_SIGNAL_TRANSFER_GLSL.replace("__CAMERA_DECODE__", "\n".join(
+    f"""if (transfer == {curve.mode}) {{
+        vec3 linear = (exp2((rgb - ({curve.log_offset})) / {curve.log_slope})
+                      - {curve.linear_offset}) / {curve.linear_slope};
+        vec3 toe = (rgb - {curve.encoded_break}) / {curve.toe_slope} + ({curve.linear_break});
+        return mix(linear, toe, lessThan(rgb, vec3({curve.encoded_break})));
+    }}""" for curve in CAMERA_LOG_CURVES.values()
+)).replace("__CAMERA_ENCODE__", "\n".join(
+    f"""if (transfer == {curve.mode}) {{
+        vec3 encoded = {curve.log_slope} * log2(max(rgb * {curve.linear_slope} + {curve.linear_offset}, 1e-10))
+                       + ({curve.log_offset});
+        vec3 toe = (rgb - ({curve.linear_break})) * {curve.toe_slope} + {curve.encoded_break};
+        return mix(encoded, toe, lessThan(rgb, vec3({curve.linear_break})));
+    }}""" for curve in CAMERA_LOG_CURVES.values()
+))
 
 VIDEO_SIGNAL_GLSL += VIDEO_SIGNAL_TRANSFER_GLSL + """
 vec3 topos_aces_reference_compression(vec3 ap1) {

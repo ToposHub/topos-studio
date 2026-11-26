@@ -13,20 +13,25 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from src.shared.color.lut_resource_registry import LutResourceSession
     from src.shared.config.config_manager import ConfigManager
+    from src.shared.project.resource_resolver import ResourceEntry
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QCheckBox, QLineEdit,
+    QFileDialog, QLabel, QMessageBox, QPushButton, QCheckBox, QLineEdit, QProgressDialog,
     QScrollArea, QGroupBox, QSpinBox, QDoubleSpinBox,
 )
-from PyQt6.QtCore import QSignalBlocker, Qt
+from PyQt6.QtCore import QSignalBlocker, QTimer, Qt
 from PyQt6.QtGui import QFont
 
 from src.shared.i18n.i18n import I18N
+from src.shared.color.camera_input import CAMERA_INPUTS
 from src.shared.color.color_space_descriptor import (
     COLOR_SPACE_PRESETS,
     LEGACY_SPACE,
@@ -42,7 +47,8 @@ from src.shared.color.hdr_video_signal import (
     HDR_WHITE_KEY, HDR_WORKING_SPACES,
 )
 from src.shared.color.project_video_signal import (
-    ACES_DISPLAY_TARGETS, ACES_INPUT_KEY, ACES_INPUT_SPACES, ACES_LINEAR_SPACES,
+    ACES_DCI_P3_MONITOR, ACES_DESKTOP_LUT_KEY, ACES_DISPLAY_TARGETS, ACES_EXTERNAL_LUT_KEY,
+    ACES_EXTERNAL_MONITOR_KEY, ACES_INPUT_KEY, ACES_INPUT_SPACES, ACES_LINEAR_SPACES,
     ACES_RGC_KEY, ACES_VERSION_KEY, ACES_WORKING_SPACES,
 )
 from src.shared.color.types import ColorPrimaries, ColorTransfer
@@ -79,14 +85,29 @@ from src.shared.control_surfaces.tangent.settings import (
 )
 
 logger = logging.getLogger(__name__)
+_MONITOR_LUT_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aces-monitor-lut")
+
+
+def _import_monitor_lut(path: str, staging: LutResourceSession) -> ResourceEntry:
+    from src.shared.color.aces_monitor_lut import validate_aces_monitor_lut
+
+    validate_aces_monitor_lut(path)
+    result = staging.import_files([path])[0]
+    if result.entry is None:
+        raise ValueError(str(result.error))
+    return result.entry
 
 
 class ColorSpaceControls(QWidget):
     """Compact project color selectors shared by Preferences and Project Settings."""
 
     _ROWS = {
-        TIMELINE_SPACE_KEY: ("timeline_space", "Timeline color space", project_timeline_space),
-        OUTPUT_SPACE_KEY: ("output_space", "Video output color space", project_output_space),
+        TIMELINE_SPACE_KEY: ("timeline_space", "Timeline color space"),
+        OUTPUT_SPACE_KEY: ("output_space", "Video output color space"),
+    }
+    _ACES_ROWS = {
+        TIMELINE_SPACE_KEY: ("aces_working_space", "ACES working space"),
+        OUTPUT_SPACE_KEY: ("aces_output_transform", "ACES output transform"),
     }
     _OPTIONS = {
         "rec709-g24": ("preset_rec709_g24", "Rec.709 Gamma 2.4"),
@@ -109,8 +130,12 @@ class ColorSpaceControls(QWidget):
         LEGACY_SPACE: ("preset_legacy", "Existing color settings"),
     }
     _ROLE_OPTIONS = {
-        TIMELINE_SPACE_KEY: (*SDR_VIDEO_OUTPUTS, *HDR_WORKING_SPACES, *ACES_WORKING_SPACES),
+        TIMELINE_SPACE_KEY: (*SDR_VIDEO_OUTPUTS, *HDR_WORKING_SPACES),
         OUTPUT_SPACE_KEY: (*SDR_VIDEO_OUTPUTS, *WIDE_GAMUT_TIFF_OUTPUTS, *HDR_OUTPUT_SPACES),
+    }
+    _MODE_DEFAULTS = {
+        "topos": ("rec709-g24", "rec709-g24"),
+        "aces": ("acescct", "rec709-g24"),
     }
     _PRIMARIES_LABELS = {
         ColorPrimaries.BT709: "Rec.709",
@@ -135,17 +160,33 @@ class ColorSpaceControls(QWidget):
         ColorTransfer.DAVINCI_INTERMEDIATE: "DaVinci Intermediate",
     }
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, project_monitor_luts: bool = False) -> None:
         super().__init__(parent)
         self._combos: dict[str, ChevronComboBox] = {}
+        self._space_labels: dict[str, QLabel] = {}
         self._parts: dict[str, tuple[QWidget, ChevronComboBox, ChevronComboBox]] = {}
         self._loaded: dict[str, str] = {}
+        self._mode_drafts: dict[str, tuple[str, str]] = {}
         self._aces_group = QWidget(self)
         self._aces_combos: dict[str, ChevronComboBox] = {}
+        self._monitor_lut_labels: dict[str, QLabel] = {}
+        self._monitor_lut_clear_buttons: dict[str, QPushButton] = {}
+        self._monitor_lut_refs: dict[str, str] = {}
+        self._monitor_lut_folder: TemporaryDirectory[str] | None = None
+        self._monitor_lut_staging: LutResourceSession | None = None
         self._hdr_group = QWidget(self)
         self._hdr_combos: dict[str, ChevronComboBox] = {}
-        form = make_pref_form(self)
-        for key, (label_key, label, _) in self._ROWS.items():
+        self._form = form = make_pref_form(self)
+        self._science = ChevronComboBox(self)
+        self._science.setObjectName("color.science")
+        science_label = I18N.tr("preferences.color_management.color_science", "Color science")
+        self._science.setAccessibleName(science_label)
+        self._science.addItem("TOPOS Color Manager", "topos")
+        self._science.addItem("ACES", "aces")
+        form.addRow(make_pref_label(science_label), self._science)
+        for key, (label_key, label) in self._ROWS.items():
+            if key == OUTPUT_SPACE_KEY:
+                form.addRow(self._aces_group)
             combo = ChevronComboBox(self)
             combo.setObjectName(key)
             combo.setMinimumWidth(160)
@@ -166,7 +207,8 @@ class ColorSpaceControls(QWidget):
                 split_layout.addWidget(make_pref_label(caption))
                 split_layout.addWidget(widget, 1)
             row_layout.addWidget(split)
-            form.addRow(make_pref_label(title), row)
+            self._space_labels[key] = make_pref_label(title)
+            form.addRow(self._space_labels[key], row)
             self._combos[key] = combo
             self._parts[key] = (split, gamut, gamma)
             combo.currentIndexChanged.connect(lambda _, row_key=key: self._sync_parts(row_key))
@@ -183,14 +225,18 @@ class ColorSpaceControls(QWidget):
             "This output uses a 16-bit RGB TIFF sequence with an ICC profile."))
         self._wide_delivery_notice.setWordWrap(True)
         form.addRow("", self._wide_delivery_notice)
-        aces_form = make_pref_form(self._aces_group)
+        aces_form = make_pref_form(self._aces_group, margins=(0, 0, 0, 0))
         for key, title, fallback, items in (
             (ACES_VERSION_KEY, "aces_version", "ACES version", (("1.3", "1.3"), ("2.0", "2.0"))),
-            (ACES_INPUT_KEY, "aces_input", "Default ACES input",
+            (ACES_INPUT_KEY, "aces_input", "ACES input transform",
              tuple((option, self._option_label(option)) for option in ACES_INPUT_SPACES)),
             (ACES_RGC_KEY, "aces_rgc", "ACES 1.3 Reference Gamut Compression",
              (("off", I18N.tr("preferences.color_management.aces_off", "Off")),
               ("on", I18N.tr("preferences.color_management.aces_on", "On")))),
+            (ACES_EXTERNAL_MONITOR_KEY, "aces_external_monitor", "ACES external monitor",
+             (("rec709-g24", self._option_label("rec709-g24")),
+              (ACES_DCI_P3_MONITOR, I18N.tr("preferences.color_management.aces_dci_monitor",
+                                          "Cinema DCI-P3 Gamma 2.6 (48 nit)")))),
         ):
             combo = ChevronComboBox(self._aces_group)
             combo.setObjectName(key)
@@ -200,8 +246,38 @@ class ColorSpaceControls(QWidget):
                 combo.addItem(caption, value)
             aces_form.addRow(make_pref_label(label), combo)
             self._aces_combos[key] = combo
-        form.addRow(self._aces_group)
-        self._aces_combos[ACES_VERSION_KEY].currentIndexChanged.connect(self._sync_aces_compression)
+        if project_monitor_luts:
+            for key, name, fallback in (
+                (ACES_DESKTOP_LUT_KEY, "aces_desktop_lut", "Desktop viewer LUT"),
+                (ACES_EXTERNAL_LUT_KEY, "aces_external_lut", "External monitor LUT"),
+            ):
+                title = I18N.tr(f"preferences.color_management.{name}", fallback)
+                field = QWidget(self._aces_group)
+                field.setObjectName(key)
+                row = QHBoxLayout(field)
+                row.setContentsMargins(0, 0, 0, 0)
+                file_label = QLabel(field)
+                file_label.setWordWrap(True)
+                self._monitor_lut_labels[key] = file_label
+                row.addWidget(file_label, 1)
+                browse = QPushButton(I18N.tr("preferences.color_management.aces_lut_load", "Load…"), field)
+                clear = QPushButton(I18N.tr("preferences.color_management.aces_lut_clear", "Clear"), field)
+                _apply_compact_button_style(browse)
+                _apply_compact_button_style(clear)
+                row.addWidget(browse)
+                row.addWidget(clear)
+                browse.clicked.connect(lambda _, lut_key=key: self._select_monitor_lut(lut_key))
+                clear.clicked.connect(lambda _, lut_key=key: self._set_monitor_lut(lut_key, ""))
+                self._monitor_lut_clear_buttons[key] = clear
+                if key == ACES_DESKTOP_LUT_KEY:
+                    tip = I18N.tr("preferences.color_management.aces_desktop_lut_tip",
+                                  "Load a 3D .cube from ACEScct to Rec.709 Gamma 2.4 to replace the desktop transform.")
+                else:
+                    tip = I18N.tr("preferences.color_management.aces_external_lut_tip",
+                                  "Load a 3D .cube from ACEScct to the selected external monitor signal.")
+                field.setToolTip(tip)
+                aces_form.addRow(make_pref_label(title, tip), field)
+        self._aces_combos[ACES_VERSION_KEY].currentIndexChanged.connect(self._sync_aces_options)
         self._combos[TIMELINE_SPACE_KEY].currentIndexChanged.connect(self._refresh_output_choices)
         self._aces_delivery_notice = make_pref_label(I18N.tr(
             "preferences.color_management.aces_exr_delivery",
@@ -241,17 +317,134 @@ class ColorSpaceControls(QWidget):
             "Signal codes can be compared to Resolve with viewer ICC disabled. "
             "Rec.709 reference converts to SDR and clips values beyond the display range.",
         ))
+        self._science.currentIndexChanged.connect(self._switch_science)
         self.load(None)
 
     def _option_label(self, option: str) -> str:
         if option in self._OPTIONS:
             key, label = self._OPTIONS[option]
             return I18N.tr(f"preferences.color_management.{key}", label)
+        if option in CAMERA_INPUTS:
+            return CAMERA_INPUTS[option][0]
         return str(COLOR_SPACE_PRESETS[option])
 
-    def _sync_aces_compression(self) -> None:
-        self._aces_combos[ACES_RGC_KEY].setEnabled(
-            self._aces_combos[ACES_VERSION_KEY].currentData() == "1.3")
+    def _sync_aces_options(self) -> None:
+        version13 = self._aces_combos[ACES_VERSION_KEY].currentData() == "1.3"
+        self._aces_combos[ACES_RGC_KEY].setEnabled(version13)
+        external = self._aces_combos[ACES_EXTERNAL_MONITOR_KEY]
+        dci_index = external.findData(ACES_DCI_P3_MONITOR)
+        dci_available = version13 or bool(self._monitor_lut_refs.get(ACES_EXTERNAL_LUT_KEY))
+        external.model().item(dci_index).setEnabled(dci_available)
+        if not dci_available and external.currentIndex() == dci_index:
+            external.setCurrentIndex(external.findData("rec709-g24"))
+
+    def _set_monitor_lut(self, key: str, ref: str) -> None:
+        from src.shared.color.lut_resource_registry import get_lut_resource_session
+
+        self._monitor_lut_refs[key] = ref
+        label = I18N.tr("preferences.color_management.aces_lut_builtin", "Built-in transform")
+        if ref:
+            entries = get_lut_resource_session().lut_entries()
+            if self._monitor_lut_staging is not None:
+                entries.extend(self._monitor_lut_staging.lut_entries())
+            entry = next((item for item in entries if item.uri == ref), None)
+            label = (entry.original_filename if entry is not None else
+                     I18N.tr("preferences.color_management.aces_lut_unavailable", "LUT unavailable"))
+        self._monitor_lut_labels[key].setText(label)
+        self._monitor_lut_clear_buttons[key].setEnabled(bool(ref))
+        self._sync_aces_options()
+
+    def _select_monitor_lut(self, key: str) -> None:
+        from src.shared.color.lut_resource_registry import LutResourceSession
+
+        title = I18N.tr("preferences.color_management.aces_lut_dialog", "Load ACES monitor LUT")
+        path, _ = QFileDialog.getOpenFileName(self, title, "", "3D LUT (*.cube)")
+        if not path:
+            return
+        temporary = TemporaryDirectory(prefix="topos-monitor-lut-selection-")
+        staging = LutResourceSession(temporary.name)
+        future = _MONITOR_LUT_POOL.submit(_import_monitor_lut, path, staging)
+        progress = QProgressDialog(title, "", 0, 0, self)
+        progress.setWindowTitle(title)
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        poll = QTimer(progress)
+
+        def finish_import() -> None:
+            if future.done():
+                progress.accept()
+
+        poll.timeout.connect(finish_import)
+        poll.start(25)
+        accepted = progress.exec()
+        poll.stop()
+        progress.deleteLater()
+        if not accepted or not future.done():
+            future.add_done_callback(lambda _: temporary.cleanup())
+            return
+        try:
+            entry = future.result()
+            if self._monitor_lut_staging is None:
+                self._monitor_lut_folder = TemporaryDirectory(prefix="topos-monitor-lut-draft-")
+                self._monitor_lut_staging = LutResourceSession(self._monitor_lut_folder.name)
+            self._monitor_lut_staging.adopt_staged_luts(staging, (entry.uri,))
+            self._set_monitor_lut(key, entry.uri)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, title, str(exc))
+        finally:
+            temporary.cleanup()
+
+    def commit_monitor_luts(self) -> None:
+        """Adopt only the monitor LUTs kept by the accepted project settings."""
+        from src.shared.color.lut_resource_registry import get_lut_resource_session
+
+        staging = self._monitor_lut_staging
+        settings = self.settings()
+        if staging is not None:
+            refs = tuple(ref for key in self._monitor_lut_refs if (ref := settings.get(key))
+                         and staging.staged_path(ref) is not None)
+            if refs:
+                get_lut_resource_session().adopt_staged_luts(staging, refs)
+
+    def discard_monitor_luts(self) -> None:
+        if self._monitor_lut_folder is not None:
+            self._monitor_lut_folder.cleanup()
+        self._monitor_lut_folder = None
+        self._monitor_lut_staging = None
+
+    @staticmethod
+    def _science_for_timeline(timeline: str) -> str:
+        return "aces" if timeline in ACES_WORKING_SPACES else "topos"
+
+    def _switch_science(self) -> None:
+        timeline = self._combos[TIMELINE_SPACE_KEY].currentData()
+        output = self._combos[OUTPUT_SPACE_KEY].currentData()
+        previous = self._science_for_timeline(timeline)
+        self._mode_drafts[previous] = (timeline, output)
+        mode = self._science.currentData()
+        self._load_spaces(*self._mode_drafts.get(mode, self._MODE_DEFAULTS[mode]))
+
+    def _load_spaces(self, timeline: str, output: str) -> None:
+        mode = self._science_for_timeline(timeline)
+        aces = mode == "aces"
+        with QSignalBlocker(self._science):
+            self._science.setCurrentIndex(self._science.findData(mode))
+        for key, (label_key, label) in (self._ACES_ROWS if aces else self._ROWS).items():
+            text = I18N.tr(f"preferences.color_management.{label_key}", label)
+            self._space_labels[key].setText(text)
+            self._combos[key].setAccessibleName(text)
+        self._form.setRowVisible(self._aces_group, aces)
+        self._form.setRowVisible(self._combine, not aces)
+
+        options = ACES_WORKING_SPACES if aces else self._ROLE_OPTIONS[TIMELINE_SPACE_KEY]
+        combo = self._combos[TIMELINE_SPACE_KEY]
+        with QSignalBlocker(combo):
+            combo.clear()
+            for option in options if timeline in options else (*options, timeline):
+                combo.addItem(self._option_label(option), option)
+            combo.setCurrentIndex(combo.findData(timeline))
+        self._refresh_output_choices(selection=output)
+        self._sync_parts(TIMELINE_SPACE_KEY)
 
     def _refresh_output_choices(self, *, selection: str | None = None) -> None:
         combo = self._combos[OUTPUT_SPACE_KEY]
@@ -266,9 +459,7 @@ class ColorSpaceControls(QWidget):
             for option in options:
                 combo.addItem(self._option_label(option), option)
             combo.setCurrentIndex(max(0, combo.findData(selection)))
-        self._aces_group.setVisible(active)
         self._sync_parts(OUTPUT_SPACE_KEY)
-        self._sync_hdr_group()
 
     def _sync_hdr_group(self) -> None:
         timeline = self._combos[TIMELINE_SPACE_KEY].currentData()
@@ -285,19 +476,9 @@ class ColorSpaceControls(QWidget):
         config_manager: ConfigManager | Mapping[str, Any] | None = None,
     ) -> None:
         """Load effective project choices without emitting change signals."""
-        for key, combo in self._combos.items():
-            if key == OUTPUT_SPACE_KEY:
-                continue
-            selection = self._ROWS[key][2](settings, config_manager)
-            options = self._ROLE_OPTIONS[key]
-            if selection not in options:
-                options = (*options, selection)
-            with QSignalBlocker(combo):
-                combo.clear()
-                for option in options:
-                    combo.addItem(self._option_label(option), option)
-                combo.setCurrentIndex(combo.findData(selection))
-        self._refresh_output_choices(selection=project_output_space(settings, config_manager))
+        self._mode_drafts.clear()
+        self._load_spaces(project_timeline_space(settings, config_manager),
+                          project_output_space(settings, config_manager))
         for key, combo in (self._aces_combos | self._hdr_combos).items():
             value = (settings or {}).get(key, config_manager.get(key) if config_manager else None)
             with QSignalBlocker(combo):
@@ -306,7 +487,13 @@ class ColorSpaceControls(QWidget):
                     if combo.findData(value) == -1:
                         combo.addItem(f"{value} nit", value)
                 combo.setCurrentIndex(max(0, combo.findData(value)))
-        self._sync_aces_compression()
+        self._monitor_lut_refs = {
+            key: value if isinstance(value := (settings or {}).get(key), str) else ""
+            for key in self._monitor_lut_labels
+        }
+        for key, value in self._monitor_lut_refs.items():
+            self._set_monitor_lut(key, value)
+        self._sync_aces_options()
         self._sync_all_parts()
         self._loaded = self.settings()
 
@@ -323,15 +510,15 @@ class ColorSpaceControls(QWidget):
         choices = tuple(COLOR_SPACE_PRESETS[option] for option in options
                         if COLOR_SPACE_PRESETS[option].primaries in self._PRIMARIES_LABELS
                         and COLOR_SPACE_PRESETS[option].transfer in self._TRANSFER_LABELS)
-        show_split = (not self._combine.isChecked() and selection in options
+        show_split = (self._science.currentData() == "topos" and not self._combine.isChecked() and selection in options
                       and COLOR_SPACE_PRESETS[selection] in choices)
         combo.setVisible(not show_split)
         split.setVisible(show_split)
         if key == OUTPUT_SPACE_KEY:
             self._sync_hdr_group()
-            self._wide_delivery_notice.setVisible(selection in WIDE_GAMUT_TIFF_OUTPUTS)
+            self._form.setRowVisible(self._wide_delivery_notice, selection in WIDE_GAMUT_TIFF_OUTPUTS)
             if hasattr(self, "_aces_delivery_notice"):
-                self._aces_delivery_notice.setVisible(selection in ACES_LINEAR_SPACES)
+                self._form.setRowVisible(self._aces_delivery_notice, selection in ACES_LINEAR_SPACES)
         if not show_split:
             return
         space = COLOR_SPACE_PRESETS[selection]
@@ -363,6 +550,7 @@ class ColorSpaceControls(QWidget):
         values = {key: combo.currentData() for key, combo in self._combos.items()}
         if values[TIMELINE_SPACE_KEY] in ACES_WORKING_SPACES:
             values.update({key: combo.currentData() for key, combo in self._aces_combos.items()})
+            values.update(self._monitor_lut_refs)
         if values[TIMELINE_SPACE_KEY] in HDR_WORKING_SPACES or values[OUTPUT_SPACE_KEY] in HDR_OUTPUT_SPACES:
             values.update({key: combo.currentData() for key, combo in self._hdr_combos.items()})
         return values

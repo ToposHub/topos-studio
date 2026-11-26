@@ -146,6 +146,7 @@ _BASE_DOCKS: dict = {
     "dock_deblur": ("dockDeblur", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_grading": ("dockGrading", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_base_grade": ("dockBaseGrade", Qt.DockWidgetArea.BottomDockWidgetArea),
+    "dock_chromogen": ("dockChromogen", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_curves": ("dockCurves", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_warper": ("dockColorMapping", Qt.DockWidgetArea.BottomDockWidgetArea),
     "dock_mixer": ("dockMixer", Qt.DockWidgetArea.BottomDockWidgetArea),
@@ -769,6 +770,8 @@ def test_photo_color_default_places_sidebars_and_groups_tools(host: _DockHost) -
     assert host.dock_raw in host.tabifiedDockWidgets(host.dock_grading)
     assert host.dock_base_grade in host.tabifiedDockWidgets(host.dock_grading)
     assert not host.dock_base_grade.isHidden()
+    assert host.dock_chromogen in host.tabifiedDockWidgets(host.dock_base_grade)
+    assert not host.dock_chromogen.isHidden()
     assert host.dock_warper in host.tabifiedDockWidgets(host.dock_curves)
     assert host.dock_grain in host.tabifiedDockWidgets(host.dock_analysis)
     assert host.dock_export.isHidden()
@@ -809,23 +812,31 @@ def test_enforce_deliver_dock_is_hidden_on_non_deliver_pages(
         "(BUG-B4-03 fixed)")
 
 
-def test_base_grade_only_available_in_color_workspace(host: _DockHost) -> None:
-    host.dock_base_grade.show()
+@pytest.mark.parametrize("attr", ("dock_base_grade", "dock_chromogen"))
+def test_grade_dock_only_available_in_color_workspace(host: _DockHost, attr: str) -> None:
+    dock = getattr(host, attr)
+    dock.show()
     host.current_page = "Edit"
     host._enforce_page_dock_visibility()
-    assert host.dock_base_grade.isHidden()
-    assert not host.dock_base_grade.toggleViewAction().isEnabled()
+    assert dock.isHidden()
+    assert not dock.toggleViewAction().isEnabled()
 
     host.current_page = "Color"
     host._enforce_page_dock_visibility()
-    assert host.dock_base_grade.toggleViewAction().isEnabled()
+    assert dock.toggleViewAction().isEnabled()
 
 
-def test_restore_legacy_base_grade_keeps_active_peer(host: _DockHost, qtbot: QtBot) -> None:
-    # Capture the actual pre-Base Grade QMainWindow state.
+@pytest.mark.parametrize("saved_base_grade", (False, True))
+def test_restore_legacy_grade_docks_keeps_active_peer(
+    host: _DockHost, qtbot: QtBot, saved_base_grade: bool,
+) -> None:
+    # Capture an actual QMainWindow state predating the new grade docks.
     legacy = QMainWindow()
     qtbot.addWidget(legacy)
-    peers = (host.dock_raw, host.dock_grading, host.dock_denoise)
+    peers = (host.dock_raw, host.dock_grading)
+    if saved_base_grade:
+        peers += (host.dock_base_grade,)
+    peers += (host.dock_denoise,)
     old_docks = []
     for dock in peers:
         old_dock = QDockWidget(dock.windowTitle(), legacy)
@@ -844,13 +855,16 @@ def test_restore_legacy_base_grade_keeps_active_peer(host: _DockHost, qtbot: QtB
     qtbot.waitUntil(lambda: not host.dock_denoise.visibleRegion().isEmpty())
     assert host.dock_base_grade in host.tabifiedDockWidgets(host.dock_grading)
     assert set(host.tabifiedDockWidgets(host.dock_grading)) >= {
-        host.dock_denoise, host.dock_raw, host.dock_base_grade}
+        host.dock_denoise, host.dock_raw, host.dock_base_grade, host.dock_chromogen}
     assert host.dock_base_grade.visibleRegion().isEmpty()
     assert not host.dock_base_grade.isHidden()
+    assert host.dock_chromogen.visibleRegion().isEmpty()
+    assert not host.dock_chromogen.isHidden()
 
 
-def test_restore_saved_base_grade_visibility_is_honored(host: _DockHost) -> None:
-    dock = host.dock_base_grade
+@pytest.mark.parametrize("attr", ("dock_base_grade", "dock_chromogen"))
+def test_restore_saved_grade_dock_visibility_is_honored(host: _DockHost, attr: str) -> None:
+    dock = getattr(host, attr)
     host.tabifyDockWidget(host.dock_grading, dock)
     dock.hide()
     saved = host.saveState()
@@ -992,6 +1006,7 @@ def test_apply_default_layout_arrangement_and_titlebars(
     # The bottom tools share one tab group...
     assert layout_host.dock_deblur in layout_host.tabifiedDockWidgets(layout_host.dock_grading)
     assert layout_host.dock_base_grade in layout_host.tabifiedDockWidgets(layout_host.dock_grading)
+    assert layout_host.dock_chromogen in layout_host.tabifiedDockWidgets(layout_host.dock_base_grade)
     # ...except Denoise, which splitDockWidget pulls out next to Scopes.
     assert layout_host.dock_denoise not in layout_host.tabifiedDockWidgets(
         layout_host.dock_grading)

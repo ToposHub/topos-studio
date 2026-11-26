@@ -67,6 +67,7 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
     导出侧硬门在 B13，此处先给出显式返回值）。
     """
     from src.features.color.core.base_grade import base_grade_active
+    from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_active, chromogen_compatibility_error
     from src.features.color.core.curves_soft_clip import (
         curves_soft_clip_is_identity,
     )
@@ -89,6 +90,10 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
         _get('curves_soft_clip'))
     has_hsl_curve = pipeline.has_active_hsl_curve_lut(_get('hsl_curve_lut'))
     has_mixer = pipeline.has_active_mixer_params(_get('mixer_params'))
+    grading = _get("grading_params")
+    grading = grading if isinstance(grading, Mapping) else {}
+    if error := chromogen_compatibility_error(grading.get(CHROMOGEN_KEY)):
+        return CorrectorDiagnostic("chromogen_unsupported", error, str(layer_id or _get("id") or ""))
 
     try:
         if bindings_override is not None:
@@ -113,7 +118,8 @@ def prepare_corrector(pipeline: ShaderPipeline, layer: Mapping[str, Any], *,
         has_mixer=has_mixer, has_curves_soft_clip=has_curves_soft_clip,
         plugins=plugin_bindings or None,
         has_primary_calibration=grade_uses_calibration(layer),
-        has_base_grade=base_grade_active(_get("grading_params") or {}),
+        has_base_grade=base_grade_active(grading),
+        has_chromogen=chromogen_active(grading),
         request_id=request_id, layer_id=layer_id,
     )
     if program is None:

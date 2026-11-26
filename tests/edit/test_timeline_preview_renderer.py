@@ -5300,10 +5300,12 @@ class TestSignals:
 
         renderer.shutdown()
 
+    @pytest.mark.parametrize("external_monitor", (False, True))
     def test_empty_timeline_none_result_emits_black_frame(
         self,
         mock_project,
         mock_frame_provider,
+        external_monitor,
     ):
         """An intentional empty range replaces the previous viewer frame with black."""
         sequence = TimelineSequence(
@@ -5313,15 +5315,20 @@ class TestSignals:
             width=1920,
             height=1080,
         )
+        project = mock_project.with_color_management({"color.timeline_space": "acescct",
+                                                       "color.aces.external_monitor": "dci-p3-g26"})
         renderer = TimelinePreviewRenderer(
-            project=mock_project,
+            project=project,
             sequence=sequence,
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer.set_aces_external_monitor_enabled(external_monitor)
         renderer._advance_to_next_frame = Mock()
 
-        with patch.object(renderer, "frame_ready") as mock_signal:
+        with patch.object(renderer, "frame_ready") as mock_signal, patch.object(
+            renderer, "aces_monitor_frame_ready",
+        ) as monitor_signal:
             renderer._on_frame_rendered(0, None)
 
         mock_signal.emit.assert_called_once()
@@ -5333,6 +5340,13 @@ class TestSignals:
         assert frame.pixelColor(0, 0).green() == 0
         assert frame.pixelColor(0, 0).blue() == 0
         assert renderer._cache.get(0) is frame
+        if external_monitor:
+            monitor_signal.emit.assert_called_once()
+            frame_index, payload = monitor_signal.emit.call_args.args
+            assert frame_index == 0
+            assert payload.data == b"\x00\x00\x00\xff"
+        else:
+            monitor_signal.emit.assert_not_called()
 
         renderer.shutdown()
 

@@ -755,7 +755,9 @@ class TimelineClipFrameProvider:
                 media_type = "image" if is_image(path) else "video"
                 if aces is not None:
                     source = meta.get("project_aces_source") or aces_input_descriptor(
-                        aces, path, media_type=media_type)
+                        aces, path, media_type=media_type,
+                        input_override=self._source_input_color_space(runtime_context, path),
+                    )
                     meta.update(project_aces_source=source,
                                 project_aces_compression=aces.reference_gamut_compression)
                 else:
@@ -1025,7 +1027,9 @@ class TimelineClipFrameProvider:
         aces = project_aces_settings(settings)
         hdr = project_hdr_settings(settings)
         if (aces is not None or hdr is not None) and is_image(asset_path):
-            return self._load_managed_still_texture(asset_path, aces)
+            return self._load_managed_still_texture(
+                asset_path, aces, input_override=self._source_input_color_space(runtime_context, asset_path),
+            )
 
         # Check source texture cache before decoding
         cache_key = (asset_path, source_frame)
@@ -1186,18 +1190,20 @@ class TimelineClipFrameProvider:
             cs_tag=source_cs_tag, source_meta=source_frame_meta,
         )
 
-    def _load_managed_still_texture(self, path: str, aces: Any) -> _TexResult | None:
+    def _load_managed_still_texture(
+        self, path: str, aces: Any, *, input_override: str | None = None,
+    ) -> _TexResult | None:
         from src.shared.color.project_video_signal import read_aces_still, read_video_still_bgr
         from src.shared.media.frame import DecodedFrame
 
         # Input interpretation is part of the cache identity. A project
         # setting change can reuse a decoded still only under the same IDT.
-        cache_key = (path, aces.input if aces is not None else "hdr")
+        cache_key = (path, (input_override or aces.input) if aces is not None else "hdr")
         cached = self._source_texture_cache.get(cache_key)
         if cached is not None and cached.is_valid:
             self._touch_source_cache_key(cache_key)
             return cached
-        pixels, source = (read_aces_still(path, aces) if aces is not None
+        pixels, source = (read_aces_still(path, aces, input_override=input_override) if aces is not None
                           else (read_video_still_bgr(path), None))
         result = self._upload_decoded_frame(DecodedFrame(
             frame_index=0, pts=None, time_seconds=0.0, data=pixels, pixel_format="bgr",
@@ -1557,6 +1563,17 @@ class TimelineClipFrameProvider:
         tags = (cs_tag, prim_tag, matrix_tag, range_tag)
         tags_cache[clip_id] = tags
         return tags
+
+    def _source_input_color_space(self, runtime_context: Any, path: str) -> str | None:
+        if self._project is None:
+            return None
+        asset_id = getattr(runtime_context, "asset_id", None) or self._resolve_clip_asset_id(runtime_context)
+        asset = self._project.get_asset_by_id(asset_id) if asset_id else None
+        if asset is None or getattr(asset, "is_comp_clip", False):
+            original_id = (getattr(asset, "metadata", None) or {}).get("original_asset_id")
+            asset = (self._project.get_asset_by_id(original_id) if original_id
+                     else self._project.get_asset_by_path(path))
+        return getattr(asset, "input_color_space", None)
 
     def _resolve_asset_path(self, runtime_context: Any) -> str | None:
         """

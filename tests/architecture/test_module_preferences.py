@@ -183,6 +183,155 @@ class TestColorProcessingPreferencePage:
         assert widget.settings() == expected
         assert widget.changes() == {OUTPUT_SPACE_KEY: "p3-d65-g24"}
 
+    def test_video_color_science_switch_keeps_each_mode_choices(self, qapp):
+        from PyQt6.QtWidgets import QCheckBox
+
+        from src.features.color.preferences import ColorSpaceControls
+        from src.shared.color.color_space_descriptor import OUTPUT_SPACE_KEY, TIMELINE_SPACE_KEY
+        from src.shared.color.project_video_signal import (
+            ACES_INPUT_KEY, ACES_RGC_KEY, ACES_VERSION_KEY, ACES_WORKING_SPACES, project_aces_settings,
+        )
+        from src.shared.ui.widgets import ChevronComboBox
+
+        widget = ColorSpaceControls()
+        topos = {TIMELINE_SPACE_KEY: "rec709-bt709", OUTPUT_SPACE_KEY: "p3-d65-g24"}
+        widget.load(topos)
+        science = widget.findChild(ChevronComboBox, "color.science")
+        timeline = widget.findChild(ChevronComboBox, TIMELINE_SPACE_KEY)
+        output = widget.findChild(ChevronComboBox, OUTPUT_SPACE_KEY)
+        version = widget.findChild(ChevronComboBox, ACES_VERSION_KEY)
+        input_transform = widget.findChild(ChevronComboBox, ACES_INPUT_KEY)
+        rgc = widget.findChild(ChevronComboBox, ACES_RGC_KEY)
+        combine = widget.findChild(QCheckBox, "color.combine_gamut_gamma")
+
+        assert science.currentText() == "TOPOS Color Manager"
+        assert timeline.findData("acescct") == -1
+        assert version.parentWidget().isHidden()
+        combine.setChecked(False)
+        science.setCurrentIndex(science.findData("aces"))
+        assert science.currentText() == "ACES"
+        assert not version.parentWidget().isHidden()
+        assert combine.isHidden()
+        assert not timeline.isHidden() and not output.isHidden()
+        assert tuple(timeline.itemData(i) for i in range(timeline.count())) == ACES_WORKING_SPACES
+        assert timeline.currentData() == "acescct"
+        assert output.currentData() == "rec709-g24"
+        assert output.findData("p3-d65-g24") == -1
+        version.setCurrentIndex(version.findData("2.0"))
+        assert not rgc.isEnabled()
+        input_transform.setCurrentIndex(input_transform.findData("acescg"))
+        timeline.setCurrentIndex(timeline.findData("acescc"))
+        output.setCurrentIndex(output.findData("aces2065-1"))
+        aces = widget.settings()
+        assert project_aces_settings(aces).version == "2.0"
+
+        science.setCurrentIndex(science.findData("topos"))
+        assert widget.settings() == topos
+        assert widget.changes() == {}
+        assert not combine.isHidden()
+        assert not combine.isChecked()
+        science.setCurrentIndex(science.findData("aces"))
+        assert widget.settings() == aces
+        widget.load(aces)
+        assert science.currentData() == "aces"
+        assert widget.changes() == {}
+
+    def test_aces_preference_is_used_by_new_projects(self, page):
+        from src.features.color.preferences import ColorSpaceControls
+        from src.shared.color.color_space_descriptor import color_settings_from_config, project_timeline_space
+        from src.shared.color.project_video_signal import ACES_VERSION_KEY, project_aces_settings
+        from src.shared.ui.widgets import ChevronComboBox
+
+        config = FakeConfigManager()
+        page.load(config)
+        widget = page._widget_ref.findChild(ColorSpaceControls)
+        science = widget.findChild(ChevronComboBox, "color.science")
+        science.setCurrentIndex(science.findData("aces"))
+        version = widget.findChild(ChevronComboBox, ACES_VERSION_KEY)
+        version.setCurrentIndex(version.findData("2.0"))
+        page.apply(config)
+
+        defaults = color_settings_from_config(config)
+        assert project_timeline_space(defaults) == "acescct"
+        assert project_aces_settings(defaults).version == "2.0"
+        page.load(config)
+        assert science.currentData() == "aces"
+        assert widget.changes() == {}
+
+    def test_project_monitor_luts_are_independent_and_adopted_on_accept(self, qapp, tmp_path, monkeypatch):
+        import numpy as np
+        from PyQt6.QtWidgets import QFileDialog
+
+        from src.features.color.preferences import ColorSpaceControls
+        from src.features.edit.core.edit_project_io import EditProjectIO
+        from src.features.edit.core.project import EditProject
+        from src.shared.color import lut_resource_registry
+        from src.shared.color.color_space_descriptor import ACESCG_SCENE, TIMELINE_SPACE_KEY
+        from src.shared.color.project_video_signal import (
+            ACES_DCI_P3_MONITOR, ACES_DESKTOP_LUT_KEY, ACES_EXTERNAL_LUT_KEY, ACES_EXTERNAL_MONITOR_KEY,
+            ACES_VERSION_KEY, aces_desktop_monitor_settings, aces_external_monitor_settings,
+            project_aces_settings, render_aces_bgr,
+        )
+        from src.shared.project.resource_resolver import get_active_project_resolver, set_active_project_resolver
+        from src.shared.ui.widgets import ChevronComboBox
+
+        session = lut_resource_registry.LutResourceSession(str(tmp_path / "project"))
+        monkeypatch.setattr(lut_resource_registry, "get_lut_resource_session", lambda: session)
+        desktop, projector = tmp_path / "desktop.cube", tmp_path / "projector.cube"
+        desktop.write_text("LUT_3D_SIZE 2\n" + "0.20 0.30 0.40\n" * 8)
+        projector.write_text("LUT_3D_SIZE 2\n" + "0.50 0.60 0.70\n" * 8)
+        paths = iter((desktop, projector))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_: (str(next(paths)), ""))
+
+        widget = ColorSpaceControls(project_monitor_luts=True)
+        original_resolver = get_active_project_resolver()
+        try:
+            widget.load({TIMELINE_SPACE_KEY: "acescct", ACES_VERSION_KEY: "2.0"})
+            external = widget.findChild(ChevronComboBox, ACES_EXTERNAL_MONITOR_KEY)
+            dci = external.findData(ACES_DCI_P3_MONITOR)
+            assert not external.model().item(dci).isEnabled()
+            widget._select_monitor_lut(ACES_DESKTOP_LUT_KEY)
+            assert not external.model().item(dci).isEnabled()
+            widget._select_monitor_lut(ACES_EXTERNAL_LUT_KEY)
+            assert external.model().item(dci).isEnabled()
+            external.setCurrentIndex(dci)
+            settings = widget.settings()
+            assert not session.entries()
+            assert settings[ACES_DESKTOP_LUT_KEY] != settings[ACES_EXTERNAL_LUT_KEY]
+            widget.commit_monitor_luts()
+            assert {item.uri for item in session.lut_entries()} == {
+                settings[ACES_DESKTOP_LUT_KEY], settings[ACES_EXTERNAL_LUT_KEY],
+            }
+            project_file = tmp_path / "monitor-luts.topos"
+            project = EditProject.create("Monitor LUTs").with_color_management(settings)
+            assert EditProjectIO().save_project(project_file, project, create_backup=False, use_ai_callback=False,
+                                                force_project_mode="edit_project")
+            desktop.unlink()
+            projector.unlink()
+            widget.discard_monitor_luts()
+            session.reset()
+            loaded, _, _ = EditProjectIO().load_project(project_file)
+            widget.load(loaded.color_management)
+            assert external.currentIndex() == dci
+            delivery = project_aces_settings(loaded.color_management)
+            assert delivery.external_monitor == ACES_DCI_P3_MONITOR
+            assert not delivery.monitor_lut
+            desktop_view = aces_desktop_monitor_settings(delivery)
+            projector_view = aces_external_monitor_settings(delivery)
+            assert desktop_view.monitor_lut == settings[ACES_DESKTOP_LUT_KEY]
+            assert projector_view.monitor_lut == settings[ACES_EXTERNAL_LUT_KEY]
+            image = np.full((1, 1, 3), 0.18, dtype=np.float32)
+            np.testing.assert_allclose(render_aces_bgr(image, ACESCG_SCENE, desktop_view), [[[0.40, 0.30, 0.20]]])
+            np.testing.assert_allclose(render_aces_bgr(image, ACESCG_SCENE, projector_view), [[[0.70, 0.60, 0.50]]])
+            assert not np.allclose(render_aces_bgr(image, ACESCG_SCENE, delivery), [[[0.40, 0.30, 0.20]]])
+            widget._set_monitor_lut(ACES_EXTERNAL_LUT_KEY, "")
+            assert external.currentData() == "rec709-g24"
+            assert widget.settings()[ACES_DESKTOP_LUT_KEY] == settings[ACES_DESKTOP_LUT_KEY]
+        finally:
+            widget.discard_monitor_luts()
+            session.reset()
+            set_active_project_resolver(original_resolver)
+
     def test_image_preferences_leave_video_color_space_defaults_untouched(self, qapp, monkeypatch):
         from PyQt6.QtWidgets import QWidget
         from src.features.color.preferences import ColorProcessingPreferencePage, ColorSpaceControls

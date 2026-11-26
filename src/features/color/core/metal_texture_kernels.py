@@ -61,6 +61,7 @@ from src.features.color.core.warper_color import (
 )
 from src.features.color.core.x_grade_shader import MSL_X_GRADE
 from src.features.color.core.base_grade_runtime import metal_graph_base_grade_source
+from src.features.color.core.chromogen_runtime import metal_managed_grading_source
 from src.shared.gpu.metal.kernels_color import build_metal_pointwise_grading_msl
 
 _MSL_HEADER = """#include <metal_stdlib>
@@ -578,11 +579,8 @@ kernel void tg_parallel_mix(
 }
 """
 
-#: 完整纹理图 kernel 源（compile_kernel 的 MSL 源参数）
-METAL_TEX_GRAPH_OPS_MSL = (
-    _MSL_HEADER
-    + build_metal_pointwise_grading_msl(metal_graph_base_grade_source())
-    + MSL_HSV_FUNCS
+_TEX_GRAPH_BODY_MSL = (
+    MSL_HSV_FUNCS
     + MSL_CURVES_HELPERS
     + MSL_CURVES                       # msl_apply_hsl_curves（纹理采样）
     + MSL_BLEND_MODES
@@ -606,6 +604,18 @@ METAL_TEX_GRAPH_OPS_MSL = (
     + f"constant int tg_warper_chroma709 = {WARPER_CHROMA709_SPACE};\n"
     + f"constant int tg_warper_x_grade = {WARPER_X_GRADE_SPACE};\n"
     + _TEX_GRAPH_KERNELS_MSL
+)
+
+# Keep the standard graph library independent of the look-stage variant.
+# ShaderPipeline uses the same active-only policy on OpenGL.
+METAL_TEX_GRAPH_OPS_MSL = (
+    _MSL_HEADER + build_metal_pointwise_grading_msl(metal_graph_base_grade_source())
+    + _TEX_GRAPH_BODY_MSL
+)
+METAL_TEX_GRAPH_CHROMOGEN_MSL = (
+    "#define tg_corrector tg_corrector_chromogen\n"
+    + _MSL_HEADER + build_metal_pointwise_grading_msl(metal_managed_grading_source())
+    + _TEX_GRAPH_BODY_MSL
 )
 
 #: 参考实现 4A 的独立源（kernel 名与计划原文一致）

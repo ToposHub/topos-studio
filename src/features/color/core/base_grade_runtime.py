@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import PurePath
@@ -86,8 +86,8 @@ def base_grade_graph_signal(
     from src.features.color.core.color_graph_param_source import _iter_corrector_nodes
 
     affected = any(
-        base_grade_active(node.legacy_payload.get("grading_params") or {})
-        or base_grade_active(node.params.get("grade") or {})
+        managed_primary_active(node.legacy_payload.get("grading_params") or {})
+        or managed_primary_active(node.params.get("grade") or {})
         or any(key in (node.params.get("grade_keyframes") or {})
                or key in (node.legacy_payload.get("grade_keyframes") or {})
                for key in BASE_GRADE_DEFAULTS)
@@ -128,7 +128,7 @@ def base_grade_shader_call(color: str, encoded: str, *, metal_layout: str | None
         arguments = [f"float{len(keys)}(" + ", ".join(
             f"p.base_grade[{next(components)}]" for _ in keys) + ")"
             for _, keys in _CONTROL_GROUPS]
-        transfer = "p.base_grade_transfer"
+        transfer = "(p.base_grade_transfer - 1)"
         arguments += ["float3(" + ", ".join(f"p.base_grade_signal[{index + i}]" for i in range(3)) + ")"
                       for index in range(0, 21, 3)]
     elif metal_layout == "composition":
@@ -151,17 +151,49 @@ def apply_base_grade_working(
     """Apply in linear Rec.709, round-tripping the working signal as needed."""
     if not base_grade_active(params):
         return rgb
+    return apply_linear_grade_in_working_space(
+        rgb, lambda color: apply_base_grade_linear(color, params), encoded_input=encoded_input, signal=signal)
+
+
+def managed_primary_active(params: Mapping[str, Any]) -> bool:
+    """Identify authored grading operations evaluated in managed linear light."""
+    from src.features.color.core.chromogen import (
+        CHROMOGEN_KEY, chromogen_active, chromogen_compatibility_error,
+    )
+
+    return (base_grade_active(params) or chromogen_active(params)
+            or chromogen_compatibility_error(params.get(CHROMOGEN_KEY)) is not None)
+
+
+def apply_linear_grade_in_working_space(
+    rgb: np.ndarray, operation: Callable[[np.ndarray], np.ndarray], *, encoded_input: bool = False,
+    signal: Mapping[str, Any] | None = None,
+) -> np.ndarray:
+    """Call a linear-light grading operation in the existing signal space."""
     if signal:
         space = ColorSpaceDescriptor.from_dict(signal["space"])
         luminance = VideoSignalLuminance(*signal["luminance"])
         linear = _COLOR_PROVIDER.transform_signal(rgb, space, LINEAR_SCENE, luminance=luminance)
-        graded = apply_base_grade_linear(linear, params)
+        graded = operation(linear)
         return _COLOR_PROVIDER.transform_signal(graded, LINEAR_SCENE, space, luminance=luminance)
     if not encoded_input:
-        return apply_base_grade_linear(rgb, params)
+        return operation(rgb)
     linear = np.copysign(np.power(np.abs(rgb), 2.4), rgb)
-    graded = apply_base_grade_linear(linear, params)
+    graded = operation(linear)
     return np.copysign(np.power(np.abs(graded), 1.0 / 2.4), graded)
+
+
+def decode_linear_grade_input(
+    rgb: np.ndarray, *, encoded_input: bool = False, signal: Mapping[str, Any] | None = None,
+) -> np.ndarray:
+    """Read the same scene-linear signal that managed grade stages receive."""
+    if signal:
+        space = ColorSpaceDescriptor.from_dict(signal["space"])
+        luminance = VideoSignalLuminance(*signal["luminance"])
+        return _COLOR_PROVIDER.transform_signal(rgb, space, LINEAR_SCENE, luminance=luminance)
+    if encoded_input:
+        return np.copysign(np.power(np.abs(rgb), 2.4), rgb)
+    return rgb
 
 
 _SIGNAL_WRAPPER_GLSL = """

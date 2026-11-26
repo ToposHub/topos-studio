@@ -1,11 +1,11 @@
-"""The X Grade palette publishes one editing gesture into the corrector model."""
+"""Selective Grade publishes one editing gesture into the corrector model."""
 from __future__ import annotations
 
 import numpy as np
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QGraphicsView, QStyle, QStyleFactory, QStyleOptionSlider
+from PyQt6.QtWidgets import QGraphicsView, QLabel, QStyle, QStyleFactory, QStyleOptionSlider, QToolButton
 from pytestqt.qtbot import QtBot
 
 from src.features.color.adapters.warper_command_adapter import WarperCommandAdapter
@@ -17,6 +17,42 @@ from src.features.color.core.warper_state import (
 )
 from src.features.color.ui.x_grade_panel import _REFERENCE_SCOPE_PIXELS, XGradeCanvas, XGradePanel
 from src.features.color.ui.warper_panel import WarperPanel
+from src.shared.i18n.i18n import I18N
+
+
+@pytest.mark.parametrize(("locale", "title", "reset", "show"), (
+    ("en_US", "Selective Grade", "Reset Selective Grade", "Show Selective Grade"),
+    ("zh_CN", "选色调节", "重置选色调节", "显示选色调节"),
+))
+def test_selective_grade_uses_its_localized_name_in_both_presentations(
+    qtbot: QtBot, locale: str, title: str, reset: str, show: str,
+) -> None:
+    previous_locale = I18N.get_current_locale()
+    try:
+        assert I18N.load_locale(locale)
+        panel = XGradePanel()
+        qtbot.addWidget(panel)
+        assert panel._standalone_header.findChild(QLabel).text() == title
+        assert panel.viewer_controls.findChild(QToolButton, "warper_reset").toolTip() == reset
+        assert panel.expanded_placeholder.text() == show
+        assert title in panel._working_notice.text()
+        panel.toggle_expanded()
+        assert panel._dialog.windowTitle() == title
+        panel.collapse_expanded()
+
+        warper = WarperPanel()
+        qtbot.addWidget(warper)
+        warper.add_x_grade_mode(panel)
+        mode = warper.mode_buttons["x_grade"]
+        assert mode.toolTip() == mode.accessibleName() == title
+        mode.click()
+        assert warper.title.text().endswith(title)
+        notices: list[str] = []
+        panel.notice_requested.connect(notices.append)
+        panel.chroma_warp.limit_reached.emit()
+        assert title in notices[0]
+    finally:
+        I18N.load_locale(previous_locale)
 
 
 def test_palette_strokes_pins_and_reset_use_independent_saved_state(qtbot: QtBot) -> None:

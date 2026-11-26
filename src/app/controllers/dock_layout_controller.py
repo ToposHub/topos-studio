@@ -61,8 +61,10 @@ _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY = "color_grading_dock_layout_version"
 _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION = 3
 COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS = 450
 _BASE_GRADE_DOCK_NAME = "dockBaseGrade"
+_CHROMOGEN_DOCK_NAME = "dockChromogen"
 _COLOR_TOOL_DOCK_NAMES = frozenset({
-    "dockDenoise", "dockDeblur", "dockGrading", _BASE_GRADE_DOCK_NAME, "dockCurves",
+    "dockDenoise", "dockDeblur", "dockGrading", _BASE_GRADE_DOCK_NAME,
+    _CHROMOGEN_DOCK_NAME, "dockCurves",
     "dockColorMapping", "dockMixer", "dockBlurSharpen", "dockGrain", "dockMasks",
     "dockQualifier", "dockRaw", "dockAnalysis", "dockCrop",
     "dockTracker", "dockColorKeyframes",
@@ -82,27 +84,41 @@ _FLOATING_TITLEBAR_HEIGHT = 28
 
 
 def restore_workspace_dock_state(window: QMainWindow, state: QByteArray, page: str) -> bool:
-    """Restore Qt geometry and place Base Grade in older Color layouts."""
+    """Restore Qt geometry and place new grade tools in older Color layouts."""
     if not window.restoreState(state):
         return False
-    base_grade = getattr(window, "dock_base_grade", None)
-    if page != "Color" or base_grade is None:
+    if page != "Color":
         return True
+    snapshot = bytes(state)
+    _place_missing_grade_dock(window, snapshot, _BASE_GRADE_DOCK_NAME, "dock_base_grade",
+                              ("dock_grading", "dock_raw"))
+    _place_missing_grade_dock(window, snapshot, _CHROMOGEN_DOCK_NAME, "dock_chromogen",
+                              ("dock_base_grade", "dock_grading", "dock_raw"))
+    return True
+
+
+def _place_missing_grade_dock(
+    window: QMainWindow, snapshot: bytes, object_name: str, dock_attr: str,
+    anchor_attrs: tuple[str, ...],
+) -> None:
+    dock = getattr(window, dock_attr, None)
     # Qt saves object names as big-endian QStrings. Only insert the dock if
     # the snapshot predates it, leaving a saved close or float state intact.
-    if _BASE_GRADE_DOCK_NAME.encode("utf-16-be") in bytes(state):
-        return True
-    grading = window.dock_grading
-    anchor = window.dock_raw if grading.isFloating() else grading
-    base_grade.hide()
-    base_grade.setFloating(False)
-    if not anchor.isFloating() and window.dockWidgetArea(anchor) != Qt.DockWidgetArea.NoDockWidgetArea:
-        if base_grade not in window.tabifiedDockWidgets(anchor):
-            window.tabifyDockWidget(anchor, base_grade)
+    if dock is None or object_name.encode("utf-16-be") in snapshot:
+        return
+    dock.hide()
+    dock.setFloating(False)
+    for anchor_attr in anchor_attrs:
+        anchor = getattr(window, anchor_attr, None)
+        if (anchor is None or anchor.isFloating()
+                or window.dockWidgetArea(anchor) == Qt.DockWidgetArea.NoDockWidgetArea):
+            continue
+        if dock not in window.tabifiedDockWidgets(anchor):
+            window.tabifyDockWidget(anchor, dock)
+        break
     else:
-        window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, base_grade)
-    base_grade.show()
-    return True
+        window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+    dock.show()
 
 
 class FloatingDockTitleBar(QWidget):
@@ -357,13 +373,23 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grading)
         base_grade = self.grading_panel.base_grade_panel
         self.dock_base_grade = create_custom_dock(
-            I18N.tr("base_grade.title", "Base Grade"), base_grade, _BASE_GRADE_DOCK_NAME
+            I18N.tr("base_grade.title", "Tonal Grade"), base_grade, _BASE_GRADE_DOCK_NAME
         )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_base_grade)
         self.dock_base_grade.visibilityChanged.connect(
             lambda visible: base_grade.finish_edit(commit=True) if not visible else None
         )
         self.dock_base_grade.hide()
+
+        chromogen = self.grading_panel.chromogen_panel
+        self.dock_chromogen = create_custom_dock(
+            I18N.tr("chromogen.title", "Look Dev"), chromogen, _CHROMOGEN_DOCK_NAME
+        )
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_chromogen)
+        self.dock_chromogen.visibilityChanged.connect(
+            lambda visible: chromogen.finish_edit(commit=True) if not visible else None
+        )
+        self.dock_chromogen.hide()
 
         self.dock_curves = create_custom_dock(I18N.tr("panel.curves", "Curves"), self.curves_panel, "dockCurves")
         self.dock_curves.setMinimumWidth(420)
@@ -1267,7 +1293,8 @@ class DockLayoutMixin:
         self.all_docks = [
             self.dock_viewport, self.dock_library, self.dock_files, self.dock_info,
             self.dock_layers, self.dock_denoise, self.dock_deblur,
-            self.dock_grading, self.dock_base_grade, self.dock_curves, self.dock_warper, self.dock_mixer,
+            self.dock_grading, self.dock_base_grade, self.dock_chromogen,
+            self.dock_curves, self.dock_warper, self.dock_mixer,
             self.dock_audio_mixer, self.dock_effects, self.dock_grain,
             self.dock_masks, self.dock_qualifier, self.dock_lut,
             self.dock_raw, self.dock_analysis, self.dock_export,
@@ -3493,6 +3520,7 @@ class DockLayoutMixin:
         # Bottom Area Distribution
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_grading)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_base_grade)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_chromogen)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_denoise)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_deblur)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_curves)
@@ -3509,6 +3537,7 @@ class DockLayoutMixin:
         self.tabifyDockWidget(self.dock_denoise, self.dock_deblur)
         self.tabifyDockWidget(self.dock_deblur, self.dock_grading)
         self.tabifyDockWidget(self.dock_grading, self.dock_base_grade)
+        self.tabifyDockWidget(self.dock_base_grade, self.dock_chromogen)
         self.tabifyDockWidget(self.dock_grading, self.dock_curves)
         self.tabifyDockWidget(self.dock_curves, self.dock_warper)
         self.tabifyDockWidget(self.dock_warper, self.dock_mixer)
@@ -3559,7 +3588,7 @@ class DockLayoutMixin:
         grade_sets = getattr(self, "dock_grade_sets", None)
         resources = tuple(dock for dock in (
             grade_sets, self.dock_presets, self.dock_lut, self.dock_plugin) if dock is not None)
-        primary = (self.dock_raw, self.dock_grading, self.dock_base_grade,
+        primary = (self.dock_raw, self.dock_grading, self.dock_base_grade, self.dock_chromogen,
                    self.dock_denoise, self.dock_deblur)
         secondary = (self.dock_curves, self.dock_warper, self.dock_mixer,
                      self.dock_qualifier, self.dock_masks, self.dock_effects)
@@ -4337,11 +4366,12 @@ class DockLayoutMixin:
         (Edit feature disabled at startup).
         """
         color_active = self.current_page == "Color"
-        base_grade = getattr(self, "dock_base_grade", None)
-        if base_grade is not None:
-            base_grade.toggleViewAction().setEnabled(color_active)
-            if not color_active:
-                base_grade.hide()
+        for attr in ("dock_base_grade", "dock_chromogen"):
+            dock = getattr(self, attr, None)
+            if dock is not None:
+                dock.toggleViewAction().setEnabled(color_active)
+                if not color_active:
+                    dock.hide()
         for attr in ("files_panel", "library_panel"):
             set_active = getattr(getattr(self, attr, None), "set_color_workspace_active", None)
             if callable(set_active):

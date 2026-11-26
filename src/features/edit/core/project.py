@@ -245,6 +245,22 @@ class MediaAsset:
             comment=comment if comment is not None else self.comment,
         )
 
+    _INPUT_COLOR_SPACE_KEY: ClassVar[str] = "input_color_space"
+
+    @property
+    def input_color_space(self) -> str | None:
+        """The authored source color interpretation, or the project default."""
+        value = (self.color_metadata or {}).get(self._INPUT_COLOR_SPACE_KEY)
+        return value if isinstance(value, str) else None
+
+    def with_input_color_space(self, selection: str | None) -> MediaAsset:
+        metadata = dict(self.color_metadata or {})
+        if selection is None:
+            metadata.pop(self._INPUT_COLOR_SPACE_KEY, None)
+        else:
+            metadata[self._INPUT_COLOR_SPACE_KEY] = selection
+        return replace(self, color_metadata=metadata or None)
+
     @property
     def has_proxy(self) -> bool:
         """是否有可用的代理"""

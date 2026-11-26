@@ -71,6 +71,10 @@ from PyQt6.QtGui import (
 )
 
 from src.shared.i18n.i18n import I18N
+from src.shared.color.color_space_descriptor import ACESCG_SCENE, ColorSpaceDescriptor
+from src.shared.color.project_video_signal import (
+    ProjectAcesSettings, aces_input_bgr, aces_input_descriptor, read_aces_still, render_aces_bgr,
+)
 from src.shared.assets.icon_manager import (
     icon_jump_start, icon_step_back, icon_play, icon_pause, icon_step_forward,
     icon_jump_end, IconColors,
@@ -1526,7 +1530,7 @@ class SourceViewer(QOpenGLWidget):
 # SourceViewerWidget - Main container widget
 # ================================================================
 
-def _open_cpu_decode_source(path: str, target_size: Optional[tuple[int, int]]):
+def _open_cpu_decode_source(path: str, target_size: Optional[tuple[int, int]], *, high_depth: bool = False) -> Any:
     """创建 CPU 回退解码器：Topos 素材经 factory 路由，其余走 FFmpeg。
 
     Topos 私有编码（TPIC）没有 FFmpeg 解码器，硬编码 FFmpegMediaSource
@@ -1553,7 +1557,7 @@ def _open_cpu_decode_source(path: str, target_size: Optional[tuple[int, int]]):
         path,
         target_size=target_size,
         output_mode="packed_rgb",
-        output_format="rgb24",
+        output_format="rgb48le" if high_depth else "rgb24",
     )
     decoder.open()
     return decoder
@@ -1570,6 +1574,21 @@ def _decoded_frame_to_rgb24(decoded) -> Optional[np.ndarray]:
 
     rgb = topos_frame_to_rgb(decoded)
     return rgb
+
+
+def _project_aces_source_rgb(
+    pixels: np.ndarray, source: ColorSpaceDescriptor, aces: ProjectAcesSettings,
+) -> np.ndarray:
+    scene = aces_input_bgr(pixels, source, ACESCG_SCENE,
+                           reference_gamut_compression=aces.reference_gamut_compression)
+    output = render_aces_bgr(scene, ACESCG_SCENE, aces)
+    return np.rint(np.clip(output[..., 2::-1], 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+def _source_viewer_rgb_image(rgb: np.ndarray) -> QImage:
+    rgb = np.ascontiguousarray(rgb)
+    height, width = rgb.shape[:2]
+    return QImage(rgb.data, width, height, 3 * width, QImage.Format.Format_RGB888).copy()
 
 
 class _CpuFallbackDecodeSignals(QObject):
@@ -1603,7 +1622,7 @@ class _CpuFallbackDecodeWorker:
         self._signals = _CpuFallbackDecodeSignals()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
-        # (asset_path, frame, generation, target_size, still) 或 _CLOSE
+        # (asset_path, frame, generation, target_size, still, color) 或 _CLOSE
         self._request: Optional[tuple] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -1646,12 +1665,13 @@ class _CpuFallbackDecodeWorker:
         target_size: Optional[tuple[int, int]],
         *,
         still: bool = False,
+        color: tuple[ProjectAcesSettings, str | None] | None = None,
     ) -> None:
         """提交解码请求（latest-wins：只保留最新一条）。"""
         with self._cond:
             if not self._running:
                 return
-            self._request = (asset_path, int(frame), int(generation), target_size, still)
+            self._request = (asset_path, int(frame), int(generation), target_size, still, color)
             self._cond.notify()
 
     def close_decoder(self) -> None:
@@ -1675,24 +1695,33 @@ class _CpuFallbackDecodeWorker:
                 if request is self._CLOSE:
                     self._dispose_decoder()
                     continue
-                asset_path, frame, generation, target_size, still = request
+                asset_path, frame, generation, target_size, still, color = request
                 if still:
                     self._dispose_decoder()
                     started = time.perf_counter()
-                    reader = QImageReader(asset_path)
-                    reader.setAutoTransform(True)
-                    image = reader.read()
-                    if image.isNull():
-                        self._signals.decode_failed.emit(frame, reader.errorString(), generation)
-                    else:
+                    try:
+                        if color is None:
+                            reader = QImageReader(asset_path)
+                            reader.setAutoTransform(True)
+                            image = reader.read()
+                            if image.isNull():
+                                raise OSError(reader.errorString())
+                        else:
+                            aces, override = color
+                            pixels, source = read_aces_still(asset_path, aces, input_override=override)
+                            rgb = _project_aces_source_rgb(pixels, source, aces)
+                            image = _source_viewer_rgb_image(rgb)
                         elapsed_ms = (time.perf_counter() - started) * 1000
                         self._signals.frame_ready.emit(frame, image, elapsed_ms, generation)
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        self._signals.decode_failed.emit(frame, str(exc), generation)
                     continue
-                key = (asset_path, target_size)
+                key = (asset_path, target_size, color is not None)
                 if self._decoder_key != key:
                     self._dispose_decoder()
                     try:
-                        self._decoder = _open_cpu_decode_source(asset_path, target_size)
+                        self._decoder = (_open_cpu_decode_source(asset_path, target_size, high_depth=True)
+                                         if color is not None else _open_cpu_decode_source(asset_path, target_size))
                         self._decoder_key = key
                     except Exception as exc:
                         logger.debug(
@@ -1711,15 +1740,11 @@ class _CpuFallbackDecodeWorker:
                     if frame_data is None:
                         self._signals.decode_failed.emit(frame, "empty_frame", generation)
                         continue
-                    frame_data = np.ascontiguousarray(frame_data)
-                    height, width = frame_data.shape[:2]
-                    qimage = QImage(
-                        frame_data.data,
-                        int(width),
-                        int(height),
-                        int(3 * width),
-                        QImage.Format.Format_RGB888
-                    ).copy()  # Copy to ensure data ownership
+                    if color is not None:
+                        aces, override = color
+                        source = aces_input_descriptor(aces, asset_path, media_type="video", input_override=override)
+                        frame_data = _project_aces_source_rgb(frame_data[..., ::-1], source, aces)
+                    qimage = _source_viewer_rgb_image(frame_data)
                     decode_ms = (time.perf_counter() - decode_t0) * 1000.0
                     self._signals.frame_ready.emit(frame, qimage, decode_ms, generation)
                 except Exception as exc:
@@ -1814,6 +1839,7 @@ class SourceViewerWidget(QWidget):
 
         # State
         self._current_asset: Optional[MediaAsset] = None
+        self._project_aces: ProjectAcesSettings | None = None
         self._preview_only = False
         # Native Metal viewport (plan 2.5): absent unless the session opts in
         # and the Source renderer accepts the layer.
@@ -2036,6 +2062,22 @@ class SourceViewerWidget(QWidget):
         return self._current_asset
 
     @property
+    def aces_source_color(self) -> tuple[ProjectAcesSettings, str | None] | None:
+        if self._current_asset is None or self._project_aces is None:
+            return None
+        return self._project_aces, self._current_asset.input_color_space
+
+    def update_aces_source_color(self, asset: MediaAsset, project_aces: ProjectAcesSettings | None) -> None:
+        if self._current_asset is None or self._current_asset.asset_id != asset.asset_id:
+            return
+        before = self.aces_source_color
+        self._current_asset, self._project_aces = asset, project_aces
+        if before != self.aces_source_color:
+            self._frame_cache.clear()
+            self._cache_order.clear()
+            self.seek(self._current_frame, force=True)
+
+    @property
     def preview_only(self) -> bool:
         return self._preview_only
 
@@ -2053,6 +2095,7 @@ class SourceViewerWidget(QWidget):
         *,
         preview_only: bool = False,
         initial_preview: QImage | None = None,
+        project_aces: ProjectAcesSettings | None = None,
     ) -> None:
         """
         Open a media asset for preview.
@@ -2071,6 +2114,7 @@ class SourceViewerWidget(QWidget):
             self.close_source()
 
         self._current_asset = asset
+        self._project_aces = project_aces
         self._preview_only = preview_only
         self._scrub_source_channel_map = source_channel_map
         self._scrub_audio_source_path = audio_source_path
@@ -3624,10 +3668,13 @@ class SourceViewerWidget(QWidget):
 
     def _load_image_frame(self) -> None:
         """Load an image asset."""
-        if self._preview_only:
+        color = self.aces_source_color
+        if self._preview_only or color is not None:
             if not self._shutdown_prepared:
                 self._cpu_worker.request(
-                    self._current_asset.path, 0, self._gpu_generation, target_size=None, still=True)
+                    self._current_asset.path, 0, self._gpu_generation, target_size=None, still=True,
+                    **({"color": color} if color is not None else {}),
+                )
             return
         try:
             from PyQt6.QtGui import QPixmap
@@ -3784,11 +3831,13 @@ class SourceViewerWidget(QWidget):
             return
         self._gpu_pending_frame = frame
         self._gpu_stats["decode_submitted"] += 1  # CPU 提交同样计入（I06 计数器口径统一）
+        color = self.aces_source_color
         self._cpu_worker.request(
             asset.path,
             frame,
             generation=self._gpu_generation,
             target_size=self._get_media_display_target_size(),
+            **({"color": color} if color is not None else {}),
         )
 
     def _on_cpu_frame_ready(self, frame: int, image: QImage, decode_ms: float,

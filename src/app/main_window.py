@@ -1944,19 +1944,31 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         panels.extend(getattr(self, name, None) for name in (
             "effects_panel", "qualifier_panel", "warper_panel", "mask_panel",
             "tracker_panel"))
+        chromogen = getattr(getattr(self, "grading_panel", None), "chromogen_panel", None)
+        panels.append(chromogen)
         for panel in panels:
             if isinstance(panel, QWidget):
                 panel.setEnabled(enabled)
+        if not enabled and (picker := getattr(self, "_chromogen_picker", None)) is not None:
+            picker.cancel()
 
     def _on_color_graph_handle(self, handle: Any) -> None:
         """Refresh parameter panels from the selected authoritative corrector."""
+        from src.features.color.core.chromogen import CHROMOGEN_KEY
         from src.features.color.core.layer import Layer
+        from src.shared.project.color_graph import unfreeze_params
 
         self._set_color_graph_panels_enabled(not bool(handle.params.get("locked", False)))
         graph_host = self.color_graph_host
         grading_panel = getattr(self, "grading_panel", None)
         if grading_panel is not None:
             grading_panel.current_stack_id = graph_host.bound_stack_id
+            project = getattr(self, "_current_edit_project", None)
+            stack = getattr(project, "color_stacks", {}).get(graph_host.bound_stack_id)
+            if getattr(stack, "graph_locked", False):
+                chromogen = getattr(grading_panel, "chromogen_panel", None)
+                if chromogen is not None:
+                    chromogen.setEnabled(False)
         effects = getattr(self, "effects_panel", None)
         if effects is not None:
             effects.set_mist_available(graph_host.binding_description()["scope"] == "clip")
@@ -1964,7 +1976,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # ——裸 legacy_payload 会让图命令写入的 qualifier 等域在面板不可见
         payload = graph_host.panel_layer_payload(handle.node_id) or {}
         layer = Layer.from_dict(payload)
-        layer.grading_params.update(handle.grade_params())
+        handle_grade = dict(handle.grade_params())
+        if CHROMOGEN_KEY in handle_grade:
+            handle_grade[CHROMOGEN_KEY] = unfreeze_params(handle_grade[CHROMOGEN_KEY])
+        layer.grading_params.update(handle_grade)
         aligned = graph_host.align_engine_active_layer(handle.node_id)
         self._set_color_stack_hydration_guard(True)
         try:
@@ -2119,6 +2134,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         source = (identity, layer.id if layer is not None else "", revision.get("_source_epoch"),
                   revision.get("current_grade_frame"))
         render_revision = (self.engine.color_graph_revision, tuple(self.engine.visible_rect))
+        chromogen = self._chromogen_picker.request(
+            node_id, source, (*render_revision, self.engine.grade_set_preview_key))
+        if chromogen is not None:
+            return chromogen
         warper = self.warper_panel.request_viewer_input(node_id, source, revision=render_revision)
         x_grade = self.x_grade_panel.request_viewer_input(
             node_id, source, revision=(*render_revision, self.engine.grade_set_preview_key),
@@ -2130,10 +2149,27 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 and self.canvas.accepts_warper_picker())
 
     def setup_connections(self):
+        from src.app.controllers.chromogen_picker import ChromogenPicker
+
         self.canvas.file_open_requested.connect(self._open_media_path)
         self.engine.frame_ready.connect(self.on_frame_ready)
         self.engine.scope_snapshot_ready.connect(self.on_scope_snapshot_ready)
         self.engine.warper_input_request = self._warper_input_request
+        chromogen = self.grading_panel.chromogen_panel
+
+        def disarm_warpers() -> None:
+            self.warper_panel.picker_button.setChecked(False)
+            self.x_grade_panel.picker_button.setChecked(False)
+
+        self._chromogen_picker = ChromogenPicker(
+            self.canvas, chromogen,
+            refresh=lambda: self.engine.render_pipeline(render_reason="viewport_refresh"),
+            available=self._warper_viewer_available, disarm_peers=disarm_warpers,
+        )
+        self.engine.warper_input_ready.connect(self._chromogen_picker.accept)
+        self.dock_chromogen.visibilityChanged.connect(
+            lambda visible: None if visible else self._chromogen_picker.cancel())
+        chromogen.export_lut_requested.connect(self.export_chromogen_lut)
         for panel, other in ((self.warper_panel, self.x_grade_panel), (self.x_grade_panel, self.warper_panel)):
             self.engine.warper_input_ready.connect(panel.accept_viewer_input)
             panel.bind_viewer(
@@ -2143,6 +2179,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 overlay_changed=self.canvas._sync_color_metal_host,
             )
             panel.picker_button.toggled.connect(lambda enabled, peer=other: enabled and peer.picker_button.setChecked(False))
+            panel.picker_button.toggled.connect(
+                lambda enabled: self._chromogen_picker.cancel() if enabled else None)
         # Native GPU scope descriptor (no CPU pixel readback).
         if hasattr(self.engine, 'gpu_scope_ready'):
             self.engine.gpu_scope_ready.connect(self.on_gpu_scope_ready)

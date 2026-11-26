@@ -62,6 +62,14 @@ def test_timeline_color_space_invalidates_working_signal_cache():
     assert build_render_cache_fingerprint(changed_timeline, "tl-1", clip) != fingerprint
 
 
+def test_asset_color_space_invalidates_working_signal_cache() -> None:
+    project = _project().with_color_management({"color.timeline_space": "acescct"})
+    clip = _clip()
+    asset = project.assets[clip.asset_id].with_input_color_space("arri-logc4")
+    changed = project.with_media_asset_added(asset)
+    assert build_render_cache_fingerprint(changed, "tl-1", clip) != build_render_cache_fingerprint(project, "tl-1", clip)
+
+
 def test_current_semantic_fingerprint_keeps_cache_green():
     project = _project()
     clip = _clip()

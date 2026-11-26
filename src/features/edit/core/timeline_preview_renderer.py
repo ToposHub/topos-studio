@@ -80,9 +80,8 @@ from typing import Optional, Dict, Any, Tuple, List, Callable, TYPE_CHECKING
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QMutex, QTimer
 from PyQt6.QtGui import QImage, QOpenGLContext, QOffscreenSurface
 
-from src.features.color.core.base_grade import base_grade_active
 from src.features.color.core.base_grade_runtime import (
-    base_grade_graph_signal, base_grade_timeline_space, base_grade_working_signal,
+    base_grade_graph_signal, base_grade_timeline_space, base_grade_working_signal, managed_primary_active,
 )
 from src.features.color.core.curves_soft_clip import (
     curves_edit_is_default,
@@ -119,6 +118,7 @@ from src.features.edit.core.crop_cpu import apply_crop_cpu, crop_is_identity
 from src.shared.color.color_space_descriptor import LINEAR_SCENE, ColorSpaceDescriptor
 from src.shared.color.hdr_video_signal import hdr_input_descriptor, hdr_monitor_space, project_hdr_settings
 from src.shared.color.project_video_signal import (
+    ProjectAcesSettings, aces_desktop_monitor_settings, aces_external_monitor_settings,
     aces_input_bgr, aces_input_descriptor, aces_monitor_space, aces_timeline_black, normalized_video_bgr,
     project_aces_settings, read_aces_still, read_video_still_bgr, render_aces_bgr,
     convert_video_signal_bgr, encode_timeline_linear_bgr,
@@ -241,6 +241,9 @@ class AssetResolver:
         if asset is None:
             return None
         return asset.metadata
+
+    def get_asset_input_color_space(self, asset_id: str) -> str | None:
+        return getattr(self._project.get_asset_by_id(asset_id), "input_color_space", None)
 
     def get_asset_type(self, asset_id: str) -> Optional[str]:
         """
@@ -590,6 +593,7 @@ class PreviewRenderWorker(QThread):
     """
 
     frame_rendered = pyqtSignal(int, object)  # frame, result (texture_id or QImage)
+    aces_monitor_frame_rendered = pyqtSignal(int, int, object)
     render_error = pyqtSignal(int, str)  # frame, error_message
     offline_media = pyqtSignal(int, object)  # frame, [{asset_id, name, path}]
     gpu_submitted = pyqtSignal(int, int)  # frame, generation_id
@@ -1907,11 +1911,9 @@ class PreviewRenderWorker(QThread):
             # Clear per-frame composite error state before compositing
             self._last_comp_error = None
 
-            direct_qimage = self._try_render_single_direct_preview_qimage(
-                layers,
-                transitions,
-                frame,
-            )
+            direct_qimage = None
+            if self._external_preview_target() is None:
+                direct_qimage = self._try_render_single_direct_preview_qimage(layers, transitions, frame)
             if direct_qimage is not None:
                 if generation_id != self._generation_id:
                     playback_trace(
@@ -2184,6 +2186,7 @@ class PreviewRenderWorker(QThread):
         settings = self._preview_color_settings()
         spaces = video_signal_spaces(settings)
         aces = project_aces_settings(settings)
+        monitor_aces = self._external_preview_target(aces)
         hdr = project_hdr_settings(settings)
         output_transform = (
             (spaces[0], aces_monitor_space()) if aces is not None
@@ -2266,6 +2269,7 @@ class PreviewRenderWorker(QThread):
             callable(has_cached)
             and not realtime_now
             and not background
+            and monitor_aces is None
             and has_cached(int(frame), int(generation_id), self._viewport_size) is True
         ):
             cache_task = EditRenderTask(
@@ -2458,8 +2462,8 @@ class PreviewRenderWorker(QThread):
                    for extra in chain_extras):
                 trace_info["fallback_reason"] = "measured_color_chain_cpu_compositor"
                 return False, trace_info
-            if any(base_grade_active(extra) for extra in chain_extras):
-                trace_info["fallback_reason"] = "base_grade_color_chain_cpu_compositor"
+            if any(managed_primary_active(extra) for extra in chain_extras):
+                trace_info["fallback_reason"] = "managed_primary_color_chain_cpu_compositor"
                 return False, trace_info
             if isinstance(op, ApplyAdjustment):
                 adjustment_layers.append((layer, op.effects, preview_grade))
@@ -2868,7 +2872,10 @@ class PreviewRenderWorker(QThread):
                     str(clip_id), asset_path, source_frame, actual_source, source_direction,
                 )
             if aces is not None:
-                source = aces_input_descriptor(aces, asset_path, media_type="video")
+                source = aces_input_descriptor(
+                    aces, asset_path, media_type="video",
+                    input_override=self._asset_resolver.get_asset_input_color_space(layer.asset_id),
+                )
                 track_info["input_signal"] = (source, timeline_space)
                 track_info["aces_input_compression"] = aces.reference_gamut_compression
             elif hdr is not None:
@@ -3090,7 +3097,8 @@ class PreviewRenderWorker(QThread):
             # P0-PREV-GPU-T：转场任务（spatial mask / dip 颜色 pass）。
             transition_jobs=transition_jobs,
             output_transform=output_transform,
-            aces=aces,
+            aces=aces_desktop_monitor_settings(aces),
+            monitor_aces=monitor_aces if not background else None,
             luminance=hdr.luminance if hdr is not None else None,
         )
 
@@ -4340,11 +4348,11 @@ class PreviewRenderWorker(QThread):
                         if hdr is not None:
                             return self._interpret_hdr_source(orig_path, "image", orig_asset_id)
                         if project_aces_settings(self._preview_color_settings()) is not None:
-                            return self._get_aces_preview_source(orig_path, "image")
+                            return self._get_aces_preview_source(orig_path, "image", asset_id=orig_asset_id)
                         frame_data = self._get_image_frame(orig_path)
                     if (frame_data is not None and orig_path
                             and project_aces_settings(self._preview_color_settings()) is not None):
-                        return self._get_aces_preview_source(orig_path, orig_type, frame_data)
+                        return self._get_aces_preview_source(orig_path, orig_type, frame_data, asset_id=orig_asset_id)
                     if hdr is not None and orig_path:
                         return self._interpret_hdr_source(orig_path, orig_type, orig_asset_id, frame_data)
             # If no original source (empty comp clip), return None
@@ -4366,12 +4374,12 @@ class PreviewRenderWorker(QThread):
             path = still_sequence_frame_path(asset_path, metadata, int(layer.source_frame))
             if hdr is not None:
                 return self._interpret_hdr_source(path, "image", layer.asset_id)
-            return self._get_aces_preview_source(path, "image")
+            return self._get_aces_preview_source(path, "image", asset_id=layer.asset_id)
         elif asset_type == "image":
             if hdr is not None:
                 return self._interpret_hdr_source(asset_path, "image", layer.asset_id)
             if project_aces_settings(self._preview_color_settings()) is not None:
-                return self._get_aces_preview_source(asset_path, "image")
+                return self._get_aces_preview_source(asset_path, "image", asset_id=layer.asset_id)
             frame_data = self._get_image_frame(asset_path)
         else:
             logger.warning(f"Unsupported asset type: {asset_type}")
@@ -4383,7 +4391,7 @@ class PreviewRenderWorker(QThread):
         if hdr is not None:
             return self._interpret_hdr_source(asset_path, asset_type, layer.asset_id, frame_data)
         if project_aces_settings(self._preview_color_settings()) is not None:
-            return self._get_aces_preview_source(asset_path, asset_type, frame_data)
+            return self._get_aces_preview_source(asset_path, asset_type, frame_data, asset_id=layer.asset_id)
 
         # 确保返回 uint8 格式
         if frame_data.dtype != np.uint8:
@@ -5285,7 +5293,7 @@ class PreviewRenderWorker(QThread):
                                     exclude_timeline=exclude_timeline)
         measured_extras = any(grade_uses_calibration({"grading_params": extra}) for extra in extras)
         if stack is None:
-            if measured_extras or any(extra.get("mid_detail") or base_grade_active(extra) for extra in extras):
+            if measured_extras or any(extra.get("mid_detail") or managed_primary_active(extra) for extra in extras):
                 return {"grading_params": {}, "chain_extra_params": extras}
             return None
 
@@ -5321,7 +5329,7 @@ class PreviewRenderWorker(QThread):
             except (TypeError, ValueError):
                 return value != default
 
-        basic_active = base_grade_active(grading_params) or any(
+        basic_active = managed_primary_active(grading_params) or any(
             changed(grading_params.get(name, default), default)
             for name, default in {**wheel_defaults, **scalar_defaults}.items()
         )
@@ -5730,8 +5738,8 @@ class PreviewRenderWorker(QThread):
         try:
             settings = self._preview_color_settings()
             spaces = video_signal_spaces(settings)
-            base_grade_extras = any(base_grade_active(extra) for extra in extras)
-            signal = self._base_grade_chain_signal(layer, settings, spaces) if base_grade_extras else None
+            managed_primary_extras = any(managed_primary_active(extra) for extra in extras)
+            signal = self._managed_primary_chain_signal(layer, settings, spaces) if managed_primary_extras else None
             return run_graph_frame_cpu(
                 graph, frame_data,
                 int(getattr(layer, "source_frame", 0) or 0),
@@ -5807,24 +5815,24 @@ class PreviewRenderWorker(QThread):
             settings = self._preview_color_settings()
             spaces = video_signal_spaces(settings)
             encoded = timeline_uses_rec709_gamma24(spaces)
-            base_grade_on = base_grade_active(grading_params) or any(base_grade_active(extra) for extra in extras)
-            signal = self._base_grade_chain_signal(layer, settings, spaces) if base_grade_on else None
+            managed_primary_on = managed_primary_active(grading_params) or any(managed_primary_active(extra) for extra in extras)
+            signal = self._managed_primary_chain_signal(layer, settings, spaces) if managed_primary_on else None
             # M05（S08）：链段按 _chain_segment 分侧——pre 段在主栈之前，
             # trim/post 段在主栈之后（pre→main→trim→post；未标记载荷按
             # 主栈之后处理，与旧行为一致）。
             def _apply_chain_entries(buf, entries):
                 for extra in entries:
                     measured_entry = grade_uses_calibration({"grading_params": extra})
-                    base_grade_entry = base_grade_active(extra)
+                    managed_primary_entry = managed_primary_active(extra)
                     if extra.get("_unsupported_advanced", False):
-                        if measured_entry or base_grade_entry:
+                        if measured_entry or managed_primary_entry:
                             raise RuntimeError("Color chain segment has unsupported advanced operations")
                         logger.warning(
                             "Edit preview color chain: clip %s 链段含 curves/"
                             "LUT 等高级操作，primary 预览跳过该段（成片渲染"
                             "路径不受影响）", layer.clip_id)
                         continue
-                    if measured_entry or base_grade_entry or any(
+                    if measured_entry or managed_primary_entry or any(
                            abs(float(extra.get(name, 0.0) or 0.0)) > 1e-6
                            for name in ("exposure", "temp", "tint", "contrast",
                                         "shadow", "highlights", "saturation",
@@ -6004,7 +6012,7 @@ class PreviewRenderWorker(QThread):
             return None
 
         if project_aces_settings(self._preview_color_settings()) is not None:
-            frame_data = self._get_aces_preview_source(asset_path, "video", frame_data)
+            frame_data = self._get_aces_preview_source(asset_path, "video", frame_data, asset_id=layer.asset_id)
         return self._numpy_to_qimage(frame_data)
 
     def _get_video_frame(
@@ -6300,26 +6308,27 @@ class PreviewRenderWorker(QThread):
             return None
 
     def _get_aces_preview_source(
-        self, path: str, media_type: str, pixels: np.ndarray | None = None,
+        self, path: str, media_type: str, pixels: np.ndarray | None = None, *, asset_id: str = "",
     ) -> np.ndarray:
         settings = self._preview_color_settings()
         aces = project_aces_settings(settings)
         track_space = video_signal_spaces(settings)[0]
+        input_override = self._asset_resolver.get_asset_input_color_space(asset_id) if asset_id else None
         if pixels is None:
             identity = os.stat(path)
-            cache_key = (path, identity.st_mtime_ns, identity.st_size, aces,
+            cache_key = (path, identity.st_mtime_ns, identity.st_size, aces, input_override,
                          track_space, self._decode_target_size)
             cached = self.__dict__.get("_aces_still_cache")
             if cached is not None and cached[0] == cache_key:
                 return cached[1].copy()
-            pixels, source = read_aces_still(path, aces)
+            pixels, source = read_aces_still(path, aces, input_override=input_override)
             result = aces_input_bgr(
                 pixels, source, track_space,
                 reference_gamut_compression=aces.reference_gamut_compression,
             )
             self._aces_still_cache = (cache_key, result)
             return result.copy()
-        source = aces_input_descriptor(aces, path, media_type=media_type)
+        source = aces_input_descriptor(aces, path, media_type=media_type, input_override=input_override)
         return aces_input_bgr(
             pixels, source, track_space,
             reference_gamut_compression=aces.reference_gamut_compression,
@@ -6644,6 +6653,9 @@ class PreviewRenderWorker(QThread):
         """
         try:
             qimage = self._numpy_to_qimage(frame_data)
+            if (self.__dict__.get("_aces_external_monitor_enabled", False)
+                    and not self._current_task_background and generation_id == self._generation_id):
+                self._render_external_aces_frame(frame, generation_id, frame_data)
             self._render_frame_qimage(frame, qimage, generation_id)
         except Exception as e:
             logger.error(f"QImage render error: {e}")
@@ -6692,7 +6704,7 @@ class PreviewRenderWorker(QThread):
         aces = project_aces_settings(settings)
         hdr = project_hdr_settings(settings)
         if aces is not None:
-            output = render_aces_bgr(frame_data, spaces[0], aces)
+            output = render_aces_bgr(frame_data, spaces[0], aces_desktop_monitor_settings(aces))
             frame_data = np.rint(np.clip(output[..., :3], 0.0, 1.0) * 255.0).astype(np.uint8)
         elif hdr is not None:
             output = convert_video_signal_bgr(
@@ -6723,6 +6735,24 @@ class PreviewRenderWorker(QThread):
         qimage._bgr_data_ref = bgr_data
         return qimage
 
+    def _external_preview_target(self, aces: ProjectAcesSettings | None = None) -> ProjectAcesSettings | None:
+        if not self.__dict__.get("_aces_external_monitor_enabled", False):
+            return None
+        return aces_external_monitor_settings(aces or project_aces_settings(self._preview_color_settings()))
+
+    def _render_external_aces_frame(self, frame: int, generation: int, working: np.ndarray) -> None:
+        target = self._external_preview_target()
+        if target is None:
+            return
+        try:
+            timeline = video_signal_spaces(self._preview_color_settings())[0]
+            output = render_aces_bgr(working, timeline, target)
+            bgr = np.rint(np.clip(output[..., :3], 0.0, 1.0) * 255.0).astype(np.uint8)
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.warning("External ACES monitor render failed: %s", exc)
+            return
+        self.aces_monitor_frame_rendered.emit(frame, generation, bgr)
+
     def _preview_color_settings(self) -> Mapping[str, Any] | None:
         """Read the worker's project color settings from its asset resolver."""
         resolver = self.__dict__.get("_asset_resolver")
@@ -6730,7 +6760,7 @@ class PreviewRenderWorker(QThread):
         settings = getattr(project, "color_management", None)
         return settings if isinstance(settings, Mapping) else None
 
-    def _base_grade_chain_signal(
+    def _managed_primary_chain_signal(
         self, layer: ClipLayerInfo, settings: Mapping[str, Any] | None,
         spaces: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None,
     ) -> dict[str, Any] | None:
@@ -6829,6 +6859,7 @@ class TimelinePreviewRenderer(QObject):
     """
 
     frame_ready = pyqtSignal(int, object)  # frame, result (QImage or texture_id)
+    aces_monitor_frame_ready = pyqtSignal(int, object)
     render_error = pyqtSignal(int, str)
     offline_media = pyqtSignal(int, object)
     cache_stats_changed = pyqtSignal(dict)
@@ -7315,7 +7346,34 @@ class TimelinePreviewRenderer(QObject):
         drag responsiveness should come from the latest hardware-decoded GPU
         frame, not from showing cached stills that then need repair.
         """
-        return self._has_gpu_preview_pipeline()
+        return self._has_gpu_preview_pipeline() or self._uses_independent_external_aces_monitor()
+
+    def set_aces_external_monitor_enabled(self, enabled: bool) -> None:
+        """Request a separate monitor frame while the video device is active."""
+        self._aces_external_monitor_enabled = bool(enabled)
+        worker = getattr(self, "_worker", None)
+        if worker is not None:
+            worker._aces_external_monitor_enabled = bool(enabled)
+
+    def _uses_independent_external_aces_monitor(self) -> bool:
+        if not self.__dict__.get("_aces_external_monitor_enabled", False):
+            return False
+        settings = getattr(self._project, "color_management", None)
+        return aces_external_monitor_settings(project_aces_settings(settings)) is not None
+
+    def _on_aces_monitor_frame_ready(self, frame: int, generation: int, pixels: object) -> None:
+        if (generation != self._generation_id or generation != self._dispatched_generation_id
+                or not self._uses_independent_external_aces_monitor()):
+            return
+        if self._scrub_active:
+            if frame not in (self._scrub_latest_display_frame, self._scrub_latest_frame):
+                return
+        elif self._is_controller_playing():
+            if self._is_playback_result_stale(frame):
+                return
+        elif frame != self.get_playhead():
+            return
+        self.aces_monitor_frame_ready.emit(frame, pixels)
 
     def _publish_interactive_scrub_state(self, frame: int, *, active: bool = True) -> None:
         """Publish latest scrub identity to the worker for latest-only dropping."""
@@ -7665,6 +7723,8 @@ class TimelinePreviewRenderer(QObject):
 
         # 连接信号
         self._worker.frame_rendered.connect(self._on_frame_rendered)
+        self._worker._aces_external_monitor_enabled = self.__dict__.get("_aces_external_monitor_enabled", False)
+        self._worker.aces_monitor_frame_rendered.connect(self._on_aces_monitor_frame_ready)
         self._worker.render_error.connect(self._on_render_error)
         self._worker.offline_media.connect(self._on_worker_offline_media)
         self._worker.background_frame_ready.connect(self._on_worker_background_frame_ready)
@@ -7849,6 +7909,8 @@ class TimelinePreviewRenderer(QObject):
         # （GPU present 帧本身不能进 CPU 缓存——纹理归 present pool 管）。
         if hasattr(gpu_renderer, "snapshot_ready"):
             gpu_renderer.snapshot_ready.connect(self._on_gpu_snapshot_ready)
+        if hasattr(gpu_renderer, "aces_monitor_frame_ready"):
+            gpu_renderer.aces_monitor_frame_ready.connect(self._on_aces_monitor_frame_ready)
 
         # Batch 1 (缺陷计划 RP-P0-01/02): present frame descriptor + ack 协议。
         # present_frame_ready 携带 GpuPresentFrame（fence + slot_id），
@@ -10605,8 +10667,10 @@ class TimelinePreviewRenderer(QObject):
         # 的 refine 结果由 _on_gpu_frame_ready 的暂停态播放头比对丢弃，不会
         # 回闪旧画面。后续单飞守卫照常把本帧的 refine 排进队列。
         early_emitted = False
+        independent_aces = getattr(self, "_uses_independent_external_aces_monitor", lambda: False)()
         if (
             not is_currently_playing
+            and not independent_aces
             and not getattr(self, "_should_use_gpu_only_realtime_preview", lambda: False)()
             and not getattr(self, "_is_scrub_finish_exact_request", lambda _f: False)(frame)
             and getattr(self, "_cache", None) is not None
@@ -10662,7 +10726,7 @@ class TimelinePreviewRenderer(QObject):
         # 检查缓存（仅在无异步渲染时执行，避免缓存帧与异步帧竞争）。
         # Realtime + GPU pipeline must not display CPU QImage cache entries:
         # that would mix old still-preview frames into the hardware playback path.
-        bypass_cpu_cache = self._should_use_gpu_only_realtime_preview()
+        bypass_cpu_cache = self._should_use_gpu_only_realtime_preview() or independent_aces
         suppress_scrub_finish_placeholder = self._is_scrub_finish_exact_request(frame)
         cached = None if (bypass_cpu_cache or suppress_scrub_finish_placeholder) else self._cache.get(frame)
         if bypass_cpu_cache:
@@ -12343,7 +12407,8 @@ class TimelinePreviewRenderer(QObject):
         self._clear_placeholder_requests_for_frame(frame)
 
         has_content = self._frame_has_content(frame) if result is None else True
-        if result is None and not has_content:
+        confirmed_gap = result is None and not has_content
+        if confirmed_gap:
             # Empty timeline ranges are a valid render result, not a decode
             # failure.  Emit black so ProgramViewer replaces the previous
             # texture instead of leaving a frozen still over the gap.
@@ -12465,6 +12530,10 @@ class TimelinePreviewRenderer(QObject):
         if self._scrub_active:
             self._trace_scrub_frame_ready_latency(frame, type(result).__name__)
         self.frame_ready.emit(frame, result)
+        if confirmed_gap and self._uses_independent_external_aces_monitor():
+            from src.shared.video.monitor_output import MonitorRGBAFrame
+
+            self.aces_monitor_frame_ready.emit(frame, MonitorRGBAFrame(b"\x00\x00\x00\xff", 1, 1))
         self._schedule_playback_prebuffer(frame)
 
         # 更新缓存统计

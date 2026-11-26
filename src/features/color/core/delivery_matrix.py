@@ -63,6 +63,10 @@ _OPERATIONS: Dict[str, Dict[str, str]] = {
         "label_key": "delivery.op_primary", "label": "Primary (色轮/曝光/白平衡)",
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_BAKED,
     },
+    "chromogen": {
+        "label_key": "chromogen.title", "label": "Look Dev",
+        TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_FULL, TARGET_LUT: DELIVERY_BAKED,
+    },
     "texture": {
         "label_key": "raw.sharpness", "label": "锐化",
         TARGET_STILL: DELIVERY_FULL, TARGET_VIDEO: DELIVERY_DROPPED, TARGET_LUT: DELIVERY_DROPPED,
@@ -249,6 +253,10 @@ def _layer_operations(data: Dict[str, Any]) -> set:
         return ops
 
     gp = data.get("grading_params") or {}
+    from src.features.color.core.chromogen import chromogen_active
+
+    if chromogen_active(gp):
+        ops.add("chromogen")
     if any(_changed(gp.get(name, default), default)
            for name, default in _SCALAR_DEFAULTS.items()
            if name not in _TEXTURE_KEYS):
@@ -794,6 +802,9 @@ CONSUMERS = (
 CONSUMER_CAPABILITY_MATRIX: Dict[str, Dict[str, str]] = {
     "primary":        {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL},
+    "chromogen":      {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,
+                       "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_FULL,
+                       "lut_export": CAP_BAKED},
     "texture":        {"color_still": CAP_FULL, "edit_preview_cpu": CAP_DROPPED,
                        "edit_preview_gpu": CAP_FULL, "video_export_cpu": CAP_DROPPED},
     "mid_detail":     {"color_still": CAP_FULL, "edit_preview_cpu": CAP_FULL,

@@ -354,12 +354,22 @@ class ColorModule:
         panel_registry.register(PanelDescriptor(
             panel_id="color.base_grade",
             title_key="base_grade.title",
-            fallback_title="Base Grade",
+            fallback_title="Tonal Grade",
             feature_id="color",
             category="Color",
             page_ids=("Color",),
             dock_attr="dock_base_grade",
             order=110,
+        ))
+        panel_registry.register(PanelDescriptor(
+            panel_id="color.chromogen",
+            title_key="chromogen.title",
+            fallback_title="Look Dev",
+            feature_id="color",
+            category="Color",
+            page_ids=("Color",),
+            dock_attr="dock_chromogen",
+            order=120,
         ))
         panel_registry.register(PanelDescriptor(
             panel_id="color.curves",

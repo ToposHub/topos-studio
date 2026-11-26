@@ -31,6 +31,9 @@ from typing import Callable, Dict, Optional
 logger = logging.getLogger(__name__)
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QOffscreenSurface, QOpenGLContext
+from src.shared.color.aces_monitor_readback import AcesMonitorReadback
+from src.shared.color.color_space_descriptor import LINEAR_SCENE
+from src.shared.color.project_video_signal import ProjectAcesSettings
 from src.shared.gpu.gl_backend import GLContextManager, FramebufferManager
 from src.features.composite.core.graph_snapshot import GraphSnapshot
 from .external_comp_snapshot import ExternalCompSnapshots, has_external_references
@@ -90,6 +93,7 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
 
     # frame_ready now includes request_id for UI stale detection
     frame_ready = pyqtSignal(int, int, int, int)  # request_id, texture_id, width, height
+    aces_monitor_frame_ready = pyqtSignal(int, object, object)  # request_id, view, pixels
     metadata_ready = pyqtSignal(dict)        # {"format": {...}|None, "bbox": {...}|None}
     error_occurred = pyqtSignal(str)
     # Signal for node thumbnail data (node_id, width, height, numpy array as bytes)
@@ -1731,6 +1735,12 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
 
     # ── Output Rendering ──
 
+    def set_aces_external_monitor(self, view: ProjectAcesSettings | None) -> None:
+        """Publish immutable monitor intent for the next rendering task."""
+        previous, revision = self.__dict__.get("_aces_external_monitor", (None, 0))
+        if previous != view:
+            self._aces_external_monitor = view, revision + 1
+
     @staticmethod
     def _build_aov_metadata(result: TextureResult) -> dict:
         """Describe auxiliary render passes for the UI without sharing ownership.
@@ -1821,6 +1831,23 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
         prog['u_texture'].value = 0
         self._render_quad(prog)
 
+        monitor_view, monitor_revision = self.__dict__.get("_aces_external_monitor", (None, 0))
+        monitor = self.__dict__.get("_aces_monitor_readback")
+        if monitor_view is not None:
+            from OpenGL.error import GLError
+
+            try:
+                if monitor is None:
+                    self._aces_monitor_readback = monitor = AcesMonitorReadback(self.ctx)
+                monitor.submit(self.tex_ring[self.write_idx], LINEAR_SCENE, monitor_view,
+                               request_id, monitor_revision)
+            except (OSError, ValueError, RuntimeError, GLError, moderngl.Error) as exc:
+                logger.warning("Composite ACES monitor render failed: %s", exc)
+                monitor = None
+        elif monitor is not None:
+            monitor.release()
+            self._aces_monitor_readback = monitor = None
+
         # Ensure GPU finishes writing to output texture before the viewer's
         # GL context (shared) reads it.  On macOS cross-context texture
         # sharing is NOT implicitly synchronised — without a finish/flush
@@ -1836,6 +1863,15 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
         self.write_idx = (self.write_idx + 1) % 3
         out_tex_id = self.tex_ring[front_idx].glo
         self.frame_ready.emit(request_id, out_tex_id, out_w, out_h)
+        if monitor is not None:
+            try:
+                view, revision = self._aces_external_monitor
+                if output := monitor.take(revision):
+                    self.aces_monitor_frame_ready.emit(output[0], view, output[2])
+            except (OSError, ValueError, RuntimeError, GLError, moderngl.Error) as exc:
+                logger.warning("Composite ACES monitor readback failed: %s", exc)
+                monitor.release()
+                self._aces_monitor_readback = None
 
         # Emit metadata for viewport overlays
         fmt_data = None
@@ -2045,6 +2081,9 @@ class CompositeRenderer(GraphEvaluatorMixin, QThread):
                 logger.warning("Composite cleanup failed for %s: %s", label, exc)
 
         try:
+            aces_monitor = self.__dict__.pop("_aces_monitor_readback", None)
+            if aces_monitor is not None:
+                safe_call("ACES monitor", aces_monitor.release)
             stabilization_runner = self.__dict__.pop('_stabilization_runner', None)
             if stabilization_runner is not None:
                 safe_call('stabilization runner', stabilization_runner.release)

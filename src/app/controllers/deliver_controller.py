@@ -755,16 +755,67 @@ class DeliverControllerMixin:
     # LUT Export
     # ------------------------------------------------------------------
 
+    def export_chromogen_lut(self) -> None:
+        """Bake the committed look by itself in the project working signal."""
+        from src.features.color.core.chromogen import CHROMOGEN_KEY, chromogen_active
+        from src.features.color.core.layer import Layer
+        from src.features.color.core.lut_exporter import LutExporter
+        from src.shared.color.project_video_signal import timeline_uses_rec709_gamma24
+
+        panel = self.grading_panel.chromogen_panel
+        panel.finish_edit(commit=True)
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is not None and graph_host.graph_edit_context_active():
+            params = graph_host.panel_grade_params() or {}
+        else:
+            active = self.engine.get_active_layer()
+            params = active.grading_params if active is not None else {}
+        if not chromogen_active(params):
+            return
+        title = I18N.tr("chromogen.export_lut", "Export Look Dev LUT")
+        dialog = QFileDialog(self, title)
+        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+        dialog.setNameFilter("3D LUT (*.cube)")
+        dialog.setDefaultSuffix("cube")
+        dialog.selectFile("Look Dev.cube")
+        if not dialog.exec():
+            return
+        path = dialog.selectedFiles()[0]
+        layer = Layer(I18N.tr("chromogen.title", "Look Dev"))
+        layer.grading_params[CHROMOGEN_KEY] = params[CHROMOGEN_KEY]
+        exporter = LutExporter()
+
+        def on_finished(output_path: str) -> None:
+            self.status_bar.showMessage(I18N.tr(
+                "chromogen.lut_saved", "Look Dev LUT saved · {name}").format(
+                    name=Path(output_path).name), 5000)
+            exporter.cleanup()
+
+        def on_error(message: str) -> None:
+            QMessageBox.critical(self, title, message)
+            exporter.cleanup()
+
+        try:
+            exporter.export_lut(
+                [layer], path, size=65, title="Topos Look Dev",
+                on_finished=on_finished, on_error=on_error,
+                base_grade_signal=self.engine._base_grade_working_signal(),
+                base_grade_encoded_input=timeline_uses_rec709_gamma24(
+                    self.engine.__dict__.get("_project_viewer_signal")),
+            )
+        except (OSError, ValueError) as exc:
+            on_error(str(exc))
+
     def perform_lut_export(self, settings) -> None:
         """执行LUT导出"""
         from src.features.color.core.lut_exporter import LutExporter
+        from src.features.color.core.x_grade_domain import X_GRADE_WORKING_MESSAGE
         from src.shared.color.project_video_signal import timeline_uses_rec709_gamma24
 
         blocker = getattr(self.engine, "x_grade_output_blocker", None)
         reason = blocker() if callable(blocker) else None
         if isinstance(reason, str) and reason:
-            QMessageBox.critical(self, "LUT Export Error", I18N.tr(
-                "x_grade.working_only", "X Grade requires linear Rec.709 or Rec.709 Gamma 2.4."))
+            QMessageBox.critical(self, "LUT Export Error", I18N.tr("x_grade.working_only", X_GRADE_WORKING_MESSAGE))
             return
 
         path = settings["path"]

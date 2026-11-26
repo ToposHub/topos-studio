@@ -70,10 +70,10 @@ from typing import (
 
 from src.features.edit.core.proxy_policy import export_source_path
 from src.features.edit.core.audio_playback import unpack_send
-from src.features.color.core.base_grade import base_grade_active
 from src.features.color.core.base_grade_runtime import (
-    base_grade_graph_signal, base_grade_timeline_space, base_grade_working_signal,
+    base_grade_graph_signal, base_grade_timeline_space, base_grade_working_signal, managed_primary_active,
 )
+from src.features.color.core.chromogen import CHROMOGEN_KEY
 from src.features.color.core.curves_soft_clip import (
     curves_edit_is_default,
     curves_soft_clip_is_identity,
@@ -8721,11 +8721,14 @@ class TimelineExporter:
 
             context = MetalComputeContext()
             renderer = TimelineMetalExportRenderer(self._gpu_trail, context=context)
+            chromogen = any(node.primary is not None and node.primary["chromogen_stage_count"][0]
+                            for clip in clips.values() for node in clip.correctors)
             kernels = {}
             for ops in sorted(variants):
                 if self._cancel_requested:
                     return ExportOutcome.user_cancelled()
-                kernels[ops] = renderer.prepare_nv12_lut(ops)
+                kernels[ops] = (renderer.prepare_nv12_lut(ops, include_chromogen=True) if chromogen
+                                else renderer.prepare_nv12_lut(ops))
             textures = LRUCache(16, CacheTier.GPU_TEXTURE, max_bytes=32 * 1024 * 1024)
             references = {node.lut[0] for clip in clips.values() for node in clip.correctors
                           if node.lut is not None}
@@ -11995,8 +11998,8 @@ class TimelineExporter:
             raise ValueError("Midtone Detail outside the color graph requires the CPU compositor")
         if any(grade_uses_calibration({"grading_params": extra}) for extra in chain_extras):
             raise ValueError("Measured color chain requires the CPU compositor")
-        if any(base_grade_active(extra) for extra in chain_extras):
-            raise ValueError("Base Grade in a color-chain segment requires the CPU compositor")
+        if any(managed_primary_active(extra) for extra in chain_extras):
+            raise ValueError("Tonal Grade and Look Dev in color-chain segments require the CPU compositor")
         main = grade_params_to_uniforms(grading_params)
         # M05（S08）/F4.1：链段作为 grade pass 序列返回，渲染端按序逐段
         # 过 shader（mid FBO 乒乓）——pre 段在主栈**之前**，trim/post 段
@@ -12094,7 +12097,7 @@ class TimelineExporter:
             timeline_id = getattr(timeline, "timeline_id", None) or getattr(clip, "timeline_id", "")
             extras = chain_extra_params(project, str(timeline_id), clip, exclude_timeline=exclude_timeline)
             if any(extra.get("mid_detail") or grade_uses_calibration({"grading_params": extra})
-                   or base_grade_active(extra)
+                   or managed_primary_active(extra)
                    for extra in extras):
                 return {"grading_params": {}, "chain_extra_params": extras}
             return None
@@ -12174,7 +12177,7 @@ class TimelineExporter:
             except (TypeError, ValueError):
                 return value != default
 
-        basic_active = grade_uses_calibration(stack) or base_grade_active(grading_params) or any(
+        basic_active = grade_uses_calibration(stack) or managed_primary_active(grading_params) or any(
             changed(grading_params.get(name, default), default)
             for name, default in {**wheel_defaults, **scalar_defaults}.items()
         )
@@ -12639,8 +12642,8 @@ class TimelineExporter:
             spaces = getattr(self, "_export_video_signal_spaces", None)
             if spaces is None:
                 spaces = video_signal_spaces(getattr(project, "color_management", None))
-            base_grade_extras = any(base_grade_active(extra) for extra in extras)
-            signal = self._base_grade_chain_signal(layer, spaces) if base_grade_extras else None
+            managed_primary_extras = any(managed_primary_active(extra) for extra in extras)
+            signal = self._managed_primary_chain_signal(layer, spaces) if managed_primary_extras else None
             return run_graph_frame_cpu(
                 graph, frame_data, source_frame,
                 plan_cache=getattr(self, "_graph_plan_cache", None),
@@ -12922,19 +12925,19 @@ class TimelineExporter:
             after_entries = [
                 e for e in extras if e.get("_chain_segment") != "pre"]
             spaces = getattr(self, "_export_video_signal_spaces", None)
-            base_grade_on = base_grade_active(grading_params) or any(base_grade_active(extra) for extra in extras)
-            if spaces is None and base_grade_on:
+            managed_primary_on = managed_primary_active(grading_params) or any(managed_primary_active(extra) for extra in extras)
+            if spaces is None and managed_primary_on:
                 project = getattr(self, "_project", None)
                 spaces = video_signal_spaces(getattr(project, "color_management", None))
             encoded = timeline_uses_rec709_gamma24(spaces)
-            signal = self._base_grade_chain_signal(layer, spaces) if base_grade_on else None
+            signal = self._managed_primary_chain_signal(layer, spaces) if managed_primary_on else None
 
             def _apply_entries(buf, entries):
                 for extra in entries:
                     if extra.get("_unsupported_advanced", False):
                         from src.features.color.core.primary_calibration import grade_uses_calibration
 
-                        if grade_uses_calibration({"grading_params": extra}) or base_grade_active(extra):
+                        if grade_uses_calibration({"grading_params": extra}) or managed_primary_active(extra):
                             raise ExportGradeDegradedError("Color chain segment has unsupported advanced operations")
                         logger.warning(
                             "Export color chain: clip %s 链段含 curves/LUT"
@@ -13072,7 +13075,7 @@ class TimelineExporter:
                 f"color grade failed for clip {layer.clip_id}: {error}"
             ) from error
 
-    def _base_grade_chain_signal(
+    def _managed_primary_chain_signal(
         self, layer: "ClipLayerInfo", spaces: tuple[ColorSpaceDescriptor, ColorSpaceDescriptor] | None,
     ) -> dict[str, Any] | None:
         project = getattr(self, "_project", None)
@@ -13099,7 +13102,7 @@ class TimelineExporter:
         import numpy as np
         from src.features.color.core.primary_calibration import grade_uses_calibration
 
-        if grade_uses_calibration({"grading_params": grading_params}) or base_grade_active(grading_params):
+        if grade_uses_calibration({"grading_params": grading_params}) or managed_primary_active(grading_params):
             return None
 
         coupled_controls = ("highlights", "vibrance", "hue_shift", "saturation", "mid_detail")
@@ -13125,6 +13128,10 @@ class TimelineExporter:
 
             key_parts = []
             for name, value in sorted(grading_params.items()):
+                # Inactive Chromogen stacks (including the unset default) have
+                # no response and are intentionally absent from a scalar LUT key.
+                if name == CHROMOGEN_KEY:
+                    continue
                 if isinstance(value, (list, tuple, np.ndarray)):
                     stable_value = tuple(float(item) for item in value)
                 else:
@@ -13453,9 +13460,12 @@ class TimelineExporter:
                             raw_params=getattr(
                                 getattr(layer, 'clip', None), 'raw', None),
                         )
-                        return self._interpret_export_video(frame, orig_path, getattr(orig_asset, "metadata", None))
+                        return self._interpret_export_video(
+                            frame, orig_path, getattr(orig_asset, "metadata", None),
+                            input_override=getattr(orig_asset, "input_color_space", None),
+                        )
                     elif orig_type == "image":
-                        return self._get_image_frame(orig_path)
+                        return self._get_image_frame(orig_path, input_override=getattr(orig_asset, "input_color_space", None))
                     else:
                         logger.warning(
                             f"Comp clip original asset has unsupported type: {orig_type}"
@@ -13478,16 +13488,19 @@ class TimelineExporter:
                 session_key=self._layer_session_key(layer),
                 raw_params=getattr(getattr(layer, 'clip', None), 'raw', None),
             )
-            return self._interpret_export_video(frame, asset_path, getattr(asset, "metadata", None))
+            return self._interpret_export_video(
+                frame, asset_path, getattr(asset, "metadata", None),
+                input_override=getattr(asset, "input_color_space", None),
+            )
         elif asset_type == "image":
-            return self._get_image_frame(asset_path)
+            return self._get_image_frame(asset_path, input_override=getattr(asset, "input_color_space", None))
         elif asset_type == "image_sequence" and (
             getattr(self, "_aces_export", None) is not None or getattr(self, "_hdr_export", None) is not None
         ):
             from src.features.edit.core.sequence_classify import still_sequence_frame_path
 
             path = still_sequence_frame_path(asset_path, asset.metadata, int(layer.source_frame))
-            return self._get_image_frame(path)
+            return self._get_image_frame(path, input_override=getattr(asset, "input_color_space", None))
         elif asset_type == "nested_sequence":
             # P1-02：嵌套序列——解析子序列并复用导出合成管线递归求值
             # （防循环 + 子序列帧钳制与预览路径语义一致）。
@@ -13522,7 +13535,7 @@ class TimelineExporter:
             return None
 
     def _interpret_export_video(
-        self, frame: Optional["np.ndarray"], path: str, metadata: dict | None,
+        self, frame: Optional["np.ndarray"], path: str, metadata: dict | None, *, input_override: str | None = None,
     ) -> Optional["np.ndarray"]:
         aces = getattr(self, "_aces_export", None)
         hdr = getattr(self, "_hdr_export", None)
@@ -13534,7 +13547,7 @@ class TimelineExporter:
             )
         if frame is None or aces is None:
             return frame
-        source = aces_input_descriptor(aces, path, media_type="video")
+        source = aces_input_descriptor(aces, path, media_type="video", input_override=input_override)
         return aces_input_bgr(
             frame, source, self._export_video_signal_spaces[0],
             reference_gamut_compression=aces.reference_gamut_compression,
@@ -14289,6 +14302,8 @@ class TimelineExporter:
     def _get_image_frame(
         self,
         asset_path: str,
+        *,
+        input_override: str | None = None,
     ) -> Optional["np.ndarray"]:
         """
         获取图片帧。
@@ -14309,8 +14324,8 @@ class TimelineExporter:
         """
         alpha_mode = bool(getattr(self, "_export_has_alpha", False))
         high_depth = bool(getattr(self, "_use_high_precision_export", False))
-        cache_key = (str(asset_path), alpha_mode, high_depth)
-        cache: "OrderedDict[tuple[str, bool, bool], np.ndarray]" = (
+        cache_key = (str(asset_path), alpha_mode, high_depth, input_override)
+        cache: "OrderedDict[tuple[str, bool, bool, str | None], np.ndarray]" = (
             self.__dict__.setdefault("_image_frame_cache", OrderedDict()))
         cached = cache.get(cache_key)
         if cached is not None:
@@ -14330,7 +14345,7 @@ class TimelineExporter:
                 cache.popitem(last=False)
             return img.copy()
         if aces is not None:
-            pixels, source = read_aces_still(asset_path, aces)
+            pixels, source = read_aces_still(asset_path, aces, input_override=input_override)
             img = aces_input_bgr(
                 pixels, source, self._export_video_signal_spaces[0],
                 reference_gamut_compression=aces.reference_gamut_compression,

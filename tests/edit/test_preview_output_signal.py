@@ -64,6 +64,34 @@ def test_aces_gl_input_and_output_keep_signed_values(
             resource.release()
 
 
+@pytest.mark.gpu_renderer
+@pytest.mark.parametrize("input_id", ["arri-logc3-ei800", "arri-logc4", "sony-slog3-sgamut3cine"])
+def test_camera_input_shader_matches_cpu(gl_context: Any, input_id: str) -> None:
+    from src.shared.color.project_video_signal import ProjectAcesSettings, aces_input_descriptor
+
+    aces = ProjectAcesSettings("2.0", "rec709-g24", "auto", False)
+    source = aces_input_descriptor(aces, input_override=input_id)
+    working = descriptor_for_space_preset("acescct")
+    rgb = np.array([[[-0.01, 0.02, 0.03, 0.8], [0.4, 0.5, 0.6, 1.0],
+                     [0.9, 0.6, 0.72, 0.25]]], dtype=np.float32)
+    renderer = EditGpuPreviewRenderer(None)
+    renderer.ctx = gl_context
+    source_tex = gl_context.texture((3, 1), 4, rgb.tobytes(), dtype="f4")
+    output_tex = gl_context.texture((3, 1), 4, dtype="f4")
+    output_fbo = gl_context.framebuffer([output_tex])
+    try:
+        renderer._render_video_signal(source_tex, output_fbo, (source, working))
+        actual = np.frombuffer(output_tex.read(), np.float32).reshape(rgb.shape)
+        expected = convert_video_signal_bgr(rgb[..., [2, 1, 0, 3]], source, working)[..., [2, 1, 0, 3]]
+        np.testing.assert_allclose(actual, expected, atol=5e-6, rtol=5e-7)
+    finally:
+        if renderer._signal_vao is not None:
+            renderer._signal_vao.release()
+            renderer._signal_program.release()
+        for resource in (output_fbo, source_tex, output_tex):
+            resource.release()
+
+
 def test_edit_qimage_uses_project_output_and_preserves_input() -> None:
     worker = PreviewRenderWorker.__new__(PreviewRenderWorker)
     project = EditProject.create("Edit output color")

@@ -1322,9 +1322,9 @@ class GradingPanel(QWidget):
     keyframe_remove_requested = pyqtSignal()
 
     # Primary edits emit the original complete parameter group. Base Grade
-    # emits its own changed keys through the same controller entry point.
+    # and Chromogen emit their own patches through the same controller entry point.
     _EXTENDED_KEYS = tuple(key for key in DEFAULT_EXTENDED_GRADING_PARAMS
-                           if key not in BASE_GRADE_DEFAULTS)
+                           if key not in BASE_GRADE_DEFAULTS and key != "chromogen")
 
     def __init__(self, parent: Optional[QWidget] = None, *,
                  use_measured_primaries: Callable[[], bool] | None = None) -> None:
@@ -1361,6 +1361,7 @@ class GradingPanel(QWidget):
 
     def _init_ui(self) -> None:
         from src.features.color.ui.base_grade_panel import BaseGradePanel
+        from src.features.color.ui.chromogen_panel import ChromogenPanel
         from src.features.color.ui.color_bars_panel import ColorBarsPanel
 
         layout = QVBoxLayout()
@@ -1662,6 +1663,10 @@ class GradingPanel(QWidget):
         self.base_grade_panel.changed.connect(self.grading_extended_changed.emit)
         self.base_grade_panel.interaction_started.connect(self.interaction_started.emit)
         self.base_grade_panel.interaction_ended.connect(self.interaction_ended.emit)
+        self.chromogen_panel = ChromogenPanel()
+        self.chromogen_panel.changed.connect(self.grading_extended_changed.emit)
+        self.chromogen_panel.interaction_started.connect(self.interaction_started.emit)
+        self.chromogen_panel.interaction_ended.connect(self.interaction_ended.emit)
 
         mode_layout = QHBoxLayout()
         mode_layout.setContentsMargins(6, 0, 6, 0)
@@ -1839,7 +1844,11 @@ class GradingPanel(QWidget):
 
     def get_extended_params(self) -> dict[str, Any]:
         """Snapshot all extended grading controls for persistence."""
-        return {**self._get_primary_extended_params(), **self.base_grade_panel.get_params()}
+        return {
+            **self._get_primary_extended_params(),
+            **self.base_grade_panel.get_params(),
+            **self.chromogen_panel.get_params(),
+        }
 
     def _get_primary_extended_params(self) -> dict[str, Any]:
         return {
@@ -1943,6 +1952,7 @@ class GradingPanel(QWidget):
             wheel.flush_pending_changes()
         self.color_bars_panel.flush_pending_changes()
         self.base_grade_panel.flush_pending_changes()
+        self.chromogen_panel.flush_pending_changes()
         if self._grading_update_timer.isActive():
             self._grading_update_timer.stop()
             self._emit_grading_changed()
@@ -2120,6 +2130,8 @@ class GradingPanel(QWidget):
         base_grade = {key: value for key, value in params.items() if key.startswith("base_grade_")}
         if base_grade:
             self.base_grade_panel.set_params(base_grade)
+        if "chromogen" in params:
+            self.chromogen_panel.set_params(params)
 
         self._syncing_ui = False
 
@@ -2158,6 +2170,7 @@ class GradingPanel(QWidget):
 
         self._exposure_value = 0.0
         self.base_grade_panel.set_params(BASE_GRADE_DEFAULTS)
+        self.chromogen_panel.set_params({"chromogen": None})
 
         self._syncing_ui = False
 
@@ -2208,6 +2221,7 @@ class GradingPanel(QWidget):
         """设置当前关联的调色栈 ID。"""
         if stack_id != self._current_stack_id:
             self.base_grade_panel.finish_edit(commit=False)
+            self.chromogen_panel.finish_edit(commit=False)
         self._current_stack_id = stack_id
         for rows in self._scalar_rows.values():
             for row in rows:

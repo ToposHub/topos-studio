@@ -223,10 +223,16 @@ def emit_composition_msl(
         parts += [MSL_GRADING_HELPERS, MSL_GRADING]
     has_base_grade = ("grading" in active_effects
                       and manifest.decl("u_base_grade_global") is not None)
+    has_chromogen = ("grading" in active_effects
+                    and manifest.decl("u_chromogen_stages") is not None)
     if has_base_grade:
         from src.features.color.core.base_grade_runtime import base_grade_msl_source
 
         parts.append(base_grade_msl_source())
+    if has_chromogen:
+        from src.features.color.core.chromogen_runtime import chromogen_msl_source
+
+        parts.append(chromogen_msl_source(include_transfer=not has_base_grade))
     if "curves" in active_effects or "hsl_curve" in active_effects:
         parts += [MSL_CURVES_HELPERS, MSL_CURVES]
     if "lut3d" in active_effects:
@@ -290,6 +296,12 @@ def emit_composition_msl(
         from src.features.color.core.base_grade_runtime import base_grade_shader_call
 
         call = base_grade_shader_call(
+            "color", "params.u_rec709_calibration_encoded != 0u", metal_layout="composition")
+        pipeline_calls = {**pipeline_calls, "grading": f"{pipeline_calls['grading']}\n    color = {call};"}
+    if has_chromogen:
+        from src.features.color.core.chromogen_runtime import chromogen_shader_call
+
+        call = chromogen_shader_call(
             "color", "params.u_rec709_calibration_encoded != 0u", metal_layout="composition")
         pipeline_calls = {**pipeline_calls, "grading": f"{pipeline_calls['grading']}\n    color = {call};"}
     body_lines = [f"    {pipeline_calls[e]}" for e in active_effects

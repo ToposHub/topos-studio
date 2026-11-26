@@ -13,6 +13,35 @@ from src.shared.color.project_video_signal import (
 from src.shared.color.types import ColorPrimaries, ColorRange, ColorTransfer
 
 
+@pytest.mark.parametrize(("preset", "ocio_space"), [
+    ("arri-logc3-ei800", "ARRI LogC3 (EI800)"),
+    ("arri-logc4", "ARRI LogC4"),
+    ("sony-slog3-sgamut3", "S-Log3 S-Gamut3"),
+    ("sony-slog3-sgamut3cine", "S-Log3 S-Gamut3.Cine"),
+])
+def test_camera_aces_input_matches_reference_csc(preset: str, ocio_space: str) -> None:
+    ocio = pytest.importorskip("PyOpenColorIO")
+    from src.shared.color.camera_input import CAMERA_LOG_CURVES
+    from src.shared.color.project_video_signal import ProjectAcesSettings, aces_input_descriptor
+    from src.shared.color.video_signal_gl import can_render_video_signal_gl
+
+    aces = ProjectAcesSettings("2.0", "rec709-g24", "rec709-g24", False)
+    source = aces_input_descriptor(aces, input_override=preset)
+    destination = descriptor_for_space_preset("acescg")
+    assert can_render_video_signal_gl(source, destination)
+    curve = CAMERA_LOG_CURVES[source.transfer]
+    rgb = np.array([[-0.01, 0.03, curve.encoded_break + 0.01],
+                    [0.25, 0.39, 0.51], [0.83, 0.51, 0.97]], dtype=np.float32)
+    config = ocio.Config.CreateFromBuiltinConfig("studio-config-v4.0.0_aces-v2.0_ocio-v2.5")
+    processor = config.getProcessor(ocio_space, "ACEScg").getDefaultCPUProcessor()
+    expected = rgb.copy()
+    processor.applyRGB(expected)
+    actual = BuiltinColorProvider().transform_signal(rgb, source, destination)
+    np.testing.assert_allclose(actual, expected, rtol=5e-5, atol=3e-6)
+    explicit_auto = aces_input_descriptor(aces, media_type="image", input_override="auto")
+    assert explicit_auto == descriptor_for_space_preset("srgb")
+
+
 def test_open_old_video_keeps_legacy_preview_and_export() -> None:
     from src.shared.color.color_context_lifecycle import on_project_loaded
     from src.shared.color.color_space_descriptor import (

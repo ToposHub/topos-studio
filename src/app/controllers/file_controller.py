@@ -37,6 +37,7 @@ from src.shared.video.video_playback import EnhancedVideoPlaybackEngine
 if TYPE_CHECKING:
     from src.app.controllers.grade_set_image_loader import DecodedPhoto
     from src.features.edit.core.project import MediaAsset
+    from src.shared.color.project_video_signal import ProjectAcesSettings
 
 
 
@@ -85,7 +86,7 @@ class _SourceViewerDecodeWorker:
         self.signals = _Signals()
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
-        # (asset_path, frame, interactive, generation)
+        # (asset_path, frame, interactive, generation, color)
         self._request: Optional[tuple] = None
         self._running = False
         self._thread: Optional[threading.Thread] = None
@@ -109,10 +110,11 @@ class _SourceViewerDecodeWorker:
         *,
         interactive: bool = False,
         generation: int = -1,
+        color: tuple[ProjectAcesSettings, str | None] | None = None,
     ) -> None:
         """Queue a decode request; only the latest request is kept."""
         with self._cond:
-            self._request = (asset_path, frame, interactive, generation)
+            self._request = (asset_path, frame, interactive, generation, color)
             self._cond.notify()
 
     def stop(self) -> None:
@@ -146,7 +148,7 @@ class _SourceViewerDecodeWorker:
             # 时间源监视播放中反复触发会累积泄漏 GPU/IOSurface 资源。
             decoded_frame = None
             try:
-                asset_path, frame, interactive, generation = request
+                asset_path, frame, interactive, generation, color = request
                 # Latest-wins: if a newer request arrived while we were
                 # picking this one up, skip straight to it.
                 with self._lock:
@@ -210,6 +212,16 @@ class _SourceViewerDecodeWorker:
                     viewport_size=(frame_w, frame_h),
                     output_fbo_size=(frame_w, frame_h),
                 )
+                if color is not None:
+                    from dataclasses import replace
+                    from src.shared.color.color_space_descriptor import ACESCG_SCENE
+                    from src.shared.color.project_video_signal import aces_input_descriptor, aces_monitor_space
+
+                    aces, override = color
+                    source = aces_input_descriptor(aces, asset_path, media_type="video", input_override=override)
+                    layer_data["track_info"].update(input_signal=(source, ACESCG_SCENE),
+                                                    aces_input_compression=aces.reference_gamut_compression)
+                    task = replace(task, output_transform=(ACESCG_SCENE, aces_monitor_space()), aces=aces)
                 if not self._renderer.submit(task):
                     safe_release_gpu_frame(decoded_frame)
                     decoded_frame = None
@@ -1093,7 +1105,9 @@ class FileOpsMixin:
             aces, hdr = project_aces_settings(settings), project_hdr_settings(settings)
             if (aces is not None or hdr is not None) and str(path).lower().endswith(".exr") and os.path.isfile(path):
                 try:
-                    pixels = read_aces_exr(str(path), aces)[0] if aces is not None else read_video_still_bgr(str(path))
+                    asset = project.get_asset_by_path(str(path))
+                    pixels = (read_aces_exr(str(path), aces, input_override=getattr(asset, "input_color_space", None))[0]
+                              if aces is not None else read_video_still_bgr(str(path)))
                 except (OSError, ValueError, RuntimeError) as exc:
                     from PyQt6.QtWidgets import QMessageBox
 
@@ -2175,9 +2189,18 @@ class FileOpsMixin:
         self._current_edit_project = project
         current_color = getattr(project, "color_management", {})
         color_spaces_changed = getattr(previous_project, "color_management", {}) != current_color
+        previous_assets = getattr(previous_project, "assets", {})
+        current_assets = getattr(project, "assets", {})
+        input_spaces_changed = previous_assets is not current_assets and any(
+            getattr(asset, "input_color_space", None) != getattr(previous_assets.get(asset_id), "input_color_space", None)
+            for asset_id, asset in current_assets.items() if asset is not previous_assets.get(asset_id)
+        )
         if color_spaces_changed:
             from src.shared.color.color_context_lifecycle import on_project_switched
             on_project_switched(current_color, video=self._is_video_work_mode())
+            refresh_monitor = getattr(self, "_ensure_program_monitor_output", None)
+            if callable(refresh_monitor):
+                refresh_monitor()
             grading_panel = getattr(self, "grading_panel", None)
             if grading_panel is not None:
                 grading_panel.refresh_primary_calibration()
@@ -2232,7 +2255,15 @@ class FileOpsMixin:
 
         self._publish_project_change_to_renderer(
             previous_project, project, sequence_changed=bool(sequence_updates))
-        if color_spaces_changed:
+        if color_spaces_changed or input_spaces_changed:
+            from src.shared.color.project_video_signal import aces_desktop_monitor_settings, project_aces_settings
+
+            source_viewer = getattr(self, "source_viewer_widget", None)
+            source_asset = getattr(source_viewer, "current_asset", None)
+            updated_source = current_assets.get(getattr(source_asset, "asset_id", None))
+            update_source = getattr(source_viewer, "update_aces_source_color", None)
+            if updated_source is not None and callable(update_source):
+                update_source(updated_source, aces_desktop_monitor_settings(project_aces_settings(current_color)))
             self._apply_program_display_color()
             color_timeline_preview = getattr(self, "_color_timeline_preview_renderer", None)
             if color_timeline_preview is not None:
@@ -2665,12 +2696,17 @@ class FileOpsMixin:
         # Open in Source Viewer（R09：解释覆盖帧率随打开传入——
         # 监视器时基与插入/导出同口径）
         from src.features.edit.core.interpretation import effective_asset_fps
+        from src.shared.color.project_video_signal import aces_desktop_monitor_settings, project_aces_settings
+        aces = aces_desktop_monitor_settings(
+            project_aces_settings(getattr(self._current_edit_project, "color_management", None)))
         self.source_viewer_widget.open_asset(
             asset,
             interpretation_fps=effective_asset_fps(
                 asset,
                 getattr(self._current_edit_project,
-                        "interpretation_overrides", None)))
+                        "interpretation_overrides", None)),
+            **({"project_aces": aces} if aces is not None else {}),
+        )
         FileOpsMixin._focus_open_edit_source(self, asset.asset_id, "media_pool_double_click")
         logger.debug(f"Asset opened in Source Viewer: {asset.display_name}")
 
@@ -2742,12 +2778,17 @@ class FileOpsMixin:
             from src.features.edit.core.interpretation import (
                 effective_asset_fps,
             )
+            from src.shared.color.project_video_signal import aces_desktop_monitor_settings, project_aces_settings
+            aces = aces_desktop_monitor_settings(
+                project_aces_settings(getattr(self._current_edit_project, "color_management", None)))
             self.source_viewer_widget.open_asset(
                 asset,
                 interpretation_fps=effective_asset_fps(
                     asset,
                     getattr(self._current_edit_project,
-                            "interpretation_overrides", None)))
+                            "interpretation_overrides", None)),
+                **({"project_aces": aces} if aces is not None else {}),
+            )
         except Exception:
             logger.exception("Failed to preview asset on select: %s", asset_id)
             return
@@ -2886,6 +2927,7 @@ class FileOpsMixin:
 
             # Connect signals
             self._connect_timeline_preview_renderer_signals()
+            self._ensure_program_monitor_output()
             # The monitor already has a size when the first drop creates its
             # renderer. Apply it before the first preview or transport request.
             budget = getattr(self, "_viewport_budget_executor", None)
@@ -2955,6 +2997,9 @@ class FileOpsMixin:
         self.timeline_preview_renderer.frame_ready.connect(
             self._on_timeline_preview_frame_ready
         )
+        monitor_signal = getattr(self.timeline_preview_renderer, "aces_monitor_frame_ready", None)
+        if monitor_signal is not None:
+            monitor_signal.connect(self._on_timeline_aces_monitor_frame_ready)
         if hasattr(self.program_viewer_widget, "monitor_frame_ready"):
             try:
                 self.program_viewer_widget.monitor_frame_ready.disconnect(
@@ -3366,10 +3411,12 @@ class FileOpsMixin:
             timeout fallback.
             """
             try:
+                color = getattr(self.source_viewer_widget, "aces_source_color", None)
                 worker.request(
                     asset_path,
                     frame_index,
                     generation=self.source_viewer_widget.gpu_generation,
+                    **({"color": color} if color is not None else {}),
                 )
                 return {'submitted': True}
             except Exception as e:
@@ -3390,6 +3437,9 @@ class FileOpsMixin:
             (renderer.render_error, self._on_timeline_preview_render_error),
             (self.program_viewer_widget.viewport_resized, self._on_program_viewer_viewport_resized),
         ]
+        monitor_signal = getattr(renderer, "aces_monitor_frame_ready", None)
+        if monitor_signal is not None:
+            connections.append((monitor_signal, self._on_timeline_aces_monitor_frame_ready))
         if hasattr(self.edit_page, 'timeline_scrub_started') and hasattr(renderer, 'begin_scrub'):
             connections.append((self.edit_page.timeline_scrub_started, self._begin_timeline_preview_scrub))
         if hasattr(self.edit_page, 'timeline_scrub_frame_requested') and hasattr(renderer, 'request_scrub_preview'):
@@ -3545,6 +3595,9 @@ class FileOpsMixin:
                 throttle=2.0,
             )
             return
+        if getattr(self, "_program_monitor_aces_external_view", None) is not None:
+            # The dedicated post-grade render emits separate, already encoded RGB.
+            return
         try:
             if isinstance(result, dict) and result.get("present_frame") is not None:
                 present = result.get("present_frame")
@@ -3593,6 +3646,8 @@ class FileOpsMixin:
                 page=getattr(self, "current_page", None),
                 throttle=2.0,
             )
+            return
+        if getattr(self, "_program_monitor_aces_external_view", None) is not None:
             return
         if video_controller is None:
             self._decklink_monitor_debug_log(
@@ -3711,6 +3766,11 @@ class FileOpsMixin:
                 self._discard_color_monitor_pending_readback()
                 return
             engine_state = getattr(getattr(self, "engine", None), "__dict__", {})
+            external_aces = getattr(self, "_program_monitor_aces_external_view", None)
+            if external_aces is not None:
+                if engine_state.get("_project_viewer_aces") is not None:
+                    self._request_color_monitor_output(controller, reason="aces_playback")
+                return
             if engine_state.get("_project_viewer_hdr") is not None:
                 self._request_color_monitor_output(controller, reason="hdr_playback")
                 return
@@ -3740,6 +3800,12 @@ class FileOpsMixin:
             self._decklink_color_static_target = target_key
             self._decklink_color_output_last_request = 0.0
             self._discard_color_monitor_pending_readback()
+        external_aces = getattr(self, "_program_monitor_aces_external_view", None)
+        if external_aces is not None:
+            engine_state = getattr(getattr(self, "engine", None), "__dict__", {})
+            if engine_state.get("_project_viewer_aces") is not None:
+                self._request_color_monitor_output(controller, reason="aces_static")
+            return
         if self._request_color_monitor_output(controller, reason="static"):
             return
 
@@ -3831,6 +3897,10 @@ class FileOpsMixin:
             return
         controller = self._ensure_program_monitor_output()
         if controller is None:
+            return
+        render_worker = getattr(getattr(self, "engine", None), "renderer", None)
+        external_aces = getattr(self, "_program_monitor_aces_external_view", None)
+        if getattr(render_worker, "_published_aces_monitor_view", None) != external_aces:
             return
         if not bool(getattr(video_controller, "is_playing", False)):
             # A paused clip switch has only one frame to present.  PBO is a
@@ -4548,6 +4618,8 @@ class FileOpsMixin:
 
     def _on_program_monitor_frame_ready(self, frame: int, image) -> None:
         """Submit GPU PBO readback frames to external monitoring output."""
+        if getattr(self, "_program_monitor_aces_external_view", None) is not None:
+            return
         controller = getattr(self, "_program_monitor_output", None)
         if controller is None:
             self._decklink_monitor_debug_log(
@@ -4574,6 +4646,24 @@ class FileOpsMixin:
         except Exception as exc:
             logger.debug("Program monitor output GPU readback submit failed: %s", exc)
 
+    def _on_timeline_aces_monitor_frame_ready(self, frame: int, pixels: object) -> None:
+        """Send a dedicated ACES monitor RGB frame without using the desktop image."""
+        if (self.sender() is not getattr(self, "timeline_preview_renderer", None)
+                or self.current_page not in ("Color", "Edit")
+                or (self.current_page == "Color" and not getattr(self, "_color_program_monitor_active", False))):
+            return
+        controller = getattr(self, "_program_monitor_output", None)
+        if (controller is not None
+                and getattr(self, "_program_monitor_aces_external_view", None) is not None):
+            controller.submit_video_frame(frame, pixels)
+
+    def _on_composite_aces_monitor_ready(self, request_id: int, view: object, pixels: object) -> None:
+        """Send the independent display result from Composite's render thread."""
+        controller = getattr(self, "_program_monitor_output", None)
+        if (self.current_page == "Composite" and controller is not None
+                and view == getattr(self, "_program_monitor_aces_external_view", None)):
+            controller.submit_video_frame(request_id, pixels)
+
     def _on_program_monitor_gpu_frame_ready(
         self,
         frame: int,
@@ -4583,6 +4673,8 @@ class FileOpsMixin:
         is_gl_oriented: bool,
     ) -> None:
         """Submit viewer-owned GPU texture metadata to native monitor output."""
+        if getattr(self, "_program_monitor_aces_external_view", None) is not None:
+            return
         controller = getattr(self, "_program_monitor_output", None)
         if controller is None:
             self._decklink_monitor_debug_log(
@@ -4673,6 +4765,12 @@ class FileOpsMixin:
 
     def _ensure_program_monitor_output(self):
         """Create/start the optional DeckLink monitor output when configured."""
+        from dataclasses import replace
+
+        from src.shared.color.project_video_signal import (
+            ACES_DCI_P3_MONITOR, aces_external_monitor_settings, project_aces_settings,
+        )
+
         try:
             from src.shared.video.monitor_output import (
                 DeckLinkMonitorConfig,
@@ -4691,6 +4789,18 @@ class FileOpsMixin:
         # so switching back to video/all restores the user's setting).
         if config.enabled and self._get_work_mode() == "image":
             config = type(config)(**{**config.__dict__, "enabled": False})
+
+        project = getattr(self, "_current_edit_project", None)
+        aces = project_aces_settings(getattr(project, "color_management", None)) if config.enabled else None
+        external = aces_external_monitor_settings(aces)
+        if external != getattr(self, "_program_monitor_aces_external_view", None):
+            self._discard_color_monitor_pending_readback()
+            self._decklink_color_output_last_request = 0.0
+        self._program_monitor_aces_external_view = external
+        if aces is not None and aces.external_monitor == ACES_DCI_P3_MONITOR:
+            # The native RGB bridge passes P3 code values to the calibrated
+            # output, avoiding the ordinary Rec.709 YUV packing matrix.
+            config = replace(config, backend="native_sdk", native_pixel_format="bgra")
 
         if not config.enabled:
             if existing is not None:
@@ -4740,8 +4850,9 @@ class FileOpsMixin:
             and getattr(getattr(existing, "backend", None), "supports_gpu_texture", False)
         )
         self._set_program_monitor_output_modes(
-            readback_enabled=not native_gpu_enabled,
-            gpu_signal_enabled=native_gpu_enabled,
+            readback_enabled=external is None and not native_gpu_enabled,
+            gpu_signal_enabled=external is None and native_gpu_enabled,
+            independent_aces=external is not None,
         )
         return existing
 
@@ -4749,6 +4860,7 @@ class FileOpsMixin:
         self,
         readback_enabled: bool,
         gpu_signal_enabled: bool,
+        *, independent_aces: bool = False,
     ) -> None:
         widget = getattr(self, "program_viewer_widget", None)
         readback_setter = getattr(widget, "set_monitor_readback_enabled", None)
@@ -4763,6 +4875,14 @@ class FileOpsMixin:
                 gpu_setter(bool(gpu_signal_enabled))
             except Exception:
                 pass
+        renderer = getattr(self, "timeline_preview_renderer", None)
+        aces_setter = getattr(renderer, "set_aces_external_monitor_enabled", None)
+        if callable(aces_setter):
+            aces_setter(readback_enabled or gpu_signal_enabled or independent_aces)
+        composite_setter = getattr(getattr(self, "composite_page", None), "set_aces_external_monitor", None)
+        if callable(composite_setter):
+            view = getattr(self, "_program_monitor_aces_external_view", None) if independent_aces else None
+            composite_setter(view)
 
     def _on_timeline_preview_render_error(self, frame: int, error_msg: str) -> None:
         """
@@ -6618,7 +6738,7 @@ class FileOpsMixin:
         from src.shared.color.desktop_video_color import USE_DISPLAY_ICC, sdr_display_preset
         from src.shared.color.hdr_video_signal import hdr_input_descriptor, hdr_monitor_space, project_hdr_settings
         from src.shared.color.project_video_signal import (
-            aces_input_descriptor, aces_monitor_space, legacy_video_timeline_space,
+            aces_desktop_monitor_settings, aces_input_descriptor, aces_monitor_space, legacy_video_timeline_space,
             project_aces_settings, video_signal_spaces,
         )
         from src.shared.color.video_signal_gl import can_render_video_signal_gl
@@ -6638,11 +6758,14 @@ class FileOpsMixin:
         if aces is not None or hdr is not None:
             context = getattr(self, "_color_timeline_clip_playback_context", None) or {}
             clip = context.get("clip")
-            asset = project.get_asset_by_id(clip.asset_id) if clip is not None else None
+            asset = (project.get_asset_by_id(clip.asset_id) if clip is not None else
+                     project.get_asset_by_path(getattr(self, "current_file_path", "") or ""))
             path = str(getattr(asset, "path", None) or getattr(self, "current_file_path", "") or "")
             media_type = getattr(asset, "media_type", "image")
             if aces is not None:
-                input_space = aces_input_descriptor(aces, path, media_type=media_type)
+                input_space = aces_input_descriptor(
+                    aces, path, media_type=media_type, input_override=getattr(asset, "input_color_space", None),
+                )
                 spaces = (spaces[0], aces_monitor_space())
             else:
                 input_space = hdr_input_descriptor(
@@ -6652,7 +6775,7 @@ class FileOpsMixin:
         if spaces is not None and not can_render_video_signal_gl(*spaces):
             spaces = None
         if aces is not None:
-            changed = setter(spaces, aces=aces, input_space=input_space)
+            changed = setter(spaces, aces=aces_desktop_monitor_settings(aces), input_space=input_space)
         elif hdr is not None:
             changed = setter(spaces, hdr=hdr, input_space=input_space)
         else:

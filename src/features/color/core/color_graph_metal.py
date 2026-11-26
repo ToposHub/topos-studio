@@ -30,8 +30,9 @@ from typing import Any, Callable, Mapping
 import numpy as np
 
 from src.features.color.core.base_grade_runtime import (
-    BASE_GRADE_SIGNAL_VECTORS, BASE_GRADE_UNIFORMS, metal_graph_base_grade_source,
+    BASE_GRADE_SIGNAL_VECTORS, BASE_GRADE_UNIFORMS,
 )
+from src.features.color.core.chromogen_runtime import metal_managed_grading_source
 from src.features.color.core.color_graph_compiler import (
     ColorGraphRenderPlan,
     RenderPass,
@@ -125,6 +126,9 @@ def graph_grading_params_for_layer(
         base_grade_encoded=values["u_rec709_calibration_encoded"],
         base_grade_transfer=values.get("u_base_grade_transfer", -1),
         base_grade_signal=tuple(component for name in BASE_GRADE_SIGNAL_VECTORS for component in values.get(name, ())),
+        chromogen_stage_count=values.get("u_chromogen_stage_count", 0),
+        chromogen_amount=values.get("u_chromogen_amount", 0.0),
+        chromogen_stages=values.get("u_chromogen_stages", ()),
     )
 
 
@@ -739,7 +743,7 @@ class ColorGraphMetalExecutor:
                   size: tuple[int, int], *, textures: dict[int, Any] | None = None) -> None:
         kernel = self._kernels.get(kernel_name)
         if kernel is None:
-            extension = metal_graph_base_grade_source()
+            extension = metal_managed_grading_source()
             source = build_metal_graph_ops_msl(extension)
             if kernel_name in ("graph_grading_709", "graph_grading_709_v2", "graph_grading_chroma709",
                                "graph_grading_x_grade"):

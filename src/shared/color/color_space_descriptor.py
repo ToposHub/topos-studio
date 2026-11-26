@@ -478,6 +478,7 @@ COLOR_MANAGEMENT_SETTING_KEYS: tuple = (
     "color.aces.version",
     "color.aces.input",
     "color.aces.reference_gamut_compression",
+    "color.aces.external_monitor",
     "color.hdr.input",
     "color.hdr.reference_white",
     "color.hdr.hlg_peak",

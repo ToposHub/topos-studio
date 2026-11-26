@@ -90,6 +90,10 @@ class MainWindowAdapter:
             lambda: self._mw.switch_to_page("Color")
         )
         page.composite_frame_ready.connect(self._mw._on_composite_frame_ready)
+        monitor_signal = getattr(page, "composite_aces_monitor_ready", None)
+        monitor_slot = getattr(self._mw, "_on_composite_aces_monitor_ready", None)
+        if monitor_signal is not None and callable(monitor_slot):
+            monitor_signal.connect(monitor_slot)
         page.composite_metadata_ready.connect(self._mw._on_composite_metadata_ready)
         page.status_message.connect(self._mw._on_composite_status_message)
         page.composite_user_edit_started.connect(self._mw._on_composite_user_edit_started)

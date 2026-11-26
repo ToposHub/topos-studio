@@ -9405,6 +9405,7 @@ class MediaPoolPanel(QWidget):
                 asset = self._project.assets.get(item_id) if self._project else None
                 if asset:
                     self._append_professional_audio_editor_action(menu, asset)
+                    self._append_input_color_space_menu(menu, tuple(batch_ids) or (item_id,))
                     # Relink (for all assets, emphasized for offline)
                     if asset.is_offline:
                         relink_act = menu.addAction(
@@ -9798,6 +9799,7 @@ class MediaPoolPanel(QWidget):
             asset = self.asset_model.data(index, Qt.ItemDataRole.UserRole)
             if isinstance(asset, MediaAsset):
                 self._append_professional_audio_editor_action(menu, asset)
+                self._append_input_color_space_menu(menu, tuple(batch_ids) or (item_id,))
                 # Relink (for all assets, emphasized for offline)
                 if asset.is_offline:
                     relink_act = menu.addAction(
@@ -10038,6 +10040,59 @@ class MediaPoolPanel(QWidget):
             lambda _checked=False, asset_id=asset.asset_id: self.professional_audio_editor_requested.emit(asset_id)
         )
         menu.addSeparator()
+
+    def _append_input_color_space_menu(self, menu: QMenu, asset_ids: tuple[str, ...]) -> None:
+        from src.shared.color.camera_input import CAMERA_INPUTS
+        from src.shared.color.project_video_signal import project_aces_settings
+
+        project = self._project
+        if project is None or project_aces_settings(project.color_management) is None:
+            return
+        assets = [project.assets[asset_id] for asset_id in asset_ids if asset_id in project.assets
+                  and project.assets[asset_id].media_type in ("video", "image", "image_sequence")]
+        if not assets:
+            return
+        title = I18N.tr("edit.media_pool.input_color_space", "Input Color Space")
+        submenu = menu.addMenu(title)
+        submenu.setObjectName("mediaInputColorSpace")
+        selected = {asset.input_color_space for asset in assets}
+        ids = tuple(asset.asset_id for asset in assets)
+
+        def add_option(target: QMenu, value: str | None, label: str) -> None:
+            action = target.addAction(label)
+            action.setData(value)
+            action.setCheckable(True)
+            action.setChecked(selected == {value})
+            action.triggered.connect(lambda: self._set_input_color_space(ids, value, title))
+
+        add_option(submenu, None, I18N.tr("edit.media_pool.input_color_project", "Use Project Default"))
+        add_option(submenu, "auto", I18N.tr("preferences.color_management.aces_auto_input", "Auto"))
+        submenu.addSeparator()
+        camera_menus = {brand: submenu.addMenu(brand) for brand in ("ARRI", "Sony")}
+        for value, (label, _, _) in CAMERA_INPUTS.items():
+            add_option(camera_menus[label.split()[0]], value, label)
+        aces_menu = submenu.addMenu("ACES")
+        for value, label in (("aces2065-1", "ACES2065-1"), ("acescg", "ACEScg"),
+                             ("acescct", "ACEScct"), ("acescc", "ACEScc")):
+            add_option(aces_menu, value, label)
+        submenu.addSeparator()
+        for value, label in (("rec709-g24", "Rec.709 Gamma 2.4"), ("rec709-bt709", "Rec.709 (BT.709 OETF)"),
+                             ("srgb", "sRGB"), ("linear-rec709", "Linear Rec.709")):
+            add_option(submenu, value, label)
+        menu.addSeparator()
+
+    def _set_input_color_space(self, asset_ids: tuple[str, ...], selection: str | None, title: str) -> None:
+        from src.features.edit.core.commands.asset_commands import SetAssetInputColorSpaceCommand
+
+        project = self._project
+        if project is None:
+            return
+        changed = tuple(asset_id for asset_id in asset_ids if asset_id in project.assets
+                        and project.assets[asset_id].input_color_space != selection)
+        if changed:
+            command = SetAssetInputColorSpaceCommand(title, changed, selection)
+            self._project = self._command_stack.execute(command, project)
+            self.project_changed.emit(self._project)
 
     # ==================== Actions ====================
 

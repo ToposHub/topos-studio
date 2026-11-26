@@ -115,6 +115,8 @@ def _asset_version(asset: Any | None) -> dict[str, Any]:
         "path": path,
         "metadata": _fingerprint_value(getattr(asset, "metadata", {}) or {}),
     }
+    if isinstance(input_space := getattr(asset, "input_color_space", None), str):
+        record["input_color_space"] = input_space
     if path and not path.startswith("topos://"):
         try:
             stat = os.stat(path)

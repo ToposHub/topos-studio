@@ -204,7 +204,8 @@ def migrate_legacy_stack(stack: ColorStackData) -> ColorGraphData:
 
 
 def _flat_view_nonempty(stack: ColorStackData) -> bool:
-    from src.features.color.core.base_grade import base_grade_active
+    from src.features.color.core.base_grade_runtime import managed_primary_active
+    from src.features.color.core.chromogen import CHROMOGEN_KEY
     from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
     from src.features.color.core.primary_calibration import (
         PRIMARY_CALIBRATION_VERSION_KEY, grade_uses_calibration,
@@ -214,7 +215,7 @@ def _flat_view_nonempty(stack: ColorStackData) -> bool:
     defaults = ColorStackData.create(asset_id=None, name="probe").grading_params
     differs = any(grading.get(k) != v for k, v in defaults.items()
                   if k != PRIMARY_CALIBRATION_VERSION_KEY)
-    return bool(base_grade_active(grading)
+    return bool(grading.get(CHROMOGEN_KEY) is not None or managed_primary_active(grading)
                 or grade_uses_calibration({"grading_params": grading}) or differs
                 or stack.curves_data or stack.hsl_curve_data
                 or stack.mixer_params or stack.lut_path
@@ -223,7 +224,8 @@ def _flat_view_nonempty(stack: ColorStackData) -> bool:
 
 
 def _needs_execution_graph(layer: Any) -> bool:
-    from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS, base_grade_active
+    from src.features.color.core.base_grade import BASE_GRADE_DEFAULTS
+    from src.features.color.core.base_grade_runtime import managed_primary_active
     from src.features.color.core.curves_calibration import curves_calibration_enabled
     from src.features.color.core.curves_soft_clip import curves_soft_clip_is_identity
     from src.features.color.core.primary_calibration import grade_uses_calibration
@@ -233,7 +235,7 @@ def _needs_execution_graph(layer: Any) -> bool:
     get = layer.get if isinstance(layer, Mapping) else lambda key: getattr(layer, key, None)
     grading = get("grading_params")
     if isinstance(grading, Mapping) and (
-        base_grade_active(grading)
+        managed_primary_active(grading)
         or any(name in (get("grade_keyframes") or ()) for name in BASE_GRADE_DEFAULTS)
     ):
         return True
