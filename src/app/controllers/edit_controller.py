@@ -9272,6 +9272,12 @@ class EditControllerMixin:
         self._current_edit_project = None
         self._current_edit_project_filepath = None
         self._current_timeline_sequences = {}
+        graph_host = getattr(self, "color_graph_host", None)
+        if graph_host is not None:
+            graph_host.clear_clip_stack()
+        color_session_manager = getattr(self, "_color_session_manager", None)
+        if color_session_manager is not None:
+            color_session_manager.clear_current_session()
         # Detach Program before clearing the panels, which can request frames.
         release_preview = getattr(self, "_release_timeline_preview_renderer", None)
         if callable(release_preview):

@@ -9490,8 +9490,8 @@ class TimecodeRulerItem(QGraphicsObject):
     ruler_dragged = pyqtSignal(int)  # frame (continuous during scrub)
     ruler_scrub_finished = pyqtSignal()
     display_mode_changed = pyqtSignal(str)  # display_mode ('frames' or 'samples')
-    mark_in_requested = pyqtSignal(int)  # frame
-    mark_out_requested = pyqtSignal(int)  # frame
+    mark_in_requested = pyqtSignal()
+    mark_out_requested = pyqtSignal()
     clear_range_requested = pyqtSignal()
 
     LABEL_GUTTER = 110  # Logical pixels reserved for a full timecode and its gap.
@@ -9909,13 +9909,11 @@ class TimecodeRulerItem(QGraphicsObject):
         super().mouseReleaseEvent(event)
 
     def contextMenuEvent(self, event: Any) -> None:
-        """Show range and display-mode actions for the clicked ruler frame."""
+        """Show playhead range actions and ruler display modes."""
         from PyQt6.QtWidgets import QMenu
         from src.shared.i18n.i18n import I18N
 
         menu = QMenu()
-        frame = self._get_frame_at_pos(event.scenePos().x())
-
         mark_in_action = menu.addAction(
             I18N.tr("timeline.range.set_in", "设置入点")
         )
@@ -9944,9 +9942,9 @@ class TimecodeRulerItem(QGraphicsObject):
 
         # Handle action
         if action == mark_in_action:
-            self.mark_in_requested.emit(frame)
+            self.mark_in_requested.emit()
         elif action == mark_out_action:
-            self.mark_out_requested.emit(frame)
+            self.mark_out_requested.emit()
         elif action == clear_range_action:
             self.clear_range_requested.emit()
         elif action == frames_action:
@@ -11715,7 +11713,7 @@ class TimelineRangeItem(QGraphicsObject):
 
     def _edge_positions(self, start: int, end: int) -> tuple[float, float]:
         return (TRACK_HEADER_WIDTH + start * self._pixels_per_frame,
-                TRACK_HEADER_WIDTH + (end + 1) * self._pixels_per_frame)
+                TRACK_HEADER_WIDTH + end * self._pixels_per_frame)
 
     def paint(self, painter: QPainter, option: Any, widget: Optional[Any] = None) -> None:
         if self._range_start is None or self._range_end is None:
@@ -11723,14 +11721,18 @@ class TimelineRangeItem(QGraphicsObject):
 
         x_start, x_end = self._edge_positions(self._range_start, self._range_end)
 
-        bar_rect = QRectF(x_start, self._bar_y, x_end - x_start, self.BAR_HEIGHT)
+        bar_rect = QRectF(x_start, self._bar_y, max(1.0, x_end - x_start), self.BAR_HEIGHT)
         painter.fillRect(bar_rect, QColor("#676970"))
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        for x, edge in ((x_start, "in"), (x_end, "out")):
+        active_edge = self._dragging_edge or self._hovered_edge
+        grips = ((x_end, "out"), (x_start, "in")) if active_edge == "in" else (
+            (x_start, "in"), (x_end, "out")
+        )
+        for x, edge in grips:
             paint_range_grip(painter, x, bar_rect.center().y(),
-                             active=edge == (self._dragging_edge or self._hovered_edge))
+                             active=edge == active_edge)
         painter.restore()
 
     def _hit_edge(self, pos: QPointF) -> Optional[str]:
@@ -11740,6 +11742,8 @@ class TimelineRangeItem(QGraphicsObject):
         in_distance = abs(pos.x() - x_start)
         out_distance = abs(pos.x() - x_end)
         if min(in_distance, out_distance) <= self.HANDLE_HIT_HALF_WIDTH:
+            if x_start == x_end:
+                return "in" if pos.x() <= x_start else "out"
             return "in" if in_distance <= out_distance else "out"
         return None
 

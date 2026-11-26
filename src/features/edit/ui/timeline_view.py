@@ -1298,8 +1298,8 @@ class TimelineView(QGraphicsView):
         self._ruler_item.ruler_clicked.connect(self._on_ruler_clicked)
         self._ruler_item.ruler_dragged.connect(self._on_ruler_dragged)
         self._ruler_item.ruler_scrub_finished.connect(self._on_ruler_scrub_finished)
-        self._ruler_item.mark_in_requested.connect(self._mark_in_at_frame)
-        self._ruler_item.mark_out_requested.connect(self._mark_out_at_frame)
+        self._ruler_item.mark_in_requested.connect(self._mark_in_at_playhead)
+        self._ruler_item.mark_out_requested.connect(self._mark_out_at_playhead)
         self._ruler_item.clear_range_requested.connect(self._clear_timeline_range)
 
         # Add placeholder playhead (P1.4 - with fps for timecode display)
@@ -3040,9 +3040,6 @@ class TimelineView(QGraphicsView):
             return 0, None, None
         duration = self._effective_timeline_duration(timeline)
         marks = resolve_timeline_in_out(timeline.range_start, timeline.range_end, duration)
-        if marks is None and timeline.duration_frames <= 0:
-            # The empty canvas shows a full range before markers are set.
-            marks = (0, duration - 1)
         start, end = marks or (None, None)
         return duration, start, end
 
@@ -11680,9 +11677,10 @@ class TimelineView(QGraphicsView):
         if self._timeline is None:
             return
         from src.features.edit.core.commands import SetTimelineRangeCommand
+        end = self._timeline.range_end
         cmd = SetTimelineRangeCommand.create(
             new_start=frame,
-            new_end=self._timeline.range_end,
+            new_end=end if end is None or end >= frame else None,
             old_start=self._timeline.range_start,
             old_end=self._timeline.range_end,
         )
@@ -11698,8 +11696,9 @@ class TimelineView(QGraphicsView):
         if self._timeline is None:
             return
         from src.features.edit.core.commands import SetTimelineRangeCommand
+        start = self._timeline.range_start
         cmd = SetTimelineRangeCommand.create(
-            new_start=self._timeline.range_start,
+            new_start=start if start is None or start <= frame else None,
             new_end=frame,
             old_start=self._timeline.range_start,
             old_end=self._timeline.range_end,

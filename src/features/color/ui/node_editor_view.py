@@ -374,6 +374,8 @@ class ColorNodeView(QGraphicsView):
 
     def apply_edit(self, action: str, operation: Callable[[], Any], payload: Any = None) -> Any:
         """One UI operation, one draft history entry and one future host intent."""
+        if not self.isEnabled():
+            return None
         if self.project_history_enabled and action in {"undo", "redo"}:
             self.edit_requested.emit(action, {"arguments": payload})
             return True

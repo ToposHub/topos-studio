@@ -104,6 +104,75 @@ def harness(qapp):
 # ═══ clip 水合 ═══════════════════════════════════════════════════════════
 
 class TestClipHydration:
+    def test_unbound_panel_stays_empty_until_a_clip_is_loaded(self, harness) -> None:
+        h, stack_id, graph = harness
+        assert not h.panel.snapshot().nodes
+        assert not h.panel.isEnabled()
+        h.panel.set_scope("timeline")
+        h.panel.view.apply_edit("add_serial", h.panel.view.state.add_serial)
+        assert not h.panel.view.cards
+
+        h.host.on_clip_stack_loaded(stack_id)
+        assert h.panel.isEnabled()
+        node_ids = {node.node_id for node in graph.nodes}
+        assert set(h.panel.view.cards) == node_ids
+        h.panel.set_scope("timeline")
+        h.host.clear_clip_stack()
+
+        assert h.panel.scope == "clip"
+        assert not h.panel.view.cards
+        assert h.host.panel_host.active_handle is None
+        assert h.host._coordinator.state == GraphSessionState.DISCONNECTED
+        assert stack_id in h.holder["project"].color_stacks
+        h.host.on_clip_stack_loaded(stack_id)
+        assert set(h.panel.view.cards) == node_ids
+
+    @pytest.mark.parametrize("switch_timeline", [False, True])
+    def test_empty_active_timeline_unbinds_the_open_clip(
+        self, harness, switch_timeline: bool,
+    ) -> None:
+        from src.app.controllers.page_controller import PageManagementMixin
+        from src.features.color.core.color_session import ColorSession, ColorSessionManager, SourceKind
+        from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+
+        h, stack_id, _graph = harness
+        project = h.holder["project"].create_timeline("First")
+        timeline_id = project.active_timeline_id
+        if switch_timeline:
+            project = project.create_timeline("Second")
+        active_id = project.active_timeline_id
+        h.holder["project"] = project
+        manager = ColorSessionManager()
+        manager.set_current_session(ColorSession(
+            session_id="s", source_kind=SourceKind.TIMELINE_CLIP,
+            project_id=project.project_id, color_stack_id=stack_id,
+            timeline_id=timeline_id, clip_id="clip", asset_id="a1",
+        ))
+        empty = TimelineSequence(timeline_id=active_id)
+        h.host.on_clip_stack_loaded(stack_id)
+        window = SimpleNamespace(
+            _current_edit_project=project,
+            _current_timeline_sequences={active_id: empty},
+            _color_session_manager=manager,
+            color_graph_host=h.host,
+            current_page="Color",
+            open_timeline_clip_in_color=Mock(side_effect=lambda *_: h.host.on_clip_stack_loaded(stack_id)),
+        )
+        PageManagementMixin.refresh_color_timeline_clip_strip(window)
+        assert not h.panel.view.cards
+        assert not h.host.bound_stack_id
+
+        if switch_timeline:
+            window._current_edit_project = project.set_active_timeline(timeline_id)
+        track = EditTrack("v", "V1", "video", 0)
+        clip = ClipInstance("clip", "a1", "v", 0, 100, 0, 100, color_stack_id=stack_id)
+        window._current_timeline_sequences[timeline_id] = TimelineSequence(
+            timeline_id=timeline_id, video_tracks=(track.with_clip_added(clip),),
+        )
+        PageManagementMixin.refresh_color_timeline_clip_strip(window)
+        window.open_timeline_clip_in_color.assert_called_once_with(timeline_id, "clip")
+        assert h.panel.view.cards
+
     def test_clip_load_binds_and_hydrates(self, harness):
         h, stack_id, graph = harness
         h.host.on_clip_stack_loaded(stack_id, scope_owner_id=stack_id)

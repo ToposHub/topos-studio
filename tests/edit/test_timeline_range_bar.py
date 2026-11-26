@@ -16,7 +16,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 from PyQt6.QtCore import QPointF, QRect, QRectF, Qt
-from PyQt6.QtGui import QColor, QImage, QPainter
+from PyQt6.QtGui import QColor, QContextMenuEvent, QImage, QPainter
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QStyleOptionGraphicsItem
 
@@ -346,7 +346,7 @@ def test_range_handles_drag_and_update_track_highlight(
     assert mask_item.boundingRect().left() == TRACK_HEADER_WIDTH + 48 * view._pixels_per_frame
     assert mask_item.boundingRect().right() == TRACK_HEADER_WIDTH + 145 * view._pixels_per_frame
     out_handle_scene = QPointF(
-        TRACK_HEADER_WIDTH + (144 + 1) * view._pixels_per_frame,
+        TRACK_HEADER_WIDTH + 144 * view._pixels_per_frame,
         range_item._bar_y,
     )
     assert range_item._hit_edge(out_handle_scene) == "out"
@@ -391,8 +391,8 @@ def test_range_handles_drag_and_update_track_highlight(
     view.close()
 
 
-def test_empty_timeline_exposes_default_black_output_range(qapp) -> None:
-    """An empty timeline still shows a full-range bar for its black canvas."""
+def test_empty_timeline_hides_the_range_until_a_mark_is_set(qapp) -> None:
+    """The black canvas is still available before any range is selected."""
     timeline = TimelineSequence(
         timeline_id="empty-range-ui",
         name="Empty",
@@ -408,9 +408,20 @@ def test_empty_timeline_exposes_default_black_output_range(qapp) -> None:
 
     assert view._effective_timeline_duration() == 240
     assert view._range_item is not None
+    assert not view._range_item.isVisible()
+    assert not view._range_mask_item.isVisible()
+    assert view.get_range_presentation(timeline) == (240, None, None)
+
+    view.set_playhead(48)
+    QTest.keyClick(view, Qt.Key.Key_I)
     assert view._range_item.isVisible()
-    assert view._range_item._range_start == 0
-    assert view._range_item._range_end == 239
+    assert (view._range_item._range_start, view._range_item._range_end) == (48, 239)
+
+    view._clear_timeline_range()
+    assert not view._range_item.isVisible()
+    assert not view._range_mask_item.isVisible()
+    view.undo()
+    assert view._range_item.isVisible()
 
     view.close()
 
@@ -428,34 +439,63 @@ def test_corner_timecode_uses_ruler_background_instead_of_black(qapp) -> None:
     view.close()
 
 
-def test_ruler_context_menu_emits_mark_in_for_clicked_frame(qapp) -> None:
-    """Ruler right-click converts its clicked position into an In-point request."""
-    ruler = TimecodeRulerItem(pixels_per_frame=2.0, fps=24.0, duration_frames=240)
-    received_frames: list[int] = []
-    ruler.mark_in_requested.connect(received_frames.append)
+@pytest.mark.parametrize("action_index, key, previous_range, playhead, expected", [
+    (0, Qt.Key.Key_I, (None, None), 48, (48, None)),
+    (1, Qt.Key.Key_O, (None, None), 144, (None, 144)),
+    (0, Qt.Key.Key_I, (None, 192), 48, (48, 192)),
+    (1, Qt.Key.Key_O, (48, None), 144, (48, 144)),
+    (0, Qt.Key.Key_I, (None, 48), 144, (144, None)),
+    (1, Qt.Key.Key_O, (144, None), 48, (None, 48)),
+    (1, Qt.Key.Key_O, (48, None), 48, (48, 48)),
+])
+@pytest.mark.parametrize("use_menu", [True, False])
+def test_mark_actions_use_the_playhead(
+    qtbot,
+    action_index: int,
+    key: Qt.Key,
+    previous_range: tuple[int | None, int | None],
+    playhead: int,
+    expected: tuple[int | None, int | None],
+    use_menu: bool,
+) -> None:
+    track = _make_track("video", "V1")
+    timeline = TimelineSequence(fps=24.0).with_track_added(track)
+    timeline = timeline.with_clip_added(track.track_id, _make_clip("clip", track.track_id, duration=240))
+    view = TimelineView()
+    qtbot.addWidget(view)
+    view.resize(1400, 320)
+    view.load_timeline(timeline.with_range(*previous_range))
+    view.show()
+    view.set_playhead(playhead)
+    if previous_range == (None, None):
+        assert not view._range_item.isVisible()
 
-    mark_in_action = MagicMock()
-    mark_out_action = MagicMock()
-    clear_action = MagicMock()
-    frames_action = MagicMock()
-    samples_action = MagicMock()
-    menu = MagicMock()
-    menu.addAction.side_effect = [
-        mark_in_action,
-        mark_out_action,
-        clear_action,
-        frames_action,
-        samples_action,
-    ]
-    menu.exec.return_value = mark_in_action
-    event = MagicMock()
-    event.scenePos.return_value = QPointF(TRACK_HEADER_WIDTH + 24.0, 0.0)
+    if use_menu:
+        actions = [MagicMock() for _ in range(5)]
+        menu = MagicMock()
+        menu.addAction.side_effect = actions
+        menu.exec.return_value = actions[action_index]
+        clicked = view.mapFromScene(QPointF(TRACK_HEADER_WIDTH + 20 * view._pixels_per_frame, 5))
+        event = QContextMenuEvent(
+            QContextMenuEvent.Reason.Mouse, clicked, view.viewport().mapToGlobal(clicked)
+        )
+        with patch("PyQt6.QtWidgets.QMenu", return_value=menu):
+            view.contextMenuEvent(event)
+        assert event.isAccepted()
+    else:
+        QTest.keyClick(view, key)
 
-    with patch("PyQt6.QtWidgets.QMenu", return_value=menu):
-        ruler.contextMenuEvent(event)
-
-    assert received_frames == [12]
-    event.accept.assert_called_once()
+    assert (view._timeline.range_start, view._timeline.range_end) == expected
+    assert view._range_item.isVisible()
+    grips = view._range_item._edge_positions(view._range_item._range_start, view._range_item._range_end)
+    assert grips[action_index] == pytest.approx(view._playhead_item.scenePos().x())
+    if expected[0] == expected[1]:
+        x = grips[action_index]
+        y = view._range_item._bar_y
+        assert view._range_item._hit_edge(QPointF(x - 4, y)) == "in"
+        assert view._range_item._hit_edge(QPointF(x + 4, y)) == "out"
+    view.undo()
+    assert (view._timeline.range_start, view._timeline.range_end) == previous_range
 
 
 def test_ruler_context_menu_can_clear_the_active_selection(qapp) -> None:

@@ -881,6 +881,16 @@ class ColorGraphPanelHost:
         """注册"非 Corrector 选择 → 只读"回调（node_id, node_type）。"""
         self._read_only_handlers.append(handler)
 
+    def clear_projection(self) -> None:
+        """Drop the departing graph and its active corrector."""
+        self._canvas_owner = None
+        self._active_node_id = ""
+        self._active_handle = None
+        if self._panel is not None:
+            self._panel.clear_graph()
+        for handler in self._read_only_handlers:
+            handler("", "")
+
     def on_handle(self, handler: Callable[[CorrectorHandle], None]) -> None:
         """注册活动句柄回调（参数面板读取入口，B06.2 读路径）。"""
         self._handle_handlers.append(handler)
@@ -1539,6 +1549,10 @@ class ColorGraphAppHost:
         scope_signal = getattr(panel, "scope_changed", None)
         if scope_signal is not None:
             scope_signal.connect(self._on_scope_menu)
+        if self._coordinator.last_ack is not None:
+            self._host.on_projection(self._coordinator.last_ack)
+        else:
+            panel.clear_graph()
 
     @property
     def panel_host(self) -> ColorGraphPanelHost:
@@ -1629,6 +1643,9 @@ class ColorGraphAppHost:
                              scope: str = "clip",
                              scope_owner_id: str | None = None) -> None:
         stack_id = str(stack_id or "")
+        if not stack_id:
+            self.clear_clip_stack()
+            return
         self.end_grade_gesture()
         self._clip_stack_id = stack_id
         owner = (scope_owner_id or stack_id or None)
@@ -1639,6 +1656,23 @@ class ColorGraphAppHost:
             logger.warning("graph host clip switch failed", exc_info=True)
         self._bind_and_hydrate(stack_id, scope, owner)
         self._refresh_group_availability()
+
+    def clear_clip_stack(self, expected_stack_id: str | None = None) -> None:
+        """Unbind a departed clip or clear all graph state on project close."""
+        if expected_stack_id is not None and expected_stack_id != self._clip_stack_id:
+            return
+        if not (self._clip_stack_id or self._bound_stack_id):
+            return
+        self._adapter.cancel_gesture()
+        self._coordinator.switch_session("", "clip", None)
+        self._coordinator._set_state(GraphSessionState.DISCONNECTED)
+        self._clip_stack_id = ""
+        self._bound_stack_id = ""
+        self._bridge.bind_stack("")
+        engine = self._engine_provider() if self._engine_provider else None
+        if engine is not None:
+            engine.clear_active_color_graph()
+        self._host.clear_projection()
 
     def _bind_and_hydrate(self, stack_id: str, scope: str,
                           scope_owner_id) -> None:

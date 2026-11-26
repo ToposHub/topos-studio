@@ -4055,6 +4055,22 @@ class PageManagementMixin:
         if hasattr(self, 'color_timeline_clip_strip'):
             self.color_timeline_clip_strip.set_project_and_timeline(project, sequence)
 
+        graph_host = getattr(self, "color_graph_host", None)
+        manager = getattr(self, "_color_session_manager", None)
+        session = manager.get_current_session() if manager is not None else None
+        if graph_host is None or project is None or session is None:
+            return
+        if not session.is_timeline_clip() or session.project_id != project.project_id:
+            return
+
+        if sequence is None or sequence.timeline_id != session.timeline_id or (
+            sequence.get_clip_by_id(session.clip_id) is None
+        ):
+            graph_host.clear_clip_stack(expected_stack_id=session.color_stack_id)
+        elif not graph_host.bound_stack_id and getattr(self, "current_page", None) == "Color":
+            # A timeline undo can restore the open clip while Color stays active.
+            self.open_timeline_clip_in_color(session.timeline_id, session.clip_id)
+
     # ------------------------------------------------------------------
     # Debounced clip-strip refresh (P2: Edit-Color real-time sync)
     # ------------------------------------------------------------------

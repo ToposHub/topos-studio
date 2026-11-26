@@ -255,11 +255,13 @@ class ColorNodePanel(QWidget):
 
     def _scope_toggled(self, scope: str, checked: bool) -> None:
         """Select scope only on activation of an exclusive reference-style dot."""
-        if checked:
+        if checked and not self._syncing:
             self.set_scope(scope)
 
     def set_scope(self, scope: str) -> None:
-        if scope not in self.SCOPES or (scope.startswith("group_") and not self._group_available):
+        if not self.isEnabled() or scope not in self.SCOPES:
+            return
+        if scope.startswith("group_") and not self._group_available:
             return
         if self._scope == scope:
             return
@@ -272,16 +274,29 @@ class ColorNodePanel(QWidget):
         self.view.state = self._scope_states.setdefault(scope, NodeEditorState())
         self.view.rebuild()
         self.view.fit_graph()
+        self._update_scope_controls()
+        self.scope_changed.emit(scope)
+        self.active_node_changed.emit(self.view.state.graph.active_id)
+
+    def _update_scope_controls(self) -> None:
         self._syncing = True
         try:
-            self.clip_radio.setChecked(scope != "timeline")
-            self.timeline_radio.setChecked(scope == "timeline")
-            key, title = self.SCOPES[scope]
+            self.clip_radio.setChecked(self._scope != "timeline")
+            self.timeline_radio.setChecked(self._scope == "timeline")
+            key, title = self.SCOPES[self._scope]
             self.scope_button.setText(tr(key, title) + " ⌄")
         finally:
             self._syncing = False
-        self.scope_changed.emit(scope)
-        self.active_node_changed.emit(self.view.state.graph.active_id)
+
+    def clear_graph(self) -> None:
+        """Clear all canvas drafts when no source is bound."""
+        self.setEnabled(False)
+        self._scope = "clip"
+        self._group_available = False
+        self._scope_states.clear()
+        self._edited_children.clear()
+        self.load_graph(GraphDraft(), fit=False)
+        self._update_scope_controls()
 
     def load_graph(self, graph: GraphDraft, *, scope: str = "clip", fit: bool = True) -> None:
         """Hydrate a scope without emitting edits or disturbing an ongoing view."""
@@ -294,6 +309,8 @@ class ColorNodePanel(QWidget):
             self.breadcrumb.hide()
             self.view.state = state
             self.view.rebuild()
+            if graph.nodes:
+                self.setEnabled(True)
             if fit:
                 self.view.fit_graph()
 
