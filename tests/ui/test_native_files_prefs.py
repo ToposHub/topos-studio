@@ -1,10 +1,14 @@
 """B10 / U06：用户级 UI 配置往返（临时 ini，不碰本机 QSettings）。"""
 from __future__ import annotations
 
+import pytest
 from PyQt6.QtCore import QSettings
+from PyQt6.QtWidgets import QCheckBox, QComboBox, QGroupBox, QSpinBox, QWidget
 
+from src.app.ui.files_browser_preferences import FilesBrowserPreferencePage
 from src.app.ui.native_files_panel import NativeFilesPanel
 from src.app.ui.native_files_prefs import NativeFilesPreferences
+from src.shared.i18n.i18n import I18N
 
 
 def _prefs(tmp_path) -> NativeFilesPreferences:
@@ -92,3 +96,134 @@ def test_favorites_and_history_are_bounded_and_deduped(tmp_path):
     prefs.remember_search("clip")
     prefs.remember_search("Clip")
     assert prefs.search_history == ["Clip"]
+
+
+def _set_option(widget: QWidget, name: str, value: object) -> None:
+    combo = widget.findChild(QComboBox, name)
+    index = combo.findData(value)
+    assert index >= 0
+    combo.setCurrentIndex(index)
+
+
+def test_browser_preferences_stage_edits_and_reload_both_views(qtbot, tmp_path) -> None:
+    prefs = _prefs(tmp_path)
+    files = NativeFilesPanel(preferences=prefs)
+    library = NativeFilesPanel(preferences=_prefs(tmp_path))
+    for panel in (files, library):
+        qtbot.addWidget(panel)
+        panel.resize(1200, 700)
+        panel.show()
+    files.sort_combo.setCurrentIndex(1)
+    library.sort_combo.setCurrentIndex(2)
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    page = FilesBrowserPreferencePage(prefs)
+    widget = page.create_widget(parent)
+    page.load({})
+    assert not any(check.isChecked() for check in widget.findChildren(QCheckBox))
+    _set_option(widget, "filesBrowserLayout", "grid")
+    _set_option(widget, "filesBrowserGridFill", True)
+    _set_option(widget, "filesBrowserSidebar", False)
+    _set_option(widget, "filesBrowserInspector", True)
+    widget.findChild(QSpinBox, "filesBrowserThumbnailWidth").setValue(232)
+    widget.findChild(QCheckBox, "filesBrowserCard_rating").setChecked(True)
+    assert prefs.layout_mode == "adaptive"
+    assert prefs.sidebar_preference is None
+    assert prefs.card_metadata == []
+
+    page.apply(None)
+    assert prefs.layout_mode == "grid"
+    assert prefs.grid_fill is True
+    assert prefs.sidebar_preference is False
+    assert prefs.inspector_preference is True
+    assert prefs.density == 232
+    assert prefs.card_metadata == ["rating"]
+
+    stored = (tmp_path / "prefs.ini").read_bytes()
+    for panel in (files, library):
+        panel.reload_preferences()
+        assert panel.view_combo.currentData() == "grid"
+        assert panel.card_delegate.grid_fill is True
+        assert panel.card_delegate.caption_fields == {"rating"}
+        assert panel.density_slider.value() == 232
+        assert panel.sidebar.isHidden()
+        assert not panel.inspector.isHidden()
+    assert files.sort_combo.currentData() == "date"
+    assert library.sort_combo.currentData() == "size"
+    assert (tmp_path / "prefs.ini").read_bytes() == stored
+
+
+def test_restore_browser_defaults_and_rollback_only_changed_fields(qtbot, tmp_path) -> None:
+    prefs = _prefs(tmp_path)
+    prefs.layout_mode = "masonry"
+    prefs.sidebar_preference = False
+    prefs.inspector_preference = True
+    prefs.density = 250
+    prefs.card_metadata = ["tags"]
+    prefs.search_history = ["clip"]
+    panel = NativeFilesPanel(preferences=prefs)
+    qtbot.addWidget(panel)
+    panel.resize(1200, 700)
+    panel.show()
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    page = FilesBrowserPreferencePage(prefs)
+    page.create_widget(parent)
+    page.load({})
+    page.restore_defaults({})
+    assert prefs.layout_mode == "masonry"
+    assert prefs.sidebar_preference is False
+    assert prefs.density == 250
+
+    page.apply(None)
+    assert prefs.layout_mode == "adaptive"
+    assert prefs.sidebar_preference is None
+    assert prefs.inspector_preference is None
+    assert prefs.density == 180
+    assert prefs.card_metadata == []
+    panel.reload_preferences()
+    assert not panel.sidebar.isHidden()
+    assert panel.inspector.isHidden()
+
+    # A different writer can update a setting between saving and rollback.
+    prefs.density = 215
+    prefs.grid_fill = True
+    page.rollback()
+    assert prefs.layout_mode == "masonry"
+    assert prefs.sidebar_preference is False
+    assert prefs.inspector_preference is True
+    assert prefs.density == 215
+    assert prefs.grid_fill is True
+    assert prefs.card_metadata == ["tags"]
+    assert prefs.search_history == ["clip"]
+
+
+@pytest.mark.parametrize(("locale", "title"), [("zh_CN", "浏览视图"), ("fr_FR", "Browser View")])
+def test_browser_preferences_fit_narrow_panel(qtbot, tmp_path, monkeypatch, locale: str, title: str) -> None:
+    monkeypatch.setattr(I18N, "_current_locale", locale)
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    page = FilesBrowserPreferencePage(_prefs(tmp_path))
+    widget = page.create_widget(parent)
+    page.load({})
+    parent.resize(532, 420)
+    widget.resize(parent.size())
+    parent.show()
+    qtbot.waitUntil(widget.isVisible)
+
+    assert widget.findChildren(QGroupBox)[0].title() == title
+    assert widget.horizontalScrollBar().maximum() == 0
+
+
+def test_reloading_unchanged_preferences_keeps_the_gallery_layout(qtbot, tmp_path, monkeypatch) -> None:
+    panel = NativeFilesPanel(preferences=_prefs(tmp_path))
+    qtbot.addWidget(panel)
+    changed = []
+    monkeypatch.setattr(panel, "_change_layout", lambda *args, **kwargs: changed.append("view"))
+    monkeypatch.setattr(panel.icon_view, "doItemsLayout", lambda: changed.append("gallery"))
+
+    panel.reload_preferences()
+
+    assert changed == []

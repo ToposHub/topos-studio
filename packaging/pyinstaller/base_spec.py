@@ -163,9 +163,7 @@ def generate_analysis(
     extra_hidden_imports = extra_hidden_imports or []
 
     # Build the list of excluded modules
-    excludes = get_exclude_modules(exclude_feature_dirs) + extra_excludes + [
-        "file_explorer", "external.file_explorer", "src.app.integrations.file_explorer",
-    ]
+    excludes = get_exclude_modules(exclude_feature_dirs) + extra_excludes
 
     # Common hidden imports that PyInstaller may miss
     hidden_imports = [
@@ -286,10 +284,10 @@ def generate_analysis(
             os.path.join(PROJECT_ROOT, "src", "shared", "node_help", "docs"),
             "src/shared/node_help/docs",
         ),
-        # Global checkbox checkmark icon used by the application stylesheet.
-        (
-            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "checkmark.svg"),
-            "src/shared/assets/icons",
+        # Shared checkbox and preference spin-box icons.
+        *(
+            (os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", name), "src/shared/assets/icons")
+            for name in ("checkmark.svg", "spin-up.svg", "spin-down.svg")
         ),
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "locations"),
@@ -298,6 +296,10 @@ def generate_analysis(
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "viewer"),
             "src/shared/assets/icons/viewer",
+        ),
+        (
+            os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "workspace"),
+            "src/shared/assets/icons/workspace",
         ),
         (
             os.path.join(PROJECT_ROOT, "src", "shared", "assets", "icons", "curves"),

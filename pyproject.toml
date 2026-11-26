@@ -9,9 +9,8 @@ description = "Professional color grading, editing, and compositing suite"
 license = "GPL-3.0-only"
 requires-python = ">=3.10"
 dependencies = [
-    # P1-DEP-01：核心依赖下限与 requirements.txt 保持一致（README 声明
-    # PyQt6 ≥ 6.10 为硬性要求——file_explorer 前端依赖 QtWebEngine 6.10
-    # 的 Chromium ≥ 122）；本文件是依赖的单一事实源。
+    # Keep the Qt/QtWebEngine versions in sync with requirements.txt.
+    # The teaching animation editor uses QtWebEngine.
     "PyQt6>=6.10.2",
     "PyQt6-Qt6>=6.10.2",
     "PyQt6-WebEngine>=6.10.0",
@@ -31,8 +30,6 @@ dependencies = [
     "onnxruntime>=1.23.0",
     "send2trash>=2.1.0",
     "flask>=3.1.0",
-    # [R4-3] 嵌入模式 file_explorer 的生产级 WSGI 后端（ARCH-8）
-    "waitress>=3.0.0",
     "psutil>=7.2.0",
     "msgpack>=1.0.0",
     "av>=10.0.0",
@@ -104,11 +101,12 @@ topos-files = "src.features.files.services.maintenance:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*", "apps*"]
-exclude = ["src.app.integrations.file_explorer*"]
 
 [tool.setuptools.package-data]
 "src.shared.assets" = [
+    "icons/checkmark.svg", "icons/spin-*.svg",
     "icons/viewer/*.svg", "icons/curves/*.svg", "icons/tracker/*.svg", "icons/warper/*.svg",
+    "icons/workspace/*.svg",
     "icons/effects/color/*.svg", "icons/effects/audio/*.svg",
 ]
 "src.features.color.core" = [

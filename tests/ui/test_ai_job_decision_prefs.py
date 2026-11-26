@@ -262,14 +262,24 @@ def test_preferences_page_does_not_publish_draft_profiles(prefs_page):
     assert emitted == []
 
 
-def test_preferences_page_exposes_capabilities_and_safe_automation_flags(prefs_page):
+@pytest.mark.parametrize(("locale", "label"), [
+    ("zh_CN", "受限自动模式"),
+    ("en_US", "Restricted automatic mode"),
+])
+def test_preferences_page_exposes_capabilities_and_safe_automation_flags(
+    prefs_page, monkeypatch, locale: str, label: str,
+) -> None:
+    from src.shared.i18n.i18n import I18N
+
+    monkeypatch.setattr(I18N, "_current_locale", locale)
+    monkeypatch.setattr(I18N, "_translations", {})
     widget = prefs_page.create_widget()
     status_list = prefs_page._widgets["capability_status"]
     assert status_list.count() >= 7
     assert prefs_page._automation_widgets["agent_auto_mode"].isChecked() is False
     prefs_page._automation_widgets["agent_auto_mode"].setChecked(True)
     prefs_page._automation_widgets["cloud_upload"].setChecked(True)
-    assert "受限自动模式" in status_list.item(status_list.count() - 3).text()
+    assert label in status_list.item(status_list.count() - 3).text()
 
 
 def test_preferences_policy_and_service_status_have_separate_tabs(prefs_page, qtbot):

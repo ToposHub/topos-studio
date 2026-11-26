@@ -301,6 +301,48 @@ def test_toolbar_panel_shortcuts_and_popups_paint_against_dark_theme(qtbot) -> N
         assert color.alpha() == 255
 
 
+def test_edit_media_pool_and_audio_mixer_are_adjacent_icon_only_shortcuts(qtbot: QtBot) -> None:
+    window = _Window(_Config())
+    qtbot.addWidget(window)
+    window.setStyleSheet(DARK_THEME)
+    area = Qt.DockWidgetArea.LeftDockWidgetArea
+    pool = window.add_panel("dock_edit_media_pool", area)
+    window.add_panel("dock_edit_effects", area).hide()
+    mixer = window.add_panel("dock_audio_mixer", area)
+    mixer.setWindowTitle(I18N.tr("panel.audio_mixer", "Audio Mixer"))
+    window.tabifyDockWidget(pool, mixer)
+    mixer.hide()
+    bar = window.create_panel_bar("Edit")
+    window.show()
+    pool_action = window.findChild(QAction, "workspace_edit_dock_edit_media_pool")
+    mixer_action = window.findChild(QAction, "shortcut_dock_audio_mixer")
+    pool_button = bar.widgetForAction(pool_action)
+    mixer_button = bar.widgetForAction(mixer_action)
+    assert bar.actions().index(mixer_action) == bar.actions().index(pool_action) + 1
+    assert pool_button.geometry().right() < mixer_button.geometry().left()
+    for action, button in ((pool_action, pool_button), (mixer_action, mixer_button)):
+        assert button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+        assert button.accessibleName() == button.toolTip() == action.text()
+        icon = button.icon().pixmap(QSize(16, 16)).toImage()
+        assert any(icon.pixelColor(x, y).alpha() > 0
+                   for x in range(icon.width()) for y in range(icon.height()))
+    assert pool_action.isChecked() and not mixer_action.isChecked()
+    qtbot.mouseClick(mixer_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: mixer_action.isChecked() and not mixer.visibleRegion().isEmpty())
+    pool.raise_()
+    qtbot.waitUntil(lambda: not mixer_action.isChecked())
+    qtbot.mouseClick(mixer_button, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: mixer_action.isChecked() and not mixer.visibleRegion().isEmpty())
+    qtbot.mouseClick(mixer_button, Qt.MouseButton.LeftButton)
+    assert mixer.isHidden() and pool_action.isChecked()
+    qtbot.mouseClick(pool_button, Qt.MouseButton.LeftButton)
+    assert pool.isHidden() and not pool_action.isChecked()
+    qtbot.mouseClick(pool_button, Qt.MouseButton.LeftButton)
+    assert pool.isVisible() and pool_action.isChecked()
+    bar.set_page("Color")
+    assert mixer_action not in bar.actions()
+
+
 def test_edit_switch_recovers_preview_space_and_restores_selected_tab(qtbot) -> None:
     config = _Config()
     window, bar = _edit_window(qtbot, config)

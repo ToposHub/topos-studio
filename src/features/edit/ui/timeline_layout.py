@@ -47,7 +47,11 @@ DEFAULT_SUBTITLE_TRACK_HEIGHT: int = 40
 MIN_VIDEO_TRACK_HEIGHT: int = 36
 MAX_VIDEO_TRACK_HEIGHT: int = 160
 MIN_AUDIO_TRACK_HEIGHT: int = 28
-MAX_AUDIO_TRACK_HEIGHT: int = 120
+# The edit canvas can display a tall audio lane at ratios up to 1:4.
+MAX_EDIT_AUDIO_TRACK_HEIGHT: int = 240
+MIXER_AUDIO_TRACK_HEIGHT_SCALE: int = 2
+MAX_MIXER_AUDIO_TRACK_HEIGHT: int = MAX_EDIT_AUDIO_TRACK_HEIGHT * MIXER_AUDIO_TRACK_HEIGHT_SCALE
+DEFAULT_TRACK_HEIGHT_RATIO: tuple[int, int] = (4, 3)
 # SUB-P1-06: subtitle lanes are resizable within a compact range so the track-
 # height presets (small/medium/large) actually take effect. The bounds stay
 # tight (24..80) because subtitles are an overlay annotation lane, not a second
@@ -502,7 +506,8 @@ class TimelineLayoutEngine:
                 # SUB-P1-06: honor the stored height (preset/drag) within the
                 # compact subtitle range instead of forcing DEFAULT always.
                 return max(MIN_SUBTITLE_TRACK_HEIGHT, min(MAX_SUBTITLE_TRACK_HEIGHT, h))
-            return max(MIN_AUDIO_TRACK_HEIGHT, min(MAX_AUDIO_TRACK_HEIGHT, h))
+            maximum = MAX_MIXER_AUDIO_TRACK_HEIGHT if self._audio_only else MAX_EDIT_AUDIO_TRACK_HEIGHT
+            return max(MIN_AUDIO_TRACK_HEIGHT, min(maximum, h))
         return track.default_height
 
     def _total_width(self) -> float:

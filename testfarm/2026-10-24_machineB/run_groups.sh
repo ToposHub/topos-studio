@@ -37,7 +37,7 @@ run G3_shared_export tests/shared tests/export
 run G4_edit_color tests/edit tests/color
 run G5_comp_render_plugins tests/composite tests/render tests/plugins
 run G6_app_rest tests/app tests/integration tests/architecture \
-  tests/feature_availability tests/file_explorer tests/project \
+  tests/feature_availability tests/project \
   tests/scripting tests/native tests/motion tests/ai tests/core \
   tests/teaching_animation tests/benchmark tests/deliver
 run G7_root tests/test_ai_gen_job.py tests/test_batch_c_quality_perf.py \

@@ -3885,6 +3885,14 @@ class ProgramViewerWidget(QWidget):
             set_metal_video_color(host.layer, *display)
         self._viewer.update()
 
+    def set_monitor_calibration_lut(self, path: str) -> bool:
+        """Keep calibrated presentation on the existing GL viewer."""
+        display = self._viewer._display_color
+        was_native = self._native_layer_is_showing()
+        display.set_calibration_lut(path)
+        self._layout_native_host()
+        return was_native and display.has_calibration
+
     def set_native_viewport_candidate(self, renderer: Optional[QObject]) -> None:
         self._native_candidate = renderer
         self._native_pending_attach = None
@@ -4014,6 +4022,7 @@ class ProgramViewerWidget(QWidget):
         viewer = self._viewer
         return bool(
             viewer is not None
+            and not getattr(getattr(viewer, "_display_color", None), "has_calibration", False)
             and viewer.isVisible()
             and viewer.parentWidget() is self._viewer_container
             and not viewer.isFullScreen()

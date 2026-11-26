@@ -196,9 +196,7 @@ def main() -> None:
         "OutputSlotPool": _find_file("src/shared/gpu/present_frame.py"),
         "EffectSpec": _find_file("src/features/shared/effects/effect_spec.py"),
         "EffectCapability": _find_file("src/features/shared/effects/effect_capability.py"),
-        "DecoderBackend": _find_file(
-            "external/file_explorer/plugins/video_pro/base_player.py"
-        ),
+        "DecoderBackend": _find_file("src/shared/playback/base_player.py"),
         "playback_should_prefer_ffmpeg": _find_file(
             "src/shared/media/macos_vt/hardware_capability.py"
         ),

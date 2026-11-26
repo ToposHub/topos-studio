@@ -1,34 +1,28 @@
-# Files 原生插件界面与旧宿主适配
+# 原生素材插件界面
 
-2026-11-17。范围为已安装扩展的呈现和现有能力调用，不包含新的插件执行系统。
-
-## 边界与数据流
+## 清单与启动
 
 ```text
-NativeFilesPanel（工具栏 / 右键 / 更多菜单）
-  → FilesPluginsController
-    → FileExplorerPluginCatalog（后台串行队列：静态声明 + 真实加载/失败状态）
-    → PluginCenterDialog / PluginLauncherDialog（不可变快照、意图信号）
-    → NativeFilesTransport（认证、仅本地 HTTP、四个已核实的 launch 端点）
-      → 旧 PluginManager 的 Flask Blueprint → GuiLauncher 信号 → Qt 主线程窗口
+FilesPanel
+  ├─ NativeFilesPanel → NativeFilesTransport → FilesFacade / 共享媒体服务
+  └─ FilesPluginsController
+       ├─ NativePluginCatalog / PluginInventory → 插件中心、启动器
+       └─ NativeToolCommandService → 原生 Qt 工具窗口
 ```
 
-- `src/features/files/plugin_contracts.py`：与宿主无关的不可变 `FilesPluginInfo`；显示期望启用状态、实际加载状态与重启要求。
-- `src/app/integrations/file_explorer/plugins.py`：静态 AST 常量/可选 config.json 清单，不执行插件、不调用运行时初始化；合并 active/failed 状态。启停以读改写保留未知配置并回读确认；插件自身 disabled 不被宿主覆盖。
-- `src/app/ui/native_files_plugins.py`：纯 Qt 呈现。搜索/功能分类/状态过滤、详情、固定、最近、快捷键编辑；显示错误的文本采用纯文本，避免解释插件提供的 HTML。
-- `src/app/ui/files_plugins_controller.py`：后台清单任务、用户级偏好、快捷键冲突和输入焦点、当前选择快照、请求互斥及反馈；不做素材扫描、SQL、解码或 GPU 工作。
-- `src/app/ui/native_files_transport.py`：`X-Auth-Token`、本地主机限制、手动重定向、超时。HTTP 200 且 `status=ok` 只表示请求被接收，不冒充工具窗口就绪或任务执行成功。
+- `src/features/files/builtin_manifests/` 保存内建工具和格式提供者的声明。`NativePluginCatalog` 校验声明并生成不可变的 `FilesPluginInfo`。内建启停状态保存在 `files-data/plugin_desired.json`。
+- `FilesPluginsController` 将内建目录、受管安装包、显式添加的开发源和本地独立应用投影到插件中心。后台任务读取清单和复核启动请求，Qt 主线程负责打开工具窗口和更新界面。
+- `PluginCenterDialog` 和 `PluginLauncherDialog` 负责搜索、分类、状态、详情、固定、最近使用和快捷键。固定、最近使用及快捷键保存在用户级 QSettings。快捷键在素材面板子树内生效，文本编辑时暂停触发。
+- `NativeFilesTransport` 通过进程内的 `FilesFacade` 和有界工作线程完成素材查询、元数据、文件事务及缩略图请求。导航代际和取消令牌阻止过期请求更新界面。
 
-## 启动与兼容
+## 工具行为
 
-`format_factory` 接收零或一个路径；多选明确拒绝，不静默丢弃。`decode_benchmark` 接收选择列表。`image_factory`、`shutdown_timer` 只打开工具窗口，不自动启动处理/系统任务。其余扩展没有通用原生启动路由，详情明确提示并提供兼容界面入口。
+启动命令冻结当前选择，在后台复核，并在主线程提交。启停和提交共用权限边界。原生窗口打开成功后才记录最近使用。支持单例的窗口通过宿主的窗口注册表聚焦。
 
-快捷键只挂在 Files 子树，编辑文本时不触发插件工具；固定、最近和快捷键仅存用户级 QSettings。最近使用只记录服务确认接收的打开请求。刷新不重新加载 Python 模块或注册 Blueprint。偏好设置的旧列表也使用同一清单，并保留未安装/未列出的 disabled id。
+`format_factory` 接收零个或一个路径。`decode_benchmark` 接收路径列表，并通过 `src/app/services/edit_benchmark_service.py` 访问当前剪辑播放管线。打开 `image_factory` 或 `shutdown_timer` 窗口后，用户在窗口中启动处理或定时任务。视频工具复用 `src/shared/playback/`。AI 素材库工具通过 `VaultClient` 查询独立的 Vault 服务。
 
-关闭宿主时先关闭 controller，丢弃后台迟到结果，再由 transport abort 在途请求；视图不拥有插件工作线程。旧插件窗口继续遵循原有关闭协议。图片工厂的工作线程改为 `_processor_thread`，避免与 `QObject.thread()` 冲突导致空闲关窗崩溃。
+独立应用使用本地应用运行时。插件中心依据清单、来源和执行能力显示可用状态及诊断。首选项中的内建工具开关使用同一个原生清单和启停状态。
 
-## 后续边界
+关闭素材宿主时，插件控制器释放工具窗口和快捷键等贡献，传输层取消在途读取并等待资源释放。图片工厂窗口关闭时取消在途批次。
 
-旧插件仍拥有宿主进程权限；当前不是热卸载或沙箱。卸载、市场安装更新、声明式 Inspector/格式 providers、完整生命周期和共享 Host API 见 [重构计划](/Users/heng/Documents/vscode/topos-studio/docs/plans/2026-11-17-files-plugin-system-rebuild-plan.md)。不能用清单刷新或启停勾选替代这些后端能力。
-
-测试和真实内建窗口验证见 [验证记录](/Users/heng/Documents/vscode/topos-studio/docs/validation/files_plugins_20261117/README.md)。
+[原生素材数据边界](../plans/files-replacement-data-boundary-20261117.md) · [插件系统重构计划](../plans/2026-11-17-files-plugin-system-rebuild-plan.md) · [历史验证记录](../validation/files_plugins_20261117/README.md)

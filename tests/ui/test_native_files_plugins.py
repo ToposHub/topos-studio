@@ -1,92 +1,95 @@
-"""Native plugin interactions against isolated settings/catalog and real HTTP I/O."""
+"""Native Files plugin UI and command tests using isolated catalog storage."""
 from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable, Iterator
 from dataclasses import replace
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from types import SimpleNamespace
-from urllib.parse import urlsplit
+from pathlib import Path
 
 import pytest
 from PyQt6.QtCore import QSettings, Qt
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
+from pytestqt.qtbot import QtBot
 
-from src.app.integrations.file_explorer.plugins import FileExplorerPluginCatalog
 from src.app.ui.files_plugins_controller import FilesPluginsController
 from src.app.ui.native_files_plugins import PluginCenterDialog, PluginLauncherDialog
 from src.app.ui.native_files_prefs import NativeFilesPreferences
 from src.app.ui.native_files_transport import NativeFilesTransport
+from src.features.files.builtin_plugins import BUILTIN_IDS, NativePluginCatalog
+from src.shared.plugins.discovery import DesiredStateStore, PluginSourceConfig, current_host_facts
+from src.shared.plugins.installer import LocalPackageInstaller
 
 
 @pytest.fixture
-def catalog(tmp_path):
-    root = tmp_path / "plugins"
-    root.mkdir()
-    ids = ("format_factory", "image_factory", "shutdown_timer", "decode_benchmark", "code_editor")
-    for pid in ids:
-        folder = root / pid
-        folder.mkdir()
-        (folder / "__init__.py").write_text(
-            f"NAME = {pid!r}\nDESCRIPTION = '测试素材工具'\nAUTHOR = 'Topos'\n", encoding="utf-8")
-    config = {"disabled_plugins": [], "unknown": {"keep": True}}
-    manager = SimpleNamespace(plugins=[{"name": pid} for pid in ids], failed_plugins=[])
-    def save(value):
-        config.clear()
-        config.update(value)
-    return FileExplorerPluginCatalog(root, manager, lambda: dict(config), save)
+def desired_store(tmp_path: Path) -> DesiredStateStore:
+    return DesiredStateStore(tmp_path / "desired.json")
 
 
 @pytest.fixture
-def endpoint():
-    observed = []
-    response = {"status": 200, "payload": {"status": "ok"}}
-    class Handler(BaseHTTPRequestHandler):
-        def do_POST(self):
-            length = int(self.headers.get("Content-Length", "0"))
-            observed.append((urlsplit(self.path).path, self.headers.get("X-Auth-Token"), json.loads(self.rfile.read(length))))
-            self.send_response(response["status"])
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(response["payload"]).encode())
-        def log_message(self, *args):
-            pass
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{server.server_port}", observed, response
-    server.shutdown()
-    server.server_close()
-    thread.join(timeout=2)
-
-
-def _native_test_openers(host):
-    """Exercise the real native command boundary without starting media tools."""
-    host._test_opened = []
-    host._native_opener = lambda key: lambda paths: host._test_opened.append((key, tuple(paths)))
-    return host
+def catalog(desired_store: DesiredStateStore) -> NativePluginCatalog:
+    return NativePluginCatalog(desired_store=desired_store)
 
 
 @pytest.fixture
-def controller(qtbot, catalog, tmp_path, endpoint):
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "plugins.ini"), QSettings.Format.IniFormat))
-    prefs.plugin_shortcuts = {"image_factory": "Ctrl+Alt+I"}
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    editor = QLineEdit()
-    layout.addWidget(editor)
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "private-test-token", panel)
+def make_host(
+    qtbot: QtBot, catalog: NativePluginCatalog, desired_store: DesiredStateStore, tmp_path: Path,
+) -> Iterator[Callable[..., tuple[FilesPluginsController, QLineEdit]]]:
+    hosts: list[FilesPluginsController] = []
+
+    def create(
+        *,
+        selected_paths: Callable[[], list[str]] | None = None,
+        shortcuts: dict[str, str] | None = None,
+        pins: list[str] | None = None,
+        sources: PluginSourceConfig | None = None,
+        extra_count: int = 0,
+    ) -> tuple[FilesPluginsController, QLineEdit]:
+        prefs = NativeFilesPreferences(QSettings(
+            str(tmp_path / "plugins.ini"), QSettings.Format.IniFormat))
+        prefs.plugin_shortcuts = shortcuts or {}
+        prefs.plugin_pins = pins or []
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        editor = QLineEdit(panel)
+        panel.meta_status = QLabel(panel)
+        layout.addWidget(editor)
+        layout.addWidget(panel.meta_status)
+        qtbot.addWidget(panel)
+        transport = NativeFilesTransport(lambda: "", None, panel)
+        sources = sources or PluginSourceConfig.for_host(
+            builtin_ids=BUILTIN_IDS, install_root=tmp_path / "managed")
+        host = FilesPluginsController(
+            catalog, transport, prefs, panel, selected_paths or list, lambda: None, panel,
+            sources_factory=lambda: sources, desired_store=desired_store,
+        )
+        hosts.append(host)
+        qtbot.waitUntil(lambda: len(host._infos) == len(BUILTIN_IDS) + extra_count, timeout=8000)
+        return host, editor
+
+    yield create
+    for host in hosts:
+        host.shutdown()
+        host._pool.waitForDone(3000)
+        host.transport.shutdown()
+
+
+def _native_test_openers(host: FilesPluginsController) -> list[tuple[str, tuple[str, ...]]]:
+    """Exercise native command dispatch without starting a plugin window."""
+    opened: list[tuple[str, tuple[str, ...]]] = []
+    host._native_opener = lambda key: lambda paths: opened.append((key, tuple(paths)))
+    return opened
+
+
+@pytest.fixture
+def controller(make_host):
     selected = ["/media/A #100% 中文.mov"]
-    legacy = []
-    host = FilesPluginsController(catalog, transport, prefs, panel, lambda: list(selected), lambda: legacy.append(True), panel)
-    qtbot.waitUntil(lambda: len(host._infos) == 5)
-    yield host, selected, legacy, editor
-    host.shutdown()
-    host._pool.waitForDone(3000)
-    transport.shutdown()
+    host, editor = make_host(
+        selected_paths=lambda: list(selected),
+        shortcuts={"files.image_factory": "Ctrl+Alt+I"},
+    )
+    return host, selected, editor
 
 
 def test_center_keeps_disabled_failed_plaintext_and_filters(qtbot, catalog):
@@ -96,7 +99,7 @@ def test_center_keeps_disabled_failed_plaintext_and_filters(qtbot, catalog):
     center = PluginCenterDialog()
     qtbot.addWidget(center)
     center.set_snapshot(rows, [], [], {}, set())
-    assert center.items.count() == 5
+    assert center.items.count() == len(BUILTIN_IDS)
     assert center.title.text() == "<b>未执行的文本</b>"
     assert center.title.textFormat() == Qt.TextFormat.PlainText
     center.categories.setCurrentRow(6)  # failed
@@ -123,16 +126,18 @@ def test_center_function_category_pin_and_unavailable_tools(qtbot, catalog):
             break
     assert center.items.count() == 1
     assert center._selected == "format_factory"
-    center.select_plugin("code_editor")
+    center.select_plugin("topos_image")
+    assert center._selected == "topos_image"
     assert not center.launch.isEnabled()
-    assert center.legacy.isHidden()
+    assert center.reason.text()
 
 
 def test_launcher_only_available_tools_pin_order_search_keyboard(qtbot, catalog):
     launcher = PluginLauncherDialog()
     qtbot.addWidget(launcher)
-    launcher.set_snapshot(catalog.snapshot(), ["shutdown_timer"], ["image_factory"], {}, set())
-    assert launcher.items.count() == 4
+    rows = catalog.snapshot()
+    launcher.set_snapshot(rows, ["shutdown_timer"], ["image_factory"], {}, set())
+    assert launcher.items.count() == sum(info.can_launch for info in rows) == len(BUILTIN_IDS) - 2
     assert launcher.items.item(0).data(Qt.ItemDataRole.UserRole) == "shutdown_timer"
     assert launcher.items.item(1).data(Qt.ItemDataRole.UserRole) == "image_factory"
     launcher.show()
@@ -141,7 +146,7 @@ def test_launcher_only_available_tools_pin_order_search_keyboard(qtbot, catalog)
     with qtbot.waitSignal(launcher.launch_requested) as signal:
         qtbot.keyClick(launcher.search, Qt.Key.Key_Return)
     assert signal.args == ["image_factory"]
-    launcher.search.setText("格式工厂")
+    launcher.search.setText("format_factory")
     assert launcher.items.count() == 1
     launcher.search.setText("absent")
     assert launcher.items.count() == 0
@@ -149,7 +154,7 @@ def test_launcher_only_available_tools_pin_order_search_keyboard(qtbot, catalog)
 
 
 def test_initial_shortcuts_restore_without_opening_center_and_ignore_editor(controller):
-    host, _, _, editor = controller
+    host, _, editor = controller
     assert len(host._actions) == 1
     assert host._actions[0].shortcut().toString() == "Ctrl+Alt+I"
     host._focus_changed(None, editor)
@@ -159,125 +164,105 @@ def test_initial_shortcuts_restore_without_opening_center_and_ignore_editor(cont
 
 
 def test_shortcut_conflicts_persistence_and_clear(controller):
-    host, _, _, _ = controller
-    host._set_shortcut("format_factory", "Ctrl+Alt+I")
+    host, _, _ = controller
+    plugin_id = "files.format_factory"
+    host._set_shortcut(plugin_id, "Ctrl+Alt+I")
     assert "占用" in host.center.notice.text()
-    assert "format_factory" not in host.preferences.plugin_shortcuts
-    host._set_shortcut("format_factory", "Ctrl+C")
-    assert "format_factory" not in host.preferences.plugin_shortcuts
-    host._set_shortcut("format_factory", "P")
+    assert plugin_id not in host.preferences.plugin_shortcuts
+    host._set_shortcut(plugin_id, "Ctrl+C")
+    assert plugin_id not in host.preferences.plugin_shortcuts
+    host._set_shortcut(plugin_id, "P")
     assert "单组" in host.center.notice.text()
-    host._set_shortcut("format_factory", "Ctrl+Alt+F")
-    assert host.preferences.plugin_shortcuts["format_factory"] == "Ctrl+Alt+F"
-    host._set_shortcut("format_factory", "")
-    assert "format_factory" not in host.preferences.plugin_shortcuts
+    host._set_shortcut(plugin_id, "Ctrl+Alt+F")
+    assert host.preferences.plugin_shortcuts[plugin_id] == "Ctrl+Alt+F"
+    host._set_shortcut(plugin_id, "")
+    assert plugin_id not in host.preferences.plugin_shortcuts
 
 
-def test_disable_visible_persistent_and_no_runtime_reload(controller, qtbot):
-    host, _, _, _ = controller
-    host.center.select_plugin("image_factory")
+def test_disable_builtin_is_persistent_and_takes_effect_immediately(controller, desired_store, qtbot):
+    host, _, _ = controller
+    plugin_id = "files.image_factory"
+    host.center.select_plugin(plugin_id)
     host.center.enabled.click()
     assert host._writing
     host._project()
     assert not host.center.enabled.isEnabled()
     qtbot.waitUntil(lambda: not host._writing)
-    row = next(info for info in host._infos if info.plugin_id == "image_factory")
-    assert not row.desired_enabled and row.runtime_loaded and row.needs_restart
+    row = next(info for info in host._infos if info.plugin_id == plugin_id)
+    assert not row.desired_enabled and not row.runtime_loaded and not row.needs_restart
     assert not row.can_launch
-    assert host.center.items.count() == 5
-    assert host.catalog._config()["unknown"] == {"keep": True}
-    assert "重启" in host.center.notice.text()
+    assert host.center.items.count() == len(BUILTIN_IDS)
+    assert desired_store.load()[plugin_id] is False
+    assert "生效" in host.center.notice.text()
 
 
-def test_launch_auth_selection_snapshot_duplicate_suppression_and_recent(controller, endpoint, qtbot):
-    host, selected, _, _ = controller
-    _native_test_openers(host)
-    host.launch("decode_benchmark")
-    host.launch("decode_benchmark")
+def test_launch_freezes_selection_suppresses_duplicates_and_records_recent(controller, qtbot):
+    host, selected, _ = controller
+    opened = _native_test_openers(host)
+    plugin_id = "files.decode_benchmark"
+    host.launch(plugin_id)
+    host.launch(plugin_id)
     selected[:] = ["/other.mov"]
     qtbot.waitUntil(lambda: bool(host.preferences.plugin_recent))
-    assert endpoint[1] == []
-    assert host._test_opened == [("decode_benchmark", ("/media/A #100% 中文.mov",))]
-    assert host.preferences.plugin_recent == ["decode_benchmark"]
+    assert opened == [("decode_benchmark", ("/media/A #100% 中文.mov",))]
+    assert host.preferences.plugin_recent == [plugin_id]
     assert "已打开" in host.center.notice.text()
 
 
-def test_multiselection_is_rejected_without_losing_files(controller, endpoint, qtbot):
-    host, selected, _, _ = controller
-    _native_test_openers(host)
+def test_native_launch_preserves_multiselection(controller, qtbot):
+    host, selected, _ = controller
+    opened = _native_test_openers(host)
     selected.append("/second.mov")
-    host.launch("decode_benchmark")
-    qtbot.waitUntil(lambda: bool(host._test_opened), timeout=8000)
-    assert endpoint[1] == []
-    assert host._test_opened[0][1] == ("/media/A #100% 中文.mov", "/second.mov")
+    host.launch("files.decode_benchmark")
+    qtbot.waitUntil(lambda: bool(opened), timeout=8000)
+    assert opened[0][1] == ("/media/A #100% 中文.mov", "/second.mov")
 
 
 @pytest.mark.parametrize("reason", ["取消", "服务关闭", "权限拒绝", "源文件丢失"])
-def test_native_open_failure_never_records_usage(controller, endpoint, qtbot, reason):
-    host, _, _, _ = controller
+def test_native_open_failure_never_records_usage(controller, qtbot, reason):
+    host, _, _ = controller
+
     def refuse(paths):
         raise ValueError(reason)
+
     host._native_opener = lambda key: refuse
-    host.launch("decode_benchmark")
+    host.launch("files.decode_benchmark")
     qtbot.waitUntil(lambda: not host._busy)
     assert host.preferences.plugin_recent == []
-    assert endpoint[1] == []
     assert reason in host.center.notice.text()
 
 
-def test_pin_roundtrip_and_legacy_navigation(controller):
-    host, _, legacy, _ = controller
-    host._pin("image_factory")
-    assert host.preferences.plugin_pins == ["image_factory"]
-    host._pin("image_factory")
+def test_pin_roundtrip(controller):
+    host, _, _ = controller
+    host._pin("files.image_factory")
+    assert host.preferences.plugin_pins == ["files.image_factory"]
+    host._pin("files.image_factory")
     assert host.preferences.plugin_pins == []
-    host._open_legacy()
-    assert legacy == [True]
-
-
-def test_transport_never_consults_the_retired_http_host(qtbot):
-    def retired_url():
-        raise AssertionError("旧 Files 服务不应被访问")
-
-    transport = NativeFilesTransport(retired_url, None)
-    results = []
-    transport.plugin_launch_finished.connect(lambda *args: results.append(args))
-    transport.launch_plugin("image_factory", "/api/plugin/image_factory/launch", {})
-    transport.launch_plugin("code_editor", "/api/plugin/code_editor/launch", {})
-    assert len(results) == 2 and all(not row[1] for row in results)
-    transport.shutdown()
 
 
 def test_shutdown_discards_late_launch_completion(controller):
-    host, _, _, _ = controller
+    host, _, _ = controller
     host.shutdown()
     host._launch_finished("image_factory", True, "late")
     assert host.preferences.plugin_recent == []
 
 
-def test_rejected_dispatch_clears_busy_without_waiting_for_network_ack(controller, endpoint, qtbot):
+def test_rejected_dispatch_clears_native_busy_state(controller, qtbot):
     from src.shared.plugins.services import rejected
-    host, _, _, _ = controller
+
+    host, _, _ = controller
     service = host._native_commands["decode_benchmark"]
-    service.dispatch = lambda prepared, opener: rejected(prepared.command_id, error_code="INVOCATION_CANCELLED", message="调用已取消")
-    host.launch("decode_benchmark")
+    service.dispatch = lambda prepared, opener: rejected(
+        prepared.command_id, error_code="INVOCATION_CANCELLED", message="调用已取消")
+    host.launch("files.decode_benchmark")
     qtbot.waitUntil(lambda: not host._busy)
     assert host.preferences.plugin_recent == []
-    assert endpoint[1] == []
     assert host.center.notice.text() == "调用已取消"
-
-
-def test_retired_http_launch_never_creates_network_requests(qtbot):
-    from tests.ui.test_files_session_regressions import _FakeNetwork
-    transport = NativeFilesTransport(lambda: "http://127.0.0.1:8000", "token")
-    transport._network = _FakeNetwork()
-    assert not transport.launch_plugin("image_factory", "/api/plugin/image_factory/launch", {})
-    assert transport._network.pending == []
-    transport.shutdown()
 
 
 def test_native_panel_plugin_toolbar_and_context_actions(qtbot):
     from src.app.ui.native_files_panel import NativeFilesPanel
+
     panel = NativeFilesPanel()
     qtbot.addWidget(panel)
     with qtbot.waitSignal(panel.plugins_requested):
@@ -287,280 +272,112 @@ def test_native_panel_plugin_toolbar_and_context_actions(qtbot):
     panel.shutdown()
 
 
-# ---------------------------------------------------------------------------
-# F1：单一 Inventory 三源聚合进入真实控制器/中心 UI
-# ---------------------------------------------------------------------------
-
 @pytest.fixture
 def f1_sources(tmp_path):
-    """受管安装根装一个新插件 + 一个开发源目录，与 legacy 目录并存。"""
-    import json as _json
-    from src.shared.plugins.discovery import PluginSourceConfig
-    from src.shared.plugins.installer import LocalPackageInstaller
-
-    host = dict(host_api=1, topos_version="3.0.0", platform="darwin", arch="x86_64")
+    """Discover installed and development plugins alongside packaged built-ins."""
     package = tmp_path / "pkg"
     package.mkdir()
-    (package / "topos.plugin.json").write_text(_json.dumps({
+    (package / "topos.plugin.json").write_text(json.dumps({
         "plugin_id": "files.installed_tool", "display_name": "已安装工具",
         "version": "1.2.0",
         "capabilities": [{"capability_id": "launch", "kind": "command"}]}),
         encoding="utf-8")
-    LocalPackageInstaller(tmp_path / "managed", host_facts=host).install(package)
+    LocalPackageInstaller(tmp_path / "managed", host_facts=current_host_facts()).install(package)
     dev = tmp_path / "devsrc"
     (dev / "files.dev_tool").mkdir(parents=True)
-    (dev / "files.dev_tool" / "topos.plugin.json").write_text(_json.dumps({
+    (dev / "files.dev_tool" / "topos.plugin.json").write_text(json.dumps({
         "plugin_id": "files.dev_tool", "display_name": "开发中工具",
         "version": "0.1.0",
         "capabilities": [{"capability_id": "launch", "kind": "command"}]}),
         encoding="utf-8")
     return PluginSourceConfig.for_host(
-        builtin_ids={"format_factory", "image_factory", "shutdown_timer",
-                     "decode_benchmark", "code_editor"},
-        install_root=tmp_path / "managed", dev_roots=[dev])
+        builtin_ids=BUILTIN_IDS, install_root=tmp_path / "managed", dev_roots=[dev])
 
 
-def test_controller_merges_three_sources_into_center(qtbot, catalog, tmp_path,
-                                                     endpoint, f1_sources):
-    """三源聚合：legacy 行带来源/状态增强，仅存在于 inventory 的安装/
-    开发源以占位行出现（不可启动、原因如实）。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f1.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel,
-                                  sources_factory=lambda: f1_sources)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)  # 5 legacy + 安装 + 开发
-        by_id = {info.plugin_id: info for info in host._infos}
-        # builtin 行：来源/安装事实直达 UI 数据；[F2] 合并行携带命名空间新 id
-        builtin = by_id["files.format_factory"]
-        assert builtin.source == "builtin" and builtin.install_state == "installed"
-        assert builtin.command_key == "format_factory"   # 命令键保留短 id
-        # 仅存在于 inventory 的安装源：占位行，不可启动且原因如实
-        installed = by_id["files.installed_tool"]
-        assert installed.source == "installed"
-        assert installed.version == "1.2.0"
-        assert not installed.can_launch
-        assert "尚未接入" in installed.launch_unavailable_reason
-        assert not installed.desired_enabled          # 第三方默认停用
-        # 开发源：未验证 + 默认停用
-        dev = by_id["files.dev_tool"]
-        assert dev.source == "local_dev" and dev.install_state == "discovered"
-        assert not dev.desired_enabled
-        # 中心 UI 渲染来源行
-        host.center.show()
-        host.center.select_plugin("files.dev_tool")
-        assert "开发源" in host.center.origin.text()
-        assert "未验证" in host.center.origin.text()
-        host.center.select_plugin("files.format_factory")
-        assert "内建" in host.center.origin.text()
-    finally:
-        host.shutdown()
+def test_controller_merges_three_sources_into_center(make_host, f1_sources):
+    host, _ = make_host(sources=f1_sources, extra_count=2)
+    by_id = {info.plugin_id: info for info in host._infos}
+    builtin = by_id["files.format_factory"]
+    assert builtin.source == "builtin" and builtin.install_state == "installed"
+    assert builtin.command_key == "format_factory"
+    installed = by_id["files.installed_tool"]
+    assert installed.source == "installed"
+    assert installed.version == "1.2.0"
+    assert not installed.can_launch
+    assert "尚未接入" in installed.launch_unavailable_reason
+    assert not installed.desired_enabled
+    dev = by_id["files.dev_tool"]
+    assert dev.source == "local_dev" and dev.install_state == "discovered"
+    assert not dev.desired_enabled
+    host.center.show()
+    host.center.select_plugin("files.dev_tool")
+    assert "开发源" in host.center.origin.text()
+    assert "未验证" in host.center.origin.text()
+    host.center.select_plugin("files.format_factory")
+    assert "内建" in host.center.origin.text()
 
 
-def test_controller_duplicate_identity_shows_diagnostic(qtbot, catalog, tmp_path,
-                                                        endpoint, f1_sources):
-    """同一 plugin_id 出现于 builtin 目录与安装根：诊断进入中心详情。"""
-    import json as _json
-    from dataclasses import replace as _replace
-    from src.shared.plugins.discovery import PluginSourceConfig
-    from src.shared.plugins.installer import LocalPackageInstaller
-
+def test_controller_duplicate_identity_shows_diagnostic(make_host, tmp_path, f1_sources):
     package = tmp_path / "dupe-pkg"
     package.mkdir()
-    (package / "topos.plugin.json").write_text(_json.dumps({
+    (package / "topos.plugin.json").write_text(json.dumps({
         "plugin_id": "files.format_factory", "display_name": "撞名安装包",
         "version": "9.9.9",
         "capabilities": [{"capability_id": "launch", "kind": "command"}]}),
         encoding="utf-8")
-    LocalPackageInstaller(f1_sources.install_root, host_facts=dict(
-        host_api=1, topos_version="3.0.0", platform="darwin",
-        arch="x86_64")).install(package)
-    sources = _replace(f1_sources)   # 同一安装根：现在有撞名包
-
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "dupe.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel,
-                                  sources_factory=lambda: sources)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) >= 6, timeout=8000)
-        info = next(item for item in host._infos
-                    if item.plugin_id == "files.format_factory")
-        # builtin 优先保留；重复身份诊断并入该行（中心详情可见/可复制）
-        assert info.source == "builtin"
-        assert any("PLUGIN_ID_DUPLICATE" in note for note in info.diagnostics)
-    finally:
-        host.shutdown()
+    LocalPackageInstaller(f1_sources.install_root, host_facts=current_host_facts()).install(package)
+    host, _ = make_host(sources=f1_sources, extra_count=2)
+    info = next(item for item in host._infos if item.plugin_id == "files.format_factory")
+    assert info.source == "builtin"
+    assert any("PLUGIN_ID_DUPLICATE" in note for note in info.diagnostics)
 
 
-# ---------------------------------------------------------------------------
-# F2：新 id/状态模型——固定/最近/快捷键/启停偏好 + 命令读同一快照
-# ---------------------------------------------------------------------------
-
-def test_f2_launch_keys_recents_on_new_id_and_wire_uses_command_key(
-        qtbot, catalog, tmp_path, endpoint, f1_sources):
-    """启动：最近使用按命名空间新 id 记账；线上仍是命令键（短 id）。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f2a.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: ["/media/a.mov"], lambda: None, panel,
-                                  sources_factory=lambda: f1_sources)
-    _native_test_openers(host)   # [G4] 四 builtin 已全原生——显式验 legacy 通道
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
-        host.launch("files.decode_benchmark")
-        qtbot.waitUntil(lambda: bool(host._test_opened), timeout=8000)
-        assert host._test_opened == [("decode_benchmark", ("/media/a.mov",))]
-        assert endpoint[1] == []
-        qtbot.waitUntil(lambda: bool(prefs.plugin_recent), timeout=8000)
-        # 偏好：最近使用按新 id 建档
-        assert prefs.plugin_recent[0] == "files.decode_benchmark"
-        qtbot.waitUntil(lambda: "files.decode_benchmark" not in host._busy, timeout=8000)
-    finally:
-        host.shutdown()
+def test_inventory_only_enable_persists_desired(make_host, desired_store, f1_sources, qtbot):
+    host, _ = make_host(sources=f1_sources, extra_count=2)
+    plugin_id = "files.installed_tool"
+    row = next(info for info in host._infos if info.plugin_id == plugin_id)
+    assert not row.desired_enabled
+    host._set_enabled(plugin_id, True)
+    assert desired_store.load()[plugin_id] is True
+    qtbot.waitUntil(lambda: next(
+        info for info in host._infos if info.plugin_id == plugin_id).desired_enabled,
+        timeout=8000)
+    assert not next(info for info in host._infos if info.plugin_id == plugin_id).can_launch
 
 
-def test_f2_inventory_only_enable_persists_desired(
-        qtbot, catalog, tmp_path, endpoint, f1_sources):
-    """新模型插件（无命令键）启停：desired 持久化到 store 并反映到行。"""
-    from src.shared.plugins.discovery import DesiredStateStore
-
-    store = DesiredStateStore(tmp_path / "desired.json")
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f2b.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel,
-                                  sources_factory=lambda: f1_sources,
-                                  desired_store=store)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
-        info = next(item for item in host._infos
-                    if item.plugin_id == "files.installed_tool")
-        assert info.desired_enabled is False
-        host._set_enabled("files.installed_tool", True)
-        qtbot.waitUntil(lambda: store.load().get("files.installed_tool") is True,
-                        timeout=8000)
-        qtbot.waitUntil(lambda: next(
-            item for item in host._infos
-            if item.plugin_id == "files.installed_tool").desired_enabled,
-            timeout=8000)
-        # 重启语义：新 store 实例读回同一偏好
-        assert store.load()["files.installed_tool"] is True
-        # legacy 目录插件的启停不进 store（仍走旧 catalog 配置）
-        host._set_enabled("files.format_factory", False)
-        qtbot.wait(300)
-        assert "files.format_factory" not in store.load()
-    finally:
-        host.shutdown()
+def test_inventory_does_not_match_old_short_id_preferences(make_host, f1_sources):
+    host, _ = make_host(sources=f1_sources, extra_count=2, pins=["format_factory"])
+    host.center.show()
+    host.center.select_plugin("files.format_factory")
+    assert "固定到启动器" in host.center.pin.text()
 
 
-def test_f2_old_short_id_preferences_are_not_migrated(
-        qtbot, catalog, tmp_path, endpoint, f1_sources):
-    """旧短 id 偏好自然失效：不迁移、不别名——固定列表无匹配行即不显示。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f2c.ini"), QSettings.Format.IniFormat))
-    prefs.plugin_pins = ["format_factory"]          # 旧口径的固定项
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel,
-                                  sources_factory=lambda: f1_sources)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 7, timeout=8000)
-        host.center.show()
-        host.center.select_plugin("files.format_factory")
-        # 旧固定项不映射到新 id：固定按钮仍是"固定"（未固定状态）
-        assert "固定到启动器" in host.center.pin.text()
-    finally:
-        host.shutdown()
-
-
-def test_f2_desired_state_store_roundtrip(tmp_path):
-    from src.shared.plugins.discovery import DesiredStateStore
-
-    store = DesiredStateStore(tmp_path / "nested" / "desired.json")
+def test_desired_state_store_roundtrip(tmp_path):
+    state_file = tmp_path / "nested" / "desired.json"
+    store = DesiredStateStore(state_file)
     assert store.load() == {}
     store.save({"files.a": True, "files.b": False})
-    assert DesiredStateStore(tmp_path / "nested" / "desired.json").load() == {
-        "files.a": True, "files.b": False}
-    store.save({})                                   # 清空即空档
+    assert DesiredStateStore(state_file).load() == {"files.a": True, "files.b": False}
+    store.save({})
     assert store.load() == {}
 
 
-def test_f5_shortcuts_are_owned_contributions(qtbot, catalog, tmp_path, endpoint):
-    """[F5] 快捷键经宿主会话持有所有权：替换释放旧句柄、停用整组注销。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f5.ini"), QSettings.Format.IniFormat))
-    prefs.plugin_shortcuts = {"format_factory": "Ctrl+Alt+F"}
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        qtbot.waitUntil(lambda: host.host_session.shortcut_count("format_factory") == 1,
-                        timeout=8000)
-        # 停用（restart-bound）：贡献整组释放，快捷键注销
-        host._set_enabled("format_factory", False)
-        qtbot.waitUntil(lambda: host.host_session.shortcut_count("format_factory") == 0,
-                        timeout=8000)
-        from PyQt6.QtGui import QAction as _QAction
-        actions = [a for a in panel.findChildren(_QAction)
-                   if a.shortcut().toString() == "Ctrl+Alt+F"]
-        assert not actions or not actions[0].isEnabled()
-    finally:
-        host.shutdown()
+def test_shortcut_contribution_is_released_on_disable(make_host, qtbot):
+    plugin_id = "files.format_factory"
+    host, _ = make_host(shortcuts={plugin_id: "Ctrl+Alt+F"})
+    assert host.host_session.shortcut_count(plugin_id) == 1
+    host._set_enabled(plugin_id, False)
+    qtbot.waitUntil(lambda: not host._writing, timeout=8000)
+    assert host.host_session.shortcut_count(plugin_id) == 0
+    actions = [action for action in host.panel.findChildren(QAction)
+               if action.shortcut().toString() == "Ctrl+Alt+F"]
+    assert not actions or not actions[0].isEnabled()
 
 
-def test_f6_launch_is_owned_job_and_retire_waits_for_confirmation(
-        qtbot, catalog, tmp_path, endpoint):
-    """[F6] 启动=归属插件的任务：在途时停用进入 cancel_requested，
-    应答到达确认终止后停用才完成（贡献保留到确认之后）。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f6.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: ["/m/a.mov"], lambda: None, panel)
-    _native_test_openers(host)   # [G4] 显式验证仍存在的 legacy 通道生命周期
-
+def test_launch_is_owned_job_and_retire_waits_for_confirmation(make_host, qtbot):
+    host, _ = make_host(selected_paths=lambda: ["/m/a.mov"])
+    opened = _native_test_openers(host)
+    plugin_id = "files.decode_benchmark"
     started, release = threading.Event(), threading.Event()
     command = host._native_commands["decode_benchmark"]
     real_revalidate = command.revalidate
@@ -572,233 +389,108 @@ def test_f6_launch_is_owned_job_and_retire_waits_for_confirmation(
 
     command.revalidate = held_revalidate
     try:
-        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        host.launch("decode_benchmark")
+        host.launch(plugin_id)
         qtbot.waitUntil(started.is_set)
         jobs = host.host_session.lifecycle.jobs
-        job_id = host._launch_jobs["files.decode_benchmark"]
-        assert jobs.owner(job_id) == "files.decode_benchmark"
-        report = host.host_session.retire_plugin("files.decode_benchmark")
+        job_id = host._launch_jobs[plugin_id]
+        assert jobs.owner(job_id) == plugin_id
+        report = host.host_session.retire_plugin(plugin_id)
         assert not report["fully_stopped"]
         assert job_id in report["jobs_still_terminating"]
         assert jobs.state(job_id) == "cancel_requested"
-        host.launch("decode_benchmark")
+        host.launch(plugin_id)
         release.set()
         qtbot.waitUntil(lambda: jobs.state(job_id) == "cancelled")
-        assert host._test_opened == []
-        assert host.host_session.retire_plugin("files.decode_benchmark")["fully_stopped"]
+        assert opened == []
+        assert host.host_session.retire_plugin(plugin_id)["fully_stopped"]
     finally:
         release.set()
-        host.shutdown()
 
 
-def test_f6_retire_async_advances_without_gui_sleep(qtbot, catalog, tmp_path, endpoint):
-    """[F6] 异步退役：QTimer 轮询推进到 fully_stopped（GUI 不 sleep）。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "f6b.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        host.host_session.lifecycle.activate(
-            "files.format_factory",
-            lambda contributions: contributions.register(
-                "menu", "m", lambda: None))
-        host._retire_plugin_async("files.format_factory")
-        qtbot.waitUntil(
-            lambda: host.host_session.lifecycle.is_stopped("files.format_factory"),
-            timeout=5000)
-        polls = host._retire_polls.get("files.format_factory", 0)
-        assert polls <= 50
-    finally:
-        host.shutdown()
+def test_retire_async_advances_without_gui_sleep(make_host, qtbot):
+    host, _ = make_host()
+    plugin_id = "files.format_factory"
+    host.host_session.lifecycle.activate(
+        plugin_id, lambda contributions: contributions.register("menu", "m", lambda: None))
+    host._retire_plugin_async(plugin_id)
+    qtbot.waitUntil(lambda: host.host_session.lifecycle.is_stopped(plugin_id),
+                    timeout=5000)
+    assert host._retire_polls.get(plugin_id, 0) <= 50
 
 
-def test_g2_image_outputs_return_via_same_index_entry(
-        qtbot, catalog, tmp_path, endpoint):
-    """[G2] 生成结果同一索引入口回库：refresh + start_scan（不开第二套索引）。"""
+def test_image_outputs_return_via_same_index_entry(make_host, monkeypatch):
+    host, _ = make_host()
     rescans = []
-    transport_backup = None
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g2.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel)
-    transport.start_scan = lambda: rescans.append(True)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        host._image_outputs_to_library(
-            [{"source": "/m/a.png", "output": "/m/a.jpg"}])
-        assert rescans == [True]
-        assert "回库" in panel.meta_status.text()
-    finally:
-        host.shutdown()
+    monkeypatch.setattr(host.transport, "start_scan", lambda: rescans.append(True))
+    host._image_outputs_to_library([{"source": "/m/a.png", "output": "/m/a.jpg"}])
+    assert rescans == [True]
+    assert "回库" in host.panel.meta_status.text()
 
 
-def test_g3_shutdown_timer_native_singleton_zero_http(
-        qtbot, catalog, tmp_path, endpoint):
-    """[G3] 原生接管：启动只开窗口；singleton 聚焦；零 HTTP；关闭销账。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g3.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        host.launch("shutdown_timer")   # legacy 投影模式信息为短 id
-        qtbot.waitUntil(lambda: host._shutdown_timer_window is not None,
-                        timeout=8000)
-        qtbot.waitUntil(lambda: "files.shutdown_timer" not in host._busy,
-                        timeout=8000)   # busy 键为命名空间 id
-        window = host._shutdown_timer_window
-        assert window.isVisible()
-        assert window._service.state == "idle"     # 启动只开窗口
-        host.launch("shutdown_timer")              # singleton：同一实例
-        qtbot.waitUntil(lambda: "files.shutdown_timer" not in host._busy,
-                        timeout=8000)
-        assert host._shutdown_timer_window is window
-        assert endpoint[1] == []                   # 原生接管：零 HTTP
-        host.host_session.windows.close_all("files.shutdown_timer")
-        assert host.host_session.windows.windows_for(
-            "files.shutdown_timer") == ()
-        assert window._service.state == "idle"     # 关闭即取消
-    finally:
-        host.shutdown()
+def test_shutdown_timer_native_singleton(make_host, qtbot):
+    host, _ = make_host()
+    plugin_id = "files.shutdown_timer"
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: plugin_id not in host._busy, timeout=8000)
+    window = host._shutdown_timer_window
+    assert window.isVisible()
+    assert window._service.state == "idle"
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: plugin_id not in host._busy, timeout=8000)
+    assert host._shutdown_timer_window is window
+    host.host_session.windows.close_all(plugin_id)
+    assert host.host_session.windows.windows_for(plugin_id) == ()
+    assert window._service.state == "idle"
 
 
-def test_g4_decode_benchmark_native_zero_http_singleton(
-        qtbot, catalog, tmp_path, endpoint):
-    """[G4] 原生接管：直接接既有跑分实现（F5 singleton；零 HTTP）。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g4.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        host.launch("decode_benchmark")
-        qtbot.waitUntil(lambda: host._decode_benchmark_window is not None,
-                        timeout=10000)
-        window = host._decode_benchmark_window
-        assert window.isVisible()
-        qtbot.waitUntil(lambda: "files.decode_benchmark" not in host._busy,
-                        timeout=8000)
-        host.launch("decode_benchmark")          # singleton：同一实例
-        qtbot.waitUntil(lambda: "files.decode_benchmark" not in host._busy,
-                        timeout=8000)
-        assert host._decode_benchmark_window is window
-        assert endpoint[1] == []                 # 零 HTTP
-        host.host_session.windows.close_all("files.decode_benchmark")
-        assert host.host_session.windows.windows_for(
-            "files.decode_benchmark") == ()
-        host._decode_benchmark_window = None
-    finally:
-        host.shutdown()
+def test_decode_benchmark_native_singleton(make_host, qtbot):
+    host, _ = make_host()
+    plugin_id = "files.decode_benchmark"
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: plugin_id not in host._busy, timeout=10000)
+    window = host._decode_benchmark_window
+    assert window.isVisible()
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: plugin_id not in host._busy, timeout=8000)
+    assert host._decode_benchmark_window is window
+    host.host_session.windows.close_all(plugin_id)
+    assert host.host_session.windows.windows_for(plugin_id) == ()
+    host._decode_benchmark_window = None
 
 
-def test_g5_code_editor_native_launch_and_availability(
-        qtbot, catalog, tmp_path, endpoint):
-    """[G5] 原生接管：code_editor 可启动（native:// 路径）、零 HTTP、
-    singleton、停用后可用性消失。"""
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g5.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(catalog, transport, prefs, panel,
-                                  lambda: [], lambda: None, panel)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 5, timeout=8000)
-        info = next(item for item in host._infos
-                    if item.plugin_id == "code_editor")
-        assert info.can_launch and info.launch_path == "native://code_editor"
-        host.launch("code_editor")
-        qtbot.waitUntil(lambda: host._code_editor_window is not None,
-                        timeout=8000)
-        window = host._code_editor_window
-        assert window.isVisible()
-        qtbot.waitUntil(lambda: "files.code_editor" not in host._busy,
-                        timeout=8000)
-        host.launch("code_editor")              # singleton：同一实例
-        qtbot.waitUntil(lambda: "files.code_editor" not in host._busy,
-                        timeout=8000)
-        assert host._code_editor_window is window
-        assert endpoint[1] == []                # 零 HTTP
-        host._set_enabled("code_editor", False)
-        qtbot.waitUntil(lambda: not host._writing, timeout=8000)
-        info2 = next(item for item in host._infos
-                     if item.plugin_id == "code_editor")
-        assert not info2.desired_enabled and not info2.can_launch
-    finally:
-        host.shutdown()
+def test_code_editor_native_launch_and_availability(make_host, qtbot):
+    host, _ = make_host()
+    plugin_id = "files.code_editor"
+    info = next(item for item in host._infos if item.plugin_id == plugin_id)
+    assert info.can_launch and info.launch_path == "native://code_editor"
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: plugin_id not in host._busy, timeout=8000)
+    window = host._code_editor_window
+    assert window.isVisible()
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: plugin_id not in host._busy, timeout=8000)
+    assert host._code_editor_window is window
+    host._set_enabled(plugin_id, False)
+    qtbot.waitUntil(lambda: not host._writing, timeout=8000)
+    updated = next(item for item in host._infos if item.plugin_id == plugin_id)
+    assert not updated.desired_enabled and not updated.can_launch
 
 
-def test_g6_image_editor_native_zero_http(qtbot, catalog, tmp_path, endpoint):
-    """[G6] 原生接管：携带选中图片打开编辑器；无选择如实提示；零 HTTP。"""
+def test_image_editor_native_launch_requires_one_image(make_host, tmp_path, qtbot):
     from PIL import Image
 
     media = tmp_path / "photo.png"
     Image.new("RGB", (48, 32), (200, 40, 40)).save(media, format="PNG")
-    # 主 fixture 无 image_editor——本测试用专属最小 catalog
-    editor_root = tmp_path / "plugins-editor"
-    (editor_root / "image_editor").mkdir(parents=True)
-    (editor_root / "image_editor" / "__init__.py").write_text(
-        "NAME = 'image_editor'\n", encoding="utf-8")
-    editor_catalog = FileExplorerPluginCatalog(
-        editor_root,
-        SimpleNamespace(plugins=[{"name": "image_editor"}], failed_plugins=[]),
-        lambda: {"disabled_plugins": []}, lambda value: None)
-    prefs = NativeFilesPreferences(QSettings(str(tmp_path / "g6.ini"), QSettings.Format.IniFormat))
-    panel = QWidget()
-    layout = QVBoxLayout(panel)
-    panel.meta_status = QLabel()
-    layout.addWidget(QLineEdit())
-    layout.addWidget(panel.meta_status)
-    qtbot.addWidget(panel)
-    transport = NativeFilesTransport(lambda: endpoint[0], "token", panel)
-    host = FilesPluginsController(editor_catalog, transport, prefs, panel,
-                                  lambda: [str(media)], lambda: None, panel)
-    try:
-        qtbot.waitUntil(lambda: len(host._infos) == 1, timeout=8000)
-        host.launch("image_editor")
-        qtbot.waitUntil(lambda: "files.image_editor" not in host._busy,
-                        timeout=8000)
-        assert host._image_editor_window is not None
-        window = host._image_editor_window
-        assert window.isVisible()
-        assert window._service.source_path == str(media)
-        qtbot.waitUntil(lambda: "files.image_editor" not in host._busy,
-                        timeout=8000)
-        assert endpoint[1] == []                # 零 HTTP
-        host._image_editor_window = None
-        host.host_session.windows.close_window("files.image_editor", "main")
-        host.selected_paths = lambda: []
-        host.launch("image_editor")
-        qtbot.waitUntil(lambda: "选择一张图片" in panel.meta_status.text(),
-                        timeout=8000)
-    finally:
-        host.shutdown()
+    selected = [str(media)]
+    host, _ = make_host(selected_paths=lambda: list(selected))
+    plugin_id = "files.image_editor"
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: plugin_id not in host._busy, timeout=8000)
+    window = host._image_editor_window
+    assert window.isVisible()
+    assert window._service.source_path == str(media)
+    host._image_editor_window = None
+    host.host_session.windows.close_window(plugin_id, "main")
+    selected.clear()
+    host.launch(plugin_id)
+    qtbot.waitUntil(lambda: "选择一张图片" in host.panel.meta_status.text(), timeout=8000)

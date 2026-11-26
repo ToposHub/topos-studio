@@ -20,6 +20,10 @@ from PyQt6.QtGui import (
     QShortcut, QRegion, QAction, QActionGroup, QContextMenuEvent,
 )
 
+from src.features.edit.core.audio_edit import (
+    ENVELOPE_BEZIER, ENVELOPE_MAX_DB, ENVELOPE_MIN_DB, envelope_bezier_weight, evaluate_envelope_db,
+)
+from src.features.edit.ui.clip_envelope_overlay import envelope_gain_readout, envelope_path
 from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint, fade_power
 from src.features.edit.ui.fade_overlay import (
     FADE_HANDLE_HIT_HEIGHT, FADE_HANDLE_HIT_RADIUS, FADE_HANDLE_SIZE,
@@ -29,6 +33,8 @@ from src.features.mixer.spectrogram import DB_FLOOR, Spectrogram, fraction_frequ
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.pro_widgets import glyph_icon
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+
+EnvelopeCurve = tuple[tuple[float, float, str], ...]
 
 # =====================================================================
 # 1. 全局色彩系统与声学常量（与 EQ-UI.py 保持一致的暗色工作室美学）
@@ -751,10 +757,12 @@ class WaveformSpectralCanvas(QWidget):
         self.project_edits_enabled = True
         self.channel_monitor_enabled = True
         self.waveform_includes_processing = False
+        self._waveform_baked_envelope: EnvelopeCurve | None = ()
 
         # 音量包络线（Vocal Riding）：关键帧按 t 升序，0dB 基准磁吸
         self._env_points: list[dict] = []          # [{"t": float, "db": float}, ...]
         self._env_enabled = True
+        self._env_accent = QColor(ACCENT_VIOLET)
         self._env_curve_mode = "smooth"            # "linear" | "smooth"
         self._env_hover_idx = -1                   # 当前悬停的节点索引
         self._env_hover_seg = -1                   # 当前悬停的线段索引
@@ -834,11 +842,15 @@ class WaveformSpectralCanvas(QWidget):
         self._wave_channels = [(np.asarray(high), np.asarray(low))
                                for high, low in zip(self._peaks_max, self._peaks_min)]
 
-    def setWaveformSamples(self, samples: np.ndarray | None) -> None:
-        if samples is not self._waveform_samples or self._waveform_window_rate is not None:
+    def setWaveformSamples(
+        self, samples: np.ndarray | None, *, baked_envelope: EnvelopeCurve | None = (),
+    ) -> None:
+        if (samples is not self._waveform_samples or self._waveform_window_rate is not None
+                or baked_envelope != self._waveform_baked_envelope):
             self._waveform_samples = samples
             self._waveform_window_start = 0.0
             self._waveform_window_rate = None
+            self._waveform_baked_envelope = baked_envelope
             self._invalidate_cache()
 
     def setWaveformWindow(self, samples: np.ndarray, start_seconds: float, samples_per_second: float) -> None:
@@ -850,6 +862,7 @@ class WaveformSpectralCanvas(QWidget):
         self._waveform_samples = samples
         self._waveform_window_start = float(start_seconds)
         self._waveform_window_rate = float(samples_per_second)
+        self._waveform_baked_envelope = ()
         if not self._wave_channels:
             # Fine detail may finish before the full-file envelope worker.
             self._channels = samples.shape[0]
@@ -922,6 +935,7 @@ class WaveformSpectralCanvas(QWidget):
 
     def _refresh_processing_overlay(self) -> None:
         if self.waveform_includes_processing:
+            self._gain_wave_cache = None
             self.update()
         else:
             self._invalidate_cache()
@@ -938,7 +952,23 @@ class WaveformSpectralCanvas(QWidget):
 
     def setToolMode(self, mode: str):
         self._tool_mode = mode
+        if self._env_curve_mode == "model" and mode != "envelope":
+            self.cancel_envelope_drag()
+            self._env_hover_idx = self._env_hover_seg = self._env_selected_idx = -1
         self.update()
+
+    def cancel_envelope_drag(self) -> bool:
+        if self._env_curve_mode != "model" or self._drag_mode != "env_drag":
+            return False
+        self._env_points = self._env_drag_init_pts
+        self._env_drag_init_pts = []
+        self._env_drag_indices.clear()
+        self._env_hover_idx = self._env_hover_seg = self._env_selected_idx = -1
+        self._env_snap_zero_flash = False
+        self._drag_mode = ""
+        self.unsetCursor()
+        self._refresh_processing_overlay()
+        return True
 
     def setStretchPreviewRatio(self, ratio_pct: float):
         """时间伸缩速率预览（拧动右侧"伸缩速率"旋钮时实时更新画布落点投射）"""
@@ -1034,10 +1064,11 @@ class WaveformSpectralCanvas(QWidget):
         return copy.deepcopy(self._env_points) if self._env_enabled else []
 
     def _env_db_to_y(self, db: float, wave_r: QRectF) -> float:
-        """将包络增益 [-36dB, +12dB] 映射到波形画布纵坐标（0dB 位于上方 28% 处，兼顾提升与衰减手感，
-        纵向区间避开顶部淡入淡出角标热区与底部分割线）"""
+        """Map gain to the waveform interior."""
         y_top = wave_r.top() + 14.0
         y_bot = max(y_top + 20.0, wave_r.bottom() - 10.0)
+        if self._env_curve_mode == "model":
+            return y_top + (ENVELOPE_MAX_DB - db) / (ENVELOPE_MAX_DB - ENVELOPE_MIN_DB) * (y_bot - y_top)
         y_zero = y_top + (y_bot - y_top) * 0.28
         db_c = max(-36.0, min(12.0, db))
         if db_c >= 0.0:
@@ -1047,17 +1078,25 @@ class WaveformSpectralCanvas(QWidget):
     def _env_y_to_db(self, y: float, wave_r: QRectF, snap_zero: bool = True) -> float:
         y_top = wave_r.top() + 14.0
         y_bot = max(y_top + 20.0, wave_r.bottom() - 10.0)
-        y_zero = y_top + (y_bot - y_top) * 0.28
-        if y <= y_zero:
-            db = ((y_zero - y) / max(1.0, y_zero - y_top)) * 12.0
+        if self._env_curve_mode == "model":
+            db = ENVELOPE_MAX_DB - (y - y_top) / (y_bot - y_top) * (ENVELOPE_MAX_DB - ENVELOPE_MIN_DB)
         else:
-            db = -((y - y_zero) / max(1.0, y_bot - y_zero)) * 36.0
-        db = max(-36.0, min(12.0, db))
-        if snap_zero and abs(db) <= 0.45:
-            self._env_snap_zero_flash = True
-            return 0.0
-        self._env_snap_zero_flash = False
-        return round(db, 1)
+            y_zero = y_top + (y_bot - y_top) * 0.28
+            if y <= y_zero:
+                db = ((y_zero - y) / max(1.0, y_zero - y_top)) * 12.0
+            else:
+                db = -((y - y_zero) / max(1.0, y_bot - y_zero)) * 36.0
+        db = max(self._envelope_floor_db(), min(ENVELOPE_MAX_DB, db))
+        self._env_snap_zero_flash = snap_zero and abs(db) <= 0.45
+        return 0.0 if self._env_snap_zero_flash else round(db, 1)
+
+    def _envelope_floor_db(self) -> float:
+        return ENVELOPE_MIN_DB if self._env_curve_mode == "model" else -36.0
+
+    def _project_envelope_mode(self, point: dict) -> str:
+        if self._drag_mode == "env_drag":
+            return ENVELOPE_BEZIER
+        return point.get("interpolation", "linear")
 
     def _env_node_slope(self, idx: int) -> float:
         """节点切线斜率 (dB/s)：取相邻两节点割线方向（Catmull-Rom 切线，手柄自然指向节点连线方向），
@@ -1093,7 +1132,9 @@ class WaveformSpectralCanvas(QWidget):
         if span <= 1e-6:
             return p0["db"]
         u = (t - p0["t"]) / span
-        if self._env_curve_mode == "smooth":
+        if self._env_curve_mode == "model" and self._project_envelope_mode(p0) == ENVELOPE_BEZIER:
+            u = envelope_bezier_weight(u)
+        elif self._env_curve_mode == "smooth":
             # Catmull-Rom -> Hermite 基函数：节点两侧手柄沿切线（割线）方向，而非水平
             m0 = self._env_node_slope(idx)
             m1 = self._env_node_slope(idx + 1)
@@ -1137,7 +1178,7 @@ class WaveformSpectralCanvas(QWidget):
 
     def _insert_envelope_node(self, t: float, db: float) -> int:
         t = max(0.0, min(self._duration, t))
-        db = max(-36.0, min(12.0, round(db, 1)))
+        db = max(self._envelope_floor_db(), min(ENVELOPE_MAX_DB, round(db, 1)))
         self._env_points.append({"t": t, "db": db})
         self._env_points.sort(key=lambda item: item["t"])
         for i, p in enumerate(self._env_points):
@@ -1175,13 +1216,24 @@ class WaveformSpectralCanvas(QWidget):
 
     def deleteSelectedEnvelopeNode(self) -> bool:
         """删除当前选中的包络节点（Del / 退格键触发）；无选中节点时返回 False，走原删除逻辑"""
-        if not self._env_enabled:
+        if not self._can_edit_envelope():
             return False
         idx = self._env_selected_idx
         if 0 <= idx < len(self._env_points):
             self._delete_env_node(idx)
             return True
         return False
+
+    def _can_edit_envelope(self) -> bool:
+        return (self.project_edits_enabled and self._env_enabled
+                and (self._env_curve_mode != "model" or self._tool_mode == "envelope"))
+
+    def _add_project_envelope_point(self, time: float) -> None:
+        if any(abs(point["t"] - time) < 1e-6 for point in self._env_points):
+            return
+        self._insert_envelope_node(time, self._eval_envelope_db(time))
+        self.envelopeChanged.emit(copy.deepcopy(self._env_points))
+        self._refresh_processing_overlay()
 
     def _apply_local_brush_heal(self, stroke: list[tuple[float, float]]):
         """对频谱图矩阵执行局部视觉平滑修复，提供即时视觉反馈"""
@@ -1486,15 +1538,31 @@ class WaveformSpectralCanvas(QWidget):
 
         # 右键包络节点/曲线：快捷归零 / 删除 / 整体重置
         if (event.button() == Qt.MouseButton.RightButton and self.project_edits_enabled
-                and self._env_enabled and wave_r.contains(pos)):
+                and self._can_edit_envelope() and wave_r.contains(pos)):
             hit_node = self._hit_test_envelope_node(pos, wave_r)
             on_line, _ = self._hit_test_envelope_line(pos, wave_r)
-            if hit_node >= 0 or (self._tool_mode == "envelope" and on_line):
+            if self._env_curve_mode == "model" and hit_node >= 0 and not event.modifiers():
+                self._delete_env_node(hit_node)
+                return
+            if self._env_curve_mode == "model" or hit_node >= 0 or (self._tool_mode == "envelope" and on_line):
                 menu = QMenu(self)
                 menu.setStyleSheet(
                     "QMenu{background:#1B1C20;border:1px solid #383A44;color:#E2E4EC;font-size:11px;padding:4px;}"
                     "QMenu::item{padding:5px 14px;}QMenu::item:selected{background:#2A2E3A;color:#B67CF8;}"
                 )
+                if self._env_curve_mode == "model":
+                    time = self._x_to_time(pos.x(), wave_r)
+                    menu.addAction(I18N.tr("timeline.envelope_add_point", "Add Envelope Point"),
+                                   lambda: self._add_project_envelope_point(time))
+                    index = hit_node if hit_node >= 0 else self._env_selected_idx
+                    action = menu.addAction(I18N.tr("timeline.envelope_delete_point", "Delete Envelope Point"),
+                                            lambda: self._delete_env_node(index))
+                    action.setEnabled(index >= 0)
+                    action = menu.addAction(I18N.tr("timeline.envelope_reset", "Reset Volume Envelope"),
+                                            self.resetEnvelope)
+                    action.setEnabled(bool(self._env_points))
+                    self._open_context_menu(menu, event.globalPosition().toPoint())
+                    return
                 if hit_node >= 0:
                     pt = self._env_points[hit_node]
                     act_zero = menu.addAction(f"重置节点为 0.0 dB (当前 {pt['db']:+.1f} dB)")
@@ -1534,8 +1602,7 @@ class WaveformSpectralCanvas(QWidget):
 
         # 2.5 抓取标尺中的播放头小三角拖拽定位（±5px 热区，优先于视口平移导航）
         ph_x = self._time_to_x(self._playhead, body)
-        if (event.button() == Qt.MouseButton.LeftButton and ruler.contains(pos)
-                and abs(pos.x() - ph_x) <= 5.0):
+        if ruler.contains(pos) and abs(pos.x() - ph_x) <= 5.0:
             self._drag_mode = "playhead"
             self._playhead = max(0.0, min(self._duration, self._x_to_time(pos.x(), body)))
             self.playheadMoved.emit(self._playhead)
@@ -1558,13 +1625,13 @@ class WaveformSpectralCanvas(QWidget):
         #    A. Alt+点击节点 -> 删除；B. 紧致热区命中节点 -> 选中并拖拽（两种模式均生效）；
         #    C. 包络模式 / Ctrl+点击线段 -> 选区推拉、整段平移或插入新节点
         #    选中节点后按 Del / 退格键可删除（右键节点菜单亦提供删除）
-        if self.project_edits_enabled and wave_r.contains(pos) and self._env_enabled:
+        if self._can_edit_envelope() and wave_r.contains(pos):
             hit_node = self._hit_test_envelope_node(pos, wave_r)
             alt_held = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
             ctrl_held = bool(event.modifiers() & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.MetaModifier))
 
             # A. Alt + 点击已有节点 -> 快捷删除节点
-            if hit_node >= 0 and alt_held:
+            if hit_node >= 0 and alt_held and self._env_curve_mode != "model":
                 self._env_points.pop(hit_node)
                 self._env_hover_idx = -1
                 self._env_selected_idx = -1
@@ -1581,6 +1648,11 @@ class WaveformSpectralCanvas(QWidget):
                 self._env_drag_anchor_pos = pos
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
                 self.update()
+                return
+
+            if self._env_curve_mode == "model":
+                if self._hit_test_envelope_line(pos, wave_r)[0]:
+                    self._add_project_envelope_point(self._x_to_time(pos.x(), wave_r))
                 return
 
             # C. 处于"✎ 包络"专属模式，或按住 Ctrl/Cmd 点击包络线
@@ -1708,7 +1780,7 @@ class WaveformSpectralCanvas(QWidget):
                 self.update()
                 return
             # 包络悬停反馈：节点开手光标 / 包络模式下的线段高亮与插入光标
-            if wave_r.contains(pos) and self._env_enabled:
+            if wave_r.contains(pos) and self._can_edit_envelope():
                 h_idx = self._hit_test_envelope_node(pos, wave_r)
                 on_line, s_idx = self._hit_test_envelope_line(pos, wave_r)
                 if h_idx != self._env_hover_idx or s_idx != self._env_hover_seg:
@@ -1719,7 +1791,11 @@ class WaveformSpectralCanvas(QWidget):
                     self.setCursor(Qt.CursorShape.OpenHandCursor)
                     self.update()
                     return
-                if self._tool_mode == "envelope":
+                if self._tool_mode == "envelope" and self._env_curve_mode == "model" and on_line:
+                    self.setCursor(Qt.CursorShape.CrossCursor)
+                    self.update()
+                    return
+                if self._tool_mode == "envelope" and self._env_curve_mode != "model":
                     self.setCursor(Qt.CursorShape.SizeVerCursor if (on_line and s_idx >= 0) else Qt.CursorShape.CrossCursor)
                     self.update()
                     return
@@ -1837,7 +1913,7 @@ class WaveformSpectralCanvas(QWidget):
                 if lock_db:
                     new_db = orig["db"]
                 elif fine_mode:
-                    new_db = max(-36.0, min(12.0, round(orig["db"] - dy * 0.05, 1)))
+                    new_db = max(self._envelope_floor_db(), min(ENVELOPE_MAX_DB, round(orig["db"] - dy * 0.05, 1)))
                 else:
                     new_db = self._env_y_to_db(pos.y(), wave_r, snap_zero=True)
 
@@ -1848,7 +1924,7 @@ class WaveformSpectralCanvas(QWidget):
                 self._env_snap_zero_flash = False
                 for idx in self._env_drag_indices:
                     orig_db = self._env_drag_init_pts[idx]["db"]
-                    cand_db = max(-36.0, min(12.0, orig_db + db_delta))
+                    cand_db = max(self._envelope_floor_db(), min(ENVELOPE_MAX_DB, orig_db + db_delta))
                     if not fine_mode and abs(cand_db) <= 0.45:
                         cand_db = 0.0
                     if abs(cand_db) <= 1e-9:
@@ -1909,11 +1985,15 @@ class WaveformSpectralCanvas(QWidget):
             if abs(self._pan_vel_sec) > 1e-4 and not self._physics_timer.isActive():
                 self._physics_timer.start()
         elif self._drag_mode == "env_drag":
-            # 拖拽结束：清空拖拽态并提交最终包络关键帧
+            if not self._can_edit_envelope() and self.cancel_envelope_drag():
+                return
+            changed = self._env_points != self._env_drag_init_pts
+            self._drag_mode = ""
             self._env_drag_indices.clear()
             self._env_drag_init_pts.clear()
             self._env_snap_zero_flash = False
-            self.envelopeChanged.emit(copy.deepcopy(self._env_points))
+            if changed or self._env_curve_mode != "model":
+                self.envelopeChanged.emit(copy.deepcopy(self._env_points))
             self._refresh_processing_overlay()
         elif self._drag_mode in ("select_wave", "select_spec"):
             # 若只是极短点击而非拖拽选区，则清空选区仅保留播放头定位
@@ -1955,7 +2035,7 @@ class WaveformSpectralCanvas(QWidget):
             self.mousePressEvent(event)
             return
         # 双击包络节点 -> 电平归零 0.0 dB（优先于全选手势，不误触）
-        if event.button() == Qt.MouseButton.LeftButton and self.project_edits_enabled and self._env_enabled:
+        if event.button() == Qt.MouseButton.LeftButton and self._can_edit_envelope():
             wave_r, _, _ = self._wave_and_spec_rects()
             hit_node = self._hit_test_envelope_node(event.position(), wave_r)
             if hit_node >= 0:
@@ -2175,6 +2255,7 @@ class WaveformSpectralCanvas(QWidget):
 
     def _draw_waveform_lod(
         self, painter: QPainter, area: QRectF, channels: tuple[int, ...], muted: bool, *, preview_gain: bool,
+        live_envelope: EnvelopeCurve | None = None,
     ) -> list[float]:
         span = max(1e-6, self._view_end - self._view_start)
         fraction = span / self._duration
@@ -2209,6 +2290,8 @@ class WaveformSpectralCanvas(QWidget):
         xs = area.left() + (times - self._view_start) * (area.width() / span)
 
         scale = np.full(len(times), 10.0 ** (self._preview_gain_db / 20.0) if preview_gain else 1.0)
+        if live_envelope is not None:
+            scale *= self._waveform_envelope_ratio(times, live_envelope)
         if not self.waveform_includes_processing:
             if self._env_enabled and self._env_points:
                 scale *= [10.0 ** (self._eval_envelope_db(t) / 20.0) for t in times]
@@ -2229,6 +2312,23 @@ class WaveformSpectralCanvas(QWidget):
         else:
             self._draw_wave_columns(painter, area, hi, lo, muted)
         return clip_xs
+
+    def _waveform_envelope_override(self) -> EnvelopeCurve | None:
+        """Return a new curve only while the visible PCM reflects a different envelope."""
+        if not self.waveform_includes_processing or self._waveform_baked_envelope is None:
+            return None
+        live = tuple(
+            (point["t"], point["db"], self._project_envelope_mode(point)) for point in self._env_points
+        ) if self._env_enabled else ()
+        return live if live != self._waveform_baked_envelope else None
+
+    def _waveform_envelope_ratio(self, times: np.ndarray, live: EnvelopeCurve) -> np.ndarray:
+        """Adjust baked peaks provisionally while the clip preview worker catches up."""
+        lookup = []
+        for curve in (live, self._waveform_baked_envelope or ()):
+            x, db, modes = zip(*curve) if curve else ((), (), ())
+            lookup.append(evaluate_envelope_db(times, x, db, modes))
+        return np.power(10.0, (lookup[0] - lookup[1]) / 20.0)
 
     def _visible_wave_extrema(
         self, channels: tuple[int, ...], times: np.ndarray, pcm: np.ndarray | None,
@@ -2416,8 +2516,15 @@ class WaveformSpectralCanvas(QWidget):
         ruler = self._ruler_rect()
         body = self._body_rect()
         wave_r, spec_r, _ = self._wave_and_spec_rects()
+        live_envelope = self._waveform_envelope_override()
+        if live_envelope is not None and wave_r.isValid():
+            p.save()
+            p.setClipRect(wave_r, Qt.ClipOperation.IntersectClip)
+            p.fillRect(wave_r, QColor(WAVE_BACKGROUND))
+            self._draw_waveform_pane(p, wave_r, live_envelope=live_envelope)
+            p.restore()
         if abs(self._preview_gain_db) >= 0.05:
-            self._paint_gain_wave(p, wave_r)
+            self._paint_gain_wave(p, wave_r, live_envelope)
 
         # 2. 动态交互层：选区遮罩、悬浮 HUD、磁吸激光闪光、标记点、播放头、谐波游标
         if self.waveform_includes_processing:
@@ -2428,7 +2535,9 @@ class WaveformSpectralCanvas(QWidget):
         if selection is not None and self.selection_gain_editable and not self.is_selecting():
             self._draw_selection_gain(p, wave_r, selection.center().x())
 
-    def _paint_gain_wave(self, painter: QPainter, wave: QRectF) -> None:
+    def _paint_gain_wave(
+        self, painter: QPainter, wave: QRectF, live_envelope: EnvelopeCurve | None = None,
+    ) -> None:
         area = wave
         if self._sel_t1 > self._sel_t0 >= 0.0:
             left = self._time_to_x(self._sel_t0, wave)
@@ -2446,7 +2555,7 @@ class WaveformSpectralCanvas(QWidget):
             with QPainter(pixmap) as background:
                 background.setRenderHint(QPainter.RenderHint.Antialiasing)
                 background.translate(0.0, -wave.top())
-                self._draw_waveform_pane(background, wave, preview_gain=True)
+                self._draw_waveform_pane(background, wave, preview_gain=True, live_envelope=live_envelope)
             self._gain_wave_cache = pixmap
         painter.save()
         painter.setClipRect(area, Qt.ClipOperation.IntersectClip)
@@ -2602,31 +2711,45 @@ class WaveformSpectralCanvas(QWidget):
             return
         has_pts = bool(self._env_points)
         in_env_mode = (self._tool_mode == "envelope")
-        if not has_pts and not in_env_mode:
+        if not has_pts and not in_env_mode and self._env_curve_mode != "model":
             return
 
         p.save()
         p.setClipRect(wave_r)
+        accent = self._env_accent
+        highlight = accent.lighter(116)
+
+        def tinted(alpha: int) -> QColor:
+            color = QColor(accent)
+            color.setAlpha(alpha)
+            return color
 
         y_zero = self._env_db_to_y(0.0, wave_r)
 
         # 1. 0.0 dB 基准参考线（进入包络模式或发生 0dB 磁吸时点亮）
         if in_env_mode or self._env_drag_indices:
             zero_alpha = 180 if self._env_snap_zero_flash else 65
-            p.setPen(QPen(QColor(182, 124, 248, zero_alpha), 1.0, Qt.PenStyle.DashLine))
+            p.setPen(QPen(tinted(zero_alpha), 1.0, Qt.PenStyle.DashLine))
             p.drawLine(QPointF(wave_r.left(), y_zero), QPointF(wave_r.right(), y_zero))
 
             badge_r = QRectF(wave_r.left() + 6.0, y_zero - 8.0, 34.0, 15.0)
-            p.setPen(QPen(QColor(182, 124, 248, 120), 1.0))
+            p.setPen(QPen(tinted(120), 1.0))
             p.setBrush(QColor(18, 14, 28, 215))
             p.drawRoundedRect(badge_r, 3.0, 3.0)
-            p.setPen(QColor(ACCENT_VIOLET))
+            p.setPen(accent)
             p.setFont(QFont(MONO_FONT_FAM, 7, QFont.Weight.Bold))
             p.drawText(badge_r, Qt.AlignmentFlag.AlignCenter, "0 dB")
 
         # 2. 构建当前视口内的包络曲线路径与相对 0dB 的面积遮罩
         curve_path = QPainterPath()
-        if not has_pts or self._env_curve_mode == "linear":
+        if self._env_curve_mode == "model":
+            curve_path = envelope_path(
+                [(point["t"], point["db"]) for point in self._env_points],
+                [self._project_envelope_mode(point) for point in self._env_points],
+                self._view_start, self._view_end, lambda t: self._time_to_x(t, wave_r),
+                lambda db: self._env_db_to_y(db, wave_r),
+            )
+        elif not has_pts or self._env_curve_mode == "linear":
             prev_t, prev_db = self._view_start, self._eval_envelope_db(self._view_start)
             curve_path.moveTo(wave_r.left(), self._env_db_to_y(prev_db, wave_r))
             knots = [(p["t"], p["db"]) for p in self._env_points
@@ -2651,11 +2774,11 @@ class WaveformSpectralCanvas(QWidget):
 
         if has_pts and in_env_mode:
             area_path = QPainterPath(curve_path)
-            area_path.lineTo(wave_r.right(), y_zero)
-            area_path.lineTo(wave_r.left(), y_zero)
+            area_path.lineTo(curve_path.currentPosition().x(), y_zero)
+            area_path.lineTo(curve_path.elementAt(0).x, y_zero)
             area_path.closeSubpath()
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(182, 124, 248, 22))
+            p.setBrush(tinted(22))
             p.drawPath(area_path)
 
         # 悬停整段线段时的高亮预览
@@ -2671,21 +2794,26 @@ class WaveformSpectralCanvas(QWidget):
                     seg_path.moveTo(sx, sy)
                 else:
                     seg_path.lineTo(sx, sy)
-            p.setPen(QPen(QColor(228, 200, 255, 220), 3.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+            p.setPen(QPen(highlight, 3.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawPath(seg_path)
 
         # 包络主曲线（包络模式下提高亮度）
         line_alpha = 235 if (in_env_mode or self._env_drag_indices) else 155
         p.setBrush(Qt.BrushStyle.NoBrush)
 
-        core_col = QColor(182, 124, 248, line_alpha)
-        pen_style = Qt.PenStyle.SolidLine if has_pts else Qt.PenStyle.DashLine
+        core_col = tinted(line_alpha)
+        pen_style = (Qt.PenStyle.SolidLine if has_pts or self._env_curve_mode == "model"
+                     else Qt.PenStyle.DashLine)
         p.setPen(QPen(core_col, 1.75 if in_env_mode else 1.35, pen_style, Qt.PenCapStyle.RoundCap))
         p.drawPath(curve_path)
+        if self._env_curve_mode == "model" and not in_env_mode:
+            p.restore()
+            return
 
         # 3. 绘制双环硬件 LED 关键帧节点
         active_hud_pt: dict | None = None
         active_hud_xy = QPointF()
+        active_hud_index = -1
 
         for i, pt in enumerate(self._env_points):
             nx = self._time_to_x(pt["t"], wave_r)
@@ -2699,57 +2827,62 @@ class WaveformSpectralCanvas(QWidget):
 
             if is_dragged or is_hovered:
                 active_hud_pt = pt
+                active_hud_index = i
                 active_hud_xy = QPointF(nx, ny)
                 halo = QRadialGradient(nx, ny, 10.0)
-                halo.setColorAt(0.0, QColor(182, 124, 248, 120))
-                halo.setColorAt(1.0, QColor(182, 124, 248, 0))
+                halo.setColorAt(0.0, tinted(120))
+                halo.setColorAt(1.0, tinted(0))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(halo)
                 p.drawEllipse(QPointF(nx, ny), 10.0, 10.0)
             elif is_selected:
                 # 选中态：柔和光晕 + 白色外环（区别于悬停，持续显示便于定位后按 Del 删除）
                 active_hud_pt = pt
+                active_hud_index = i
                 active_hud_xy = QPointF(nx, ny)
                 halo = QRadialGradient(nx, ny, 9.0)
-                halo.setColorAt(0.0, QColor(182, 124, 248, 75))
-                halo.setColorAt(1.0, QColor(182, 124, 248, 0))
+                halo.setColorAt(0.0, tinted(75))
+                halo.setColorAt(1.0, tinted(0))
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(halo)
                 p.drawEllipse(QPointF(nx, ny), 9.0, 9.0)
-                p.setPen(QPen(QColor("#F3E8FF"), 1.3))
+                p.setPen(QPen(highlight, 1.3))
                 p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawEllipse(QPointF(nx, ny), 7.2, 7.2)
 
             r_outer = 4.8 if (is_active or in_env_mode) else 3.6
-            p.setPen(QPen(QColor("#F3E8FF") if is_active else QColor(ACCENT_VIOLET), 1.6))
+            p.setPen(QPen(highlight if is_active else accent, 1.6))
             p.setBrush(QColor("#101219"))
             p.drawEllipse(QPointF(nx, ny), r_outer, r_outer)
 
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor("#FFFFFF") if is_active else QColor(ACCENT_VIOLET))
+            p.setBrush(QColor("#FFFFFF") if is_active else accent)
             p.drawEllipse(QPointF(nx, ny), 1.5, 1.5)
 
         # 4. 悬停或拖拽节点时，在节点旁浮现精致参数读数胶囊
         if active_hud_pt is not None:
             db_val = active_hud_pt["db"]
-            db_str = "0.0 dB" if abs(db_val) < 0.05 else f"{db_val:+.1f} dB"
-            pill_txt = f"{db_str} · {format_timecode(active_hud_pt['t'])}"
-            pw, ph = 114.0, 20.0
-            px = max(wave_r.left() + 6.0, min(wave_r.right() - pw - 6.0, active_hud_xy.x() - pw * 0.5))
-            py = active_hud_xy.y() - ph - 10.0
-            if py < wave_r.top() + 4.0:
-                py = active_hud_xy.y() + 11.0
+            dragging = (active_hud_index in self._env_drag_indices
+                        and active_hud_index < len(self._env_drag_init_pts) and self._mouse_pos is not None)
+            if dragging:
+                pill_txt = envelope_gain_readout(db_val, self._env_drag_init_pts[active_hud_index]["db"])
+                active_hud_xy = self._mouse_pos
+            else:
+                pill_txt = f"{db_val:+.1f} dB · {format_timecode(active_hud_pt['t'])}"
+            p.setFont(QFont(MONO_FONT_FAM, 8, QFont.Weight.Bold))
+            pw, ph = min(wave_r.width() - 8.0, p.fontMetrics().horizontalAdvance(pill_txt) + 18.0), 20.0
+            px = max(wave_r.left() + 4.0, min(wave_r.right() - pw - 4.0, active_hud_xy.x() + 12.0))
+            py = max(wave_r.top() + 4.0, min(wave_r.bottom() - ph - 4.0, active_hud_xy.y() + 12.0))
 
             pill_r = QRectF(px, py, pw, ph)
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QColor(0, 0, 0, 160))
             p.drawRoundedRect(pill_r.translated(0, 1.5), 5.0, 5.0)
 
-            p.setPen(QPen(QColor(ACCENT_VIOLET), 1.1))
+            p.setPen(QPen(accent, 1.1))
             p.setBrush(QColor(19, 16, 28, 240))
             p.drawRoundedRect(pill_r, 5.0, 5.0)
-            p.setPen(QColor("#F4ECFF"))
-            p.setFont(QFont(MONO_FONT_FAM, 8, QFont.Weight.Bold))
+            p.setPen(highlight)
             p.drawText(pill_r, Qt.AlignmentFlag.AlignCenter, pill_txt)
 
         p.restore()
@@ -2833,19 +2966,24 @@ class WaveformSpectralCanvas(QWidget):
                     p.drawLine(QPointF(sx, ruler.bottom() - 3.5), QPointF(sx, ruler.bottom() - 1.0))
             t += step
 
-    def _draw_waveform_pane(self, p: QPainter, wave_r: QRectF, *, preview_gain: bool = False) -> None:
+    def _draw_waveform_pane(
+        self, p: QPainter, wave_r: QRectF, *, preview_gain: bool = False,
+        live_envelope: EnvelopeCurve | None = None,
+    ) -> None:
         p.save()
-        p.setClipRect(QRectF(0, wave_r.top(), self.width(), wave_r.height()))
+        p.setClipRect(QRectF(0, wave_r.top(), self.width(), wave_r.height()), Qt.ClipOperation.IntersectClip)
         self._draw_channel_pills(p, wave_r)
 
         lanes = self._waveform_lanes(wave_r)
         if len(lanes) == 1:
             channels, muted = self._waveform_display_channels()
-            self._draw_waveform_lane(p, wave_r, channels, muted, preview_gain=preview_gain)
+            self._draw_waveform_lane(p, wave_r, channels, muted, preview_gain=preview_gain,
+                                     live_envelope=live_envelope)
         else:
             for ch, lane in enumerate(lanes):
                 self._draw_waveform_lane(p, lane, (ch,), self._channel_is_muted(ch),
-                                         preview_gain=preview_gain and self._edit_channel in (-1, ch))
+                                         preview_gain=preview_gain and self._edit_channel in (-1, ch),
+                                         live_envelope=live_envelope)
                 if ch > 0:
                     p.setPen(QPen(QColor("#30343C"), 1.0))
                     p.drawLine(QPointF(lane.left(), lane.top()), QPointF(lane.right(), lane.top()))
@@ -2856,6 +2994,7 @@ class WaveformSpectralCanvas(QWidget):
 
     def _draw_waveform_lane(
         self, p: QPainter, wave_r: QRectF, channels: tuple[int, ...], muted: bool, *, preview_gain: bool,
+        live_envelope: EnvelopeCurve | None = None,
     ) -> None:
         cy = wave_r.center().y()
         half_h = wave_r.height() * 0.45
@@ -2863,7 +3002,8 @@ class WaveformSpectralCanvas(QWidget):
             area = QRectF(wave_r.left(), cy - half_h, wave_r.width(), 2.0 * half_h)
             p.save()
             p.setClipRect(wave_r, Qt.ClipOperation.IntersectClip)
-            clip_xs = self._draw_waveform_lod(p, area, channels, muted, preview_gain=preview_gain)
+            clip_xs = self._draw_waveform_lod(p, area, channels, muted, preview_gain=preview_gain,
+                                              live_envelope=live_envelope)
 
             # Adjacent clipped columns share a single warning bar.
             if clip_xs:
@@ -4001,7 +4141,7 @@ class StudioAudioClipEditor(QWidget):
         self.btn_tool_envelope.setObjectName("GroupBtn")
         self.btn_tool_envelope.setCheckable(True)
         self.btn_tool_envelope.setToolTip("音量包络线工具：点击添加节点，拖拽调节各区域音量 (V)")
-        self.btn_tool_envelope.clicked.connect(lambda: self._set_tool_mode("envelope"))
+        self.btn_tool_envelope.clicked.connect(lambda checked: self._set_tool_mode("envelope" if checked else "select"))
 
         self.btn_tool_brush = QPushButton("✦ 修复笔")
         self.btn_tool_brush.setObjectName("GroupBtn")
@@ -4830,6 +4970,8 @@ class StudioAudioClipEditor(QWidget):
         self._on_fade_changed(v, v)
 
     def _clear_selection_or_cancel_fade_curve(self) -> None:
+        if self.canvas.cancel_envelope_drag():
+            return
         if self.canvas._drag_mode == "fade_curve":
             self.canvas.cancel_fade_drag()
         else:

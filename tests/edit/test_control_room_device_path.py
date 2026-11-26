@@ -104,7 +104,7 @@ def test_real_device_feed_uses_pre_and_post_taps_without_changing_programme() ->
     assert renderer._programme_peaks == pytest.approx((0.12, 0.08))
 
 
-def test_monitor_gain_changes_device_pcm_with_master_levels_unchanged(qapp, monkeypatch) -> None:
+def test_monitor_gain_and_mute_change_device_pcm_with_master_levels_unchanged(qapp, monkeypatch) -> None:
     monkeypatch.setattr(ControlRoomPatch, "load_local", ControlRoomPatch)
     manager = AudioPlaybackManager()
     mixer = manager._mixer
@@ -122,6 +122,18 @@ def test_monitor_gain_changes_device_pcm_with_master_levels_unchanged(qapp, monk
     assert before_levels[MASTER_BUS_KEY].peak_l == after_levels[MASTER_BUS_KEY].peak_l
     assert manager._scrub_preview_generation == generation
     assert manager._prepared_frame is None
+
+    manager._prepared_frame = 30
+    manager._prepared_fps = 24.0
+    manager.set_monitor_muted(True)
+    muted, muted_levels = renderer._render_output_block(2, 500, 2)
+    np.testing.assert_array_equal(muted[:, -1], [0, 0])
+    assert muted_levels[MASTER_BUS_KEY].peak_l == before_levels[MASTER_BUS_KEY].peak_l
+    assert manager._prepared_frame is None and manager._prepared_fps == 0.0
+    manager.set_monitor_muted(False)
+    restored, _ = renderer._render_output_block(3, 500, 2)
+    np.testing.assert_allclose(restored[:, -1], after[:, -1])
+    assert manager.control_room_state.gain_db == -20.0
 
 
 def test_bus_taps_keep_fader_and_master_processing_boundaries() -> None:

@@ -1137,7 +1137,7 @@ class CompositeViewer(QOpenGLWidget):
         self._project_output_descriptor: ColorSpaceDescriptor | None = None
         self._display_color = VideoDisplayColor(self, self.update)
         self._use_display_icc = False
-        self._monitor_icc_applied = False
+        self._monitor_display_transform_applied = False
         self._project_output_uniforms: tuple[int, int, tuple[float, ...]] | None = None
         self._project_aces: ProjectAcesSettings | None = None
         self._odt_lut_tex_id = 0
@@ -3564,7 +3564,7 @@ class CompositeViewer(QOpenGLWidget):
         # display-space descriptor; when unavailable the builtin GLSL ODT
         # above stays in charge (u_odt_lut_active = 0).
         project_output_active = self._bind_project_output_signal()
-        self._monitor_icc_applied = self._display_color.bind_gl(
+        self._monitor_display_transform_applied = self._display_color.bind_gl(
             _gl, self._prog, enabled=project_output_active,
         )
         odt_active_loc = _gl.glGetUniformLocation(self._prog, b"u_odt_lut_active")
@@ -9318,6 +9318,9 @@ class CompositeViewer(QOpenGLWidget):
         self._use_display_icc = enabled
         self._display_color.configure(sdr_display_preset(self._project_output_descriptor), enabled)
 
+    def set_monitor_calibration_lut(self, path: str) -> None:
+        self._display_color.set_calibration_lut(path)
+
     def set_project_output_signal(
         self, descriptor: ColorSpaceDescriptor | None, *, aces: ProjectAcesSettings | None = None,
         luminance: VideoSignalLuminance | None = None,
@@ -9971,7 +9974,7 @@ class CompositeViewer(QOpenGLWidget):
         b = pixel[2] / 255.0
         a = pixel[3] / 255.0
         # The frame-buffer fallback reads the actual viewer output signal.
-        if self._monitor_icc_applied:
+        if self._monitor_display_transform_applied:
             display_space = I18N.tr("viewport.display_monitor_rgb", "Monitor RGB")
         elif self._project_output_uniforms is not None:
             display_space = str(self._project_output_descriptor)

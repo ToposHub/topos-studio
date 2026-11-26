@@ -16,6 +16,7 @@ FADE_HANDLE_HIT_HEIGHT = 13
 def paint_fade_ramp(
     painter: QPainter, band: QRectF, edge: float, span: float,
     gain_at: Callable[[float], float], *, outline: QColor | None = None,
+    shade: QColor | None = None,
 ) -> None:
     """Paint the attenuation above the visible portion of a gain ramp."""
     if span == 0.0:
@@ -35,7 +36,7 @@ def paint_fade_ramp(
     mask.lineTo(edge + span * stop, band.top())
     mask.lineTo(edge + span * start, band.top())
     mask.closeSubpath()
-    painter.fillPath(mask, QColor(9, 12, 18, 115))
+    painter.fillPath(mask, shade if shade is not None else QColor(9, 12, 18, 115))
     if outline is not None:
         painter.save()
         painter.setBrush(Qt.BrushStyle.NoBrush)

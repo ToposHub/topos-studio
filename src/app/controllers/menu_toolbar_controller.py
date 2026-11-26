@@ -797,27 +797,16 @@ class MenuToolbarMixin:
         self.engine.flip_image(horizontal)
         self.status_bar.showMessage("Image Flipped", 2000)
 
-    def rename_current_layer(self):
-        # [UX-6] F2 是 Qt QAction 快捷键，即使槽里 return 事件也不会到达
-        # QWebEngineView——焦点在 Files 面板内时，主动把"重命名"转发给
-        # 素材浏览器的前端实现
-        w = QApplication.focusWidget()
-        while w is not None:
-            if w.__class__.__name__ == 'FilesPanel':
-                try:
-                    # [ARCH-4] 带回调记录执行结果：JS 显式返回 true/false，
-                    # None 表示页面未就绪或渲染进程异常
-                    w.browser.page().runJavaScript(
-                        "(() => { if (window.__fxRenameSelected) {"
-                        " window.__fxRenameSelected(); return true; }"
-                        " return false; })()", 0,
-                        lambda r: logging.getLogger(__name__).warning(
-                            "F2 重命名转发未生效（result=%r）", r)
-                        if r is not True else None)
-                except Exception:
-                    logging.getLogger(__name__).exception("F2 重命名转发失败")
+    def rename_current_layer(self) -> None:
+        # The window-level F2 action also sees focus in the native Files view.
+        from src.app.ui.native_files_panel import NativeFilesPanel
+
+        focused = QApplication.focusWidget()
+        while focused is not None:
+            if isinstance(focused, NativeFilesPanel):
+                focused.request_rename()
                 return
-            w = w.parentWidget()
+            focused = focused.parentWidget()
         layer = self.engine.get_active_layer()
         if not layer: return
         name, ok = QInputDialog.getText(self, "Rename Layer", "New Name:", text=layer.name)
@@ -949,6 +938,9 @@ class MenuToolbarMixin:
     ) -> None:
         """Show the Preferences dialog for application settings."""
         from src.app.ui.preferences_dialog import PreferencesDialog
+        from src.shared.color.monitor_calibration import EXTERNAL_CALIBRATION_LUT
+
+        previous_external_lut = self.config_manager.get(EXTERNAL_CALIBRATION_LUT, "")
 
         # Collect module preference pages from registered modules
         module_pages = []
@@ -960,6 +952,12 @@ class MenuToolbarMixin:
                         module_pages.extend(mod.register_preference_pages())
                     except Exception as exc:
                         logger.warning("Failed to register preference pages for %s: %s", fid, exc)
+
+        browser = getattr(getattr(self, "files_panel", None), "_native_panel", None)
+        if browser is not None:
+            from src.app.ui.files_browser_preferences import FilesBrowserPreferencePage
+
+            module_pages.append(FilesBrowserPreferencePage(browser._preferences()))
 
         manager = getattr(self, "_model_pack_manager", None)
         for page in module_pages:
@@ -982,13 +980,16 @@ class MenuToolbarMixin:
         # Connect appearance preview signal for instant preview
         dialog.appearance_preview_changed.connect(self._on_appearance_preview)
 
-        dialog.exec()
+        result = dialog.exec()
 
         # Disconnect appearance preview signal (defensive programming)
         try:
             dialog.appearance_preview_changed.disconnect(self._on_appearance_preview)
         except TypeError:
             pass  # Connection may have been automatically disconnected on dialog destruction
+
+        if result == QDialog.DialogCode.Accepted:
+            self._refresh_workspace_preferences()
 
         # AI provider profile 可能在 Preferences 里被修改/切换；重新装配 AI 子系统
         # 使新 profile 立即生效（_setup_ai_editing 会从 config 重新加载 profile 并
@@ -1006,6 +1007,10 @@ class MenuToolbarMixin:
         self.color_manager.reconfigure(self.config_manager)
         self._apply_program_display_color()
         self._apply_color_project_viewer_signal(getattr(self, "_color_project_viewer_active", False))
+        self._apply_desktop_monitor_calibration()
+        external_lut = self.config_manager.get(EXTERNAL_CALIBRATION_LUT, "")
+        if external_lut != previous_external_lut or (external_lut and result == QDialog.DialogCode.Accepted):
+            self._refresh_external_monitor_calibration()
         from src.shared.color.desktop_video_color import USE_DISPLAY_ICC
 
         composite = getattr(self, "composite_viewer", None)
@@ -1034,6 +1039,43 @@ class MenuToolbarMixin:
                     self.config_manager.get("video_preview_no_deblock")))
             except Exception:
                 logger.exception("Failed to apply preview no-deblock preference")
+
+    def _refresh_workspace_preferences(self) -> None:
+        """Apply saved display and editing preferences to the active panels."""
+        config = self.config_manager
+        self._rebuild_recent_projects_menu()
+
+        renderer = getattr(self, "timeline_preview_renderer", None)
+        if renderer is not None:
+            renderer.set_adaptive_playback_quality_enabled(
+                config.get("video_preview_adaptive_quality") is not False
+            )
+        timeline = getattr(self, "timeline_panel", None)
+        if timeline is not None:
+            timeline.set_edit_mode(config.get("edit_drop_mode"), persist=False)
+        edit_page = getattr(self, "edit_page", None)
+        if edit_page is not None:
+            edit_page.set_scene_cut_overlay_visible(
+                config.get("edit_scene_cut_overlay_visible") is True, persist=False
+            )
+        effects = getattr(self, "edit_effects_panel", None)
+        if effects is not None:
+            effects.reload_transition_preview_preferences(config)
+
+        grade_set = getattr(self, "grade_set_panel", None)
+        if grade_set is not None:
+            grade_set.set_card_caption_preferences(
+                show_filenames=config.get("grade_set_show_filenames") is True,
+                rating_at_bottom=config.get("grade_set_rating_at_bottom") is True,
+            )
+        node_editor = getattr(getattr(self, "composite_page", None), "node_editor", None)
+        if node_editor is not None:
+            node_editor.reload_display_preferences()
+
+        for panel_name in ("files_panel", "library_panel"):
+            browser = getattr(getattr(self, panel_name, None), "_native_panel", None)
+            if browser is not None:
+                browser.reload_preferences()
 
     # ------------------------------------------------------------------
     # Appearance preview
@@ -1607,23 +1649,26 @@ class MenuToolbarMixin:
             empty.setEnabled(False)
             return
 
-        for filepath in recent_projects:
+        for filepath in recent_projects[:self._recent_project_limit()]:
             action = self.recent_projects_menu.addAction(os.path.basename(filepath))
             action.setToolTip(filepath)
             action.setData(filepath)
             action.triggered.connect(self._open_recent_project)
+
+    def _recent_project_limit(self) -> int:
+        value = self.config_manager.get("max_recent_projects")
+        return max(1, min(value, 50)) if type(value) is int else 10
 
     def _add_to_recent_projects(self, filepath: str) -> None:
         """Add a project to the recent projects list and rebuild menu."""
         if not filepath:
             return
         recent_projects = list(self.config_manager.get("recent_projects") or [])
-        max_count = self.config_manager.get("max_recent_projects") or 10
         # Remove duplicate if present, then prepend
         abs_path = os.path.abspath(filepath)
         recent_projects = [p for p in recent_projects if os.path.abspath(p) != abs_path]
         recent_projects.insert(0, filepath)
-        recent_projects = recent_projects[:max_count]
+        recent_projects = recent_projects[:self._recent_project_limit()]
         self.config_manager.set("recent_projects", recent_projects)
         # [R2-10] 记住上次打开的项目，供 Project Manager "继续上次项目"使用
         self.config_manager.set("last_project", abs_path)

@@ -5,7 +5,7 @@
 则整体拒绝、要求重新预览，绝不现场重算另一份计划偷偷执行。
 
 模式：template（{name}/{ext}/{seq}/{date}/{camera}）、replace、sequence。
-命名渲染为独立纯函数（不依赖旧 file_explorer.rename_template）。
+命名模板通过独立纯函数渲染。
 """
 from __future__ import annotations
 

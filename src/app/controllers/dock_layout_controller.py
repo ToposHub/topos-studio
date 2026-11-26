@@ -1757,7 +1757,6 @@ class DockLayoutMixin:
         for dock, widget in borrowed:
             dock.widget().layout().addWidget(widget)
             widget.show()
-        self.timeline_panel.set_audio_mixer_dock(self.dock_audio_console)
 
     def _restore_edit_panels_from_mixer(self) -> None:
         """Return the shared widgets before restoring the destination dock state."""
@@ -1796,7 +1795,6 @@ class DockLayoutMixin:
         if self.edit_viewport is not None:
             self.edit_viewport.set_program_only(False)
         viewport.show()
-        self.timeline_panel.set_audio_mixer_dock(self.dock_audio_mixer)
 
     def _audio_workspace_docks(self) -> tuple[QDockWidget, ...]:
         """Include optional docks for visibility and layout persistence."""

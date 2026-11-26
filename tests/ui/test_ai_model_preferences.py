@@ -4,14 +4,17 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import re
 from threading import Thread
 from typing import Any, Callable
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QInputDialog
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
-from src.features.edit.ai_editing.ai_provider_catalog import get_preset
+from src.features.edit.ai_editing.ai_provider_catalog import PROVIDER_PRESETS, get_preset
+from src.features.edit.ai_editing import mcp_vision_gateway
 from src.features.edit.ui import ai_preferences_page
 from src.features.edit.ui.ai_preferences_page import AiEditingPreferencePage
 from src.shared.ai_models.generation import user_ai_config
@@ -23,11 +26,54 @@ from src.shared.ai_models.generation.provider_profiles import (
     ProfileRegistry,
     ProviderLimits,
 )
+from src.shared.i18n.i18n import I18N
 
 
 class _Config(dict[str, Any]):
     def set(self, key: str, value: Any, auto_save: bool = False) -> None:
         self[key] = value
+
+
+def test_preferences_localize_builtin_model_and_service_labels(qtbot, monkeypatch) -> None:
+    gateway = mcp_vision_gateway.McpVisionGateway(api_key_provider=lambda: None, npx_path="/test/npx")
+    monkeypatch.setattr(mcp_vision_gateway, "get_mcp_vision_gateway", lambda: gateway)
+    previous_locale = I18N.get_current_locale()
+    try:
+        for locale in ("zh_CN", "en_US", "ja_JP"):
+            assert I18N.reload_locale(locale)
+            registry = ProfileRegistry()
+            registry.add(AiProviderProfile("custom", "自定义模型", capabilities=("language",)))
+            registry.set_active("custom")
+            page = AiEditingPreferencePage(registry, FakeCredentialStore())
+            widget = page.create_widget()
+            qtbot.addWidget(widget)
+            controls = page._widgets
+            expected = ("智谱视觉 MCP" if locale == "zh_CN" else "Zhipu Vision MCP")
+            protocols = controls["provider_kind"]
+            assert protocols.itemText(protocols.findData("zhipu_vision_mcp")) == expected
+            assert controls["profile_picker"].currentText() == "自定义模型"
+
+            page._set_probe_status("custom", "vision", "视觉模型测试成功")
+            mcp_items = controls["mcp_server_list"]
+            status_items = controls["capability_status"]
+            if locale == "zh_CN":
+                assert "智谱" in mcp_items.item(0).text()
+                assert "剪辑助手语言模型" in status_items.item(0).text()
+                assert "视觉模型测试成功" in controls["probe_status"].text()
+            else:
+                texts = [
+                    controls["probe_status"].text(),
+                    *(part for preset in PROVIDER_PRESETS for part in ai_preferences_page._preset_text(preset)),
+                    *(protocols.itemText(index) for index in range(protocols.count())),
+                ]
+                for items in (mcp_items, status_items):
+                    for index in range(items.count()):
+                        item = items.item(index)
+                        texts.extend((item.text(), item.data(Qt.ItemDataRole.ToolTipRole) or ""))
+                assert all(not re.search(r"[\u3400-\u9fff]", text) for text in texts)
+            widget.close()
+    finally:
+        I18N.reload_locale(previous_locale)
 
 
 def test_model_defaults_and_keys_apply_and_rollback(qapp, tmp_path, monkeypatch) -> None:

@@ -4359,6 +4359,10 @@ class Canvas(QGraphicsView):
             self._color_metal_host.set_video_display(*display)
         self._refresh_display_color()
 
+    def set_monitor_calibration_lut(self, path: str) -> None:
+        self._display_color.set_calibration_lut(path)
+        self._sync_color_metal_host()
+
     def _refresh_display_color(self) -> None:
         if self._timeline_preview_active and self._timeline_monitor_image is not None:
             self._display_color.display_image(self._timeline_monitor_image, self._paint_timeline_preview_image)
@@ -6750,6 +6754,7 @@ class Canvas(QGraphicsView):
         if (not self.isVisible() or self.window().isMinimized()
                 or self._timeline_preview_active or renderer is None
                 or not self._should_present_renderer_front_texture(renderer)
+                or self._display_color.has_calibration
                 or getattr(self.engine, "split_view_active", False)
                 or self.is_picking or self.inspector_mode_active
                 or self.hsl_picker_mode or self.curves_picker_mode

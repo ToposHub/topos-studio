@@ -237,6 +237,40 @@ def test_preview_preserves_same_clip_selection_viewport_and_envelope(qapp) -> No
     editor.close()
 
 
+def test_live_envelope_scales_display_only_until_processed_preview_arrives(qapp) -> None:
+    from src.features.edit.core.audio_edit import envelope_from_canvas_points, set_envelope
+
+    editor, panel = _panel(qapp)
+    panel.set_source_mode(False)
+    panel._duration = 1.0
+
+    def curve(level: float) -> dict:
+        return set_envelope(None, envelope_from_canvas_points(
+            [{"t": 0.0, "db": -6.0}, {"t": 1.0, "db": level}], 1.0, RATE,
+        ))
+
+    panel.sync_audio_edit(curve(-6.0), RATE)
+    panel.attach_pcm(_pcm(), RATE)
+    panel._refresh_stack_preview()
+    canvas = panel.canvas
+    baked_pcm = panel._pcm
+    assert canvas._waveform_envelope_override() is None
+    canvas._env_points[1]["db"] = -18.0  # Mouse drag updates this temporary projection.
+    live = canvas._waveform_envelope_override()
+    assert live is not None
+    ratio = canvas._waveform_envelope_ratio(np.array([0.0, 0.25, 0.5, 1.0]), live)
+    np.testing.assert_allclose(ratio, 10 ** (np.array([0.0, -1.875, -6.0, -12.0]) / 20.0))
+    assert panel._pcm is baked_pcm
+
+    panel.sync_audio_edit(curve(-18.0), RATE)
+    assert panel._pcm is not baked_pcm
+    assert canvas._waveform_envelope_override() is None
+    panel.btn_bypass.setChecked(True)
+    assert canvas._waveform_envelope_override() is None
+    assert canvas._waveform_baked_envelope is None
+    editor.close()
+
+
 def test_timeline_custom_fade_is_displayed_in_clip_editor(qapp) -> None:
     from src.features.edit.core.fade_curve_spec import fade_curve_from_midpoint
     from src.features.mixer.effects.panels.clip_editor import _display_fade_factor

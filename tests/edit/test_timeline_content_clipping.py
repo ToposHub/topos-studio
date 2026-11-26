@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from PyQt6.QtCore import QPoint
+from PyQt6.QtCore import QPoint, QRectF
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
@@ -49,14 +49,16 @@ def test_overflowing_video_thumbnails_do_not_paint_in_audio_panel(
         items = list(view._items_map.values())
         if path in ("filmstrip", "start_end", "single"):
             for item in items:
+                bounds = QRectF(0.0, 0.0, item._width, item._track_height)
+                thumbnail_height = int(item._clip_body_rect(bounds).height() - 4)
                 request = ClipThumbnailRequest(
                     asset_id=item._asset_id, asset_path=item._asset_path,
                     clip_width_px=int(item._width), source_start=item._source_start,
                     source_duration=item._source_duration, pixels_per_frame=item._pixels_per_frame,
-                    thumbnail_height=item._track_height - 4, display_mode=mode,
+                    thumbnail_height=thumbnail_height, display_mode=mode,
                 )
                 key = request.get_cache_key()
-                cache.put(key, ClipThumbnailSet(key, [(0, pixmap), (1000, pixmap)], item._track_height - 4))
+                cache.put(key, ClipThumbnailSet(key, [(0, pixmap), (1000, pixmap)], thumbnail_height))
         for item in items:
             item.hide()
         baseline = _render(view, dpr)

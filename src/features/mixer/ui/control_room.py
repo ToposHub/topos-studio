@@ -154,6 +154,10 @@ class ControlRoomDialog(QDialog):
         with QSignalBlocker(self.gain):
             self.gain.setValue(gain_db)
 
+    def set_monitor_muted(self, muted: bool) -> None:
+        with QSignalBlocker(self.mute):
+            self.mute.setChecked(muted)
+
     def _publish_state(self) -> None:
         if self._syncing:
             return

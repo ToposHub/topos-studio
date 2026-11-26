@@ -16,11 +16,15 @@ from PyQt6.QtGui import QGuiApplication, QImage, QOpenGLContext, QWindow
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
 from src.shared.color.desktop_video_color import (
-    DISPLAY_COLOR_TEXTURE_UNIT, LUT_SIZE, build_display_lut, convert_display_image,
+    DISPLAY_COLOR_TEXTURE_UNIT, LUT_SIZE, build_calibrated_display_lut, build_display_lut,
+    convert_calibrated_display_image,
 )
+from src.shared.color.monitor_calibration import CalibrationRevision, monitor_calibration_revision
 
 _LOG = logging.getLogger(__name__)
 _POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="viewer-colorsync")
+
+
 def _window_icc(window: QWindow) -> bytes:
     """Read the active Cocoa backing profile, including profiles Qt cannot parse."""
     try:
@@ -35,16 +39,20 @@ def _window_icc(window: QWindow) -> bytes:
 
 
 class VideoDisplayColor(QObject):
-    """Build ICC data off the GUI thread and upload only in the existing draw pass."""
+    """Build display LUTs off the GUI thread and upload within the draw pass."""
 
     def __init__(self, viewport: QOpenGLWidget, changed: Callable[[], None]) -> None:
         super().__init__(viewport)
         self._viewport = viewport
         self._changed = changed
         self._preset: str | None = None
-        self._key: tuple[str, bytes] | None = None
+        self._calibration: tuple[str, CalibrationRevision] = ("", (0, 0, 0, 0))
+        self._key: tuple[str | None, bytes, str, CalibrationRevision] | None = None
         self._pending: Future[np.ndarray] | None = None
         self._data: np.ndarray | None = None
+        self._calibration_only_requested = False
+        self._calibration_only_future: Future[np.ndarray] | None = None
+        self._calibration_only_data: np.ndarray | None = None
         self._texture: int | None = None
         self._texture_data: np.ndarray | None = None
         self._context: QOpenGLContext | None = None
@@ -82,8 +90,8 @@ class VideoDisplayColor(QObject):
             if self._in_flight_key == self._key and self._in_flight_revision == self._image_revision:
                 try:
                     image = future.result()
-                except (ImportError, ValueError, RuntimeError, TypeError):
-                    _LOG.warning("Viewer ColorSync image transform failed", exc_info=True)
+                except (OSError, ImportError, ValueError, RuntimeError, TypeError):
+                    _LOG.warning("Viewer display image transform failed", exc_info=True)
                     image = original
                 present(image)
         request, self._image_request = self._image_request, None
@@ -93,19 +101,33 @@ class VideoDisplayColor(QObject):
         self._in_flight_image = request
         self._in_flight_key = self._key
         self._in_flight_revision = self._image_revision
-        self._image_future = _POOL.submit(convert_display_image, request[0], *self._key)
+        self._image_future = _POOL.submit(convert_calibrated_display_image, request[0], *self._key[:3])
         self._image_timer.start()
 
-    def configure(self, preset: str | None, managed: bool) -> None:
+    @property
+    def has_calibration(self) -> bool:
+        return bool(self._calibration[0])
+
+    def set_calibration_lut(self, path: str) -> None:
+        self.configure(self._preset, self._preset is not None, path)
+
+    def configure(self, preset: str | None, managed: bool, calibration_lut: str | None = None) -> None:
         cocoa = sys.platform == "darwin" and QGuiApplication.platformName() == "cocoa"
         requested = preset if managed and cocoa else None
-        if requested == self._preset:
+        calibration = self._calibration
+        if calibration_lut is not None:
+            revision = (0, 0, 0, 0)
+            if calibration_lut:
+                try:
+                    revision = monitor_calibration_revision(calibration_lut)
+                except OSError:
+                    _LOG.warning("Viewer calibration LUT is unavailable: %s", calibration_lut)
+                    calibration_lut = ""
+            calibration = (calibration_lut, revision)
+        if requested == self._preset and calibration == self._calibration:
             return
         self._preset = requested
-        if requested:
-            self._timer.start()
-        else:
-            self._timer.stop()
+        self._calibration = calibration
         self._refresh_profile()
 
     def _refresh_profile(self) -> None:
@@ -113,12 +135,22 @@ class VideoDisplayColor(QObject):
         # follows the NSWindow on profile changes and after a fullscreen reparent.
         window = self._viewport.window().windowHandle() if self._preset else None
         profile = _window_icc(window) if window is not None else b""
-        key = (self._preset, profile) if self._preset and profile else None
+        path, revision = self._calibration
+        key = (self._preset, profile, path, revision) if profile or path else None
         if key != self._key:
             if self._pending is not None:
                 self._pending.cancel()
+            if self._calibration_only_future is not None:
+                self._calibration_only_future.cancel()
+            self._calibration_only_requested = False
+            self._calibration_only_future = self._calibration_only_data = None
             self._key = key
-            self._pending = _POOL.submit(build_display_lut, *key) if key else None
+            if path:
+                self._pending = _POOL.submit(build_calibrated_display_lut, self._preset, profile, path, revision)
+            elif profile:
+                self._pending = _POOL.submit(build_display_lut, self._preset, profile)
+            else:
+                self._pending = None
             self._data = None
             self._changed()
         pending = self._pending
@@ -126,10 +158,26 @@ class VideoDisplayColor(QObject):
             self._pending = None
             try:
                 self._data = pending.result()
-            except (ImportError, ValueError, RuntimeError, TypeError):
-                _LOG.warning("Viewer ColorSync transform could not be built", exc_info=True)
+            except (OSError, ImportError, ValueError, RuntimeError, TypeError):
+                _LOG.warning("Viewer display transform could not be built", exc_info=True)
+                if path and profile:
+                    self._pending = _POOL.submit(build_display_lut, self._preset, profile)
             else:
                 self._changed()
+        calibration_only = self._calibration_only_future
+        if calibration_only is not None and calibration_only.done():
+            self._calibration_only_future = None
+            try:
+                self._calibration_only_data = calibration_only.result()
+            except (OSError, ImportError, ValueError, RuntimeError, TypeError):
+                _LOG.warning("Viewer calibration transform could not be built", exc_info=True)
+            else:
+                self._changed()
+        if self._preset or self._pending is not None:
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            self._timer.stop()
 
     def _release_texture(self) -> None:
         texture = self._texture
@@ -153,11 +201,10 @@ class VideoDisplayColor(QObject):
             finally:
                 self._viewport.doneCurrent()
 
-    def _bind_texture(self, enabled: bool) -> bool:
-        data = self._data
+    def _bind_texture(self, data: np.ndarray | None) -> bool:
         if self._texture is not None and self._texture_data is not data:
             self._release_texture()
-        if data is None or not enabled:
+        if data is None:
             return False
         context = QOpenGLContext.currentContext()
         if context is None:
@@ -196,8 +243,11 @@ class VideoDisplayColor(QObject):
                     glPixelStorei(GL_UNPACK_ALIGNMENT, alignment)
             except GLError:
                 glDeleteTextures([texture])
-                self._data = None
-                _LOG.warning("Could not upload the viewer ICC texture", exc_info=True)
+                if data is self._calibration_only_data:
+                    self._calibration_only_data = None
+                else:
+                    self._data = None
+                _LOG.warning("Could not upload the viewer display LUT", exc_info=True)
                 return False
             self._texture = texture
             self._texture_data = data
@@ -210,11 +260,32 @@ class VideoDisplayColor(QObject):
     def bind_moderngl(self, program: Any, enabled: bool) -> None:
         """Configure the currently executing Color canvas draw pass."""
         program["topos_monitor_icc_lut"].value = DISPLAY_COLOR_TEXTURE_UNIT
-        program["topos_monitor_icc_enabled"].value = self._bind_texture(enabled)
+        program["topos_monitor_icc_enabled"].value = self._bind_texture(self._display_data(enabled))
 
-    def bind_gl(self, gl: Any, program: int, enabled: bool = True) -> bool:
-        """Configure the currently executing Edit or Composite draw pass."""
-        gl.glUniform1i(gl.glGetUniformLocation(program, b"topos_monitor_icc_lut"), DISPLAY_COLOR_TEXTURE_UNIT)
-        active = self._bind_texture(enabled)
-        gl.glUniform1i(gl.glGetUniformLocation(program, b"topos_monitor_icc_enabled"), int(active))
+    def _display_data(self, icc_enabled: bool) -> np.ndarray | None:
+        if icc_enabled:
+            return self._data
+        path, revision = self._calibration
+        if not path:
+            return None
+        if self._key is None or not self._key[1]:
+            return self._data
+        if not self._calibration_only_requested:
+            self._calibration_only_requested = True
+            self._calibration_only_future = _POOL.submit(build_calibrated_display_lut, None, b"", path, revision)
+        return self._calibration_only_data
+
+    def bind_gl(
+        self, gl: Any, program: int, enabled: bool = True, *, uniform_locations: tuple[int, int] | None = None,
+    ) -> bool:
+        """Configure the currently executing desktop viewer draw pass."""
+        if uniform_locations is None:
+            uniform_locations = (
+                gl.glGetUniformLocation(program, b"topos_monitor_icc_lut"),
+                gl.glGetUniformLocation(program, b"topos_monitor_icc_enabled"),
+            )
+        lut_location, enabled_location = uniform_locations
+        gl.glUniform1i(lut_location, DISPLAY_COLOR_TEXTURE_UNIT)
+        active = self._bind_texture(self._display_data(enabled))
+        gl.glUniform1i(enabled_location, int(active))
         return active

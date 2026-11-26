@@ -160,7 +160,7 @@ jobs:
           /tmp/venv-b/bin/python -m pip check
       - name: Core dependency version parity
         run: |
-          CORE_PKGS="PyQt6 PyQt6-Qt6 PyQt6-WebEngine numpy opencv-python scipy av moderngl PyOpenGL opencolorio pillow keyring psutil msgpack waitress flask trimesh pyassimp onnxruntime rawpy pillow-heif QtAwesome send2trash"
+          CORE_PKGS="PyQt6 PyQt6-Qt6 PyQt6-WebEngine numpy opencv-python scipy av moderngl PyOpenGL opencolorio pillow keyring psutil msgpack flask trimesh pyassimp onnxruntime rawpy pillow-heif QtAwesome send2trash"
           fail=0
           for p in $CORE_PKGS; do
             a=$(/tmp/venv-a/bin/python -m pip show "$p" 2>/dev/null | sed -n 's/^Version: //p')

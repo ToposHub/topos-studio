@@ -50,7 +50,7 @@ class _FakeEvent:
         self.accepted = True
 
 
-def _clip_item(qapp, nodes, *, locked=False, width=480.0, height=72.0):
+def _clip_item(qapp, nodes, *, locked=False, width=480.0, height=72.0, node_editing=True):
     """真实 ClipItem（媒体类型 audio → 包络可用），装载包络节点。"""
     from src.features.edit.ui.timeline_items import ClipItem
 
@@ -60,7 +60,7 @@ def _clip_item(qapp, nodes, *, locked=False, width=480.0, height=72.0):
         track_height=int(height), is_track_locked=locked,
         media_type="audio",
     )
-    item._envelope_nodes = list(nodes)
+    item.set_volume_envelope(list(nodes), node_editing=node_editing)
     return item
 
 
@@ -79,8 +79,8 @@ class TestGeometryAndHit:
         assert geo is not None
         y_zero = item._envelope_db_to_y(0.0, geo)
         y_m12 = item._envelope_db_to_y(-12.0, geo)
-        # 0 dB 线 = top + height*0.25（top=6，bottom=track_height−4）。
-        assert y_zero == pytest.approx(6.0 + (72.0 - 4.0 - 6.0) * 0.25)
+        waveform = item._waveform_rect()
+        assert y_zero == pytest.approx(waveform.top() + waveform.height() / 6.0)
         assert item._envelope_y_to_db(y_zero, geo) == pytest.approx(0.0, abs=0.01)
         assert item._envelope_y_to_db(y_m12, geo) == pytest.approx(-12.0, abs=0.01)
         # 中点：0 与 −12 的 y 中点反解 ≈ −6 dB。
@@ -126,7 +126,7 @@ class TestNodeDragCommitsOnce:
         # 拖动期间：临时 overlay 更新，原始折线不变（模型未提交）。
         assert item._envelope_nodes == [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0)]
         assert item._envelope_drag_nodes[1][1] == pytest.approx(-12.0, abs=0.1)
-        item._finish_envelope_node_drag()
+        item._finish_envelope_drag()
         assert len(recorder.finished) == 1
         clip_id, track_id, emitted = recorder.finished[0]
         assert clip_id == "c1" and track_id == "a1"
@@ -172,29 +172,26 @@ class TestNodeDragCommitsOnce:
         assert recorder.finished == []
 
 
-class TestAltInteractions:
-    def test_alt_click_empty_adds_node_and_finishes(self, qapp) -> None:
-        nodes = [(0.0, 0.0), (1.0, 0.0)]
+class TestEnvelopeClicks:
+    def test_left_click_on_empty_envelope_adds_node(self, qapp) -> None:
+        nodes = []
         item = _clip_item(qapp, nodes)
         recorder = _recorder(item)
         geo = item._envelope_geometry()
-        pos = QPointF(0.5 * geo["width"], item._envelope_db_to_y(-6.0, geo))
-        assert item._handle_envelope_press(
-            _FakeEvent(pos, Qt.KeyboardModifier.AltModifier)) is True
+        pos = QPointF(0.5 * geo["width"], item._envelope_db_to_y(0.0, geo))
+        assert item._handle_envelope_press(_FakeEvent(pos)) is True
         assert item._drag_mode == "envelope_node"
-        assert len(item._envelope_nodes) == 3  # 临时 overlay 已含新节点
-        item._finish_envelope_node_drag()
+        assert item._envelope_nodes == []
+        assert item._envelope_live_nodes() == [(0.5, 0.0)]
+        item._finish_envelope_drag()
         assert len(recorder.finished) == 1
-        assert len(recorder.finished[0][2]) == 3
+        assert len(recorder.finished[0][2]) == 1
 
-    def test_alt_click_node_deletes_it(self, qapp) -> None:
+    def test_remove_node_commits_the_remaining_points(self, qapp) -> None:
         nodes = [(0.0, 0.0), (0.5, -6.0), (1.0, 0.0)]
         item = _clip_item(qapp, nodes)
         recorder = _recorder(item)
-        geo = item._envelope_geometry()
-        pos = QPointF(0.5 * geo["width"], item._envelope_db_to_y(-6.0, geo))
-        assert item._handle_envelope_press(
-            _FakeEvent(pos, Qt.KeyboardModifier.AltModifier)) is True
+        item._remove_envelope_point(1)
         assert recorder.finished and len(recorder.finished[0][2]) == 2
 
     def test_locked_track_not_editable(self, qapp) -> None:
@@ -204,6 +201,42 @@ class TestAltInteractions:
         pos = QPointF(0.5 * geo["width"], item._envelope_db_to_y(-6.0, geo))
         assert item._handle_envelope_press(_FakeEvent(pos)) is False
         assert item._envelope_editable() is False
+
+
+def test_default_envelope_paints_on_a_clip_without_knots_at_narrow_zoom(qapp) -> None:
+    from PyQt6.QtGui import QImage, QPainter
+    from PyQt6.QtWidgets import QStyleOptionGraphicsItem
+
+    item = _clip_item(qapp, [], width=20.0, node_editing=False)
+    image = QImage(20, 72, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(0)
+    painter = QPainter(image)
+    try:
+        item.paint(painter, QStyleOptionGraphicsItem())
+    finally:
+        painter.end()
+    zero_y = round(item._envelope_geometry()["zero_y"])
+    assert max(image.pixelColor(10, y).green() for y in range(zero_y - 1, zero_y + 2)) > 175
+    assert item._envelope_nodes == []
+
+
+def test_edit_timeline_shifts_the_whole_envelope_without_editing_knots(qapp) -> None:
+    nodes = [(0.25, 3.0), (0.75, -12.0)]
+    item = _clip_item(qapp, nodes, node_editing=False)
+    node_commits = _recorder(item)
+    shifts: list[float] = []
+    item.envelope_shift_finished.connect(lambda _clip, _track, db: shifts.append(db))
+    geo = item._envelope_geometry()
+    point = QPointF(geo["width"] / 2.0, item._envelope_db_to_y(-4.5, geo))
+
+    assert not item._handle_envelope_press(_FakeEvent(point, Qt.KeyboardModifier.AltModifier))
+    assert item._handle_envelope_press(_FakeEvent(point))
+    item._update_envelope_shift(6 * geo["pixels_per_db"])
+    assert item._envelope_live_nodes() == [(0.25, -3.0), (0.75, -18.0)]
+    item._finish_envelope_drag()
+
+    assert shifts == [-6.0]
+    assert node_commits.finished == []
 
 
 class TestKeyboard:
@@ -242,6 +275,8 @@ class TestViewCommit:
         monkeypatch.setattr(view, "_is_track_locked", lambda tid: False)
 
         # 2 s clip：0 dB→−12 dB 中点在 1 s（48000 样本）。
+        view._audio_only = True
+        view._mixer_envelope_editing = True
         view._on_envelope_edit_finished("c1", "a1", [
             (0.0, 0.0), (0.5, -12.0), (1.0, 0.0)])
         assert len(executed) == 1

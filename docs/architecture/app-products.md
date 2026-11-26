@@ -124,7 +124,7 @@ def main():
 
 ### 3.2 关键装配约束（源码注释即证据）
 
-1. **QtWebEngine 必须在 QApplication 之前导入**（main.py:92-102）。历史上曾推迟到 `create_panels()` 中 files_panel 顶层导入（R0-6 修复记录），属于启动链改动的高危点。
+1. **QtWebEngine 必须在 QApplication 之前导入**。教学动画的 HTML 预览和捕获依赖这项启动顺序。
 2. **模块注册的两种失败语义**（module_loader.py:100-116）：Color 走 `guarded=False`——导入失败直接抛异常中止启动（快速失败）；其余模块 `_register_spec` 把 ImportError/异常隔离为 warning（:59-82），失败清单经 `failures` dict 由 main.py 收集，启动后 1.5s 状态栏提示用户（main.py:248-294）。
 3. **save_router 后装配**：模块注册先于 MainWindow 存在，因此 `registry.register_all_save_handlers()` 必须在 `app_context.save_router = window.save_router` 之后再跑一遍（main.py:268-275；feature_registry.py:193-210）。
 4. **GL ready 前不加载文件**：上次文件恢复挂在 `canvas.gl_viewport.gl_initialized` 信号上且用 `QueuedConnection`——注释明确指出 DirectConnection 会在 `initializeGL()` 内执行 `load_last_file()`，阻塞窗口完成 show()（main_window.py:654-658）。
@@ -166,7 +166,7 @@ class MainWindow(QMainWindow, EditControllerMixin, DeliverControllerMixin,
 | `AiEditController`（ai_edit_controller.py） | 6,424 | 面板信号 ↔ AssistantService 映射；经类型化 `AiEditHostBridge` 与宿主解耦；不解析模型输出 | batch-020/021/022 |
 | `MediaAnalysisController`（media_analysis_controller.py） | 275 | propose→confirm→execute 三步媒体分析编排；不写 timeline、不碰媒体池 widget | 工程切换 unbind 全部 worker |
 
-另有两个独立协作件：`ai_edit_host_bridge(_impl).py`（类型化宿主协议 + MainWindow 实现）、`ai_workflow_composite_render.py`（AI Workflow 画布与合成渲染桥）。app 层还有 `src/app/integrations/file_explorer/`（adapter + EditBenchmarkHostService，把 file_explorer 的 Flask 桥接进 Edit 渲染器，main_window.py:1204-1225 注册；batch-033/034）与 `src/app/ui/` 的共享面板（files_panel/script_panel/library_panel/info_panel/audio_mixer 及 welcome/project_manager/preferences/shortcut/resize 对话框；batch-038~041）。
+App 层的独立协作件包括 `ai_edit_host_bridge(_impl).py`（类型化宿主协议与 MainWindow 实现）、`ai_workflow_composite_render.py`（AI Workflow 画布与合成渲染桥）和 `src/app/services/edit_benchmark_service.py`（剪辑播放与渲染跑分宿主）。MainWindow 创建 `EditBenchmarkHostService`，原生解码跑分窗口通过 `src/features/files/decode_benchmark_service.py` 获取宿主能力。
 
 ### 4.3 页面切换协议（PageManagementMixin）
 
@@ -246,7 +246,9 @@ switch_to_page(page_name, force)
 
 ### 5.4 app/ui 共享面板
 
-`src/app/ui/`：library_panel / files_panel（QtWebEngine + WebChannel 承载 external/file_explorer）/ info_panel / audio_mixer / script_panel / library_adapter，以及 welcome_dialog / project_manager_dialog（视频模式启动强制走此入口）/ preferences_dialog / shortcut_dialog / resize_dialog。特征：files_panel 对 file_explorer 的导入全部 try/except 容错（files_panel.py:18-25），因为它属于可选集成。
+`src/app/ui/` 包含素材面板、资源库、信息面板、音频混音器和脚本面板，也包含欢迎页、工程管理器、首选项、快捷键及画布尺寸对话框。视频模式从工程管理器进入工作区。
+
+`FilesPanel` 装配原生 Qt 素材界面 `NativeFilesPanel` 与 `NativeFilesTransport`。传输层将目录浏览、搜索、元数据和文件事务交给进程内的 `FilesFacade`。预览和回放复用 `src/shared/playback/` 及共享媒体解码。插件启动器和插件中心由 `FilesPluginsController` 协调。内建工具通过原生命令打开独立 Qt 窗口。 [原生素材插件界面](files-plugins-ui.md)
 
 ---
 
@@ -272,7 +274,7 @@ MainWindow 创建 `SaveRouter` 并 `_setup_save_router_callbacks()`（main_windo
 
 ### 6.3 关闭链
 
-`closeEvent`（main_window.py:1903-2004）顺序：tangent_bridge → tracking_service → edit benchmark service → files_panel(Flask) → `_shutdown_playback_pipeline()`（走带→音频→Color 视频→时间线预览渲染→合成渲染线程，幂等 `_pipeline_shutdown_done`）→ **显式 `FileOpsMixin.closeEvent(self, event)`**（QMainWindow 在 MRO 中先于 mixin，super() 会跳过 FileOps 的保存确认与配置持久化——注释即红线，:1941-1946）。已知缺陷：保存确认对话框弹出前服务已全部停机，用户"取消"后应用半瘫痪（AUD-3500，见 §8）。
+MainWindow 的 `closeEvent` 先执行可取消的保存确认，再关闭调色台、跟踪、剪辑跑分和原生素材面板等资源所有者，随后调用 `_shutdown_playback_pipeline()` 停止走带、音频、视频预览及渲染线程。最后显式调用 `FileOpsMixin.closeEvent(self, event)` 完成持久化和工程清理。QMainWindow 在 MRO 中先于 mixin，必须保留这条调用路径。
 
 ---
 
@@ -346,7 +348,8 @@ MainWindow 创建 `SaveRouter` 并 `_setup_save_router_callbacks()`（main_windo
 - `/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/ai_editing_mixin.py`
 - `/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/ai_edit_controller.py`（头部契约）
 - `/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/controllers/media_analysis_controller.py`（头部契约）
-- `/Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/src/app/integrations/file_explorer/`（adapter.py、edit_benchmark_service.py）
+- `src/app/services/edit_benchmark_service.py`（剪辑跑分宿主）
+- `src/app/ui/files_panel.py`、`src/app/ui/native_files_transport.py`（原生素材面板与传输层）
 
 UI / 菜单 / 面板注册：
 

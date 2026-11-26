@@ -818,6 +818,8 @@
     "menu": {
       "rename_track": "重命名轨道…",
       "delete_track": "删除轨道",
+      "cleanup_empty_tracks": "清理空白轨道",
+      "no_empty_tracks": "没有可清理的空白轨道",
       "move_up": "上移轨道",
       "move_down": "下移轨道",
       "set_target_track": "设为目标轨道",
@@ -839,8 +841,17 @@
     "view_options": "时间线显示选项",
     "keyframe_tray": "显示关键帧托盘",
     "recording_mode": "录音模式",
+    "shift_envelope": "上下拖动整条音量包络线",
+    "envelope_edit_mode": "编辑音量包络线",
+    "envelope_add_point": "添加包络线控制点",
+    "envelope_delete_point": "删除包络线控制点",
+    "envelope_reset": "重置音量包络线",
+    "recording_mode_required": "开启录音模式后可启用此轨录音",
     "recording_mode_active": "录音模式 · Shift＋空格开始录音",
     "advanced_tools": "更多编辑工具",
+    "rate_stretch": "比例拉伸工具 (Shift+R)",
+    "linked_selection": "链接选择",
+    "show_marker_list": "显示标记列表",
     "position_lock": "位置锁定",
     "position_locked": "已启用位置锁定",
     "replace_clip": "替换片段",
@@ -848,8 +859,16 @@
     "more_actions": "更多时间线操作",
     "video_view": "视频显示",
     "show_waveforms": "音频波形",
+    "waveform_style": {
+      "title": "波形样式",
+      "bottom_fill": "底部填充",
+      "centered": "居中双向"
+    },
     "video_track_height": "视频轨道高度",
     "audio_track_height": "音频轨道高度",
+    "track_height_ratio": "视频与音频高度比例",
+    "track_height_ratio_video": "视频轨道比例",
+    "track_height_ratio_audio": "音频轨道比例",
     "clip_height": "片段高度",
     "monitor_volume": "监听音量",
     "follow_playhead": "跟随播放头",
@@ -866,8 +885,8 @@
     "thumbnails": {
       "auto": "自动",
       "filmstrip": "连续缩略图",
-      "start_end": "首尾帧",
-      "none": "仅显示片段名称"
+      "start_end": "首尾各一帧",
+      "none": "隐藏预览图"
     },
     "smart_trim": {
       "ripple_in": "波纹入点 — 拖动左边缘",

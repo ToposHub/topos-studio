@@ -6759,8 +6759,13 @@ class CompositePage(QWidget):
         self._aces_external_monitor = view
         if self._renderer is not None:
             self._renderer.set_aces_external_monitor(view)
-            if view is not None and self._is_active:
-                self._evaluate_graph()
+            self.request_external_monitor_refresh()
+
+    def request_external_monitor_refresh(self) -> None:
+        """Render the current composition again for an active external monitor."""
+        if (self.__dict__.get("_aces_external_monitor") is not None
+                and self._renderer is not None and self._is_active):
+            self._evaluate_graph()
 
     def _on_aces_monitor_frame_ready(self, request_id: int, view: object, pixels: object) -> None:
         if (self._is_active and view == self.__dict__.get("_aces_external_monitor")

@@ -5977,6 +5977,7 @@ class AudioPlaybackManager(QObject):
     sample_rate_changed = pyqtSignal(float)
     control_room_output_failed = pyqtSignal(str)
     monitor_gain_changed = pyqtSignal(float)
+    monitor_muted_changed = pyqtSignal(bool)
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         """
@@ -6049,15 +6050,22 @@ class AudioPlaybackManager(QObject):
             self._stop_scrub_preview_output()
             self._invalidate_scrub_previews()
         self.control_room_state = state
-        if state.gain_db != previous.gain_db:
-            # A paused preroll may contain PCM rendered at the old level.
+        if state.gain_db != previous.gain_db or state.muted != previous.muted:
+            # A paused preroll may contain PCM rendered before the monitor change.
             self._prepared_frame = None
             self._prepared_fps = 0.0
+        if state.gain_db != previous.gain_db:
             self.monitor_gain_changed.emit(state.gain_db)
+        if state.muted != previous.muted:
+            self.monitor_muted_changed.emit(state.muted)
 
     def set_monitor_gain_db(self, gain_db: float) -> None:
         """Set listening gain before the speaker output, outside the programme mix."""
         self.set_control_room(replace(self.control_room_state, gain_db=gain_db), self.control_room_patch)
+
+    def set_monitor_muted(self, muted: bool) -> None:
+        """Mute the local listening output while preserving its level setting."""
+        self.set_control_room(replace(self.control_room_state, muted=muted), self.control_room_patch)
 
     def control_room_sample_rate(self) -> int:
         return self._sample_rate

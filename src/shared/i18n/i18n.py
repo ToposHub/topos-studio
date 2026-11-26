@@ -44,6 +44,9 @@ class I18N:
         "it_IT": "Italiano",
     }
     
+    # Preferences have reviewed translations for these locales.
+    _PREFERENCE_LOCALES = frozenset({"en_US", "zh_CN"})
+
     # Locales directory path (set during initialization)
     _locales_dir: Optional[str] = None
 
@@ -165,6 +168,21 @@ class I18N:
             if use_english and cls._current_locale != cls._fallback_locale
             else cls._translations
         )
+        return cls._translate(translations, key, default, **kwargs)
+
+    @classmethod
+    def tr_preference(cls, key: str, default: Optional[str] = None, **kwargs) -> str:
+        """Translate Preferences in Simplified Chinese or English."""
+        translations = (
+            cls._translations if cls._current_locale in cls._PREFERENCE_LOCALES
+            else cls._fallback_translations
+        )
+        return cls._translate(translations, key, default, **kwargs)
+
+    @classmethod
+    def _translate(
+        cls, translations: Dict[str, Any], key: str, default: Optional[str], /, **kwargs: Any,
+    ) -> str:
         if not translations:
             if default is None:
                 return key

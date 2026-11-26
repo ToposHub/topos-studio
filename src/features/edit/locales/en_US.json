@@ -668,6 +668,8 @@
     "menu": {
       "rename_track": "Rename Track...",
       "delete_track": "Delete Track",
+      "cleanup_empty_tracks": "Remove Empty Tracks",
+      "no_empty_tracks": "No unused tracks to remove",
       "move_up": "Move Track Up",
       "move_down": "Move Track Down",
       "set_target_track": "Set as Target Track",
@@ -689,8 +691,17 @@
     "view_options": "Timeline View Options",
     "keyframe_tray": "Show Keyframe Tray",
     "recording_mode": "Recording Mode",
+    "shift_envelope": "Drag vertically to move the whole volume envelope",
+    "envelope_edit_mode": "Edit Audio Envelopes",
+    "envelope_add_point": "Add Envelope Point",
+    "envelope_delete_point": "Delete Envelope Point",
+    "envelope_reset": "Reset Volume Envelope",
+    "recording_mode_required": "Enable Recording Mode to arm this track",
     "recording_mode_active": "Recording Mode · Shift+Space to record",
     "advanced_tools": "More Editing Tools",
+    "rate_stretch": "Rate Stretch (Shift+R)",
+    "linked_selection": "Linked Selection",
+    "show_marker_list": "Show Marker List",
     "position_lock": "Position Lock",
     "position_locked": "Position Lock is enabled",
     "replace_clip": "Replace Clip",
@@ -698,8 +709,16 @@
     "more_actions": "More Timeline Actions",
     "video_view": "Video View",
     "show_waveforms": "Audio Waveforms",
+    "waveform_style": {
+      "title": "Waveform Style",
+      "bottom_fill": "Bottom Fill",
+      "centered": "Centered"
+    },
     "video_track_height": "Video Track Height",
     "audio_track_height": "Audio Track Height",
+    "track_height_ratio": "Video : Audio Height",
+    "track_height_ratio_video": "Video Height Ratio",
+    "track_height_ratio_audio": "Audio Height Ratio",
     "clip_height": "Clip Height",
     "monitor_volume": "Monitor Volume",
     "follow_playhead": "Follow Playhead",
@@ -716,8 +735,8 @@
     "thumbnails": {
       "auto": "Automatic",
       "filmstrip": "Filmstrip",
-      "start_end": "First and Last Frame",
-      "none": "Clip Names Only"
+      "start_end": "One Frame at Each End",
+      "none": "Hide Thumbnails"
     },
     "smart_trim": {
       "ripple_in": "Ripple In — drag the edge",

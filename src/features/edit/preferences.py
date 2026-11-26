@@ -18,7 +18,7 @@ from typing import Any
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QCheckBox, QLineEdit,
-    QScrollArea, QGroupBox,
+    QGroupBox,
 )
 from PyQt6.QtCore import Qt
 
@@ -26,7 +26,7 @@ from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets import ChevronComboBox
 from src.shared.ui.widgets.topos_controls import ToposClickableSlider
 from src.shared.ui.widgets.pref_drag_value import PrefDragValue
-from src.shared.ui.widgets.pref_form_layout import make_pref_form, make_pref_label
+from src.shared.ui.widgets.pref_form_layout import make_pref_form, make_pref_label, make_pref_page
 
 logger = logging.getLogger(__name__)
 
@@ -103,21 +103,11 @@ class EditPreferencePage:
 
     def create_widget(self, parent: QWidget) -> QWidget:
         """Create the Video Playback preference page UI."""
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content = QWidget()
-        content.setObjectName("PrefPageContent")
-        scroll.setWidget(content)
-
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        scroll, layout = make_pref_page(parent)
 
         # Video Playback group
         video_group = QGroupBox(
-            I18N.tr("preferences.video_playback.section_title", "Video Playback")
+            I18N.tr_preference("preferences.video_playback.section_title", "Video Playback")
         )
         video_group.setObjectName("PrefSettingsGroup")
         video_form = make_pref_form(video_group)
@@ -126,30 +116,30 @@ class EditPreferencePage:
         playback_engine_combo = ChevronComboBox()
         playback_engine_combo.setMinimumWidth(180)
         playback_engine_combo.addItem(
-            I18N.tr("preferences.video_playback.engine_auto",
+            I18N.tr_preference("preferences.video_playback.engine_auto",
                     "Auto (Recommended)"),
             "auto"
         )
         playback_engine_combo.addItem(
-            I18N.tr("preferences.video_playback.engine_v3",
+            I18N.tr_preference("preferences.video_playback.engine_v3",
                     "v3 Realtime Engine"),
             "v3"
         )
         playback_engine_combo.addItem(
-            I18N.tr("preferences.video_playback.engine_v2",
+            I18N.tr_preference("preferences.video_playback.engine_v2",
                     "v2 Compatibility"),
             "v2"
         )
         self._widgets['video_pipeline_mode'] = playback_engine_combo
         engine_label = make_pref_label(
-            I18N.tr("preferences.video_playback.engine",
+            I18N.tr_preference("preferences.video_playback.engine",
                     "Video Playback Engine:")
         )
         video_form.addRow(engine_label, playback_engine_combo)
 
         # Allow v2 fallback
         allow_fallback = QCheckBox(
-            I18N.tr("preferences.video_playback.allow_fallback",
+            I18N.tr_preference("preferences.video_playback.allow_fallback",
                     "Allow automatic fallback to v2 if v3 fails")
         )
         self._widgets['video_pipeline_allow_v2_fallback'] = allow_fallback
@@ -157,7 +147,7 @@ class EditPreferencePage:
 
         # Engine description
         engine_desc = QLabel(
-            I18N.tr("preferences.video_playback.engine_desc",
+            I18N.tr_preference("preferences.video_playback.engine_desc",
                      "Auto: Prioritizes v3 realtime engine, falls back to v2 on failure. "
                      "v3: Forces realtime engine, no fallback. "
                      "v2: Uses legacy compatibility path for debugging.")
@@ -168,11 +158,10 @@ class EditPreferencePage:
 
         # 预览关滤波（P6 v2.1 后续，2026-09-22）：跳过解码端输出去块
         no_deblock = QCheckBox(
-            I18N.tr("preferences.video_pipeline.no_deblock",
-                    "Disable deblock filtering in preview (faster, "
-                    "may show 8x8 blocks on low tiers)")
+            I18N.tr_preference("preferences.video_pipeline.no_deblock",
+                    "Disable deblocking in preview")
         )
-        no_deblock.setToolTip(I18N.tr(
+        no_deblock.setToolTip(I18N.tr_preference(
             "preferences.video_pipeline.no_deblock_tooltip",
             "Skips the decoder-side deblock filter for timeline preview. "
             "Decoding gets 1.2-2x faster on low tiers but 8x8 block edges "
@@ -183,26 +172,36 @@ class EditPreferencePage:
 
         # Drop Frames
         drop_frames = QCheckBox(
-            I18N.tr("preferences.video_pipeline.drop_frames",
+            I18N.tr_preference("preferences.video_pipeline.drop_frames",
                     "Drop frames when preview queue is full")
         )
         self._widgets['video_preview_drop_frames'] = drop_frames
         video_form.addRow("", drop_frames)
+
+        adaptive_quality = QCheckBox(I18N.tr_preference(
+            "preferences.video_playback.adaptive_quality", "Adjust playback quality automatically"
+        ))
+        adaptive_quality.setToolTip(I18N.tr_preference(
+            "preferences.video_playback.adaptive_quality_help",
+            "Reduce preview quality when playback struggles and restore it when the load drops.",
+        ))
+        self._widgets["video_preview_adaptive_quality"] = adaptive_quality
+        video_form.addRow("", adaptive_quality)
 
         # Max Queue Size
         queue_spin = PrefDragValue(min_v=2, max_v=32, default=4)
         queue_spin.setSingleStep(2)
         self._widgets['video_preview_max_queue'] = queue_spin
         queue_label = make_pref_label(
-            I18N.tr("preferences.video_pipeline.max_queue",
+            I18N.tr_preference("preferences.video_pipeline.max_queue",
                     "Preview queue depth:")
         )
         video_form.addRow(queue_label, queue_spin)
 
         # YUV GPU Upload
         yuv_upload = QCheckBox(
-            I18N.tr("preferences.video_pipeline.yuv_gpu_upload",
-                    "Use GPU for YUV color conversion (recommended)")
+            I18N.tr_preference("preferences.video_pipeline.yuv_gpu_upload",
+                    "Use GPU for YUV conversion")
         )
         self._widgets['video_use_yuv_gpu_upload'] = yuv_upload
         video_form.addRow("", yuv_upload)
@@ -211,51 +210,51 @@ class EditPreferencePage:
 
         # External monitoring group
         monitor_group = QGroupBox(
-            I18N.tr("preferences.decklink.section_title", "External Video Monitoring")
+            I18N.tr_preference("preferences.decklink.section_title", "External Video Monitoring")
         )
         monitor_group.setObjectName("PrefSettingsGroup")
         monitor_form = make_pref_form(monitor_group)
 
         decklink_enabled = QCheckBox(
-            I18N.tr(
+            I18N.tr_preference(
                 "preferences.decklink.enabled",
-                "Enable Blackmagic DeckLink program monitor output",
+                "Enable DeckLink monitor output",
             )
         )
         self._widgets['decklink_monitor_enabled'] = decklink_enabled
         monitor_form.addRow("", decklink_enabled)
 
         decklink_backend = ChevronComboBox()
-        decklink_backend.addItem("Native SDK bridge", "native_sdk")
+        decklink_backend.addItem(I18N.tr_preference("preferences.decklink.backend_native", "Native SDK bridge"), "native_sdk")
         decklink_backend.addItem("ffmpeg DeckLink", "ffmpeg")
         self._widgets['decklink_monitor_backend'] = decklink_backend
         monitor_form.addRow(
-            make_pref_label(I18N.tr("preferences.decklink.backend", "Output backend:")),
+            make_pref_label(I18N.tr_preference("preferences.decklink.backend", "Output backend:")),
             decklink_backend,
         )
 
         decklink_device = QLineEdit()
-        decklink_device.setPlaceholderText(I18N.tr(
+        decklink_device.setPlaceholderText(I18N.tr_preference(
             "preferences.decklink.auto_device_placeholder",
             "Auto-select when only one DeckLink device is installed"))
         self._widgets['decklink_monitor_device'] = decklink_device
         monitor_form.addRow(
-            make_pref_label(I18N.tr("preferences.decklink.device", "DeckLink device:")),
+            make_pref_label(I18N.tr_preference("preferences.decklink.device", "DeckLink device:")),
             decklink_device,
         )
 
         decklink_ffmpeg = QLineEdit()
-        decklink_ffmpeg.setPlaceholderText(I18N.tr(
+        decklink_ffmpeg.setPlaceholderText(I18N.tr_preference(
             "preferences.decklink.ffmpeg_path_placeholder",
             "/usr/local/bin/ffmpeg"))
         self._widgets['decklink_monitor_ffmpeg_path'] = decklink_ffmpeg
         monitor_form.addRow(
-            make_pref_label(I18N.tr("preferences.decklink.ffmpeg_path", "ffmpeg path:")),
+            make_pref_label(I18N.tr_preference("preferences.decklink.ffmpeg_path", "ffmpeg path:")),
             decklink_ffmpeg,
         )
 
         decklink_desc = QLabel(
-            I18N.tr(
+            I18N.tr_preference(
                 "preferences.decklink.desc",
                 "First-stage monitoring outputs fixed 1080i50 YUV video. The ffmpeg "
                 "backend requires an ffmpeg build compiled with DeckLink support; "
@@ -272,7 +271,7 @@ class EditPreferencePage:
 
         # P9-6: Scene Cut Detection group
         scene_cut_group = QGroupBox(
-            I18N.tr("preferences.scene_cut.section_title", "Scene Cut Detection")
+            I18N.tr_preference("preferences.scene_cut.section_title", "Scene Cut Detection")
         )
         scene_cut_group.setObjectName("PrefSettingsGroup")
         scene_cut_form = make_pref_form(scene_cut_group)
@@ -293,14 +292,14 @@ class EditPreferencePage:
 
         # Label for sensitivity
         sensitivity_label = make_pref_label(
-            I18N.tr("preferences.scene_cut.sensitivity",
+            I18N.tr_preference("preferences.scene_cut.sensitivity",
                     "Default sensitivity:")
         )
         scene_cut_form.addRow(sensitivity_label, sens_widget)
 
         # Sensitivity description
         sensitivity_desc = QLabel(
-            I18N.tr("preferences.scene_cut.sensitivity_desc",
+            I18N.tr_preference("preferences.scene_cut.sensitivity_desc",
                     "Lower values = more sensitive (more candidates). "
                     "Higher values = conservative (fewer false positives).")
         )
@@ -310,18 +309,24 @@ class EditPreferencePage:
 
         # Use proxy for detection
         use_proxy = QCheckBox(
-            I18N.tr("preferences.scene_cut.use_proxy",
+            I18N.tr_preference("preferences.scene_cut.use_proxy",
                     "Use proxy media for detection (faster)")
         )
         use_proxy.setChecked(True)
         self._widgets['scene_cut_use_proxy'] = use_proxy
         scene_cut_form.addRow("", use_proxy)
 
+        scene_overlay = QCheckBox(I18N.tr_preference(
+            "preferences.scene_cut.show_overlay", "Show candidate cuts on the timeline"
+        ))
+        self._widgets["edit_scene_cut_overlay_visible"] = scene_overlay
+        scene_cut_form.addRow("", scene_overlay)
+
         # Min scene frames
         min_frames_spin = PrefDragValue(min_v=2, max_v=120, default=8)
         self._widgets['scene_cut_min_scene_frames'] = min_frames_spin
         min_frames_label = make_pref_label(
-            I18N.tr("preferences.scene_cut.min_scene_frames",
+            I18N.tr_preference("preferences.scene_cut.min_scene_frames",
                     "Minimum frames between cuts:")
         )
         scene_cut_form.addRow(min_frames_label, min_frames_spin)
@@ -348,6 +353,12 @@ class EditPreferencePage:
         self._widgets['video_pipeline_allow_v2_fallback'].setChecked(
             _safe_bool(config.get('video_pipeline_allow_v2_fallback'), True,
                        'video_pipeline_allow_v2_fallback')
+        )
+        self._widgets["video_preview_adaptive_quality"].setChecked(
+            _safe_bool(config.get("video_preview_adaptive_quality", True), True, "video_preview_adaptive_quality")
+        )
+        self._widgets["edit_scene_cut_overlay_visible"].setChecked(
+            _safe_bool(config.get("edit_scene_cut_overlay_visible", False), False, "edit_scene_cut_overlay_visible")
         )
         self._widgets['video_preview_drop_frames'].setChecked(
             _safe_bool(config.get('video_preview_drop_frames'), True,
@@ -411,6 +422,8 @@ class EditPreferencePage:
         config_manager.set('video_pipeline_allow_v2_fallback',
                            self._widgets['video_pipeline_allow_v2_fallback'].isChecked(),
                            auto_save=False)
+        for key in ("video_preview_adaptive_quality", "edit_scene_cut_overlay_visible"):
+            config_manager.set(key, self._widgets[key].isChecked(), auto_save=False)
         config_manager.set('video_preview_drop_frames',
                            self._widgets['video_preview_drop_frames'].isChecked(),
                            auto_save=False)
@@ -470,6 +483,12 @@ class EditPreferencePage:
             _safe_bool(defaults.get('video_pipeline_allow_v2_fallback'), True,
                        'video_pipeline_allow_v2_fallback')
         )
+        self._widgets["video_preview_adaptive_quality"].setChecked(
+            _safe_bool(defaults.get("video_preview_adaptive_quality", True), True, "video_preview_adaptive_quality")
+        )
+        self._widgets["edit_scene_cut_overlay_visible"].setChecked(
+            _safe_bool(defaults.get("edit_scene_cut_overlay_visible", False), False, "edit_scene_cut_overlay_visible")
+        )
         self._widgets['video_preview_drop_frames'].setChecked(
             _safe_bool(defaults.get('video_preview_drop_frames'), True,
                        'video_preview_drop_frames')
@@ -519,6 +538,74 @@ class EditPreferencePage:
                       *_SCENE_CUT_MIN_SCENE_FRAMES_RANGE,
                       key='scene_cut_min_scene_frames')
         )
+
+
+class EditInteractionPreferencePage:
+    """Timeline drop behavior and transition browser presentation."""
+
+    page_id = "edit.interaction"
+    _DEFAULTS = {
+        "edit_drop_mode": "overwrite",
+        "transition_preview_mode": "icon",
+        "transition_preview_size": "medium",
+    }
+
+    def __init__(self) -> None:
+        self._combos: dict[str, ChevronComboBox] = {}
+
+    def create_widget(self, parent: QWidget) -> QWidget:
+        scroll, layout = make_pref_page(parent)
+
+        drag_group = QGroupBox(I18N.tr_preference("preferences.edit_interaction.timeline", "Timeline"))
+        drag_group.setObjectName("PrefSettingsGroup")
+        drag_form = make_pref_form(drag_group)
+        drop_mode = ChevronComboBox()
+        drop_mode.addItem(I18N.tr_preference("preferences.edit_interaction.overwrite", "Overwrite"), "overwrite")
+        drop_mode.addItem(I18N.tr_preference("preferences.edit_interaction.insert", "Insert"), "insert")
+        self._combos["edit_drop_mode"] = drop_mode
+        drag_form.addRow(make_pref_label(I18N.tr_preference(
+            "preferences.edit_interaction.drop_mode", "Timeline drop mode"
+        )), drop_mode)
+        layout.addWidget(drag_group)
+
+        transitions = QGroupBox(I18N.tr_preference("preferences.edit_interaction.transitions", "Transition Browser"))
+        transitions.setObjectName("PrefSettingsGroup")
+        transition_form = make_pref_form(transitions)
+        preview = ChevronComboBox()
+        preview.addItem(I18N.tr_preference("preferences.edit_interaction.static", "Static icons"), "icon")
+        preview.addItem(I18N.tr_preference("preferences.edit_interaction.animated", "Animated previews"), "animated")
+        self._combos["transition_preview_mode"] = preview
+        transition_form.addRow(make_pref_label(I18N.tr_preference(
+            "preferences.edit_interaction.preview_mode", "Preview style"
+        )), preview)
+        size = ChevronComboBox()
+        for key, label in (
+            ("small", I18N.tr_preference("preferences.edit_interaction.small", "Small")),
+            ("medium", I18N.tr_preference("preferences.edit_interaction.medium", "Medium")),
+            ("large", I18N.tr_preference("preferences.edit_interaction.large", "Large")),
+        ):
+            size.addItem(label, key)
+        self._combos["transition_preview_size"] = size
+        transition_form.addRow(make_pref_label(I18N.tr_preference(
+            "preferences.edit_interaction.preview_size", "Animated preview size"
+        )), size)
+        preview.currentIndexChanged.connect(lambda: size.setEnabled(preview.currentData() == "animated"))
+        size.setEnabled(False)
+        layout.addWidget(transitions)
+        layout.addStretch()
+        return scroll
+
+    def load(self, config: Any) -> None:
+        for key, combo in self._combos.items():
+            index = combo.findData(config.get(key))
+            combo.setCurrentIndex(index if index >= 0 else combo.findData(self._DEFAULTS[key]))
+
+    def apply(self, config_manager: Any) -> None:
+        for key, combo in self._combos.items():
+            config_manager.set(key, combo.currentData(), auto_save=False)
+
+    def restore_defaults(self, defaults: dict) -> None:
+        self.load(defaults)
 
 
 def get_scene_cut_settings_from_config(config: dict) -> dict:

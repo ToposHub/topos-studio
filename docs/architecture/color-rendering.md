@@ -648,6 +648,8 @@ ImageEngine.bake_layer → submit(BAKE_LAYER)              [关键命令]
 
 三处桌面查看器以线性 AP1 为共同输入，内置变换使用固定版本的 OpenColorIO，macOS 显示器 ICC 在桌面呈现时应用。OpenGL 使用 OCIO 生成的解析着色器和查表纹理，自定义监看 LUT 在 CPU 和 OpenGL 上采用四面体插值。Rec.709 交付继续使用工程的 OCIO 输出变换，AP0 和 AP1 OpenEXR 写入场景线性浮点像素、色度及关联 Alpha。
 
+色彩管理首选项保存本机的内置监看与上屏卡校准 LUT，支持设备信号域的 `.cube` 和 `.3dl`。桌面校准在显示变换和启用的 ICC 校正之后生效。外接校准在该路独立显示变换之后、DeckLink 封装之前生效。工程变换、示波器和正式交付继续使用各自的色彩信号。
+
 - [工程设置、输入和 CPU 路径](../../src/shared/color/project_video_signal.py)
 - [OpenGL 输出变换](../../src/shared/color/aces_video_gl.py)
 - [OpenEXR 读入](../../src/shared/io/openexr_io.py)

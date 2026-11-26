@@ -13,6 +13,11 @@ from typing import Any
 from PyQt6.QtCore import QSettings
 
 
+THUMBNAIL_WIDTH_MIN = 96
+THUMBNAIL_WIDTH_MAX = 320
+THUMBNAIL_WIDTH_DEFAULT = 180
+
+
 class NativeFilesPreferences:
     """一层薄封装：把 QSettings 的字符串/字节噪声挡在 UI 代码之外。"""
 
@@ -212,7 +217,7 @@ class NativeFilesPreferences:
 
     @property
     def density(self) -> int:
-        return int(self._read("density", 180))
+        return int(self._read("density", THUMBNAIL_WIDTH_DEFAULT))
 
     @density.setter
     def density(self, value: int) -> None:

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from PyQt6.QtGui import QColor, QImage, QPainter
 from PyQt6.QtWidgets import QApplication, QGraphicsScene
 
 from src.features.edit.core.audio_waveform import (
@@ -28,8 +29,19 @@ from src.features.edit.core.audio_waveform import (
     load_waveform_from_disk,
     save_waveform_to_disk,
 )
+from src.features.edit.ui.timeline_waveform_style import waveform_baseline, waveform_path
 
 pytestmark = pytest.mark.edit_core
+
+
+def test_waveform_bottom_fill_uses_magnitude_of_both_polarities() -> None:
+    lows, highs = (-0.8, -0.2), (0.1, 0.4)
+    filled = waveform_path(lows, highs, 0.0, 40.0, 20.0, 20.0, "bottom_fill").boundingRect()
+    centered = waveform_path(lows, highs, 0.0, 40.0, 20.0, 20.0, "centered").boundingRect()
+    assert filled.top() == pytest.approx(14.0)
+    assert filled.bottom() == pytest.approx(30.0)
+    assert centered.top() == pytest.approx(16.0)
+    assert centered.bottom() == pytest.approx(28.0)
 
 WAV_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "test_audio", "wav")
@@ -319,6 +331,56 @@ class TestClipItemGainAndFx:
         assert item._waveform_gain == 0.0
         # 同值不触发 update（幂等）
         item.set_waveform_gain(0.0)
+
+    @pytest.mark.parametrize("style", ["bottom_fill", "centered"])
+    def test_waveform_follows_live_envelope_without_rebuilding_source_peaks(
+        self, qapp: QApplication, style: str,
+    ) -> None:
+        item = _make_clip_item(qapp)
+        item._waveform_style = style
+        width = item._width
+        baseline = waveform_baseline(style, 20.0, 20.0)
+        # The raw peaks cover a scrolled window, not the entire clip.
+        source = waveform_path((-0.5,) * 4, (0.5,) * 4, width / 4, width * 3 / 4, 20.0, 20.0, style)
+        item.set_volume_envelope([(0.0, 0.0), (1.0, -24.0)])
+        item._waveform_path_cache = [source]
+        source_height = baseline - source.boundingRect().top()
+        linear = item._enveloped_waveform_path(source, baseline, item._envelope_live_nodes())
+        assert baseline - linear.boundingRect().top() == pytest.approx(source_height * 10 ** (-6 / 20))
+        assert item._enveloped_waveform_path(source, baseline, item._envelope_live_nodes()) is linear
+
+        item._drag_mode = "envelope_node"
+        item._envelope_drag_nodes = [(0.0, 0.0), (1.0, -48.0)]
+        bezier = item._enveloped_waveform_path(source, baseline, item._envelope_live_nodes())
+        assert baseline - bezier.boundingRect().top() == pytest.approx(source_height * 10 ** (-7.5 / 20))
+        assert bezier is not linear
+        assert item._waveform_path_cache[0] is source
+        assert baseline - source.boundingRect().top() == source_height
+
+    def test_waveform_gain_preview_stays_inside_its_channel(self, qapp: QApplication) -> None:
+        item = _make_clip_item(qapp)
+        item._waveform_style = "bottom_fill"
+        item.set_volume_envelope([(0.0, 0.0)])
+        source = waveform_path((-0.4,) * 4, (0.4,) * 4, 0.0, 100.0, 20.0, 20.0, item._waveform_style)
+
+        def render() -> QImage:
+            image = QImage(100, 40, QImage.Format.Format_ARGB32)
+            image.fill(0)
+            painter = QPainter(image)
+            try:
+                item._paint_waveform_path(painter, source, QColor("white"), 0.0, 100.0, 20.0, 20.0)
+            finally:
+                painter.end()
+            return image
+
+        assert render().pixelColor(50, 15).alpha() == 0
+        item._drag_mode = "envelope_shift"
+        item._envelope_shift_db = 12.0
+        item._envelope_drag_nodes = [(0.0, 12.0)]
+        amplified = render()
+        assert amplified.pixelColor(50, 15).alpha() == 255
+        assert amplified.pixelColor(50, 9).alpha() == 0
+        assert amplified.pixelColor(50, 30).alpha() == 0
 
     def test_effect_fingerprint_stability_and_bypass(self, qapp: QApplication) -> None:
         fx_on = (SimpleNamespace(effect_type="compressor",

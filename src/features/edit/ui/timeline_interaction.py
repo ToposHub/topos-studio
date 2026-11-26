@@ -52,6 +52,7 @@ class InteractionState(Enum):
     DRAGGING_FADE_IN = auto()
     DRAGGING_FADE_OUT = auto()
     DRAGGING_RETIME_POINT = auto()
+    DRAGGING_ENVELOPE = auto()
     CONTEXT_MENU = auto()       # Context menu is open
 
 
@@ -186,6 +187,7 @@ class InteractionSession:
             InteractionState.DRAGGING_FADE_IN,
             InteractionState.DRAGGING_FADE_OUT,
             InteractionState.DRAGGING_RETIME_POINT,
+            InteractionState.DRAGGING_ENVELOPE,
         )
 
     def begin(self, state: InteractionState, start_pos: QPointF, **kwargs) -> None:

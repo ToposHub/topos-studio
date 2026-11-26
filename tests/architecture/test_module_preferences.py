@@ -43,12 +43,12 @@ def qapp():
 
 
 # =========================================================================
-# TestColorProcessingPreferencePage
+# Color preference pages
 # =========================================================================
 
 
-class TestColorProcessingPreferencePage:
-    """Lifecycle tests for ColorProcessingPreferencePage."""
+class TestColorPreferencePages:
+    """Lifecycle tests for color management and image processing."""
 
     COLOR_DEFAULTS = {
         "default_color_space": "sRGB",
@@ -67,32 +67,47 @@ class TestColorProcessingPreferencePage:
 
     @pytest.fixture
     def page(self, qapp):
-        from src.features.color.preferences import ColorProcessingPreferencePage
-        p = ColorProcessingPreferencePage()
+        from src.features.color.preferences import ColorManagementPreferencePage
+        p = ColorManagementPreferencePage()
         # Keep a reference to the widget so Qt C++ objects are not GC'd
         p._widget_ref = p.create_widget(None)
         return p
 
-    def test_create_widget_returns_widget(self, qapp):
+    @pytest.fixture
+    def processing_page(self, qapp):
         from src.features.color.preferences import ColorProcessingPreferencePage
+
+        page = ColorProcessingPreferencePage()
+        page._widget_ref = page.create_widget(None)
+        return page
+
+    def test_create_widget_returns_widget(self, qapp):
+        from src.features.color.preferences import ColorManagementPreferencePage
         from PyQt6.QtWidgets import QWidget
-        p = ColorProcessingPreferencePage()
+        p = ColorManagementPreferencePage()
         widget = p.create_widget(None)
         assert widget is not None
         assert isinstance(widget, QWidget)
 
-    def test_create_widget_populates_internal_widgets(self, page):
+    def test_create_widget_populates_internal_widgets(self, page, processing_page):
         expected_keys = [
             "default_color_space", "default_bit_depth", "rendering_intent",
             "gpu_color_processing", "show_color_space_warnings",
             "auto_assign_icc", "ocio_config_path",
-            "default_denoise_strength", "default_sharpen_amount",
-            "ai_model_path", "ai_tile_size", "ai_gpu_device",
         ]
         for key in expected_keys:
             assert key in page._widgets, f"Missing widget key: {key}"
+            assert key not in processing_page._widgets
 
-    def test_load_settings(self, page):
+        processing_keys = [
+            "default_denoise_strength", "default_sharpen_amount",
+            "ai_model_path", "ai_tile_size", "ai_gpu_device",
+        ]
+        for key in processing_keys:
+            assert key in processing_page._widgets, f"Missing widget key: {key}"
+            assert key not in page._widgets
+
+    def test_load_settings(self, page, processing_page):
         config = {
             "default_color_space": "Adobe RGB",
             "default_bit_depth": "16-bit",
@@ -108,6 +123,7 @@ class TestColorProcessingPreferencePage:
             "ai_gpu_device": "cuda",
         }
         page.load(config)
+        processing_page.load(config)
 
         assert page._widgets["default_color_space"].currentText() == "Adobe RGB"
         assert page._widgets["default_bit_depth"].currentText() == "16-bit"
@@ -116,22 +132,23 @@ class TestColorProcessingPreferencePage:
         assert page._widgets["show_color_space_warnings"].isChecked() is False
         assert page._widgets["auto_assign_icc"].isChecked() is False
         assert page._widgets["ocio_config_path"].text() == "/path/to/ocio"
-        assert page._widgets["default_denoise_strength"].value() == 75
-        assert page._widgets["default_sharpen_amount"].value() == 30
-        assert page._widgets["ai_model_path"].text() == "/models/ai"
-        assert page._widgets["ai_tile_size"].currentData() == 1024
-        assert page._widgets["ai_gpu_device"].currentData() == "cuda"
+        assert processing_page._widgets["default_denoise_strength"].value() == 75
+        assert processing_page._widgets["default_sharpen_amount"].value() == 30
+        assert processing_page._widgets["ai_model_path"].text() == "/models/ai"
+        assert processing_page._widgets["ai_tile_size"].currentData() == 1024
+        assert processing_page._widgets["ai_gpu_device"].currentData() == "cuda"
 
-    def test_load_with_empty_config_uses_defaults(self, page):
+    def test_load_with_empty_config_uses_defaults(self, page, processing_page):
         page.load({})
+        processing_page.load({})
         assert page._widgets["default_color_space"].currentText() == "sRGB"
         assert page._widgets["default_bit_depth"].currentText() == "8-bit"
         assert page._widgets["rendering_intent"].currentData() == "relative"
         assert page._widgets["gpu_color_processing"].isChecked() is True
-        assert page._widgets["default_denoise_strength"].value() == 50
-        assert page._widgets["default_sharpen_amount"].value() == 0
-        assert page._widgets["ai_tile_size"].currentData() == 512
-        assert page._widgets["ai_gpu_device"].currentData() == "auto"
+        assert processing_page._widgets["default_denoise_strength"].value() == 50
+        assert processing_page._widgets["default_sharpen_amount"].value() == 0
+        assert processing_page._widgets["ai_tile_size"].currentData() == 512
+        assert processing_page._widgets["ai_gpu_device"].currentData() == "auto"
 
     def test_video_color_space_preferences_keep_existing_custom_choices(self, page):
         from src.features.color.preferences import ColorSpaceControls
@@ -258,6 +275,35 @@ class TestColorProcessingPreferencePage:
         assert science.currentData() == "aces"
         assert widget.changes() == {}
 
+    def test_monitor_calibration_is_saved_for_each_local_display(self, page, tmp_path, monkeypatch):
+        from PyQt6.QtWidgets import QFileDialog
+
+        from src.shared.color.color_space_descriptor import color_settings_from_config
+        from src.shared.color.monitor_calibration import DESKTOP_CALIBRATION_LUT, EXTERNAL_CALIBRATION_LUT
+
+        pytest.importorskip("PyOpenColorIO")
+        paths = []
+        for name in ("desktop.cube", "screen.cube"):
+            path = tmp_path / name
+            path.write_text("LUT_3D_SIZE 2\n" + "0.25 0.5 0.75\n" * 8)
+            paths.append(str(path))
+        selections = iter(paths)
+        monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_: (next(selections), ""))
+        config = FakeConfigManager()
+        page.load(config)
+        keys = (DESKTOP_CALIBRATION_LUT, EXTERNAL_CALIBRATION_LUT)
+        for key in keys:
+            page._select_calibration_lut(page._widgets[key])
+        page.apply(config)
+        assert [config.get(key) for key in keys] == paths
+        assert not set(keys).intersection(color_settings_from_config(config))
+
+        page.load(config)
+        page._widgets[EXTERNAL_CALIBRATION_LUT].clear()
+        page.apply(config)
+        assert config.get(DESKTOP_CALIBRATION_LUT) == paths[0]
+        assert config.get(EXTERNAL_CALIBRATION_LUT) == ""
+
     def test_project_monitor_luts_are_independent_and_adopted_on_accept(self, qapp, tmp_path, monkeypatch):
         import numpy as np
         from PyQt6.QtWidgets import QFileDialog
@@ -334,13 +380,13 @@ class TestColorProcessingPreferencePage:
 
     def test_image_preferences_leave_video_color_space_defaults_untouched(self, qapp, monkeypatch):
         from PyQt6.QtWidgets import QWidget
-        from src.features.color.preferences import ColorProcessingPreferencePage, ColorSpaceControls
+        from src.features.color.preferences import ColorManagementPreferencePage, ColorSpaceControls
 
         monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
         parent = QWidget()
         cfg = FakeConfigManager({"work_mode": "image", "color.timeline_space": "srgb"})
         parent._config_manager = cfg
-        page = ColorProcessingPreferencePage()
+        page = ColorManagementPreferencePage()
         widget = page.create_widget(parent)
         assert widget.findChild(ColorSpaceControls) is None
 
@@ -350,19 +396,21 @@ class TestColorProcessingPreferencePage:
         assert cfg.get("color.timeline_space") == "srgb"
         assert cfg.get("color.output_space") is None
 
-    def test_apply_settings(self, page):
+    def test_apply_settings(self, page, processing_page):
         page.load(self.COLOR_DEFAULTS)
+        processing_page.load(self.COLOR_DEFAULTS)
         # Modify some widgets
         page._widgets["default_color_space"].setCurrentText("ProPhoto RGB")
         page._widgets["default_bit_depth"].setCurrentText("16-bit")
         page._widgets["gpu_color_processing"].setChecked(False)
-        page._widgets["default_denoise_strength"].setValue(80)
-        page._widgets["ai_gpu_device"].setCurrentIndex(
-            _find_combo_data_index(page._widgets["ai_gpu_device"], "cuda")
+        processing_page._widgets["default_denoise_strength"].setValue(80)
+        processing_page._widgets["ai_gpu_device"].setCurrentIndex(
+            _find_combo_data_index(processing_page._widgets["ai_gpu_device"], "cuda")
         )
 
         cm = FakeConfigManager()
         page.apply(cm)
+        processing_page.apply(cm)
 
         assert cm._data["default_color_space"] == "ProPhoto RGB"
         assert cm._data["default_bit_depth"] == "16-bit"
@@ -373,7 +421,7 @@ class TestColorProcessingPreferencePage:
         assert cm._data["rendering_intent"] == "relative"
         assert cm._data["default_sharpen_amount"] == 0
 
-    def test_restore_defaults(self, page):
+    def test_restore_defaults(self, page, processing_page):
         # First load non-default values
         config = dict(self.COLOR_DEFAULTS)
         config["default_color_space"] = "DCI-P3"
@@ -381,15 +429,17 @@ class TestColorProcessingPreferencePage:
         config["gpu_color_processing"] = False
         config["default_denoise_strength"] = 100
         page.load(config)
+        processing_page.load(config)
 
         # Restore defaults
         page.restore_defaults(self.COLOR_DEFAULTS)
+        processing_page.restore_defaults(self.COLOR_DEFAULTS)
 
         assert page._widgets["default_color_space"].currentText() == "sRGB"
         assert page._widgets["default_bit_depth"].currentText() == "8-bit"
         assert page._widgets["gpu_color_processing"].isChecked() is True
-        assert page._widgets["default_denoise_strength"].value() == 50
-        assert page._widgets["default_sharpen_amount"].value() == 0
+        assert processing_page._widgets["default_denoise_strength"].value() == 50
+        assert processing_page._widgets["default_sharpen_amount"].value() == 0
 
     def test_default_values_complete(self):
         """All expected config keys should have defaults in DEFAULT_CONFIG."""
@@ -400,22 +450,22 @@ class TestColorProcessingPreferencePage:
             assert key in defaults, f"Missing default for key: {key}"
 
     def test_load_before_create_widget_is_noop(self, qapp):
-        from src.features.color.preferences import ColorProcessingPreferencePage
-        p = ColorProcessingPreferencePage()
+        from src.features.color.preferences import ColorManagementPreferencePage
+        p = ColorManagementPreferencePage()
         # Should not crash even though widgets were never created
         p.load({"default_color_space": "Adobe RGB"})
 
     def test_apply_before_create_widget_is_noop(self, qapp):
-        from src.features.color.preferences import ColorProcessingPreferencePage
-        p = ColorProcessingPreferencePage()
+        from src.features.color.preferences import ColorManagementPreferencePage
+        p = ColorManagementPreferencePage()
         cm = FakeConfigManager()
         # Should not crash
         p.apply(cm)
         assert len(cm._data) == 0
 
     def test_restore_defaults_before_create_widget_is_noop(self, qapp):
-        from src.features.color.preferences import ColorProcessingPreferencePage
-        p = ColorProcessingPreferencePage()
+        from src.features.color.preferences import ColorManagementPreferencePage
+        p = ColorManagementPreferencePage()
         # Should not crash
         p.restore_defaults(self.COLOR_DEFAULTS)
 
@@ -553,6 +603,7 @@ class TestEditPreferencePage:
         pages = mod.register_preference_pages()
         assert {page.page_id for page in pages} == {
             "edit.video_playback",
+            "edit.interaction",
             "edit.ai_editing",
         }
 
@@ -728,7 +779,7 @@ class TestCompositePreferencePage:
         cache capacity, node cache format)."""
         cm = FakeConfigManager()
         page.apply(cm)
-        assert len(cm._data) == 7
+        assert len(cm._data) == 9
         assert "composite.shake_disconnect_sensitivity" in cm._data
         assert "composite.working_space" in cm._data
         assert "composite.display_space" in cm._data
@@ -736,6 +787,8 @@ class TestCompositePreferencePage:
         assert "composite.export_parallel_frames" in cm._data
         assert "composite.node_cache_capacity_gb" in cm._data
         assert "composite.node_cache_format" in cm._data
+        assert cm._data["composite.node_cable_routing"] == "curved"
+        assert cm._data["composite.node_preview_mode"] == "selected_single"
 
     def test_restore_defaults_is_noop(self, page):
         """restore_defaults with empty defaults should not crash."""
@@ -784,8 +837,11 @@ class TestPreferencesRegistryFiltering:
         }
 
         feature_ids = {
+            "color.management": "color",
+            "color.control_surface": "color",
             "color.processing": "color",
             "edit.video_playback": "edit",
+            "edit.interaction": "edit",
             "edit.ai_editing": "edit",
             "deliver.export": "deliver",
             "composite.settings": "composite",
@@ -876,8 +932,11 @@ class TestPreferencesRegistryFiltering:
         )
         page_ids = {p.page_id for p in pages}
         assert page_ids == {
+            "color.management",
+            "color.control_surface",
             "color.processing",
             "edit.video_playback",
+            "edit.interaction",
             "edit.ai_editing",
             "deliver.export",
             "composite.settings",
@@ -891,7 +950,7 @@ class TestPreferencesRegistryFiltering:
         )
 
         pages = registry.get_pages(enabled_features=None)
-        assert len(pages) == 5
+        assert len(pages) == 8
 
     def test_app_level_pages_never_filtered(self):
         """Pages with feature_id=None should always appear."""

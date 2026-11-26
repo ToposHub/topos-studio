@@ -1,22 +1,22 @@
 """
-PreferencesDialog - DaVinci Resolve-style application preferences panel.
+Application preferences with category navigation.
 
 Features:
 - Left sidebar category navigation with right content area
-- 8 categories: General, Appearance, Color & Processing, Performance, Export,
-  Shortcuts, File & Storage, Advanced
+- Feature-specific pages contributed by the active modules
 - Dark theme matching the global application style
 - Settings persist to config.json via ConfigManager
 - Full i18n support (en_US, zh_CN)
 - Instant preview for appearance settings
-- Apply button for testing settings without closing
 """
+
+from typing import Any
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QComboBox, QWidget, QGroupBox,
     QListWidget, QListWidgetItem, QStackedWidget,
-    QScrollArea, QSpinBox, QSlider, QCheckBox, QLineEdit,
+    QSpinBox, QSlider, QCheckBox, QLineEdit,
     QFileDialog, QMessageBox, QApplication
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
@@ -33,12 +33,15 @@ import threading
 
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import apply_combo_dropdown_style, C
+from src.shared.ui.style_sheet import (
+    C, CHECKMARK_ICON_PATH, SPIN_DOWN_ICON_PATH, SPIN_UP_ICON_PATH,
+    apply_combo_dropdown_style,
+)
 from src.shared.ui.widgets import ChevronComboBox
 from src.shared.ui.widgets.topos_controls import ToposClickableSlider
 from src.shared.ui.widgets.pref_drag_value import PrefDragValue
 from src.shared.ui.widgets.pref_form_layout import (
-    make_pref_form, make_pref_label,
+    PREF_FORM_MARGINS, PREF_PAGE_BACKGROUND, make_pref_form, make_pref_label, make_pref_page,
 )
 from src.shared.export.export_panel import (
     _apply_text_input_style,
@@ -49,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 
 class PreferencesDialog(QDialog):
-    """DaVinci Resolve-style preferences dialog with category navigation."""
+    """Application preferences with category navigation."""
 
     # Signal for instant appearance preview
     appearance_preview_changed = pyqtSignal(str, object)
@@ -75,16 +78,6 @@ class PreferencesDialog(QDialog):
         "480p": 854,
         "Original": 0,
     }
-
-    # Category page indices
-    PAGE_GENERAL = 0
-    PAGE_APPEARANCE = 1
-    PAGE_COLOR_PROCESSING = 2
-    PAGE_PERFORMANCE = 3
-    PAGE_EXPORT = 4
-    PAGE_SHORTCUTS = 5
-    PAGE_FILE_STORAGE = 6
-    PAGE_ADVANCED = 7
 
     def __init__(self, config_manager, shortcut_manager=None, parent=None, feature_flags=None, module_pages=None) -> None:
         super().__init__(parent)
@@ -113,12 +106,11 @@ class PreferencesDialog(QDialog):
 
         # Store all widget references for load/save (app-level pages only)
         self._widgets = {}
-        self._disabled_plugins = []  # Initialized before any plugin refresh
 
         # Module preference pages (ModularPreferencePage instances)
         self._module_pages = {}  # page_id -> page_object
 
-        self.setWindowTitle(I18N.tr("preferences.title", "Preferences"))
+        self.setWindowTitle(I18N.tr_preference("preferences.title", "Preferences"))
         self.setMinimumSize(780, 560)
         self.resize(860, 900)
 
@@ -150,10 +142,10 @@ class PreferencesDialog(QDialog):
 
         # App-level pages (always shown)
         registry.register(PreferencePageDescriptor(
-            page_id="app.general", title=I18N.tr("preferences.categories.general", "General"),
+            page_id="app.general", title=I18N.tr_preference("preferences.categories.general", "General"),
             category="General", factory=self._create_general_page, order=100))
         registry.register(PreferencePageDescriptor(
-            page_id="app.appearance", title=I18N.tr("preferences.categories.appearance", "Appearance"),
+            page_id="app.appearance", title=I18N.tr_preference("preferences.categories.appearance", "Appearance"),
             category="Appearance", factory=self._create_appearance_page, order=200))
 
         # Module-contributed pages replace the old inline pages.
@@ -162,18 +154,34 @@ class PreferencesDialog(QDialog):
             pid = page_obj.page_id
 
             # Determine category, title, order, feature_id based on page_id
-            if pid == "color.processing":
+            if pid == "color.management":
                 registry.register(PreferencePageDescriptor(
                     page_id=pid,
-                    title=I18N.tr("preferences.categories.color_processing", "Color & Processing"),
-                    category="Color & Processing",
+                    title=I18N.tr_preference("preferences.categories.color_management", "Color Management"),
+                    category="Color Management",
                     order=300, feature_id="color",
+                    page_object=page_obj,
+                ))
+            elif pid == "color.control_surface":
+                registry.register(PreferencePageDescriptor(
+                    page_id=pid,
+                    title=I18N.tr_preference("preferences.categories.control_surface", "Control Surface"),
+                    category="Control Surface",
+                    order=310, feature_id="color",
+                    page_object=page_obj,
+                ))
+            elif pid == "color.processing":
+                registry.register(PreferencePageDescriptor(
+                    page_id=pid,
+                    title=I18N.tr_preference("preferences.categories.image_processing", "Image Processing"),
+                    category="Image Processing",
+                    order=320, feature_id="color",
                     page_object=page_obj,
                 ))
             elif pid == "deliver.export":
                 registry.register(PreferencePageDescriptor(
                     page_id=pid,
-                    title=I18N.tr("preferences.categories.export", "Export"),
+                    title=I18N.tr_preference("preferences.categories.export", "Export"),
                     category="Export",
                     order=500, feature_id="deliver",
                     page_object=page_obj,
@@ -185,15 +193,33 @@ class PreferencesDialog(QDialog):
                     continue
                 registry.register(PreferencePageDescriptor(
                     page_id=pid,
-                    title=I18N.tr("preferences.categories.video_playback", "Video Playback"),
+                    title=I18N.tr_preference("preferences.categories.video_playback", "Video Playback"),
                     category="Video Playback",
-                    order=350, feature_id="edit",
+                    order=460, feature_id="edit",
+                    page_object=page_obj,
+                ))
+            elif pid == "edit.interaction":
+                if image_mode:
+                    continue
+                registry.register(PreferencePageDescriptor(
+                    page_id=pid,
+                    title=I18N.tr_preference("preferences.categories.edit_interaction", "Editing"),
+                    category="Editing",
+                    order=470, feature_id="edit",
+                    page_object=page_obj,
+                ))
+            elif pid == "app.files_browser":
+                registry.register(PreferencePageDescriptor(
+                    page_id=pid,
+                    title=I18N.tr_preference("preferences.categories.files_browser", "Media Browser"),
+                    category="Media Browser",
+                    order=710,
                     page_object=page_obj,
                 ))
             elif pid == "composite.settings":
                 registry.register(PreferencePageDescriptor(
                     page_id=pid,
-                    title=I18N.tr("preferences.categories.composite", "Composite"),
+                    title=I18N.tr_preference("preferences.categories.composite", "Composite"),
                     category="Composite",
                     order=550, feature_id="composite",
                     page_object=page_obj,
@@ -201,7 +227,7 @@ class PreferencesDialog(QDialog):
             elif pid == "edit.ai_editing":
                 registry.register(PreferencePageDescriptor(
                     page_id=pid,
-                    title=I18N.tr("preferences.categories.ai_editing", "AI Editing"),
+                    title=I18N.tr_preference("preferences.categories.ai_editing", "AI Editing"),
                     category="AI Editing",
                     order=650, feature_id="edit",
                     page_object=page_obj,
@@ -218,24 +244,24 @@ class PreferencesDialog(QDialog):
         # App-level Performance page (base settings remain here;
         # Video Playback section moved to EditPreferencePage)
         registry.register(PreferencePageDescriptor(
-            page_id="app.performance", title=I18N.tr("preferences.categories.performance", "Performance"),
+            page_id="app.performance", title=I18N.tr_preference("preferences.categories.performance", "Performance"),
             category="Performance", factory=self._create_performance_page, order=400))
 
         # Timeline Defaults (hidden in image mode — no timeline workflow).
         if not image_mode:
             registry.register(PreferencePageDescriptor(
-                page_id="app.timeline_defaults", title=I18N.tr("preferences.categories.timeline_defaults", "Timeline Defaults"),
+                page_id="app.timeline_defaults", title=I18N.tr_preference("preferences.categories.timeline_defaults", "Timeline Defaults"),
                 category="Timeline Defaults", factory=self._create_timeline_defaults_page, order=450))
 
         # App-level utility pages
         registry.register(PreferencePageDescriptor(
-            page_id="app.shortcuts", title=I18N.tr("preferences.categories.shortcuts", "Shortcuts"),
+            page_id="app.shortcuts", title=I18N.tr_preference("preferences.categories.shortcuts", "Shortcuts"),
             category="Shortcuts", factory=self._create_shortcuts_page, order=600))
         registry.register(PreferencePageDescriptor(
-            page_id="app.file_storage", title=I18N.tr("preferences.categories.file_storage", "File & Storage"),
+            page_id="app.file_storage", title=I18N.tr_preference("preferences.categories.file_storage", "File & Storage"),
             category="File & Storage", factory=self._create_file_storage_page, order=700))
         registry.register(PreferencePageDescriptor(
-            page_id="app.advanced", title=I18N.tr("preferences.categories.advanced", "Advanced"),
+            page_id="app.advanced", title=I18N.tr_preference("preferences.categories.advanced", "Advanced"),
             category="Advanced", factory=self._create_advanced_page, order=800))
 
         return registry
@@ -254,7 +280,7 @@ class PreferencesDialog(QDialog):
         title_bar.setFixedHeight(48)
         title_layout = QHBoxLayout(title_bar)
         title_layout.setContentsMargins(20, 0, 20, 0)
-        title_label = QLabel(I18N.tr("preferences.title", "Preferences"))
+        title_label = QLabel(I18N.tr_preference("preferences.title", "Preferences"))
         title_label.setObjectName("PrefTitleLabel")
         title_layout.addWidget(title_label)
         title_layout.addStretch()
@@ -275,7 +301,7 @@ class PreferencesDialog(QDialog):
         pages = self._page_registry.get_pages(self._enabled_features)
         for desc in pages:
             item = QListWidgetItem(desc.title)
-            item.setSizeHint(QSize(0, 40))
+            item.setSizeHint(QSize(0, 34))
             self._category_list.addItem(item)
         self._category_list.setCurrentRow(0)
         self._category_list.currentRowChanged.connect(self._on_category_changed)
@@ -307,32 +333,22 @@ class PreferencesDialog(QDialog):
         btn_layout.setContentsMargins(20, 0, 20, 0)
 
         self._restore_btn = QPushButton(
-            I18N.tr("preferences.restore_defaults", "Restore Defaults")
+            I18N.tr_preference("preferences.restore_defaults", "Restore Defaults")
         )
         self._restore_btn.setObjectName("PrefRestoreBtn")
         self._restore_btn.clicked.connect(self._on_restore_defaults)
 
         self._cancel_btn = QPushButton(
-            I18N.tr("preferences.cancel", "Cancel")
+            I18N.tr_preference("preferences.cancel", "Cancel")
         )
         self._cancel_btn.setObjectName("PrefCancelBtn")
         self._cancel_btn.clicked.connect(self._on_cancel)
 
-        self._apply_btn = QPushButton(
-            I18N.tr("preferences.apply", "Apply")
-        )
-        self._apply_btn.setObjectName("PrefApplyBtn")
-        self._apply_btn.setToolTip(I18N.tr(
-            "preferences.apply_tooltip",
-            "Apply changes and keep Preferences open.",
-        ))
-        self._apply_btn.clicked.connect(self._on_apply)
-
         self._save_btn = QPushButton(
-            I18N.tr("preferences.save", "Save")
+            I18N.tr_preference("preferences.save", "Save")
         )
         self._save_btn.setObjectName("PrefSaveBtn")
-        self._save_btn.setToolTip(I18N.tr(
+        self._save_btn.setToolTip(I18N.tr_preference(
             "preferences.save_tooltip",
             "Save changes and close Preferences.",
         ))
@@ -342,8 +358,6 @@ class PreferencesDialog(QDialog):
         btn_layout.addWidget(self._restore_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(self._cancel_btn)
-        btn_layout.addSpacing(8)
-        btn_layout.addWidget(self._apply_btn)
         btn_layout.addSpacing(8)
         btn_layout.addWidget(self._save_btn)
         main_layout.addWidget(btn_bar)
@@ -425,11 +439,7 @@ class PreferencesDialog(QDialog):
     # ── Page: General ─────────────────────────────────────────────
 
     def _create_general_page(self) -> QWidget:
-        page = self._wrap_in_scroll_area()
-        content = page.widget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page, layout = make_pref_page()
 
         group = self._create_group("preferences.general.section_title", "Application")
         form = make_pref_form(group)
@@ -439,13 +449,13 @@ class PreferencesDialog(QDialog):
         apply_combo_dropdown_style(lang_combo)
         lang_combo.setMinimumWidth(120)
         for code, name in I18N.SUPPORTED_LOCALES.items():
-            lang_combo.addItem(name, code)
+            lang_combo.addItem(I18N.tr_preference(f"preferences.language_names.{code}", name), code)
         self._widgets['locale'] = lang_combo
-        lang_label = make_pref_label(I18N.tr("preferences.general.language", "Language:"))
+        lang_label = make_pref_label(I18N.tr_preference("preferences.general.language", "Language:"))
         form.addRow(lang_label, lang_combo)
 
         # Language note
-        note = QLabel(I18N.tr("preferences.general.language_note",
+        note = QLabel(I18N.tr_preference("preferences.general.language_note",
                                "Language change requires application restart."))
         note.setObjectName("PrefNoteLabel")
         note.setWordWrap(True)
@@ -461,21 +471,21 @@ class PreferencesDialog(QDialog):
             apply_combo_dropdown_style(work_mode_combo)
             work_mode_combo.setMinimumWidth(180)
             work_mode_combo.addItem(
-                I18N.tr("preferences.general.work_mode.image", "Image Grading"),
+                I18N.tr_preference("preferences.general.work_mode.image", "Image Grading"),
                 "image",
             )
             work_mode_combo.addItem(
-                I18N.tr("preferences.general.work_mode.video", "Video Grading"),
+                I18N.tr_preference("preferences.general.work_mode.video", "Video Grading"),
                 "video",
             )
             self._widgets['work_mode'] = work_mode_combo
             work_mode_label = make_pref_label(
-                I18N.tr("preferences.general.work_mode_label", "Work Mode:")
+                I18N.tr_preference("preferences.general.work_mode_label", "Work Mode:")
             )
             form.addRow(work_mode_label, work_mode_combo)
 
             # Restart note (work mode is applied on next launch)
-            work_mode_note = QLabel(I18N.tr(
+            work_mode_note = QLabel(I18N.tr_preference(
                 "preferences.general.work_mode_note",
                 "Work mode change requires application restart. "
                 "Image mode hides the Edit page and disables keyframes in "
@@ -486,36 +496,42 @@ class PreferencesDialog(QDialog):
             form.addRow("", work_mode_note)
 
         # Auto-save interval
-        auto_save = PrefDragValue(min_v=1, max_v=60, default=5, suffix=" min")
+        auto_save = PrefDragValue(min_v=1, max_v=60, default=5, suffix=I18N.tr_preference("preferences.units.minutes", " min"))
         self._widgets['auto_save_interval'] = auto_save
-        auto_save_label = make_pref_label(I18N.tr("preferences.general.auto_save_interval",
+        auto_save_label = make_pref_label(I18N.tr_preference("preferences.general.auto_save_interval",
                                                    "Auto-save interval (minutes):"))
         form.addRow(auto_save_label, auto_save)
 
         # Max recent files
         max_recent = PrefDragValue(min_v=5, max_v=20, default=10)
         self._widgets['max_recent_files'] = max_recent
-        max_label = make_pref_label(I18N.tr("preferences.general.max_recent_files",
+        max_label = make_pref_label(I18N.tr_preference("preferences.general.max_recent_files",
                                              "Max recent files:"))
         form.addRow(max_label, max_recent)
 
+        max_projects = PrefDragValue(min_v=1, max_v=50, default=10)
+        self._widgets["max_recent_projects"] = max_projects
+        form.addRow(make_pref_label(I18N.tr_preference(
+            "preferences.general.max_recent_projects", "Maximum Recent Projects:"
+        )), max_projects)
+
         # Show welcome
         show_welcome = QCheckBox(
-            I18N.tr("preferences.general.show_welcome", "Show welcome on startup")
+            I18N.tr_preference("preferences.general.show_welcome", "Show welcome on startup")
         )
         self._widgets['show_welcome_on_startup'] = show_welcome
         form.addRow("", show_welcome)
 
         # Confirm before reset (NEW)
         confirm_reset = QCheckBox(
-            I18N.tr("preferences.general.confirm_before_reset", "Confirm before reset")
+            I18N.tr_preference("preferences.general.confirm_before_reset", "Confirm before reset")
         )
         self._widgets['confirm_before_reset'] = confirm_reset
         form.addRow("", confirm_reset)
 
         # Auto-load last project (NEW)
         auto_load = QCheckBox(
-            I18N.tr("preferences.general.auto_load_last_project", "Auto-load last project on startup")
+            I18N.tr_preference("preferences.general.auto_load_last_project", "Auto-load last project on startup")
         )
         self._widgets['auto_load_last_project'] = auto_load
         form.addRow("", auto_load)
@@ -524,12 +540,12 @@ class PreferencesDialog(QDialog):
         undo_limit = PrefDragValue(min_v=10, max_v=200, default=50)
         undo_limit.setSingleStep(10)
         self._widgets['undo_history_limit'] = undo_limit
-        undo_label = make_pref_label(I18N.tr("preferences.general.undo_history_limit", "Undo history limit:"))
+        undo_label = make_pref_label(I18N.tr_preference("preferences.general.undo_history_limit", "Undo history limit:"))
         form.addRow(undo_label, undo_limit)
 
         # Check updates on startup (NEW)
         check_updates = QCheckBox(
-            I18N.tr("preferences.general.check_updates", "Check for updates on startup")
+            I18N.tr_preference("preferences.general.check_updates", "Check for updates on startup")
         )
         self._widgets['check_updates_on_startup'] = check_updates
         form.addRow("", check_updates)
@@ -541,11 +557,7 @@ class PreferencesDialog(QDialog):
     # ── Page: Appearance ──────────────────────────────────────────
 
     def _create_appearance_page(self) -> QWidget:
-        page = self._wrap_in_scroll_area()
-        content = page.widget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page, layout = make_pref_page()
 
         group = self._create_group("preferences.appearance.section_title", "UI Settings")
         form = make_pref_form(group)
@@ -557,7 +569,7 @@ class PreferencesDialog(QDialog):
         for s in range(90, 160, 10):
             scale_combo.addItem(f"{s}%", s)
         self._widgets['ui_scale'] = scale_combo
-        scale_label = make_pref_label(I18N.tr("preferences.appearance.ui_scale", "UI Scale:"))
+        scale_label = make_pref_label(I18N.tr_preference("preferences.appearance.ui_scale", "UI Scale:"))
         form.addRow(scale_label, scale_combo)
 
         # Panel Opacity
@@ -582,13 +594,13 @@ class PreferencesDialog(QDialog):
         opacity_layout.addWidget(opacity_slider, 1)
         opacity_layout.addWidget(opacity_value)
         self._widgets['panel_opacity'] = opacity_slider
-        opacity_label = make_pref_label(I18N.tr("preferences.appearance.panel_opacity",
+        opacity_label = make_pref_label(I18N.tr_preference("preferences.appearance.panel_opacity",
                                                  "Panel Opacity:"))
         form.addRow(opacity_label, opacity_widget)
 
         # Show tooltips
         show_tooltips = QCheckBox(
-            I18N.tr("preferences.appearance.show_tooltips", "Show tooltips")
+            I18N.tr_preference("preferences.appearance.show_tooltips", "Show tooltips")
         )
         self._widgets['show_tooltips'] = show_tooltips
         form.addRow("", show_tooltips)
@@ -598,21 +610,21 @@ class PreferencesDialog(QDialog):
         apply_combo_dropdown_style(accent_combo)
         accent_combo.setMinimumWidth(120)
         accent_colors = [
-            ("#ff8800", I18N.tr("preferences.appearance.accent_default", "Default Orange")),
-            ("#4488ff", I18N.tr("preferences.appearance.accent_blue", "Blue")),
-            ("#00aa99", I18N.tr("preferences.appearance.accent_teal", "Teal")),
-            ("#ff4444", I18N.tr("preferences.appearance.accent_red", "Red")),
-            ("#9944ff", I18N.tr("preferences.appearance.accent_purple", "Purple")),
+            ("#ff8800", I18N.tr_preference("preferences.appearance.accent_default", "Default Orange")),
+            ("#4488ff", I18N.tr_preference("preferences.appearance.accent_blue", "Blue")),
+            ("#00aa99", I18N.tr_preference("preferences.appearance.accent_teal", "Teal")),
+            ("#ff4444", I18N.tr_preference("preferences.appearance.accent_red", "Red")),
+            ("#9944ff", I18N.tr_preference("preferences.appearance.accent_purple", "Purple")),
         ]
         for color, label in accent_colors:
             accent_combo.addItem(label, color)
         self._widgets['accent_color'] = accent_combo
-        accent_label = make_pref_label(I18N.tr("preferences.appearance.accent_color", "Highlight Color:"))
+        accent_label = make_pref_label(I18N.tr_preference("preferences.appearance.accent_color", "Highlight Color:"))
         form.addRow(accent_label, accent_combo)
 
         # Show panel titles (NEW)
         show_titles = QCheckBox(
-            I18N.tr("preferences.appearance.show_panel_titles", "Show panel title bars")
+            I18N.tr_preference("preferences.appearance.show_panel_titles", "Show panel title bars")
         )
         self._widgets['show_panel_titles'] = show_titles
         form.addRow("", show_titles)
@@ -637,28 +649,39 @@ class PreferencesDialog(QDialog):
         zoom_layout.addWidget(zoom_slider, 1)
         zoom_layout.addWidget(zoom_value)
         self._widgets['zoom_speed'] = zoom_slider
-        zoom_label = make_pref_label(I18N.tr("preferences.appearance.zoom_speed", "Mouse wheel zoom speed:"))
+        zoom_label = make_pref_label(I18N.tr_preference("preferences.appearance.zoom_speed", "Mouse wheel zoom speed:"))
         form.addRow(zoom_label, zoom_widget)
 
         # Preview note
-        preview_note = QLabel(I18N.tr("preferences.appearance.preview_note",
+        preview_note = QLabel(I18N.tr_preference("preferences.appearance.preview_note",
                                        "Appearance changes preview in real-time."))
         preview_note.setObjectName("PrefNoteLabel")
         preview_note.setWordWrap(True)
         form.addRow("", preview_note)
 
         layout.addWidget(group)
+
+        from src.shared.feature_flags import get_workspace_work_mode
+        if get_workspace_work_mode(self._config_manager) == "image":
+            grade_set_group = self._create_group("preferences.appearance.grade_set", "Photo Grade Sets")
+            grade_set_form = make_pref_form(grade_set_group)
+            for key, title in (
+                ("grade_set_show_filenames", I18N.tr_preference(
+                    "preferences.appearance.grade_set_show_filenames", "Show file names on photo cards")),
+                ("grade_set_rating_at_bottom", I18N.tr_preference(
+                    "preferences.appearance.grade_set_rating_at_bottom", "Show ratings below photo cards")),
+            ):
+                checkbox = QCheckBox(title)
+                self._widgets[key] = checkbox
+                grade_set_form.addRow("", checkbox)
+            layout.addWidget(grade_set_group)
         layout.addStretch()
         return page
 
     # ── Page: Performance ─────────────────────────────────────────
 
     def _create_performance_page(self) -> QWidget:
-        page = self._wrap_in_scroll_area()
-        content = page.widget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page, layout = make_pref_page()
 
         group = self._create_group("preferences.performance.section_title",
                                     "Performance Settings")
@@ -666,7 +689,7 @@ class PreferencesDialog(QDialog):
 
         # GPU acceleration
         gpu_acc = QCheckBox(
-            I18N.tr("preferences.performance.gpu_acceleration",
+            I18N.tr_preference("preferences.performance.gpu_acceleration",
                     "GPU acceleration")
         )
         self._widgets['gpu_acceleration'] = gpu_acc
@@ -680,19 +703,19 @@ class PreferencesDialog(QDialog):
         apply_combo_dropdown_style(graphics_combo)
         graphics_combo.setMinimumWidth(160)
         graphics_combo.addItem(
-            I18N.tr("preferences.performance.graphics_auto", "Auto (Recommended)"),
+            I18N.tr_preference("preferences.performance.graphics_auto", "Auto (Recommended)"),
             "auto",
         )
         graphics_combo.addItem(
-            I18N.tr("preferences.performance.graphics_opengl", "OpenGL"),
+            I18N.tr_preference("preferences.performance.graphics_opengl", "OpenGL"),
             "opengl",
         )
         graphics_combo.addItem(
-            I18N.tr("preferences.performance.graphics_d3d11", "D3D11 (Windows export)"),
+            I18N.tr_preference("preferences.performance.graphics_d3d11", "D3D11 (Windows export)"),
             "d3d11",
         )
         graphics_combo.addItem(
-            I18N.tr("preferences.performance.graphics_metal", "Metal"),
+            I18N.tr_preference("preferences.performance.graphics_metal", "Metal"),
             "metal",
         )
         metal_available, metal_reason = False, "Metal is only available on macOS."
@@ -733,12 +756,12 @@ class PreferencesDialog(QDialog):
                     d3d11_index, d3d11_reason, Qt.ItemDataRole.ToolTipRole)
         self._widgets['timeline_graphics_backend'] = graphics_combo
         graphics_label = make_pref_label(
-            I18N.tr("preferences.performance.timeline_graphics_backend",
+            I18N.tr_preference("preferences.performance.timeline_graphics_backend",
                     "Timeline render backend:")
         )
         form.addRow(graphics_label, graphics_combo)
         graphics_desc = QLabel(
-            I18N.tr(
+            I18N.tr_preference(
                 "preferences.performance.timeline_graphics_backend_desc",
                 "For timeline exports, Auto selects D3D11 only after the complete "
                 "native-surface and zero-readback gate passes. Otherwise it keeps "
@@ -757,28 +780,28 @@ class PreferencesDialog(QDialog):
         apply_combo_dropdown_style(vt_combo)
         vt_combo.setMinimumWidth(120)
         vt_combo.addItem(
-            I18N.tr("preferences.performance.vt_zero_copy_auto",
+            I18N.tr_preference("preferences.performance.vt_zero_copy_auto",
                     "Auto (Recommended)"),
             "auto"
         )
         vt_combo.addItem(
-            I18N.tr("preferences.performance.vt_zero_copy_off",
+            I18N.tr_preference("preferences.performance.vt_zero_copy_off",
                     "Disabled"),
             "off"
         )
         vt_combo.addItem(
-            I18N.tr("preferences.performance.vt_zero_copy_force",
+            I18N.tr_preference("preferences.performance.vt_zero_copy_force",
                     "Force Enable"),
             "force"
         )
         self._widgets['video_macos_vt_zero_copy'] = vt_combo
-        vt_label = make_pref_label(I18N.tr("preferences.performance.vt_zero_copy",
+        vt_label = make_pref_label(I18N.tr_preference("preferences.performance.vt_zero_copy",
                                             "macOS VT Zero-Copy Decode:"))
         form.addRow(vt_label, vt_combo)
 
         # VT zero-copy description
         vt_desc = QLabel(
-            I18N.tr("preferences.performance.vt_zero_copy_desc",
+            I18N.tr_preference("preferences.performance.vt_zero_copy_desc",
                     "Use macOS VideoToolbox for hardware decode with zero GPU memory copy. "
                     "Auto: enable when available. Disabled: force CPU decode. "
                     "Force: attempt even on unsupported configurations.")
@@ -791,15 +814,17 @@ class PreferencesDialog(QDialog):
         res_combo = ChevronComboBox()
         apply_combo_dropdown_style(res_combo)
         res_combo.setMinimumWidth(120)
-        for label in self.VIDEO_RESOLUTIONS.keys():
-            res_combo.addItem(label)
+        for label, resolution in self.VIDEO_RESOLUTIONS.items():
+            if resolution == 0:
+                label = I18N.tr_preference("preferences.performance.resolution_original", "Original")
+            res_combo.addItem(label, resolution)
         self._widgets['video_playback_resolution'] = res_combo
-        res_label = make_pref_label(I18N.tr("preferences.performance.playback_resolution",
+        res_label = make_pref_label(I18N.tr_preference("preferences.performance.playback_resolution",
                                              "Video Playback Resolution:"))
         form.addRow(res_label, res_combo)
 
         # Resolution description
-        res_desc = QLabel(I18N.tr("preferences.performance.resolution_desc",
+        res_desc = QLabel(I18N.tr_preference("preferences.performance.resolution_desc",
                                    "Maximum resolution for video playback. "
                                    "Higher values use more memory."))
         res_desc.setObjectName("PrefNoteLabel")
@@ -808,9 +833,9 @@ class PreferencesDialog(QDialog):
 
         # Processing threads
         threads_spin = PrefDragValue(min_v=0, max_v=32, default=0)
-        threads_spin.setSpecialValueText("Auto")
+        threads_spin.setSpecialValueText(I18N.tr_preference("preferences.performance.threads_auto", "Auto"))
         self._widgets['processing_threads'] = threads_spin
-        threads_label = make_pref_label(I18N.tr("preferences.performance.processing_threads",
+        threads_label = make_pref_label(I18N.tr_preference("preferences.performance.processing_threads",
                                                  "Processing threads (0=auto):"))
         form.addRow(threads_label, threads_spin)
 
@@ -819,24 +844,24 @@ class PreferencesDialog(QDialog):
         apply_combo_dropdown_style(fusion_combo)
         fusion_combo.setMinimumWidth(120)
         fusion_combo.addItem(
-            I18N.tr("preferences.performance.fusion_conservative", "Conservative (Recommended)"),
+            I18N.tr_preference("preferences.performance.fusion_conservative", "Conservative (Recommended)"),
             "conservative"
         )
         fusion_combo.addItem(
-            I18N.tr("preferences.performance.fusion_aggressive", "Aggressive"),
+            I18N.tr_preference("preferences.performance.fusion_aggressive", "Aggressive"),
             "aggressive"
         )
         fusion_combo.addItem(
-            I18N.tr("preferences.performance.fusion_off", "Disabled"),
+            I18N.tr_preference("preferences.performance.fusion_off", "Disabled"),
             "off"
         )
         self._widgets['pass_fusion_mode'] = fusion_combo
-        fusion_label = make_pref_label(I18N.tr("preferences.performance.pass_fusion_mode",
+        fusion_label = make_pref_label(I18N.tr_preference("preferences.performance.pass_fusion_mode",
                                                 "Pass Fusion Mode:"))
         form.addRow(fusion_label, fusion_combo)
 
         # Pass Fusion description
-        fusion_desc = QLabel(I18N.tr("preferences.performance.fusion_desc",
+        fusion_desc = QLabel(I18N.tr_preference("preferences.performance.fusion_desc",
                                       "Merges consecutive color-only nodes into a single GPU pass. "
                                       "Conservative: only fuse when texture sizes match. "
                                       "Aggressive: fuse with auto-resize. "
@@ -853,11 +878,7 @@ class PreferencesDialog(QDialog):
 
     def _create_timeline_defaults_page(self) -> QWidget:
         """Create Timeline Defaults preference page."""
-        page = self._wrap_in_scroll_area()
-        content = page.widget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page, layout = make_pref_page()
 
         # ── Default Video Settings ──
         video_group = self._create_group("preferences.timeline.video_group",
@@ -880,7 +901,7 @@ class PreferencesDialog(QDialog):
         for label, val in fps_items:
             fps_combo.addItem(label, val)
         self._widgets['default_timeline_fps'] = fps_combo
-        video_form.addRow(make_pref_label(I18N.tr("preferences.timeline.default_fps", "Frame Rate:")), fps_combo)
+        video_form.addRow(make_pref_label(I18N.tr_preference("preferences.timeline.default_fps", "Frame Rate:")), fps_combo)
 
         # Default Resolution
         res_layout = QHBoxLayout()
@@ -891,7 +912,7 @@ class PreferencesDialog(QDialog):
             ("2K QHD (2560x1440)", 2560, 1440),
             ("1080p (1920x1080)", 1920, 1080),
             ("720p (1280x720)", 1280, 720),
-            (I18N.tr("preferences.timeline.custom", "Custom"), 0, 0),
+            (I18N.tr_preference("preferences.timeline.custom", "Custom"), 0, 0),
         ]
         for item in res_preset_items:
             # [BUG-B3-03] 预设尺寸作为 itemData 保存，供 _load_current_settings
@@ -900,7 +921,7 @@ class PreferencesDialog(QDialog):
         res_combo.currentIndexChanged.connect(
             lambda idx: self._on_timeline_res_preset_changed(idx, res_preset_items, width_spin, height_spin)
         )
-        res_layout.addWidget(res_combo)
+        video_form.addRow(make_pref_label(I18N.tr_preference("preferences.timeline.resolution", "Resolution:")), res_combo)
         self._widgets['_timeline_res_combo'] = res_combo
 
         width_spin = PrefDragValue(min_v=64, max_v=8192, default=1920, suffix=" px")
@@ -913,34 +934,43 @@ class PreferencesDialog(QDialog):
         res_layout.addWidget(height_spin)
         self._widgets['default_timeline_height'] = height_spin
 
-        video_form.addRow(make_pref_label(I18N.tr("preferences.timeline.resolution", "Resolution:")), res_layout)
+        res_layout.addStretch()
+        video_form.addRow("", res_layout)
 
         # Default Pixel Aspect Ratio
         par_combo = ChevronComboBox()
         apply_combo_dropdown_style(par_combo)
         par_items = [
-            ("Square Pixels (1.0)", "1.0"),
+            (I18N.tr_preference("preferences.timeline.square_pixels", "Square Pixels (1.0)"), "1.0"),
             ("DV NTSC (0.9091)", "0.9091"),
             ("DV PAL (1.0926)", "1.0926"),
-            ("HD Anamorphic (1.3333)", "1.3333"),
+            (I18N.tr_preference("preferences.timeline.anamorphic_pixels", "HD Anamorphic (1.3333)"), "1.3333"),
         ]
         for label, val in par_items:
             par_combo.addItem(label, val)
         self._widgets['default_timeline_pixel_aspect_ratio'] = par_combo
-        video_form.addRow(make_pref_label(I18N.tr("preferences.timeline.pixel_aspect", "Pixel Aspect Ratio:")), par_combo)
+        video_form.addRow(make_pref_label(I18N.tr_preference("preferences.timeline.pixel_aspect", "Pixel Aspect Ratio:")), par_combo)
 
         # Default Field Order
         field_combo = ChevronComboBox()
         apply_combo_dropdown_style(field_combo)
         field_items = [
-            (I18N.tr("preferences.timeline.progressive", "Progressive (No Fields)"), "progressive"),
-            (I18N.tr("preferences.timeline.upper_field", "Upper Field First"), "upper"),
-            (I18N.tr("preferences.timeline.lower_field", "Lower Field First"), "lower"),
+            (I18N.tr_preference("preferences.timeline.progressive", "Progressive (No Fields)"), "progressive"),
+            (I18N.tr_preference("preferences.timeline.upper_field", "Upper Field First"), "upper"),
+            (I18N.tr_preference("preferences.timeline.lower_field", "Lower Field First"), "lower"),
         ]
         for label, val in field_items:
             field_combo.addItem(label, val)
         self._widgets['default_timeline_field_order'] = field_combo
-        video_form.addRow(make_pref_label(I18N.tr("preferences.timeline.field_order", "Field Order:")), field_combo)
+        video_form.addRow(make_pref_label(I18N.tr_preference("preferences.timeline.field_order", "Field Order:")), field_combo)
+
+        tc_edit = QLineEdit("00:00:00:00")
+        tc_edit.setMaximumWidth(160)
+        tc_edit.setInputMask("00:00:00:00")
+        self._widgets['default_timeline_start_timecode'] = tc_edit
+        video_form.addRow(
+            make_pref_label(I18N.tr_preference("preferences.timeline.start_timecode", "Start Timecode:")), tc_edit
+        )
 
         layout.addWidget(video_group)
 
@@ -955,15 +985,15 @@ class PreferencesDialog(QDialog):
         for label, val in [("44.1 kHz", 44100), ("48 kHz", 48000), ("96 kHz", 96000)]:
             sr_combo.addItem(label, val)
         self._widgets['default_timeline_sample_rate'] = sr_combo
-        audio_form.addRow(make_pref_label(I18N.tr("preferences.timeline.sample_rate", "Sample Rate:")), sr_combo)
+        audio_form.addRow(make_pref_label(I18N.tr_preference("preferences.timeline.sample_rate", "Sample Rate:")), sr_combo)
 
         # Default Audio Track Type
         at_combo = ChevronComboBox()
         apply_combo_dropdown_style(at_combo)
-        for label, val in [("Mono", "mono"), ("Stereo", "stereo"), ("5.1 Surround", "51")]:
+        for label, val in [(I18N.tr_preference("preferences.timeline.track_mono", "Mono"), "mono"), (I18N.tr_preference("preferences.timeline.track_stereo", "Stereo"), "stereo"), (I18N.tr_preference("preferences.timeline.track_surround", "5.1 Surround"), "51")]:
             at_combo.addItem(label, val)
         self._widgets['default_timeline_audio_track_type'] = at_combo
-        audio_form.addRow(make_pref_label(I18N.tr("preferences.timeline.audio_track_type", "Track Type:")), at_combo)
+        audio_form.addRow(make_pref_label(I18N.tr_preference("preferences.timeline.audio_track_type", "Track Type:")), at_combo)
 
         layout.addWidget(audio_group)
 
@@ -974,30 +1004,17 @@ class PreferencesDialog(QDialog):
 
         # Default subtitle clip duration (stored as frames; 72 = 3s @ 24fps).
         # Range 6-1200 frames (0.25s - 50s @ 24fps), step 6 frames (0.25s).
-        sub_dur = PrefDragValue(min_v=6, max_v=1200, default=72, suffix=" f")
+        sub_dur = PrefDragValue(min_v=6, max_v=1200, default=72, suffix=I18N.tr_preference("preferences.timeline.frames_suffix", " f"))
         sub_dur.setSingleStep(6)
         self._widgets['default_subtitle_clip_duration_frames'] = sub_dur
         sub_form.addRow(
-            make_pref_label(I18N.tr(
+            make_pref_label(I18N.tr_preference(
                 "preferences.timeline.subtitle_default_duration",
                 "Default Subtitle Clip Duration:")),
             sub_dur,
         )
 
         layout.addWidget(sub_group)
-
-        # ── Default Start Timecode ──
-        tc_layout = QHBoxLayout()
-        tc_edit = QLineEdit("00:00:00:00")
-        tc_edit.setMaximumWidth(160)
-        tc_edit.setInputMask("00:00:00:00")
-        self._widgets['default_timeline_start_timecode'] = tc_edit
-        tc_layout.addWidget(tc_edit)
-        tc_layout.addStretch()
-
-        tc_form = make_pref_form()
-        tc_form.addRow(make_pref_label(I18N.tr("preferences.timeline.start_timecode", "Start Timecode:")), tc_layout)
-        layout.addLayout(tc_form)
 
         layout.addStretch()
         return page
@@ -1034,57 +1051,50 @@ class PreferencesDialog(QDialog):
     # ── Page: Shortcuts ───────────────────────────────────────────
 
     def _create_shortcuts_page(self) -> QWidget:
-        page = self._wrap_in_scroll_area()
-        content = page.widget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page, layout = make_pref_page()
 
         group = self._create_group("preferences.shortcuts.section_title",
                                     "Keyboard Shortcuts")
-        group_layout = QVBoxLayout(group)
-        group_layout.setContentsMargins(16, 20, 16, 16)
-        group_layout.setSpacing(12)
+        form = make_pref_form(group)
 
-        desc = QLabel(I18N.tr("preferences.shortcuts.open_editor_desc",
+        desc = QLabel(I18N.tr_preference("preferences.shortcuts.open_editor_desc",
                                "Customize keyboard shortcuts for all actions."))
         desc.setObjectName("PrefNoteLabel")
         desc.setWordWrap(True)
-        group_layout.addWidget(desc)
+        form.addRow("", desc)
 
         # Open shortcut editor button
         open_btn = QPushButton(
-            I18N.tr("preferences.shortcuts.open_editor", "Open Shortcut Editor")
+            I18N.tr_preference("preferences.shortcuts.open_editor", "Open Shortcut Editor")
         )
         open_btn.setObjectName("PrefActionBtn")
         open_btn.setFixedHeight(36)
         open_btn.clicked.connect(self._open_shortcut_editor)
-        group_layout.addWidget(open_btn)
+        form.addRow("", open_btn)
 
         # Reset all shortcuts button
         reset_btn = QPushButton(
-            I18N.tr("preferences.shortcuts.reset_all", "Reset All Shortcuts")
+            I18N.tr_preference("preferences.shortcuts.reset_all", "Reset All Shortcuts")
         )
         reset_btn.setObjectName("PrefDangerBtn")
         reset_btn.setFixedHeight(36)
         reset_btn.clicked.connect(self._reset_all_shortcuts)
-        group_layout.addWidget(reset_btn)
+        form.addRow("", reset_btn)
 
         # Global shortcuts (NEW)
         global_shortcuts = QCheckBox(
-            I18N.tr("preferences.shortcuts.global_shortcuts", "Enable global shortcuts")
+            I18N.tr_preference("preferences.shortcuts.global_shortcuts", "Enable global shortcuts")
         )
         self._widgets['global_shortcuts'] = global_shortcuts
-        group_layout.addWidget(global_shortcuts)
+        form.addRow("", global_shortcuts)
 
         # Show shortcut conflicts (NEW)
         show_conflicts = QCheckBox(
-            I18N.tr("preferences.shortcuts.show_conflicts", "Show shortcut conflict warnings")
+            I18N.tr_preference("preferences.shortcuts.show_conflicts", "Show shortcut conflict warnings")
         )
         self._widgets['show_shortcut_conflicts'] = show_conflicts
-        group_layout.addWidget(show_conflicts)
+        form.addRow("", show_conflicts)
 
-        group_layout.addStretch()
         layout.addWidget(group)
         layout.addStretch()
         return page
@@ -1092,40 +1102,36 @@ class PreferencesDialog(QDialog):
     # ── Page: File & Storage ──────────────────────────────────────
 
     def _create_file_storage_page(self) -> QWidget:
-        page = self._wrap_in_scroll_area()
-        content = page.widget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page, layout = make_pref_page()
 
         # File Handling group
         file_group = self._create_group("preferences.file_storage.section_file_title", "File Handling")
         file_form = make_pref_form(file_group)
 
         # Default open directory
-        open_dir_edit = self._create_path_edit("Select Default Open Directory")
+        open_dir_edit = self._create_path_edit(I18N.tr_preference("preferences.paths.select_open_dir", "Select Default Open Directory"))
         self._widgets['default_open_directory'] = open_dir_edit._line_edit
         open_dir_widget = open_dir_edit
         file_form.addRow(
-            make_pref_label(I18N.tr("preferences.file_storage.default_open_dir", "Default Open Directory:")),
+            make_pref_label(I18N.tr_preference("preferences.file_storage.default_open_dir", "Default Open Directory:")),
             open_dir_widget
         )
 
         # Auto-backup interval
-        backup_interval = PrefDragValue(min_v=0, max_v=120, default=15, suffix=" min")
-        backup_interval.setSpecialValueText("Off")
+        backup_interval = PrefDragValue(min_v=0, max_v=120, default=15, suffix=I18N.tr_preference("preferences.units.minutes", " min"))
+        backup_interval.setSpecialValueText(I18N.tr_preference("preferences.file_storage.backup_off", "Off"))
         self._widgets['auto_backup_interval'] = backup_interval
         file_form.addRow(
-            make_pref_label(I18N.tr("preferences.file_storage.auto_backup_interval", "Auto-backup interval (min, 0=off):")),
+            make_pref_label(I18N.tr_preference("preferences.file_storage.auto_backup_interval", "Auto-backup interval (min, 0=off):")),
             backup_interval
         )
 
         # Backup directory
-        backup_dir_edit = self._create_path_edit("Select Backup Directory")
+        backup_dir_edit = self._create_path_edit(I18N.tr_preference("preferences.paths.select_backup_dir", "Select Backup Directory"))
         self._widgets['backup_directory'] = backup_dir_edit._line_edit
         backup_dir_widget = backup_dir_edit
         file_form.addRow(
-            make_pref_label(I18N.tr("preferences.file_storage.backup_directory", "Backup Directory:")),
+            make_pref_label(I18N.tr_preference("preferences.file_storage.backup_directory", "Backup Directory:")),
             backup_dir_widget
         )
 
@@ -1133,9 +1139,20 @@ class PreferencesDialog(QDialog):
         max_backup = PrefDragValue(min_v=1, max_v=50, default=5)
         self._widgets['max_backup_count'] = max_backup
         file_form.addRow(
-            make_pref_label(I18N.tr("preferences.file_storage.max_backup_count", "Max backup count:")),
+            make_pref_label(I18N.tr_preference("preferences.file_storage.max_backup_count", "Max backup count:")),
             max_backup
         )
+
+        from src.shared.feature_flags import get_workspace_work_mode
+        if get_workspace_work_mode(self._config_manager) == "video":
+            library_path = self._create_path_edit(I18N.tr_preference(
+                "preferences.paths.select_project_library", "Select Project Library Directory"
+            ))
+            library_path._line_edit.setPlaceholderText("~/Documents/ToposProjects")
+            self._widgets["project_library_directory"] = library_path._line_edit
+            file_form.addRow(make_pref_label(I18N.tr_preference(
+                "preferences.file_storage.project_library_directory", "Default Project Library:"
+            )), library_path)
 
         layout.addWidget(file_group)
 
@@ -1144,11 +1161,11 @@ class PreferencesDialog(QDialog):
         cache_form = make_pref_form(cache_group)
 
         # Cache directory
-        cache_dir_edit = self._create_path_edit("Select Cache Directory")
+        cache_dir_edit = self._create_path_edit(I18N.tr_preference("preferences.paths.select_cache_dir", "Select Cache Directory"))
         self._widgets['cache_directory'] = cache_dir_edit._line_edit
         cache_dir_widget = cache_dir_edit
         cache_form.addRow(
-            make_pref_label(I18N.tr("preferences.file_storage.cache_directory", "Cache Directory:")),
+            make_pref_label(I18N.tr_preference("preferences.file_storage.cache_directory", "Cache Directory:")),
             cache_dir_widget
         )
 
@@ -1156,37 +1173,37 @@ class PreferencesDialog(QDialog):
         cache_spin = PrefDragValue(min_v=1, max_v=100, default=10, suffix=" GB")
         self._widgets['cache_size_limit_gb'] = cache_spin
         cache_form.addRow(
-            make_pref_label(I18N.tr("preferences.performance.cache_size", "Cache size limit (GB):")),
+            make_pref_label(I18N.tr_preference("preferences.performance.cache_size", "Cache size limit (GB):")),
             cache_spin
         )
 
         # Cleanup temp on exit
-        cleanup = QCheckBox(I18N.tr("preferences.file_storage.cleanup_temp", "Cleanup temp files on exit"))
+        cleanup = QCheckBox(I18N.tr_preference("preferences.file_storage.cleanup_temp", "Cleanup temp files on exit"))
         self._widgets['cleanup_temp_on_exit'] = cleanup
         cache_form.addRow("", cleanup)
 
         # Temp file max age
-        temp_age = PrefDragValue(min_v=1, max_v=365, default=7, suffix=" days")
+        temp_age = PrefDragValue(min_v=1, max_v=365, default=7, suffix=I18N.tr_preference("preferences.units.days", " days"))
         self._widgets['temp_file_max_age_days'] = temp_age
         cache_form.addRow(
-            make_pref_label(I18N.tr("preferences.file_storage.temp_max_age", "Temp file max age (days):")),
+            make_pref_label(I18N.tr_preference("preferences.file_storage.temp_max_age", "Temp file max age (days):")),
             temp_age
         )
 
         # Cache size label (placeholder)
-        cache_size_label = QLabel(I18N.tr("preferences.file_storage.cache_size_label", "Current cache size:") + " --")
+        cache_size_label = QLabel(I18N.tr_preference("preferences.file_storage.cache_size_label", "Current cache size:") + " --")
         cache_size_label.setObjectName("PrefNoteLabel")
         self._widgets['cache_size_label'] = cache_size_label
         cache_form.addRow("", cache_size_label)
 
         # Clear cache button
-        clear_cache_btn = QPushButton(I18N.tr("preferences.file_storage.clear_cache", "Clear Cache"))
+        clear_cache_btn = QPushButton(I18N.tr_preference("preferences.file_storage.clear_cache", "Clear Cache"))
         clear_cache_btn.setObjectName("PrefDangerBtn")
         clear_cache_btn.setFixedHeight(36)
         clear_cache_btn.clicked.connect(self._clear_cache)
         cache_form.addRow("", clear_cache_btn)
 
-        thumbnail_clear_btn = QPushButton(I18N.tr(
+        thumbnail_clear_btn = QPushButton(I18N.tr_preference(
             "preferences.file_storage.clear_thumbnail_cache", "Clear Media Library Thumbnails"))
         thumbnail_clear_btn.setObjectName("PrefDangerBtn")
         thumbnail_clear_btn.setFixedHeight(36)
@@ -1214,16 +1231,16 @@ class PreferencesDialog(QDialog):
         proxy_codec = ChevronComboBox()
         apply_combo_dropdown_style(proxy_codec)
         proxy_codec.setMinimumWidth(160)
-        proxy_codec.addItem("Topos 422 Proxy (recommended)", "topos_proxy")
+        proxy_codec.addItem(I18N.tr_preference("preferences.render_cache.codec_topos_proxy", "Topos 422 Proxy (recommended)"), "topos_proxy")
         proxy_codec.addItem("ProRes 422 Proxy", "prores_proxy")
         proxy_codec.addItem("H.264", "h264")
         self._widgets['proxy_format'] = proxy_codec
         proxy_form.addRow(
-            make_pref_label(I18N.tr("preferences.file_storage.proxy_format", "Proxy Format:")),
+            make_pref_label(I18N.tr_preference("preferences.file_storage.proxy_format", "Proxy Format:")),
             proxy_codec
         )
 
-        proxy_note = QLabel(I18N.tr(
+        proxy_note = QLabel(I18N.tr_preference(
             "preferences.file_storage.proxy_format_note",
             "Topos proxies are intra-frame 4:2:2 10-bit (video-only; audio "
             "always plays from the master). Changing the format takes "
@@ -1244,12 +1261,12 @@ class PreferencesDialog(QDialog):
         rc_mode = ChevronComboBox()
         apply_combo_dropdown_style(rc_mode)
         rc_mode.setMinimumWidth(120)
-        rc_mode.addItem(I18N.tr("preferences.render_cache.mode_off", "Off"), "off")
-        rc_mode.addItem(I18N.tr("preferences.render_cache.mode_user", "User (manual)"), "user")
-        rc_mode.addItem(I18N.tr("preferences.render_cache.mode_smart", "Smart (auto)"), "smart")
+        rc_mode.addItem(I18N.tr_preference("preferences.render_cache.mode_off", "Off"), "off")
+        rc_mode.addItem(I18N.tr_preference("preferences.render_cache.mode_user", "User (manual)"), "user")
+        rc_mode.addItem(I18N.tr_preference("preferences.render_cache.mode_smart", "Smart (auto)"), "smart")
         self._widgets['render_cache_auto_mode'] = rc_mode
         rc_form.addRow(
-            make_pref_label(I18N.tr("preferences.render_cache.auto_mode", "Render Cache Mode:")),
+            make_pref_label(I18N.tr_preference("preferences.render_cache.auto_mode", "Render Cache Mode:")),
             rc_mode
         )
 
@@ -1257,14 +1274,13 @@ class PreferencesDialog(QDialog):
         rc_threshold = QSpinBox()
         rc_threshold.setRange(1, 30)
         rc_threshold.setValue(6)
-        rc_threshold.setToolTip(I18N.tr(
+        rc_threshold.setToolTip(I18N.tr_preference(
             "preferences.render_cache.threshold_tooltip",
-            "Smart 模式的自动缓存分数阈值（分数 = 效果数×2 + 调色×3 + "
-            "变速×2 + 合成×4 + 动画参数×1），仅 smart 模式生效",
+            "Minimum score for automatic caching in Smart mode. Score = effects ×2 + grade ×3 + retime ×2 + composite ×4 + animated parameters ×1.",
         ))
         self._widgets['render_cache_auto_threshold'] = rc_threshold
         rc_form.addRow(
-            make_pref_label(I18N.tr(
+            make_pref_label(I18N.tr_preference(
                 "preferences.render_cache.threshold",
                 "Smart Score Threshold:")),
             rc_threshold
@@ -1274,23 +1290,23 @@ class PreferencesDialog(QDialog):
         rc_codec = ChevronComboBox()
         apply_combo_dropdown_style(rc_codec)
         rc_codec.setMinimumWidth(160)
-        rc_codec.addItem("Topos 422 Proxy (recommended)", "topos_proxy")
-        rc_codec.addItem("Topos 422 (Standard)", "topos")
-        rc_codec.addItem("H.264 Proxy", "h264_proxy")
+        rc_codec.addItem(I18N.tr_preference("preferences.render_cache.codec_topos_proxy", "Topos 422 Proxy (recommended)"), "topos_proxy")
+        rc_codec.addItem(I18N.tr_preference("preferences.render_cache.codec_topos_standard", "Topos 422 (Standard)"), "topos")
+        rc_codec.addItem(I18N.tr_preference("preferences.render_cache.codec_h264_proxy", "H.264 Proxy"), "h264_proxy")
         rc_codec.addItem("DNxHR LB", "dnxhr_lb")
         rc_codec.addItem("DNxHR SQ", "dnxhr_sq")
         self._widgets['render_cache_codec'] = rc_codec
         rc_form.addRow(
-            make_pref_label(I18N.tr("preferences.render_cache.codec", "Cache Codec:")),
+            make_pref_label(I18N.tr_preference("preferences.render_cache.codec", "Cache Codec:")),
             rc_codec
         )
 
         # Render-cache files are intentionally separate from baked/image
         # caches: moving this location must not invalidate unrelated caches.
-        rc_dir_edit = self._create_path_edit("Select Render Cache Directory")
+        rc_dir_edit = self._create_path_edit(I18N.tr_preference("preferences.paths.select_render_cache_dir", "Select Render Cache Directory"))
         self._widgets['render_cache_directory'] = rc_dir_edit._line_edit
         rc_form.addRow(
-            make_pref_label(I18N.tr("preferences.render_cache.directory", "Cache Location:")),
+            make_pref_label(I18N.tr_preference("preferences.render_cache.directory", "Cache Location:")),
             rc_dir_edit
         )
 
@@ -1298,12 +1314,12 @@ class PreferencesDialog(QDialog):
         rc_resolution = ChevronComboBox()
         apply_combo_dropdown_style(rc_resolution)
         rc_resolution.setMinimumWidth(120)
-        rc_resolution.addItem(I18N.tr("preferences.render_cache.res_timeline", "Timeline"), "timeline")
-        rc_resolution.addItem(I18N.tr("preferences.render_cache.res_half", "Half"), "half")
-        rc_resolution.addItem(I18N.tr("preferences.render_cache.res_quarter", "Quarter"), "quarter")
+        rc_resolution.addItem(I18N.tr_preference("preferences.render_cache.res_timeline", "Timeline"), "timeline")
+        rc_resolution.addItem(I18N.tr_preference("preferences.render_cache.res_half", "Half"), "half")
+        rc_resolution.addItem(I18N.tr_preference("preferences.render_cache.res_quarter", "Quarter"), "quarter")
         self._widgets['render_cache_resolution_mode'] = rc_resolution
         rc_form.addRow(
-            make_pref_label(I18N.tr("preferences.render_cache.resolution", "Cache Resolution:")),
+            make_pref_label(I18N.tr_preference("preferences.render_cache.resolution", "Cache Resolution:")),
             rc_resolution
         )
 
@@ -1311,7 +1327,7 @@ class PreferencesDialog(QDialog):
         rc_max_size = PrefDragValue(min_v=1, max_v=500, default=50, suffix=" GB")
         self._widgets['render_cache_max_size_gb'] = rc_max_size
         rc_form.addRow(
-            make_pref_label(I18N.tr("preferences.render_cache.max_size", "Max cache size (GB):")),
+            make_pref_label(I18N.tr_preference("preferences.render_cache.max_size", "Max cache size (GB):")),
             rc_max_size
         )
 
@@ -1322,11 +1338,7 @@ class PreferencesDialog(QDialog):
     # ── Page: Advanced ──────────────────────────────────────────────
 
     def _create_advanced_page(self) -> QWidget:
-        page = self._wrap_in_scroll_area()
-        content = page.widget()
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
+        page, layout = make_pref_page()
 
         # Logging group
         log_group = self._create_group("preferences.advanced.section_logging_title", "Logging")
@@ -1337,29 +1349,29 @@ class PreferencesDialog(QDialog):
         apply_combo_dropdown_style(log_level)
         log_level.setMinimumWidth(120)
         for value, label in [
-            ("debug", I18N.tr("preferences.logs_diagnostics.level_debug", "Debug")),
-            ("info", I18N.tr("preferences.logs_diagnostics.level_info", "Info")),
-            ("warning", I18N.tr("preferences.logs_diagnostics.level_warning", "Warning")),
-            ("error", I18N.tr("preferences.logs_diagnostics.level_error", "Error")),
-            ("critical", I18N.tr("preferences.logs_diagnostics.level_critical", "Critical")),
+            ("debug", I18N.tr_preference("preferences.logs_diagnostics.level_debug", "Debug")),
+            ("info", I18N.tr_preference("preferences.logs_diagnostics.level_info", "Info")),
+            ("warning", I18N.tr_preference("preferences.logs_diagnostics.level_warning", "Warning")),
+            ("error", I18N.tr_preference("preferences.logs_diagnostics.level_error", "Error")),
+            ("critical", I18N.tr_preference("preferences.logs_diagnostics.level_critical", "Critical")),
         ]:
             log_level.addItem(label, value)
         self._widgets['log_level'] = log_level
         log_form.addRow(
-            make_pref_label(I18N.tr("preferences.logs_diagnostics.log_level", "Log Level:")),
+            make_pref_label(I18N.tr_preference("preferences.logs_diagnostics.log_level", "Log Level:")),
             log_level
         )
 
         # Log file path
-        log_path_edit = self._create_path_edit("Select Log File", is_file=True)
+        log_path_edit = self._create_path_edit(I18N.tr_preference("preferences.paths.select_log_file", "Select Log File"), is_file=True)
         self._widgets['log_file_path'] = log_path_edit._line_edit
         log_form.addRow(
-            make_pref_label(I18N.tr("preferences.logs_diagnostics.log_file_path", "Log File Location:")),
+            make_pref_label(I18N.tr_preference("preferences.logs_diagnostics.log_file_path", "Log File Location:")),
             log_path_edit
         )
 
         # Enable file logging
-        enable_file_log = QCheckBox(I18N.tr("preferences.logs_diagnostics.enable_file_logging", "Enable file logging"))
+        enable_file_log = QCheckBox(I18N.tr_preference("preferences.logs_diagnostics.enable_file_logging", "Enable file logging"))
         self._widgets['enable_file_logging'] = enable_file_log
         log_form.addRow("", enable_file_log)
 
@@ -1367,12 +1379,12 @@ class PreferencesDialog(QDialog):
         max_log_size = PrefDragValue(min_v=1, max_v=100, default=10, suffix=" MB")
         self._widgets['max_log_file_size_mb'] = max_log_size
         log_form.addRow(
-            make_pref_label(I18N.tr("preferences.logs_diagnostics.max_log_size", "Max log file size (MB):")),
+            make_pref_label(I18N.tr_preference("preferences.logs_diagnostics.max_log_size", "Max log file size (MB):")),
             max_log_size
         )
 
         # Open log directory button
-        open_log_dir_btn = QPushButton(I18N.tr("preferences.logs_diagnostics.open_log_dir", "Open Log Directory"))
+        open_log_dir_btn = QPushButton(I18N.tr_preference("preferences.logs_diagnostics.open_log_dir", "Open Log Directory"))
         open_log_dir_btn.setObjectName("PrefActionBtn")
         open_log_dir_btn.setFixedHeight(36)
         open_log_dir_btn.clicked.connect(self._open_log_directory)
@@ -1385,17 +1397,17 @@ class PreferencesDialog(QDialog):
         diag_form = make_pref_form(diag_group)
 
         # Show version in title
-        show_version = QCheckBox(I18N.tr("preferences.logs_diagnostics.show_version_in_title", "Show version in title bar"))
+        show_version = QCheckBox(I18N.tr_preference("preferences.logs_diagnostics.show_version_in_title", "Show version in title bar"))
         self._widgets['show_version_in_title'] = show_version
         diag_form.addRow("", show_version)
 
         # Show GPU info
-        show_gpu = QCheckBox(I18N.tr("preferences.logs_diagnostics.show_gpu_info", "Show GPU info label"))
+        show_gpu = QCheckBox(I18N.tr_preference("preferences.logs_diagnostics.show_gpu_info", "Show GPU info label"))
         self._widgets['show_gpu_info'] = show_gpu
         diag_form.addRow("", show_gpu)
 
         # Export diagnostics button
-        export_diag_btn = QPushButton(I18N.tr("preferences.logs_diagnostics.export_diagnostics", "Export Diagnostics Report"))
+        export_diag_btn = QPushButton(I18N.tr_preference("preferences.logs_diagnostics.export_diagnostics", "Export Diagnostics Report"))
         export_diag_btn.setObjectName("PrefActionBtn")
         export_diag_btn.setFixedHeight(36)
         export_diag_btn.clicked.connect(self._export_diagnostics)
@@ -1408,12 +1420,12 @@ class PreferencesDialog(QDialog):
         dev_form = make_pref_form(dev_group)
 
         dev_mode = QCheckBox(
-            I18N.tr("preferences.developer.enable", "Enable developer mode")
+            I18N.tr_preference("preferences.developer.enable", "Enable developer mode")
         )
         self._widgets['developer_mode'] = dev_mode
         dev_form.addRow("", dev_mode)
 
-        dev_note = QLabel(I18N.tr(
+        dev_note = QLabel(I18N.tr_preference(
             "preferences.developer.note",
             "Developer mode change requires application restart. It exposes "
             "maintainer tools such as Window > Set as Default, which updates "
@@ -1425,28 +1437,28 @@ class PreferencesDialog(QDialog):
         layout.addWidget(dev_group)
 
         # Plugin Settings group
-        plugin_group = self._create_group("preferences.plugin_management.effect_settings_title", "效果插件设置（GLSL / AI）")
+        plugin_group = self._create_group("preferences.plugin_management.effect_settings_title", "Effect Plugin Settings (GLSL / AI)")
         plugin_form = make_pref_form(plugin_group)
 
         # Plugin directory
-        plugin_dir_edit = self._create_path_edit("Select Plugin Directory")
+        plugin_dir_edit = self._create_path_edit(I18N.tr_preference("preferences.paths.select_plugin_dir", "Select Plugin Directory"))
         self._widgets['plugin_directory'] = plugin_dir_edit._line_edit
         plugin_form.addRow(
-            make_pref_label(I18N.tr("preferences.plugin_management.plugin_directory", "Plugin Directory:")),
+            make_pref_label(I18N.tr_preference("preferences.plugin_management.plugin_directory", "Plugin Directory:")),
             plugin_dir_edit
         )
 
         # Auto-scan plugins
-        auto_scan = QCheckBox(I18N.tr("preferences.plugin_management.auto_scan", "Auto-scan plugins on startup"))
+        auto_scan = QCheckBox(I18N.tr_preference("preferences.plugin_management.auto_scan", "Auto-scan plugins on startup"))
         self._widgets['auto_scan_plugins'] = auto_scan
         plugin_form.addRow("", auto_scan)
 
         layout.addWidget(plugin_group)
 
         # Installed Plugins group
-        installed_group = self._create_group("preferences.plugin_management.files_list_title", "素材插件（启停需重启）")
+        installed_group = self._create_group("preferences.plugin_management.files_list_title", "Media Plugins (Restart Required)")
         installed_layout = QVBoxLayout(installed_group)
-        installed_layout.setContentsMargins(16, 20, 16, 16)
+        installed_layout.setContentsMargins(*PREF_FORM_MARGINS)
         installed_layout.setSpacing(12)
 
         self._plugin_list = QListWidget()
@@ -1455,13 +1467,13 @@ class PreferencesDialog(QDialog):
         installed_layout.addWidget(self._plugin_list)
 
         btn_layout = QHBoxLayout()
-        refresh_btn = QPushButton(I18N.tr("preferences.plugin_management.refresh_plugins", "Refresh Plugins"))
+        refresh_btn = QPushButton(I18N.tr_preference("preferences.plugin_management.refresh_plugins", "Refresh Plugins"))
         refresh_btn.setObjectName("PrefActionBtn")
         refresh_btn.setFixedHeight(36)
         refresh_btn.clicked.connect(self._refresh_plugins)
         btn_layout.addWidget(refresh_btn)
 
-        open_plugin_dir_btn = QPushButton(I18N.tr("preferences.plugin_management.open_plugin_dir", "Open Plugin Directory"))
+        open_plugin_dir_btn = QPushButton(I18N.tr_preference("preferences.plugin_management.open_plugin_dir", "Open Plugin Directory"))
         open_plugin_dir_btn.setObjectName("PrefActionBtn")
         open_plugin_dir_btn.setFixedHeight(36)
         open_plugin_dir_btn.clicked.connect(self._open_plugin_directory)
@@ -1474,20 +1486,9 @@ class PreferencesDialog(QDialog):
 
     # ── Helper Methods ─────────────────────────────────────────────
 
-    def _wrap_in_scroll_area(self) -> QScrollArea:
-        """Create a QScrollArea wrapping a QWidget for page content."""
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content = QWidget()
-        content.setObjectName("PrefPageContent")
-        scroll.setWidget(content)
-        return scroll
-
     def _create_group(self, title_key: str, default_title: str) -> QGroupBox:
         """Create a styled QGroupBox with i18n title."""
-        group = QGroupBox(I18N.tr(title_key, default_title))
+        group = QGroupBox(I18N.tr_preference(title_key, default_title))
         group.setObjectName("PrefSettingsGroup")
         return group
 
@@ -1502,7 +1503,7 @@ class PreferencesDialog(QDialog):
         edit.setPlaceholderText(dialog_title)
         # 统一文本框样式（与导出面板输入框一致）
         _apply_text_input_style(edit)
-        browse_btn = QPushButton(I18N.tr("preferences.export.browse", "Browse"))
+        browse_btn = QPushButton(I18N.tr_preference("preferences.export.browse", "Browse"))
         browse_btn.setObjectName("PrefBrowseBtn")
         browse_btn.setFixedWidth(80)
         # 统一按钮样式（与导出面板 Browse/Choose 同款）
@@ -1524,7 +1525,7 @@ class PreferencesDialog(QDialog):
         current = line_edit.text()
         if is_file:
             path, _ = QFileDialog.getOpenFileName(
-                self, title, current if current else "", "All Files (*)"
+                self, title, current if current else "", I18N.tr_preference("preferences.paths.all_files", "All Files (*)")
             )
         else:
             path = QFileDialog.getExistingDirectory(
@@ -1544,8 +1545,8 @@ class PreferencesDialog(QDialog):
         """Reset all keyboard shortcuts to defaults."""
         reply = QMessageBox.question(
             self,
-            I18N.tr("preferences.shortcuts.reset_all", "Reset All Shortcuts"),
-            I18N.tr("preferences.shortcuts.reset_all_confirm",
+            I18N.tr_preference("preferences.shortcuts.reset_all", "Reset All Shortcuts"),
+            I18N.tr_preference("preferences.shortcuts.reset_all_confirm",
                     "Are you sure you want to reset all shortcuts to defaults?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
@@ -1559,8 +1560,8 @@ class PreferencesDialog(QDialog):
         """Clear the image and baked-layer caches managed by FileIO."""
         reply = QMessageBox.question(
             self,
-            I18N.tr("preferences.file_storage.clear_cache", "Clear Cache"),
-            I18N.tr("preferences.file_storage.clear_cache_confirm",
+            I18N.tr_preference("preferences.file_storage.clear_cache", "Clear Cache"),
+            I18N.tr_preference("preferences.file_storage.clear_cache_confirm",
                     "Clear the cached images and baked layers? This cannot be undone."),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
@@ -1588,15 +1589,15 @@ class PreferencesDialog(QDialog):
             self._update_cache_size_label()
             QMessageBox.information(
                 self,
-                I18N.tr("preferences.file_storage.clear_cache", "Clear Cache"),
-                I18N.tr("preferences.file_storage.cache_cleared",
+                I18N.tr_preference("preferences.file_storage.clear_cache", "Clear Cache"),
+                I18N.tr_preference("preferences.file_storage.cache_cleared",
                         "Cache cleared. {count} files removed.").format(count=total)
             )
 
     def _clear_thumbnail_cache(self) -> None:
         self._widgets["thumbnail_clear_button"].setEnabled(False)
         status = self._widgets["thumbnail_clear_status"]
-        status.setText(I18N.tr("preferences.file_storage.clearing_thumbnail_cache", "Clearing thumbnail cache…"))
+        status.setText(I18N.tr_preference("preferences.file_storage.clearing_thumbnail_cache", "Clearing thumbnail cache…"))
         status.show()
         threading.Thread(
             target=self._clear_thumbnail_cache_worker, name="prefs-thumbnail-cache-clear", daemon=True,
@@ -1620,10 +1621,10 @@ class PreferencesDialog(QDialog):
         self._widgets["thumbnail_clear_button"].setEnabled(True)
         status = self._widgets["thumbnail_clear_status"]
         if count < 0:
-            status.setText(I18N.tr(
+            status.setText(I18N.tr_preference(
                 "preferences.file_storage.thumbnail_cache_clear_failed", "Couldn't clear the thumbnail cache."))
         else:
-            status.setText(I18N.tr(
+            status.setText(I18N.tr_preference(
                 "preferences.file_storage.thumbnail_cache_cleared",
                 "Thumbnail cache cleared. {count} entries removed.",
             ).format(count=count))
@@ -1654,9 +1655,10 @@ class PreferencesDialog(QDialog):
         # Save dialog first (UI thread), then collect in background.
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            I18N.tr("preferences.advanced.export_diagnostics", "Export Diagnostics"),
+            I18N.tr_preference("preferences.advanced.export_diagnostics", "Export Diagnostics"),
             "topos_diagnostics.json",
-            "JSON Files (*.json);;All Files (*)"
+            I18N.tr_preference("preferences.paths.json_files", "JSON Files (*.json)") + ";;"
+            + I18N.tr_preference("preferences.paths.all_files", "All Files (*)")
         )
         if not file_path:
             return
@@ -1720,20 +1722,20 @@ class PreferencesDialog(QDialog):
         if ok:
             QMessageBox.information(
                 self,
-                I18N.tr("preferences.advanced.export_diagnostics", "Export Diagnostics"),
-                I18N.tr("preferences.advanced.diagnostics_saved",
+                I18N.tr_preference("preferences.advanced.export_diagnostics", "Export Diagnostics"),
+                I18N.tr_preference("preferences.advanced.diagnostics_saved",
                         "Diagnostics saved to: {path}").format(path=detail)
             )
         else:
             QMessageBox.warning(
                 self,
-                I18N.tr("preferences.advanced.export_diagnostics", "Export Diagnostics"),
-                I18N.tr("preferences.advanced.diagnostics_failed",
+                I18N.tr_preference("preferences.advanced.export_diagnostics", "Export Diagnostics"),
+                I18N.tr_preference("preferences.advanced.diagnostics_failed",
                         "Failed to save diagnostics: {error}").format(error=detail)
             )
 
     def _open_log_directory(self) -> None:
-        """Open log directory in file explorer."""
+        """Open the log directory in the system file manager."""
         from src.shared.io.file_io import FileIO
         # Try custom log path, then cache dir, then project root
         log_dir = self._config_manager.get("log_file_path") or ""
@@ -1766,14 +1768,22 @@ class PreferencesDialog(QDialog):
             self._plugin_list.addItem(item)
             return
         if not plugins:
-            item = QListWidgetItem(I18N.tr(
+            item = QListWidgetItem(I18N.tr_preference(
                 "preferences.plugin_management.no_plugins_found", "No plugins found"))
             item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
             self._plugin_list.addItem(item)
             return
         for plugin in plugins:
-            item = QListWidgetItem(f"{plugin.name} v{plugin.version} — {plugin_status(plugin)}")
-            item.setToolTip(plugin.description or plugin.launch_unavailable_reason)
+            name, description = plugin.name, plugin.description or plugin.launch_unavailable_reason
+            if plugin.source == "builtin":
+                prefix = f"preferences.plugin_management.builtins.{plugin.plugin_id}"
+                name = I18N.tr_preference(f"{prefix}.name", name)
+                description = I18N.tr_preference(f"{prefix}.description", description)
+            status = plugin_status(
+                plugin, lambda key, default: I18N.tr_preference(f"preferences.plugin_management.status.{key}", default)
+            )
+            item = QListWidgetItem(f"{name} v{plugin.version} — {status}")
+            item.setToolTip(description)
             item.setData(Qt.ItemDataRole.UserRole, plugin.plugin_id)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if plugin.desired_enabled
@@ -1800,8 +1810,8 @@ class PreferencesDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(
                 self,
-                I18N.tr("preferences.file_storage.open_directory", "Open Directory"),
-                I18N.tr("preferences.file_storage.open_directory_failed",
+                I18N.tr_preference("preferences.file_storage.open_directory", "Open Directory"),
+                I18N.tr_preference("preferences.file_storage.open_directory_failed",
                         "Failed to open directory: {error}").format(error=str(e))
             )
 
@@ -1874,7 +1884,7 @@ class PreferencesDialog(QDialog):
         label = self._widgets.get('cache_size_label')
         if label:
             label.setText(
-                I18N.tr("preferences.file_storage.cache_size_label", "Current cache size:") + " " + size_str)
+                I18N.tr_preference("preferences.file_storage.cache_size_label", "Current cache size:") + " " + size_str)
 
     # ── Data Loading ───────────────────────────────────────────────
 
@@ -1939,6 +1949,9 @@ class PreferencesDialog(QDialog):
             self._coerce_int(cfg.get('auto_save_interval'), 5))
         self._widgets['max_recent_files'].setValue(
             self._coerce_int(cfg.get('max_recent_files'), 10))
+        self._widgets["max_recent_projects"].setValue(
+            self._coerce_int(cfg.get("max_recent_projects"), 10))
+        self._load_workspace_display_settings(cfg)
         self._widgets['show_welcome_on_startup'].setChecked(
             cfg.get('show_welcome_on_startup', True)
         )
@@ -1989,11 +2002,7 @@ class PreferencesDialog(QDialog):
                 break
 
         resolution = self._coerce_int(cfg.get('video_playback_resolution'), 1920)
-        res_combo = self._widgets['video_playback_resolution']
-        for i, (label, value) in enumerate(self.VIDEO_RESOLUTIONS.items()):
-            if value == resolution:
-                res_combo.setCurrentIndex(i)
-                break
+        self._select_combo_by_data('video_playback_resolution', resolution)
 
         self._widgets['processing_threads'].setValue(
             self._coerce_int(cfg.get('processing_threads'), 0))
@@ -2077,7 +2086,6 @@ class PreferencesDialog(QDialog):
         self._widgets['developer_mode'].setChecked(bool(cfg.get('developer_mode', False)))
         self._widgets['plugin_directory'].setText(cfg.get('plugin_directory', 'plugins'))
         self._widgets['auto_scan_plugins'].setChecked(cfg.get('auto_scan_plugins', True))
-        self._disabled_plugins = list(cfg.get('disabled_plugins', []))  # Update from config
 
         # Delegate load to module preference pages
         for page_id, page_obj in self._module_pages.items():
@@ -2092,6 +2100,16 @@ class PreferencesDialog(QDialog):
         self._update_cache_size_label()
 
     # ── Event Handlers ──────────────────────────────────────────────
+
+    def _load_workspace_display_settings(self, config: Any) -> None:
+        for key in ("grade_set_show_filenames", "grade_set_rating_at_bottom"):
+            checkbox = self._widgets.get(key)
+            if checkbox is not None:
+                checkbox.setChecked(config.get(key) is True)
+        library_path = self._widgets.get("project_library_directory")
+        if library_path is not None:
+            path = config.get("project_library_directory")
+            library_path.setText(path if isinstance(path, str) else "")
 
     def _on_category_changed(self, row: int) -> None:
         """Switch to the selected category page."""
@@ -2122,6 +2140,14 @@ class PreferencesDialog(QDialog):
             cfg.set('work_mode', wm_widget.currentData(), auto_save=False)
         cfg.set('auto_save_interval', self._widgets['auto_save_interval'].intValue(), auto_save=False)
         cfg.set('max_recent_files', self._widgets['max_recent_files'].intValue(), auto_save=False)
+        cfg.set("max_recent_projects", self._widgets["max_recent_projects"].intValue(), auto_save=False)
+        for key in ("grade_set_show_filenames", "grade_set_rating_at_bottom"):
+            checkbox = self._widgets.get(key)
+            if checkbox is not None:
+                cfg.set(key, checkbox.isChecked(), auto_save=False)
+        library_path = self._widgets.get("project_library_directory")
+        if library_path is not None:
+            cfg.set("project_library_directory", library_path.text().strip(), auto_save=False)
         cfg.set('show_welcome_on_startup', self._widgets['show_welcome_on_startup'].isChecked(), auto_save=False)
         cfg.set('confirm_before_reset', self._widgets['confirm_before_reset'].isChecked(), auto_save=False)
         cfg.set('auto_load_last_project', self._widgets['auto_load_last_project'].isChecked(), auto_save=False)
@@ -2145,8 +2171,7 @@ class PreferencesDialog(QDialog):
         cfg.set('video_macos_vt_zero_copy',
                 self._widgets['video_macos_vt_zero_copy'].currentData(),
                 auto_save=False)
-        res_label = self._widgets['video_playback_resolution'].currentText()
-        resolution = self.VIDEO_RESOLUTIONS.get(res_label, 1920)
+        resolution = self._widgets['video_playback_resolution'].currentData()
         cfg.set('video_playback_resolution', resolution, auto_save=False)
         cfg.set('processing_threads', self._widgets['processing_threads'].intValue(), auto_save=False)
         cfg.set('pass_fusion_mode', self._widgets['pass_fusion_mode'].currentData(), auto_save=False)
@@ -2246,10 +2271,10 @@ class PreferencesDialog(QDialog):
         if module_apply_failures:
             QMessageBox.warning(
                 self,
-                I18N.tr("preferences.module_apply_failed.title", "Apply Failed"),
-                I18N.tr(
+                I18N.tr_preference("preferences.module_apply_failed.title", "Save Failed"),
+                I18N.tr_preference(
                     "preferences.module_apply_failed.message",
-                    "Some module settings could not be applied:\n{pages}",
+                    "Some module settings could not be saved:\n{pages}",
                 ).format(pages=", ".join(module_apply_failures)),
             )
 
@@ -2257,24 +2282,23 @@ class PreferencesDialog(QDialog):
         cfg.save_config()
         return not module_apply_failures
 
-    def _on_apply(self) -> None:
-        """Apply settings without closing dialog."""
+    def _on_apply(self) -> bool:
+        """Commit settings and track writes for rollback if the dialog stays open."""
         self._applied = True
         with self._tracking_config_writes():
-            self._apply_settings()
+            applied = self._apply_settings()
         # Refresh VT zero-copy capability cache when video settings change
         try:
             from src.shared.media.macos_vt.capability import clear_capability_cache
             clear_capability_cache()
         except Exception as exc:
             logger.warning("Failed to refresh VT capability cache after apply: %s", exc)
+        return applied
 
     def _on_save(self) -> None:
         """Apply settings and close dialog."""
-        self._applied = True
-        with self._tracking_config_writes():
-            if self._apply_settings() is False:
-                return
+        if self._on_apply() is False:
+            return
         
         # Check if locale changed -> need restart
         locale = self._widgets['locale'].currentData()
@@ -2403,8 +2427,8 @@ class PreferencesDialog(QDialog):
         """Restore all settings to default values."""
         reply = QMessageBox.question(
             self,
-            I18N.tr("preferences.restore_defaults", "Restore Defaults"),
-            I18N.tr("preferences.restore_confirm",
+            I18N.tr_preference("preferences.restore_defaults", "Restore Defaults"),
+            I18N.tr_preference("preferences.restore_confirm",
                     "Restore all settings to their default values?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
@@ -2433,6 +2457,8 @@ class PreferencesDialog(QDialog):
                     break
         self._widgets['auto_save_interval'].setValue(defaults['auto_save_interval'])
         self._widgets['max_recent_files'].setValue(defaults['max_recent_files'])
+        self._widgets["max_recent_projects"].setValue(defaults.get("max_recent_projects", 10))
+        self._load_workspace_display_settings(defaults)
         self._widgets['show_welcome_on_startup'].setChecked(defaults['show_welcome_on_startup'])
         self._widgets['confirm_before_reset'].setChecked(defaults.get('confirm_before_reset', True))
         self._widgets['auto_load_last_project'].setChecked(defaults.get('auto_load_last_project', True))
@@ -2468,11 +2494,7 @@ class PreferencesDialog(QDialog):
             if graphics_combo.itemData(i) == default_graphics_backend:
                 graphics_combo.setCurrentIndex(i)
                 break
-        res_combo = self._widgets['video_playback_resolution']
-        for i, (label, value) in enumerate(self.VIDEO_RESOLUTIONS.items()):
-            if value == defaults['video_playback_resolution']:
-                res_combo.setCurrentIndex(i)
-                break
+        self._select_combo_by_data('video_playback_resolution', defaults['video_playback_resolution'])
         self._widgets['processing_threads'].setValue(defaults.get('processing_threads', 0))
         # [BUG-B3-04] Restore Defaults 此前漏掉 pass_fusion_mode，用户设为
         # "off"/"aggressive" 后恢复默认不生效；DEFAULT_CONFIG 已补默认键
@@ -2528,7 +2550,6 @@ class PreferencesDialog(QDialog):
         self._widgets['developer_mode'].setChecked(bool(defaults.get('developer_mode', False)))
         self._widgets['plugin_directory'].setText(defaults.get('plugin_directory', 'plugins'))
         self._widgets['auto_scan_plugins'].setChecked(defaults.get('auto_scan_plugins', True))
-        self._disabled_plugins = list(defaults.get('disabled_plugins', []))
 
         # Timeline Defaults — hidden in Image mode, guard each access.
         self._select_combo_by_data('default_timeline_fps', defaults.get('default_timeline_fps', '25'))
@@ -2567,9 +2588,9 @@ class PreferencesDialog(QDialog):
         if module_restore_failures:
             QMessageBox.warning(
                 self,
-                I18N.tr("preferences.module_restore_failed.title",
+                I18N.tr_preference("preferences.module_restore_failed.title",
                         "Restore Defaults Failed"),
-                I18N.tr(
+                I18N.tr_preference(
                     "preferences.module_restore_failed.message",
                     "Some module pages could not be restored:\n{pages}",
                 ).format(pages=", ".join(module_restore_failures)),
@@ -2583,8 +2604,8 @@ class PreferencesDialog(QDialog):
         """Ask whether to restart after saving the preferences."""
         reply = QMessageBox.question(
             self.parent() if self.parent() else self,
-            I18N.tr("dialog.restart_title", "Restart Required"),
-            I18N.tr("dialog.restart_message",
+            I18N.tr_preference("preferences.restart.title", "Restart Required"),
+            I18N.tr_preference("preferences.restart.message",
                     "The application needs to restart for the language change to take effect.\n\n"
                     "Would you like to restart now?"),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -2608,22 +2629,18 @@ class PreferencesDialog(QDialog):
     # ── Styles ─────────────────────────────────────────────────────
 
     def _apply_styles(self) -> None:
-        """Apply dark theme styles unified with the Export panels (Batch/Quick Export).
-
-        配色与导出面板一致：输入框/下拉框/按钮统一用 #232325 背景 + #151517 边框 +
-        6px 圆角（同 ChevronComboBox / _apply_text_input_style / 紧凑按钮）。
-        颜色全部引用全局 C 常量，方便全局调整。
-        """
+        """Apply the preferences pane colors and the shared Topos accents."""
+        sidebar_background = "#202024"
         self.setStyleSheet(f"""
             /* === Dialog Background === */
             QDialog {{
-                background-color: {C.BG_PANEL};
+                background-color: {PREF_PAGE_BACKGROUND};
                 color: {C.TEXT_PRIMARY};
             }}
 
             /* === Title Bar === */
             QWidget#PrefTitleBar {{
-                background-color: {C.BG_DARK};
+                background-color: #191A1F;
                 border-bottom: 1px solid {C.BG_DARKEST};
             }}
             QLabel#PrefTitleLabel {{
@@ -2636,7 +2653,7 @@ class PreferencesDialog(QDialog):
 
             /* === Category List === */
             QListWidget#PrefCategoryList {{
-                background-color: {C.BG_DARK};
+                background-color: {sidebar_background};
                 border: none;
                 outline: none;
                 padding: 8px 0px;
@@ -2644,52 +2661,52 @@ class PreferencesDialog(QDialog):
             }}
             QListWidget#PrefCategoryList::item {{
                 color: {C.TEXT_LABEL};
-                padding: 10px 20px;
+                padding: 6px 16px;
                 border: none;
                 border-left: 3px solid transparent;
             }}
             QListWidget#PrefCategoryList::item:hover {{
-                background-color: {C.BG_DARK};
+                background-color: #29292e;
                 color: {C.TEXT_BRIGHT};
             }}
             QListWidget#PrefCategoryList::item:selected {{
-                background-color: {C.BG_DARK};
+                background-color: #2c2c32;
                 color: {C.ORANGE};
                 border-left: 3px solid {C.ORANGE};
             }}
 
             /* === Pages Container === */
             QStackedWidget#PrefPages {{
-                background-color: {C.BG_PANEL};
+                background-color: {PREF_PAGE_BACKGROUND};
             }}
 
             /* === Page Content === */
             QWidget#PrefPageContent {{
-                background-color: {C.BG_PANEL};
+                background-color: {PREF_PAGE_BACKGROUND};
             }}
 
             /* === Scroll Area for pages === */
             QScrollArea {{
-                background-color: {C.BG_PANEL};
+                background-color: {PREF_PAGE_BACKGROUND};
                 border: none;
             }}
 
-            /* === Settings Group（与导出面板 section 视觉对齐） === */
+            /* === Settings Group === */
             QGroupBox#PrefSettingsGroup {{
-                background-color: #232325;
-                border: 1px solid #151517;
-                border-radius: 6px;
-                padding: 12px;
-                margin-top: 8px;
-                font-size: 14px;
+                background-color: {PREF_PAGE_BACKGROUND};
+                border: 1px solid #1b1b1e;
+                border-radius: 5px;
+                margin-top: 9px;
+                font-size: 13px;
                 font-weight: bold;
                 color: {C.TEXT_BRIGHT};
             }}
             QGroupBox#PrefSettingsGroup::title {{
                 subcontrol-origin: margin;
                 left: 12px;
-                padding: 4px 8px;
-                color: {C.ORANGE};
+                padding: 0 5px;
+                background-color: {PREF_PAGE_BACKGROUND};
+                color: {C.TEXT_PRIMARY};
             }}
 
             /* === 统一输入控件（QLineEdit/QSpinBox/QComboBox） === */
@@ -2726,7 +2743,7 @@ class PreferencesDialog(QDialog):
             QComboBox::down-arrow:hover {{
                 border-top-color: {C.ORANGE};
             }}
-            /* QSpinBox 上下按钮（与导出面板一致，保留可点按） */
+            /* Spin-box step controls */
             QSpinBox::up-button, QDoubleSpinBox::up-button,
             QSpinBox::down-button, QDoubleSpinBox::down-button {{
                 background-color: #2e2e34;
@@ -2738,17 +2755,17 @@ class PreferencesDialog(QDialog):
                 background-color: {C.BG_BUTTON};
             }}
             QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-bottom: 5px solid {C.TEXT_LABEL};
+                image: url("{SPIN_UP_ICON_PATH}");
+                width: 8px;
+                height: 5px;
             }}
             QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid {C.TEXT_LABEL};
+                image: url("{SPIN_DOWN_ICON_PATH}");
+                width: 8px;
+                height: 5px;
             }}
 
-            /* === QCheckBox（全局主题已处理，这里补 spacing） === */
+            /* === Checkboxes === */
             QCheckBox {{
                 color: {C.TEXT_SECONDARY};
                 font-size: 12px;
@@ -2768,6 +2785,18 @@ class PreferencesDialog(QDialog):
             QCheckBox::indicator:checked {{
                 background: {C.ORANGE};
                 border: 1px solid {C.ORANGE};
+                image: url("{CHECKMARK_ICON_PATH}");
+            }}
+            QCheckBox:disabled {{
+                color: {C.TEXT_HINT};
+            }}
+            QCheckBox::indicator:disabled {{
+                border-color: #3a3a3e;
+                background: #232325;
+            }}
+            QCheckBox::indicator:checked:disabled {{
+                background: #914b12;
+                border-color: #914b12;
             }}
 
             /* === Form Labels === */
@@ -2866,24 +2895,6 @@ class PreferencesDialog(QDialog):
             QPushButton#PrefCancelBtn:hover {{
                 border-color: {C.ORANGE};
                 color: {C.ORANGE};
-            }}
-
-            /* === Apply Button（橙色描边次级按钮） === */
-            QPushButton#PrefApplyBtn {{
-                background-color: rgba(255, 136, 0, 0.15);
-                border: 1px solid {C.ORANGE};
-                border-radius: 4px;
-                padding: 8px 20px;
-                color: {C.ORANGE};
-                font-size: 13px;
-                font-weight: bold;
-                min-width: 80px;
-            }}
-            QPushButton#PrefApplyBtn:hover {{
-                background-color: rgba(255, 136, 0, 0.25);
-            }}
-            QPushButton#PrefApplyBtn:pressed {{
-                background-color: rgba(255, 136, 0, 0.35);
             }}
 
             /* === Save Button（主操作橙色实心，与导出面板 #PrimaryButton 同款） === */

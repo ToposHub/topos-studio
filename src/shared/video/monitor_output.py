@@ -8,6 +8,7 @@ format, and written to an ffmpeg DeckLink output process on a stable clock.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from dataclasses import replace
 import importlib
@@ -26,12 +27,20 @@ import numpy as np
 from PyQt6.QtGui import QImage
 from PyQt6.QtCore import Qt
 
+from src.shared.color.monitor_calibration import (
+    CalibrationRevision, EXTERNAL_CALIBRATION_LUT, load_monitor_calibration, monitor_calibration_revision,
+)
+
 logger = logging.getLogger(__name__)
 COMMON_FFMPEG_PATHS = (
     "/opt/homebrew/bin/ffmpeg",
     "/usr/local/bin/ffmpeg",
     "/opt/local/bin/ffmpeg",
 )
+# HD lookup runs on the monitor worker. UHD splits the memory-bound lookup
+# between that worker and at most three helpers to keep the queue responsive.
+_CALIBRATION_HD_PIXELS = 1920 * 1080
+_CALIBRATION_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="monitor-lut")
 
 
 @dataclass(frozen=True)
@@ -53,6 +62,7 @@ class DeckLinkMonitorConfig:
     ffmpeg_path: str = "ffmpeg"
     queue_size: int = 2
     debug: bool = False
+    calibration_lut: str = ""
 
     @classmethod
     def from_config(cls, config_manager: object | None) -> "DeckLinkMonitorConfig":
@@ -93,6 +103,7 @@ class DeckLinkMonitorConfig:
             ffmpeg_path=str(read("decklink_monitor_ffmpeg_path", "ffmpeg") or "ffmpeg"),
             queue_size=int(read("decklink_monitor_queue_size", 2) or 2),
             debug=bool(read("decklink_monitor_debug", False)),
+            calibration_lut=str(read(EXTERNAL_CALIBRATION_LUT, "") or ""),
         )
 
 
@@ -118,7 +129,7 @@ def build_ffmpeg_decklink_command(config: DeckLinkMonitorConfig) -> list[str]:
         "-f",
         "rawvideo",
         "-pix_fmt",
-        config.input_pix_fmt,
+        "bgra" if config.calibration_lut else config.input_pix_fmt,
         "-s",
         f"{int(config.width)}x{int(config.height)}",
         "-r",
@@ -260,6 +271,8 @@ def qimage_to_bgra_frame(
     try:
         import cv2
 
+        if (src_w, src_h) == (target_w, target_h):
+            return cv2.cvtColor(arr, cv2.COLOR_RGB2BGRA).tobytes()
         interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         fitted = cv2.resize(arr, (draw_w, draw_h), interpolation=interpolation)
     except Exception:
@@ -328,6 +341,8 @@ def ndarray_to_bgra_frame(
     try:
         import cv2
 
+        if (src_w, src_h) == (target_w, target_h):
+            return cv2.cvtColor(bgr, cv2.COLOR_BGR2BGRA).tobytes()
         interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         fitted = cv2.resize(bgr, (draw_w, draw_h), interpolation=interpolation)
     except Exception:
@@ -360,6 +375,19 @@ def rgba_bytes_to_bgra_frame(
         return black_bgra_frame(width, height)
     if is_gl_oriented:
         rgba = np.flipud(rgba)
+    if width > 0 and height > 0 and (src_width, src_height) == (width, height):
+        try:
+            import cv2
+        except ImportError:
+            pass
+        else:
+            try:
+                bgra = cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA)
+            except cv2.error:
+                pass  # The established RGB conversion handles the fallback.
+            else:
+                bgra[..., 3] = 255
+                return bgra.tobytes()
     rgb = np.ascontiguousarray(rgba[:, :, :3])
     return rgb_array_to_bgra_frame(rgb, width=width, height=height, fit_mode=fit_mode)
 
@@ -394,6 +422,8 @@ def rgb_array_to_bgra_frame(
     try:
         import cv2
 
+        if (src_w, src_h) == (target_w, target_h):
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGRA).tobytes()
         interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         fitted = cv2.resize(rgb, (draw_w, draw_h), interpolation=interpolation)
     except Exception:
@@ -667,6 +697,79 @@ def monitor_payload_to_bgra_frame(payload: object, *, width: int, height: int) -
     return black_bgra_frame(width, height)
 
 
+class _MonitorFrameConverter:
+    """Calibrate the physical monitor's RGB on its existing output worker."""
+
+    def __init__(self, lut_path: str, stop_event: threading.Event) -> None:
+        self._lut_path = lut_path
+        self._stop_event = stop_event
+        self._table: np.ndarray | None = None
+        self._revision: CalibrationRevision | None = None
+        self._reload_requested = threading.Event()
+        self.request_reload()
+
+    def request_reload(self) -> None:
+        if self._lut_path:
+            self._reload_requested.set()
+
+    def _reload(self) -> None:
+        self._reload_requested.clear()
+        try:
+            revision = monitor_calibration_revision(self._lut_path)
+            if revision == self._revision:
+                return
+            calibration = load_monitor_calibration(self._lut_path)
+            # The native monitor transports BGRA8. Evaluate the LUT once for
+            # every possible input code so playback needs only a packed lookup.
+            self._table = None
+            table = np.empty(1 << 24, dtype=np.uint32)
+            for begin in range(0, len(table), 65536):
+                if self._stop_event.is_set():
+                    return
+                codes = np.arange(begin, begin + 65536, dtype=np.uint32)
+                rgb = np.empty((len(codes), 3), dtype=np.float32)
+                for channel, shift in enumerate((16, 8, 0)):
+                    rgb[:, channel] = (codes >> shift) & 255
+                rgb /= np.float32(255.0)
+                mapped = calibration.apply_rgb(rgb)
+                if not np.isfinite(mapped).all():
+                    raise ValueError("The calibration LUT produced invalid RGB values.")
+                values = np.rint(np.clip(mapped, 0.0, 1.0) * 255.0).astype(np.uint32)
+                table[begin:begin + len(codes)] = values[:, 0] << 16 | values[:, 1] << 8 | values[:, 2]
+            self._table, self._revision = table, revision
+        except (MemoryError, OSError, RuntimeError, ValueError) as exc:
+            self._table, self._revision = None, None
+            logger.warning("DeckLink monitor calibration failed: %s", exc)
+
+    def convert(self, payload: object, *, width: int, height: int) -> bytes | None:
+        if not self._lut_path:
+            return monitor_payload_to_bgra_frame(payload, width=width, height=height)
+        if self._reload_requested.is_set():
+            self._reload()
+        if self._table is None:
+            return None
+        frame = monitor_payload_to_bgra_frame(payload, width=width, height=height)
+        pixels = np.frombuffer(frame, dtype="<u4")
+        calibrated = np.empty_like(pixels)
+        if len(pixels) <= _CALIBRATION_HD_PIXELS:
+            self._lookup(pixels, calibrated, self._table)
+        else:
+            span = (len(pixels) + 3) // 4
+            futures = [
+                _CALIBRATION_POOL.submit(self._lookup, pixels[i:i + span], calibrated[i:i + span], self._table)
+                for i in range(span, len(pixels), span)
+            ]
+            self._lookup(pixels[:span], calibrated[:span], self._table)
+            for future in futures:
+                future.result()
+        return calibrated.tobytes()
+
+    @staticmethod
+    def _lookup(pixels: np.ndarray, out: np.ndarray, table: np.ndarray) -> None:
+        out[:] = table[pixels & 0x00FFFFFF]
+        out |= pixels & 0xFF000000
+
+
 def monitor_payload_size(payload: object) -> tuple[int | None, int | None]:
     if isinstance(payload, QImage):
         return int(payload.width()), int(payload.height())
@@ -715,6 +818,7 @@ class FfmpegDeckLinkMonitorOutput:
         self._stop_event = threading.Event()
         self._process: Optional[subprocess.Popen] = None
         self._last_frame: bytes = black_bgra_frame(config.width, config.height)
+        self._frame_converter = _MonitorFrameConverter(config.calibration_lut, self._stop_event)
         self._last_frame_index: Optional[int] = None
         self._started = False
         # AUD-39214: 丢帧计数被提交线程与写线程并发自增（读-改-写），
@@ -769,6 +873,7 @@ class FfmpegDeckLinkMonitorOutput:
             return True
 
         self._stop_event.clear()
+        self._frame_converter = _MonitorFrameConverter(self.config.calibration_lut, self._stop_event)
         self._thread = threading.Thread(
             target=self._run,
             name="DeckLinkMonitorOutput",
@@ -786,6 +891,9 @@ class FfmpegDeckLinkMonitorOutput:
         self._thread = None
         self._started = False
         self._terminate_process()
+
+    def reload_calibration(self) -> None:
+        self._frame_converter.request_reload()
 
     def submit_qimage(self, frame_index: int, image: QImage) -> bool:
         if not self.is_running or image is None or image.isNull():
@@ -884,7 +992,7 @@ class FfmpegDeckLinkMonitorOutput:
         next_time = self._monotonic()
         while not self._stop_event.is_set():
             self._drain_latest_frame()
-            if not self._write_frame(self._last_frame):
+            if self._stop_event.is_set() or not self._write_frame(self._last_frame):
                 break
             next_time += interval
             delay = next_time - self._monotonic()
@@ -931,12 +1039,14 @@ class FfmpegDeckLinkMonitorOutput:
         if latest is None:
             return
         frame_index, payload = latest
-        self._last_frame = monitor_payload_to_bgra_frame(
+        frame = self._frame_converter.convert(
             payload,
             width=self.config.width,
             height=self.config.height,
         )
-        self._last_frame_index = int(frame_index)
+        if frame is not None:
+            self._last_frame = frame
+            self._last_frame_index = int(frame_index)
 
     def _write_frame(self, frame: bytes) -> bool:
         process = self._process
@@ -1025,6 +1135,7 @@ class NativeDeckLinkSDKMonitorOutput:
         self._last_submit_error_log = 0.0
         self._last_debug_log_by_event: dict[str, float] = {}
         self._last_content_debug_log = 0.0
+        self._frame_converter = _MonitorFrameConverter(config.calibration_lut, self._stop_event)
 
     @property
     def is_running(self) -> bool:
@@ -1032,7 +1143,7 @@ class NativeDeckLinkSDKMonitorOutput:
 
     @property
     def supports_gpu_texture(self) -> bool:
-        return self._supports_gpu_texture
+        return self._supports_gpu_texture and not self.config.calibration_lut
 
     def start(self) -> bool:
         if not self.config.enabled:
@@ -1084,6 +1195,7 @@ class NativeDeckLinkSDKMonitorOutput:
             self._supports_gpu_texture = False
             return False
         self._stop_event.clear()
+        self._frame_converter = _MonitorFrameConverter(self.config.calibration_lut, self._stop_event)
         self._thread = threading.Thread(
             target=self._run_bgra_submitter,
             name="NativeDeckLinkSubmitter",
@@ -1133,6 +1245,9 @@ class NativeDeckLinkSDKMonitorOutput:
             )
             return False
         return self.submit_frame_payload(frame_index, image.copy())
+
+    def reload_calibration(self) -> None:
+        self._frame_converter.request_reload()
 
     def submit_frame_payload(self, frame_index: int, payload: object) -> bool:
         if not self.is_running or payload is None:
@@ -1207,11 +1322,15 @@ class NativeDeckLinkSDKMonitorOutput:
             if output is None or not callable(submit):
                 continue
             try:
-                frame = monitor_payload_to_bgra_frame(
+                frame = self._frame_converter.convert(
                     payload,
                     width=self.config.width,
                     height=self.config.height,
                 )
+                if frame is None:
+                    continue
+                if self._stop_event.is_set() or self._output is not output:
+                    return
                 self._debug_frame_content(frame, frame_index)
                 submit(frame, int(self.config.width), int(self.config.height), int(frame_index))
                 self._submitted_frames += 1
@@ -1308,7 +1427,7 @@ class NativeDeckLinkSDKMonitorOutput:
     def submit_gpu_frame(self, frame: NativeGpuMonitorFrame) -> bool:
         output = self._output
         submit = getattr(output, "submit_gpu_texture", None)
-        if not self.is_running or not callable(submit):
+        if not self.is_running or not self.supports_gpu_texture or not callable(submit):
             return False
         try:
             submit(
@@ -1374,6 +1493,11 @@ class ProgramMonitorOutputController:
 
     def stop(self) -> None:
         self.backend.stop()
+
+    def reload_calibration(self) -> None:
+        reload_lut = getattr(self.backend, "reload_calibration", None)
+        if callable(reload_lut):
+            reload_lut()
 
     def submit_frame(self, frame_index: int, result: object) -> bool:
         if not self.backend.is_running:
@@ -1447,7 +1571,7 @@ class ProgramMonitorOutputController:
 
     def submit_gpu_frame(self, frame: NativeGpuMonitorFrame) -> bool:
         submit = getattr(self.backend, "submit_gpu_frame", None)
-        if not self.backend.is_running or not callable(submit):
+        if self.config.calibration_lut or not self.backend.is_running or not callable(submit):
             return False
         return bool(submit(frame))
 

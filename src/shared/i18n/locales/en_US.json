@@ -1330,6 +1330,7 @@
       "default": "Project default"
     },
     "track_header": {
+      "show_mix_controls": "Show Volume, Pan and Meters",
       "volume": "Track volume · {db} dB · L/R peaks · double-click for 0 dB",
       "pan": "Stereo balance · {value} · drag to adjust, double-click to center"
     },
@@ -1445,6 +1446,8 @@
       "mono": "Mono",
       "dim": "DIM",
       "mute": "Mute speakers",
+      "unmute": "Unmute speakers",
+      "playback_only": "Adjusts what you hear on this device.",
       "device": "Output device",
       "width": "Device channels",
       "map_hint": "Automatic stereo, or e.g. 1,2,3,4,5,6",
@@ -1719,9 +1722,12 @@
   "preferences": {
     "title": "Preferences",
     "categories": {
+      "control_surface": "Control Surface",
+      "video_playback": "Video Playback",
+      "timeline_defaults": "Timeline Defaults",
+      "advanced": "Advanced",
       "general": "General",
       "appearance": "Appearance",
-      "color_processing": "Color & Processing",
       "color_management": "Color Management",
       "performance": "Performance",
       "export": "Export",
@@ -1731,7 +1737,10 @@
       "logs_diagnostics": "Logs & Diagnostics",
       "plugin_management": "Plugins",
       "composite": "Composite",
-      "ai_editing": "AI Editing"
+      "ai_editing": "AI Editing",
+      "color_processing": "Color & Processing",
+      "edit_interaction": "Editing",
+      "files_browser": "Media Browser"
     },
     "general": {
       "section_title": "Application",
@@ -1749,7 +1758,8 @@
       "work_mode": {
         "image": "Image Grading",
         "video": "Video Grading"
-      }
+      },
+      "max_recent_projects": "Maximum Recent Projects:"
     },
     "appearance": {
       "section_title": "UI Settings",
@@ -1766,15 +1776,24 @@
       "show_panel_titles": "Show panel title bars",
       "compact_mode": "Compact mode (reduce padding)",
       "zoom_speed": "Mouse wheel zoom speed:",
-      "preview_note": "Appearance changes preview in real-time."
+      "preview_note": "Appearance changes preview in real-time.",
+      "grade_set": "Photo Grade Sets",
+      "grade_set_show_filenames": "Show file names on photo cards",
+      "grade_set_rating_at_bottom": "Show ratings below photo cards"
     },
     "color_management": {
       "section_title": "Color Settings",
       "default_color_space": "Default Color Space:",
       "image_warning_profile": "Image profile warning reference:",
       "project_color_defaults": "Project Color Defaults",
+      "calibration_section": "Monitor calibration",
+      "desktop_calibration_lut": "Built-in monitor calibration LUT",
+      "external_calibration_lut": "External card monitor calibration LUT",
+      "calibration_none": "No LUT selected",
+      "calibration_load": "Load monitor calibration LUT",
+      "calibration_tip": "Use a calibration LUT measured for this display and its output signal. The LUT applies after its display transform.",
       "color_science": "Color science",
-      "use_display_icc": "Use macOS display profiles for video viewers",
+      "use_display_icc": "Use macOS display ICC for video",
       "use_display_icc_tip": "Match the “Use Mac Display Color Profile for Viewers” setting in DaVinci Resolve.",
       "project_color_spaces": "Project Color Spaces",
       "timeline_space": "Timeline color space",
@@ -1850,7 +1869,12 @@
       "tf_srgb": "sRGB (~gamma 2.2)",
       "tf_rec709": "Rec.709 (~gamma 2.4)",
       "tf_linear": "Linear (no encode)",
-      "smart_default": "Smart default (timeline→Rec.709, image→sRGB)"
+      "smart_default": "Smart default (timeline→Rec.709, image→sRGB)",
+      "depth_8": "8-bit",
+      "depth_16": "16-bit",
+      "depth_float": "32-bit float",
+      "hdr_export_metadata": "Include static metadata in HDR10 exports",
+      "hdr_export_metadata_help": "Default for new projects using HDR10 HEVC/PQ export."
     },
     "performance": {
       "section_title": "Performance Settings",
@@ -1861,7 +1885,25 @@
       "render_quality": "Render Quality:",
       "processing_threads": "Processing threads (0=auto):",
       "background_rendering": "Enable background rendering",
-      "memory_limit": "Memory usage limit GB (0=auto):"
+      "memory_limit": "Memory usage limit GB (0=auto):",
+      "graphics_auto": "Auto (Recommended)",
+      "graphics_opengl": "OpenGL",
+      "graphics_d3d11": "D3D11 (Windows export)",
+      "graphics_metal": "Metal",
+      "timeline_graphics_backend": "Timeline render backend:",
+      "timeline_graphics_backend_desc": "For timeline exports, Auto selects D3D11 only after the complete native-surface and zero-readback gate passes. Otherwise it keeps the OpenGL path. Eligible single-layer clips run source color conversion, primary grading, scaling and H.264 YUV conversion on the selected GPU; unsupported effects or complex stacks use the CPU path.",
+      "vt_zero_copy_auto": "Auto (Recommended)",
+      "vt_zero_copy_off": "Disabled",
+      "vt_zero_copy_force": "Force Enable",
+      "vt_zero_copy": "macOS VT Zero-Copy Decode:",
+      "vt_zero_copy_desc": "Use macOS VideoToolbox for hardware decode with zero GPU memory copy. Auto: enable when available. Disabled: force CPU decode. Force: attempt even on unsupported configurations.",
+      "fusion_conservative": "Conservative (Recommended)",
+      "fusion_aggressive": "Aggressive",
+      "fusion_off": "Disabled",
+      "pass_fusion_mode": "Pass Fusion Mode:",
+      "fusion_desc": "Merges consecutive color-only nodes into a single GPU pass. Conservative: only fuse when texture sizes match. Aggressive: fuse with auto-resize. Disabled: no fusion for maximum quality.",
+      "resolution_original": "Original",
+      "threads_auto": "Auto"
     },
     "export": {
       "section_title": "Default Export Settings",
@@ -1872,7 +1914,8 @@
       "preserve_metadata": "Preserve metadata",
       "color_profile": "Export Color Profile:",
       "embed_icc": "Embed ICC profile in exported file",
-      "open_folder_after": "Open folder after export"
+      "open_folder_after": "Open folder after export",
+      "profile_none": "None"
     },
     "shortcuts": {
       "section_title": "Keyboard Shortcuts",
@@ -1901,7 +1944,16 @@
       "clearing_thumbnail_cache": "Clearing thumbnail cache…",
       "thumbnail_cache_cleared": "Thumbnail cache cleared. {count} entries removed.",
       "thumbnail_cache_clear_failed": "Couldn't clear the thumbnail cache.",
-      "calculating": "Calculating..."
+      "calculating": "Calculating...",
+      "section_proxy_title": "Video Proxy",
+      "section_render_cache_title": "Render Cache",
+      "proxy_format_note": "Topos proxies are intra-frame 4:2:2 10-bit (video-only; audio always plays from the master). Changing the format takes effect for newly generated proxies and invalidates existing ones.",
+      "proxy_format": "Proxy Format:",
+      "open_directory": "Open Directory",
+      "cache_cleared": "Cache cleared. {count} files removed.",
+      "open_directory_failed": "Failed to open directory: {error}",
+      "backup_off": "Off",
+      "project_library_directory": "Default Project Library:"
     },
     "image_processing": {
       "section_default_title": "Default Processing Parameters",
@@ -1909,7 +1961,7 @@
       "sharpen_amount": "Default sharpening amount:",
       "processing_bit_depth": "Processing bit depth:",
       "conversion_intent": "Color conversion intent:",
-      "section_ai_title": "AI Processing",
+      "section_ai_title": "AI Image Processing",
       "ai_model_path": "AI Model Path:",
       "ai_precision": "AI Inference Precision:",
       "ai_precision_fp32": "FP32 (High Quality)",
@@ -1947,7 +1999,59 @@
       "open_plugin_dir": "Open Plugin Directory",
       "no_plugins_found": "No plugins found",
       "enabled": "Enabled",
-      "disabled": "Disabled"
+      "disabled": "Disabled",
+      "effect_settings_title": "Effect Plugin Settings (GLSL / AI)",
+      "files_list_title": "Media Plugins (Restart Required)",
+      "status": {
+        "failed": "Load failed",
+        "pending_disable": "Disables after restart",
+        "pending_enable": "Enables after restart",
+        "disabled": "Disabled",
+        "loaded": "Loaded",
+        "unloaded": "Not loaded"
+      },
+      "builtins": {
+        "image_factory": {
+          "name": "Image Factory",
+          "description": "Batch-convert or compress images. Add media after opening the plugin."
+        },
+        "video_pro": {
+          "name": "Video Pro",
+          "description": "Plays video through Qt Multimedia or Topos decoding, including thumbnails and metadata."
+        },
+        "audio_pro": {
+          "name": "Audio Pro",
+          "description": "Plays audio and supports waveforms and clip trimming."
+        },
+        "decode_benchmark": {
+          "name": "Topos Decode Speed Test",
+          "description": "Benchmarks offline decoding and live decoding, GPU compositing and presentation on the Edit timeline."
+        },
+        "ai_library_browser": {
+          "name": "AI Media Library",
+          "description": "Searches the vault for video, music and images by meaning."
+        },
+        "topos_image": {
+          "name": "Topos Image",
+          "description": "Previews Topos .toos images and reads their metadata."
+        },
+        "image_editor": {
+          "name": "Darkroom",
+          "description": "Opens the legacy web image editor. Effects run through the existing Effect Catalog."
+        },
+        "code_editor": {
+          "name": "Code Editor",
+          "description": "Opens the legacy code editor based on Monaco Editor."
+        },
+        "shutdown_timer": {
+          "name": "Shutdown Timer",
+          "description": "Schedules shutdown. Opening the plugin leaves shutdown inactive."
+        },
+        "format_factory": {
+          "name": "Format Factory",
+          "description": "Transcodes and remuxes video. The launch endpoint accepts one file at a time."
+        }
+      }
     },
     "save": "Save",
     "apply": "Apply",
@@ -1963,7 +2067,26 @@
       "subtitle_export_complete_title": "Subtitle Export Complete",
       "subtitle_export_complete": "Exported {count} cues to:\n{path}",
       "subtitle_export_failed_title": "Subtitle Export Failed",
-      "subtitle_export_failed": "Could not export subtitles:\n{error}"
+      "subtitle_export_failed": "Could not export subtitles:\n{error}",
+      "video_group": "Default Video Settings",
+      "audio_group": "Default Audio Settings",
+      "default_fps": "Frame Rate:",
+      "custom": "Custom",
+      "resolution": "Resolution:",
+      "square_pixels": "Square Pixels (1.0)",
+      "anamorphic_pixels": "HD Anamorphic (1.3333)",
+      "pixel_aspect": "Pixel Aspect Ratio:",
+      "progressive": "Progressive (No Fields)",
+      "upper_field": "Upper Field First",
+      "lower_field": "Lower Field First",
+      "field_order": "Field Order:",
+      "start_timecode": "Start Timecode:",
+      "sample_rate": "Sample Rate:",
+      "track_mono": "Mono",
+      "track_stereo": "Stereo",
+      "track_surround": "5.1 Surround",
+      "audio_track_type": "Track Type:",
+      "frames_suffix": " f"
     },
     "video_playback": {
       "section_title": "Video Playback",
@@ -1972,7 +2095,9 @@
       "engine_v3": "v3 Realtime Engine",
       "engine_v2": "v2 Compatibility",
       "allow_fallback": "Allow automatic fallback to v2 if v3 fails",
-      "engine_desc": "Auto: Prioritizes v3 realtime engine, falls back to v2 on failure. v3: Forces realtime engine, no fallback. v2: Uses legacy compatibility path for debugging."
+      "engine_desc": "Auto: Prioritizes v3 realtime engine, falls back to v2 on failure. v3: Forces realtime engine, no fallback. v2: Uses legacy compatibility path for debugging.",
+      "adaptive_quality": "Adjust playback quality automatically",
+      "adaptive_quality_help": "Reduce preview quality when playback struggles and restore it when the load drops."
     },
     "video_pipeline": {
       "section_title": "Video Pipeline",
@@ -1980,8 +2105,8 @@
       "v3_enabled": "Enable v3 video architecture",
       "drop_frames": "Drop frames when preview queue is full",
       "max_queue": "Preview queue depth:",
-      "yuv_gpu_upload": "Use GPU for YUV color conversion (recommended)",
-      "no_deblock": "Disable deblock filtering in preview (faster, may show 8x8 blocks on low tiers)",
+      "yuv_gpu_upload": "Use GPU for YUV conversion",
+      "no_deblock": "Disable deblocking in preview",
       "no_deblock_tooltip": "Skips the decoder-side deblock filter for timeline preview. Decoding gets 1.2-2x faster on low tiers but 8x8 block edges become visible again. Export and delivery always keep the filter.",
       "note": "These settings control the video playback architecture."
     },
@@ -1991,7 +2116,35 @@
       "shake_sensitivity_tooltip": "How easily shaking a node disconnects it. Lower values are harder to trigger and ignore slow movements.",
       "shake_sensitivity_hint": "Lower this value if nodes disconnect too easily while being moved.",
       "ocio_unavailable_tooltip": "Install PyOpenColorIO (pip install opencolorio) to enable.",
-      "gb_suffix": " GB"
+      "gb_suffix": " GB",
+      "export_parallel_frames_tooltip": "Number of frames rendered simultaneously during exports. Each worker holds its own GPU context (more VRAM use); output is identical to a serial render.",
+      "working_space_tooltip": "The colour space used for all internal compositing operations. Scene-linear gives physically correct blending.",
+      "display_space_tooltip": "How scene-linear data is shown on screen by default. sRGB applies a linear→sRGB encode; Linear shows raw values.",
+      "color_engine_tooltip": "OCIO (factory default) uses OpenColorIO for arbitrary colour transforms (requires PyOpenColorIO installed). Built-in uses fast sRGB↔linear math.",
+      "node_cache_capacity_tooltip": "Total size ceiling for the node result disk cache (Render-in-Place and cache_to_disk nodes). Oldest entries are evicted first.",
+      "node_cache_format_tooltip": "Payload codec for the node result disk cache. Auto prefers the native Topos .toos image (12-bit GBR+alpha) and falls back to lossless npz for HDR results or when the native library is unavailable.",
+      "export_parallel_frames": "Export Parallel Frames",
+      "color_management_group": "Colour Management",
+      "space_scene_linear": "Scene-Linear",
+      "working_space": "Working Space",
+      "space_linear": "Linear",
+      "display_space": "Display Space",
+      "engine_builtin": "Built-in (sRGB/Linear)",
+      "color_engine": "Color Engine",
+      "color_management_hint": "Built-in is the fast default for sRGB/Linear workflows; its transforms are verified identical to OCIO for the common spaces. With OCIO selected, exports run through OpenColorIO and the viewer ODT uses an OCIO-baked lookup — same engine as export. ACEScg sources are colour-managed with the same matrix as the bundled config's acescg space. A real ACES Studio Config can be set via ocio_config_path; missing OCIO falls back to built-in everywhere — behaviour never breaks.",
+      "node_cache_capacity": "Node disk cache size",
+      "cache_format_auto": "Auto (Topos .toos + npz fallback)",
+      "cache_format_toos": "Topos .toos only",
+      "cache_format_npz": "npz (lossless float16)",
+      "node_cache_format": "Node cache format",
+      "node_cable_routing": "Node cable routing",
+      "cable_curved": "Curved",
+      "cable_straight": "Straight",
+      "cable_orthogonal": "Right angles",
+      "node_thumbnail_mode": "Node thumbnails",
+      "thumbnail_none": "Hidden",
+      "thumbnail_selected": "Single selected node",
+      "thumbnail_all": "All nodes"
     },
     "ai_editing": {
       "route_embedding": "Library semantic search",
@@ -2038,7 +2191,127 @@
       "note": "Developer mode change requires application restart. It exposes maintainer tools such as Window > Set as Default, which updates the committed default_layout.json (ship it via git commit)."
     },
     "ocio_placeholder": "config.ocio",
-    "ai_model_dir_placeholder": "Select AI Model Directory"
+    "ai_model_dir_placeholder": "Select AI Model Directory",
+    "advanced": {
+      "section_logging_title": "Logging",
+      "section_diag_title": "Diagnostics",
+      "export_diagnostics": "Export Diagnostics",
+      "diagnostics_saved": "Diagnostics saved to: {path}",
+      "diagnostics_failed": "Failed to save diagnostics: {error}"
+    },
+    "paths": {
+      "select_open_dir": "Select Default Open Directory",
+      "select_backup_dir": "Select Backup Directory",
+      "select_cache_dir": "Select Cache Directory",
+      "select_render_cache_dir": "Select Render Cache Directory",
+      "select_log_file": "Select Log File",
+      "select_plugin_dir": "Select Plugin Directory",
+      "all_files": "All Files (*)",
+      "json_files": "JSON Files (*.json)",
+      "select_ocio": "Select OCIO Config",
+      "select_ai_models": "Select AI Model Directory",
+      "select_export_dir": "Select Export Directory",
+      "export_directory_placeholder": "Select export directory…",
+      "select_project_library": "Select Project Library Directory"
+    },
+    "render_cache": {
+      "codec_topos_proxy": "Topos 422 Proxy (recommended)",
+      "mode_off": "Off",
+      "mode_user": "User (manual)",
+      "mode_smart": "Smart (auto)",
+      "threshold_tooltip": "Minimum score for automatic caching in Smart mode. Score = effects ×2 + grade ×3 + retime ×2 + composite ×4 + animated parameters ×1.",
+      "codec_topos_standard": "Topos 422 (Standard)",
+      "codec_h264_proxy": "H.264 Proxy",
+      "res_timeline": "Timeline",
+      "res_half": "Half",
+      "res_quarter": "Quarter",
+      "auto_mode": "Render Cache Mode:",
+      "threshold": "Smart Score Threshold:",
+      "codec": "Cache Codec:",
+      "directory": "Cache Location:",
+      "resolution": "Cache Resolution:",
+      "max_size": "Max cache size (GB):"
+    },
+    "restart": {
+      "title": "Restart Required",
+      "message": "Restart the application to apply these changes.\n\nRestart now?"
+    },
+    "module_apply_failed": {
+      "title": "Save Failed",
+      "message": "Some module settings could not be saved:\n{pages}"
+    },
+    "module_restore_failed": {
+      "title": "Restore Defaults Failed",
+      "message": "Some module pages could not be restored:\n{pages}"
+    },
+    "tangent": {
+      "section_title": "Device Connection",
+      "disabled": "Disabled",
+      "auto": "Auto Detect",
+      "ripple": "Tangent Ripple",
+      "element": "Tangent Element",
+      "note": "Uses the native Tangent Hub connection. Element is treated as one four-panel set.",
+      "calibration_title": "Color Wheels and Trackerballs",
+      "invert_direction": "Invert hue direction",
+      "lift": "Lift",
+      "gamma": "Gamma",
+      "gain": "Gain",
+      "axis_x": "X Axis",
+      "axis_y": "Y Axis",
+      "brightness": "Brightness",
+      "sensitivity_note": "X/Y UI 100% = internal 1000% base maximum (10x native Tangent increment). Slow rolls use a finer gain; fast rolls can rise smoothly to 20x; brightness keeps the native 100% scale.",
+      "smoothing_note": "0% = raw response and is the default for straight diagonal movement. Higher values smooth noisy hardware but add response lag.",
+      "surface_label": "Control Surface:",
+      "rotation": "Color Wheel Rotation:",
+      "smoothing": "Trackerball Smoothing:"
+    },
+    "decklink": {
+      "section_title": "External Video Monitoring",
+      "enabled": "Enable DeckLink monitor output",
+      "backend_native": "Native SDK bridge",
+      "desc": "First-stage monitoring outputs fixed 1080i50 YUV video. The ffmpeg backend requires an ffmpeg build compiled with DeckLink support; standard Homebrew ffmpeg often does not include it. The Native SDK backend uses the bundled topos_decklink bridge module and can auto-select a single installed DeckLink device.",
+      "backend": "Output backend:",
+      "device": "DeckLink device:",
+      "ffmpeg_path": "ffmpeg path:"
+    },
+    "scene_cut": {
+      "section_title": "Scene Cut Detection",
+      "sensitivity": "Default sensitivity:",
+      "sensitivity_desc": "Lower values = more sensitive (more candidates). Higher values = conservative (fewer false positives).",
+      "use_proxy": "Use proxy media for detection (faster)",
+      "min_scene_frames": "Minimum frames between cuts:",
+      "show_overlay": "Show candidate cuts on the timeline"
+    },
+    "language_names": {
+      "en_US": "English",
+      "zh_CN": "Simplified Chinese",
+      "ja_JP": "Japanese",
+      "ko_KR": "Korean",
+      "fr_FR": "French",
+      "de_DE": "German",
+      "es_ES": "Spanish",
+      "pt_BR": "Portuguese (Brazil)",
+      "ru_RU": "Russian",
+      "it_IT": "Italian"
+    },
+    "units": {
+      "minutes": " min",
+      "days": " days"
+    },
+    "edit_interaction": {
+      "timeline": "Timeline",
+      "drop_mode": "Timeline drop mode",
+      "overwrite": "Overwrite",
+      "insert": "Insert",
+      "transitions": "Transition Browser",
+      "static": "Static icons",
+      "animated": "Animated previews",
+      "preview_mode": "Preview style",
+      "preview_size": "Animated preview size",
+      "small": "Small",
+      "medium": "Medium",
+      "large": "Large"
+    }
   },
   "composite": {
     "external": {
@@ -2905,7 +3178,15 @@
       "hand": "Hand Tool",
       "hand_tooltip": "Hand Tool (H)",
       "zoom": "Zoom Tool",
-      "zoom_tooltip": "Zoom Tool (Z)"
+      "zoom_tooltip": "Zoom Tool (Z)",
+      "timeline_zoom": "Horizontal Timeline Zoom",
+      "zoom_out": "Zoom Out",
+      "zoom_in": "Zoom In",
+      "height_out": "Decrease Track Height",
+      "height_in": "Increase Track Height",
+      "clip_height": "Clip Height",
+      "audio_track_height": "Audio Track Height",
+      "custom_zoom": "Custom Zoom"
     },
     "playback_control": {
       "jump_start": "Jump to Start (Home)",

@@ -73,7 +73,6 @@ keyring>=25.0.0
 psutil>=7.2.0
 send2trash>=2.1.0
 flask>=3.1.0
-waitress>=3.0.0
 msgpack>=1.0.0
 
 # ── macOS VideoToolbox 零拷贝支持 (仅 macOS) ─────────────────────────────────

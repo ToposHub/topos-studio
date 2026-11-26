@@ -73,3 +73,14 @@ def test_tr_hit_key_returns_translation(monkeypatch):
     monkeypatch.setattr(I18N, "_current_locale", "zh_CN", raising=False)
     # 直接对 locale 数据断言（tr 的加载路径在 I18N.load_locale 全量装配）
     assert expected  # 非空译文才有验证意义
+
+
+
+def test_preference_language_falls_back_without_changing_shared_translation(monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "preferences.general.work_mode.video"
+    monkeypatch.setattr(I18N, "_current_locale", "ja_JP")
+    monkeypatch.setattr(I18N, "_translations", {"preferences": {"general": {"work_mode": {"video": "動画"}}}})
+    monkeypatch.setattr(I18N, "_fallback_translations", {"preferences": {"general": {"work_mode": {"video": "Video"}}}})
+
+    assert I18N.tr(key) == "動画"
+    assert I18N.tr_preference(key) == "Video"

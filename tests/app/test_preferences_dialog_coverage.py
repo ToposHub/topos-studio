@@ -10,11 +10,9 @@
 - 外观即时预览信号（含 _preview_blocked 抑制与批量回滚）
 - 分类导航 / select_page / 图片模式隐藏视频页 / feature 过滤
 - 模块偏好页（ModularPreferencePage）load/apply/restore_defaults 委托
-- file_explorer 插件列表刷新与停用状态写回
+- 原生素材插件列表刷新与启停状态写回
 
 锁定现状的用例（断言引用 BUG-B3-xx，修复 src 时需同步更新）：
-- ``test_apply_without_refresh_clears_fe_disabled_plugins`` → BUG-B3-01
-  （已随 AUD-03900 修复翻转为 ``test_apply_without_refresh_preserves_fe_disabled_plugins``）
 - ``test_restore_defaults_skips_smart_threshold_lock_in`` → BUG-B3-02
   （已修复，翻转为 ``test_restore_defaults_resets_smart_threshold``）
 - ``test_timeline_resolution_preset_combo_not_synced_with_config`` → BUG-B3-03
@@ -32,9 +30,11 @@ from typing import Any, Callable, Iterator, Optional
 import time
 
 import pytest
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QApplication, QComboBox, QDialog, QLabel,
-                             QMessageBox, QWidget)
+from PyQt6.QtCore import QPoint, Qt
+from PyQt6.QtWidgets import (
+    QApplication, QComboBox, QDialog, QLabel, QMessageBox, QPushButton,
+    QStyle, QStyleOptionButton, QStyleOptionSpinBox, QWidget,
+)
 from pytestqt.qtbot import QtBot
 
 import src.app.ui.preferences_dialog as preferences_dialog_module
@@ -89,38 +89,6 @@ class _RecordingConfig:
 
     def save_config(self) -> None:
         self.save_count += 1
-
-
-class _FakeFeModule:
-    """Temporary static plugin declarations and in-memory runtime/config."""
-
-    def __init__(self, root: Path, disabled: Optional[list[str]] = None,
-                 plugins: Optional[list[dict]] = None,
-                 installed: Optional[list[str]] = None) -> None:
-        root.mkdir(parents=True)
-        main_file = root / "main.py"
-        main_file.write_text("# Test host; never imported.\n", encoding="utf-8")
-        self.__file__ = str(main_file)
-        self.conf: dict = {"disabled_plugins": list(disabled or [])}
-        self.saved: Optional[dict] = None
-        self.plugin_manager = SimpleNamespace(
-            plugins=list(plugins or []), failed_plugins=[])
-        plugin_ids = set(installed or []) | {
-            plugin["name"] for plugin in plugins or []}
-        (root / "plugins").mkdir()
-        for plugin_id in plugin_ids:
-            folder = root / "plugins" / plugin_id
-            folder.mkdir()
-            (folder / "__init__.py").write_text(
-                f"NAME = {plugin_id!r}\nVERSION = '1.0.0'\n",
-                encoding="utf-8")
-
-    def load_config(self) -> dict:
-        return dict(self.conf)
-
-    def save_config(self, conf: dict) -> None:
-        self.saved = dict(conf)
-        self.conf = dict(conf)
 
 
 class _FakeModulePage:
@@ -183,22 +151,9 @@ def _confirm_with(monkeypatch: pytest.MonkeyPatch,
 
 
 @pytest.fixture
-def make_fe(tmp_path: Path) -> Callable[..., _FakeFeModule]:
-    """Keep discovery and all FE config writes inside the test directory."""
-    count = 0
-
-    def _make(**kwargs: Any) -> _FakeFeModule:
-        nonlocal count
-        count += 1
-        return _FakeFeModule(tmp_path / f"file_explorer_{count}", **kwargs)
-
-    return _make
-
-
-@pytest.fixture
 def make_dialog(qapp, monkeypatch, tmp_path) -> Iterator[
         Callable[..., tuple[PreferencesDialog, _RecordingConfig]]]:
-    """PreferencesDialog 工厂：hermetic 缓存目录 + 关闭真实 FE 插件桥。"""
+    """PreferencesDialog 工厂：隔离缓存和素材插件状态目录。"""
     import src.shared.io.file_io as file_io
     monkeypatch.setattr(file_io.FileIO, "CACHE_DIR", str(tmp_path / "images_cache"))
     monkeypatch.setattr(file_io.FileIO, "BAKED_CACHE_DIR", str(tmp_path / "baked_layers"))
@@ -1149,7 +1104,266 @@ class TestModulePageDelegation:
         assert set(dlg._module_pages) == {"color.processing", "deliver.export"}
 
 
-# ── file_explorer 插件列表 ──────────────────────────────────────
+def test_preferences_save_commits_all_three_color_pages(make_dialog, monkeypatch) -> None:
+    from src.features.color.module import ColorModule
+    from src.shared.control_surfaces.tangent.settings import CONTROL_SURFACE_CONFIG_KEY
+
+    monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
+    pages = ColorModule().register_preference_pages()
+    dialog, config = make_dialog(
+        {"work_mode": "all", "locale": "en_US"}, module_pages=pages,
+    )
+    monkeypatch.setattr(dialog, "_show_restart_prompt", lambda: False)
+    page_ids = _page_ids(dialog)
+    first_color = page_ids.index("color.management")
+    assert page_ids[first_color:first_color + 3] == [
+        "color.management", "color.control_surface", "color.processing",
+    ]
+
+    management, surface, processing = pages
+    management._widgets["gpu_color_processing"].setChecked(False)
+    devices = surface._widgets[CONTROL_SURFACE_CONFIG_KEY]
+    devices.setCurrentIndex(devices.findData("ripple"))
+    processing._widgets["default_denoise_strength"].setValue(68)
+
+    bar = dialog.findChild(QWidget, "PrefBtnBar")
+    assert {button.objectName() for button in bar.findChildren(QPushButton)} == {
+        "PrefRestoreBtn", "PrefCancelBtn", "PrefSaveBtn",
+    }
+    dialog._save_btn.click()
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert config.save_count == 1
+    assert config.get("gpu_color_processing") is False
+    assert config.get(CONTROL_SURFACE_CONFIG_KEY) == "ripple"
+    assert config.get("default_denoise_strength") == 68
+
+
+def test_edit_and_project_preferences_save_existing_config_keys(make_dialog, monkeypatch, tmp_path: Path) -> None:
+    from src.features.color.module import ColorModule
+    from src.features.edit.preferences import EditInteractionPreferencePage, EditPreferencePage
+    from src.shared.color.color_space_descriptor import color_settings_from_config
+
+    monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
+    color = ColorModule().register_preference_pages()[0]
+    playback = EditPreferencePage()
+    editing = EditInteractionPreferencePage()
+    dialog, config = make_dialog(
+        {"work_mode": "all", "locale": "en_US", "transition_preview_size": "invalid"},
+        module_pages=[color, playback, editing],
+    )
+    monkeypatch.setattr(dialog, "_show_restart_prompt", lambda: False)
+    assert "edit.interaction" in _page_ids(dialog)
+    assert editing._combos["transition_preview_size"].currentData() == "medium"
+    assert not editing._combos["transition_preview_size"].isEnabled()
+
+    for key, value in {
+        "edit_drop_mode": "insert",
+        "transition_preview_mode": "animated",
+        "transition_preview_size": "large",
+    }.items():
+        combo = editing._combos[key]
+        combo.setCurrentIndex(combo.findData(value))
+    assert editing._combos["transition_preview_size"].isEnabled()
+
+    dialog._widgets["max_recent_projects"].setValue(17)
+    dialog._widgets["project_library_directory"].setText(str(tmp_path / "projects"))
+    playback._widgets["video_preview_adaptive_quality"].setChecked(False)
+    playback._widgets["edit_scene_cut_overlay_visible"].setChecked(True)
+    color._widgets["color.output.hdr_metadata"].setChecked(False)
+    dialog._save_btn.click()
+
+    assert dialog.result() == QDialog.DialogCode.Accepted
+    assert config.get("max_recent_projects") == 17
+    assert config.get("project_library_directory") == str(tmp_path / "projects")
+    assert config.get("edit_drop_mode") == "insert"
+    assert config.get("transition_preview_mode") == "animated"
+    assert config.get("transition_preview_size") == "large"
+    assert config.get("video_preview_adaptive_quality") is False
+    assert config.get("edit_scene_cut_overlay_visible") is True
+    assert color_settings_from_config(config)["color.output.hdr_metadata"] is False
+
+
+def test_photo_grade_set_preferences_follow_image_workflow(make_dialog, monkeypatch) -> None:
+    from src.features.edit.preferences import EditInteractionPreferencePage
+
+    monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
+    dialog, config = make_dialog(
+        {"work_mode": "image", "locale": "en_US", "grade_set_rating_at_bottom": True},
+        module_pages=[EditInteractionPreferencePage()],
+    )
+    monkeypatch.setattr(dialog, "_show_restart_prompt", lambda: False)
+    assert "edit.interaction" not in _page_ids(dialog)
+    assert "project_library_directory" not in dialog._widgets
+    assert dialog._widgets["grade_set_rating_at_bottom"].isChecked()
+
+    dialog._widgets["grade_set_show_filenames"].setChecked(True)
+    dialog._widgets["grade_set_rating_at_bottom"].setChecked(False)
+    dialog._save_btn.click()
+    assert config.get("grade_set_show_filenames") is True
+    assert config.get("grade_set_rating_at_bottom") is False
+
+
+def test_edit_quick_controls_share_config_with_preferences(qtbot: QtBot, monkeypatch) -> None:
+    from src.features.edit.preferences import EditInteractionPreferencePage, EditPreferencePage
+    from src.features.edit.ui.edit_effects_panel import EditEffectsPanel
+    from src.features.edit.ui.edit_page import EditPage
+    from src.features.edit.ui.timeline_panel import TimelinePanel
+
+    monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
+    host = QWidget()
+    qtbot.addWidget(host)
+    config = _RecordingConfig({"work_mode": "all", "locale": "en_US"})
+    host.config_manager = config
+    timeline = TimelinePanel(host, config_manager=config)
+    effects = EditEffectsPanel(host, config_manager=config)
+    timeline.set_edit_mode("insert")
+    effects._set_transition_preview_mode("animated")
+    effects._set_transition_preview_size("large")
+    EditPage._persist_scene_cut_overlay_state(SimpleNamespace(
+        _config_manager=config, _SCENE_CUT_OVERLAY_CONFIG_KEY="edit_scene_cut_overlay_visible",
+        _scene_cut_overlay_visible=True,
+    ))
+
+    playback, editing = EditPreferencePage(), EditInteractionPreferencePage()
+    dialog = PreferencesDialog(config, parent=host, module_pages=[playback, editing])
+    monkeypatch.setattr(dialog, "_show_restart_prompt", lambda: False)
+    assert editing._combos["edit_drop_mode"].currentData() == "insert"
+    assert editing._combos["transition_preview_mode"].currentData() == "animated"
+    assert editing._combos["transition_preview_size"].currentData() == "large"
+    assert playback._widgets["edit_scene_cut_overlay_visible"].isChecked()
+    dialog._save_btn.click()
+    assert config.get("edit_drop_mode") == "insert"
+    assert config.get("transition_preview_mode") == "animated"
+    assert config.get("transition_preview_size") == "large"
+    assert config.get("edit_scene_cut_overlay_visible") is True
+
+
+def test_saved_workspace_preferences_use_live_panel_setters() -> None:
+    from unittest.mock import Mock
+
+    from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
+
+    config = {
+        "edit_drop_mode": "insert", "edit_scene_cut_overlay_visible": True,
+        "video_preview_adaptive_quality": False, "grade_set_show_filenames": True,
+    }
+    browser = Mock()
+    library = Mock()
+    node_editor = Mock()
+    host = SimpleNamespace(
+        config_manager=config, _rebuild_recent_projects_menu=Mock(),
+        timeline_preview_renderer=Mock(), timeline_panel=Mock(), edit_page=Mock(),
+        edit_effects_panel=Mock(), grade_set_panel=Mock(),
+        composite_page=SimpleNamespace(node_editor=node_editor),
+        files_panel=SimpleNamespace(_native_panel=browser),
+        library_panel=SimpleNamespace(_native_panel=library),
+    )
+    MenuToolbarMixin._refresh_workspace_preferences(host)
+    host._rebuild_recent_projects_menu.assert_called_once()
+    host.timeline_preview_renderer.set_adaptive_playback_quality_enabled.assert_called_once_with(False)
+    host.timeline_panel.set_edit_mode.assert_called_once_with("insert", persist=False)
+    host.edit_page.set_scene_cut_overlay_visible.assert_called_once_with(True, persist=False)
+    host.edit_effects_panel.reload_transition_preview_preferences.assert_called_once_with(config)
+    host.grade_set_panel.set_card_caption_preferences.assert_called_once_with(
+        show_filenames=True, rating_at_bottom=False
+    )
+    node_editor.reload_display_preferences.assert_called_once()
+    browser.reload_preferences.assert_called_once()
+    library.reload_preferences.assert_called_once()
+
+
+@pytest.mark.parametrize(("locale", "color_title", "no_profile"), [
+    ("zh_CN", "色彩管理", "无"),
+    ("en_US", "Color Management", "None"),
+    ("ja_JP", "Color Management", "None"),
+])
+def test_preference_translations_keep_field_alignment_in_narrow_dialog(
+    make_dialog, monkeypatch, locale: str, color_title: str, no_profile: str,
+) -> None:
+    from src.features.color.module import ColorModule
+    from src.features.deliver.preferences import ExportPreferencePage
+    from src.shared.i18n.i18n import I18N
+
+    for field in ("_translations", "_fallback_translations", "_current_locale", "_locales_dir"):
+        monkeypatch.setattr(I18N, field, getattr(I18N, field))
+    assert I18N.load_locale(locale)
+    monkeypatch.setenv("TOPOS_PRODUCT_MODE", "studio")
+    color_pages = ColorModule().register_preference_pages()
+    export = ExportPreferencePage()
+    dialog, _ = make_dialog(module_pages=[*color_pages, export])
+    dialog.resize(dialog.minimumSize())
+    dialog.show()
+
+    control_column = dialog._widgets["locale"].mapTo(dialog, QPoint()).x()
+    dialog.select_page("color.management")
+    QApplication.processEvents()
+    assert dialog._category_list.currentItem().text() == color_title
+    assert color_pages[0]._widgets["gpu_color_processing"].mapTo(dialog, QPoint()).x() == control_column
+
+    dialog.select_page("color.control_surface")
+    QApplication.processEvents()
+    page = dialog._pages.currentWidget()
+    notes = [note for note in page.findChildren(QLabel, "PrefNoteLabel") if note.isVisible()]
+    assert notes
+    for note in notes:
+        assert note.mapTo(dialog, QPoint()).x() == control_column
+        assert note.height() >= note.heightForWidth(note.width())
+    assert page.horizontalScrollBar().maximum() == 0
+
+    dialog.select_page("deliver.export")
+    QApplication.processEvents()
+    profile = export._widgets["export_color_profile"]
+    profile.setCurrentIndex(profile.findData("None"))
+    assert profile.currentText() == no_profile
+    assert profile.currentData() == "None"
+
+
+def test_preference_indicators_draw_and_step(make_dialog, qtbot: QtBot) -> None:
+    from src.features.color.module import ColorModule
+    from src.features.composite.preferences import (
+        CompositePreferencePage, EXPORT_PARALLEL_FRAMES_KEY, NODE_CACHE_CAPACITY_KEY,
+    )
+
+    color_pages = ColorModule().register_preference_pages()
+    composite = CompositePreferencePage()
+    dialog, _ = make_dialog(module_pages=[*color_pages, composite])
+    dialog.show()
+    dialog.select_page("color.management")
+    QApplication.processEvents()
+    check = color_pages[0]._widgets["gpu_color_processing"]
+
+    for checked, enabled in ((False, True), (True, True), (True, False)):
+        check.setEnabled(enabled)
+        check.setChecked(checked)
+        option = QStyleOptionButton()
+        check.initStyleOption(option)
+        rect = check.style().subElementRect(QStyle.SubElement.SE_CheckBoxIndicator, option, check)
+        image = check.grab(rect).toImage()
+        white_pixels = [
+            image.pixelColor(x, y)
+            for x in range(image.width()) for y in range(image.height())
+            if image.pixelColor(x, y).lightness() > 230
+        ]
+        assert bool(white_pixels) == checked
+
+    dialog.select_page("composite.settings")
+    QApplication.processEvents()
+    for key in (EXPORT_PARALLEL_FRAMES_KEY, NODE_CACHE_CAPACITY_KEY):
+        spin = composite._widgets[key]
+        initial = spin.value()
+        option = QStyleOptionSpinBox()
+        spin.initStyleOption(option)
+        for control in (QStyle.SubControl.SC_SpinBoxUp, QStyle.SubControl.SC_SpinBoxDown):
+            rect = spin.style().subControlRect(QStyle.ComplexControl.CC_SpinBox, option, control, spin)
+            image = spin.grab(rect).toImage()
+            assert any(image.pixelColor(x, y).lightness() > 155
+                       for x in range(image.width()) for y in range(image.height()))
+            qtbot.mouseClick(spin, Qt.MouseButton.LeftButton, pos=rect.center())
+            expected = initial + spin.singleStep() if control == QStyle.SubControl.SC_SpinBoxUp else initial
+            assert spin.value() == pytest.approx(expected)
+
+
+# ── 原生素材插件列表 ──────────────────────────────────────
 
 
 class TestNativePluginState:
@@ -1216,7 +1430,6 @@ class TestNativePluginState:
         assert opened == [str(locator.plugins_install_root)]
 
     def test_no_plugins_uses_disabled_placeholder(self, make_dialog):
-        from types import SimpleNamespace
         dlg, _ = make_dialog()
         dlg._plugin_catalog = lambda: SimpleNamespace(snapshot=lambda: ())
         dlg._refresh_plugins()
@@ -1224,7 +1437,6 @@ class TestNativePluginState:
         assert not dlg._plugin_list.item(0).flags() & Qt.ItemFlag.ItemIsEnabled
 
     def test_discovery_error_is_visible(self, make_dialog):
-        from types import SimpleNamespace
         def broken():
             raise OSError("declaration unavailable")
         dlg, _ = make_dialog()

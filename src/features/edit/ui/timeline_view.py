@@ -246,6 +246,7 @@ from src.features.edit.ui.timeline_items import (
     # Marker item (Phase 5.1)
     MarkerItem,
 )
+from src.features.edit.ui.timeline_waveform_style import WAVEFORM_STYLE_BOTTOM, WAVEFORM_STYLES
 from src.features.edit.ui.subtitle_clip_item import SubtitleClipItem
 from src.features.edit.ui.timeline_recording_preview import RecordingPreview
 from src.features.edit.ui.timeline_interaction import InteractionState, InteractionSession, ClipDragSession, MoveGroup, MoveGroupMember
@@ -256,7 +257,14 @@ from src.features.edit.ui.timeline_layout import (
     TimelineDropTarget,
     TrackInfo,
     SPLITTER_HEIGHT,
+    DEFAULT_TRACK_HEIGHT_RATIO,
     DEFAULT_SUBTITLE_TRACK_HEIGHT,
+    MIN_VIDEO_TRACK_HEIGHT,
+    MAX_VIDEO_TRACK_HEIGHT,
+    MIN_AUDIO_TRACK_HEIGHT,
+    MAX_EDIT_AUDIO_TRACK_HEIGHT,
+    MAX_MIXER_AUDIO_TRACK_HEIGHT,
+    MIXER_AUDIO_TRACK_HEIGHT_SCALE,
     MIN_SUBTITLE_TRACK_HEIGHT,
     MAX_SUBTITLE_TRACK_HEIGHT,
 )
@@ -980,6 +988,8 @@ class TimelineView(QGraphicsView):
         self._position_lock_enabled: bool = False
         self._thumbnail_display_mode: str = ClipItem._thumbnail_display_mode
         self._waveforms_visible: bool = True
+        self._waveform_style: str = WAVEFORM_STYLE_BOTTOM
+        self._track_height_ratio: tuple[int, int] = DEFAULT_TRACK_HEIGHT_RATIO
         self._source_patch_routes: dict[tuple[str, str], Optional[str]] = {}
         # B07：presentation 原始 payload 的未知字段原样保留（apply 捕获、
         # export 回写），未来工程重存不丢扩展配置；路由嵌套层的未知
@@ -995,6 +1005,11 @@ class TimelineView(QGraphicsView):
         self._independent_selection: bool = False
         self._linked_selection_enabled: bool = True  # P3: Toggle linked A/V selection (on by default)
         self._audio_only = False
+        self._mixer_track_heights: dict[str, int] = {}
+        self._mixer_envelope_editing = False
+        self._envelope_readout: QLabel | None = None
+        self._deliver_mode = False
+        self._edit_audio_mix_tracks: dict[str, set[str]] = {}
         self._edit_wheel_controls = True
         self._timeline_recording_enabled = False
         self._track_meter_generation = 0
@@ -1473,6 +1488,8 @@ class TimelineView(QGraphicsView):
             self._cancel_current_interaction()
         self._audio_only = enabled
         if not enabled:
+            self._mixer_track_heights.clear()
+            self._mixer_envelope_editing = False
             self._clear_recording_previews()
         # P2-8（P0）：音频工作区的时间尺切到采样域（子帧位置显式可见），
         # 返回 Edit 恢复帧域；尺渲染本身支持两种模式。
@@ -1492,17 +1509,99 @@ class TimelineView(QGraphicsView):
             self._update_scene_rect()
             self._update_clip_visibility()
         self.viewport().update()
+        self.track_heights_changed.emit()
+
+    def set_mixer_envelope_editing(self, enabled: bool) -> None:
+        enabled = enabled and self._audio_only
+        if self._mixer_envelope_editing == enabled:
+            return
+        if self._interaction.state == InteractionState.DRAGGING_ENVELOPE:
+            self._cancel_current_interaction()
+        self._mixer_envelope_editing = enabled
+        if self._timeline is not None:
+            for track in self._timeline.audio_tracks:
+                for clip in track.clips:
+                    item = self._items_map.get(clip.clip_id)
+                    if isinstance(item, ClipItem):
+                        self._push_clip_volume_envelope(item, clip)
+
+    def _show_envelope_drag_readout(self, screen_pos: QPoint, text: str) -> None:
+        if not text:
+            if self._envelope_readout is not None:
+                self._envelope_readout.hide()
+            return
+
+        viewport = self.viewport()
+        if self._envelope_readout is None:
+            label = QLabel(viewport)
+            label.setObjectName("timelineEnvelopeReadout")
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            label.setStyleSheet(
+                "QLabel#timelineEnvelopeReadout { background: #1a1c21; color: #edf1f5;"
+                " border: 1px solid #69717a; border-radius: 4px; padding: 3px 6px; }"
+            )
+            self._envelope_readout = label
+        label = self._envelope_readout
+        if label.text() != text:
+            label.setText(text)
+            label.adjustSize()
+        point = viewport.mapFromGlobal(screen_pos) + QPoint(14, 14)
+        label.move(max(0, min(point.x(), viewport.width() - label.width())),
+                   max(0, min(point.y(), viewport.height() - label.height())))
+        label.show()
+        label.raise_()
+
+    def set_deliver_mode(self, enabled: bool) -> None:
+        """Apply Deliver workspace track controls and heights."""
+        if self._deliver_mode == enabled:
+            return
+        self._deliver_mode = enabled
+        for header in self._track_headers.values():
+            if header.track_type == "audio":
+                self._sync_audio_mix_header(header)
+        if self._timeline is not None:
+            self._layout_track_items()
+        self.track_heights_changed.emit()
+
+    def _sync_audio_mix_header(self, header: TrackHeaderItem) -> None:
+        if self._timeline is not None:
+            enabled = self._edit_audio_mix_tracks.get(self._timeline.timeline_id, ())
+            header.set_audio_mix_controls(
+                header.track_id in enabled, always_visible=self._deliver_mode,
+            )
+
+    def _on_audio_mix_controls_requested(self, track_id: str, enabled: bool) -> None:
+        header = self._track_headers.get(track_id)
+        if self._timeline is None or header is None or header.track_type != "audio":
+            return
+        tracks = self._edit_audio_mix_tracks.setdefault(self._timeline.timeline_id, set())
+        if enabled:
+            tracks.add(track_id)
+        else:
+            tracks.discard(track_id)
+        self._sync_audio_mix_header(header)
+        if enabled and header.track_height < header.AUDIO_MIX_CONTROLS_MIN_HEIGHT:
+            self._on_track_height_changed(track_id, header.AUDIO_MIX_CONTROLS_MIN_HEIGHT)
 
     def update_track_header_levels(self, levels: dict) -> None:
         """Feed audio headers the same post-fader stereo peaks as the console."""
+        if self._timeline is None:
+            return
+        track_ids = (
+            self._track_headers if self._audio_only or self._deliver_mode
+            else self._edit_audio_mix_tracks.get(self._timeline.timeline_id, ())
+        )
+        if not track_ids:
+            return
         # Each engine packet belongs to one playback generation. Check it
         # before clearing absent tracks, so a late packet cannot clear a new one.
         first = next(iter(levels.values()), None)
         generation = first.get("generation") if isinstance(first, dict) else None
         if isinstance(generation, int) and generation < self._track_meter_generation:
             return
-        for track_id, header in self._track_headers.items():
-            if header.track_type != "audio":
+        for track_id in track_ids:
+            header = self._track_headers.get(track_id)
+            if header is None or header.track_type != "audio":
                 continue
             payload = levels.get(track_id)
             if isinstance(payload, dict):
@@ -1559,7 +1658,7 @@ class TimelineView(QGraphicsView):
             self._sync_header_recording_control(header, track)
 
     def set_timeline_recording_enabled(self, enabled: bool) -> None:
-        """Expose recording on the active editing workspace's audio tracks."""
+        """Enable recording actions on the editing workspace audio tracks."""
         self._timeline_recording_enabled = enabled
         if self._timeline is not None:
             for track in self._timeline.audio_tracks:
@@ -1638,10 +1737,11 @@ class TimelineView(QGraphicsView):
             bar.setValue(bar.value() + math.ceil(scroll_to))
 
     def _sync_header_recording_control(self, header: TrackHeaderItem, track: EditTrack) -> None:
+        recording_enabled = self._audio_only or self._timeline_recording_enabled
+        state = self._recording_track_states.get(track.track_id, "unpatched") if recording_enabled else "mode_disabled"
         header.set_recording_control(
-            (self._audio_only or self._timeline_recording_enabled)
-            and track.track_type == "audio" and not track.is_bus,
-            self._recording_track_states.get(track.track_id, "unpatched"),
+            not self._deliver_mode and track.track_type == "audio" and not track.is_bus,
+            state,
             busy=self._mixer_record_arm_busy,
             input_setup=self._timeline_recording_enabled and not self._audio_only,
         )
@@ -1677,7 +1777,7 @@ class TimelineView(QGraphicsView):
             tracks.append(TrackInfo(
                 track_id=t.track_id,
                 track_type=t.track_type,
-                default_height=self._default_track_height(t),
+                default_height=self.default_track_height(t.track_type),
             ))
         # Retime title unfolds upward; keep the saved track sizes untouched.
         expanded_tracks = {
@@ -1688,6 +1788,8 @@ class TimelineView(QGraphicsView):
         } if self._timeline is not None else set()
         effective_heights = dict(self._layout_state.track_heights)
         for track in tracks:
+            if self._audio_only:
+                effective_heights[track.track_id] = self.display_track_height(track.track_id, track.track_type)
             if track.track_id in expanded_tracks:
                 effective_heights[track.track_id] = effective_heights.get(track.track_id, track.default_height) + 24
         layout_state = replace(self._layout_state, track_heights=effective_heights)
@@ -1719,14 +1821,29 @@ class TimelineView(QGraphicsView):
             audio_only=self._audio_only,
         )
 
-    def _default_track_height(self, track: EditTrack) -> int:
+    def default_track_height(self, track_type: str) -> int:
         """Return default visual height for a track."""
-        if track.track_type == "audio":
-            return int(EDIT_SIZES["track_h_audio"])
-        if track.track_type == "subtitle":
-            # Subtitle lanes are fixed and compact by design.
+        if track_type == "subtitle":
             return DEFAULT_SUBTITLE_TRACK_HEIGHT
-        return int(EDIT_SIZES["track_h_video"])
+        if (self._deliver_mode and not self._audio_only) or (self._audio_only and track_type != "audio"):
+            return EDIT_SIZES[f"track_h_{track_type}"]
+        lo, hi = self._linked_video_height_range()
+        video_height = max(lo, min(hi, EDIT_SIZES["track_h_video"]))
+        if track_type != "audio":
+            return video_height
+        height = self._linked_audio_height(video_height)
+        return height * MIXER_AUDIO_TRACK_HEIGHT_SCALE if self._audio_only else height
+
+    def display_track_height(self, track_id: str, track_type: str) -> int:
+        """Return the workspace height before any temporary retime expansion."""
+        saved = self._layout_state.track_heights.get(track_id)
+        if self._audio_only and track_type == "audio":
+            if track_id in self._mixer_track_heights:
+                return self._mixer_track_heights[track_id]
+            if saved is not None:
+                height = max(MIN_AUDIO_TRACK_HEIGHT, min(MAX_EDIT_AUDIO_TRACK_HEIGHT, saved))
+                return height * MIXER_AUDIO_TRACK_HEIGHT_SCALE
+        return self.default_track_height(track_type) if saved is None else saved
 
     def _track_height_for(self, track: EditTrack) -> int:
         """Return current visual height for a track."""
@@ -1780,27 +1897,20 @@ class TimelineView(QGraphicsView):
             total += self._track_height_for(track) + TRACK_GAP
         return total
 
-    def _push_clip_volume_envelope(self, clip_item: ClipItem, clip: Any) -> None:
-        """P1-4 余项：``audio_edit`` 包络节点 → 片段波形上的叠加折线。
+    def _push_clip_volume_envelope(self, clip_item: ClipItem, clip: ClipInstance) -> None:
+        from src.features.edit.core.audio_edit import envelope_nodes
+        from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
 
-        模型驱动、只读可视化：节点编辑在 Clip Editor 画布提交命令，时间线
-        在下一次布局刷新折线（0 dB 基线 + 节点 + 选中读数）。
-        """
-        try:
-            from src.features.edit.core.audio_edit import envelope_nodes
-            nodes = envelope_nodes(getattr(clip, "audio_edit", None))
-            if not nodes:
-                if clip_item._envelope_nodes:
-                    clip_item.set_volume_envelope(None)
-                return
-            fps = float(getattr(self._timeline, "fps", 24.0) or 24.0)
-            total = max(1, int(round(
-                float(clip.timeline_duration or 0) / fps * 48000)))
-            clip_item.set_volume_envelope([
-                (node["local_sample"] / total, float(node.get("gain_db", 0.0)))
-                for node in nodes])
-        except Exception:  # noqa: BLE001 - 包络可视化失败不影响布局
-            logger.debug("clip envelope overlay failed", exc_info=True)
+        if self._timeline is None:
+            return
+        nodes = envelope_nodes(clip.audio_edit)
+        total = max(1, round(clip.timeline_duration / float(self._timeline.fps) * AUDIO_REFERENCE_SAMPLE_RATE))
+        clip_item.set_volume_envelope(
+            [(max(0.0, min(1.0, node["local_sample"] / total)), float(node["gain_db"])) for node in nodes],
+            tuple(node.get("interpolation", "linear") for node in nodes),
+            node_editing=self._mixer_envelope_editing,
+            whole_editing=not self._audio_only,
+        )
 
     @staticmethod
     def _overlap_fade_ends_by_clip(pairs: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
@@ -1873,14 +1983,10 @@ class TimelineView(QGraphicsView):
             # Position clips (skip clips being actively dragged OR linked clips in active drag)
             display_color = resolve_track_color(track_id, track.color) if self._audio_only else None
             expanded = any(c.clip_id in self._retime_control_clip_ids for c in track.clips)
-            base_height = self._layout_state.track_heights.get(track_id, self._default_track_height(track))
+            base_height = self.display_track_height(track_id, track.track_type)
             if expanded:
-                from src.features.edit.ui.timeline_layout import (
-                    MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
-                    MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT,
-                )
                 lo, hi = ((MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT)
-                          if track.track_type == "video" else (MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT))
+                          if track.track_type == "video" else (MIN_AUDIO_TRACK_HEIGHT, self._max_audio_track_height()))
                 base_height = max(lo, min(hi, base_height))
             expansion = max(0, track_h - base_height) if expanded else 0
             fade_ends = self._overlap_fade_ends_by_clip(
@@ -1892,8 +1998,6 @@ class TimelineView(QGraphicsView):
                 if clip_item and isinstance(clip_item, ClipItem):
                     clip_item.set_audio_display_color(display_color)
                     clip_item.set_overlap_fade_ends(frozenset(fade_ends.get(clip.clip_id, ())))
-                    # P1-4 余项：包络叠加随每次布局刷新（命令提交 → 模型
-                    # 变更 → 布局 → 折线更新）。
                     if track.track_type == "audio":
                         self._push_clip_volume_envelope(clip_item, clip)
                     extra = expansion if clip.clip_id not in self._retime_control_clip_ids else 0
@@ -2269,6 +2373,7 @@ class TimelineView(QGraphicsView):
         previous_id = getattr(self._project, "project_id", None)
         next_id = getattr(project, "project_id", None)
         if previous_id is not None and previous_id != next_id:
+            self._mixer_track_heights.clear()
             # 切工程时取消未完成的导入探测：旧结果不得插入新工程
             runner = getattr(self, "_external_import_runner", None)
             if runner is not None:
@@ -2289,6 +2394,8 @@ class TimelineView(QGraphicsView):
             self._source_patch_routes.clear()
             self._presentation_extras = {}
             self._presentation_route_extras = {}
+            self.set_waveform_style(WAVEFORM_STYLE_BOTTOM)
+            self.set_track_height_ratio(DEFAULT_TRACK_HEIGHT_RATIO)
         self._project = project
         self._update_cache_indicator()
 
@@ -2360,6 +2467,7 @@ class TimelineView(QGraphicsView):
             previous_id = getattr(self._timeline, "timeline_id", None)
             if previous_id != timeline.timeline_id:
                 self._zoom_fit_restore = None
+                self._mixer_track_heights.clear()
                 self._selected_edit_edges.clear()
                 self._clear_recording_previews()
             known_snapshot = (
@@ -2422,7 +2530,7 @@ class TimelineView(QGraphicsView):
                     i,
                     track.track_type,
                     track_color=track.color,
-                    track_height=self._default_track_height(track),
+                    track_height=self.default_track_height(track.track_type),
                     is_muted=track.is_muted,
                     is_solo=track.is_solo,
                     is_locked=track.is_locked,
@@ -2442,6 +2550,7 @@ class TimelineView(QGraphicsView):
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
+                header.cleanup_empty_tracks_requested.connect(self._on_cleanup_empty_tracks_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
                 header.add_tracks_requested.connect(self._show_add_tracks_dialog)
                 header.move_track_requested.connect(self._on_move_track_requested)
@@ -2456,7 +2565,7 @@ class TimelineView(QGraphicsView):
                     i + len(timeline.video_tracks),
                     track.track_type,
                     track_color=track.color,
-                    track_height=self._default_track_height(track),
+                    track_height=self.default_track_height(track.track_type),
                     is_muted=track.is_muted,
                     is_solo=track.is_solo,
                     is_locked=track.is_locked,
@@ -2477,10 +2586,13 @@ class TimelineView(QGraphicsView):
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.volume_changed.connect(self._on_track_volume_changed)
                 header.pan_changed.connect(self._on_track_pan_changed)
+                header.audio_mix_controls_requested.connect(self._on_audio_mix_controls_requested)
+                self._sync_audio_mix_header(header)
                 header.record_requested.connect(self.track_record_requested)
                 header.recording_input_requested.connect(self.track_recording_input_requested)
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
+                header.cleanup_empty_tracks_requested.connect(self._on_cleanup_empty_tracks_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
                 header.add_tracks_requested.connect(self._show_add_tracks_dialog)
                 header.move_track_requested.connect(self._on_move_track_requested)
@@ -2496,7 +2608,7 @@ class TimelineView(QGraphicsView):
                     i + len(timeline.video_tracks) + len(timeline.audio_tracks),
                     track.track_type,
                     track_color=track.color,
-                    track_height=self._default_track_height(track),
+                    track_height=self.default_track_height(track.track_type),
                     is_muted=track.is_muted,
                     is_solo=track.is_solo,
                     is_locked=track.is_locked,
@@ -2514,6 +2626,7 @@ class TimelineView(QGraphicsView):
                 header.visibility_changed.connect(self._on_track_visibility_changed)
                 header.rename_requested.connect(self._on_track_rename_requested)
                 header.delete_requested.connect(self._on_track_delete_requested)
+                header.cleanup_empty_tracks_requested.connect(self._on_cleanup_empty_tracks_requested)
                 header.add_track_requested.connect(self._on_add_track_requested)
                 header.add_tracks_requested.connect(self._show_add_tracks_dialog)
                 header.move_track_requested.connect(self._on_move_track_requested)
@@ -2672,6 +2785,8 @@ class TimelineView(QGraphicsView):
                     # P1-1：时间线包络编辑（松手单命令提交）
                     item.envelope_edit_finished.connect(
                         self._on_envelope_edit_finished)
+                    item.envelope_shift_finished.connect(self._on_envelope_shift_finished)
+                    item.envelope_drag_readout_changed.connect(self._show_envelope_drag_readout)
 
                     # Slip signals (P4.4)
                     item.clip_slip.connect(self._on_clip_slip)
@@ -2749,7 +2864,6 @@ class TimelineView(QGraphicsView):
 
                     # Phase 6.1-6.2: Connect linked group and track highlight signals
                     item.linked_group_hovered.connect(self._on_linked_group_hovered)
-                    item.track_highlight_requested.connect(self._on_track_highlight_requested)
 
             # P10.3: Create subtitle clip items (separate from regular clips
             # because SubtitleClip uses a different item type and has no asset).
@@ -2939,7 +3053,7 @@ class TimelineView(QGraphicsView):
             track_index,
             track.track_type,
             track_color=track.color,
-            track_height=self._default_track_height(track),
+            track_height=self.default_track_height(track.track_type),
             is_muted=track.is_muted,
             is_solo=track.is_solo,
             is_locked=track.is_locked,
@@ -2961,10 +3075,13 @@ class TimelineView(QGraphicsView):
         if track.track_type == "audio":
             header.volume_changed.connect(self._on_track_volume_changed)
             header.pan_changed.connect(self._on_track_pan_changed)
+            header.audio_mix_controls_requested.connect(self._on_audio_mix_controls_requested)
+            self._sync_audio_mix_header(header)
             header.record_requested.connect(self.track_record_requested)
             header.recording_input_requested.connect(self.track_recording_input_requested)
         header.rename_requested.connect(self._on_track_rename_requested)
         header.delete_requested.connect(self._on_track_delete_requested)
+        header.cleanup_empty_tracks_requested.connect(self._on_cleanup_empty_tracks_requested)
         header.add_track_requested.connect(self._on_add_track_requested)
         header.add_tracks_requested.connect(self._show_add_tracks_dialog)
         header.move_track_requested.connect(self._on_move_track_requested)
@@ -3363,6 +3480,7 @@ class TimelineView(QGraphicsView):
         # Preserve the runtime default of bottom-aligning the video stack on
         # first layout unless the saved state explicitly chose otherwise.
         self._layout_state = new_state
+        self._mixer_track_heights.clear()
         self._configure_layout_engine()
         self._layout_track_items()
         self._sync_split_vertical_scrollbars()
@@ -4420,6 +4538,9 @@ class TimelineView(QGraphicsView):
                 label_color=item._label_color,
                 is_enabled=item._is_enabled,
             )
+            ghost._thumbnail_display_mode = item._thumbnail_display_mode
+            ghost._waveforms_visible = item._waveforms_visible
+            ghost._waveform_style = item._waveform_style
             ghost.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             ghost.setAcceptHoverEvents(False)
             ghost.setOpacity(0.55)
@@ -4734,7 +4855,7 @@ class TimelineView(QGraphicsView):
         """Forward text-edit (from double-click dialog) to controller as a command."""
         self.subtitle_clip_edit_text_requested.emit(clip_id, track_id, new_text)
 
-    # ==================== Phase 6.1-6.2: Linked Group & Track Highlight ====================
+    # ==================== Phase 6.1: Linked Group Highlight ====================
 
     def _on_linked_group_hovered(self, clip_id: str, linked_clip_id: str, is_hovered: bool) -> None:
         """
@@ -4761,26 +4882,6 @@ class TimelineView(QGraphicsView):
             source_item.set_group_highlighted(is_hovered)
 
         logger.debug(f"Linked group hover: {clip_id} -> {linked_clip_id}, hovered={is_hovered}")
-
-    def _on_track_highlight_requested(self, track_id: str, is_highlighted: bool) -> None:
-        """
-        Handle track highlight request signal (Phase 6.2).
-
-        当 hover clip 时，对应的轨道头显示高亮效果。
-
-        Args:
-            track_id: The track to highlight
-            is_highlighted: True to highlight, False to clear
-        """
-        if self._updating:
-            return
-
-        # Set highlight state on the track header
-        track_header = self._track_headers.get(track_id)
-        if track_header and isinstance(track_header, TrackHeaderItem):
-            track_header.set_highlighted(is_highlighted)
-
-        logger.debug(f"Track highlight: {track_id}, highlighted={is_highlighted}")
 
     def _assign_linked_group_colors(self) -> None:
         """
@@ -4871,6 +4972,7 @@ class TimelineView(QGraphicsView):
         item.set_active_tool(self._active_tool)
         item._thumbnail_display_mode = self._thumbnail_display_mode
         item._waveforms_visible = self._waveforms_visible
+        item._waveform_style = self._waveform_style
         item._position_lock_enabled = self._position_lock_enabled
         item._selected_edit_edge = self._selected_edit_edges.get(item.clip_id)
         item._timeline_display_fps = float(self._timeline.fps) if self._timeline is not None else EMPTY_TIMELINE_FPS
@@ -4913,6 +5015,21 @@ class TimelineView(QGraphicsView):
                 item._waveforms_visible = self._waveforms_visible
                 item.update()
         self.viewport().update()
+
+    def waveform_style(self) -> str:
+        return self._waveform_style
+
+    def set_waveform_style(self, style: str) -> None:
+        """Change the waveform drawing style without editing any audio."""
+        if style not in WAVEFORM_STYLES:
+            raise ValueError(f"Unknown timeline waveform style: {style!r}")
+        if style == self._waveform_style:
+            return
+        self._waveform_style = style
+        for item in self._items_map.values():
+            if isinstance(item, ClipItem):
+                item._waveform_style = style
+                item.update()
 
     def set_position_lock_enabled(self, enabled: bool) -> None:
         """Set the UI position-lock guard and cancel any gesture in flight.
@@ -4963,6 +5080,8 @@ class TimelineView(QGraphicsView):
             "version": PRESENTATION_STATE_VERSION,
             "thumbnail_mode": self._thumbnail_display_mode,
             "waveforms_visible": self._waveforms_visible,
+            "waveform_style": self._waveform_style,
+            "track_height_ratio": list(self._track_height_ratio),
             "position_lock": self._position_lock_enabled,
             "source_destination_ui": routes,
         }
@@ -4986,7 +5105,8 @@ class TimelineView(QGraphicsView):
         if not isinstance(state, dict):
             return
         known = {
-            "version", "thumbnail_mode", "waveforms_visible",
+            "version", "thumbnail_mode", "waveforms_visible", "waveform_style",
+            "track_height_ratio",
             "position_lock", "source_destination_ui",
         }
         extras: dict[str, Any] = {}
@@ -5006,6 +5126,16 @@ class TimelineView(QGraphicsView):
         waveforms = state.get("waveforms_visible")
         if isinstance(waveforms, bool):
             self.set_waveforms_visible(waveforms)
+        waveform_style = state.get("waveform_style")
+        if not isinstance(waveform_style, str) or waveform_style not in WAVEFORM_STYLES:
+            waveform_style = WAVEFORM_STYLE_BOTTOM
+        self.set_waveform_style(waveform_style)
+        ratio = state.get("track_height_ratio")
+        if (isinstance(ratio, (list, tuple)) and len(ratio) == 2
+                and all(type(part) is int and 1 <= part <= 4 for part in ratio)):
+            self.set_track_height_ratio((ratio[0], ratio[1]))
+        else:
+            self.set_track_height_ratio(DEFAULT_TRACK_HEIGHT_RATIO)
         lock = state.get("position_lock")
         if isinstance(lock, bool):
             self.set_position_lock_enabled(lock)
@@ -5034,39 +5164,95 @@ class TimelineView(QGraphicsView):
                         self.source_patch_track_id(header.track_type)
                         == header.track_id)
 
+    def track_height_ratio(self) -> tuple[int, int]:
+        return self._track_height_ratio
+
+    def set_track_height_ratio(self, ratio: tuple[int, int], *, resize_existing: bool = False) -> None:
+        """Set the linked heights preference, optionally applying it to the visible tracks."""
+        video, audio = ratio
+        if not all(type(part) is int and 1 <= part <= 4 for part in ratio):
+            raise ValueError(f"Track height ratio needs two values from 1 to 4: {ratio!r}")
+        ratio = (video, audio)
+        if ratio == self._track_height_ratio:
+            return
+        self._track_height_ratio = ratio
+        timeline = self._timeline
+        if (resize_existing and not self._audio_only and timeline is not None
+                and timeline.video_tracks and timeline.audio_tracks):
+            anchor = timeline.video_tracks[0]
+            height = self._layout_state.track_heights.get(anchor.track_id, self.default_track_height("video"))
+            self.set_media_track_height(height)
+            return
+        if timeline is not None:
+            self._layout_track_items()
+        self.track_heights_changed.emit()
+
+    def _linked_audio_height(self, video_height: int) -> int:
+        video_ratio, audio_ratio = self._track_height_ratio
+        return round(video_height * audio_ratio / video_ratio)
+
+    def _linked_video_height_range(self) -> tuple[int, int]:
+        video_ratio, audio_ratio = self._track_height_ratio
+        return (
+            max(MIN_VIDEO_TRACK_HEIGHT, math.ceil(MIN_AUDIO_TRACK_HEIGHT * video_ratio / audio_ratio)),
+            min(MAX_VIDEO_TRACK_HEIGHT, MAX_EDIT_AUDIO_TRACK_HEIGHT * video_ratio // audio_ratio),
+        )
+
+    def _max_audio_track_height(self) -> int:
+        return MAX_MIXER_AUDIO_TRACK_HEIGHT if self._audio_only else MAX_EDIT_AUDIO_TRACK_HEIGHT
+
+    def _track_height_overrides(self, track_type: str) -> dict[str, int]:
+        if self._audio_only and track_type == "audio":
+            return self._mixer_track_heights
+        return self._layout_state.track_heights
+
+    def media_track_height_range(self) -> tuple[int, int]:
+        """Return the slider range for whole-timeline resizing."""
+        timeline = self._timeline
+        if self._audio_only or (timeline is not None and timeline.audio_tracks and not timeline.video_tracks):
+            return MIN_AUDIO_TRACK_HEIGHT, self._max_audio_track_height()
+        if timeline is not None and timeline.video_tracks and timeline.audio_tracks:
+            return self._linked_video_height_range()
+        return MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT
+
     def set_track_height_for_type(self, track_type: str, height: int, *, relative: bool = False) -> None:
         """Resize a track group in one layout pass using the shared engine."""
-        self._set_track_heights((track_type,), height, relative=relative)
+        self._set_track_heights({track_type: height}, relative=relative)
 
     def set_media_track_height(self, height: int) -> None:
-        """Set the visual height of video and audio clips together."""
-        self._set_track_heights(("video", "audio"), height)
+        """Resize both media types together using the video height as the anchor."""
+        timeline = self._timeline
+        if timeline is None:
+            return
+        if self._audio_only or not timeline.video_tracks:
+            self.set_track_height_for_type("audio", height)
+        elif not timeline.audio_tracks:
+            self.set_track_height_for_type("video", height)
+        else:
+            lo, hi = self._linked_video_height_range()
+            video_height = max(lo, min(hi, height))
+            self._set_track_heights({"video": video_height, "audio": self._linked_audio_height(video_height)})
 
     def _set_track_heights(
-        self, track_types: tuple[str, ...], height: int, *, relative: bool = False,
+        self, heights: dict[str, int], *, relative: bool = False,
     ) -> None:
-        from src.features.edit.ui.timeline_layout import (
-            MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
-            MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT,
-        )
         limits = {
             "video": (MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT),
-            "audio": (MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT),
+            "audio": (MIN_AUDIO_TRACK_HEIGHT, self._max_audio_track_height()),
             "subtitle": (MIN_SUBTITLE_TRACK_HEIGHT, MAX_SUBTITLE_TRACK_HEIGHT),
         }
         if self._timeline is None:
             return
-        for track_type in track_types:
+        for track_type, height in heights.items():
             if track_type not in limits:
                 raise ValueError(f"Unknown track type: {track_type!r}")
             lo, hi = limits[track_type]
+            overrides = self._track_height_overrides(track_type)
             for track in getattr(self._timeline, f"{track_type}_tracks"):
-                current = self._layout_state.track_heights.get(
-                    track.track_id, self._default_track_height(track),
-                )
+                current = self.display_track_height(track.track_id, track_type)
                 requested = current + height if relative else height
                 clamped = max(lo, min(hi, int(requested)))
-                self._layout_state.track_heights[track.track_id] = clamped
+                overrides[track.track_id] = clamped
                 self._layout_engine.set_track_height(track.track_id, clamped)
         self._layout_track_items()
         self.viewport().update()
@@ -6382,7 +6568,11 @@ class TimelineView(QGraphicsView):
 
         # Clamp track height
         # BUG-09 fix: Use centralized constants instead of hardcoded values
-        new_height = max(EDIT_SIZES["track_h_min"], min(EDIT_SIZES["track_h_max"], new_height))
+        lo, hi = (
+            (MIN_AUDIO_TRACK_HEIGHT, MAX_MIXER_AUDIO_TRACK_HEIGHT) if self._audio_only
+            else (EDIT_SIZES["track_h_min"], EDIT_SIZES["track_h_max"])
+        )
+        new_height = max(lo, min(hi, new_height))
 
         if new_height != self._layout_engine.track_height(self._track_resize_track_id):
             self._on_track_height_changed(self._track_resize_track_id, new_height)
@@ -7498,6 +7688,9 @@ class TimelineView(QGraphicsView):
         if old_clip.track_id != new_clip.track_id:
             return True
 
+        if old_clip.audio_edit != new_clip.audio_edit:
+            return True
+
         # Check fade in/out
         if old_clip.fade_in_duration != new_clip.fade_in_duration:
             return True
@@ -8063,7 +8256,6 @@ class TimelineView(QGraphicsView):
         item.scene_cut_detect_requested.connect(self.scene_cut_detect_requested.emit)
         item.speech_to_text_requested.connect(self.speech_to_text_requested.emit)
         item.linked_group_hovered.connect(self._on_linked_group_hovered)
-        item.track_highlight_requested.connect(self._on_track_highlight_requested)
         # Phase 6: Connect Comp Clip context menu signals
         item.convert_to_comp_clip_requested.connect(self.convert_to_comp_clip_requested.emit)
         item.remove_composite_binding_requested.connect(self.remove_composite_binding_requested.emit)
@@ -8104,6 +8296,8 @@ class TimelineView(QGraphicsView):
         item.retime_segment_speed_requested.connect(self._on_retime_segment_speed_requested)
         # P1-1：增量添加的片段同样接包络编辑提交（与整建路径一致）
         item.envelope_edit_finished.connect(self._on_envelope_edit_finished)
+        item.envelope_shift_finished.connect(self._on_envelope_shift_finished)
+        item.envelope_drag_readout_changed.connect(self._show_envelope_drag_readout)
 
     def _apply_subtitle_drag_clamp(
         self,
@@ -8706,7 +8900,7 @@ class TimelineView(QGraphicsView):
             if display_track_id.startswith("__new_"):
                 m_type = "video" if m_item._media_type in ("video", "image", "comp_clip", "motion_graphic") else "audio"
                 m_y = self._compute_new_track_preview_y(display_track_id, m_type)
-                m_item.set_track_height(int(EDIT_SIZES[f"track_h_{m_type}"]))
+                m_item.set_track_height(self.default_track_height(m_type))
             else:
                 m_y = self._layout_engine.track_top(display_track_id)
                 m_item.set_track_height(self._layout_engine.track_height(display_track_id))
@@ -9132,7 +9326,7 @@ class TimelineView(QGraphicsView):
         self._configure_layout_engine()
         _, _, suffix = pseudo_track_id.partition(":")
         offset = int(suffix or 1)
-        height = EDIT_SIZES[f"track_h_{clip_track_type}"]
+        height = self.default_track_height(clip_track_type)
 
         if "above" in pseudo_track_id:
             # New video track above top video track
@@ -10955,16 +11149,21 @@ class TimelineView(QGraphicsView):
     def handle_delete_request(self, ripple: bool = False) -> None:
         """Unified delete dispatcher (keyboard Delete / Edit menu).
 
-        Priority order (P1-03):
-        1. Selected transitions are deleted.
-        2. With an In/Out range set and no clip selection, the range is
+        Priority order:
+        1. Delete a focused Mixer envelope node.
+        2. Delete selected transitions.
+        3. With an In/Out range set and no clip selection, the range is
            Lifted (ripple=False, gap kept) or Extracted (ripple=True, gap
            closed).
-        3. Otherwise the selected clips are deleted.
+        4. Otherwise the selected clips are deleted.
 
         Args:
             ripple: Close gaps (Extract / ripple delete) when True.
         """
+        if self._audio_only and not ripple:
+            focused = self._scene.focusItem()
+            if isinstance(focused, ClipItem) and focused.delete_selected_envelope_node():
+                return
         if self._selection.selected_transition_ids:
             self._delete_selected_transitions()
             return
@@ -11150,6 +11349,8 @@ class TimelineView(QGraphicsView):
         "motion_graphic_duration": InteractionState.TRIMMING_RIGHT,
         "retime_stretch": InteractionState.TRIMMING_RIGHT,
         "retime_point_move": InteractionState.DRAGGING_RETIME_POINT,
+        "envelope_node": InteractionState.DRAGGING_ENVELOPE,
+        "envelope_shift": InteractionState.DRAGGING_ENVELOPE,
     }
 
     def _on_item_interaction_started(
@@ -12684,65 +12885,77 @@ class TimelineView(QGraphicsView):
         尽量沿用既有（按邻近匹配），新节点生成 uuid；一条节点操作只占
         一步撤销（UpdateClipAudioEditCommand 快照整个 audio_edit）。
         """
-        if self._timeline is None:
+        if self._timeline is None or not self._mixer_envelope_editing:
             return
+        track = self._timeline.get_track_by_id(track_id)
         clip = self._timeline.get_clip_by_id(clip_id)
-        if clip is None:
+        if (track is None or track.track_type != "audio" or track.is_locked
+                or clip is None or clip.track_id != track_id):
             return
-        if self._is_track_locked(track_id):
-            return
+        from uuid import uuid4
         from src.features.edit.core.audio_edit import (
-            envelope_nodes, set_envelope,
+            ENVELOPE_BEZIER, ENVELOPE_MAX_DB, ENVELOPE_MIN_DB, envelope_nodes, set_envelope,
         )
-        from src.features.edit.core.commands.clip_props_commands import (
-            UpdateClipAudioEditCommand,
-        )
-        from src.features.edit.core.sample_time import (
-            AUDIO_REFERENCE_SAMPLE_RATE,
-        )
-        fps = float(self._timeline.fps) or 24.0
-        total = max(1, int(round(
-            clip.timeline_duration / fps * AUDIO_REFERENCE_SAMPLE_RATE)))
-        existing = envelope_nodes(getattr(clip, "audio_edit", None))
-        used_ids: set[str] = set()
+        from src.features.edit.core.commands.clip_props_commands import UpdateClipAudioEditCommand
+        from src.features.edit.core.sample_time import AUDIO_REFERENCE_SAMPLE_RATE
+
+        fps = float(self._timeline.fps)
+        total = max(1, round(clip.timeline_duration / fps * AUDIO_REFERENCE_SAMPLE_RATE))
+        levels = {
+            round(max(0.0, min(1.0, fraction)) * total): round(
+                max(ENVELOPE_MIN_DB, min(ENVELOPE_MAX_DB, gain_db)), 3)
+            for fraction, gain_db in view_nodes
+        }
+        existing = {node["local_sample"]: node for node in envelope_nodes(clip.audio_edit)}
+        moved = set(existing) - levels.keys() if len(existing) == len(levels) else set()
         model_nodes = []
-        for fraction, gain_db in sorted(view_nodes or [],
-                                        key=lambda point: point[0]):
-            local_sample = int(round(
-                max(0.0, min(1.0, float(fraction))) * total))
-            # 邻近沿用既有 id（同一节点拖动后保持稳定身份）。
-            node_id = None
-            best_dist = None
-            for node in existing:
-                if node.get("id") in used_ids:
-                    continue
-                dist = abs(int(node.get("local_sample", 0)) - local_sample)
-                if best_dist is None or dist < best_dist:
-                    node_id, best_dist = str(node.get("id")), dist
-            if node_id is None:
-                import uuid as _uuid
-                node_id = str(_uuid.uuid4())
-            used_ids.add(node_id)
+        for sample, db in sorted(levels.items()):
+            previous = existing.get(sample, {})
+            if not previous and moved:
+                nearest = min(moved, key=lambda old: (abs(old - sample), old))
+                moved.remove(nearest)
+                previous = existing[nearest]
             model_nodes.append({
-                "id": node_id,
-                "local_sample": local_sample,
-                "gain_db": round(max(-60.0, min(12.0, float(gain_db))), 3),
-                "interpolation": "linear",
+                **previous,
+                "id": previous.get("id") or str(uuid4()),
+                "local_sample": sample,
+                "gain_db": db,
+                "interpolation": ENVELOPE_BEZIER,
             })
-        # 同 sample 唯一：后写覆盖前写（与 envelope_from_canvas_points 一致）。
-        deduped: list[dict] = []
-        for node in model_nodes:
-            if deduped and deduped[-1]["local_sample"] == node["local_sample"]:
-                deduped[-1] = node
-            else:
-                deduped.append(node)
         try:
-            new_edit = set_envelope(getattr(clip, "audio_edit", None),
-                                    deduped or None)
+            new_edit = set_envelope(clip.audio_edit, model_nodes)
             self._execute_command(UpdateClipAudioEditCommand.create(
                 track_id, clip, new_edit,
                 label=I18N.tr("mixer.clip_editor.edit_envelope",
                               "Edit clip volume envelope")))
+        except (ValueError, RuntimeError) as exc:
+            self.status_message_requested.emit(str(exc))
+
+    def _on_envelope_shift_finished(self, clip_id: str, track_id: str, delta_db: float) -> None:
+        """Move all envelope levels together while keeping knot times and shape."""
+        if self._timeline is None or self._audio_only or not delta_db:
+            return
+        track = self._timeline.get_track_by_id(track_id)
+        clip = self._timeline.get_clip_by_id(clip_id)
+        if (track is None or track.track_type != "audio" or track.is_locked
+                or clip is None or clip.track_id != track_id):
+            return
+
+        from uuid import uuid4
+        from src.features.edit.core.audio_edit import envelope_nodes, set_envelope
+        from src.features.edit.core.commands.clip_props_commands import UpdateClipAudioEditCommand
+
+        nodes = envelope_nodes(clip.audio_edit)
+        if nodes:
+            shifted = [{**node, "gain_db": round(node["gain_db"] + delta_db, 3)} for node in nodes]
+        else:
+            shifted = [{"id": str(uuid4()), "local_sample": 0, "gain_db": delta_db,
+                        "interpolation": "linear"}]
+        try:
+            self._execute_command(UpdateClipAudioEditCommand.create(
+                track_id, clip, set_envelope(clip.audio_edit, shifted),
+                label=I18N.tr("mixer.clip_editor.edit_envelope", "Edit clip volume envelope"),
+            ))
         except (ValueError, RuntimeError) as exc:
             self.status_message_requested.emit(str(exc))
 
@@ -14367,6 +14580,7 @@ class TimelineView(QGraphicsView):
         self._clear_items()
         self._remove_persistent_items()
         self._timeline = None
+        self._mixer_track_heights.clear()
         self.range_display_changed.emit(0, EMPTY_TIMELINE_FPS, None, None)
         self._provisional_timeline = False
         self._runtime_duration_frames = 0
@@ -14554,6 +14768,51 @@ class TimelineView(QGraphicsView):
         self._execute_command(cmd)
         logger.debug(f"Track {track_id} deleted")
 
+    def _on_cleanup_empty_tracks_requested(self) -> None:
+        """Remove unused lanes in the visible workspace as one undoable edit."""
+        timeline = self._timeline
+        if timeline is None:
+            return
+
+        from src.features.edit.core.shared_recording_input import stored_recording_inputs
+
+        protected_ids = set(self._recording_track_states)
+        protected_ids.update(stored_recording_inputs(timeline.format_settings))
+        protected_ids.update(style.track_id for style in timeline.caption_track_graphic_styles)
+        for track_type in ("video", "audio"):
+            routed = self._source_patch_routes.get((timeline.timeline_id, track_type))
+            if routed is not None:
+                protected_ids.add(routed)
+        for group in timeline.vcas:
+            protected_ids.update(group.member_track_ids)
+
+        scope = timeline.audio_tracks if self._audio_only else timeline.all_tracks
+        empty_ids = {
+            track.track_id for track in scope
+            if track.track_id not in protected_ids
+            and not (track.clips or track.subtitle_clips or track.transitions
+                     or track.is_locked or track.is_bus or track.automation
+                     or track.sends or track.output_bus_id)
+        }
+
+        # Keep an ordinary insertion destination for each A/V type that exists.
+        for tracks in (timeline.video_tracks, timeline.audio_tracks):
+            ordinary_ids = [
+                track.track_id for track in tracks if not track.is_bus and track.track_role == "standard"
+            ]
+            if ordinary_ids and empty_ids.issuperset(ordinary_ids):
+                empty_ids.remove(ordinary_ids[0])
+
+        if not empty_ids:
+            self.status_message_requested.emit(
+                I18N.tr("timeline.menu.no_empty_tracks", "No unused tracks to remove"))
+            return
+
+        self._execute_command(MacroCommand.create(
+            I18N.tr("timeline.menu.cleanup_empty_tracks", "Remove Empty Tracks"),
+            [DeleteTrackCommand.create(track.track_id) for track in scope if track.track_id in empty_ids],
+        ))
+
     def _on_add_track_requested(
         self, track_type: str, position: str, reference_track_id: str | None = None,
     ) -> None:
@@ -14735,9 +14994,10 @@ class TimelineView(QGraphicsView):
         if track.track_type == "subtitle":
             new_height = max(MIN_SUBTITLE_TRACK_HEIGHT,
                              min(MAX_SUBTITLE_TRACK_HEIGHT, int(new_height)))
+        elif self._audio_only and track.track_type == "audio":
+            new_height = max(MIN_AUDIO_TRACK_HEIGHT, min(MAX_MIXER_AUDIO_TRACK_HEIGHT, new_height))
 
-        # Store height in layout state (persists across reloads)
-        self._layout_state.track_heights[track_id] = new_height
+        self._track_height_overrides(track.track_type)[track_id] = new_height
         self._layout_engine.set_track_height(track_id, new_height)
 
         # Update clip items on this track. Subtitle clips use their own
@@ -14775,13 +15035,23 @@ class TimelineView(QGraphicsView):
             "medium": {"video": 58, "audio": 46, "subtitle": 36},
             "large": {"video": 90, "audio": 70, "subtitle": 50},
             "default": {
-                "video": EDIT_SIZES["track_h_video"],
-                "audio": EDIT_SIZES["track_h_audio"],
-                "subtitle": 40,
+                "video": self.default_track_height("video"),
+                "audio": self.default_track_height("audio"),
+                "subtitle": DEFAULT_SUBTITLE_TRACK_HEIGHT,
             },
         }
 
         h = heights.get(preset, heights["default"])
+        if self._audio_only:
+            if preset in {"small", "medium", "large"}:
+                self.set_track_height_for_type("audio", h["audio"])
+            else:
+                self._mixer_track_heights.clear()
+                self._layout_track_items()
+                self.viewport().update()
+                self.track_heights_changed.emit()
+            return
+
         # P10.3: iterate all track types including subtitles.
         # SUB-P1-06: subtitle tracks now honor the preset height (28/36/50)
         # instead of being forced back to DEFAULT_SUBTITLE_TRACK_HEIGHT.
@@ -16216,12 +16486,12 @@ class TimelineView(QGraphicsView):
             lane = engine.track_rect(drop.track_id)
             top, height = lane.top(), lane.height()
         elif is_video:
-            height = float(EDIT_SIZES["track_h_video"])
+            height = float(self.default_track_height("video"))
             top = area.splitter_rect.top() - height
             if self._timeline and self._timeline.video_tracks:
                 top = self._compute_new_track_preview_y("__new_video_track_above__", "video")
         else:
-            height = float(EDIT_SIZES["track_h_audio"])
+            height = float(self.default_track_height("audio"))
             top = panel.top()
             if self._timeline and self._timeline.audio_tracks:
                 top = self._compute_new_track_preview_y("__new_audio_track_below__", "audio")
@@ -19998,9 +20268,7 @@ class TimelineView(QGraphicsView):
                     continue
 
                 # 获取 track 高度
-                track_height = TRACK_HEIGHT
-                if track.track_type == "audio":
-                    track_height = EDIT_SIZES["track_h_audio"]
+                track_height = self.default_track_height(track.track_type)
 
                 # 遍历相邻 clip，找间隙
                 for i in range(len(clips) - 1):

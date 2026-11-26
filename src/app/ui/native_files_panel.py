@@ -25,6 +25,9 @@ from PyQt6.QtWidgets import (
 )
 
 from src.app.ui.add_library_dialog import AddLibraryDialog
+from src.app.ui.native_files_prefs import (
+    NativeFilesPreferences, THUMBNAIL_WIDTH_DEFAULT, THUMBNAIL_WIDTH_MAX, THUMBNAIL_WIDTH_MIN,
+)
 from src.shared.assets.icon_manager import get_icon, icon_export
 from src.shared.i18n.i18n import I18N
 from src.shared.media.format_registry import MODEL_3D_EXTENSIONS, SUBTITLE_EXTENSIONS, get_media_type, is_image
@@ -53,6 +56,7 @@ if TYPE_CHECKING:
 
 _LOCATION_DEFAULT_WIDTH = 240
 _INSPECTOR_DEFAULT_WIDTH = 210
+_CAPTION_FIELD_KEYS = frozenset(key for key, _ in FILE_CAPTION_FIELDS)
 
 
 def _tr(key: str, default: str) -> str:
@@ -553,7 +557,11 @@ class NativeFilesPanel(QWidget):
         self._color_workspace_active = False
         self._build_ui()
         self._prefs = preferences
-        self._apply_preferences()
+        self.reload_preferences()
+        sort_index = min(self._preferences().sort_index, self.sort_combo.count() - 1)
+        with QSignalBlocker(self.sort_combo):
+            self.sort_combo.setCurrentIndex(sort_index)
+        self._sort_changed(sort_index)
         self._preview_path = ""
         self._library_lightbox = False
         self._space_preview = False
@@ -580,36 +588,38 @@ class NativeFilesPanel(QWidget):
         self.selection.selectionChanged.connect(self._update_info)
         self.proxy.rowsInserted.connect(self._update_info)
         self.proxy.rowsRemoved.connect(self._update_info)
-        self.proxy.sort(0)
 
-    def _preferences(self) -> "NativeFilesPreferences":
+    def _preferences(self) -> NativeFilesPreferences:
         """惰性创建：不注入时用真实 QSettings；测试注入临时实例避免污染本机。"""
         if self._prefs is None:
-            from src.app.ui.native_files_prefs import NativeFilesPreferences
             self._prefs = NativeFilesPreferences()
         return self._prefs
 
-    def _apply_preferences(self) -> None:
-        """恢复上次的视图/密度/侧栏/信息栏/排序；不触发回写。"""
+    def reload_preferences(self) -> None:
+        """Apply the shared browser display settings without writing them back."""
         prefs = self._preferences()
-        with QSignalBlocker(self.view_combo):
-            self.view_combo.setCurrentIndex(self.view_combo.findData(prefs.layout_mode))
-        self.card_delegate.grid_fill = prefs.grid_fill
-        self._set_card_metadata(frozenset(prefs.card_metadata), persist=False)
-        self._change_layout(self.view_combo.currentIndex(), persist=False)
+        mode = prefs.layout_mode
+        layout_index = self.view_combo.findData(mode)
+        if self.view_combo.currentIndex() != layout_index or self.card_delegate.layout_mode != mode:
+            with QSignalBlocker(self.view_combo):
+                self.view_combo.setCurrentIndex(layout_index)
+            self._change_layout(layout_index, persist=False)
+        grid_fill = prefs.grid_fill
+        if self.card_delegate.grid_fill != grid_fill:
+            self.card_delegate.grid_fill = grid_fill
+            self.icon_view.viewport().update()
+        fields = frozenset(prefs.card_metadata) & _CAPTION_FIELD_KEYS
+        if self.card_delegate.caption_fields != fields:
+            self._set_card_metadata(fields, persist=False)
+
+        width = max(self.density_slider.minimum(), min(self.density_slider.maximum(), prefs.density))
         with QSignalBlocker(self.density_slider):
-            self.density_slider.setValue(max(self.density_slider.minimum(),
-                                             min(self.density_slider.maximum(), prefs.density)))
-        self._resize_cards(self.density_slider.value())
-        with QSignalBlocker(self.sort_combo):
-            self.sort_combo.setCurrentIndex(min(prefs.sort_index, self.sort_combo.count() - 1))
-        self._sort_changed(self.sort_combo.currentIndex())
+            self.density_slider.setValue(width)
+        self._resize_cards(width)
         self._sidebar_preference = prefs.sidebar_preference
-        if self._sidebar_preference is not None:
-            with QSignalBlocker(self.sidebar_button):
-                self.sidebar_button.setChecked(self._sidebar_preference)
-            self.sidebar.setVisible(self._sidebar_preference)
         self._inspector_preference = prefs.inspector_preference
+        self._sync_sidebar_visibility()
+        self._sync_inspector_visibility()
 
     def _button(self, text: str, tooltip: str, callback: Any) -> QPushButton:
         button = QPushButton(text, self)
@@ -865,8 +875,8 @@ class NativeFilesPanel(QWidget):
         self.density_label.setObjectName("filesHint")
         self.gallery_title_row.addWidget(self.density_label)
         self.density_slider = QSlider(Qt.Orientation.Horizontal, self.gallery_toolbar)
-        self.density_slider.setRange(96, 320)
-        self.density_slider.setValue(180)
+        self.density_slider.setRange(THUMBNAIL_WIDTH_MIN, THUMBNAIL_WIDTH_MAX)
+        self.density_slider.setValue(THUMBNAIL_WIDTH_DEFAULT)
         self.density_slider.setMinimumWidth(44)
         self.density_slider.setMaximumWidth(92)
         self.density_slider.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
@@ -1316,7 +1326,7 @@ class NativeFilesPanel(QWidget):
         self._set_card_metadata(fields | {field} if enabled else fields - {field})
 
     def _set_card_metadata(self, fields: frozenset[str], *, persist: bool = True) -> None:
-        fields = fields & {key for key, _ in FILE_CAPTION_FIELDS}
+        fields = fields & _CAPTION_FIELD_KEYS
         rating_at_bottom = "rating" in fields
         caption_height = LIBRARY_GALLERY_SPACING.caption_height + FILE_CAPTION_LINE_HEIGHT * len(fields - {"rating"})
         if rating_at_bottom:
@@ -1533,13 +1543,16 @@ class NativeFilesPanel(QWidget):
         super().resizeEvent(event)
         if not hasattr(self, "sidebar"):
             return
-        show_sidebar = self._sidebar_preference if self._sidebar_preference is not None else self.width() >= 720
-        self.sidebar.setVisible(show_sidebar)
+        self._sync_sidebar_visibility()
         self._layout_gallery_toolbar()
         self._layout_navigation()
-        with QSignalBlocker(self.sidebar_button):
-            self.sidebar_button.setChecked(show_sidebar)
         self._sync_inspector_visibility()
+
+    def _sync_sidebar_visibility(self) -> None:
+        show = self._sidebar_preference if self._sidebar_preference is not None else self.width() >= 720
+        self.sidebar.setVisible(show)
+        with QSignalBlocker(self.sidebar_button):
+            self.sidebar_button.setChecked(show)
 
     def minimumSizeHint(self) -> QSize:
         return QSize(380, 280)

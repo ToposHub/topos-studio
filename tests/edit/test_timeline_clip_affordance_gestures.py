@@ -7,12 +7,12 @@ from typing import Any
 
 import pytest
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt
-from PyQt6.QtGui import QImage, QPainter
+from PyQt6.QtGui import QColor, QImage, QPainter
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QStyleOptionGraphicsItem
 
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
-from src.features.edit.ui.timeline_items import ClipItem, EditTool, RollHandleItem
+from src.features.edit.ui.timeline_items import CLIP_TITLE_HEIGHT, ClipItem, EditTool, RollHandleItem
 from src.features.edit.ui.timeline_view import TimelineView
 from src.shared.media.metadata import Rational
 
@@ -99,6 +99,32 @@ def test_clip_content_stays_inside_rounded_corners(qtbot: Any, clip_id: str, sel
     assert image.pixelColor(0, bottom // 2).alpha() > 0
     assert image.pixelColor(right, bottom // 2).alpha() > 0
     assert item.shape().contains(QPointF(0.5, 0.5))
+
+
+def test_video_title_keeps_a_separate_region_from_its_thumbnail(
+    qapp: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = ClipItem("video", "video", "Source", 0, 200, 1.0, 0, track_height=64)
+    thumbnail_ink = QColor("#ff2090")
+
+    def draw_thumbnail(painter: QPainter, rect: QRectF, _mode: str) -> None:
+        painter.fillRect(rect, thumbnail_ink)
+
+    monkeypatch.setattr(item, "_draw_video_thumbnails", draw_thumbnail)
+    image = _render(item)
+    title_pixel = image.pixelColor(150, 8)
+    assert title_pixel.alpha() == 255 and title_pixel != thumbnail_ink
+    assert image.pixelColor(150, int(CLIP_TITLE_HEIGHT) + 1) == thumbnail_ink
+
+
+def test_video_and_audio_share_the_default_clip_palette(qapp: Any) -> None:
+    video = ClipItem("video", "v1", "Source", 0, 200, 1.0, 0, track_height=64)
+    audio = ClipItem("audio", "a1", "Source", 0, 200, 1.0, 0, track_height=64, media_type="audio")
+    video_image, audio_image = _render(video), _render(audio)
+    for y in (8, int(CLIP_TITLE_HEIGHT) + 1):
+        assert video_image.pixelColor(150, y) == audio_image.pixelColor(150, y)
+    audio.set_audio_display_color("#B8644D")
+    assert _render(audio).pixelColor(150, 8) != video_image.pixelColor(150, 8)
 
 
 @pytest.mark.parametrize("tool", [EditTool.SELECT, EditTool.TRIM])
@@ -229,7 +255,7 @@ def test_a_short_clip_still_exposes_and_edits_its_fade_tab(qtbot: Any) -> None:
     _assert_single_undo(view, before)
 
 
-def test_fade_tab_is_rectangular_and_fade_does_not_cover_clip_name_strip(qtbot: Any) -> None:
+def test_fade_tab_is_rectangular(qtbot: Any) -> None:
     view = _view(qtbot)
     item = view._items_map["v0"]
     center = _point(view, "v0", item._width / 2, 32)
@@ -243,12 +269,32 @@ def test_fade_tab_is_rectangular_and_fade_does_not_cover_clip_name_strip(qtbot: 
 
     assert white_width(3) >= 3 and white_width(7) >= 3
     assert abs(white_width(3) - white_width(7)) <= 1
-    _gesture(view, _point(view, "v0", 3, 4), 90)
+
+
+@pytest.mark.parametrize("clip_id", ["v0", "a0"])
+@pytest.mark.parametrize("end", ["in", "out"])
+def test_fade_shades_title_glyphs_and_body_only_within_its_range(qtbot: Any, clip_id: str, end: str) -> None:
+    view = _view(qtbot)
+    item = view._items_map[clip_id]
+    item._asset_name = "Timeline fade preview " * 8
+    center = _point(view, clip_id, item._width / 2, 32)
     QTest.mouseMove(view.viewport(), center)
-    faded = _render(view._items_map["v0"])
-    for y in range(faded.height() - 17, faded.height() - 3):
-        assert [faded.pixel(x, y) for x in range(4, faded.width() - 4)] == [
-            baseline.pixel(x, y) for x in range(4, baseline.width() - 4)]
+    baseline = _render(item)
+
+    tab_x = 3.0 if end == "in" else item._width - 3.0
+    _gesture(view, _point(view, clip_id, tab_x, 4), 90 if end == "in" else -90)
+    QTest.mouseMove(view.viewport(), center)
+    faded = _render(view._items_map[clip_id])
+    affected = range(28, 58) if end == "in" else range(faded.width() - 58, faded.width() - 28)
+    glyphs = [(x, y) for x in affected for y in range(4, 14)
+              if baseline.pixelColor(x, y).lightness() > 125]
+    assert glyphs
+    assert all(faded.pixelColor(x, y).lightness() < baseline.pixelColor(x, y).lightness() for x, y in glyphs)
+    assert any(faded.pixelColor(x, y).lightness() < baseline.pixelColor(x, y).lightness() - 10
+               for x in affected for y in range(int(CLIP_TITLE_HEIGHT) + 4, int(CLIP_TITLE_HEIGHT) + 13))
+    middle = range(110, faded.width() - 110)
+    assert all(faded.pixel(x, y) == baseline.pixel(x, y)
+               for x in middle for y in range(4, int(CLIP_TITLE_HEIGHT)))
 
 
 @pytest.mark.parametrize("clip_id,edge", [("v0", "left"), ("v2", "right")])

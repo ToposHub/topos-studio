@@ -72,6 +72,7 @@ from PyQt6.QtGui import (
 
 from src.shared.i18n.i18n import I18N
 from src.shared.color.color_space_descriptor import ACESCG_SCENE, ColorSpaceDescriptor
+from src.shared.color.desktop_video_color import DISPLAY_COLOR_GLSL
 from src.shared.color.project_video_signal import (
     ProjectAcesSettings, aces_input_bgr, aces_input_descriptor, read_aces_still, render_aces_bgr,
 )
@@ -102,6 +103,7 @@ from src.shared.gpu.metal.present_port import normalized_rect
 from src.features.edit.ui.edit_style import EDIT_COLORS
 from src.shared.ui.style_sheet import UI_MONO_FONT_FAMILIES
 from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
+from src.shared.ui.widgets.video_display_color import VideoDisplayColor
 
 logger = logging.getLogger(__name__)
 
@@ -789,6 +791,7 @@ class SourceViewer(QOpenGLWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._clip_drag_press = None
         self._fps_indicator = RealtimeFpsIndicator(self)
+        self._display_color = VideoDisplayColor(self, self.update)
 
         # Texture state
         self._current_tex_id: Optional[int] = None
@@ -813,6 +816,7 @@ class SourceViewer(QOpenGLWidget):
         self._u_texture_loc: Optional[int] = None
         self._u_display_rect_loc: Optional[int] = None
         self._u_flip_y_loc: Optional[int] = None
+        self._display_uniform_locations: tuple[int, int] = (-1, -1)
 
         # Pending QImage for rendering (CPU fallback) — staged by
         # submit_qimage() and uploaded inside paintGL where the GL
@@ -868,13 +872,15 @@ class SourceViewer(QOpenGLWidget):
                 """,
                 """
                 #version 330
+                // MONITOR_COLOR_GLSL
                 uniform sampler2D u_texture;
                 in vec2 v_texcoord;
                 out vec4 f_color;
                 void main() {
-                    f_color = texture(u_texture, v_texcoord);
+                    vec4 pixel = texture(u_texture, v_texcoord);
+                    f_color = vec4(topos_monitor_color(pixel.rgb), pixel.a);
                 }
-                """
+                """.replace("// MONITOR_COLOR_GLSL", DISPLAY_COLOR_GLSL),
             )
 
             # AUD-20904: cache uniform locations once after linking.
@@ -884,6 +890,10 @@ class SourceViewer(QOpenGLWidget):
                     self._prog, b"u_display_rect"
                 )
                 self._u_flip_y_loc = _gl.glGetUniformLocation(self._prog, b"u_flip_y")
+                self._display_uniform_locations = (
+                    _gl.glGetUniformLocation(self._prog, b"topos_monitor_icc_lut"),
+                    _gl.glGetUniformLocation(self._prog, b"topos_monitor_icc_enabled"),
+                )
 
             # Create quad VBO
             self._create_quad_vbo()
@@ -1180,6 +1190,7 @@ class SourceViewer(QOpenGLWidget):
             self._u_flip_y_loc,
             1.0 if self._shared_tex_id is not None else 0.0,
         )
+        self._display_color.bind_gl(_gl, self._prog, uniform_locations=self._display_uniform_locations)
 
         # Bind VAO (static unit quad) and draw
         _gl.glBindVertexArray(self._vao)
@@ -2552,6 +2563,14 @@ class SourceViewerWidget(QWidget):
         """Whether a native viewport was set up for this widget."""
         return self.__dict__.get("_native_renderer", None) is not None
 
+    def set_monitor_calibration_lut(self, path: str) -> None:
+        display = self.viewer._display_color
+        was_native = self._native_showing and self._native_host_can_show()
+        display.set_calibration_lut(path)
+        self._layout_native_host()
+        if was_native and display.has_calibration and self._current_asset is not None:
+            self.seek(self._current_frame, force=True)
+
     def disable_native_viewport(self) -> None:
         """Stop using the native viewport and take the layer back."""
         renderer = self.__dict__.get("_native_renderer")
@@ -2604,7 +2623,8 @@ class SourceViewerWidget(QWidget):
 
     def _native_host_can_show(self) -> bool:
         viewer = self.viewer
-        return bool(viewer is not None and viewer.isVisible() and not self._view_hidden)
+        return bool(viewer is not None and viewer.isVisible() and not self._view_hidden
+                    and not getattr(getattr(viewer, "_display_color", None), "has_calibration", False))
 
     def _layout_native_host(self) -> None:
         """Keep the layer over the canvas exactly while a native frame is shown."""

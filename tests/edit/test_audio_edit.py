@@ -117,7 +117,7 @@ class TestModel:
         clip = make_clip(audio_edit=edit)
         restored = ClipInstance.from_dict(clip.to_dict())
         assert restored.audio_edit["future_field"] == {"keep": True}
-        assert restored.audio_edit["version"] == AUDIO_EDIT_SCHEMA_VERSION
+        assert restored.audio_edit["version"] == edit["version"] == 1
 
 
 class TestCommand:
@@ -268,6 +268,24 @@ class TestEnvelope:
         dupes = envelope_from_canvas_points(
             [{"t": 0.5, "db": -1.0}, {"t": 0.5, "db": -2.0}], 1.0, 48000)
         assert len(dupes) == 1 and dupes[0]["gain_db"] == -2.0
+
+    def test_bezier_envelope_is_bounded_and_chunk_invariant(self) -> None:
+        nodes = envelope_from_canvas_points(
+            [{"t": 0.0, "db": 0.0}, {"t": 1.0, "db": -12.0},
+             {"t": 1.01, "db": 3.0}], 2.0, 200)
+        edit = set_envelope({"version": 1, "processing_rate": 48000, "steps": []}, nodes)
+        assert edit["version"] == AUDIO_EDIT_SCHEMA_VERSION
+        assert not validate_audio_edit(edit)
+        gain = evaluate_envelope_gain(-10, 150, nodes)
+        assert 20.0 * np.log10(gain[35]) == pytest.approx(-1.875, abs=1e-5)
+        assert 20.0 * np.log10(gain[110]) == pytest.approx(-12.0, abs=1e-5)
+        assert float(min(gain)) == pytest.approx(10.0 ** (-12.0 / 20.0))
+        assert float(max(gain)) == pytest.approx(10.0 ** (3.0 / 20.0))
+        np.testing.assert_allclose(
+            gain, np.concatenate([evaluate_envelope_gain(-10, 83, nodes),
+                                  evaluate_envelope_gain(73, 67, nodes)]),
+        )
+        assert canvas_points_from_envelope(nodes, 2.0, 200)[0]["id"] == nodes[0]["id"]
 
     def test_envelope_applies_with_steps(self) -> None:
         rate = 48000

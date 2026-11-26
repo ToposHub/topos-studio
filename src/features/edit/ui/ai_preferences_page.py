@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import replace
 from hashlib import sha256
 from urllib.parse import urlsplit
@@ -13,9 +14,9 @@ from PyQt6.QtCore import QObject, QSignalBlocker, Qt, QThread, QTimer, pyqtSigna
 from PyQt6.QtGui import QStandardItemModel
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QFormLayout,
     QFrame,
     QHBoxLayout,
-    QGridLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -73,48 +74,76 @@ from src.shared.ai_models.generation.media_inference import (
 )
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.style_sheet import C
+from src.shared.ui.widgets.pref_form_layout import (
+    PREF_FORM_MARGINS, PREF_PAGE_BACKGROUND, PREF_PAGE_MARGINS,
+    make_pref_form, make_pref_label,
+)
 
-# provider_kind 选项（显示名, 值, endpoint placeholder, model placeholder）
-_PROVIDER_OPTIONS = [
+# (Translation key and labels, protocol, URL placeholder, model placeholder)
+_PROVIDER_OPTIONS = (
     (
-        "OpenAI 兼容（本机或局域网）",
+        ("provider_local_http", "OpenAI 兼容（本机或局域网）", "OpenAI-compatible (local or LAN)"),
         "local_http",
         "http://127.0.0.1:8000/v1",
         "qwen2.5-7b-instruct",
     ),
     (
-        I18N.tr("preferences.ai_editing.openai_compatible", "OpenAI-compatible"),
+        ("openai_compatible", "OpenAI 兼容", "OpenAI-compatible"),
         "openai",
         "https://api.openai.com",
         "gpt-4o",
     ),
     (
-        I18N.tr("preferences.ai_editing.provider_ollama", "Ollama (本地)"),
+        ("provider_ollama", "Ollama（本地）", "Ollama (Local)"),
         "ollama",
         "http://localhost:11434",
         "llama3.2",
     ),
     (
-        I18N.tr("preferences.ai_editing.provider_anthropic", "Claude (Anthropic)"),
+        ("provider_anthropic", "Claude (Anthropic)", "Claude (Anthropic)"),
         "anthropic",
         "https://api.anthropic.com",
         "claude-3-5-sonnet-20241022",
     ),
-    ("DeepSeek", "deepseek", "https://api.deepseek.com", "deepseek-flash"),
-    ("智谱视觉 MCP", ZHIPU_VISION_PROVIDER_KIND, ZHIPU_VISION_ORIGIN, ZHIPU_VISION_TOOL),
-    ("OpenAI Responses", "openai_responses", "https://api.openai.com/v1", ""),
-    ("火山方舟 Responses", "volcengine_responses", "https://ark.cn-beijing.volces.com/api/plan/v3", "doubao-seed-2.0-lite"),
-    ("火山方舟 Seedream 图片", "volcengine_seedream", "https://ark.cn-beijing.volces.com/api/plan/v3", "doubao-seedream-5.0-lite"),
-    ("火山方舟 TTS", "volcengine_plan_tts", "https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional", "doubao-seed-tts-2.0"),
-    ("本地 Qwen3-ASR", "local_qwen_asr", "", "qwen3_asr"),
-    ("本地 Qwen3-TTS", "local_qwen_tts", "", "qwen3_tts_customvoice"),
     (
-        "火山方舟 ASR",
+        ("provider_deepseek", "DeepSeek", "DeepSeek"),
+        "deepseek", "https://api.deepseek.com", "deepseek-flash",
+    ),
+    (
+        ("provider_zhipu_vision", "智谱视觉 MCP", "Zhipu Vision MCP"),
+        ZHIPU_VISION_PROVIDER_KIND, ZHIPU_VISION_ORIGIN, ZHIPU_VISION_TOOL,
+    ),
+    (
+        ("provider_openai_responses", "OpenAI Responses", "OpenAI Responses"),
+        "openai_responses", "https://api.openai.com/v1", "",
+    ),
+    (
+        ("provider_volcengine_responses", "火山方舟 Responses", "Volcengine Ark Responses"),
+        "volcengine_responses", "https://ark.cn-beijing.volces.com/api/plan/v3", "doubao-seed-2.0-lite",
+    ),
+    (
+        ("provider_volcengine_seedream", "火山方舟 Seedream 图片", "Volcengine Ark Seedream"),
+        "volcengine_seedream", "https://ark.cn-beijing.volces.com/api/plan/v3", "doubao-seedream-5.0-lite",
+    ),
+    (
+        ("provider_volcengine_tts", "火山方舟 TTS", "Volcengine Ark TTS"),
+        "volcengine_plan_tts", "https://openspeech.bytedance.com/api/v3/plan/tts/unidirectional", "doubao-seed-tts-2.0",
+    ),
+    (
+        ("provider_local_qwen_asr", "本地 Qwen3-ASR", "Local Qwen3-ASR"),
+        "local_qwen_asr", "", "qwen3_asr",
+    ),
+    (
+        ("provider_local_qwen_tts", "本地 Qwen3-TTS", "Local Qwen3-TTS"),
+        "local_qwen_tts", "", "qwen3_tts_customvoice",
+    ),
+    (
+        ("provider_volcengine_asr", "火山方舟 ASR", "Volcengine Ark ASR"),
         "volcengine_plan_asr",
         "https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash",
         "volc.bigasr.auc_turbo",
     ),
-]
+)
 
 _CATEGORY_OPTIONS = (
     ("language", "语言", "Language"),
@@ -157,8 +186,54 @@ _STATUS_LABELS = {
     "blocked": ("已阻止", "Blocked"),
 }
 
+# Service clients also supply diagnostics to non-UI callers. Localize their
+# fixed messages on display and preserve model/server responses as received.
+_PROBE_MESSAGES_EN = {
+    "视觉模型测试成功": "Vision model test passed.",
+    "语音转文字接口测试成功": "Speech-to-text test passed.",
+    "语言模型测试成功": "Language model test passed.",
+    "向量化模型测试成功": "Embedding model test passed.",
+    "智谱视觉 MCP 测试成功": "Zhipu Vision MCP test passed.",
+    "当前协议不支持测试所选能力。": "The current protocol does not support testing this capability.",
+    "当前协议没有可用的模型列表接口。": "The current protocol does not support model discovery.",
+    "服务未返回有效的模型列表。": "The service returned an invalid model list.",
+    "当前协议不支持图片理解或对话。": "The current protocol does not support image understanding or chat.",
+    "当前协议不支持语音转文字。": "The current protocol does not support speech-to-text.",
+    "当前协议不支持向量化。": "The current protocol does not support embeddings.",
+    "请设置有效的模型 ID。": "Enter a valid model ID.",
+    "模型未返回有效文本。": "The model returned no valid text.",
+    "语音服务资源 ID 无效。": "The speech service resource ID is invalid.",
+    "服务未返回有效转录结果。": "The service returned no valid transcription.",
+    "语音转文字服务拒绝了请求，请检查资源 ID 和权限。": "The speech-to-text service rejected the request. Check the resource ID and permissions.",
+    "无法连接模型服务，或请求已超时。": "The service could not be reached or the request timed out.",
+    "模型服务响应超出大小限制。": "The model service response exceeds the size limit.",
+    "模型服务返回了无效的 JSON。": "The model service returned invalid JSON.",
+    "模型服务返回了错误或无法识别的响应。": "The model service returned an error or an unrecognized response.",
+    "模型服务返回的向量数量、索引或维度无效。": "The model service returned an invalid vector count, index, or dimension.",
+    "模型服务返回了无效的向量分量。": "The model service returned invalid vector components.",
+    "请填写有效的模型服务 URL。": "Enter a valid model service URL.",
+    "API Key 的格式无效。": "The API key format is invalid.",
+    "请填写不含凭据、查询参数或片段的 HTTP(S) 服务 URL。": "Enter an HTTP(S) service URL without credentials, query parameters, or a fragment.",
+    "公共服务器或需要 API Key 的局域网服务必须使用 HTTPS。": "Use HTTPS for public servers or local network services that require an API key.",
+    "MCP 视觉不可用：npx 未安装": "MCP vision is unavailable because npx is missing.",
+    "MCP 视觉不可用：未找到 npx（需要 Node.js v18+，可经 nvm 安装）": "MCP vision requires npx from Node.js 18 or later.",
+    "MCP 视觉不可用：未配置智谱 API key 或会话已关闭": "MCP vision is unavailable. Check the Zhipu API key and session.",
+    "该 MCP 服务已在偏好设置中禁用": "This MCP service is disabled in Preferences.",
+    "智谱视觉 MCP 调用失败": "The Zhipu Vision MCP call failed.",
+    "MCP 调用失败": "The MCP call failed.",
+    "MCP 工具报告执行失败": "The MCP tool reported a failure.",
+    "MCP 返回无文本内容": "The MCP service returned no text.",
+    "视觉服务未返回画面描述。": "The vision service returned no image description.",
+    "视觉服务返回的描述和标签格式不完整。": "The vision service returned incomplete image descriptions or tags.",
+    "视觉服务未返回有效的描述对象。": "The vision service returned an invalid description object.",
+    "视觉服务未返回有效的画面描述。": "The vision service returned an invalid image description.",
+}
+
+# Match the inset of a bordered settings group in the other preference pages.
+_FORM_MARGINS = (PREF_FORM_MARGINS[0] + 1, 0, PREF_FORM_MARGINS[2] + 1, 0)
+
 _PAGE_STYLE = f"""
-    QWidget#AiPreferences, QWidget#PrefPageContent {{ background: {C.BG_PANEL}; }}
+    QWidget#AiPreferences, QWidget#PrefPageContent {{ background: {PREF_PAGE_BACKGROUND}; }}
     QTabBar#AiPageTabs::tab, QTabBar#AiProviderCategoryTabs::tab {{
         background: transparent; color: {C.TEXT_SECONDARY};
         border: none; font-size: 12px; padding: 6px 12px;
@@ -182,7 +257,7 @@ _PAGE_STYLE = f"""
     QLabel#AiSectionTitle {{
         background: transparent; color: {C.TEXT_PRIMARY}; font-size: 14px; font-weight: 600;
     }}
-    QLabel#AiFieldLabel {{ background: transparent; color: {C.TEXT_SECONDARY}; font-size: 12px; }}
+    QLabel#PrefFormLabel {{ background: transparent; color: {C.TEXT_SECONDARY}; font-size: 12px; }}
     QLabel#AiNote {{ background: transparent; color: {C.TEXT_LABEL}; font-size: 12px; }}
     QFrame#AiDivider {{ background: {C.TOGGLE_PILL_BG}; border: none; }}
     QPushButton#AiAction, QPushButton#AiAddModel, QToolButton#AiMore, QToolButton#AiDisclosure {{
@@ -202,7 +277,7 @@ _PAGE_STYLE = f"""
     QToolButton#AiMore:focus, QToolButton#AiDisclosure:focus {{ border-color: {C.ORANGE}; }}
     QPushButton#AiAction:disabled, QToolButton#AiMore:disabled {{ color: {C.TEXT_HINT}; }}
     QListWidget#AiCapabilityStatusList, QListWidget#AiMcpServerList {{
-        background: {C.BG_PANEL}; border: none; outline: none;
+        background: {PREF_PAGE_BACKGROUND}; border: none; outline: none;
         color: {C.TEXT_SECONDARY}; font-size: 12px;
     }}
     QListWidget#AiCapabilityStatusList::item, QListWidget#AiMcpServerList::item {{
@@ -212,19 +287,35 @@ _PAGE_STYLE = f"""
 
 
 def _tr(key: str, zh: str, en: str) -> str:
-    return I18N.tr(f"preferences.ai_editing.{key}", zh if I18N.get_current_locale().startswith("zh") else en)
+    default = zh if I18N.get_current_locale() == "zh_CN" else en
+    return I18N.tr_preference(f"preferences.ai_editing.{key}", default)
 
 
 def _preset_text(preset: AiProviderPreset) -> tuple[str, str]:
     key = f"preset_{preset.preset_id.replace('-', '_')}"
     return (
-        _tr(f"{key}_label", preset.label, preset.label_en) if preset.label_en else preset.label,
-        _tr(f"{key}_description", preset.description, preset.description_en)
-        if preset.description_en else preset.description,
+        _tr(f"{key}_label", preset.label, preset.label_en or preset.label),
+        _tr(f"{key}_description", preset.description, preset.description_en),
     )
 
 
-def _label(text: str, style: str = "AiFieldLabel") -> QLabel:
+def _profile_display_name(profile: AiProviderProfile) -> str:
+    preset = get_preset(profile.preset_id)
+    if preset is not None and profile.display_name in (preset.label, preset.label_en):
+        return _preset_text(preset)[0]
+    return profile.display_name
+
+
+def _probe_text(message: str) -> str:
+    if I18N.get_current_locale() == "zh_CN":
+        return message
+    status = re.fullmatch(r"模型服务请求失败（HTTP (\d+)）。", message)
+    if status:
+        return f"Model service request failed (HTTP {status[1]})."
+    return _PROBE_MESSAGES_EN.get(message, message)
+
+
+def _label(text: str, style: str) -> QLabel:
     label = QLabel(text)
     label.setObjectName(style)
     label.setTextFormat(Qt.TextFormat.PlainText)
@@ -423,7 +514,6 @@ class AiEditingPreferencePage:
             scroll = QScrollArea()
             scroll.setFrameShape(QFrame.Shape.NoFrame)
             scroll.setWidgetResizable(True)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             panel.setObjectName("PrefPageContent")
             scroll.setWidget(panel)
             pages.addWidget(scroll)
@@ -436,7 +526,7 @@ class AiEditingPreferencePage:
     def _build_models_section(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 13, 20, 4)
+        layout.setContentsMargins(*PREF_PAGE_MARGINS)
         layout.setSpacing(8)
         layout.addWidget(self._build_model_routes())
         layout.addSpacing(4)
@@ -485,16 +575,16 @@ class AiEditingPreferencePage:
         self._widgets["model_actions"] = more
         picker_row = QHBoxLayout()
         picker_row.setSpacing(6)
-        picker_label = _label(_tr("edit_model_label", "编辑模型", "Edit model"))
-        picker_label.setBuddy(picker)
-        picker_row.addWidget(picker_label)
         picker_row.addWidget(picker, 1)
         picker_row.addWidget(more)
         picker_panel = QWidget()
         picker_row.setContentsMargins(0, 0, 0, 0)
         picker_panel.setLayout(picker_row)
-        self._widgets["picker_panel"] = picker_panel
-        layout.addWidget(picker_panel)
+        picker_section = QWidget()
+        picker_form = make_pref_form(picker_section, margins=_FORM_MARGINS)
+        self._add_field(picker_form, _tr("edit_model_label", "编辑模型", "Edit model"), picker_panel, buddy=picker)
+        self._widgets["picker_panel"] = picker_section
+        layout.addWidget(picker_section)
 
         empty = _note(_tr("models_empty", "此分类还没有模型。点击「新建模型」添加。",
                           "No models in this category. Select Add model to set one up."))
@@ -513,9 +603,7 @@ class AiEditingPreferencePage:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.addWidget(_label(_tr("model_routes", "默认模型", "Default models"), "AiSectionTitle"))
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(6)
+        form = make_pref_form(margins=_FORM_MARGINS, spacing=6)
         routes = (
             ("language", _tr("route_language", "剪辑助手", "Editing assistant")),
             ("vision", _tr("route_vision", "素材视觉打标", "Visual tagging")),
@@ -523,24 +611,18 @@ class AiEditingPreferencePage:
             ("tts", _tr("route_tts", "剪辑配音", "Voiceover")),
             ("embedding", _tr("route_embedding", "素材语义搜索", "Library semantic search")),
         )
-        for index, (capability, label) in enumerate(routes):
+        for capability, label in routes:
             combo = _combo()
             combo.currentIndexChanged.connect(
                 lambda _index, cap=capability: self._on_route_changed(cap)
             )
             self._route_widgets[capability] = combo
-            col = (index % 2) * 2
-            field_label = _label(label)
-            field_label.setBuddy(combo)
-            combo.setAccessibleName(label)
-            grid.addWidget(field_label, index // 2, col)
-            grid.addWidget(combo, index // 2, col + 1)
-            grid.setColumnStretch(col + 1, 1)
-        layout.addLayout(grid)
-        layout.addWidget(_note(_tr(
+            self._add_field(form, label, combo)
+        form.addRow("", _note(_tr(
             "asset_binding_hint", "素材打标和转录需要在 AI 素材库中按目录启用。",
             "Enable tagging and transcription per folder in AI Library.",
         )))
+        layout.addLayout(form)
         return panel
 
     def _refresh_routes(self) -> None:
@@ -561,7 +643,7 @@ class AiEditingPreferencePage:
                     profile.provider_kind, capability,
                 ):
                     continue
-                combo.addItem(profile.display_name, profile.profile_id)
+                combo.addItem(_profile_display_name(profile), profile.profile_id)
             self._set_combo_data(combo, active.profile_id if active else "")
             combo.blockSignals(False)
 
@@ -574,7 +656,7 @@ class AiEditingPreferencePage:
     def _build_environment_section(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 15, 20, 16)
+        layout.setContentsMargins(*PREF_PAGE_MARGINS)
         layout.setSpacing(10)
         layout.addWidget(_label(_tr("mcp_servers", "MCP 服务", "MCP services"), "AiSectionTitle"))
         layout.addWidget(_note(_tr(
@@ -619,14 +701,16 @@ class AiEditingPreferencePage:
             from src.features.edit.ai_editing.mcp_vision_gateway import (
                 get_mcp_vision_gateway,
             )
-            statuses = get_mcp_vision_gateway().server_statuses()
+            statuses = get_mcp_vision_gateway().server_statuses(
+                english=I18N.get_current_locale() != "zh_CN",
+            )
         except Exception:  # noqa: BLE001 — 网关不可用时显示占位说明
             statuses = []
         server_list.blockSignals(True)
         server_list.clear()
         if not statuses:
             item = QListWidgetItem(
-                I18N.tr("preferences.ai_editing.mcp_unavailable", "（MCP 网关不可用）"))
+                _tr("mcp_unavailable", "（MCP 网关不可用）", "(MCP gateway unavailable)"))
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # 不可勾选
             server_list.addItem(item)
         for st in statuses:
@@ -644,15 +728,15 @@ class AiEditingPreferencePage:
             )
             # profile_id 放 UserRole，勾选回调据此启停。
             item.setData(Qt.ItemDataRole.UserRole, st.get("profile_id", ""))
-            tooltip = (
-                f"server: {st.get('server', '')}\n"
-                f"作者: {st.get('author', '')}\n"
-                f"传输: {st.get('transport', '')}\n"
-                f"工具: {', '.join(st.get('tools', ()))}"
-            )
+            details = [
+                _tr("mcp_tip_server", "服务器：{value}", "Server: {value}").format(value=st.get("server", "")),
+                _tr("mcp_tip_author", "作者：{value}", "Author: {value}").format(value=st.get("author", "")),
+                _tr("mcp_tip_transport", "传输：{value}", "Transport: {value}").format(value=st.get("transport", "")),
+                _tr("mcp_tip_tools", "工具：{value}", "Tools: {value}").format(value=", ".join(st.get("tools", ()))),
+            ]
             if st.get("reason"):
-                tooltip += f"\n状态: {st['reason']}"
-            item.setToolTip(tooltip)
+                details.append(_tr("mcp_tip_state", "状态：{value}", "Status: {value}").format(value=st["reason"]))
+            item.setToolTip("\n".join(details))
             server_list.addItem(item)
         server_list.blockSignals(False)
         self._fit_status_list(server_list)
@@ -673,17 +757,18 @@ class AiEditingPreferencePage:
 
     def _build_policy_section(self) -> QWidget:
         page = QWidget()
-        form = QVBoxLayout(page)
-        form.setContentsMargins(20, 15, 20, 16)
-        form.setSpacing(8)
-        form.addWidget(_label(_tr("key_storage_title", "密钥存储", "Credential storage"), "AiSectionTitle"))
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(*PREF_PAGE_MARGINS)
+        layout.setSpacing(8)
+        layout.addWidget(_label(_tr("key_storage_title", "密钥存储", "Credential storage"), "AiSectionTitle"))
         keychain_checkbox = self._create_credential_storage_checkbox()
-        form.addWidget(keychain_checkbox)
-        form.addWidget(_note(keychain_checkbox.toolTip()))
-        form.addSpacing(6)
-        form.addWidget(_divider())
-        form.addSpacing(4)
-        form.addWidget(_label(_tr("automation", "自动执行策略", "Automation"), "AiSectionTitle"))
+        storage_form = make_pref_form(margins=_FORM_MARGINS)
+        storage_form.addRow("", keychain_checkbox)
+        storage_form.addRow("", _note(keychain_checkbox.toolTip()))
+        layout.addLayout(storage_form)
+        layout.addWidget(_divider())
+        layout.addWidget(_label(_tr("automation", "自动执行策略", "Automation"), "AiSectionTitle"))
+        automation_form = make_pref_form(margins=_FORM_MARGINS)
         entries = (
             ("agent_auto_mode", "启用受限自动模式", "Restricted automatic mode",
              "关闭时，剪辑助手只生成建议和预览。", "When disabled, the assistant provides suggestions and previews."),
@@ -696,10 +781,10 @@ class AiEditingPreferencePage:
             checkbox = QCheckBox(_tr(f"flag.{key}", zh, en))
             checkbox.stateChanged.connect(self._on_automation_flag_changed)
             self._automation_widgets[key] = checkbox
-            form.addWidget(checkbox)
-            form.addWidget(_note(_tr(f"flag_hint.{key}", help_zh, help_en)))
-            form.addSpacing(4)
-        form.addStretch()
+            automation_form.addRow("", checkbox)
+            automation_form.addRow("", _note(_tr(f"flag_hint.{key}", help_zh, help_en)))
+        layout.addLayout(automation_form)
+        layout.addStretch()
         return page
 
     def _create_credential_storage_checkbox(self) -> QCheckBox:
@@ -793,6 +878,7 @@ class AiEditingPreferencePage:
             analysis_provider_ids=("scene_cut_local",),
             model_pack_manager=self._model_pack_manager,
             connection_results=self._connection_results,
+            english=I18N.get_current_locale() != "zh_CN",
         )
         status_list.blockSignals(True)
         status_list.clear()
@@ -819,17 +905,13 @@ class AiEditingPreferencePage:
         form = QVBoxLayout(page)
         form.setContentsMargins(0, 0, 0, 0)
         form.setSpacing(6)
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(3, 1)
+        fields = make_pref_form(margins=_FORM_MARGINS, spacing=6)
 
         name_edit = QLineEdit()
         name_edit.setPlaceholderText(_tr("name_example", "例如：工作站千问", "e.g. Workstation Qwen"))
         name_edit.textChanged.connect(self._on_field_changed)
         self._widgets["display_name"] = name_edit
-        self._add_field(grid, 0, 0, _tr("name_label", "显示名称", "Display name"), name_edit, span=3)
+        self._add_field(fields, _tr("name_label", "显示名称", "Display name"), name_edit)
 
         source_combo = _combo()
         source_labels = {
@@ -842,26 +924,26 @@ class AiEditingPreferencePage:
             source_combo.addItem(source_labels[source], source)
         source_combo.currentIndexChanged.connect(self._on_source_kind_changed)
         self._widgets["source_kind"] = source_combo
-        self._add_field(grid, 1, 0, _tr("source_label", "接入方式", "Connection"), source_combo)
+        self._add_field(fields, _tr("source_label", "接入方式", "Connection"), source_combo)
 
         preset_combo = _combo()
         self._refresh_preset_options(preset_combo)
         preset_combo.currentIndexChanged.connect(self._on_preset_changed)
         self._widgets["preset_id"] = preset_combo
         self._widgets["preset_label"] = self._add_field(
-            grid, 1, 2, _tr("preset_label", "服务预设", "Preset"), preset_combo,
+            fields, _tr("preset_label", "服务预设", "Preset"), preset_combo,
         )
 
         kind_combo = _combo()
         for label, value, _url, _model in _PROVIDER_OPTIONS:
-            kind_combo.addItem(label, value)
+            kind_combo.addItem(_tr(*label), value)
         kind_model = kind_combo.model()
         if isinstance(kind_model, QStandardItemModel):
             kind_model.item(kind_combo.findData(ZHIPU_VISION_PROVIDER_KIND)).setEnabled(False)
         kind_combo.currentIndexChanged.connect(self._on_provider_kind_changed)
         self._widgets["provider_kind"] = kind_combo
         self._widgets["protocol_label"] = self._add_field(
-            grid, 1, 2, _tr("protocol_label", "协议", "Protocol"), kind_combo,
+            fields, _tr("protocol_label", "协议", "Protocol"), kind_combo,
         )
 
         endpoint = QLineEdit()
@@ -872,7 +954,7 @@ class AiEditingPreferencePage:
         endpoint.textChanged.connect(self._on_field_changed)
         self._widgets["endpoint"] = endpoint
         self._widgets["endpoint_label"] = self._add_field(
-            grid, 2, 0, _tr("address_label", "服务地址", "Service URL"), endpoint, span=3,
+            fields, _tr("address_label", "服务地址", "Service URL"), endpoint,
         )
 
         model = QLineEdit()
@@ -881,7 +963,7 @@ class AiEditingPreferencePage:
         discover = self._action_button(_tr("discover_models", "获取模型", "Get models"), self._on_discover_models)
         self._widgets["discover_models"] = discover
         model_row = self._field_with_action(model, discover)
-        self._add_field(grid, 3, 0, _tr("model_label", "模型 ID", "Model ID"), model_row, span=3, buddy=model)
+        self._add_field(fields, _tr("model_label", "模型 ID", "Model ID"), model_row, buddy=model)
 
         key = QLineEdit()
         key.setEchoMode(QLineEdit.EchoMode.Password)
@@ -891,11 +973,12 @@ class AiEditingPreferencePage:
         self._widgets["remove_key"] = remove_key
         key_row = self._field_with_action(key, remove_key)
         self._widgets["key_row"] = key_row
-        self._widgets["key_label"] = self._add_field(grid, 4, 0, "API Key", key_row, span=3, buddy=key)
+        self._widgets["key_label"] = self._add_field(
+            fields, _tr("api_key_label", "API 密钥", "API key"), key_row, buddy=key,
+        )
         key_status = _note()
         self._widgets["key_status"] = key_status
-        grid.addWidget(key_status, 5, 1, 1, 3)
-        form.addLayout(grid)
+        fields.addRow("", key_status)
         for edit in (name_edit, endpoint, model, key):
             edit.setFixedHeight(28)
 
@@ -927,28 +1010,28 @@ class AiEditingPreferencePage:
         self._widgets["test_btn"] = test
         actions = QHBoxLayout()
         actions.setSpacing(6)
-        actions.addWidget(upload)
-        actions.addStretch()
         actions.addWidget(disclosure)
         actions.addWidget(test)
-        form.addLayout(actions)
+        actions.addStretch()
+        fields.addRow("", upload)
+        fields.addRow("", actions)
         probe_status = _note()
         self._widgets["probe_status"] = probe_status
-        form.addWidget(probe_status)
+        fields.addRow("", probe_status)
+        form.addLayout(fields)
         form.addWidget(advanced)
         return page
 
     @staticmethod
     def _add_field(
-        layout: QGridLayout, row: int, col: int, text: str, widget: QWidget,
-        *, span: int = 1, buddy: QWidget | None = None,
+        layout: QFormLayout, text: str, widget: QWidget, *, buddy: QWidget | None = None,
     ) -> QLabel:
-        label = _label(text)
+        label = make_pref_label(text)
+        label.setTextFormat(Qt.TextFormat.PlainText)
         control = widget if buddy is None else buddy
         label.setBuddy(control)
         control.setAccessibleName(text)
-        layout.addWidget(label, row, col)
-        layout.addWidget(widget, row, col + 1, 1, span)
+        layout.addRow(label, widget)
         return label
 
     @staticmethod
@@ -976,10 +1059,7 @@ class AiEditingPreferencePage:
         layout.setSpacing(8)
         layout.addWidget(_divider())
 
-        limits = QGridLayout()
-        limits.setHorizontalSpacing(10)
-        limits.setColumnStretch(1, 1)
-        limits.setColumnStretch(3, 1)
+        limits = make_pref_form(margins=_FORM_MARGINS)
         context = QSpinBox()
         context.setRange(1, 2_000)
         context.setSuffix(_tr("context_suffix", "k", "k"))
@@ -987,7 +1067,7 @@ class AiEditingPreferencePage:
         context.setFixedHeight(28)
         context.valueChanged.connect(self._on_context_limit_changed)
         self._widgets["context_limit"] = context
-        self._add_field(limits, 0, 0, _tr("context_label", "上下文上限", "Context limit"), context)
+        self._add_field(limits, _tr("context_label", "上下文上限", "Context limit"), context)
         timeout = QSpinBox()
         timeout.setRange(5, 120)
         timeout.setSuffix(_tr("seconds_suffix", " 秒", " s"))
@@ -997,33 +1077,33 @@ class AiEditingPreferencePage:
                                "Increase the per-request timeout if the model takes a while to start."))
         timeout.valueChanged.connect(self._on_context_limit_changed)
         self._widgets["request_timeout"] = timeout
-        self._add_field(limits, 0, 2, _tr("field_timeout", "请求超时", "Request timeout"), timeout)
+        self._add_field(limits, _tr("field_timeout", "请求超时", "Request timeout"), timeout)
         layout.addLayout(limits)
 
         layout.addWidget(_label(_tr("route_capabilities", "用于分类和默认模型分配的能力", "Capabilities for model assignment"), "AiSectionTitle"))
-        capabilities = QGridLayout()
-        for index, (capability, zh, en) in enumerate(_CAPABILITY_OPTIONS):
+        capability_form = make_pref_form(margins=_FORM_MARGINS)
+        for capability, zh, en in _CAPABILITY_OPTIONS:
             checkbox = QCheckBox(_tr(f"capability_{capability}", zh, en))
             checkbox.stateChanged.connect(self._on_capability_changed)
             self._capability_widgets[capability] = checkbox
-            capabilities.addWidget(checkbox, index // 3, index % 3)
-        layout.addLayout(capabilities)
+            capability_form.addRow("", checkbox)
+        layout.addLayout(capability_form)
 
         layout.addWidget(_label(_tr("media_capabilities", "请求与媒体能力", "Request & media capabilities"), "AiSectionTitle"))
-        modalities = QGridLayout()
-        for index, (value, zh, en) in enumerate((
+        modality_form = make_pref_form(margins=_FORM_MARGINS)
+        for value, zh, en in (
             ("text", "文本 Agent", "Text agent"),
             ("tool_call", "工具调用", "Tool calling"),
             ("image", "图片输入", "Image input"),
             ("video", "视频输入", "Video input"),
             ("music", "音乐生成", "Music generation"),
             ("voice", "配音 / TTS", "Voiceover / TTS"),
-        )):
+        ):
             checkbox = QCheckBox(_tr(f"modality_{value}", zh, en))
             checkbox.stateChanged.connect(self._on_modality_changed)
             self._modality_widgets[value] = checkbox
-            modalities.addWidget(checkbox, index // 3, index % 3)
-        layout.addLayout(modalities)
+            modality_form.addRow("", checkbox)
+        layout.addLayout(modality_form)
         return page
 
     def _sync_connection_fields(self) -> None:
@@ -1210,10 +1290,11 @@ class AiEditingPreferencePage:
         """重置：清空所有 profile（保留用户已存的 key 不动）。"""
         reply = QMessageBox.question(
             None,
-            I18N.tr("preferences.ai_editing.reset_title", "重置 AI 配置"),
-            I18N.tr(
-                "preferences.ai_editing.reset_confirm",
-                "确定要删除所有 AI provider profile 吗？已保存的 API key 不会被清除。",
+            _tr("reset_title", "重置 AI 配置", "Reset AI Configuration"),
+            _tr(
+                "reset_profiles_confirm",
+                "确定要删除所有 AI 服务配置吗？已保存的 API 密钥会保留。",
+                "Delete all AI provider profiles? Saved API keys will be kept.",
             ),
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -1257,7 +1338,7 @@ class AiEditingPreferencePage:
         if profile is not None:
             row = picker.findData(profile.profile_id)
             if row >= 0:
-                picker.setItemText(row, profile.display_name)
+                picker.setItemText(row, _profile_display_name(profile))
                 picker.setItemData(row, profile.model_id, Qt.ItemDataRole.ToolTipRole)
 
     def _refresh_profile_picker(self) -> None:
@@ -1273,7 +1354,7 @@ class AiEditingPreferencePage:
         picker.blockSignals(True)
         picker.clear()
         for profile in visible_profiles:
-            picker.addItem(profile.display_name, profile.profile_id)
+            picker.addItem(_profile_display_name(profile), profile.profile_id)
             picker.setItemData(picker.count() - 1, profile.model_id, Qt.ItemDataRole.ToolTipRole)
         row = picker.findData(self._current_profile_id)
         picker.setCurrentIndex(max(0, row) if visible_profiles else -1)
@@ -1325,7 +1406,7 @@ class AiEditingPreferencePage:
         context_spin: QSpinBox = self._widgets["context_limit"]  # type: ignore[assignment]
         key_edit: QLineEdit = self._widgets["api_key"]  # type: ignore[assignment]
 
-        name_edit.setText(profile.display_name)
+        name_edit.setText(_profile_display_name(profile))
         self._set_combo_data(source_combo, profile.source_kind or self._infer_source_kind(profile))
         self._refresh_preset_options(preset_combo)
         if profile.preset_id and preset_combo.findData(profile.preset_id) < 0:
@@ -1336,7 +1417,10 @@ class AiEditingPreferencePage:
         self._set_combo_data(preset_combo, profile.preset_id)
         # 选中对应 provider_kind
         if kind_combo.findData(profile.provider_kind) < 0:
-            kind_combo.addItem(profile.provider_kind or "OpenAI-compatible", profile.provider_kind)
+            kind_combo.addItem(
+                profile.provider_kind or _tr("openai_compatible", "OpenAI 兼容", "OpenAI-compatible"),
+                profile.provider_kind,
+            )
         self._set_combo_data(kind_combo, profile.provider_kind)
         endpoint_edit.setText(profile.endpoint)
         model_edit.setText(profile.model_id)
@@ -1596,9 +1680,12 @@ class AiEditingPreferencePage:
         context = old.limits.max_context_tokens
         if context_spin.value() != max(1, min(2_000, round(context / 1_000))):
             context = context_spin.value() * 1_000
+        name = name_edit.text().strip()
+        if not name or name == _profile_display_name(old):
+            name = old.display_name
         new = AiProviderProfile(
             profile_id=old.profile_id,
-            display_name=name_edit.text().strip() or old.display_name,
+            display_name=name,
             provider_kind=provider_kind,
             source_kind=source_kind,
             preset_id=str(preset_combo.currentData() or ""),
@@ -1696,9 +1783,9 @@ class AiEditingPreferencePage:
                 return
         # Custom protocols still receive useful generic hints.
         self._widgets["endpoint"].setPlaceholderText(
-            I18N.tr("preferences.ai_editing.base_url_placeholder", "Base URL 或完整接口地址"))  # type: ignore[union-attr]
+            _tr("base_url_placeholder", "API 基础地址或完整接口地址", "Base URL or full endpoint URL"))  # type: ignore[union-attr]
         self._widgets["model_id"].setPlaceholderText(
-            I18N.tr("preferences.ai_editing.model_name_placeholder", "model-name"))  # type: ignore[union-attr]
+            _tr("model_name_placeholder", "model-name", "model-name"))  # type: ignore[union-attr]
 
     # ------------------------------------------------------------------ #
     # 操作按钮
@@ -1743,7 +1830,7 @@ class AiEditingPreferencePage:
         new_id = f"profile-{_uuid.uuid4().hex[:8]}"
         dup = AiProviderProfile(
             profile_id=new_id,
-            display_name=_tr("model_copy", "{name}（副本）", "{name} (copy)").format(name=src.display_name),
+            display_name=_tr("model_copy", "{name}（副本）", "{name} (copy)").format(name=_profile_display_name(src)),
             provider_kind=src.provider_kind,
             endpoint=src.endpoint,
             model_id=src.model_id,
@@ -1802,7 +1889,7 @@ class AiEditingPreferencePage:
         if not isinstance(label, QLabel):
             return
         names = {cap: _tr(f"capability_{cap}", zh, en) for cap, zh, en in _CAPABILITY_OPTIONS}
-        results = [f"{names.get(capability, capability)} · {value}"
+        results = [f"{names.get(capability, capability)} · {_probe_text(value)}"
                    for (profile_id, capability), value in self._probe_results.items()
                    if profile_id == self._current_profile_id]
         label.setText("\n".join(results))
@@ -1919,7 +2006,7 @@ class AiEditingPreferencePage:
             self._refresh_probe_status()
             return
         if operation == "language":
-            self._connection_results[profile_id] = error or True
+            self._connection_results[profile_id] = _probe_text(error) or True
             self._refresh_capability_status()
         if error:
             self._set_probe_status(profile_id, operation, error)

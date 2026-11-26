@@ -9,13 +9,15 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PyQt6.QtCore import QEvent, QObject, QPoint, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QHideEvent, QKeySequence, QMouseEvent, QShortcut, QShowEvent
+from PyQt6.QtGui import QColor, QHideEvent, QKeySequence, QMouseEvent, QShortcut, QShowEvent
 from PyQt6.QtWidgets import (
     QCheckBox, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy,
     QVBoxLayout, QWidget,
 )
 
 from src.features.edit.core.audio_sync import binding_for_asset, bound_audio_frame, resolve_audio_source
+from src.features.edit.ui.clip_envelope_overlay import envelope_accent
+from src.shared.track_colors import resolve_track_color
 from src.features.edit.core.audio_waveform import (
     WaveformData, WaveformExtractor, get_cached_waveform, is_waveform_pending,
 )
@@ -117,7 +119,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.canvas._magnetic_snap = False
         self.canvas.selection_gain_editable = False
         self.canvas.waveform_includes_processing = True
-        self.canvas._env_curve_mode = "linear"
+        self.canvas._env_curve_mode = "model"
         self.canvas.previewGainChanged.disconnect(self._on_preview_gain_changed)
         self.gain_knob._min = -48.0
         self.gain_knob._max = 12.0
@@ -131,6 +133,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._pcm: np.ndarray | None = None
         self._pcm_rate = AUDIO_REFERENCE_SAMPLE_RATE
         self._raw_pcm: np.ndarray | None = None      # 处理栈前的原始 PCM
+        self._clip_envelope_available = False
+        self._envelope_projection: tuple[float, int | None] | None = None
         self._model_audio_edit: dict | None = None   # 工程模型驱动的处理栈
         # P0-3 · 片段级 gain/fade 快照（模型 → 预览/试听消费；None=无片段）：
         # (gain_db, fade_in_frames, fade_out_frames, fade_in_samples,
@@ -278,7 +282,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
 
     def _set_tool_mode(self, mode: str) -> None:
         super()._set_tool_mode(mode)
-        self.canvas._env_enabled = mode == "envelope" or bool(self.canvas._env_points)
+        self.btn_env_reset.setEnabled(self.canvas._can_edit_envelope())
         if mode == "brush":
             self.btn_spectral.setChecked(True)
 
@@ -453,8 +457,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         """有可编辑时间线片段时启用处理栈相关控件（源监视模式禁用）。"""
         active = editable and self._pcm is not None
         self.canvas.project_edits_enabled = active and self._pending_timepitch is None
+        if not self.canvas.project_edits_enabled:
+            self.canvas.cancel_envelope_drag()
         self.canvas.channel_monitor_enabled = self._pcm is not None
-        if not active and self.canvas._tool_mode in {"envelope", "brush"}:
+        if not active and self.canvas._tool_mode == "brush":
             self._set_tool_mode("select")
         self.set_pending_timepitch(self._pending_timepitch)
 
@@ -464,10 +470,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.btn_bypass.setEnabled(self._pcm is not None and (
             self._model_audio_edit is not None or self._pending_timepitch is not None
             or self._clip_fx is not None))
-        for widget in (self.btn_tool_envelope, self.btn_tool_brush, self.btn_env_reset,
+        for widget in (self.btn_tool_envelope, self.btn_tool_brush,
                        self.btn_apply_lufs, self.target_lufs_pill, self.tp_ceil_pill,
                        *self._lufs_preset_btns.values(), *self._selection_edit_buttons):
             widget.setEnabled(active)
+        self.btn_env_reset.setEnabled(self.canvas._can_edit_envelope())
         self.btn_clear_stack.setEnabled(active and bool(self._process_steps))
         for index in range(self.stack_list_layout.count()):
             row = self.stack_list_layout.itemAt(index).widget()
@@ -488,8 +495,13 @@ class _TimelineClipPanel(StudioAudioClipEditor):
     def sync_audio_edit(self, audio_edit: dict | None,
                         output_total_samples: int | None = None) -> None:
         """处理栈机架由工程模型驱动（命令提交后刷新；P0-3 §控件映射）。"""
+        geometry = (self._duration, output_total_samples)
         if audio_edit == self._model_audio_edit:
-            return  # 任何时间线编辑都会走 sync_clip——栈没变不重绘/不打断选区
+            if geometry != self._envelope_projection:
+                self._envelope_projection = geometry
+                self._project_overlays(ClipAuditionCoordinates.from_edit(audio_edit), output_total_samples)
+            return
+        self._envelope_projection = geometry
         self._validated_timepitch = None
         self._model_audio_edit = audio_edit
         self._project_overlays(ClipAuditionCoordinates.from_edit(audio_edit), output_total_samples)
@@ -601,8 +613,10 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             markers = [{**marker, "local_sample": origin.map_to(coordinates, marker["local_sample"])}
                        for marker in markers]
         total = output_total_samples or max(1, round(self._duration * self._pcm_rate))
-        self.canvas._env_enabled = self.canvas._tool_mode == "envelope" or bool(nodes)
+        self.canvas.cancel_envelope_drag()
+        self.canvas._env_enabled = self._clip_envelope_available
         self.canvas._env_points = canvas_points_from_envelope(nodes, self._duration, total)
+        self.canvas._env_hover_idx = self.canvas._env_hover_seg = self.canvas._env_selected_idx = -1
         self.canvas._markers = canvas_markers_from(markers, self._duration, total)
         self.canvas._invalidate_cache()
 
@@ -670,6 +684,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self._schedule_spectrum_detail()
 
     def hideEvent(self, event: QHideEvent) -> None:
+        self.canvas.cancel_envelope_drag()
         self._cancel_spectrum_detail()
         super().hideEvent(event)
 
@@ -786,7 +801,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         return {
             "key": (content_key, self.current_fft_size(), self._preview_generation),
             "raw": raw, "rate": self._pcm_rate, "duration": duration,
-            "edit": copy_audio_edit(edit), "denoise_preview": denoise,
+            "edit": copy_audio_edit(edit), "denoise_preview": denoise, "bypass": bypass,
             "timepitch_request": request, "fft": self.current_fft_size(),
             "clip_gain_fade": self._clip_gain_fade,
             "clip_fx": None if bypass else self._clip_fx,
@@ -810,7 +825,8 @@ class _TimelineClipPanel(StudioAudioClipEditor):
                 return None
             return ClipPreviewResult(
                 inputs["key"], reused.edited, rate, reused.duration,
-                reused.mins, reused.maxs, reused.rmss, spectrogram, reused.report, reused.length_maps)
+                reused.mins, reused.maxs, reused.rmss, spectrogram, reused.report, reused.length_maps,
+                reused.waveform_envelope)
         edit = inputs["edit"]
         request = inputs["timepitch_request"]
         if request is not None:
@@ -848,9 +864,16 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         spectrogram = analyze_spectrogram(edited, rate, nfft=inputs["fft"], columns=4096, cancelled=cancelled)
         if cancelled():
             return None
+        waveform_envelope = None
+        if not inputs.get("bypass", False):
+            points = canvas_points_from_envelope(
+                envelope_nodes(edit), duration, max(1, round(duration * AUDIO_REFERENCE_SAMPLE_RATE)),
+            )
+            waveform_envelope = tuple((point["t"], point["db"], point["interpolation"]) for point in points)
         return ClipPreviewResult(
             inputs["key"], edited, rate, duration, mins, maxs, rmss, spectrogram,
-            self._measure_cleanliness(edited, rate), ClipAuditionCoordinates.from_edit(edit).maps)
+            self._measure_cleanliness(edited, rate), ClipAuditionCoordinates.from_edit(edit).maps,
+            waveform_envelope)
 
     def _compute_base_pcm(self, inputs: dict) -> np.ndarray:
         from src.features.edit.core.audio_edit import render_pre_render_steps
@@ -956,7 +979,7 @@ class _TimelineClipPanel(StudioAudioClipEditor):
             else:
                 self._audition.load(result.edited, result.sample_rate)
         self._pcm = result.edited
-        self.canvas.setWaveformSamples(result.edited)
+        self.canvas.setWaveformSamples(result.edited, baked_envelope=result.waveform_envelope)
         self.btn_play.setEnabled(self._audition.has_audio())
         self._audition_coordinates = coordinates
         fade_times = (self.canvas._fade_in_sec, self.canvas._fade_out_sec)
@@ -1341,6 +1364,11 @@ class _TimelineClipPanel(StudioAudioClipEditor):
         self.update_output_meter(-60.0, -60.0)
 
     def set_source_mode(self, source_mode: bool) -> None:
+        self._clip_envelope_available = not source_mode
+        self.canvas._env_enabled = self._clip_envelope_available
+        self.canvas._env_points = []
+        self._envelope_projection = None
+        self._set_tool_mode("select")
         if self._mode_label is not None:
             self._mode_label.setText(
                 I18N.tr("mixer.clip_editor.source_mode", "● Source audio")
@@ -1764,6 +1792,11 @@ class ProjectClipEditor(QWidget):
             self._cancel_analysis()
         self._clip = clip
         self._locked = track.is_locked
+        label_color = QColor(clip.label_color or "")
+        if not label_color.isValid():
+            label_color = QColor(resolve_track_color(track.track_id, track.color))
+        self._panel.canvas._env_accent = envelope_accent(label_color)
+        self._panel.canvas.update()
         geometry_changed = (
             self._source_changed
             or old_fps != self._fps
@@ -1807,6 +1840,7 @@ class ProjectClipEditor(QWidget):
         self._last_pcm = None
         self._pcm_applied = False
         if self._panel is not None:
+            self._panel.set_source_mode(True)
             self._panel._pending_fade = None
             self._panel.canvas.cancel_fade_drag()
             self._panel.canvas._drag_mode = ""
@@ -2530,6 +2564,13 @@ class ProjectClipEditor(QWidget):
             return
         nodes = envelope_from_canvas_points(
             points, panel._duration, self._output_total_samples())
+        existing = envelope_nodes(clip.audio_edit)
+        if [(n["local_sample"], n["gain_db"]) for n in nodes] == [
+            (n["local_sample"], n["gain_db"]) for n in existing
+        ]:
+            return
+        previous = {n["id"]: n for n in existing if n.get("id")}
+        nodes = [{**previous.get(n["id"], {}), **n} for n in nodes]
         self._commit_audio_edit(
             set_envelope(clip.audio_edit, nodes),
             I18N.tr("mixer.clip_editor.edit_envelope", "Edit clip volume envelope"))

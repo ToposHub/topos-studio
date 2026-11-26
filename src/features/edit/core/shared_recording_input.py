@@ -18,6 +18,16 @@ PcmReceiver = Callable[[np.ndarray], None]
 ErrorReceiver = Callable[[str], None]
 
 
+RECORDING_INPUTS_KEY = "mixer_recording_inputs"
+
+
+def stored_recording_inputs(format_settings: dict[str, object]) -> dict[str, object]:
+    """Return the stored track-to-input mapping without opening a capture device."""
+    payload = format_settings.get(RECORDING_INPUTS_KEY)
+    tracks = payload.get("tracks") if isinstance(payload, dict) else None
+    return tracks if isinstance(tracks, dict) else {}
+
+
 class RecordingInputError(RuntimeError):
     """A selected capture source cannot provide the requested input."""
 

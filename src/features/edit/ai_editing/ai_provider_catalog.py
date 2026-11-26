@@ -60,6 +60,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "适用于本机 vLLM / llama.cpp / LM Studio 等 OpenAI 兼容服务",
+        label_en="Local model · OpenAI-compatible server",
+        description_en="Connect to a local OpenAI-compatible server such as vLLM, llama.cpp, or LM Studio.",
     ),
     AiProviderPreset(
         "openai-compatible-vision",
@@ -71,6 +73,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("vision",),
         ("image",),
         "可填写局域网服务器地址，再获取或输入视觉模型 ID",
+        label_en="Self-hosted · OpenAI-compatible vision",
+        description_en="Enter the local network server URL, then discover or enter a vision model ID.",
     ),
     AiProviderPreset(
         ZHIPU_VISION_PROFILE_ID,
@@ -82,6 +86,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("vision",),
         ("image",),
         "智谱 GLM Coding Plan · npx 启动官方 stdio 服务，需要 Node.js 18+",
+        label_en="Zhipu · Vision MCP",
+        description_en="Zhipu GLM Coding Plan. Launches the official stdio server via npx and requires Node.js 18+.",
     ),
     AiProviderPreset(
         "model-studio-vision",
@@ -93,6 +99,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("vision",),
         ("image",),
         "从百炼控制台复制当前工作空间的 OpenAI 兼容地址和视觉模型 ID",
+        label_en="Alibaba Cloud Model Studio · Qwen Vision",
+        description_en="Copy the OpenAI-compatible URL and vision model ID for your workspace from the Model Studio console.",
     ),
     AiProviderPreset(
         "openai-timed-asr",
@@ -104,6 +112,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("asr",),
         ("asr",),
         "OpenAI 兼容转录接口；自建服务可修改地址和模型 ID",
+        label_en="OpenAI · Timestamped transcription",
+        description_en="OpenAI-compatible transcription API. For self-hosted services, edit the URL and model ID.",
     ),
     AiProviderPreset(
         "openai-chat",
@@ -115,6 +125,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "OpenAI 兼容聊天接口",
+        description_en="OpenAI-compatible chat API.",
     ),
     AiProviderPreset(
         "anthropic-chat",
@@ -126,6 +137,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "Anthropic Messages 接口",
+        description_en="Anthropic Messages API.",
     ),
     AiProviderPreset(
         "deepseek-flash",
@@ -137,6 +149,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language", "vision_understanding"),
         ("text", "tool_call", "image"),
         "DeepSeek OpenAI 兼容接口，支持对话、工具调用和图片理解",
+        description_en="DeepSeek’s OpenAI-compatible API for chat, tool calls, and image understanding.",
     ),
     AiProviderPreset(
         "deepseek-chat",
@@ -148,6 +161,7 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "DeepSeek OpenAI 兼容接口",
+        description_en="DeepSeek’s OpenAI-compatible API.",
     ),
     AiProviderPreset(
         "zhipu-glm-coding",
@@ -162,6 +176,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("language",),
         ("text", "tool_call"),
         "GLM Coding Plan；支持填写 Base URL 或完整 /chat/completions 地址",
+        label_en="Zhipu GLM Coding",
+        description_en="GLM Coding Plan. Accepts a base URL or a complete /chat/completions URL.",
     ),
     AiProviderPreset(
         "volcengine-agent-plan-text",
@@ -182,6 +198,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
             "media_upload",
         ),
         "Agent Plan Responses API；支持图片、视频、音频、PDF/文件输入；API Key 单独安全保存",
+        label_en="Volcengine Ark Agent Plan · Multimodal",
+        description_en="Agent Plan Responses API for images, video, audio, PDFs, and files. API keys are stored separately.",
     ),
     AiProviderPreset(
         "volcengine-seedream-image",
@@ -193,6 +211,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("image",),
         ("image",),
         "Seedream 图片生成；Medium 套餐可用能力以控制台为准",
+        label_en="Volcengine Ark Agent Plan · Images",
+        description_en="Seedream image generation. Check the console for capabilities included in the Medium plan.",
     ),
     AiProviderPreset(
         "volcengine-plan-tts",
@@ -204,6 +224,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("tts",),
         ("voice",),
         "豆包语音合成 HTTP 接口；Resource-Id 由适配器使用",
+        label_en="Volcengine Ark Agent Plan · Speech synthesis",
+        description_en="Doubao speech synthesis over HTTP. The adapter uses the Resource-Id.",
     ),
     AiProviderPreset(
         "volcengine-plan-asr",
@@ -215,6 +237,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("asr",),
         (),
         "文件识别端点；Resource-Id 可按控制台实际开通资源调整",
+        label_en="Volcengine Ark Agent Plan · Speech recognition",
+        description_en="File transcription endpoint. Adjust the Resource-Id to match the resources enabled in the console.",
     ),
     AiProviderPreset(
         "local-openai-compatible-embedding",
@@ -262,6 +286,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("asr",),
         (),
         "读取本机模型包，不上传素材",
+        label_en="Local Qwen3-ASR",
+        description_en="Uses the model pack on this device. Media stays on this device.",
     ),
     AiProviderPreset(
         "local-qwen-tts",
@@ -273,6 +299,8 @@ PROVIDER_PRESETS: tuple[AiProviderPreset, ...] = (
         ("tts",),
         ("voice",),
         "读取本机模型包，不上传素材",
+        label_en="Local Qwen3-TTS",
+        description_en="Uses the model pack on this device. Media stays on this device.",
     ),
 )
 

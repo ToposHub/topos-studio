@@ -233,7 +233,7 @@ DEPENDENCIES=(
   "MessagePack|msgpack|H|项目序列化失败|Project serialization fails|Save/Load"
   "psutil|psutil|O|性能监控不可用|Performance monitoring unavailable|System Monitor"
   "Send2Trash|send2trash|O|删除文件不经过回收站|Files deleted permanently (no trash)|File Management"
-  "Flask|flask|O|内部预览服务不可用|Internal preview service unavailable|Preview"
+  "Flask|flask|O|Vault 服务不可用|Vault service unavailable|Vault"
   "python-vlc|vlc|O|VLC 媒体播放不可用|VLC media playback unavailable|Media Playback"
   "rawpy|rawpy|O|RAW 格式图片无法打开|Cannot open RAW image files|RAW Support"
   "Pillow-HEIF|pillow_heif|O|HEIF/HEIC 格式不可用|HEIF/HEIC format unavailable|HEIF Support"

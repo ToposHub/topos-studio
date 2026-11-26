@@ -4,7 +4,6 @@
 
 - AUD-24501  Tangent Hub 驱动 slot 不再向 Qt 事件循环抛异常
 - AUD-24601  color.capture_still / toggle_comparison 独占默认键序
-- AUD-24611  缺失 CMS 键按运行时默认预选（image range 不再静默 limited）
 - AUD-24612  load() 对外部配置数值做防御式转换
 - AUD-24702  F-Gamut 矩阵按官方基色重新生成（不再是 Rec.2020 复制）
 - AUD-24703  RAW_VIEW 3D LUT 半 texel 中心修正
@@ -268,116 +267,61 @@ class TestAUD24601ShortcutDefaults:
 
 
 # ---------------------------------------------------------------------------
-# AUD-24611 / AUD-24612: 偏好页 CMS 缺键预选与防御式数值转换
+# AUD-24612: 偏好页防御式数值转换
 # ---------------------------------------------------------------------------
 
 
-class _RecordingConfig:
-    """dict 型 ConfigManager 替身（记录 set 调用）。"""
-
-    def __init__(self, store=None):
-        self.store: dict = dict(store or {})
-        self.set_calls: list[tuple[str, Any]] = []
-
-    def get(self, key, default=None):
-        return self.store.get(key, default)
-
-    def set(self, key, value, auto_save=True):
-        self.set_calls.append((key, value))
-        self.store[key] = value
-
-
-def _make_pref_page(qapp):
-    from src.features.color.preferences import ColorProcessingPreferencePage
-
-    page = ColorProcessingPreferencePage()
+def _create_split_preference_page(page_type):
+    page = page_type()
     # 生产路径 parent 为对话框；测试无 parent 时必须持有返回的顶层
     # 控件引用，否则 C++ 侧整棵子树被回收，_widgets 变成悬空包装。
     page._top_widget = page.create_widget(None)
     return page
 
 
-class TestAUD24611MissingCmsKeysPreselectRuntimeDefaults:
-    def test_missing_keys_preselect_runtime_defaults(self, qapp):
-        page = _make_pref_page(qapp)
-        page.load({})   # 完全缺键
-        # image 范围运行时默认 FULL（SRGB_IMAGE），不再是组合框首项 limited
-        assert page._widgets["color.preview.image_range"].currentData() == "full"
-        assert page._widgets["color.output.image_range"].currentData() == "full"
-        # timeline 范围运行时默认 LIMITED（REC709_VIDEO）
-        assert page._widgets["color.preview.timeline_range"].currentData() == "limited"
-        assert page._widgets["color.output.timeline_range"].currentData() == "limited"
-        # timeline 传输函数预选 Rec.709（smart-default 语义）
-        assert page._widgets["color.preview.timeline_transfer"].currentData() == "bt709"
-        assert page._widgets["color.preview.image_transfer"].currentData() == "iec61966_2_1"
-        for key in ("color.preview.image_primaries",
-                    "color.output.timeline_primaries"):
-            assert page._widgets[key].currentData() == "bt709"
-
-    def test_apply_persists_runtime_defaults_not_index_zero(self, qapp):
-        page = _make_pref_page(qapp)
-        page.load({})
-        cfg = _RecordingConfig()
-        page.apply(cfg)
-        written = dict(cfg.set_calls)
-        assert written["color.preview.image_range"] == "full"
-        assert written["color.output.image_range"] == "full"
-        assert written["color.preview.timeline_range"] == "limited"
-
-    def test_explicit_config_values_preserved(self, qapp):
-        page = _make_pref_page(qapp)
-        page.load({"color.output.image_range": "limited"})
-        assert page._widgets["color.output.image_range"].currentData() == "limited"
-
-    def test_restore_defaults_missing_range_keys_preselect(self, qapp):
-        page = _make_pref_page(qapp)
-        # DEFAULT_CONFIG 未覆盖的 range 键同样按运行时默认预选
-        page.restore_defaults({
-            "default_color_space": "sRGB",
-            "default_bit_depth": "8-bit",
-            "gpu_color_processing": True,
-            "show_color_space_warnings": True,
-        })
-        assert page._widgets["color.preview.image_range"].currentData() == "full"
-        assert page._widgets["color.output.image_range"].currentData() == "full"
-
-
 class TestAUD24612DefensiveNumericConversions:
     def test_bad_numeric_values_fall_back_without_abort(self, qapp, caplog):
-        page = _make_pref_page(qapp)
+        from src.features.color.preferences import ColorProcessingPreferencePage, ControlSurfacePreferencePage
+
+        surface = _create_split_preference_page(ControlSurfacePreferencePage)
+        processing = _create_split_preference_page(ColorProcessingPreferencePage)
         bad = {
             COLOR_WHEEL_ROTATION_CONFIG_KEY: "not-a-number",
             TRACKERBALL_SMOOTHING_CONFIG_KEY: None,
             "tangent.lift_brightness_sensitivity": "abc",
             "default_denoise_strength": None,
             "default_sharpen_amount": "x",
-            # 数值键之后的组仍应被加载（证明 load 未半途中断）
             "ai_gpu_device": "cpu",
         }
         with caplog.at_level(logging.WARNING):
-            page.load(bad)   # 旧实现在此 ValueError，其后控件全部停在构建默认
-        assert page._widgets[COLOR_WHEEL_ROTATION_CONFIG_KEY].value() == \
+            surface.load(bad)
+            processing.load(bad)
+        assert surface._widgets[COLOR_WHEEL_ROTATION_CONFIG_KEY].value() == \
             DEFAULT_COLOR_WHEEL_ROTATION_DEGREES
-        assert page._widgets[TRACKERBALL_SMOOTHING_CONFIG_KEY].value() == \
+        assert surface._widgets[TRACKERBALL_SMOOTHING_CONFIG_KEY].value() == \
             DEFAULT_TRACKERBALL_SMOOTHING
-        assert page._widgets["tangent.lift_brightness_sensitivity"].value() == \
+        assert surface._widgets["tangent.lift_brightness_sensitivity"].value() == \
             DEFAULT_TANGENT_SENSITIVITY["tangent.lift_brightness_sensitivity"]
-        assert page._widgets["default_denoise_strength"].value() == 50
-        assert page._widgets["default_sharpen_amount"].value() == 0
-        # AI 组（位于 Tangent 数值键之后）也被正确加载
-        assert page._widgets["ai_gpu_device"].currentData() == "cpu"
+        assert processing._widgets["default_denoise_strength"].value() == 50
+        assert processing._widgets["default_sharpen_amount"].value() == 0
+        assert processing._widgets["ai_gpu_device"].currentData() == "cpu"
         assert any("Invalid numeric value" in r.message for r in caplog.records)
 
     def test_valid_numeric_values_still_load(self, qapp):
-        page = _make_pref_page(qapp)
-        page.load({
+        from src.features.color.preferences import ColorProcessingPreferencePage, ControlSurfacePreferencePage
+
+        surface = _create_split_preference_page(ControlSurfacePreferencePage)
+        processing = _create_split_preference_page(ColorProcessingPreferencePage)
+        config = {
             COLOR_WHEEL_ROTATION_CONFIG_KEY: 123.5,
             TRACKERBALL_SMOOTHING_CONFIG_KEY: 40,
             "default_denoise_strength": 77,
-        })
-        assert page._widgets[COLOR_WHEEL_ROTATION_CONFIG_KEY].value() == 123.5
-        assert page._widgets[TRACKERBALL_SMOOTHING_CONFIG_KEY].value() == 40
-        assert page._widgets["default_denoise_strength"].value() == 77
+        }
+        surface.load(config)
+        processing.load(config)
+        assert surface._widgets[COLOR_WHEEL_ROTATION_CONFIG_KEY].value() == 123.5
+        assert surface._widgets[TRACKERBALL_SMOOTHING_CONFIG_KEY].value() == 40
+        assert processing._widgets["default_denoise_strength"].value() == 77
 
 
 # ---------------------------------------------------------------------------

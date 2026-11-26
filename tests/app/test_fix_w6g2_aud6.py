@@ -72,7 +72,6 @@ def make_dialog(qapp, monkeypatch, tmp_path) -> Iterator[
     def _make(initial: Optional[dict] = None) -> tuple[PreferencesDialog, _RecordingConfig]:
         cfg = _RecordingConfig(initial)
         dlg = PreferencesDialog(cfg)
-        dlg._fe_plugin_bridge = lambda: None  # type: ignore[method-assign]
         created.append(dlg)
         return dlg, cfg
 

@@ -155,7 +155,6 @@ jobs:
             tests/media/test_topos_timeline_export.py \
             tests/media/test_topos_image_source.py \
             tests/media/test_topos_image_sequence.py \
-            tests/file_explorer/test_topos_image_preview.py \
             tests/media/test_capability_manifest.py \
             tests/media/test_topos_audio_container.py \
             tests/media/test_topos_source_audio.py \

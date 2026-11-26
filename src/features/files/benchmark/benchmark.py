@@ -182,7 +182,7 @@ ResultCallback = Callable[[BenchmarkResult], None]
 
 
 def _ensure_project_import_path() -> None:
-    """Make ``src.shared`` importable in standalone file-explorer launches."""
+    """Make ``src.shared`` importable when the benchmark is launched separately."""
 
     project_root = Path(__file__).resolve().parents[4]
     if (project_root / "src").is_dir() and str(project_root) not in sys.path:
@@ -210,7 +210,7 @@ class DecodeBenchmarkRunner:
 
     @staticmethod
     def _probe(path: str) -> Any:
-        # Keep imports lazy: loading the file explorer should not initialise
+        # Keep imports lazy: importing the benchmark should not initialise
         # PyAV/OpenGL when the benchmark window is never opened.
         _ensure_project_import_path()
         from src.shared.media.factory import MediaSourceFactory

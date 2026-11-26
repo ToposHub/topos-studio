@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from threading import Event, get_ident
 from types import SimpleNamespace
 import sys
 
 from PyQt6.QtGui import QColor, QImage
 import numpy as np
+import pytest
 
 from src.shared.video import monitor_output
 from src.shared.video.monitor_output import (
     DeckLinkMonitorConfig,
+    FfmpegDeckLinkMonitorOutput,
     MonitorRGBAFrame,
     NativeDeckLinkSDKMonitorOutput,
     NativeGpuMonitorFrame,
@@ -45,6 +50,7 @@ def test_decklink_config_supports_project_config_manager_get_signature() -> None
         config = {
             "decklink_monitor_enabled": True,
             "decklink_monitor_device": "DeckLink Mini Monitor 4K",
+            "color.monitor.external_calibration_lut": "/path/display.cube",
         }
 
         def get(self, key):
@@ -59,6 +65,96 @@ def test_decklink_config_supports_project_config_manager_get_signature() -> None
     assert config.mode == "1080i50"
     assert config.connection == "hdmi"
     assert config.native_pixel_format == "yuv"
+    assert config.calibration_lut == "/path/display.cube"
+
+
+def _calibration_lut(path: Path) -> Path:
+    rows = [f"{blue} {green * 0.5} {red}"
+            for blue in (0, 1) for green in (0, 1) for red in (0, 1)]
+    path.write_text("LUT_3D_SIZE 2\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    return path
+
+
+def test_ffmpeg_monitor_calibrates_display_rgb_before_transport(tmp_path: Path) -> None:
+    lut = _calibration_lut(tmp_path / "display.cube")
+    config = DeckLinkMonitorConfig(width=1, height=1, input_pix_fmt="uyvy422", calibration_lut=str(lut))
+    output = FfmpegDeckLinkMonitorOutput(config)
+    output._queue.put_nowait((4, np.array([[[26, 100, 204]]], dtype=np.uint8)))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(output._drain_latest_frame).result()
+
+    assert output._last_frame == bytes((204, 50, 26, 255))
+    assert output._last_frame_index == 4
+    command = build_ffmpeg_decklink_command(config)
+    assert command[command.index("-pix_fmt") + 1] == "bgra"
+
+
+def test_monitor_reloads_calibration_when_reselecting_an_overwritten_file(tmp_path: Path) -> None:
+    lut = _calibration_lut(tmp_path / "display.cube")
+    output = FfmpegDeckLinkMonitorOutput(DeckLinkMonitorConfig(width=1, height=1, calibration_lut=str(lut)))
+    payload = np.array([[[26, 100, 204]]], dtype=np.uint8)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        output._queue.put_nowait((4, payload))
+        executor.submit(output._drain_latest_frame).result()
+        assert output._last_frame == bytes((204, 50, 26, 255))
+        lut.write_text("LUT_3D_SIZE 2\n" + "0.50 0.25 0.00\n" * 8, encoding="utf-8")
+        output.reload_calibration()
+        output._queue.put_nowait((5, payload))
+        executor.submit(output._drain_latest_frame).result()
+
+    assert output._last_frame == bytes((0, 64, 128, 255))
+    assert output._last_frame_index == 5
+
+
+def test_monitor_with_unavailable_calibration_retains_last_calibrated_frame(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = DeckLinkMonitorConfig(width=1, height=1, calibration_lut=str(tmp_path / "missing.cube"))
+    output = FfmpegDeckLinkMonitorOutput(config)
+    output._last_frame = bytes((1, 2, 3, 255))
+    output._last_frame_index = 1
+    output._queue.put_nowait((4, np.array([[[26, 100, 204]]], dtype=np.uint8)))
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(output._drain_latest_frame).result()
+
+    assert output._last_frame == bytes((1, 2, 3, 255))
+    assert output._last_frame_index == 1
+    assert "DeckLink monitor calibration failed" in caplog.text
+
+
+def test_native_monitor_calibration_disables_gpu_bypass_and_runs_on_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lut = _calibration_lut(tmp_path / "display.cube")
+    submitted = Event()
+    pixels: list[tuple[bytes, int]] = []
+
+    def submit_bgra(frame: bytes, width: int, height: int, frame_index: int) -> None:
+        assert (width, height, frame_index) == (1, 1, 7)
+        pixels.append((frame, get_ident()))
+        submitted.set()
+
+    def submit_gpu_texture(*args: object) -> None:
+        pytest.fail("Active display calibration must use frame readback")
+
+    native = SimpleNamespace(supports_gpu_texture=True, submit_bgra=submit_bgra, submit_gpu_texture=submit_gpu_texture)
+    monkeypatch.setitem(sys.modules, "topos_decklink", SimpleNamespace(create_output=lambda **_: native))
+    output = NativeDeckLinkSDKMonitorOutput(DeckLinkMonitorConfig(
+        device="DeckLink", enabled=True, backend="native_sdk", width=1, height=1,
+        native_pixel_format="bgra", calibration_lut=str(lut),
+    ))
+    assert output.start()
+    try:
+        assert not output.supports_gpu_texture
+        assert not output.submit_gpu_frame(NativeGpuMonitorFrame(7, 44, 1, 1, 0, True))
+        assert output.submit_frame_payload(7, np.array([[[26, 100, 204]]], dtype=np.uint8))
+        assert submitted.wait(2.0)
+        assert pixels[0][0] == bytes((204, 50, 26, 255))
+        assert pixels[0][1] != get_ident()
+    finally:
+        output.stop()
 
 
 def test_resolve_ffmpeg_path_checks_common_gui_paths(monkeypatch) -> None:

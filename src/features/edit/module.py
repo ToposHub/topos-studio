@@ -484,9 +484,9 @@ class EditModule:
         if not self._available:
             return []
 
-        from src.features.edit.preferences import EditPreferencePage
+        from src.features.edit.preferences import EditInteractionPreferencePage, EditPreferencePage
         from src.features.edit.ui.ai_preferences_page import AiEditingPreferencePage
-        return [EditPreferencePage(), AiEditingPreferencePage()]
+        return [EditPreferencePage(), EditInteractionPreferencePage(), AiEditingPreferencePage()]
 
     def register_shortcuts(self, shortcut_manager: "ShortcutManager") -> None:
         """Register Edit module shortcuts with the ShortcutManager.

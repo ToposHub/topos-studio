@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -115,12 +115,14 @@ def _make_viewer(qtbot):
     viewer._u_texture_loc = 0
     viewer._u_display_rect_loc = 1
     viewer._u_flip_y_loc = 2
+    viewer._display_uniform_locations = (3, 4)
     return viewer
 
 
 def test_render_texture_sets_display_and_flip_uniforms(qtbot, monkeypatch) -> None:
     """mock GL 下验证 4f/1f 参数；location=-1 也安全。"""
     import src.features.edit.ui.source_viewer as sv
+    from src.shared.color.desktop_video_color import DISPLAY_COLOR_TEXTURE_UNIT
 
     gl_mock = MagicMock()
     gl_mock.glIsTexture.return_value = True
@@ -129,7 +131,8 @@ def test_render_texture_sets_display_and_flip_uniforms(qtbot, monkeypatch) -> No
     viewer = _make_viewer(qtbot)
     viewer._render_texture((-0.5, -0.5, 1.0, 1.0))
 
-    gl_mock.glUniform1i.assert_called_once_with(0, 0)
+    assert gl_mock.glUniform1i.call_args_list == [call(0, 0), call(3, DISPLAY_COLOR_TEXTURE_UNIT), call(4, 0)]
+    gl_mock.glGetUniformLocation.assert_not_called()
     gl_mock.glUniform4f.assert_called_once_with(1, -0.5, -0.5, 1.0, 1.0)
     gl_mock.glUniform1f.assert_called_once_with(2, 0.0)  # CPU 路径不翻转
 

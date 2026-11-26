@@ -38,6 +38,24 @@ def panel(qtbot):
     return widget
 
 
+def test_global_layer_rename_routes_file_focus_to_native_browser(qtbot, monkeypatch) -> None:
+    from unittest.mock import Mock
+
+    from PyQt6.QtWidgets import QApplication
+    from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
+    from src.app.ui.native_files_panel import NativeFilesPanel
+
+    browser = NativeFilesPanel()
+    qtbot.addWidget(browser)
+    rename = Mock()
+    monkeypatch.setattr(browser, "request_rename", rename)
+    monkeypatch.setattr(QApplication, "focusWidget", lambda: browser.view_combo)
+
+    MenuToolbarMixin.rename_current_layer(object())
+
+    rename.assert_called_once_with()
+
+
 def test_delete_key_requests_trash_for_selection(panel):
     captured: list[tuple] = []
     panel.file_task_requested.connect(lambda op, targets, options: captured.append((op, targets, options)))

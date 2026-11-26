@@ -4850,6 +4850,7 @@ class FileOpsMixin:
         }
         native_gpu_enabled = bool(
             native_backend
+            and not config.calibration_lut
             and getattr(getattr(existing, "backend", None), "supports_gpu_texture", False)
         )
         self._set_program_monitor_output_modes(
@@ -4858,6 +4859,28 @@ class FileOpsMixin:
             independent_aces=external is not None,
         )
         return existing
+
+    def _refresh_external_monitor_calibration(self) -> None:
+        """Publish the new calibration immediately, including for a paused frame."""
+        self._discard_color_monitor_pending_readback()
+        self._decklink_color_output_last_request = 0.0
+        self._decklink_video_monitor_last_submit = 0.0
+        controller = self._ensure_program_monitor_output()
+        if controller is None:
+            return
+        controller.reload_calibration()
+
+        page = getattr(self, "current_page", None)
+        if page == "Edit" or (page == "Color" and getattr(self, "_color_program_monitor_active", False)):
+            self._request_current_timeline_preview_frame()
+        elif page == "Color":
+            self._request_color_monitor_output(controller, reason="calibration_changed")
+        elif page == "Composite":
+            composite = getattr(self, "composite_page", None)
+            if getattr(self, "_program_monitor_aces_external_view", None) is not None and composite is not None:
+                composite.request_external_monitor_refresh()
+            else:
+                self._submit_video_controller_monitor_frame(reason="calibration_changed")
 
     def _set_program_monitor_output_modes(
         self,
@@ -6716,6 +6739,18 @@ class FileOpsMixin:
         except Exception:
             logger.debug("color viewer capability refresh after clip context "
                          "clear failed", exc_info=True)
+
+    def _apply_desktop_monitor_calibration(self) -> None:
+        """Publish the local display LUT to the final desktop viewer passes."""
+        from src.shared.color.monitor_calibration import DESKTOP_CALIBRATION_LUT
+
+        path = self.config_manager.get(DESKTOP_CALIBRATION_LUT, "")
+        if not isinstance(path, str):
+            path = ""
+        for name in ("canvas", "program_viewer_widget", "source_viewer_widget", "composite_viewer"):
+            configure = getattr(getattr(self, name, None), "set_monitor_calibration_lut", None)
+            if callable(configure) and configure(path) is True and name == "program_viewer_widget":
+                self._request_current_timeline_preview_frame()
 
     def _apply_program_display_color(self) -> None:
         from src.shared.color.desktop_video_color import USE_DISPLAY_ICC, sdr_display_preset

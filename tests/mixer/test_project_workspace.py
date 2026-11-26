@@ -85,7 +85,6 @@ class ProjectHost(QMainWindow, DockLayoutMixin, MixerRecordingControllerMixin,
                           "dock_audio_media_pool", "dock_audio_effects",
                           "dock_audio_console", "dock_audio_timeline"):
             getattr(self, dock_attr).hide()
-        self.timeline_panel.set_audio_mixer_dock(self.dock_audio_mixer)
 
         panel = self.audio_mixer_panel
         panel.track_volume_changed.connect(self._on_mixer_volume_committed)
@@ -598,7 +597,8 @@ def test_track_header_record_button_follows_capture_state(project_host, qtbot, m
         host.dock_audio_mixer.hide()
         strip = panel._track_mixers["audio-track"]
         assert not host._handle_mixer_record_shortcut(view.viewport(), shortcut)
-        assert not mode_button.isChecked() and not header._show_record_button
+        assert not mode_button.isChecked() and header._show_record_button
+        assert not header._record_button_enabled()
         assert not strip._monitor_btn.isEnabled()
         mode_button.click()
         assert mode_button.isChecked() and header._show_record_button
@@ -668,12 +668,13 @@ def test_track_header_record_button_follows_capture_state(project_host, qtbot, m
 
     if page_name == "Edit":
         mode_button.click()
-        assert not mode_button.isChecked() and not header._show_record_button
+        assert not mode_button.isChecked() and header._show_record_button
+        assert not header._record_button_enabled()
         assert not strip._monitor_btn.isEnabled()
         assert not host._handle_mixer_record_shortcut(view.viewport(), shortcut)
     else:
         host._set_mixer_recording_workflow(False)
-    assert header._recording_state == "unpatched"
+    assert header._recording_state == ("mode_disabled" if page_name == "Edit" else "unpatched")
     assert not host._mixer_armed_inputs
 
 
@@ -1256,6 +1257,7 @@ def test_mixer_ignores_removed_output_in_saved_layout(project_host, qtbot, float
 
 def test_mixer_monitor_and_timeline_controls_restore_on_return_to_edit(project_host, qtbot) -> None:
     host = project_host
+    host.resize(1440, host.height())
     timeline = host.timeline_panel
     viewport = host.edit_viewport
     picture = host.program_viewer_widget.get_viewer()
@@ -1279,7 +1281,6 @@ def test_mixer_monitor_and_timeline_controls_restore_on_return_to_edit(project_h
     assert abs(play_center.y() - edit_center.y()) <= 1
     assert abs(meter_center.y() - edit_center.y()) <= 1
     assert edit_center.x() < play_center.x() < meter_center.x() < more_center.x()
-    assert play_center.x() > toolbar.width() / 4
     edit_right = max(
         button.mapTo(toolbar, QPoint()).x() + button.width()
         for button in (timeline.btn_select, timeline.btn_trim, timeline.btn_blade,
@@ -1288,7 +1289,7 @@ def test_mixer_monitor_and_timeline_controls_restore_on_return_to_edit(project_h
     )
     transport_left = transport.btn_jump_start.mapTo(toolbar, QPoint()).x()
     transport_right = transport.btn_loop.mapTo(toolbar, QPoint()).x() + transport.btn_loop.width()
-    zoom_left = timeline._mixer_width_icon.mapTo(toolbar, QPoint()).x()
+    zoom_left = timeline._zoom_width_icon.mapTo(toolbar, QPoint()).x()
     assert transport_left - edit_right >= 12
     assert zoom_left - transport_right >= 12
     assert toolbar.width() - timeline.btn_overflow.geometry().right() <= 10
@@ -1316,28 +1317,32 @@ def test_mixer_monitor_and_timeline_controls_restore_on_return_to_edit(project_h
     zoom_center = timeline.zoom_slider.mapTo(toolbar, timeline.zoom_slider.rect().center())
     monitor_slider = timeline._monitor_gain_slider
     monitor_center = monitor_slider.mapTo(toolbar, monitor_slider.rect().center())
-    assert play_center.x() < zoom_center.x() < height_center.x() < meter_center.x() < monitor_center.x() < more_center.x()
+    assert play_center.x() < zoom_center.x() < height_center.x() < monitor_center.x() < meter_center.x() < more_center.x()
     assert abs(height_center.y() - edit_center.y()) <= 1
-    assert height_slider.width() == timeline.zoom_slider.width() == 54
-    assert timeline._mixer_width_icon.isVisible()
-    assert timeline.btn_zoom_out.isVisible() and timeline.btn_zoom_in.isVisible()
+    assert timeline.zoom_slider.width() == 92
+    assert height_slider.width() == 61
+    assert timeline._zoom_width_icon.isVisible()
     assert not timeline.btn_audio_automation.icon().isNull()
     height_slider.setValue(92)
-    assert timeline.timeline_view.layout_state()["track_heights"]["audio-track"] == 92
+    assert timeline.timeline_view.display_track_height("audio-track", "audio") == 92
     timeline.timeline_view.set_layout_state({"track_heights": {"audio-track": 52}})
-    assert height_slider.value() == 52
+    assert height_slider.value() == 104
+    audio_clip = timeline.timeline_view.get_timeline().audio_tracks[0].clips[0]
+    assert timeline.timeline_view._items_map[audio_clip.clip_id]._track_height == 104
     timeline.btn_audio_automation.click()
     assert timeline.automation_lane_visible()
     assert timeline._keyframe_tray.isHidden()
     assert timeline.export_presentation_state()["keyframe_tray_visible"]
 
     host._restore_edit_panels_from_mixer()
+    assert timeline.timeline_view.display_track_height("audio-track", "audio") == 52
     assert viewport.program_header.options_button.menu() is edit_menu
     assert viewport.program_slider.isHidden()
     assert meter.isHidden()
-    assert timeline._track_height_control.isHidden() == timeline.zoom_slider.isHidden()
-    assert not timeline._mixer_width_icon.isVisible()
+    assert timeline.zoom_slider.isHidden() == (timeline.width() < 560)
+    assert timeline._zoom_width_icon.isHidden() == timeline.zoom_slider.isHidden()
     assert timeline.zoom_slider.width() == 92
+    assert height_slider.width() == 61
     assert toolbar.height() == 40
     assert not viewport.program_footer.isHidden()
     assert viewport.program_footer.isAncestorOf(transport.btn_play)
@@ -1876,10 +1881,56 @@ def test_clip_editor_spectral_repair_commits_and_undoes(
     assert view.get_timeline().get_clip_by_id(clip_id).audio_edit is None
 
 
+def test_mixer_envelope_toolbar_left_add_right_delete_and_menu_reset(
+    project_host, qtbot, monkeypatch,
+) -> None:
+    host = project_host
+    host.show_mixer()
+    host.resizeDocks([host.dock_audio_timeline], [200], Qt.Orientation.Vertical)
+    view = host.timeline_panel.timeline_view
+    view.setMinimumHeight(180)
+    button = host.timeline_panel.btn_envelope_edit
+    clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
+    item = view._items_map[clip_id]
+    geometry = item._envelope_geometry()
+    assert geometry is not None
+    local_point = QPointF(item._width / 2.0, geometry["zero_y"])
+    qtbot.waitUntil(lambda: view.itemAt(view.mapFromScene(item.mapToScene(local_point))) is item)
+    point = view.mapFromScene(item.mapToScene(local_point))
+    assert button.isVisible() and not button.isChecked() and not button.icon().isNull()
+
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert item._envelope_nodes == []
+    button.click()
+    assert button.isChecked() and item._envelope_node_editing
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+    assert len(item._envelope_nodes) == 1
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=point)
+    assert item._envelope_nodes == []
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=point)
+
+    opened: list[bool] = []
+
+    def choose_reset(menu: QMenu, *_args: object) -> QAction:
+        opened.append(True)
+        actions = {action.objectName(): action for action in menu.actions()}
+        assert {"addEnvelopePoint", "deleteEnvelopePoint", "resetVolumeEnvelope"} <= actions.keys()
+        return actions["resetVolumeEnvelope"]
+
+    monkeypatch.setattr(QMenu, "exec", choose_reset)
+    menu_point = view.mapFromScene(item.mapToScene(QPointF(item._width / 3.0, geometry["zero_y"])))
+    assert view.itemAt(menu_point) is item
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=menu_point)
+    assert opened
+    assert item._envelope_nodes == []
+    view.undo()
+    assert len(view._items_map[clip_id]._envelope_nodes) == 1
+
+
 def test_timeline_shows_clip_volume_envelope_overlay(
         project_host, qtbot, tmp_path) -> None:
-    """P1-4 余项：包络提交命令后，时间线音频片段叠加包络折线（模型驱动）。"""
-    import numpy as np
+    """Clip editor, Mixer and Edit reflect one undoable envelope."""
+    from src.features.edit.core.audio_edit import ENVELOPE_BEZIER
 
     host = project_host
     view = host.timeline_panel.timeline_view
@@ -1900,11 +1951,17 @@ def test_timeline_shows_clip_volume_envelope_overlay(
     clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
     assert host._load_project_audio_clip_editor(clip_id)
     editor = host.dock_audio_clip_editor.widget()
-    qtbot.waitUntil(lambda: editor._panel._pcm is not None, timeout=15000)
     panel = editor._panel
+    assert not panel.btn_tool_envelope.isChecked()
+    assert panel.canvas._env_enabled
+    qtbot.waitUntil(lambda: panel._pcm is not None, timeout=15000)
+    assert not panel.btn_tool_envelope.isChecked()
 
     item = view._items_map.get(clip_id)
     assert item is not None and item._envelope_nodes == []
+    assert not item._envelope_node_editing and item._envelope_db_at(0.5) == 0.0
+    assert not item._envelope_whole_editing
+    panel.btn_tool_envelope.click()
 
     # 画布包络（拖拽结束/增删节点发一次）→ 命令 → 时间线叠加折线。
     panel.envelopeChanged.emit([
@@ -1917,10 +1974,49 @@ def test_timeline_shows_clip_volume_envelope_overlay(
     assert fractions[0] == 0.0
     assert 0.3 <= fractions[1] <= 0.5  # 2 s / 4~5 s 显示域
 
-    # 撤销后折线消失。
+    assert item._envelope_modes == (ENVELOPE_BEZIER,) * 2
+    assert item._envelope_db_at(fractions[1] / 4.0) == pytest.approx(
+        panel.canvas._eval_envelope_db(0.5), abs=0.03)
+
+    track_id = view.get_timeline().audio_tracks[0].track_id
+    host.timeline_panel.btn_envelope_edit.click()
+    assert item._envelope_node_editing
+    view._on_envelope_edit_finished(clip_id, track_id, [(0.0, 0.0), (0.5, -24.0)])
+    assert [point["db"] for point in panel.canvas.getEnvelopePoints()] == [0.0, -24.0]
+
+    host.current_page = "Edit"
+    host._restore_edit_panels_from_mixer()
+    assert not item._envelope_node_editing
+    view._on_envelope_edit_finished(clip_id, track_id, [(0.5, 12.0)])
+    assert item._envelope_nodes == [(0.0, 0.0), (0.5, -24.0)]
+    view._on_envelope_shift_finished(clip_id, track_id, -3.0)
+    assert item._envelope_nodes == [(0.0, -3.0), (0.5, -27.0)]
+
+    host.show_mixer()
+    assert host._load_project_audio_clip_editor(clip_id)
+    qtbot.waitUntil(lambda: panel._pcm is not None, timeout=15000)
+    assert [point["db"] for point in panel.canvas.getEnvelopePoints()] == [-3.0, -27.0]
+
     view.undo()
-    qtbot.waitUntil(
-        lambda: not bool(view._items_map[clip_id]._envelope_nodes), timeout=5000)
+    assert [point["db"] for point in panel.canvas.getEnvelopePoints()] == [0.0, -24.0]
+    view.undo()
+    view.undo()
+    assert view._items_map[clip_id]._envelope_nodes == []
+    assert panel.canvas._env_enabled and panel.canvas.getEnvelopePoints() == []
+    view.redo()
+    assert [point["db"] for point in panel.canvas.getEnvelopePoints()] == [0.0, -12.0]
+
+    item = view._items_map[clip_id]
+    host.timeline_panel.btn_envelope_edit.click()
+    view.setFocus(Qt.FocusReason.OtherFocusReason)
+    item.setFocus(Qt.FocusReason.OtherFocusReason)
+    assert view.scene().focusItem() is item
+    item._envelope_selected = 1
+    view._handle_timeline_key_press(
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Backspace, Qt.KeyboardModifier.NoModifier),
+    )
+    assert view.get_timeline().get_clip_by_id(clip_id) is not None
+    assert [point["db"] for point in panel.canvas.getEnvelopePoints()] == [0.0]
 
 
 def test_automation_lane_mode_commits_per_track(project_host, qtbot) -> None:

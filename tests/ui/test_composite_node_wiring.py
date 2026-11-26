@@ -1,12 +1,13 @@
 """Exercise cable gestures through the composite canvas and page undo stack."""
 
 from unittest.mock import MagicMock
+from pathlib import Path
 
 import pytest
 from PyQt6.QtCore import QMimeData, QPoint, QPointF, Qt
 from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QDockWidget, QMainWindow
+from PyQt6.QtWidgets import QApplication, QComboBox, QDockWidget, QMainWindow
 
 from src.features.composite.core.graph_edit import EDIT_LAYER_CONFLICT, EDIT_STALE_REVISION
 from src.features.composite.core.layer_stack_compiler import CompileResult
@@ -14,10 +15,14 @@ from src.features.composite.nodes.blur_node import BlurNode
 from src.features.composite.nodes.constant_node import ConstantNode
 from src.features.composite.nodes.output_node import OutputNode
 from src.features.composite.nodes.transform_node import TransformNode
+from src.features.composite.preferences import (
+    CompositePreferencePage, NODE_CABLE_ROUTING_KEY, NODE_PREVIEW_MODE_KEY,
+)
 from src.features.composite.ui.composite_page import CompositePage
 from src.features.composite.ui.keyframes_panel import KeyframesPanel
 from src.features.composite.ui.node_item import NodeItem
 from src.features.composite.ui.node_search_popup import NODE_PALETTE_MIME, NodeSearchPopup
+from src.shared.config.config_manager import ConfigManager
 
 
 @pytest.fixture
@@ -180,6 +185,49 @@ def test_cable_routing_hit_test_matches_painted_path(page, qapp, routing):
     edge.set_show_insertion_dot(True)
     assert edge.hit_test_insertion_dot(midpoint)
     assert page._graph_cable_keys() == before
+
+
+def test_display_preferences_update_live_nodes_and_cables_without_graph_edits(
+    page: CompositePage, qapp: QApplication, tmp_path: Path,
+) -> None:
+    config = ConfigManager(tmp_path / "config.json")
+    page.config_manager = config
+    editor = _wiring_page(page, qapp)
+    original_graph = page.node_graph.to_dict()
+    cables = [cable for cable, *_ in editor._connection_items]
+    node_items = list(editor._node_items.values())
+    page._evaluate_graph.reset_mock()
+
+    preferences = CompositePreferencePage()
+    preferences.create_widget(page)
+    preferences.load(config)
+    routing = preferences._widgets[NODE_CABLE_ROUTING_KEY]
+    thumbnails = preferences._widgets[NODE_PREVIEW_MODE_KEY]
+    assert isinstance(routing, QComboBox) and isinstance(thumbnails, QComboBox)
+    assert routing.currentData() == "curved"
+    assert thumbnails.currentData() == "selected_single"
+    routing.setCurrentIndex(routing.findData("orthogonal"))
+    thumbnails.setCurrentIndex(thumbnails.findData("all"))
+    preferences.apply(config)
+    config.save_config()
+    assert ConfigManager(config.config_path).get(NODE_CABLE_ROUTING_KEY) == "orthogonal"
+    assert ConfigManager(config.config_path).get(NODE_PREVIEW_MODE_KEY) == "all"
+
+    config.set = MagicMock(wraps=config.set)
+    editor.reload_display_preferences()
+    config.set.assert_not_called()
+    assert all(cable._routing == "orthogonal" for cable in cables)
+    assert all(item._show_thumbnail for item in node_items)
+
+    preferences.restore_defaults({})
+    preferences.apply(config)
+    config.set.reset_mock()
+    editor.reload_display_preferences()
+    config.set.assert_not_called()
+    assert all(cable._routing == "curved" for cable in cables)
+    assert all(not item._show_thumbnail for item in node_items)
+    assert page.node_graph.to_dict() == original_graph
+    page._evaluate_graph.assert_not_called()
 
 
 def test_double_click_empty_graph_creates_at_click_position(page, qapp, monkeypatch):

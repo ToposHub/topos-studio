@@ -19,14 +19,14 @@ UI_FONT_FAMILIES = ("DejaVu Sans", UI_CJK_FONT_FAMILY)
 UI_MONO_FONT_FAMILIES = ("DejaVu Sans Mono", UI_CJK_FONT_FAMILY)
 _UI_FONT_DIR = Path(__file__).resolve().parents[2] / "assets" / "fonts"
 
-_CHECKMARK_ICON_FILE = (
-    Path(__file__).resolve().parents[1] / "assets" / "icons" / "checkmark.svg"
-)
+_ICONS_DIR = Path(__file__).resolve().parents[1] / "assets" / "icons"
 # QSS 的 url() 不接受 Windows 反斜杠路径（\U、\D 等会被当作转义序列，
 # 导致整张样式表 "Could not parse stylesheet"），必须注入正斜杠形式。
 # 注意：不能换成 Path.as_uri()——Qt6 QSS 解析器把带引号的 url("file:...")
 # 当作相对路径（实测解析为 cwd + "file:/..."），图标永远加载不出来。
-_CHECKMARK_ICON_PATH = _CHECKMARK_ICON_FILE.resolve().as_posix()
+CHECKMARK_ICON_PATH = (_ICONS_DIR / "checkmark.svg").as_posix()
+SPIN_UP_ICON_PATH = (_ICONS_DIR / "spin-up.svg").as_posix()
+SPIN_DOWN_ICON_PATH = (_ICONS_DIR / "spin-down.svg").as_posix()
 
 
 def timeline_timecode_font() -> QFont:
@@ -1633,7 +1633,7 @@ QDockWidget QTabWidget::tab-bar {
 
 # ``QCheckBox::indicator`` 使用自定义背景后，Qt 不会再绘制平台原生勾选标记。
 # 以运行时绝对 URL 注入资源，开发环境和 PyInstaller 包内均能可靠加载。
-DARK_THEME = DARK_THEME.replace("__CHECKMARK_ICON_URL__", _CHECKMARK_ICON_PATH)
+DARK_THEME = DARK_THEME.replace("__CHECKMARK_ICON_URL__", CHECKMARK_ICON_PATH)
 DARK_THEME = DARK_THEME.replace("__PANEL_DIVIDER__", C.PANEL_DIVIDER)
 DARK_THEME = DARK_THEME.replace(
     "__UI_FONT_FAMILIES__", ", ".join(f'"{family}"' for family in UI_FONT_FAMILIES)

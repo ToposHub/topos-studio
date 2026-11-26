@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 from urllib.parse import urlsplit
 
 from src.shared.ai_models.generation.media_inference import is_local_media_endpoint
@@ -28,6 +28,16 @@ LOCAL_MODEL_PACKS: tuple[tuple[str, str, str], ...] = (
 
 #: 本地模型包 pack_id 集合（RuntimeCapabilitySnapshot 用）。
 _LOCAL_PACK_IDS: frozenset[str] = frozenset(p for _, _, p in LOCAL_MODEL_PACKS)
+
+_MODEL_PACK_LABELS_EN = {
+    "asr_local": "Local speech transcription",
+    "alignment_local": "Word-level alignment",
+    "diarization_local": "Speaker diarization",
+    "ocr_local": "Local OCR",
+    "visual_caption_local": "Local shot descriptions and tags",
+    "visual_embedding_local": "Local visual semantic search",
+    "tts_local": "Local TTS",
+}
 
 
 class CapabilityTier(str, Enum):
@@ -131,6 +141,7 @@ def _provider_is_available(provider: Any) -> bool:
 def _pack_state(
     manager: Any | None,
     pack_id: str,
+    text: Callable[[str, str], str],
 ) -> tuple[CapabilityState, str, str, bool]:
     """Return an honest state for a local model pack.
 
@@ -139,33 +150,48 @@ def _pack_state(
     a failed verification is a failed installation, not an available
     fallback.
     """
+    install = text("安装模型包 {pack}", "Install model pack {pack}.").format(pack=pack_id)
     if manager is None:
-        return CapabilityState.NOT_INSTALLED, "未安装本地模型包", f"安装模型包 {pack_id}", False
+        return CapabilityState.NOT_INSTALLED, text("未安装本地模型包", "Local model pack is missing."), install, False
     release_required = getattr(manager, "needs_release_manifest", None)
     if callable(release_required) and release_required(pack_id):
         return (
             CapabilityState.NOT_INSTALLED,
-            "缺少受控发布清单中的真实 SHA-256，不能安全安装或使用模型包",
-            "安装受控模型发布清单后重试",
+            text("缺少受控发布清单中的真实 SHA-256，不能安全安装或使用模型包",
+                 "The release manifest needs a valid SHA-256 before this model pack can be installed or used."),
+            text("安装受控模型发布清单后重试", "Install the model release manifest and try again."),
             False,
         )
     try:
         status = manager.get_status(pack_id)
     except (AttributeError, KeyError, OSError, RuntimeError) as exc:
-        return CapabilityState.FAILED, f"模型包状态读取失败：{type(exc).__name__}", "重试模型包检查", True
+        reason = text("模型包状态读取失败：{error}", "Failed to read model pack status: {error}").format(
+            error=type(exc).__name__,
+        )
+        return CapabilityState.FAILED, reason, text("重试模型包检查", "Retry the model pack check."), True
     if bool(getattr(status, "is_demo", False)):
-        return CapabilityState.DEMO, "仅目录存在校验的演示模型，不可用于生产", "加载发布清单并重新安装", False
+        return (
+            CapabilityState.DEMO,
+            text("仅目录存在校验的演示模型，不可用于生产", "Demo model pack. Only its directory was verified."),
+            text("加载发布清单并重新安装", "Load the release manifest and reinstall."),
+            False,
+        )
     if bool(getattr(status, "usable", False)):
         return CapabilityState.AVAILABLE, "", "", False
     if bool(getattr(status, "installed", False)):
-        return CapabilityState.FAILED, "模型包完整性校验失败", "删除并重新安装模型包", True
-    return CapabilityState.NOT_INSTALLED, "模型包未安装", f"安装模型包 {pack_id}", False
+        return (
+            CapabilityState.FAILED,
+            text("模型包完整性校验失败", "Model pack integrity check failed."),
+            text("删除并重新安装模型包", "Remove and reinstall the model pack."),
+            True,
+        )
+    return CapabilityState.NOT_INSTALLED, text("模型包未安装", "Model pack is missing."), install, False
 
 
-def _failure_reason(failed: Any, capability_id: str) -> str:
+def _failure_reason(failed: Any, capability_id: str, text: Callable[[str, str], str]) -> str:
     if isinstance(failed, Mapping):
         return str(failed.get(capability_id, ""))
-    return "" if capability_id not in set(failed or ()) else "provider 执行失败"
+    return "" if capability_id not in set(failed or ()) else text("provider 执行失败", "Provider failed.")
 
 
 def build_capability_matrix(
@@ -180,12 +206,17 @@ def build_capability_matrix(
     blocked_capabilities: Iterable[str] = (),
     failed_capabilities: Mapping[str, str] | Iterable[str] = (),
     connection_results: Mapping[str, bool | str | None] | None = None,
+    english: bool = False,
 ) -> tuple[CapabilityStatus, ...]:
     """Build statuses from live configuration and provider registries.
 
     No network call is made.  A separate connection test can update the startup
-    report after the local configuration gate has passed.
+    report after the local configuration gate has passed. Preferences can
+    request English text while existing diagnostic callers keep Chinese.
     """
+
+    def text(zh: str, en: str) -> str:
+        return en if english else zh
 
     statuses: list[CapabilityStatus] = []
     endpoint = str(getattr(profile, "endpoint", "") or "")
@@ -203,44 +234,44 @@ def build_capability_matrix(
              or getattr(profile, "provider_kind", "") in {"ollama", "local_http", "openai_compat"})
     )
     blocked = set(blocked_capabilities)
-    profile_failed = _failure_reason(failed_capabilities, "deepseek_text_agent")
+    profile_failed = _failure_reason(failed_capabilities, "deepseek_text_agent", text)
     if "deepseek_text_agent" in blocked:
         llm_state = CapabilityState.BLOCKED_BY_POLICY
-        llm_reason = "当前策略禁止使用文本 Agent"
+        llm_reason = text("当前策略禁止使用文本 Agent", "The current policy blocks the text agent.")
     elif profile_failed:
         llm_state = CapabilityState.FAILED
         llm_reason = profile_failed
     elif profile is None:
         llm_state = CapabilityState.NOT_CONFIGURED
-        llm_reason = "未配置活动 AI profile"
+        llm_reason = text("未配置活动 AI profile", "No active AI profile is configured.")
     elif not profile_ready:
         llm_state = CapabilityState.BLOCKED
-        llm_reason = "endpoint、model 或凭据引用不可用"
+        llm_reason = text("endpoint、model 或凭据引用不可用", "The endpoint, model, or credential is unavailable.")
     elif not _flag_enabled(feature_flags, "ai_assistant", True):
         llm_state = CapabilityState.BLOCKED_BY_POLICY
-        llm_reason = "ai_assistant feature flag 已关闭"
+        llm_reason = text("ai_assistant feature flag 已关闭", "The editing assistant is disabled.")
     elif offline and str(getattr(profile, "endpoint", "")).startswith(("http://", "https://")):
         llm_state = CapabilityState.OFFLINE
-        llm_reason = "当前处于离线模式，云端 profile 暂不可用"
+        llm_reason = text("当前处于离线模式，云端 profile 暂不可用", "Cloud profiles are unavailable in offline mode.")
     elif str(getattr(profile, "endpoint", "")).startswith(("http://", "https://")):
         if connection is True:
             llm_state = CapabilityState.AVAILABLE
-            llm_reason = "连接测试已通过"
+            llm_reason = text("连接测试已通过", "The connection test passed.")
         elif isinstance(connection, str) and connection.strip():
             llm_state = CapabilityState.FAILED
-            llm_reason = f"连接测试失败：{connection.strip()}"
+            llm_reason = text("连接测试失败：{error}", "Connection test failed: {error}").format(error=connection.strip())
         elif connection is False:
             llm_state = CapabilityState.FAILED
-            llm_reason = "连接测试失败"
+            llm_reason = text("连接测试失败", "The connection test failed.")
         else:
             llm_state = CapabilityState.UNVERIFIED
-            llm_reason = "配置已保存，尚未完成连接测试"
+            llm_reason = text("配置已保存，尚未完成连接测试", "The profile is saved and its connection test is pending.")
     else:
         llm_state = CapabilityState.AVAILABLE
         llm_reason = ""
     statuses.append(CapabilityStatus(
         capability_id="deepseek_text_agent",
-        label="剪辑助手语言模型",
+        label=text("剪辑助手语言模型", "Editing assistant language model"),
         tier=CapabilityTier.BETA,
         state=llm_state,
         provider_id=profile_id,
@@ -249,42 +280,45 @@ def build_capability_matrix(
         requires_credentials=needs_credentials,
         source="profile",
         next_step=(
-            "测试连接确认模型可达" if llm_state == CapabilityState.UNVERIFIED
-            else "配置 profile 和系统凭据" if llm_state != CapabilityState.AVAILABLE else ""
+            text("测试连接确认模型可达", "Test the connection to verify the model is reachable.")
+            if llm_state == CapabilityState.UNVERIFIED else
+            text("配置 profile 和系统凭据", "Configure the profile and system credentials.")
+            if llm_state != CapabilityState.AVAILABLE else ""
         ),
         retryable=llm_state in {CapabilityState.OFFLINE, CapabilityState.FAILED, CapabilityState.UNVERIFIED},
     ))
 
     analysis_ids = set(analysis_provider_ids)
     analysis_enabled = _flag_enabled(feature_flags, "media_analysis", True)
-    analysis_failed = _failure_reason(failed_capabilities, "local_media_analysis")
+    analysis_failed = _failure_reason(failed_capabilities, "local_media_analysis", text)
     if "local_media_analysis" in blocked:
         analysis_state = CapabilityState.BLOCKED_BY_POLICY
-        analysis_reason = "当前策略禁止素材分析"
+        analysis_reason = text("当前策略禁止素材分析", "The current policy blocks media analysis.")
     elif analysis_failed:
         analysis_state = CapabilityState.FAILED
         analysis_reason = analysis_failed
     elif not analysis_enabled:
         analysis_state = CapabilityState.BLOCKED_BY_POLICY
-        analysis_reason = "media_analysis feature flag 已关闭"
+        analysis_reason = text("media_analysis feature flag 已关闭", "Media analysis is disabled.")
     elif not analysis_ids:
         analysis_state = CapabilityState.NOT_INSTALLED
-        analysis_reason = "没有注册分析 provider"
+        analysis_reason = text("没有注册分析 provider", "No media analysis provider is registered.")
     elif offline:
         analysis_state = CapabilityState.AVAILABLE
-        analysis_reason = "仅使用本地分析 provider"
+        analysis_reason = text("仅使用本地分析 provider", "Uses only local analysis providers.")
     else:
         analysis_state = CapabilityState.AVAILABLE
         analysis_reason = ""
     statuses.append(CapabilityStatus(
         capability_id="local_media_analysis",
-        label="本地素材分析",
+        label=text("本地素材分析", "Local media analysis"),
         tier=CapabilityTier.BETA,
         state=analysis_state,
         provider_id=", ".join(sorted(analysis_ids)),
         reason=analysis_reason,
         source="analysis_registry",
-        next_step="安装或启用本地分析 provider" if analysis_state == CapabilityState.NOT_INSTALLED else "",
+        next_step=(text("安装或启用本地分析 provider", "Install or enable a local analysis provider.")
+                   if analysis_state == CapabilityState.NOT_INSTALLED else ""),
         retryable=analysis_state in {CapabilityState.OFFLINE, CapabilityState.FAILED},
     ))
 
@@ -295,16 +329,21 @@ def build_capability_matrix(
     for capability_id, label, pack_id in local_packs:
         if capability_id in blocked:
             state, reason, next_step, retryable = (
-                CapabilityState.BLOCKED_BY_POLICY, "当前策略禁止该能力", "检查隐私/上传策略", False
+                CapabilityState.BLOCKED_BY_POLICY,
+                text("当前策略禁止该能力", "The current policy blocks this capability."),
+                text("检查隐私/上传策略", "Check the privacy and upload policy."),
+                False,
             )
         else:
-            state, reason, next_step, retryable = _pack_state(model_pack_manager, pack_id)
-        failure = _failure_reason(failed_capabilities, capability_id)
+            state, reason, next_step, retryable = _pack_state(model_pack_manager, pack_id, text)
+        failure = _failure_reason(failed_capabilities, capability_id, text)
         if failure:
-            state, reason, next_step, retryable = CapabilityState.FAILED, failure, "重试分析", True
+            state, reason, next_step, retryable = (
+                CapabilityState.FAILED, failure, text("重试分析", "Retry analysis."), True,
+            )
         statuses.append(CapabilityStatus(
             capability_id=capability_id,
-            label=label,
+            label=text(label, _MODEL_PACK_LABELS_EN[capability_id]),
             tier=CapabilityTier.BETA,
             state=state,
             provider_id="local",
@@ -316,20 +355,20 @@ def build_capability_matrix(
 
     statuses.append(CapabilityStatus(
         capability_id="offline_help",
-        label="离线帮助与 Brief",
+        label=text("离线帮助与 Brief", "Offline help and briefs"),
         tier=CapabilityTier.PRODUCTION,
         state=(CapabilityState.BLOCKED_BY_POLICY if "offline_help" in blocked else CapabilityState.AVAILABLE),
-        reason="当前策略禁止本地帮助" if "offline_help" in blocked else "",
+        reason=text("当前策略禁止本地帮助", "The current policy blocks local help.") if "offline_help" in blocked else "",
         source="local_help_index",
-        next_step="检查隐私策略" if "offline_help" in blocked else "",
+        next_step=text("检查隐私策略", "Check the privacy policy.") if "offline_help" in blocked else "",
     ))
 
     providers = tuple(generation_providers)
     for modality, label in (
-        ("image", "图片生成"),
-        ("video", "视频生成"),
-        ("music", "音乐生成"),
-        ("voice", "配音/TTS"),
+        ("image", text("图片生成", "Image generation")),
+        ("video", text("视频生成", "Video generation")),
+        ("music", text("音乐生成", "Music generation")),
+        ("voice", text("配音/TTS", "Voiceover / TTS")),
     ):
         matching = [
             p for p in providers
@@ -338,13 +377,13 @@ def build_capability_matrix(
         active = next((p for p in matching if _provider_is_available(p)), None)
         if not _flag_enabled(feature_flags, "generation", True):
             state = CapabilityState.BLOCKED_BY_POLICY
-            reason = "generation feature flag 已关闭"
+            reason = text("generation feature flag 已关闭", "Media generation is disabled.")
         elif active is None:
             state = CapabilityState.OFFLINE if offline else CapabilityState.NOT_INSTALLED
-            reason = "没有可用的生成 provider"
+            reason = text("没有可用的生成 provider", "No media generation provider is available.")
         elif _provider_is_demo(active):
             state = CapabilityState.DEMO
-            reason = "仅测试/演示 provider；不可宣称真实生产生成"
+            reason = text("仅测试/演示 provider；不可宣称真实生产生成", "The available provider is for testing and demos only.")
         else:
             state = CapabilityState.AVAILABLE
             reason = ""
@@ -358,14 +397,15 @@ def build_capability_matrix(
             requires_consent=True,
             requires_credentials=active is not None and not _provider_is_demo(active),
             source=_provider_id(active) if active is not None else "generation_registry",
-            next_step="配置真实 provider" if state in {CapabilityState.DEMO, CapabilityState.NOT_INSTALLED, CapabilityState.OFFLINE} else "",
+            next_step=(text("配置真实 provider", "Configure a production provider.")
+                       if state in {CapabilityState.DEMO, CapabilityState.NOT_INSTALLED, CapabilityState.OFFLINE} else ""),
             retryable=state in {CapabilityState.OFFLINE, CapabilityState.FAILED},
         ))
 
     for capability_id, label, flag_name in (
-        ("agent_auto_mode", "受限自动模式", "agent_auto_mode"),
-        ("automatic_export", "自动导出", "auto_export"),
-        ("cloud_upload", "云端素材上传", "cloud_upload"),
+        ("agent_auto_mode", text("受限自动模式", "Restricted automatic mode"), "agent_auto_mode"),
+        ("automatic_export", text("自动导出", "Automatic exports"), "auto_export"),
+        ("cloud_upload", text("云端素材上传", "Cloud media uploads"), "cloud_upload"),
     ):
         enabled = _flag_enabled(feature_flags, flag_name, False)
         statuses.append(CapabilityStatus(
@@ -373,10 +413,10 @@ def build_capability_matrix(
             label=label,
             tier=CapabilityTier.BETA,
             state=CapabilityState.AVAILABLE if enabled else CapabilityState.BLOCKED_BY_POLICY,
-            reason="" if enabled else "默认安全关闭，需用户显式开启",
+            reason="" if enabled else text("默认安全关闭，需用户显式开启", "Disabled by default."),
             requires_consent=True,
             source="feature_flags",
-            next_step="在设置中显式开启" if not enabled else "",
+            next_step=text("在设置中显式开启", "Enable in Preferences.") if not enabled else "",
         ))
     return tuple(statuses)
 

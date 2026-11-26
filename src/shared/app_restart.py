@@ -2,7 +2,7 @@
 
 [R2-6] 此前三种重启路径并存：menu_toolbar 用 detached subprocess
 （走正常退出清理），welcome/preferences/project_manager 用 os.execv
-原地替换进程——execv 不做任何清理，Flask/后台线程瞬间蒸发。
+原地替换进程——execv 不做任何清理，后台线程会随进程替换退出。
 全部统一为本模块的 subprocess 方案：新进程独立启动，旧进程走
 正常退出链（QThreadPool 清理、缩略图 worker 停止、配置落盘）。
 """
@@ -43,8 +43,6 @@ def restart_application() -> None:
 
     logger.info("Restarting application: %s (cwd=%s)", args, work_dir)
 
-    # 不主动停 file_explorer 服务器：stop_server() 可能阻塞退出，
-    # 新进程已有端口检测和清理逻辑（start_server 端口占用顺延）
     if sys.platform == "win32":
         # Windows: DETACHED_PROCESS 使进程独立运行
         subprocess.Popen(

@@ -3,11 +3,11 @@
 ``ClipInstance.audio_edit`` holds a versioned, serializable structure::
 
     {
-        "version": 1,
+        "version": 1,           # v2 when an envelope uses Bézier segments
         "processing_rate": 48000,
         "steps": [ {step...}, ... ],
         "markers": [...],       # 预留（P1-5 标记点）
-        "envelope": [...],      # 预留（P1-4 包络）
+        "envelope": [...],      # clip gain knots with outgoing interpolation
     }
 
 Each step is a pure-data dict with a stable ``step_id``, a ``processor_id``
@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import copy
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from fractions import Fraction
 from typing import Any, Optional
 
@@ -51,7 +51,12 @@ from src.features.edit.core.sample_time import (
     reference_position_to_rate,
 )
 
-AUDIO_EDIT_SCHEMA_VERSION = 1
+AUDIO_EDIT_SCHEMA_VERSION = 2
+LINEAR_AUDIO_EDIT_SCHEMA_VERSION = 1
+BEZIER_AUDIO_EDIT_SCHEMA_VERSION = 2
+ENVELOPE_MIN_DB = -60.0
+ENVELOPE_MAX_DB = 12.0
+ENVELOPE_BEZIER = "bezier"
 PROCESSING_RATE = AUDIO_REFERENCE_SAMPLE_RATE
 
 # 选区处理边缘的干湿过渡（2–5 ms 区间取 3 ms；防爆音）。
@@ -166,7 +171,7 @@ LENGTH_CHANGING_PROCESSORS = frozenset(
 def new_audio_edit(steps: Optional[list[dict]] = None, **extra: Any) -> dict:
     """构造一个最小合法的 audio_edit 结构（未知顶层字段保留）。"""
     edit: dict[str, Any] = {
-        "version": AUDIO_EDIT_SCHEMA_VERSION,
+        "version": LINEAR_AUDIO_EDIT_SCHEMA_VERSION,
         "processing_rate": PROCESSING_RATE,
         "steps": list(steps or []),
     }
@@ -353,7 +358,10 @@ def validate_audio_edit(
                     seen_samples.add(sample)
                 if not isinstance(node.get("gain_db"), (int, float)):
                     diagnostics.append(f"{where}: gain_db must be numeric")
-                if node.get("interpolation", "linear") != "linear":
+                interpolation = node.get("interpolation", "linear")
+                if interpolation != "linear" and (
+                    interpolation != ENVELOPE_BEZIER or version != BEZIER_AUDIO_EDIT_SCHEMA_VERSION
+                ):
                     diagnostics.append(
                         f"{where}: unsupported interpolation {node.get('interpolation')!r}")
     markers = audio_edit.get("markers", [])
@@ -1528,10 +1536,13 @@ def envelope_nodes(audio_edit: Any) -> list[dict]:
     """读取包络节点（按 local_sample 升序；非法项剔除）。"""
     if not isinstance(audio_edit, dict):
         return []
+    raw_nodes = audio_edit.get("envelope")
+    if not isinstance(raw_nodes, list):
+        return []
     nodes = []
-    for node in audio_edit.get("envelope", []) or []:
+    for node in raw_nodes:
         if (isinstance(node, dict) and isinstance(node.get("local_sample"), int)
-                and isinstance(node.get("gain_db"), (int, float))):
+                and isinstance(node.get("gain_db"), (int, float)) and math.isfinite(node["gain_db"])):
             nodes.append(node)
     nodes.sort(key=lambda n: n["local_sample"])
     return nodes
@@ -1550,6 +1561,9 @@ def set_envelope(audio_edit: Any, nodes: list[dict] | None) -> dict:
     updated = copy_audio_edit(audio_edit) if isinstance(audio_edit, dict) else new_audio_edit()
     if nodes:
         updated["envelope"] = sorted(nodes, key=lambda n: n["local_sample"])
+        if (any(n.get("interpolation") == ENVELOPE_BEZIER for n in nodes)
+                and updated.get("version", LINEAR_AUDIO_EDIT_SCHEMA_VERSION) == LINEAR_AUDIO_EDIT_SCHEMA_VERSION):
+            updated["version"] = BEZIER_AUDIO_EDIT_SCHEMA_VERSION
     else:
         updated.pop("envelope", None)
     return updated
@@ -1572,7 +1586,7 @@ def envelope_from_canvas_points(
             "id": point.get("id") or str(uuid.uuid4()),
             "local_sample": int(round(fraction * output_total_samples)),
             "gain_db": round(db, 3),
-            "interpolation": "linear",
+            "interpolation": ENVELOPE_BEZIER,
         })
     nodes.sort(key=lambda n: n["local_sample"])
     # 同 sample 唯一：后写覆盖前写。
@@ -1596,28 +1610,50 @@ def canvas_points_from_envelope(
             "t": max(0.0, min(duration_seconds,
                               node["local_sample"] / output_total_samples * duration_seconds)),
             "db": float(node.get("gain_db", 0.0)),
+            "id": node.get("id"),
+            "interpolation": node.get("interpolation", "linear"),
         }
         for node in nodes
     ]
 
 
+def envelope_bezier_weight(t: float | np.ndarray) -> float | np.ndarray:
+    """Evaluate the cubic with time handles at thirds and level handles flat."""
+    return t * t * (3.0 - 2.0 * t)
+
+
 def evaluate_envelope_gain(
     block_start_sample: int, count: int, nodes: list[dict],
 ) -> Optional[np.ndarray]:
-    """包络节点的块求值：dB 分段线性 → 线性增益包络。
-
-    首节点前/末节点后沿用边界增益（计划 §4.3）。实时与离线共用本函数；
-    返回 None 表示无包络（恒等）。
-    """
+    """Evaluate clip gain with constant extension before and after the knots."""
     if count <= 0 or not nodes:
         return None
-    samples = np.arange(block_start_sample, block_start_sample + count,
-                        dtype=np.float64)
-    node_x = np.array([n["local_sample"] for n in nodes], dtype=np.float64)
-    node_db = np.array([float(n.get("gain_db", 0.0)) for n in nodes],
-                       dtype=np.float64)
-    db = np.interp(samples, node_x, node_db)
+    samples = np.arange(block_start_sample, block_start_sample + count, dtype=np.float64)
+    db = evaluate_envelope_db(
+        samples, [n["local_sample"] for n in nodes], [n.get("gain_db", 0.0) for n in nodes],
+        [n.get("interpolation", "linear") for n in nodes],
+    )
     return (10.0 ** (db / 20.0)).astype(np.float32)
+
+
+def evaluate_envelope_db(
+    positions: np.ndarray, times: Sequence[float], levels: Sequence[float], interpolations: Sequence[str],
+) -> np.ndarray:
+    """Sample the shared envelope curve at arbitrary positions in its time domain."""
+    if len(times) == 0:
+        return np.zeros_like(positions, dtype=np.float64)
+    node_x = np.asarray(times, dtype=np.float64)
+    node_db = np.asarray(levels, dtype=np.float64)
+    db = np.interp(positions, node_x, node_db)
+    if ENVELOPE_BEZIER in interpolations[:-1]:
+        curved = np.asarray(interpolations) == ENVELOPE_BEZIER
+        left = np.searchsorted(node_x, positions, side="right") - 1
+        valid = (left >= 0) & (left < len(node_x) - 1)
+        valid[valid] = curved[left[valid]]
+        i = left[valid]
+        u = (positions[valid] - node_x[i]) / (node_x[i + 1] - node_x[i])
+        db[valid] = node_db[i] + (node_db[i + 1] - node_db[i]) * envelope_bezier_weight(u)
+    return db
 
 
 def edge_fade_samples(sample_rate: int) -> int:

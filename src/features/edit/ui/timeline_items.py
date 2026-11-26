@@ -34,6 +34,14 @@ from typing import Optional, Any
 from enum import Enum
 from pathlib import Path
 
+import numpy as np
+
+from src.features.edit.core.audio_edit import (
+    ENVELOPE_BEZIER, ENVELOPE_MAX_DB, ENVELOPE_MIN_DB, evaluate_envelope_db,
+)
+from src.features.edit.ui.clip_envelope_overlay import (
+    envelope_accent, envelope_db_at, envelope_gain_readout, envelope_path,
+)
 from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
 
@@ -70,7 +78,10 @@ from PyQt6.QtGui import (
 from src.features.edit.ui.edit_style import EDIT_SIZES, get_color
 from src.features.edit.ui.timeline_edit_affordances import edit_cursor, paint_range_grip, paint_trim_bracket
 from src.features.edit.ui.timeline_icons import icon_link, icon_unlink
-from src.features.edit.ui.timeline_layout import TRACK_HEADER_WIDTH
+from src.features.edit.ui.timeline_layout import MAX_MIXER_AUDIO_TRACK_HEIGHT, MIN_AUDIO_TRACK_HEIGHT, TRACK_HEADER_WIDTH
+from src.features.edit.ui.timeline_waveform_style import (
+    WAVEFORM_STYLE_BOTTOM, waveform_baseline, waveform_path,
+)
 from src.shared.assets.icon_manager import get_icon
 from src.shared.ui.horizontal_peak_meter import paint_horizontal_peak_bar
 from src.shared.ui.rotary_knob_style import paint_rotary_knob
@@ -119,6 +130,9 @@ TRACK_AREA_TOP = EDIT_SIZES["track_area_top"]  # 轨道内容区起始 y 坐标 
 
 # Clip visual settings
 CLIP_CORNER_RADIUS = 4.0
+CLIP_TITLE_HEIGHT = 17.0
+CLIP_MIN_HEIGHT_FOR_TITLE = 24.0
+MIN_CLIP_WIDTH_FOR_FULL_DETAILS = 90
 CLIP_BORDER_WIDTH = 1
 CLIP_SELECTED_BORDER_WIDTH = 1  # Thin accent outline for selected clips
 HANDLE_SIZE = 10  # Size of trim handles on clip edges
@@ -126,19 +140,12 @@ TRANSITION_ITEM_HEIGHT = 28
 TRANSITION_EDGE_HANDLE_WIDTH = 6
 
 # Colors from EDIT_COLORS (design tokens)
-CLIP_VIDEO_COLOR = QColor(get_color("video_clip"))  # #2D4B5F
-CLIP_AUDIO_COLOR = QColor(get_color("audio_clip"))  # #2D5F3A
 CLIP_TRANSITION_COLOR = QColor(get_color("transition"))  # #ba8b45
 
-# P4: Gradient colors for clip backgrounds (DaVinci Resolve professional NLE style)
-# Video: professional blue tones matching DaVinci Resolve clip colors
-CLIP_VIDEO_GRADIENT_START = QColor(0x45, 0x92, 0xB2)   # lively Resolve blue highlight
-CLIP_VIDEO_GRADIENT_END = QColor(0x36, 0x79, 0x99)      # clear blue body
-CLIP_VIDEO_LABEL_BAR = QColor(0x21, 0x4F, 0x68)         # dark blue information strip
-# Audio: professional green tones
-CLIP_AUDIO_GRADIENT_START = QColor(0x43, 0xB0, 0x70)   # lively green highlight
-CLIP_AUDIO_GRADIENT_END = QColor(0x32, 0x94, 0x5D)      # clear green body
-CLIP_AUDIO_LABEL_BAR = QColor(0x20, 0x5B, 0x39)         # dark green information strip
+# Video and audio clips share a default blue-cyan palette.
+CLIP_DEFAULT_GRADIENT_START = QColor("#336781")
+CLIP_DEFAULT_GRADIENT_END = QColor("#284E68")
+CLIP_DEFAULT_TITLE_COLOR = QColor("#21455C")
 # Transition: warm amber tones (unchanged)
 CLIP_TRANSITION_GRADIENT_START = QColor(140, 100, 50)  # Orange/brown start
 CLIP_TRANSITION_GRADIENT_END = QColor(180, 130, 70)    # Lighter end
@@ -153,10 +160,10 @@ CLIP_SOLID_GRADIENT_END = QColor(0x3A, 0x3A, 0x44)          # #3A3A44 slate end
 # P4: Waveform colors.  Resolve keeps the waveform brighter and more neutral
 # than the clip body; that contrast is especially important when a custom
 # label color is applied to an audio clip.
-WAVEFORM_COLOR = QColor(get_color("waveform_line"))
-WAVEFORM_COLOR_AUDIO_TRACK = QColor(0xB7, 0xDE, 0xCC)
-WAVEFORM_COLOR_STEREO_L = QColor(0xA9, 0xD8, 0xC2)
-WAVEFORM_COLOR_STEREO_R = QColor(0xD0, 0xEC, 0xDD)
+WAVEFORM_COLOR = QColor("#8CBAC9")
+WAVEFORM_COLOR_AUDIO_TRACK = QColor("#7AA9BA")
+WAVEFORM_COLOR_STEREO_L = QColor("#80B0C1")
+WAVEFORM_COLOR_STEREO_R = QColor("#A5C9D6")
 
 # Bright-but-controlled label colors. The palette is deliberately spread
 # across warm and cool hues so users can distinguish clips at a glance
@@ -272,10 +279,8 @@ SNAP_INDICATOR_LINE_WIDTH = 2
 SNAP_INDICATOR_TIMECODE_COLOR = QColor(255, 255, 255, 230)
 
 # P4: Track type colors (DaVinci Resolve badge colors — reddish-brown)
-VIDEO_TRACK_COLOR = QColor(get_color("track_header_badge_video"))  # #8B3A3A reddish-brown
 VIDEO_TRACK_LOCKED_COLOR = QColor(0x1A, 0x1A, 0x1D) # Darker when locked
 VIDEO_TRACK_HEADER_BG = QColor(get_color("track_header_bg"))  # #1D1E24 header bg
-AUDIO_TRACK_COLOR = QColor(get_color("track_header_badge_audio"))  # #8B3A3A reddish-brown
 AUDIO_TRACK_LOCKED_COLOR = QColor(0x1A, 0x1A, 0x1D) # Darker when locked
 AUDIO_TRACK_HEADER_BG = QColor(get_color("track_header_bg"))  # #1D1E24 header bg
 # P10.3: Subtitle track colors — teal/cyan to distinguish from V (red) and A (green)
@@ -567,6 +572,7 @@ class ClipItem(QGraphicsObject):
     _waveform_cache_shared_max_size: int = 256
     # User thumbnail display preference: "auto" (LOD-based), "none", "start_end", "filmstrip"
     _thumbnail_display_mode: str = "auto"
+    _waveform_style: str = WAVEFORM_STYLE_BOTTOM
     # Cached diagonal stripe tile for _draw_disabled_pattern (avoids per-paint recreation)
     _disabled_pattern_tile: QPixmap | None = None
 
@@ -629,8 +635,6 @@ class ClipItem(QGraphicsObject):
     fade_finished = pyqtSignal(str, str, float, float, float, float)  # clip_id, track_id, old in/out, new in/out
     # Phase 6.1: Linked group hover signal (for group highlight sync)
     linked_group_hovered = pyqtSignal(str, str, bool)  # clip_id, linked_clip_id, is_hovered
-    # Phase 6.2: Track highlight request signal
-    track_highlight_requested = pyqtSignal(str, bool)  # track_id, is_highlighted
     # P9: Scene Cut Detection signal
     scene_cut_detect_requested = pyqtSignal(str, str, str)  # clip_id, track_id, asset_id
     # Audio clip transcription → automatically create timeline subtitles.
@@ -655,6 +659,8 @@ class ClipItem(QGraphicsObject):
     # P1-1：时间线包络编辑（clip_id, track_id, [(fraction, gain_db), ...]）
     # ——拖动期间只更新临时 overlay，松手发一次本信号提交单命令。
     envelope_edit_finished = pyqtSignal(str, str, list)
+    envelope_shift_finished = pyqtSignal(str, str, float)
+    envelope_drag_readout_changed = pyqtSignal(QPoint, str)
     # R08：速度点把手拖动（源窗口坐标；origin=按下时边界，preview/final=拖动）
     retime_point_dragged = pyqtSignal(str, str, int, int)
     retime_point_move_finished = pyqtSignal(str, str, int, int)
@@ -776,8 +782,14 @@ class ClipItem(QGraphicsObject):
         # 等比缩放已有 QPainterPath，不重建路径、不重提取峰值——音量拖动
         # 的视觉反馈成本仅为一次 update()。
         self._waveform_gain: float = 1.0
-        # P1-4 余项：片段音量包络节点（[(x_fraction, gain_db)]；None=无）。
+        # Clip-local envelope knots and the temporary drag projection.
         self._envelope_nodes: list[tuple[float, float]] = []
+        self._envelope_modes: tuple[str, ...] = ()
+        self._envelope_node_editing = False
+        self._envelope_whole_editing = True
+        self._envelope_added_node = False
+        self._envelope_shift_db = 0.0
+        self._envelope_start_db = 0.0
         # P1-1：时间线包络编辑态（独立编辑模式：节点选择/拖动/Alt 增删）。
         self._envelope_selected: int | None = None      # 选中节点下标
         self._envelope_drag_nodes: list[tuple[float, float]] | None = None
@@ -794,6 +806,9 @@ class ClipItem(QGraphicsObject):
         # Waveform path cache (参考 kdenlive: avoid per-frame redraw)
         self._waveform_path_cache: Optional[QPainterPath] = None  # Cached waveform path
         self._waveform_path_cache_key: Optional[str] = None  # Cache key (based on source range + display width)
+        self._enveloped_waveform_key: tuple[tuple[tuple[float, float], ...], tuple[str, ...]] | None = None
+        self._enveloped_waveform_paths: dict[tuple[int, float, float], QPainterPath] = {}
+        self._waveform_peak_coordinates: dict[int, tuple[QPainterPath, np.ndarray]] = {}
         self._waveform_show_channels: bool = bool(waveform_show_channels)
 
         # Visibility culling state (参考 kdenlive: hideClipViews)
@@ -984,7 +999,7 @@ class ClipItem(QGraphicsObject):
     def set_waveform_gain(self, gain: float) -> None:
         """Set the track-volume driven waveform display scaling.
 
-        纯视觉更新：波形 path 缓存保持有效，paint 时围绕中线等比缩放。
+        纯视觉更新：波形 path 缓存保持有效，paint 时围绕当前基线缩放。
         """
         clamped = max(0.0, min(2.0, float(gain)))
         if abs(clamped - self._waveform_gain) < 1e-4:
@@ -992,73 +1007,69 @@ class ClipItem(QGraphicsObject):
         self._waveform_gain = clamped
         self.update()
 
-    def set_volume_envelope(self, nodes) -> None:
-        """P1-4 余项：装载片段音量包络（模型节点 → 视图折线）。
-
-        ``nodes``: ``[(x_fraction 0..1, gain_db), ...]`` 升序；None/空清除。
-        纯视觉状态——编辑提交走 Clip Editor 的命令，时间线随重建刷新。
-        """
-        normalized = []
-        for fraction, gain_db in nodes or ():
-            try:
-                normalized.append((max(0.0, min(1.0, float(fraction))),
-                                   max(-60.0, min(12.0, float(gain_db)))))
-            except (TypeError, ValueError):
-                continue
-        normalized.sort(key=lambda point: point[0])
-        if normalized == self._envelope_nodes:
+    def set_volume_envelope(
+        self, nodes: list[tuple[float, float]] | None, modes: tuple[str, ...] = (),
+        *, node_editing: bool = False, whole_editing: bool = True,
+    ) -> None:
+        """Project ordered clip envelope nodes without creating default model nodes."""
+        normalized = list(nodes or ())
+        if any(left[0] > right[0] for left, right in zip(normalized, normalized[1:])):
+            order = sorted(range(len(normalized)), key=lambda i: normalized[i][0])
+            normalized = [normalized[i] for i in order]
+            modes = tuple(modes[i] if i < len(modes) else "linear" for i in order) if modes else ()
+        if (normalized, modes, node_editing, whole_editing) == (
+            self._envelope_nodes, self._envelope_modes, self._envelope_node_editing, self._envelope_whole_editing,
+        ):
             return
         self._envelope_nodes = normalized
+        self._envelope_modes = modes
+        self._envelope_whole_editing = whole_editing
+        if node_editing != self._envelope_node_editing:
+            self._envelope_node_editing = node_editing
+            self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsFocusable, node_editing)
+        self._envelope_selected = None
         self.update()
 
-    def _draw_volume_envelope(self, painter: QPainter, clip_rect: QRectF) -> None:
-        """在音频片段波形上画音量包络（0 dB 细线 + 节点圆点 + dB 标注）。
-
-        P1-1：拖动期间画临时 overlay（``_envelope_live_nodes``）。
-        """
+    def _draw_volume_envelope(
+        self, painter: QPainter, clip_rect: QRectF, background: QColor, *, show_nodes: bool = True,
+    ) -> None:
         nodes = self._envelope_live_nodes()
-        if not nodes:
+        geo = self._envelope_geometry()
+        if geo is None:
             return
+        modes = self._envelope_live_modes()
         painter.save()
-        top = clip_rect.top() + 6.0
-        bottom = clip_rect.bottom() - 4.0
-        height = max(8.0, bottom - top)
-        zero_y = top + height * 0.25  # 0 dB 基线（上方留出 headroom）
-        db_span = 36.0  # 可视范围：0 dB 线下方 −36 dB
-
-        def _y_for(db: float) -> float:
-            return zero_y + (max(0.0, -db) / db_span) * (bottom - zero_y)
-
-        # 0 dB 细线（计划 §4.2）。
-        painter.setPen(QPen(QColor(255, 255, 255, 46), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(QPointF(clip_rect.left(), zero_y),
-                         QPointF(clip_rect.right(), zero_y))
-        # 折线（首尾节点外的区间沿用边界增益，与求值器语义一致）。
-        points = []
-        for fraction, gain_db in nodes:
-            x = clip_rect.left() + fraction * clip_rect.width()
-            points.append((QPointF(x, _y_for(gain_db)), gain_db))
-        if len(points) == 1:
-            first = points[0]
-            points = [(QPointF(clip_rect.left(), first[0].y()), first[1]),
-                      (QPointF(clip_rect.right(), first[0].y()), first[1])]
-        else:
-            points.insert(0, (QPointF(clip_rect.left(), points[0][0].y()),
-                              points[0][1]))
-            points.append((QPointF(clip_rect.right(), points[-1][0].y()),
-                           points[-1][1]))
-        polyline = QPolygonF([point for point, _db in points])
-        pen = QPen(QColor(126, 214, 165), 1.6)
+        painter.setClipRect(clip_rect, Qt.ClipOperation.IntersectClip)
+        if nodes:
+            painter.setPen(QPen(QColor(255, 255, 255, 46), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(QPointF(0.0, geo["zero_y"]), QPointF(geo["width"], geo["zero_y"]))
+        path = envelope_path(nodes, modes, 0.0, 1.0, lambda t: t * geo["width"],
+                             lambda db: self._envelope_db_to_y(db, geo))
+        accent = envelope_accent(background)
+        pen = QPen(QColor(13, 16, 20, 165), 2.8)
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawPolyline(polyline)
+        painter.drawPath(path)
+        pen = QPen(accent, 1.5)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.drawPath(path)
+        if not self._envelope_node_editing or not show_nodes:
+            painter.restore()
+            return
+        points = [(QPointF(t * geo["width"], self._envelope_db_to_y(db, geo)), db)
+                  for t, db in nodes]
         # 节点圆点 + 选中片段时显示 dB 值（读数随选择，避免常态噪音）。
         painter.setPen(QPen(QColor(22, 30, 27), 1))
-        painter.setBrush(QBrush(QColor(126, 214, 165)))
-        label_pen = QPen(QColor(215, 245, 230))
-        for point, gain_db in points[1:-1]:
-            painter.drawEllipse(point, 2.6, 2.6)
+        node_fill = accent
+        selected_fill = accent.lighter(118)
+        label_pen = QPen(selected_fill)
+        for index, (point, gain_db) in enumerate(points):
+            selected = index == self._envelope_selected
+            painter.setBrush(selected_fill if selected else node_fill)
+            radius = 3.3 if selected else 2.6
+            painter.drawEllipse(point, radius, radius)
             if self._is_selected and clip_rect.width() >= 140:
                 painter.setPen(label_pen)
                 painter.setFont(QFont(UI_MONO_FONT_FAMILIES, 7))
@@ -1080,27 +1091,23 @@ class ClipItem(QGraphicsObject):
 
         ClipItem 本地坐标：``clip_rect = QRectF(0, 0, _width, _track_height)``。
         """
-        if self._width < 36.0 or self._track_height <= 12.0:
+        waveform = self._waveform_rect()
+        if self._width <= 1.0 or waveform.height() <= 1.0:
             return None
-        top, bottom = 6.0, self._track_height - 4.0
-        height = max(8.0, bottom - top)
-        zero_y = top + height * 0.25
-        return {"top": top, "bottom": bottom, "zero_y": zero_y,
-                "db_span": 36.0, "width": self._width}
+        top, bottom = waveform.top(), waveform.bottom()
+        pixels_per_db = waveform.height() / (ENVELOPE_MAX_DB - ENVELOPE_MIN_DB)
+        return {"top": top, "bottom": bottom, "zero_y": top + ENVELOPE_MAX_DB * pixels_per_db,
+                "pixels_per_db": pixels_per_db, "width": self._width}
 
     def _envelope_db_to_y(self, db: float, geo: dict) -> float:
-        return geo["zero_y"] + (max(0.0, -db) / geo["db_span"]) * (
-            geo["bottom"] - geo["zero_y"])
+        return geo["zero_y"] - db * geo["pixels_per_db"]
 
     def _envelope_y_to_db(self, y: float, geo: dict) -> float:
-        span = max(1.0, geo["bottom"] - geo["zero_y"])
-        below = max(0.0, (y - geo["zero_y"]) / span)
-        db = -below * geo["db_span"]
-        # 上方 headroom（0 dB 线以上）按同斜率外推（上限 +12 dB）。
-        if y < geo["zero_y"]:
-            above = min(1.0, (geo["zero_y"] - y) / span)
-            db = min(12.0, above * geo["db_span"] * 0.5)
-        return max(-60.0, min(12.0, db))
+        db = (geo["zero_y"] - y) / geo["pixels_per_db"]
+        return max(ENVELOPE_MIN_DB, min(ENVELOPE_MAX_DB, db))
+
+    def _envelope_db_at(self, fraction: float) -> float:
+        return envelope_db_at(self._envelope_nodes, self._envelope_modes, fraction)
 
     def _envelope_node_at(self, pos: QPointF) -> int | None:
         """Hit the closest node; equal distances retain the last original index.
@@ -1141,59 +1148,86 @@ class ClipItem(QGraphicsObject):
         return best
 
     def _envelope_editable(self) -> bool:
-        return (self._is_audio_track() and bool(self._envelope_nodes)
-                and not self._is_track_locked)
+        return not self._is_track_locked and self._width >= 36.0 and self._is_audio_track()
 
-    def _handle_envelope_press(self, event) -> bool:
-        """P1-1 · 包络按下路由（mousePressEvent 调用；返回 True=已处理）。
+    def _envelope_line_hit(self, pos: QPointF, geo: dict) -> bool:
+        fraction = pos.x() / geo["width"]
+        return abs(pos.y() - self._envelope_db_to_y(self._envelope_db_at(fraction), geo)) <= 4.0
 
-        Alt+节点=删除（单命令）；命中节点=选择并拖动；Alt+空白=插入
-        节点并立即拖动（临时 overlay）。锁轨/非音频/无节点返回 False
-        落回常规交互。
-        """
+    def _whole_envelope_hit(self, pos: QPointF, geo: dict) -> bool:
+        return (self._envelope_whole_editing and self._active_tool == EditTool.SELECT
+                and 15.0 < pos.x() < geo["width"] - 15.0
+                and geo["top"] <= pos.y() <= geo["bottom"]
+                and self._envelope_line_hit(pos, geo))
+
+    def _handle_envelope_press(self, event: Any) -> bool:
         if not self._envelope_editable():
             return False
-        pos = event.pos()
-        node_index = self._envelope_node_at(pos)
-        alt = bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
-        if node_index is not None and alt:
-            remaining = [point for index, point
-                         in enumerate(self._envelope_nodes)
-                         if index != node_index]
-            self._envelope_selected = None
-            self.envelope_edit_finished.emit(
-                self._clip_id, self._track_id, remaining)
-            event.accept()
-            return True
-        if node_index is not None:
-            self._begin_envelope_node_drag(node_index, event)
-            event.accept()
-            return True
         geo = self._envelope_geometry()
-        if alt and geo is not None:
-            fraction = max(0.0, min(1.0, pos.x() / geo["width"]))
-            db = round(self._envelope_y_to_db(pos.y(), geo), 3)
-            inserted = sorted(
-                self._envelope_nodes + [(fraction, db)],
-                key=lambda point: point[0])
-            self._envelope_nodes = inserted  # 临时 overlay
-            self._begin_envelope_node_drag(
-                inserted.index((fraction, db)), event)
+        if geo is None:
+            return False
+        pos = event.pos()
+        if not QRectF(0.0, geo["top"], geo["width"], geo["bottom"] - geo["top"]).contains(pos):
+            return False
+        fraction = pos.x() / geo["width"]
+        if not self._envelope_node_editing:
+            if event.modifiers() or not self._whole_envelope_hit(pos, geo):
+                return False
+            self.clip_clicked.emit(self._clip_id, self._track_id)
+            self._begin_envelope_drag(event, "envelope_shift", None, self._envelope_nodes)
             event.accept()
             return True
+
+        if event.modifiers():
+            return False
+        node_index = self._envelope_node_at(pos)
+        if node_index is not None:
+            self._begin_envelope_drag(event, "envelope_node", node_index, self._envelope_nodes)
+            event.accept()
+            return True
+        if self._envelope_line_hit(pos, geo):
+            inserted, index = self._insert_envelope_point(fraction)
+            self._begin_envelope_drag(event, "envelope_node", index, inserted)
+            self._envelope_added_node = True
+            event.accept()
+            return True
+        if self._envelope_selected is not None:
+            self._envelope_selected = None
+            self.update()
         return False
 
-    def _begin_envelope_node_drag(self, index: int, event) -> None:
-        """进入包络节点拖动（临时 overlay；松手一次提交）。"""
-        self._drag_mode = "envelope_node"
+    def _insert_envelope_point(self, fraction: float) -> tuple[list[tuple[float, float]], int]:
+        index = bisect_left(self._envelope_nodes, fraction, key=lambda node: node[0])
+        if index < len(self._envelope_nodes) and self._envelope_nodes[index][0] == fraction:
+            return self._envelope_nodes, index
+        point = (fraction, round(self._envelope_db_at(fraction), 3))
+        return self._envelope_nodes[:index] + [point] + self._envelope_nodes[index:], index
+
+    def _remove_envelope_point(self, index: int) -> None:
+        self._envelope_selected = None
+        self.envelope_edit_finished.emit(
+            self._clip_id, self._track_id, self._envelope_nodes[:index] + self._envelope_nodes[index + 1:],
+        )
+        self.update()
+
+    def _begin_envelope_drag(
+        self, event: Any, mode: str, index: int | None, nodes: list[tuple[float, float]],
+    ) -> None:
+        self._drag_mode = mode
         self._drag_pending = True
         self._is_dragging = False
         self._drag_start_pos = event.scenePos()
+        self._last_move_emit = None
+        self._copy_mode = False
         self._envelope_selected = index
-        self._envelope_drag_backup = list(self._envelope_nodes)
-        self._envelope_drag_nodes = list(self._envelope_nodes)
+        self._envelope_added_node = False
+        self._envelope_shift_db = 0.0
+        self._envelope_start_db = nodes[index][1] if index is not None else self._envelope_db_at(
+            event.pos().x() / max(1.0, self._width),
+        )
+        self._envelope_drag_nodes = list(nodes)
         self.interaction_started.emit(
-            self._clip_id, self._track_id, "envelope_node")
+            self._clip_id, self._track_id, mode)
         self.setFocus()
         self.update()
 
@@ -1218,37 +1252,48 @@ class ClipItem(QGraphicsObject):
         nodes[index] = (fraction, round(max(-60.0, min(12.0, db)), 3))
         self.update()
 
-    def _finish_envelope_node_drag(self) -> None:
-        """松手：一次提交（envelope_edit_finished → view 单命令）。"""
-        nodes = self._envelope_drag_nodes or self._envelope_nodes
-        self._envelope_drag_nodes = None
-        self._envelope_drag_backup = None
-        self._drag_mode = None
-        self._drag_pending = False
-        self._is_dragging = False
-        self.envelope_edit_finished.emit(
-            self._clip_id, self._track_id, list(nodes))
-        self.interaction_finished.emit(self._clip_id)
+    def _update_envelope_shift(self, delta_y: float) -> None:
+        geo = self._envelope_geometry()
+        if geo is None:
+            return
+        nodes = self._envelope_nodes or [(0.0, 0.0)]
+        low = min(db for _, db in nodes)
+        high = max(db for _, db in nodes)
+        delta = -delta_y / geo["pixels_per_db"]
+        delta = round(max(min(0.0, ENVELOPE_MIN_DB - low),
+                          min(max(0.0, ENVELOPE_MAX_DB - high), delta)), 3)
+        self._envelope_shift_db = delta
+        self._envelope_drag_nodes = [(t, db + delta) for t, db in nodes]
         self.update()
 
+    def _finish_envelope_drag(self) -> None:
+        nodes = self._envelope_live_nodes()
+        shift = self._envelope_shift_db
+        mode = self._drag_mode
+        self._cancel_envelope_drag()
+        if mode == "envelope_shift":
+            if shift:
+                self.envelope_shift_finished.emit(self._clip_id, self._track_id, shift)
+        elif nodes != self._envelope_nodes:
+            self.envelope_edit_finished.emit(self._clip_id, self._track_id, nodes)
+
     def _cancel_envelope_drag(self) -> None:
-        """Esc/失焦：恢复拖动前折线（无命令）。"""
-        if self._envelope_drag_nodes is not None:
-            self._envelope_nodes = list(
-                getattr(self, "_envelope_drag_backup", None)
-                or self._envelope_nodes)
-            self._envelope_drag_nodes = None
-            self._envelope_drag_backup = None
+        self.envelope_drag_readout_changed.emit(QPoint(), "")
+        self._envelope_drag_nodes = None
+        self._envelope_added_node = False
+        self._envelope_shift_db = 0.0
         self._drag_mode = None
         self._drag_pending = False
         self._is_dragging = False
         self.update()
 
     def _envelope_live_nodes(self) -> list[tuple[float, float]]:
-        """绘制/提交用的当前折线（拖动中为临时表）。"""
-        return (self._envelope_drag_nodes
-                if self._envelope_drag_nodes is not None
-                else self._envelope_nodes)
+        return self._envelope_drag_nodes if self._envelope_drag_nodes is not None else self._envelope_nodes
+
+    def _envelope_live_modes(self) -> tuple[str, ...]:
+        if self._envelope_drag_nodes is not None and self._drag_mode == "envelope_node":
+            return (ENVELOPE_BEZIER,) * len(self._envelope_drag_nodes)
+        return self._envelope_modes
 
     def set_drag_cache_mode(self, dragging: bool) -> None:
         """Disable the device cache while a clip is being repositioned.
@@ -1787,8 +1832,8 @@ class ClipItem(QGraphicsObject):
         # LOD: Level of detail based on clip width (DaVinci-like adaptive rendering)
         clip_width = self._width
         is_narrow = clip_width < 36      # Very narrow: color block only
-        is_medium = clip_width < 90      # Medium: color + short name
-        is_wide = clip_width >= 90       # Wide: full details with thumbnails
+        is_wide = clip_width >= MIN_CLIP_WIDTH_FOR_FULL_DETAILS
+        is_medium = not is_wide
 
         # P5-1: Thumbnail mode — use user preference if set, otherwise auto LOD
         if self._thumbnail_display_mode == "auto":
@@ -1837,9 +1882,6 @@ class ClipItem(QGraphicsObject):
         label_palette = self._display_label_palette()
         if label_palette is not None:
             gradient_start, gradient_end = label_palette[0], label_palette[1]
-        elif is_audio:
-            gradient_start = CLIP_AUDIO_GRADIENT_START
-            gradient_end = CLIP_AUDIO_GRADIENT_END
         elif is_adjustment:
             gradient_start = CLIP_ADJUSTMENT_GRADIENT_START
             gradient_end = CLIP_ADJUSTMENT_GRADIENT_END
@@ -1856,8 +1898,8 @@ class ClipItem(QGraphicsObject):
             gradient_start = CLIP_TRANSITION_GRADIENT_START
             gradient_end = CLIP_TRANSITION_GRADIENT_END
         else:
-            gradient_start = CLIP_VIDEO_GRADIENT_START
-            gradient_end = CLIP_VIDEO_GRADIENT_END
+            gradient_start = CLIP_DEFAULT_GRADIENT_START
+            gradient_end = CLIP_DEFAULT_GRADIENT_END
 
         border_color = CLIP_SELECTED_BORDER
         border_width = CLIP_SELECTED_BORDER_WIDTH
@@ -1927,25 +1969,26 @@ class ClipItem(QGraphicsObject):
             self._draw_drag_frame_label(painter, clip_rect)
         painter.setClipPath(clip_path, Qt.ClipOperation.IntersectClip)
 
-        # During a move drag, paint only a lightweight card. Thumbnails,
-        # waveforms, badges and fade handles are expensive and do not help the
-        # user place a clip. The normal detailed path resumes after release.
-        if is_move_drag:
-            self._paint_move_drag_preview(painter, clip_rect, is_locked, is_audio)
-            painter.restore()
-            return
-
-        # LOD: Skip all details for very narrow clips
+        # Keep the envelope readable even when there is no room for a waveform.
         if is_narrow:
-            # Just draw color block with selection border (already done above)
             if is_disabled or is_locked:
                 painter.setOpacity(1.0)
                 self._draw_disabled_pattern(painter, clip_rect)
+            if is_audio:
+                self._draw_volume_envelope(painter, clip_rect, gradient_start, show_nodes=False)
             painter.restore()
             return
 
         # Skip details if hide_details is True (参考 kdenlive: hideClipViews)
         hide_details = getattr(self, '_hide_details', False)
+        show_retime = self._shows_retime_strip()
+        body_rect = self._clip_body_rect(clip_rect)
+
+        # During a move drag, skip image and waveform rendering.
+        if is_move_drag:
+            self._draw_clip_title(painter, clip_rect, gradient_end.darker(125), show_link=False)
+            painter.restore()
+            return
 
         # Draw video thumbnails for video/image clips (P5-1: LOD mode)
         # P5: Use thumbnail_mode instead of simple is_wide check.
@@ -1961,7 +2004,7 @@ class ClipItem(QGraphicsObject):
             painter.save()
             if not self._is_track_output_enabled:
                 painter.setOpacity(painter.opacity() * 0.28)
-            self._draw_video_thumbnails(painter, clip_rect, thumbnail_mode)
+            self._draw_video_thumbnails(painter, body_rect, thumbnail_mode)
             painter.restore()
 
         # Keep the source thumbnail, but tint it very lightly so a Comp Clip
@@ -1970,7 +2013,7 @@ class ClipItem(QGraphicsObject):
         if is_composite_clip and not is_audio and not hide_details:
             painter.setBrush(QBrush(QColor(93, 74, 150, 34)))
             painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.drawRect(clip_rect)
+            painter.drawRect(body_rect)
 
         # Draw diagonal stripe pattern for disabled/muted
         if is_disabled or is_locked:
@@ -1988,20 +2031,7 @@ class ClipItem(QGraphicsObject):
         # Draw waveform for every readable audio clip.  ``is_medium`` means
         # width < 90px, so using it here accidentally suppressed waveforms on
         # the wide clips where users most expect to see them.
-        if is_audio and not hide_details and not is_narrow and getattr(self, "_waveforms_visible", True):
-            # Give the envelope a quiet, translucent analysis bed. This is
-            # independent of the label hue so the waveform remains readable
-            # on every custom clip color.
-            waveform_panel = QRectF(
-                3.0,
-                4.0,
-                max(0.0, clip_width - 6.0),
-                max(0.0, self._track_height - 26.0),
-            )
-            if waveform_panel.width() > 1.0 and waveform_panel.height() > 1.0:
-                painter.setBrush(QBrush(QColor(5, 10, 13, 28)))
-                painter.setPen(QPen(Qt.PenStyle.NoPen))
-                painter.drawRoundedRect(waveform_panel, 2.0, 2.0)
+        if is_audio and not hide_details and getattr(self, "_waveforms_visible", True):
             # Own the value across nested Qt/cache paints; option's rect is a
             # borrowed SIP wrapper whose owner can be recycled by Qt.
             painter.save()
@@ -2011,70 +2041,18 @@ class ClipItem(QGraphicsObject):
             self._draw_waveform(painter, QRectF(style.exposedRect))
             painter.restore()
 
-        # Draw asset name with text protection bar (DaVinci-like label bar)
-        if not hide_details or is_wide:
-            # P4: Use media-type-specific label bar color for professional look
-            # When a label color is set, derive the bar from it
+        title_rect = None
+        if not show_retime and (not hide_details or is_wide):
             if label_palette is not None:
                 label_bar_bg = label_palette[2]
-            elif is_audio:
-                label_bar_bg = CLIP_AUDIO_LABEL_BAR
             elif is_transition:
                 label_bar_bg = QColor(0x1E, 0x2A, 0x1E)  # Dark warm for transition
             elif is_composite_clip:
                 label_bar_bg = CLIP_COMP_LABEL_BAR
             else:
-                label_bar_bg = CLIP_VIDEO_LABEL_BAR
+                label_bar_bg = CLIP_DEFAULT_TITLE_COLOR
 
-            if not self._is_track_output_enabled:
-                label_bar_bg = QColor("#3B3E43")
-
-            # Both media types use a shared bottom information strip.  This
-            # gives the waveform the same clear main area as video thumbnails
-            # and makes linked A/V clips read as one coherent unit.
-            label_bar_rect = QRectF(0.5, clip_rect.height() - 19, clip_width - 1.0, 18)
-            label_bar_color = QColor(label_bar_bg)
-            label_bar_color.setAlpha(212)
-            painter.setBrush(QBrush(label_bar_color))
-            painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.drawRoundedRect(label_bar_rect, 2, 2)
-
-            name_font = QFont(UI_FONT_FAMILIES, 8)
-            name_font.setWeight(QFont.Weight.DemiBold)
-            painter.setFont(name_font)
-            name_color = TEXT_COLOR if not is_locked else TEXT_MUTED_COLOR
-            painter.setPen(QPen(name_color))
-
-            # Clip name area with elide (leave space for linked indicator)
-            text_offset = 6
-            if self._linked_clip_id:
-                text_offset = 22
-
-            name_rect = QRectF(
-                text_offset,
-                clip_rect.height() - 17,
-                clip_width - text_offset - 6,
-                13,
-            )
-            # Use font metrics to elide text that doesn't fit
-            from PyQt6.QtGui import QFontMetrics
-            metrics = QFontMetrics(name_font)
-            elided = metrics.elidedText(self._asset_name, Qt.TextElideMode.ElideRight, int(name_rect.width()))
-            painter.drawText(name_rect, Qt.TextFlag.TextSingleLine, elided)
-
-            # Do not stack source in/out text inside this compact strip.  It
-            # competes with the clip name and makes dense edits feel noisy.
-
-        # Draw linked clip indicator in the label strip, immediately before
-        # the clip name.  This follows the Resolve-style timeline treatment;
-        # the link state belongs with the clip identity rather than floating
-        # in the top-right over the picture/waveform.
-        if self._linked_clip_id and not is_narrow:
-            self._draw_linked_indicator(painter)
-
-        # Draw lock indicator in top-right if locked
-        if is_locked and is_medium:
-            self._draw_locked_indicator(painter)
+            title_rect = self._draw_clip_title(painter, clip_rect, label_bar_bg)
 
         # Calculate dynamic handle size based on zoom level
         dynamic_handle_size = max(6, min(15, int(10 * self._pixels_per_frame / 0.5)))
@@ -2094,28 +2072,28 @@ class ClipItem(QGraphicsObject):
             and (not hide_details or self._is_selected)
             and clip_width >= MIN_CLIP_WIDTH_FOR_FADE_HANDLES
         ):
-            self._draw_fade_handles(painter, clip_rect)
+            self._draw_fade_handles(painter, clip_rect, title_rect)
 
-        # Phase 2: Draw badge and indicators (only for wide clips)
+        # Status badges sit in the body under the title.
+        painter.save()
+        painter.setClipRect(body_rect, Qt.ClipOperation.IntersectClip)
+        painter.translate(0.0, body_rect.top())
+        badge_rect = QRectF(0.0, 0.0, clip_width, body_rect.height())
+        if is_locked and is_medium and badge_rect.height() >= 22.0:
+            self._draw_locked_indicator(painter)
         if not is_locked and not hide_details and is_wide:
-            # Phase 2.3: Draw clip type icon
             if self._media_type not in {"video", "audio", "image"}:
-                self._draw_clip_type_icon(painter, clip_rect)
-
-            # Phase 2.1: Draw effects badge
-            self._draw_effects_badge(painter, clip_rect)
-
-            # Phase 2.2: Draw speed indicator
-            self._draw_speed_indicator(painter, clip_rect)
-
-            # A2: Draw freeze badge ("FZ") when the clip is frozen
-            self._draw_freeze_badge(painter, clip_rect)
-
-            # A1: Draw blend-mode abbreviation badge when non-normal
-            self._draw_blend_badge(painter, clip_rect)
-
-            # Phase 2.4: Draw opacity indicator
-            self._draw_opacity_indicator(painter, clip_rect)
+                self._draw_clip_type_icon(painter, badge_rect)
+            self._draw_effects_badge(painter, badge_rect)
+            self._draw_speed_indicator(painter, badge_rect)
+            self._draw_freeze_badge(painter, badge_rect)
+            self._draw_blend_badge(painter, badge_rect)
+            self._draw_opacity_indicator(painter, badge_rect)
+        if is_composite_clip and clip_width >= MIN_CLIP_WIDTH_FOR_NAME and not hide_details:
+            self._draw_comp_badge(painter, badge_rect)
+        if (is_adjustment or is_solid or is_motion_graphic) and is_medium and not hide_details:
+            self._draw_generator_badge(painter, badge_rect)
+        painter.restore()
 
         # W05：彩色旗标徽章——与 label_color 配色、素材 flag 独立；
         # 不受 is_wide/hide_details 门控（窄片段也要可见），锁定轨仍显示。
@@ -2125,57 +2103,69 @@ class ClipItem(QGraphicsObject):
         # of opening a modal editor.  The strip remains a UI-only overlay;
         # every actual timing edit is emitted back to TimelineView as a
         # command, preserving undo/redo and preview/export parity.
-        if self._retime_controls_visible and not is_locked and is_wide:
+        if show_retime:
             self._draw_retime_controls(painter, clip_rect)
-
-        # Phase 6: Draw COMP badge (for comp clips or clips with composite_id)
-        if is_composite_clip and clip_width >= MIN_CLIP_WIDTH_FOR_NAME and not hide_details:
-            self._draw_comp_badge(painter, clip_rect)
-
-        # Generator badge (Adjustment / Solid Color) — distinct from COMP.
-        if (is_adjustment or is_solid or is_motion_graphic) and is_medium and not hide_details:
-            self._draw_generator_badge(painter, clip_rect)
 
         # Phase 6: Draw cache status line at bottom of clip
         if self._comp_cache_status != "none" and self._comp_cache_status:
             self._draw_comp_cache_status(painter, clip_rect)
 
-        # P1-4 余项：片段音量包络叠加在音频波形上（模型驱动、只读可视化；
-        # 编辑入口在 Clip Editor 画布，提交命令后此处随重建刷新）。
-        if is_audio and self._envelope_nodes and not is_narrow:
-            self._draw_volume_envelope(painter, clip_rect)
+        # A clip with no authored nodes still has a unity envelope.
+        if is_audio:
+            self._draw_volume_envelope(painter, clip_rect, gradient_start)
 
         # Restore painter state (matches save() at start of paint())
         painter.restore()
 
-    def _paint_move_drag_preview(
+    def _shows_retime_strip(self) -> bool:
+        return (self._retime_controls_visible and not self._is_track_locked
+                and self._width >= MIN_CLIP_WIDTH_FOR_FULL_DETAILS)
+
+    def _clip_body_rect(self, clip_rect: QRectF) -> QRectF:
+        if self._shows_retime_strip():
+            body = clip_rect.adjusted(0.0, 26.0, 0.0, -19.0)
+        else:
+            title_height = CLIP_TITLE_HEIGHT if clip_rect.height() >= CLIP_MIN_HEIGHT_FOR_TITLE else 0.0
+            body = clip_rect.adjusted(0.0, title_height, 0.0, 0.0)
+        body.setHeight(max(0.0, body.height()))
+        return body
+
+    def _waveform_rect(self) -> QRectF:
+        body = self._clip_body_rect(QRectF(0.0, 0.0, self._width, self._track_height))
+        padding = 3.0 if self._waveform_style == WAVEFORM_STYLE_BOTTOM else max(3.0, body.height() * 0.18)
+        padding = min(body.height() / 2.0, padding)
+        return body.adjusted(0.0, padding, 0.0, -padding)
+
+    def _draw_clip_title(
         self,
         painter: QPainter,
         clip_rect: QRectF,
-        is_locked: bool,
-        is_audio: bool,
-    ) -> None:
-        """Paint the minimal visual needed while a clip is being moved."""
-        label_rect = QRectF(0.5, clip_rect.height() - 19, self._width - 1.0, 18)
-        label_color = QColor(
-            (CLIP_AUDIO_LABEL_BAR if is_audio else CLIP_VIDEO_LABEL_BAR)
-            if self._is_track_output_enabled else "#3B3E43"
+        color: QColor,
+        *,
+        show_link: bool = True,
+    ) -> QRectF | None:
+        """Draw the title strip and return its painted bounds."""
+        if clip_rect.height() < CLIP_MIN_HEIGHT_FOR_TITLE:
+            return None
+        title = QRectF(1.0, 1.0, clip_rect.width() - 2.0, CLIP_TITLE_HEIGHT - 1.0)
+        painter.fillRect(title, color if self._is_track_output_enabled else QColor("#3B3E43"))
+        left = 18 if self._flag_color else 8
+        if show_link and self._linked_clip_id and clip_rect.width() >= left + 36:
+            self._draw_linked_indicator(painter, QRect(left, 3, 11, 11))
+            left += 15
+        name_rect = title.adjusted(left - 1.0, 0.0, -8.0, 0.0)
+        if name_rect.width() <= 0:
+            return title
+        font = QFont(UI_FONT_FAMILIES)
+        font.setPixelSize(10)
+        font.setWeight(QFont.Weight.Light)
+        painter.setFont(font)
+        painter.setPen(QPen(TEXT_MUTED_COLOR if self._is_track_locked else QColor("#D6E1E7")))
+        name = painter.fontMetrics().elidedText(
+            self._asset_name, Qt.TextElideMode.ElideRight, int(name_rect.width()),
         )
-        label_color.setAlpha(220)
-        painter.setBrush(QBrush(label_color))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawRect(label_rect)
-
-        label = self._asset_name
-        if len(label) > 36:
-            label = f"{label[:33]}..."
-        painter.setFont(QFont(UI_FONT_FAMILIES, 8))
-        painter.setPen(QPen(TEXT_MUTED_COLOR if is_locked else TEXT_COLOR))
-        painter.drawText(
-            QRectF(6.0, clip_rect.height() - 17.0, max(1.0, self._width - 12.0), 13.0),
-            Qt.TextFlag.TextSingleLine,
-            label,
-        )
+        painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextSingleLine, name)
+        return title
 
     def _apply_track_area_clip(self, painter: QPainter) -> None:
         """Clip scrolling track content to its V/A area so split scrolling feels continuous."""
@@ -2214,7 +2204,9 @@ class ClipItem(QGraphicsObject):
         ends = self._preview_overlap_fade_ends
         return end not in (self._overlap_fade_ends if ends is None else ends)
 
-    def _draw_fade_handles(self, painter: QPainter, clip_rect: QRectF) -> None:
+    def _draw_fade_handles(
+        self, painter: QPainter, clip_rect: QRectF, title_rect: QRectF | None,
+    ) -> None:
         """Paint the fade ranges and reveal their controls on hover or drag."""
         if self._width < MIN_CLIP_WIDTH_FOR_FADE_HANDLES:
             return
@@ -2227,9 +2219,9 @@ class ClipItem(QGraphicsObject):
         in_visible = self._fade_end_is_visible("in")
         out_visible = self._fade_end_is_visible("out")
         if in_visible and fade_in_duration > 0:
-            self._draw_fade_overlay(painter, clip_rect, self._fade_visual_width(fade_in_duration), "in")
+            self._draw_fade_overlay(painter, clip_rect, self._fade_visual_width(fade_in_duration), "in", title_rect)
         if out_visible and fade_out_duration > 0:
-            self._draw_fade_overlay(painter, clip_rect, self._fade_visual_width(fade_out_duration), "out")
+            self._draw_fade_overlay(painter, clip_rect, self._fade_visual_width(fade_out_duration), "out", title_rect)
 
         show_fade_in_handle = in_visible and (
             self._pointer_inside or self._hover_fade_handle == "fade_in" or self._drag_mode == "fade_in"
@@ -2330,15 +2322,17 @@ class ClipItem(QGraphicsObject):
         return min(candidates, key=lambda candidate: (candidate[0], candidate[1] != preferred))[1]
 
     def _fade_bands(self, rect: QRectF) -> tuple[QRectF, ...]:
-        top = rect.top() + 1.0
-        bottom = max(top + 1.0, rect.bottom() - 19.0)
-        if self._stereo_fade_display and rect.height() > 36:
-            split = rect.top() + 6.0 + (rect.height() - 28.0) / 2.0
+        band = (self._waveform_rect() if self._is_audio_track()
+                else self._clip_body_rect(rect).adjusted(0.0, 0.0, 0.0, -2.0))
+        if band.height() <= 1.0:
+            return ()
+        if self._stereo_fade_display:
+            split = band.center().y()
             return (
-                QRectF(rect.left(), top, rect.width(), split - top),
-                QRectF(rect.left(), split, rect.width(), bottom - split),
+                QRectF(band.left(), band.top(), band.width(), split - band.top()),
+                QRectF(band.left(), split, band.width(), band.bottom() - split),
             )
-        return (QRectF(rect.left(), top, rect.width(), bottom - top),)
+        return (band,)
 
     def _fade_curve(self, end: str) -> str:
         if self._fade_curve_drag_end == end and self._fade_curve_preview is not None:
@@ -2371,15 +2365,31 @@ class ClipItem(QGraphicsObject):
                     return end
         return None
 
-    def _draw_fade_overlay(self, painter: QPainter, rect: QRectF, width: float, end: str) -> None:
+    def _draw_fade_overlay(
+        self, painter: QPainter, rect: QRectF, width: float, end: str, title_rect: QRectF | None,
+    ) -> None:
+        if width <= 0.0:
+            return
         curve = self._fade_curve(end)
         direction = 1 if end == "in" else -1
         edge = rect.left() if end == "in" else rect.right()
+        span = direction * width
+
+        def gain_at(progress: float) -> float:
+            return fade_curve_factor(curve, progress)
+
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if title_rect is not None:
+            fade_rect = QRectF(min(edge, edge + span), title_rect.top(), width, title_rect.height())
+            gradient = QLinearGradient(edge, 0.0, edge + span, 0.0)
+            for step in range(9):
+                progress = step / 8.0
+                gradient.setColorAt(progress, QColor(5, 8, 13, round(112 * (1.0 - gain_at(progress)))))
+            # Shade the painted title, including glyphs, within this fade only.
+            painter.fillRect(title_rect.intersected(fade_rect), gradient)
         for band in self._fade_bands(rect):
-            paint_fade_ramp(painter, band, edge, direction * width,
-                            lambda progress: fade_curve_factor(curve, progress))
+            paint_fade_ramp(painter, band, edge, span, gain_at, shade=QColor(9, 12, 18, 166))
 
         drag_end = self._fade_curve_drag_end
         if self._pointer_inside or drag_end == end:
@@ -2497,13 +2507,12 @@ class ClipItem(QGraphicsObject):
             clip_rect: Clip bounding rectangle
             thumbnail_mode: LOD mode from _calculate_thumbnail_mode()
         """
-        if not self._asset_id or not self._asset_path:
+        if not self._asset_id or not self._asset_path or clip_rect.height() <= 4.0:
             return
 
-        # P5-1: Minimum width check based on LOD mode
-        if thumbnail_mode == THUMBNAIL_MODE_SINGLE and self._width < THUMBNAIL_WIDTH_NONE:
-            return
-        elif thumbnail_mode != THUMBNAIL_MODE_SINGLE and self._width < MIN_CLIP_WIDTH_FOR_BADGES:
+        minimum_width = (THUMBNAIL_WIDTH_NONE if thumbnail_mode in
+                         (THUMBNAIL_MODE_SINGLE, THUMBNAIL_MODE_START_END) else MIN_CLIP_WIDTH_FOR_BADGES)
+        if self._width < minimum_width:
             return
 
         # Import thumbnail provider components
@@ -2670,7 +2679,7 @@ class ClipItem(QGraphicsObject):
             pixmap: Cached QPixmap to draw
             thumbnail_mode: Current LOD mode
         """
-        inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
+        inner_rect = clip_rect.adjusted(2.0, 2.0, -2.0, -2.0)
         painter.save()
         painter.setClipRect(inner_rect, Qt.ClipOperation.IntersectClip)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
@@ -2693,7 +2702,7 @@ class ClipItem(QGraphicsObject):
 
         P5-1: Supports multiple rendering modes:
         - filmstrip: All frames evenly spaced across clip width
-        - start_end: Only first and last frame, stretched to half-width each
+        - start_end: First and last frames at the edges in explicit mode
         - single: Only first frame, stretched to full clip width
 
         Gemini suggestion: Use KeepAspectRatioByExpanding to prevent stretching,
@@ -2706,7 +2715,7 @@ class ClipItem(QGraphicsObject):
             thumbnail_mode: LOD mode from _calculate_thumbnail_mode()
         """
         # Inner clip area (leave margin for borders)
-        inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
+        inner_rect = clip_rect.adjusted(2.0, 2.0, -2.0, -2.0)
 
         painter.save()
         # Preserve the outer V/A crop when this row scrolls beyond its panel.
@@ -2754,47 +2763,13 @@ class ClipItem(QGraphicsObject):
                 )
 
         elif thumbnail_mode == THUMBNAIL_MODE_START_END:
-            # Start/end mode: first and last frame, each taking half width
-            valid_frames = [
-                (i, (frame_idx, pixmap))
-                for i, (frame_idx, pixmap) in enumerate(valid_frames_for_display)
-            ]
-            if not valid_frames:
+            if not valid_frames_for_display:
                 painter.restore()
                 return
 
-            half_width = inner_rect.width() / 2
-            left_rect = QRectF(
-                inner_rect.left(), inner_rect.top(),
-                half_width, inner_rect.height()
-            )
-            right_rect = QRectF(
-                inner_rect.left() + half_width, inner_rect.top(),
-                half_width, inner_rect.height()
-            )
-
-            # Draw first frame on left half
-            first_pixmap = valid_frames[0][1][1]
-            self._draw_single_thumbnail_at(
-                painter, first_pixmap, left_rect, inner_rect
-            )
-
-            # Draw last frame on right half
-            if len(valid_frames) > 1:
-                last_pixmap = valid_frames[-1][1][1]
-            else:
-                last_pixmap = first_pixmap  # Fallback if only one frame
-            self._draw_single_thumbnail_at(
-                painter, last_pixmap, right_rect, inner_rect
-            )
-
-            # P5-1: Draw subtle divider line between start/end thumbnails
-            divider_x = inner_rect.left() + half_width
-            painter.setPen(QPen(QColor(0, 0, 0, 60), 1))
-            painter.drawLine(
-                int(divider_x), int(inner_rect.top()),
-                int(divider_x), int(inner_rect.bottom())
-            )
+            left_rect, right_rect = self._thumbnail_end_cells(inner_rect)
+            self._draw_single_thumbnail_at(painter, valid_frames_for_display[0][1], left_rect, inner_rect)
+            self._draw_single_thumbnail_at(painter, valid_frames_for_display[-1][1], right_rect, inner_rect)
 
         else:
             # Filmstrip mode: keep each decoded frame at its source-time
@@ -2850,6 +2825,15 @@ class ClipItem(QGraphicsObject):
 
         painter.restore()
 
+    def _thumbnail_end_cells(self, rect: QRectF) -> tuple[QRectF, QRectF]:
+        width = rect.width() / 2
+        if self._thumbnail_display_mode == THUMBNAIL_MODE_START_END:
+            width = min(width, rect.height() * FILMSTRIP_CELL_ASPECT)
+        return (
+            QRectF(rect.left(), rect.top(), width, rect.height()),
+            QRectF(rect.right() - width, rect.top(), width, rect.height()),
+        )
+
     def _draw_single_thumbnail_at(
         self,
         painter: QPainter,
@@ -2902,7 +2886,10 @@ class ClipItem(QGraphicsObject):
 
         target_rect = QRectF(scaled_x, scaled_y, scaled_width, scaled_height)
         source_rect = QRectF(0, 0, pixmap.width(), pixmap.height())
+        painter.save()
+        painter.setClipRect(target_cell.intersected(clip_rect), Qt.ClipOperation.IntersectClip)
         painter.drawPixmap(target_rect, pixmap, source_rect)
+        painter.restore()
 
     def _draw_loading_thumbnails(self, painter: QPainter, clip_rect: QRectF) -> None:
         """
@@ -2910,7 +2897,7 @@ class ClipItem(QGraphicsObject):
 
         参考 Kdenlive: loading state indicator
         """
-        inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
+        inner_rect = clip_rect.adjusted(2.0, 2.0, -2.0, -2.0)
 
         painter.save()
         painter.setClipRect(inner_rect, Qt.ClipOperation.IntersectClip)
@@ -2954,12 +2941,17 @@ class ClipItem(QGraphicsObject):
             clip_rect: Clip bounding rectangle
             state: Either "loading" or "failed"
         """
-        inner_rect = QRectF(2, 2, clip_rect.width() - 4, clip_rect.height() - 4)
+        inner_rect = clip_rect.adjusted(2.0, 2.0, -2.0, -2.0)
 
         painter.save()
         painter.setClipRect(inner_rect, Qt.ClipOperation.IntersectClip)
 
         if state == "loading":
+            if self._thumbnail_display_mode == THUMBNAIL_MODE_START_END:
+                for cell in self._thumbnail_end_cells(inner_rect):
+                    painter.fillRect(cell, QColor(83, 111, 125, 52))
+                painter.restore()
+                return
             # Use quiet filmstrip cells instead of a large three-dot loader.
             # They preserve the visual rhythm of a populated timeline while
             # thumbnail decoding completes, without competing with the clip
@@ -3076,12 +3068,10 @@ class ClipItem(QGraphicsObject):
         - Proper sample offset calculation via _waveform_start_offset_samples()
         - When clip is trimmed, only the visible audio portion is shown
         """
-        # Waveform area bounds
-        # Keep the waveform visually dominant; the shared bottom information
-        # strip starts at y=track_height-19 and must not cover its peaks.
-        waveform_top = 6
-        waveform_bottom = self._track_height - 22
-        waveform_height = waveform_bottom - waveform_top
+        waveform_rect = self._waveform_rect()
+        waveform_top = waveform_rect.top()
+        waveform_height = waveform_rect.height()
+        y_center = waveform_rect.center().y()
         if waveform_height <= 1:
             return
 
@@ -3141,7 +3131,9 @@ class ClipItem(QGraphicsObject):
         sample_offset = int(visible_source_start * (self._fps if self._fps > 0 else 30.0))
         cache_key = (
             f"{visible_source_start}_{visible_source_duration}_{x_start:.1f}_{display_width:.1f}"
-            f"_h_{self._track_height}_fps_{self._fps:.4f}_stereo_{is_stereo}_soff_{sample_offset}"
+            f"_y_{waveform_top:.2f}_h_{waveform_height:.2f}"
+            f"_style_{self._waveform_style}"
+            f"_fps_{self._fps:.4f}_stereo_{is_stereo}_soff_{sample_offset}"
             f"_fx_{self._effect_waveform_fp or ''}"
         )
 
@@ -3155,7 +3147,6 @@ class ClipItem(QGraphicsObject):
                     x_start, x_end, waveform_top, waveform_height
                 )
             else:
-                y_center = self._track_height / 2
                 self._draw_cached_waveform(
                     painter, cached_paths[0] if isinstance(cached_paths, list) else cached_paths,
                     x_start, x_end, y_center, waveform_height
@@ -3171,7 +3162,6 @@ class ClipItem(QGraphicsObject):
                     x_start, x_end, waveform_top, waveform_height
                 )
             else:
-                y_center = self._track_height / 2
                 self._draw_cached_waveform(
                     painter, self._waveform_path_cache[0] if isinstance(self._waveform_path_cache, list) else self._waveform_path_cache,
                     x_start, x_end, y_center, waveform_height
@@ -3196,7 +3186,6 @@ class ClipItem(QGraphicsObject):
                     )
             else:
                 # Mono: single path
-                y_center = self._track_height / 2
                 path = self._build_real_waveform_path(
                     waveform_data, x_start, x_end, y_center, waveform_height,
                     channel=None,
@@ -3212,7 +3201,6 @@ class ClipItem(QGraphicsObject):
         elif self._waveform_asset_id and self._asset_path and not self._waveform_requested:
             # Request waveform async; show placeholder if we already know it failed
             request_sent = self._request_waveform_async()
-            y_center = self._track_height / 2
             if request_sent:
                 self._draw_loading_waveform(painter, x_start, x_end, y_center, waveform_height)
             elif getattr(self, '_waveform_failed', False):
@@ -3222,7 +3210,6 @@ class ClipItem(QGraphicsObject):
                 self._draw_placeholder_waveform(painter, x_start, x_end, y_center, waveform_height)
         else:
             # Placeholder waveform
-            y_center = self._track_height / 2
             failed = getattr(self, '_waveform_failed', False)
             self._draw_placeholder_waveform(painter, x_start, x_end, y_center, waveform_height, failed=failed)
 
@@ -3269,32 +3256,9 @@ class ClipItem(QGraphicsObject):
         if len(peaks_max) == 0:
             return None
 
-        # Build a filled envelope that reaches both clip edges. Closing via
-        # the center line created a visible zero-amplitude notch at every
-        # edit point; using the first/last peak instead keeps neighboring
-        # clips visually connected like Resolve's timeline waveform.
-        waveform_path = QPainterPath()
-        first_upper = waveform_height * float(peaks_max[0]) / 2.0
-        last_lower = waveform_height * abs(float(peaks_min[-1])) / 2.0
-        waveform_path.moveTo(x_start, y_center - first_upper)
-
-        # Upper envelope
-        for i, peak in enumerate(peaks_max):
-            x = x_start + (x_end - x_start) * i / len(peaks_max)
-            y_offset = waveform_height * peak / 2
-            waveform_path.lineTo(x, y_center - y_offset)
-
-        waveform_path.lineTo(x_end, y_center + last_lower)
-
-        # Lower envelope
-        for i in range(len(peaks_min) - 1, -1, -1):
-            x = x_start + (x_end - x_start) * i / len(peaks_min)
-            peak = peaks_min[i]
-            y_offset = waveform_height * abs(peak) / 2
-            waveform_path.lineTo(x, y_center + y_offset)
-
-        waveform_path.closeSubpath()
-        return waveform_path
+        return waveform_path(
+            peaks_min, peaks_max, x_start, x_end, y_center, waveform_height, self._waveform_style,
+        )
 
     def _build_stereo_waveform_paths(
         self,
@@ -3384,32 +3348,89 @@ class ClipItem(QGraphicsObject):
         else:
             waveform_fill_color = WAVEFORM_COLOR
 
-        # Track-volume preview: scale the cached path around its center line
-        # instead of rebuilding it. A cosmetic stroke keeps the outline width
-        # constant under the vertical scale.
+        self._paint_waveform_path(painter, path, waveform_fill_color,
+                                  x_start, x_end, y_center, waveform_height)
+
+    def _paint_waveform_path(
+        self, painter: QPainter, path: QPainterPath, color: QColor,
+        x_start: float, x_end: float, y_center: float, height: float,
+    ) -> None:
+        """Scale cached source peaks by clip envelope and track level at paint time."""
         gain = self._waveform_gain
-        if abs(gain - 1.0) > 1e-3:
+        if gain <= 0.0:
+            return
+        baseline = waveform_baseline(self._waveform_style, y_center, height)
+        nodes = self._envelope_live_nodes()
+        if self._drag_mode == "envelope_shift" and self._envelope_drag_nodes is not None and self._envelope_nodes:
+            # A whole-curve adjustment only needs to scale the cached shape.
+            nodes = self._envelope_nodes
+            gain *= 10.0 ** (self._envelope_shift_db / 20.0)
+        varies = bool(nodes and any(db != nodes[0][1] for _, db in nodes))
+        if varies:
+            path = self._enveloped_waveform_path(path, baseline, nodes)
+        elif nodes:
+            gain *= 10.0 ** (nodes[0][1] / 20.0)
+
+        uniform_scale = abs(gain - 1.0) > 1e-3
+        if varies or uniform_scale:
             painter.save()
             painter.setClipRect(
-                QRectF(x_start - 1.0, y_center - waveform_height / 2 - 0.5,
-                       (x_end - x_start) + 2.0, waveform_height + 1.0),
+                QRectF(x_start - 1.0, y_center - height / 2,
+                       (x_end - x_start) + 2.0, height),
                 Qt.ClipOperation.IntersectClip)
-            painter.translate(0.0, y_center)
+        if uniform_scale:
+            painter.translate(0.0, baseline)
             painter.scale(1.0, gain)
-            painter.translate(0.0, -y_center)
-            scaled = True
-        else:
-            scaled = False
-
-        # DaVinci-style waveform: one clean filled envelope with no outline.
-        # The clip body and the waveform fill provide the contrast; adding a
-        # dark keyline makes the waveform look embossed and visually noisy.
+            painter.translate(0.0, -baseline)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(waveform_fill_color))
+        painter.setBrush(color)
         painter.drawPath(path)
-
-        if scaled:
+        if varies or uniform_scale:
             painter.restore()
+
+    def _enveloped_waveform_path(
+        self, source: QPainterPath, baseline: float, nodes: list[tuple[float, float]],
+    ) -> QPainterPath:
+        """Bend visible peak geometry without touching the shared source cache."""
+        if source.isEmpty():
+            return source
+        modes = self._envelope_live_modes()
+        state = (tuple(nodes), modes)
+        if state != self._enveloped_waveform_key:
+            self._enveloped_waveform_key = state
+            self._enveloped_waveform_paths.clear()
+        width = max(1.0, self._width)
+        key = (id(source), baseline, width)
+        cached = self._enveloped_waveform_paths.get(key)
+        if cached is not None:
+            return cached
+
+        geometry = self._waveform_peak_coordinates.get(id(source))
+        if geometry is None:
+            coordinates = np.asarray(
+                [(element.x, element.y) for element in map(source.elementAt, range(source.elementCount()))],
+                dtype=np.float64,
+            )
+            if len(self._waveform_peak_coordinates) >= 4:
+                self._waveform_peak_coordinates.clear()
+                self._enveloped_waveform_paths.clear()
+            # Retain the original path so its wrapper identity stays unique.
+            self._waveform_peak_coordinates[id(source)] = (source, coordinates)
+        else:
+            coordinates = geometry[1]
+
+        xs, ys = coordinates.T
+        times, levels = zip(*nodes)
+        modes = modes[:len(nodes)] + ("linear",) * max(0, len(nodes) - len(modes))
+        db = evaluate_envelope_db(xs / width, times, levels, modes)
+        scaled_y = baseline + (ys - baseline) * np.power(10.0, db / 20.0)
+        peaks = QPainterPath(source)
+        for index, (x, y) in enumerate(zip(xs.tolist(), scaled_y.tolist())):
+            peaks.setElementPositionAt(index, x, y)
+        if len(self._enveloped_waveform_paths) >= 4:
+            self._enveloped_waveform_paths.clear()
+        self._enveloped_waveform_paths[key] = peaks
+        return peaks
 
     def _draw_cached_stereo_waveform(
         self,
@@ -3455,43 +3476,11 @@ class ClipItem(QGraphicsObject):
             stereo_l_color = WAVEFORM_COLOR_STEREO_L
             stereo_r_color = WAVEFORM_COLOR_STEREO_R
 
-        # Track-volume preview scales each channel around its own center line.
-        gain = self._waveform_gain
-        scaled = abs(gain - 1.0) > 1e-3
         left_y_center = waveform_top + channel_height / 2
-        right_y_center = waveform_top + channel_height + channel_height / 2
-        if scaled:
-            painter.save()
-            painter.setClipRect(
-                QRectF(x_start - 1.0, waveform_top - 0.5,
-                       (x_end - x_start) + 2.0, waveform_height + 1.0),
-                Qt.ClipOperation.IntersectClip)
-
-        def _draw_one(channel_path: QPainterPath, y_center: float,
-                      fill_color: QColor) -> None:
-            if scaled:
-                painter.translate(0.0, y_center)
-                painter.scale(1.0, gain)
-                painter.translate(0.0, -y_center)
-            # Stereo follows the same flat-fill treatment as mono; the two
-            # channel colors are the only distinction.
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(fill_color))
-            painter.drawPath(channel_path)
-            if scaled:
-                # Undo the per-channel vertical scale before the next channel.
-                painter.translate(0.0, y_center)
-                painter.scale(1.0, 1.0 / gain)
-                painter.translate(0.0, -y_center)
-
-        # Left channel (top half)
-        _draw_one(left_path, left_y_center, stereo_l_color)
-
-        # Right channel (bottom half)
-        _draw_one(right_path, right_y_center, stereo_r_color)
-
-        if scaled:
-            painter.restore()
+        self._paint_waveform_path(painter, left_path, stereo_l_color,
+                                  x_start, x_end, left_y_center, channel_height)
+        self._paint_waveform_path(painter, right_path, stereo_r_color,
+                                  x_start, x_end, left_y_center + channel_height, channel_height)
 
         # Draw center divider line (1px)
         mid_y = int(waveform_top + channel_height)
@@ -3524,7 +3513,8 @@ class ClipItem(QGraphicsObject):
             color = QColor("#8F5258" if failed else self._audio_display_color)
             color.setAlpha(120)
             painter.setPen(QPen(color, 1))
-            painter.drawLine(QPointF(x_start, y_center), QPointF(x_end, y_center))
+            baseline = waveform_baseline(self._waveform_style, y_center, waveform_height)
+            painter.drawLine(QPointF(x_start, baseline), QPointF(x_end, baseline))
             return
 
         # P5-5: Use different color for failed state
@@ -3535,32 +3525,14 @@ class ClipItem(QGraphicsObject):
         else:
             waveform_color = WAVEFORM_COLOR_AUDIO_TRACK
 
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.setBrush(QBrush(waveform_color))
-
         # Create pseudo-random waveform shape
-        waveform_path = QPainterPath()
         seed_hash = hash(self._clip_id) % 100
         num_points = max(4, int((x_end - x_start) / 4))
-
-        waveform_path.moveTo(x_start, y_center)
-
-        for i in range(num_points):
-            x = x_start + (x_end - x_start) * i / num_points
-            height_factor = 0.3 + 0.7 * abs((seed_hash + i * 7) % 100 - 50) / 50
-            y_offset = waveform_height * height_factor / 2
-            waveform_path.lineTo(x, y_center - y_offset)
-
-        waveform_path.lineTo(x_end, y_center)
-
-        for i in range(num_points - 1, -1, -1):
-            x = x_start + (x_end - x_start) * i / num_points
-            height_factor = 0.3 + 0.7 * abs((seed_hash + i * 7) % 100 - 50) / 50
-            y_offset = waveform_height * height_factor / 2
-            waveform_path.lineTo(x, y_center + y_offset)
-
-        waveform_path.closeSubpath()
-        painter.drawPath(waveform_path)
+        peaks = [0.3 + 0.7 * abs((seed_hash + i * 7) % 100 - 50) / 50 for i in range(num_points)]
+        path = waveform_path(
+            peaks, peaks, x_start, x_end, y_center, waveform_height, self._waveform_style,
+        )
+        self._paint_waveform_path(painter, path, waveform_color, x_start, x_end, y_center, waveform_height)
 
     def _draw_loading_waveform(
         self,
@@ -3573,7 +3545,7 @@ class ClipItem(QGraphicsObject):
         """
         Draw loading indicator (waveform being extracted).
         """
-        loading_color = WAVEFORM_COLOR_AUDIO_TRACK
+        loading_color = QColor(WAVEFORM_COLOR_AUDIO_TRACK)
         loading_color.setAlpha(150)
 
         painter.setPen(QPen(Qt.PenStyle.NoPen))
@@ -3583,6 +3555,9 @@ class ClipItem(QGraphicsObject):
         display_width = x_end - x_start
         stripe_width = 8
         num_strips = int(display_width / stripe_width)
+        stripe_height = waveform_height / 2
+        stripe_top = waveform_baseline(self._waveform_style, y_center, waveform_height)
+        stripe_top -= stripe_height if self._waveform_style == WAVEFORM_STYLE_BOTTOM else stripe_height / 2
 
         for i in range(num_strips):
             x = x_start + i * stripe_width
@@ -3590,7 +3565,7 @@ class ClipItem(QGraphicsObject):
             stripe_color = QColor(loading_color)
             stripe_color.setAlpha(alpha)
             painter.setBrush(QBrush(stripe_color))
-            painter.drawRect(int(x), int(y_center - waveform_height / 4), stripe_width - 2, int(waveform_height / 2))
+            painter.drawRect(QRectF(x, stripe_top, stripe_width - 2, stripe_height))
 
         # Loading text
         painter.setPen(QPen(TEXT_MUTED_COLOR))
@@ -3674,15 +3649,15 @@ class ClipItem(QGraphicsObject):
             logger.debug(f"Waveform extraction failed for clip {self._clip_id}: {error}")
 
 
-    def _draw_linked_indicator(self, painter: QPainter) -> None:
+    def _draw_linked_indicator(self, painter: QPainter, rect: QRect) -> None:
         """Paint the toolbar's linked-selection glyph beside the clip name."""
         if self._linked_selection_enabled:
-            icon, opacity = icon_link("#f5f5f5"), 0.9
+            icon, opacity = icon_link("#a9bfcd"), 0.85
         else:
             icon, opacity = icon_unlink("#aaafb4"), 0.6
         painter.save()
         painter.setOpacity(painter.opacity() * opacity)
-        icon.paint(painter, QRect(2, self._track_height - 18, 16, 16))
+        icon.paint(painter, rect)
         painter.restore()
 
     def _draw_linked_group_border(self, painter: QPainter, clip_rect: QRectF) -> None:
@@ -3788,6 +3763,9 @@ class ClipItem(QGraphicsObject):
 
         badge_x = (clip_rect.width() - badge_w) / 2
         badge_y = clip_rect.height() - badge_h - 2
+        if badge_y < 0.0:
+            painter.restore()
+            return
 
         badge_rect = QRectF(badge_x, badge_y, badge_w, badge_h)
 
@@ -3867,6 +3845,9 @@ class ClipItem(QGraphicsObject):
         fade_handle_space = 14 if self._fade_out_duration > 0 else 0
         indicator_x = clip_rect.width() - indicator_w - 4
         indicator_y = 4 + fade_handle_space
+        if indicator_y + indicator_h > clip_rect.height():
+            painter.restore()
+            return
 
         indicator_rect = QRectF(indicator_x, indicator_y, indicator_w, indicator_h)
 
@@ -3954,6 +3935,9 @@ class ClipItem(QGraphicsObject):
         speed_space = indicator_h + 2 if self.is_speed_modified() else 0
         indicator_x = clip_rect.width() - indicator_w - 4
         indicator_y = 4 + fade_handle_space + speed_space
+        if indicator_y + indicator_h > clip_rect.height():
+            painter.restore()
+            return
 
         indicator_rect = QRectF(indicator_x, indicator_y, indicator_w, indicator_h)
 
@@ -3992,6 +3976,9 @@ class ClipItem(QGraphicsObject):
         text_width = len(badge_text) * 5 + 6
         indicator_w = max(text_width, 20)
 
+        if 4 + indicator_h > clip_rect.height():
+            painter.restore()
+            return
         indicator_rect = QRectF(4, 4, indicator_w, indicator_h)
 
         bg_color = QColor(get_color("bg_input"))
@@ -4284,7 +4271,7 @@ class ClipItem(QGraphicsObject):
         icon_color = icon_colors.get(self._media_type, QColor(get_color("text")))
         icon_char = media_icons.get(self._media_type, "")
 
-        if icon_char:
+        if icon_char and icon_y + icon_size <= clip_rect.height():
             # Draw icon as text (Unicode emoji)
             painter.setFont(QFont(UI_FONT_FAMILIES, font_size))
             painter.setPen(QPen(icon_color))
@@ -4341,6 +4328,9 @@ class ClipItem(QGraphicsObject):
 
         indicator_x = clip_rect.width() - indicator_w - 4
         indicator_y = 4 + fade_handle_space + speed_indicator_space
+        if indicator_y + indicator_h > clip_rect.height():
+            painter.restore()
+            return
 
         indicator_rect = QRectF(indicator_x, indicator_y, indicator_w, indicator_h)
 
@@ -4404,8 +4394,7 @@ class ClipItem(QGraphicsObject):
         badge_x = 4 + linked_space
         badge_y = 4 + fade_handle_space
 
-        # If the badge would overlap with the name, shift it up
-        if badge_x + badge_w > clip_rect.width() - 4:
+        if badge_x + badge_w > clip_rect.width() - 4 or badge_y + badge_h > clip_rect.height():
             painter.restore()
             return
 
@@ -4473,7 +4462,7 @@ class ClipItem(QGraphicsObject):
         badge_x = 4 + linked_space + 14
         badge_y = 4 + fade_handle_space
 
-        if badge_x + badge_w > clip_rect.width() - 4:
+        if badge_x + badge_w > clip_rect.width() - 4 or badge_y + badge_h > clip_rect.height():
             painter.restore()
             return
 
@@ -4751,6 +4740,12 @@ class ClipItem(QGraphicsObject):
                 new_tooltip = I18N.tr("timeline.fade_duration", "Fade: {frames} frames", frames=int(duration))
             new_cursor = edit_cursor("fade")
 
+        elif (self._envelope_editable() and (envelope_geo := self._envelope_geometry()) is not None
+              and self._whole_envelope_hit(pos, envelope_geo)):
+            new_edge = new_fade = None
+            new_tooltip = I18N.tr("timeline.shift_envelope", "Drag vertically to move the whole volume envelope")
+            new_cursor = Qt.CursorShape.SizeVerCursor
+
         elif self._active_tool == EditTool.TRIM:
             mode = self._smart_trim_mode_at(pos)
             new_edge = mode
@@ -4865,7 +4860,7 @@ class ClipItem(QGraphicsObject):
 
     def hoverEnterEvent(self, event: Any) -> None:
         """
-        Handle hover enter to emit linked group and track highlight signals (Phase 6.1-6.2).
+        Handle hover enter to emit the linked group highlight signal.
 
         参考 Kdenlive: hover 一个 clip 时，同组的所有 clip 边框同时高亮。
         """
@@ -4877,14 +4872,11 @@ class ClipItem(QGraphicsObject):
         if self._linked_clip_id:
             self.linked_group_hovered.emit(self._clip_id, self._linked_clip_id, True)
 
-        # Phase 6.2: Emit track highlight request signal
-        self.track_highlight_requested.emit(self._track_id, True)
-
         super().hoverEnterEvent(event)
 
     def hoverLeaveEvent(self, event: Any) -> None:
         """
-        Handle hover leave to clear linked group and track highlight (Phase 6.1-6.2).
+        Handle hover leave to clear the linked group highlight.
 
         参考 Kdenlive: hover 离开 clip 时，同组的所有 clip 边框取消高亮。
         """
@@ -4898,9 +4890,6 @@ class ClipItem(QGraphicsObject):
         # Phase 6.1: Emit linked group hover signal to clear highlight on linked clip
         if self._linked_clip_id:
             self.linked_group_hovered.emit(self._clip_id, self._linked_clip_id, False)
-
-        # Phase 6.2: Emit track highlight request signal (clear)
-        self.track_highlight_requested.emit(self._track_id, False)
 
         self.update()
         super().hoverLeaveEvent(event)
@@ -4925,10 +4914,6 @@ class ClipItem(QGraphicsObject):
                 return
 
             point_handle = self._retime_point_handle_at(pos)
-
-            # P1-1：包络节点独立编辑模式——命中优先于片段移动/修剪。
-            if point_handle is None and self._handle_envelope_press(event):
-                return
 
             # In Resolve the percentage label is itself the segment editor.
             # Keep this before clip drag handling so a click never turns into
@@ -4958,6 +4943,11 @@ class ClipItem(QGraphicsObject):
             self._final_new_start = self._start_frame
             self._final_new_end = self._start_frame + self._duration_frames
             self._original_retime_speed = float(self._speed)
+
+            if (self._active_tool == EditTool.SELECT and not self._retime_controls_visible
+                    and self._fade_handle_at(pos) is None and self._fade_curve_handle_at(pos) is None
+                    and self._handle_envelope_press(event)):
+                return
             self._retime_requested_duration = self._duration_frames
 
             # Shift+right-edge is reserved for Motion Graphic duration
@@ -5104,6 +5094,11 @@ class ClipItem(QGraphicsObject):
 
         elif event.button() == Qt.MouseButton.RightButton:
             # Show context menu
+            if (self._envelope_node_editing and self._envelope_editable() and not event.modifiers()
+                    and (index := self._envelope_node_at(event.pos())) is not None):
+                self._remove_envelope_point(index)
+                event.accept()
+                return
             # Right-click also selects the clip, matching normal NLE behavior
             # and ensuring Duplicate acts on the item under the pointer.
             self.clip_clicked.emit(self._clip_id, self._track_id)
@@ -5128,6 +5123,24 @@ class ClipItem(QGraphicsObject):
         if self._is_audio_track() and getattr(view, "audio_clip_editor_available", False):
             editor_action = menu.addAction(I18N.tr("mixer.clip_editor.open", "Open Professional Audio Editor…"))
             editor_action.setObjectName("openProfessionalAudioEditor")
+            menu.addSeparator()
+
+        envelope_add = envelope_delete = envelope_reset = None
+        envelope_index = None
+        if self._envelope_node_editing:
+            envelope_add = menu.addAction(I18N.tr("timeline.envelope_add_point", "Add Envelope Point"))
+            envelope_add.setObjectName("addEnvelopePoint")
+            envelope_delete = menu.addAction(I18N.tr("timeline.envelope_delete_point", "Delete Envelope Point"))
+            envelope_delete.setObjectName("deleteEnvelopePoint")
+            envelope_reset = menu.addAction(I18N.tr("timeline.envelope_reset", "Reset Volume Envelope"))
+            envelope_reset.setObjectName("resetVolumeEnvelope")
+            editable = self._envelope_editable()
+            envelope_index = self._envelope_node_at(item_pos)
+            if envelope_index is None:
+                envelope_index = self._envelope_selected
+            envelope_add.setEnabled(editable and 0.0 <= item_pos.x() <= self._width)
+            envelope_delete.setEnabled(editable and envelope_index is not None)
+            envelope_reset.setEnabled(editable and bool(self._envelope_nodes))
             menu.addSeparator()
 
         # Initialize action variables (to avoid NameError when referenced later)
@@ -5642,6 +5655,18 @@ class ClipItem(QGraphicsObject):
         def selected(candidate: Any) -> bool:
             return _is_menu_action_selected(action, candidate)
 
+        if selected(envelope_add):
+            nodes, _ = self._insert_envelope_point(item_pos.x() / self._width)
+            if nodes != self._envelope_nodes:
+                self.envelope_edit_finished.emit(self._clip_id, self._track_id, nodes)
+            return
+        if selected(envelope_delete) and envelope_index is not None:
+            self._remove_envelope_point(envelope_index)
+            return
+        if selected(envelope_reset):
+            self.envelope_edit_finished.emit(self._clip_id, self._track_id, [])
+            return
+
         # Handle Float/Dock action
         if timeline_dock and selected(float_action):
             timeline_dock.setFloating(not timeline_dock.isFloating())
@@ -5923,6 +5948,18 @@ class ClipItem(QGraphicsObject):
                 # Below threshold, don't start drag yet
                 super().mouseMoveEvent(event)
                 return
+            if self._drag_mode == "envelope_shift" and abs(delta.x()) >= abs(delta.y()):
+                self._envelope_drag_nodes = None
+                if self._position_lock_blocks("move"):
+                    self._cancel_envelope_drag()
+                    self.interaction_finished.emit(self._clip_id)
+                    event.accept()
+                    return
+                self._drag_mode = "move"
+                self._drag_start_frame = self._start_frame
+                self.interaction_finished.emit(self._clip_id)
+                self.interaction_started.emit(self._clip_id, self._track_id, "move")
+
             # Threshold passed: enter drag mode
             self._is_dragging = True
             self._drag_pending = False
@@ -5953,6 +5990,20 @@ class ClipItem(QGraphicsObject):
                     event.pos(),
                     fine=bool(event.modifiers()
                               & Qt.KeyboardModifier.AltModifier))
+                if self._envelope_drag_nodes is not None and self._envelope_selected is not None:
+                    db = self._envelope_drag_nodes[self._envelope_selected][1]
+                    self.envelope_drag_readout_changed.emit(
+                        event.screenPos(), envelope_gain_readout(db, self._envelope_start_db),
+                    )
+
+            elif self._drag_mode == "envelope_shift":
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
+                self._update_envelope_shift(delta.y())
+                self.envelope_drag_readout_changed.emit(
+                    event.screenPos(), envelope_gain_readout(
+                        self._envelope_start_db + self._envelope_shift_db, self._envelope_start_db,
+                    ),
+                )
 
             elif self.can_scroll_during_drag():
                 self.update_scrollable_drag(event.scenePos(), event.modifiers())
@@ -6068,10 +6119,10 @@ class ClipItem(QGraphicsObject):
                 else:
                     self._cancel_retime_point_drag()
 
-            # P1-1：包络节点松手——一次提交（拖动过）/ 取消（仅点击）
-            elif self._drag_mode == "envelope_node":
-                if was_dragging:
-                    self._finish_envelope_node_drag()
+            # Added knots commit on click; moving an existing envelope requires a drag.
+            elif self._drag_mode in {"envelope_node", "envelope_shift"}:
+                if was_dragging or self._envelope_added_node:
+                    self._finish_envelope_drag()
                 else:
                     self._cancel_envelope_drag()
 
@@ -6241,7 +6292,7 @@ class ClipItem(QGraphicsObject):
         self._last_move_emit = None
         self._slip_delta = 0
         self._copy_mode = False
-        if self._drag_mode == "envelope_node":
+        if self._drag_mode in {"envelope_node", "envelope_shift"}:
             # P1-1：恢复拖动前的包络折线（临时 overlay 回滚，无命令）。
             self._cancel_envelope_drag()
         if self._drag_mode == "retime_stretch":
@@ -6277,25 +6328,28 @@ class ClipItem(QGraphicsObject):
 
         super().mouseDoubleClickEvent(event)
 
+    def delete_selected_envelope_node(self) -> bool:
+        """Consume Delete for a focused knot in Mixer."""
+        index = self._envelope_selected
+        if (index is None or index >= len(self._envelope_nodes)
+                or not self._envelope_node_editing or not self._envelope_editable()):
+            return False
+        self._remove_envelope_point(index)
+        return True
+
     def keyPressEvent(self, event: Any) -> None:
         """Handle key press for deletion."""
         # P1-1：包络独立编辑模式——Esc 取消拖动/清选择，Delete 删节点
         # （有选中节点时不落入 clip 删除）。
-        if self._drag_mode == "envelope_node" and \
+        if self._drag_mode in {"envelope_node", "envelope_shift"} and \
                 event.key() == Qt.Key.Key_Escape:
             self._cancel_envelope_drag()
             self._envelope_selected = None
+            self.setZValue(0)
+            self.interaction_finished.emit(self._clip_id)
             event.accept()
             return
-        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and \
-                self._envelope_selected is not None and \
-                self._envelope_editable():
-            remaining = [
-                point for index, point in enumerate(self._envelope_nodes)
-                if index != self._envelope_selected]
-            self._envelope_selected = None
-            self.envelope_edit_finished.emit(
-                self._clip_id, self._track_id, remaining)
+        if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace) and self.delete_selected_envelope_node():
             event.accept()
             return
         if event.key() == Qt.Key.Key_Delete:
@@ -7736,10 +7790,12 @@ class TrackHeaderItem(QGraphicsObject):
     visibility_changed = pyqtSignal(str, bool)  # track_id, visible
     volume_changed = pyqtSignal(str, float)  # track_id, volume
     pan_changed = pyqtSignal(str, float)  # track_id, stereo balance
+    audio_mix_controls_requested = pyqtSignal(str, bool)
     record_requested = pyqtSignal(str)
     recording_input_requested = pyqtSignal(str)
     rename_requested = pyqtSignal(str)  # track_id
     delete_requested = pyqtSignal(str)  # track_id
+    cleanup_empty_tracks_requested = pyqtSignal()
     add_track_requested = pyqtSignal(str, str, str)  # track_type, position, reference_track_id
     add_tracks_requested = pyqtSignal(str)
     move_track_requested = pyqtSignal(str, str)  # track_id, direction ('up'/'down')
@@ -7761,6 +7817,7 @@ class TrackHeaderItem(QGraphicsObject):
     # Icon paths (static class attribute)
     _PROJECT_ROOT = str(Path(__file__).resolve().parents[4])
     ICON_DIR = _PROJECT_ROOT + "/src/shared/assets/icons/video-editing-icons"
+    AUDIO_MIX_CONTROLS_MIN_HEIGHT = 60
 
     def __init__(
         self,
@@ -7790,6 +7847,8 @@ class TrackHeaderItem(QGraphicsObject):
         self._track_type = track_type
         self._track_color = track_color
         self._audio_workspace_style = False
+        self._audio_mix_controls_enabled = False
+        self._audio_mix_controls_always_visible = False
         self._show_record_button = False
         self._recording_state = "idle"
         self._record_arm_busy = False
@@ -7816,9 +7875,6 @@ class TrackHeaderItem(QGraphicsObject):
         self._is_dragging_volume: bool = False
         self._volume_drag_x = 0.0
         self._pan_drag: tuple[QPointF, float] | None = None
-
-        # Phase 6.2: Clip hover highlight state (when a clip on this track is hovered)
-        self._is_clip_hover_highlighted: bool = False
 
         # Whether this is the topmost track in its group (video or audio)
         self._is_topmost: bool = False
@@ -7934,66 +7990,73 @@ class TrackHeaderItem(QGraphicsObject):
         return self._track_type == "audio"
 
     def _shows_audio_controls(self) -> bool:
-        if not self._has_audio_controls() or self._track_height < 60:
+        if not self._has_audio_controls() or not (
+            self._audio_workspace_style or self._audio_mix_controls_always_visible
+            or self._audio_mix_controls_enabled
+        ) or self._track_height < self.AUDIO_MIX_CONTROLS_MIN_HEIGHT:
             return False
         scene = self.scene()
         views = scene.views() if scene is not None else ()
         return not views or views[0].viewport().width() >= TRACK_HEADER_WIDTH - 4
 
-    def _mixer_header_button_rect(self, x: float, width: float = 20.0) -> QRectF:
+    def _header_button_rect(self, x: float, width: float = 20.0) -> QRectF:
         y = 3.0 if self._track_height >= 40 else (self._track_height - 20.0) / 2.0
         return QRectF(x, y, width, 20.0)
 
     def _get_source_patch_rect(self) -> QRectF:
-        """The source destination and the red target badge are separate controls."""
-        if self._track_type == "subtitle":
-            return QRectF()
-        if self._has_audio_controls():
-            return self._mixer_header_button_rect(10.0)
-        y = 4.0 if self._track_height >= 40 else (self._track_height - 18.0) / 2.0
-        return QRectF(10.0, y, 30.0, 18.0)
+        """Return the source patch independently of the target badge."""
+        return QRectF() if self._track_type == "subtitle" else self._header_button_rect(10.0)
 
     def _get_track_badge_rect(self) -> QRectF:
-        """Return the target-track badge independently of source patching."""
-        if self._has_audio_controls():
-            return self._mixer_header_button_rect(36.0, 34.0)
-        y = 4.0 if self._track_height >= 40 else (self._track_height - 18.0) / 2.0
-        return QRectF(46.0, y, 30.0, 18.0)
+        if self._track_type == "subtitle":
+            y = 4.0 if self._track_height >= 40 else (self._track_height - 18.0) / 2.0
+            return QRectF(46.0, y, 30.0, 18.0)
+        return self._header_button_rect(36.0, 34.0)
 
     def _get_name_rect(self) -> QRectF:
         """Name and badge both select the destination; double-click renames."""
-        top = min(27.0, self._get_mixer_title_rect().top()) if self._shows_audio_controls() else 27.0
-        return QRectF(8.0, top, TRACK_HEADER_WIDTH - 16.0, max(0.0, self._track_height - top - 3.0))
+        if self._track_type == "subtitle" or self._track_height < 43:
+            return QRectF()
+        if self._shows_audio_controls():
+            return self._get_mixer_title_rect()
+        return QRectF(12.0, 27.0, TRACK_HEADER_WIDTH - 24.0, 14.0)
+
+    def _get_clip_count_rect(self) -> QRectF:
+        if self._track_type == "subtitle" or self._clip_count <= 0 or self._track_height < 55:
+            return QRectF()
+        if self._shows_audio_controls():
+            title = self._get_mixer_title_rect()
+            x = title.right() + 4.0
+            return QRectF(x, title.top(), TRACK_HEADER_WIDTH - x - 12.0, title.height())
+        return QRectF(12.0, 41.0, TRACK_HEADER_WIDTH - 24.0, 12.0)
 
     def _get_lock_button_rect(self) -> QRectF:
-        if self._has_audio_controls():
-            return self._mixer_header_button_rect(84.0)
-        y = 4.0 if self._track_height >= 40 else (self._track_height - BUTTON_SIZE) / 2.0
-        return QRectF(84.0, y, BUTTON_SIZE, BUTTON_SIZE)
+        if self._track_type == "subtitle":
+            y = 4.0 if self._track_height >= 40 else (self._track_height - BUTTON_SIZE) / 2.0
+            return QRectF(84.0, y, BUTTON_SIZE, BUTTON_SIZE)
+        return self._header_button_rect(84.0)
 
     def _get_sync_lock_button_rect(self) -> QRectF:
-        if self._has_audio_controls():
-            return QRectF() if self._audio_workspace_style else self._mixer_header_button_rect(108.0)
-        rect = self._get_lock_button_rect()
-        return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
+        if self._track_type == "subtitle" or self._audio_workspace_style:
+            return QRectF()
+        return self._header_button_rect(108.0)
 
     def _get_solo_button_rect(self) -> QRectF:
         if self._has_audio_controls():
-            return self._mixer_header_button_rect(132.0 if self._audio_workspace_style else 156.0)
-        rect = self._get_sync_lock_button_rect()
-        return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
+            return self._header_button_rect(132.0 if self._audio_workspace_style else 156.0)
+        return QRectF()
 
     def _get_mute_button_rect(self) -> QRectF:
         if self._has_audio_controls():
-            return self._mixer_header_button_rect(156.0 if self._audio_workspace_style else 180.0)
-        rect = self._get_solo_button_rect()
-        return QRectF(rect.right() + 4.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
+            return self._header_button_rect(156.0 if self._audio_workspace_style else 180.0)
+        if self._track_type == "subtitle":
+            return self._get_lock_button_rect().translated(3 * (BUTTON_SIZE + 4.0), 0.0)
+        return self._header_button_rect(130.0)
 
     def _get_record_button_rect(self) -> QRectF:
         if self._has_audio_controls():
-            return self._mixer_header_button_rect(108.0 if self._audio_workspace_style else 132.0)
-        rect = self._get_mute_button_rect()
-        return QRectF(rect.right() + 6.0, rect.y(), BUTTON_SIZE, BUTTON_SIZE)
+            return self._header_button_rect(108.0 if self._audio_workspace_style else 132.0)
+        return QRectF()
 
     def _get_resize_handle_rect(self) -> QRectF:
         """Get resize handle bounding rect (at bottom of header)."""
@@ -8055,30 +8118,16 @@ class TrackHeaderItem(QGraphicsObject):
         option: QStyleOptionGraphicsItem,
         widget: Optional[Any] = None
     ) -> None:
-        """Paint the track header with DaVinci Resolve-style two-row layout."""
+        """Paint the controls and the track details that fit below them."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self._apply_track_area_clip(painter)
 
-        use_two_rows = self._track_height >= 40
-
-        # Background color
-        bg_color = QColor("#27272B") if self._has_audio_controls() else QColor(get_color("track_header_bg"))
-        if self._is_locked:
-            bg_color = QColor(0x1A, 0x1A, 0x1D)
-
-        if self._is_clip_hover_highlighted:
-            bg_color = bg_color.lighter(130)
-
-        # Main background
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawRect(QRectF(0, 0, TRACK_HEADER_WIDTH, self._track_height))
-
-        # Resolve's control strip has its own continuous black lower edge.
-        if use_two_rows:
-            painter.setBrush(QBrush(QColor(get_color("track_header_bg_alt"))))
-            painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.drawRect(QRectF(0, 0, TRACK_HEADER_WIDTH, min(26, self._track_height)))
+        # The controls use the same surface at full and compact heights.
+        painter.fillRect(QRectF(0, 0, TRACK_HEADER_WIDTH, self._track_height),
+                         QColor(get_color("track_header_bg_alt")))
+        if self._track_height >= 40:
+            painter.fillRect(0, 26, TRACK_HEADER_WIDTH, self._track_height - 26,
+                             QColor(get_color("track_header_bg")))
             painter.fillRect(0, 25, TRACK_HEADER_WIDTH, 1,
                              QColor(get_color("timeline_divider")))
 
@@ -8091,57 +8140,22 @@ class TrackHeaderItem(QGraphicsObject):
         # Strong right boundary: the timeline ruler/content starts immediately after this.
         painter.fillRect(TRACK_HEADER_WIDTH - 1, 0, 1, self._track_height, divider)
 
-        # Clip hover highlight: keep the relationship visible without drawing
-        # a bright rectangle around every header touched by linked clips.
-        if self._is_clip_hover_highlighted:
-            highlight_color = QColor(ACCENT_COLOR)
-            highlight_color.setAlpha(150)
-            painter.setBrush(QBrush(highlight_color))
-            painter.setPen(QPen(Qt.PenStyle.NoPen))
-            painter.drawRect(QRectF(0, 0, 2, self._track_height))
-
-        # Two-row layout vs single-row layout
-        if use_two_rows:
-            self._paint_two_rows(painter)
-        else:
-            self._paint_single_row(painter)
-
-        # Locked overlay
-        if self._is_locked:
-            self._draw_locked_overlay(painter)
+        self._draw_source_patch(painter)
+        self._draw_track_badge(painter)
+        self._draw_buttons(painter)
+        self._draw_track_name(painter)
+        self._draw_clip_count(painter)
+        self._draw_audio_mix_controls(painter)
 
         # Identity remains readable for every track, including target/locked tracks.
         # Target state is still expressed by the existing badge highlight.
-        painter.fillRect(0, 0, 3 if self._has_audio_controls() else 2, self._track_height,
+        painter.fillRect(0, 0, 3 if self._track_type != "subtitle" else 2, self._track_height,
                          QColor(resolve_track_color(self._track_id, self._track_color)))
 
     def _apply_track_area_clip(self, painter: QPainter) -> None:
         """Clip pinned track headers to their own V/A area during split scrolling."""
         rect = _visible_track_item_rect(self, self.boundingRect(), self._track_type)
         painter.setClipRect(rect, Qt.ClipOperation.IntersectClip)
-
-    def _paint_two_rows(self, painter: QPainter) -> None:
-        """Paint two-row DaVinci layout: Row 1 = badge+name+clip_count, Row 2 = buttons."""
-        # Resolve: source destination, target badge, then track controls.
-        self._draw_source_patch(painter)
-        self._draw_track_badge(painter)
-        self._draw_buttons(painter)
-
-        # Fixed-height subtitle tracks only need the S1 badge and controls;
-        # a second "Subtitle 1" label would be clipped by the compact lane.
-        if self._track_type != "subtitle":
-            self._draw_track_name(painter)
-            self._draw_clip_count(painter)
-
-        self._draw_audio_mix_controls(painter)
-
-    def _paint_single_row(self, painter: QPainter) -> None:
-        """Paint single-row collapsed layout: badge + buttons only."""
-        self._draw_source_patch(painter)
-        self._draw_track_badge(painter)
-        self._draw_buttons(painter)
-
-        self._draw_audio_mix_controls(painter)
 
     def _draw_audio_mix_controls(self, painter: QPainter) -> None:
         if self._shows_audio_controls():
@@ -8150,81 +8164,46 @@ class TrackHeaderItem(QGraphicsObject):
             self._draw_mixer_value_readouts(painter)
 
     def _draw_track_badge(self, painter: QPainter) -> None:
-        """Draw track type badge (V1/A1/S1) in DaVinci reddish-brown color."""
-        badge_rect = self._get_track_badge_rect()
-        if self._has_audio_controls():
-            color = C.ORANGE if self._is_target else C.TEXT_BRIGHT
-            self._draw_mixer_button_surface(painter, badge_rect, "target", color if self._is_target else None)
-            painter.setPen(QColor(color))
-            font = QFont(UI_MONO_FONT_FAMILIES)
-            font.setPixelSize(11)
-            font.setWeight(QFont.Weight.DemiBold)
-            painter.setFont(font)
-            painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"A{self._badge_index + 1}")
+        """Draw the numbered destination badge."""
+        rect = self._get_track_badge_rect()
+        if self._track_type == "subtitle":
+            color = QColor(SUBTITLE_TRACK_COLOR)
+            if self._is_target:
+                color = color.lighter(130)
+            if self._is_locked:
+                color = color.darker(140)
+            radius = EDIT_SIZES["track_badge_radius"]
+            painter.setBrush(color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(rect, radius, radius)
+            painter.setPen(QColor(255, 255, 255))
+            painter.setFont(QFont(UI_FONT_FAMILIES, 9, QFont.Weight.Bold))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"S{self._badge_index + 1}")
             return
-        badge_radius = EDIT_SIZES["track_badge_radius"]  # 3
 
-        # Badge background — type-specific color (DaVinci Resolve style)
-        if self._track_type == "video" and self._track_role == "graphics":
-            badge_color = QColor("#8c5bd6")
-        elif self._track_type == "video":
-            badge_color = VIDEO_TRACK_COLOR
-        elif self._track_type == "subtitle":
-            badge_color = SUBTITLE_TRACK_COLOR
-        else:
-            badge_color = AUDIO_TRACK_COLOR
-
-        if self._is_target:
-            badge_color = badge_color.lighter(130)  # Brighten when target
-        if self._is_locked:
-            badge_color = badge_color.darker(140)
-
-        # Badge text
-        if self._track_type == "video" and self._track_role == "graphics":
-            prefix = f"G{self._badge_index + 1}"
-        elif self._track_type == "video":
-            prefix = f"V{self._badge_index + 1}"
-        elif self._track_type == "subtitle":
-            prefix = f"S{self._badge_index + 1}"
-        else:
-            prefix = f"A{self._badge_index + 1}"
-
-        # Draw badge rounded rect
-        painter.setBrush(QBrush(badge_color))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawRoundedRect(badge_rect, badge_radius, badge_radius)
-
-        # Badge text (white, bold, centered)
-        painter.setPen(QPen(QColor(255, 255, 255)))
-        font = QFont(UI_FONT_FAMILIES, 9, QFont.Weight.Bold)
+        prefix = "A" if self._track_type == "audio" else ("G" if self._track_role == "graphics" else "V")
+        color = C.ORANGE if self._is_target else C.TEXT_BRIGHT
+        self._draw_mixer_button_surface(painter, rect, "target", color if self._is_target else None)
+        painter.setPen(QColor(color))
+        font = QFont(UI_MONO_FONT_FAMILIES)
+        font.setPixelSize(11)
+        font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(font)
-        painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, prefix)
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{prefix}{self._badge_index + 1}")
 
     def _draw_source_patch(self, painter: QPainter) -> None:
-        """Paint the source badge; backend routing is exposed as a request signal."""
-        if self._track_type == "subtitle":
-            return
+        """Draw the source routing control using the same patch symbol on audio and video."""
         rect = self._get_source_patch_rect()
-        if self._has_audio_controls():
+        if not rect.isEmpty():
             self._draw_mixer_icon(
                 painter, rect, "source_patch", "arrow-line-right",
                 C.MIXER_CYAN_ACCENT if self._source_patch_enabled else None,
             )
-            return
-        color = QColor(get_color("video_clip") if self._track_type == "video" else get_color("audio_clip"))
-        painter.setBrush(QBrush(color.darker(145) if self._source_patch_enabled else QColor(get_color("track_header_bg"))))
-        painter.setPen(QPen(color.lighter(150) if self._source_patch_enabled else TEXT_MUTED_COLOR, 0.7))
-        painter.drawRoundedRect(rect, 2.0, 2.0)
-        painter.setPen(QPen(TEXT_COLOR if self._source_patch_enabled else TEXT_MUTED_COLOR))
-        painter.setFont(QFont(UI_FONT_FAMILIES, 8, QFont.Weight.DemiBold))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "V1" if self._track_type == "video" else "A1")
 
     def _draw_track_name(self, painter: QPainter) -> None:
-        """Show the actual track name, including user renames."""
-        y = 29.0 if self._track_height >= 46 else 26.0
-        height = min(15.0, self._track_height - y)
-        width = 90.0 if self._track_type == "audio" and self._track_height < 60 else TRACK_HEADER_WIDTH - 24.0
-        name_rect = self._get_mixer_title_rect() if self._shows_audio_controls() else QRectF(12.0, y, width, height)
+        name_rect = self._get_name_rect()
+        if name_rect.isEmpty():
+            return
         if self._hover_button == "name":
             painter.fillRect(name_rect, QColor(255, 255, 255, 12))
         painter.setPen(QPen(TEXT_COLOR if not self._is_locked else TEXT_MUTED_COLOR))
@@ -8233,103 +8212,41 @@ class TrackHeaderItem(QGraphicsObject):
         painter.drawText(name_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
     def _draw_clip_count(self, painter: QPainter) -> None:
-        """Draw clip count under the track label."""
-        if self._clip_count <= 0:
+        count_rect = self._get_clip_count_rect()
+        if count_rect.isEmpty():
             return
-
-        if self._track_height < 52:
-            return
-
-        count_text = I18N.tr("timeline.track.clip_count", "{count} Clips", count=self._clip_count)
-
-        count_rect = QRectF(12, 44, 90, 14)
-        alignment = Qt.AlignmentFlag.AlignLeft
-        if self._shows_audio_controls():
-            title = self._get_mixer_title_rect()
-            x = title.right() + 4.0
-            count_rect = QRectF(x, title.top(), TRACK_HEADER_WIDTH - x - 12.0, title.height())
-            alignment = Qt.AlignmentFlag.AlignRight
-
+        alignment = Qt.AlignmentFlag.AlignRight if self._shows_audio_controls() else Qt.AlignmentFlag.AlignLeft
         painter.setPen(QPen(TEXT_MUTED_COLOR))
-        font = QFont(UI_FONT_FAMILIES, 8)
-        painter.setFont(font)
-        if alignment == Qt.AlignmentFlag.AlignRight:
-            count_text = painter.fontMetrics().elidedText(
-                count_text, Qt.TextElideMode.ElideRight, int(count_rect.width()),
-            )
-        painter.drawText(count_rect, Qt.AlignmentFlag.AlignVCenter | alignment, count_text)
+        painter.setFont(QFont(UI_FONT_FAMILIES, 8))
+        text = I18N.tr("timeline.track.clip_count", "{count} Clips", count=self._clip_count)
+        text = painter.fontMetrics().elidedText(text, Qt.TextElideMode.ElideRight, int(count_rect.width()))
+        painter.drawText(count_rect, Qt.AlignmentFlag.AlignVCenter | alignment, text)
 
     def _draw_buttons(self, painter: QPainter) -> None:
-        """Draw lock, solo/visibility, and mute buttons with vector icons."""
-        if self._has_audio_controls():
-            self._draw_mixer_header_buttons(painter)
-            return
-        # Lock button (L - amber when active)
-        self._draw_button(
-            painter,
-            self._get_lock_button_rect(),
-            "lock",
-            self._is_locked,
-            LOCK_ACTIVE_COLOR,
-            "L"
-        )
-
+        """Draw track controls with a shared audio/video baseline."""
         if self._track_type == "subtitle":
-            # Caption tracks have no audio mute/solo semantics.  Their right
-            # control is the preview visibility eye; the middle slot stays
-            # intentionally empty until Deliver owns an export policy.
             self._draw_button(
-                painter,
-                self._get_mute_button_rect(),
-                "visibility",
-                not self._is_visible,
-                MUTE_ACTIVE_COLOR,
-                "H",
+                painter, self._get_lock_button_rect(), "lock", self._is_locked, LOCK_ACTIVE_COLOR, "L",
+            )
+            self._draw_button(
+                painter, self._get_mute_button_rect(), "visibility", not self._is_visible, MUTE_ACTIVE_COLOR, "H",
             )
             return
 
-        self._draw_button(
-            painter, self._get_sync_lock_button_rect(), "sync_lock",
-            self._is_sync_locked, QColor(get_color("track_header_bg_alt")), "<>"
-        )
-        if self._track_type == "audio":
-            self._draw_button(
-                painter, self._get_solo_button_rect(), "solo",
-                self._is_solo, SOLO_ACTIVE_COLOR, "S"
-            )
-
-        if self._track_type == "video":
-            # Video tracks expose visibility through an eye, not audio mute.
-            self._draw_button(
-                painter,
-                self._get_mute_button_rect(),
-                "visibility",
-                not self._is_visible,
-                MUTE_ACTIVE_COLOR,
-                "H",
-            )
-        else:
-            # Audio mute uses the speaker glyph and a clear red active state.
-            self._draw_button(
-                painter,
-                self._get_mute_button_rect(),
-                "mute",
-                self._is_muted,
-                MUTE_ACTIVE_COLOR,
-                "M",
-            )
-            if self._show_record_button:
-                self._draw_record_button(painter)
-
-    def _draw_mixer_header_buttons(self, painter: QPainter) -> None:
         lock = self._get_lock_button_rect().center()
         painter.fillRect(QRectF(77.0, lock.y() - 5, 1, 10), QColor(C.MIXER_BTN_BORDER))
         self._draw_lock_icon(painter, lock.x(), lock.y(), 6.5, self._is_locked or self._hover_button == "lock")
-        if not self._audio_workspace_style:
+        sync = self._get_sync_lock_button_rect()
+        if not sync.isEmpty():
             self._draw_button(
-                painter, self._get_sync_lock_button_rect(), "sync_lock", self._is_sync_locked,
-                QColor(get_color("track_header_bg_alt")), "<>",
+                painter, sync, "sync_lock", self._is_sync_locked, QColor(get_color("track_header_bg_alt")), "<>",
             )
+        if self._track_type == "video":
+            self._draw_button(
+                painter, self._get_mute_button_rect(), "visibility", not self._is_visible, MUTE_ACTIVE_COLOR, "H",
+            )
+            return
+
         if self._show_record_button:
             self._draw_record_button(painter, letter_size=11)
         self._draw_button(
@@ -8340,7 +8257,7 @@ class TrackHeaderItem(QGraphicsObject):
         )
 
     def _draw_record_button(self, painter: QPainter, *, letter_size: int = 14) -> None:
-        armed = self._recording_state not in {"idle", "unpatched"}
+        armed = self._recording_state not in {"idle", "unpatched", "mode_disabled"}
         color = QColor("#B4495A" if self._recording_state == "recording" else "#9A3947")
         self._draw_button(
             painter, self._get_record_button_rect(), "record", armed, color,
@@ -8654,18 +8571,6 @@ class TrackHeaderItem(QGraphicsObject):
             y_offset = y_center - 2 + i * 2
             painter.drawLine(start_x, y_offset, start_x + grip_width, y_offset)
 
-    def _draw_locked_overlay(self, painter: QPainter) -> None:
-        """Draw locked overlay on track header (subtle dim, no diagonal stripes).
-
-        Diagonal stripe pattern is only drawn on clips (ClipItem._draw_disabled_pattern),
-        not on the track header — the header just gets a semi-transparent dim to
-        indicate the track is locked.
-        """
-        overlay_color = QColor(0, 0, 0, 40)
-        painter.setBrush(QBrush(overlay_color))
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.drawRect(QRectF(0, 0, TRACK_HEADER_WIDTH, self._track_height))
-
     # ==================== Interaction (Enhanced) ====================
 
     def hoverMoveEvent(self, event: Any) -> None:
@@ -8724,6 +8629,8 @@ class TrackHeaderItem(QGraphicsObject):
                 return I18N.tr("mixer.record.locked", "Unlock this track to record")
             if self._record_arm_busy:
                 return I18N.tr("mixer.record.busy", "Finish the current recording first")
+            if self._recording_state == "mode_disabled":
+                return I18N.tr("timeline.recording_mode_required", "Enable Recording Mode to arm this track")
             if self._recording_state == "unpatched":
                 if self._record_input_setup:
                     return I18N.tr("mixer.record.choose_input", "Choose a recording input")
@@ -8962,7 +8869,24 @@ class TrackHeaderItem(QGraphicsObject):
             if not enabled and (self._pan_drag is not None or self._is_dragging_volume):
                 self.ungrabMouse()
             self._audio_workspace_style = enabled
+            if not enabled and not (self._audio_mix_controls_enabled or self._audio_mix_controls_always_visible):
+                self.set_meter_peaks()
             self.update()
+
+    def set_audio_mix_controls(self, enabled: bool, *, always_visible: bool = False) -> None:
+        if (enabled, always_visible) == (self._audio_mix_controls_enabled,
+                                        self._audio_mix_controls_always_visible):
+            return
+        self._audio_mix_controls_enabled = enabled
+        self._audio_mix_controls_always_visible = always_visible
+        if not (enabled or always_visible or self._audio_workspace_style):
+            if self._pan_drag is not None or self._is_dragging_volume:
+                self.ungrabMouse()
+            if self._hover_button in {"volume", "pan"}:
+                self._hover_button = None
+                self.setToolTip("")
+            self.set_meter_peaks()
+        self.update()
 
     def set_recording_control(
         self, visible: bool, state: str, *, busy: bool = False, input_setup: bool = False,
@@ -9002,27 +8926,6 @@ class TrackHeaderItem(QGraphicsObject):
             self._peak_db = peaks
             if self._shows_audio_controls():
                 self.update(self._get_volume_slider_rect())
-
-    # ==================== Phase 6.2: Clip Hover Highlight ====================
-
-    def set_highlighted(self, highlighted: bool) -> None:
-        """
-        Set clip hover highlight state (Phase 6.2).
-
-        当 hover clip 时，对应的轨道头显示高亮效果。
-        使用更亮的背景色 + padding 边框。
-
-        Args:
-            highlighted: True when a clip on this track is being hovered
-        """
-        if self._is_clip_hover_highlighted != highlighted:
-            self._is_clip_hover_highlighted = highlighted
-            self.update()
-
-    @property
-    def is_clip_hover_highlighted(self) -> bool:
-        """Get clip hover highlight state."""
-        return self._is_clip_hover_highlighted
 
     # ==================== Volume Actions ====================
 
@@ -9099,8 +9002,8 @@ class TrackHeaderItem(QGraphicsObject):
         delta_y = event.scenePos().y() - self._resize_start_y
         new_height = self._resize_start_height + int(delta_y)
 
-        # Clamp height (minimum 20, maximum 150)
-        new_height = max(20, min(150, new_height))
+        lo, hi = (MIN_AUDIO_TRACK_HEIGHT, MAX_MIXER_AUDIO_TRACK_HEIGHT) if self._audio_workspace_style else (20, 150)
+        new_height = max(lo, min(hi, new_height))
 
         # Maintain resize cursor during drag
         if self.scene() and self.scene().views():
@@ -9189,6 +9092,9 @@ class TrackHeaderItem(QGraphicsObject):
         # Delete action
         delete_action = menu.addAction(
             I18N.tr("timeline.menu.delete_track", "Delete Track"))
+        cleanup_empty_tracks_action = menu.addAction(
+            I18N.tr("timeline.menu.cleanup_empty_tracks", "Remove Empty Tracks"))
+        cleanup_empty_tracks_action.setObjectName("cleanupEmptyTracks")
 
         menu.addSeparator()
 
@@ -9263,6 +9169,18 @@ class TrackHeaderItem(QGraphicsObject):
             input_action = menu.addAction(_I18N.tr("mixer.record.input_menu", "Recording input…"))
             input_action.setEnabled(not self._is_locked and not self._record_arm_busy)
 
+        if self._has_audio_controls() and not (
+            self._audio_workspace_style or self._audio_mix_controls_always_visible
+        ):
+            mix_controls_action = menu.addAction(I18N.tr(
+                "mixer.track_header.show_mix_controls", "Show Volume, Pan and Meters",
+            ))
+            mix_controls_action.setObjectName("showTrackAudioMixControls")
+            mix_controls_action.setCheckable(True)
+            mix_controls_action.setChecked(self._audio_mix_controls_enabled)
+            mix_controls_action.triggered.connect(
+                lambda checked: self.audio_mix_controls_requested.emit(self._track_id, checked))
+
         # Visibility toggle
         menu.addSeparator()
         visibility_action = menu.addAction("Hide Track" if self._is_visible else "Show Track")
@@ -9305,6 +9223,8 @@ class TrackHeaderItem(QGraphicsObject):
             self.rename_requested.emit(self._track_id)
         elif action == delete_action:
             self.delete_requested.emit(self._track_id)
+        elif action == cleanup_empty_tracks_action:
+            self.cleanup_empty_tracks_requested.emit()
         elif add_sub_clip_action is not None and action == add_sub_clip_action:
             self.add_subtitle_clip_requested.emit(self._track_id)
         elif subtitle_to_speech_action is not None and action == subtitle_to_speech_action:
@@ -10830,7 +10750,7 @@ class DragPreviewItem(QGraphicsObject):
     ) -> None:
         """Draw a single preview item with thumbnail and label."""
         rect = QRectF(x, y, width, height)
-        color = QColor(CLIP_AUDIO_COLOR if media_type == "audio" else CLIP_VIDEO_COLOR)
+        color = QColor(CLIP_DEFAULT_GRADIENT_START)
         border = color.lighter(180)
         color.setAlpha(215)
         if not self._is_valid:

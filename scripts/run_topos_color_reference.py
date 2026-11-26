@@ -71,7 +71,7 @@ def build_report() -> dict:
         "neutral_vectors": vectors,
         "transfer_roundtrip_max_abs_error": transfer,
         "alpha_zero_rgb_max_abs_error": alpha_error,
-        "deferred": ["GPU parity", "file explorer professional display", "ICC tag semantic comparison", "DeltaE2000 against external reference"],
+        "deferred": ["GPU parity", "native Files panel professional display", "ICC tag semantic comparison", "DeltaE2000 against external reference"],
     }
 
 

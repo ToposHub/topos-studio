@@ -138,10 +138,7 @@ def test_deliver_mode_hides_edit_tools_but_keeps_zoom_controls(qapp: Any, qtbot:
     assert panel.btn_select.isHidden()
     assert panel.btn_snap.isHidden()
     assert panel.btn_marker.isHidden()
-    assert panel.btn_mixer.isHidden()
-    assert not panel.btn_zoom_out.isHidden()
     assert not panel.zoom_slider.isHidden()
-    assert not panel.btn_zoom_in.isHidden()
     assert not panel.btn_zoom_fit.isHidden()
 
     panel.set_display_mode("edit")
@@ -149,7 +146,6 @@ def test_deliver_mode_hides_edit_tools_but_keeps_zoom_controls(qapp: Any, qtbot:
     assert not panel.btn_select.isHidden()
     assert not panel.btn_snap.isHidden()
     assert panel.btn_marker.isHidden()
-    assert not panel.btn_mixer.isHidden()
 
 
 def test_deliver_in_out_defaults_to_full_timeline_range(qapp: Any) -> None:

@@ -39,9 +39,7 @@ from conftest_module_isolation import (  # noqa: E402
     color_only_physical,
 )
 
-# Import QWebEngineWidgets before any QApplication is created.
-# MainWindow imports files_panel which imports QWebEngineView at module level.
-# If this import happens after QApplication exists, PyQt6 aborts.
+# Match application startup for tests that import the teaching animation browser.
 if sys.platform != 'win32':
     try:
         from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
@@ -56,13 +54,7 @@ def qapp():
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
-    yield app
-    # The embedded file explorer starts a daemon thumbnail worker at import
-    # time. Stop it before pytest-qt tears down QApplication/native Qt state.
-    file_explorer = sys.modules.get("file_explorer.main")
-    shutdown = getattr(file_explorer, "shutdown_thumbnail_worker", None)
-    if callable(shutdown):
-        shutdown()
+    return app
 
 
 @pytest.fixture(autouse=True)

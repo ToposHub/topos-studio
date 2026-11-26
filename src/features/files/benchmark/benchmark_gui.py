@@ -317,7 +317,7 @@ class BenchmarkWorker(QThread):
 
 
 class DecodeBenchmarkWindow(QMainWindow):
-    """Blackmagic-inspired benchmark panel embedded in file explorer."""
+    """Blackmagic-inspired benchmark panel opened from the native Files panel."""
 
     MATRIX_ROWS = [label for label, _aliases in SUPPORTED_CODECS]
     MATRIX_COLUMNS = ["2K", "4K", "6K", "8K"]

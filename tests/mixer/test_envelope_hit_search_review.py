@@ -24,8 +24,7 @@ def _original_hit(item: ClipItem, pos: QPointF) -> int | None:
     distance = item.ENVELOPE_NODE_HIT_RADIUS
     for index, (fraction, gain) in enumerate(item._envelope_nodes):
         x = fraction * geometry["width"]
-        y = geometry["zero_y"] + max(0.0, -gain) / 36.0 * (
-            geometry["bottom"] - geometry["zero_y"])
+        y = geometry["zero_y"] - gain * geometry["pixels_per_db"]
         candidate = ((pos.x() - x) ** 2 + (pos.y() - y) ** 2) ** 0.5
         if candidate <= distance:
             best, distance = index, candidate
@@ -70,7 +69,7 @@ def test_equal_distance_uses_last_canonical_index_and_drag_overlay_is_separate(q
 
 def test_nearest_node_uses_both_axes_not_only_fraction(qapp) -> None:
     item = _item()
-    item.set_volume_envelope([(0.5, -4.0), (0.51, 0.0)])
+    item.set_volume_envelope([(0.5, -8.0), (0.51, 0.0)])
     geometry = item._envelope_geometry()
     position = QPointF(0.5 * item._width, geometry["zero_y"])
     assert item._envelope_node_at(position) == 1

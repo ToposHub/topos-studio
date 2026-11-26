@@ -9,6 +9,7 @@ from uuid import uuid4
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QDockWidget, QWidget
 
+from src.features.edit.core.shared_recording_input import RECORDING_INPUTS_KEY, stored_recording_inputs
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.shortcut_scope import text_input_focused
 
@@ -18,9 +19,6 @@ if TYPE_CHECKING:
 
     from src.features.edit.core.shared_recording_input import SharedRecordingInput
     from src.features.edit.core.timeline_v2 import TimelineSequence
-
-
-_INPUTS_KEY = "mixer_recording_inputs"
 
 
 @dataclass(frozen=True)
@@ -53,14 +51,13 @@ class _InputPatch:
 
 
 def _input_patches(timeline: TimelineSequence | None) -> dict[str, _InputPatch]:
-    payload = timeline.format_settings.get(_INPUTS_KEY) if timeline is not None else None
+    if timeline is None:
+        return {}
+    payload = timeline.format_settings.get(RECORDING_INPUTS_KEY)
     if not isinstance(payload, dict) or payload.get("version") != 1:
         return {}
-    tracks = payload.get("tracks")
-    if not isinstance(tracks, dict):
-        return {}
     return {
-        track_id: patch for track_id, value in tracks.items()
+        track_id: patch for track_id, value in stored_recording_inputs(timeline.format_settings).items()
         if (patch := _InputPatch.from_dict(value)) is not None
     }
 
@@ -257,7 +254,7 @@ class MixerRecordingControllerMixin:
         from src.features.edit.core.timeline_settings_command import TimelineSettingsCommand
 
         settings = dict(timeline.format_settings)
-        stored = settings.get(_INPUTS_KEY, {"version": 1})
+        stored = settings.get(RECORDING_INPUTS_KEY, {"version": 1})
         if not isinstance(stored, dict) or stored.get("version") != 1:
             self._show_mixer_recording_message(
                 I18N.tr("mixer.record.patch_version", "This timeline uses a newer recording input format."))
@@ -269,7 +266,7 @@ class MixerRecordingControllerMixin:
         else:
             old = tracks.get(track_id)
             tracks[track_id] = {**(old if isinstance(old, dict) else {}), **patch.to_dict()}
-        settings[_INPUTS_KEY] = {**stored, "tracks": tracks}
+        settings[RECORDING_INPUTS_KEY] = {**stored, "tracks": tracks}
         update = replace(timeline, format_settings=settings)
         view.execute_command(TimelineSettingsCommand(
             str(uuid4()), I18N.tr("mixer.record.input", "Recording input"), timeline, update,

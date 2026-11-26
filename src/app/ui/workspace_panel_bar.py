@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QSize, Qt
@@ -12,6 +13,7 @@ from src.shared.assets.icon_manager import get_icon
 from src.shared.i18n.i18n import I18N
 from src.shared.panels.registry import get_panel_registry
 from src.shared.ui.style_sheet import C
+from src.shared.ui.tinted_icon import TintedIconEngine
 
 if TYPE_CHECKING:
     from src.app.main_window import MainWindow
@@ -19,9 +21,17 @@ if TYPE_CHECKING:
 
 _SHORTCUT_TEXT = "#a4a4ac"
 _SHORTCUT_ACTIVE = "#f0f0f2"
+_WORKSPACE_GLYPH_PATH = Path(__file__).resolve().parents[2] / "shared/assets/icons/workspace"
+_ICON_ONLY_SHORTCUTS = {"media-pool", "audio-mixer"}
 
 
 def _shortcut_icon(name: str) -> QIcon:
+    if name in _ICON_ONLY_SHORTCUTS:
+        return QIcon(TintedIconEngine(
+            QIcon(str(_WORKSPACE_GLYPH_PATH / f"{name}.svg")),
+            idle=_SHORTCUT_TEXT, hover=_SHORTCUT_ACTIVE, active=_SHORTCUT_ACTIVE,
+            disabled=C.TEXT_HINT,
+        ))
     return get_icon(f"ph.{name}", _SHORTCUT_TEXT, active_color=_SHORTCUT_ACTIVE)
 
 
@@ -150,6 +160,7 @@ class WorkspacePanelBar(QToolBar):
         self._style_toolbar(self, "workspacePanelBar")
         self._style_toolbar(self.right_tools, "workspacePanelBarRight")
         self._right_actions: set[QAction] = set()
+        self._icon_only_actions: set[QAction] = set()
         self._panels_menu = QMenu(self)
         self._panels_button = create_toolbar_menu_button(
             self, self.windowTitle(), "layout", self._panels_menu,
@@ -221,21 +232,25 @@ class WorkspacePanelBar(QToolBar):
                 action = dock.toggleViewAction()
                 action.triggered.connect(lambda checked, panel=dock: panel.raise_() if checked else None)
             action.setIcon(_shortcut_icon(icon))
+            if icon in _ICON_ONLY_SHORTCUTS:
+                self._icon_only_actions.add(action)
             if right:
                 self._right_actions.add(action)
             actions.setdefault(page, []).append(action)
 
         show_library_pool = getattr(window, "set_library_media_pool_visible", None)
         if self._docks("dock_edit_media_pool") and callable(show_library_pool):
-            pool = QAction(_shortcut_icon("folder-open"), I18N.tr("panel.media_pool", "Media Pool"), self)
+            pool = QAction(_shortcut_icon("media-pool"), I18N.tr("panel.media_pool", "Media Pool"), self)
             pool.setObjectName("workspace_library_media_pool")
             pool.setCheckable(True)
             pool.toggled.connect(show_library_pool)
+            self._icon_only_actions.add(pool)
             actions["Library"] = [pool]
 
-        group("Edit", "folder-open", I18N.tr("panel.media_pool", "Media Pool"),
+        group("Edit", "media-pool", I18N.tr("panel.media_pool", "Media Pool"),
               "dock_edit_media_pool", "dock_edit_effects",
               peers=("dock_audio_mixer",))
+        group("Edit", "audio-mixer", "", "dock_audio_mixer", foreground_tab=True)
         group("Edit", "sliders-horizontal", I18N.tr("panel.properties", "Properties"),
               "dock_properties", "dock_edit_info", "dock_caption_workspace",
               "dock_multicam", "dock_ai_edit_assistant",
@@ -247,17 +262,17 @@ class WorkspacePanelBar(QToolBar):
         if self._mode != "image":
             group("Color", "film-strip", "", "dock_color_timeline_clips")
         group("Color", "chart-line", "", "dock_analysis", right=True)
-        group("Composite", "folder-open", "", "dock_edit_media_pool")
+        group("Composite", "media-pool", "", "dock_edit_media_pool")
         group("Composite", "sliders-horizontal", I18N.tr("panel.node_properties", "Node Properties"),
               "dock_node_properties", "dock_composite_scene_outliner", "dock_composite_material",
               right=True)
         group("Composite", "stack", "", "dock_composite_keyframes")
         group("Composite", "tree-structure", "", "dock_composite")
         group("Composite", "chart-line", "", "dock_composite_scope", right=True)
-        group("Mixer", "faders", "", "dock_audio_console")
+        group("Mixer", "audio-mixer", "", "dock_audio_console")
         group("Mixer", "monitor-play", "", "dock_audio_viewer", right=True)
         group("Mixer", "activity", "", "dock_audio_clip_editor", right=True, foreground_tab=True)
-        group("Mixer", "folder-open", "", "dock_audio_media_pool", foreground_tab=True)
+        group("Mixer", "media-pool", "", "dock_audio_media_pool", foreground_tab=True)
         group("Mixer", "waves", "", "dock_audio_effects", foreground_tab=True)
         group("Mixer", "sliders-horizontal", "", "dock_audio_properties", right=True)
         deliver_page = getattr(window, "deliver_page", None)
@@ -367,8 +382,11 @@ class WorkspacePanelBar(QToolBar):
             toolbar = self.right_tools if action in self._right_actions else self
             toolbar.addAction(action)
             button = toolbar.widgetForAction(action)
-            if button is not None:
+            if isinstance(button, QToolButton):
                 button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+                if action in self._icon_only_actions:
+                    button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+                    button.setAccessibleName(action.text())
         self.setVisible(bool(primary or self._panels_menu.actions()) or show_tools)
         self.right_tools.setVisible(bool(self.right_tools.actions()))
 

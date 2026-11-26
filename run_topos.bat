@@ -136,7 +136,7 @@ call :check_dep "MessagePack" "msgpack"  "H" "项目序列化失败"            
 
 call :check_dep "psutil"     "psutil"   "O" "性能监控不可用"                               "Performance monitoring unavailable"            "System Monitor"
 call :check_dep "Send2Trash" "send2trash" "O" "删除文件不经过回收站"                        "Files deleted permanently (no trash)"         "File Management"
-call :check_dep "Flask"      "flask"    "O" "内部预览服务不可用"                            "Internal preview service unavailable"         "Preview"
+call :check_dep "Flask"      "flask"    "O" "Vault 服务不可用"                            "Vault service unavailable"         "Vault"
 call :check_dep "rawpy"      "rawpy"    "O" "RAW 格式图片无法打开"                          "Cannot open RAW image files"                 "RAW Support"
 call :check_dep "Pillow-HEIF" "pillow_heif" "O" "HEIF/HEIC 格式不可用"                      "HEIF/HEIC format unavailable"                 "HEIF Support"
 

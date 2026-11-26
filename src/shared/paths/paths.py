@@ -155,6 +155,6 @@ def get_host_db_path() -> str:
 
     [数据边界 §6] 生产代码禁止再用 ``Database()`` 无参默认（按 CWD 解析
     topos.db，历史上分叉出 src/topos.db）。旧 repo 根 topos.db 仍归旧
-    file_explorer 使用，不做迁移。
+    历史数据使用，保留原位置。
     """
     return os.path.join(get_config_root(), "host.db")

@@ -53,6 +53,8 @@ ZHIPU_VISION_TOOL = "analyze_image"
 ZHIPU_SEARCH_PROFILE_ID = "zhipu-web-search-mcp"
 ZHIPU_READER_PROFILE_ID = "zhipu-web-reader-mcp"
 _NVM_NPX_CANDIDATES = ("~/.nvm/versions/node",)
+_NPX_MISSING = "未找到 npx（需要 Node.js v18+，可经 nvm 安装）"
+_NPX_MISSING_EN = "npx not found. Install Node.js 18 or later, for example via nvm."
 
 # 远程 HTTP MCP 端点（智谱 Coding Plan；认证同智谱 API key）。
 ZHIPU_SEARCH_MCP_URL = "https://open.bigmodel.cn/api/mcp/web_search_prime/mcp"
@@ -81,21 +83,24 @@ _MCP_SERVER_TOOLS: dict[str, tuple[str, ...]] = {
 _MCP_SERVER_META: dict[str, dict[str, str]] = {
     ZHIPU_VISION_PROFILE_ID: {
         "name": "智谱 Vision MCP",
+        "name_en": "Zhipu Vision MCP",
         "server": "@z_ai/mcp-server",
-        "author": "智谱 AI（docs.bigmodel.cn）",
         "transport": "本地 stdio（npx，需 Node.js v18+）",
+        "transport_en": "Local stdio (npx, requires Node.js 18+)",
     },
     ZHIPU_SEARCH_PROFILE_ID: {
         "name": "智谱联网搜索 MCP",
+        "name_en": "Zhipu Web Search MCP",
         "server": "web_search_prime",
-        "author": "智谱 AI（docs.bigmodel.cn）",
         "transport": "远程 HTTP",
+        "transport_en": "Remote HTTP",
     },
     ZHIPU_READER_PROFILE_ID: {
         "name": "智谱网页读取 MCP",
+        "name_en": "Zhipu Web Reader MCP",
         "server": "webReader",
-        "author": "智谱 AI（docs.bigmodel.cn）",
         "transport": "远程 HTTP",
+        "transport_en": "Remote HTTP",
     },
 }
 
@@ -319,7 +324,7 @@ class McpVisionGateway:
     # 管理 API（偏好页「MCP 服务」分区）
     # ------------------------------------------------------------------ #
 
-    def server_statuses(self) -> list[dict[str, Any]]:
+    def server_statuses(self, *, english: bool = False) -> list[dict[str, Any]]:
         """列出全部内置 MCP server 的状态（供偏好页展示）。
 
         每项：profile_id / name / server / author / transport / available /
@@ -333,24 +338,33 @@ class McpVisionGateway:
         # AUD-13851：锁内取启用状态快照，循环中不再直接读共享 set。
         with self._state_lock:
             disabled_snapshot = set(self._server_disabled)
+        missing_npx = _NPX_MISSING_EN if english else _NPX_MISSING
         statuses: list[dict[str, Any]] = []
         for pid, meta in _MCP_SERVER_META.items():
             if pid == ZHIPU_VISION_PROFILE_ID:
                 available = bool(self._npx_path) and has_vision_key and not self._failed_reason
                 if self._failed_reason:
-                    reason = self._failed_reason
+                    reason = missing_npx if self._failed_reason == _NPX_MISSING else self._failed_reason
                 elif not self._npx_path:
-                    reason = "未找到 npx（需要 Node.js v18+，可经 nvm 安装）"
+                    reason = missing_npx
                 elif not has_vision_key:
-                    reason = "未配置助手可用的智谱 API key，或该视觉配置未开启素材上传"
+                    reason = (
+                        "Configure a Zhipu API key for the assistant and enable media uploads for this vision profile."
+                        if english else "未配置助手可用的智谱 API key，或该视觉配置未开启素材上传"
+                    )
                 else:
                     reason = ""
             else:
                 available = has_key
-                reason = "" if has_key else "未配置智谱 API key"
+                reason = "" if has_key else (
+                    "No Zhipu API key configured." if english else "未配置智谱 API key"
+                )
             statuses.append({
                 "profile_id": pid,
-                **meta,
+                "name": meta["name_en" if english else "name"],
+                "server": meta["server"],
+                "author": "Zhipu AI (docs.bigmodel.cn)" if english else "智谱 AI（docs.bigmodel.cn）",
+                "transport": meta["transport_en" if english else "transport"],
                 "available": available,
                 "reason": reason,
                 "enabled": pid not in disabled_snapshot,
@@ -437,7 +451,7 @@ class McpVisionGateway:
             if self._failed_reason or self._closed:
                 return None
             if not self._npx_path:
-                self._failed_reason = "未找到 npx（需要 Node.js v18+，可经 nvm 安装）"
+                self._failed_reason = _NPX_MISSING
                 return None
             api_key = self._resolve_api_key(vision=True)
             if self._client is not None:

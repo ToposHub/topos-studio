@@ -178,7 +178,7 @@ DEPENDENCIES=(
   "PyGObject|gi|H|GStreamer 媒体功能不可用|GStreamer media features unavailable|GStreamer"
   "psutil|psutil|O|性能监控不可用|Performance monitoring unavailable|System Monitor"
   "Send2Trash|send2trash|O|删除文件不经过回收站|Files deleted permanently (no trash)|File Management"
-  "Flask|flask|O|内部预览服务不可用|Internal preview service unavailable|Preview"
+  "Flask|flask|O|Vault 服务不可用|Vault service unavailable|Vault"
   "rawpy|rawpy|O|RAW 格式图片无法打开|Cannot open RAW image files|RAW Support"
   "Pillow-HEIF|pillow_heif|O|HEIF/HEIC 格式不可用|HEIF/HEIC format unavailable|HEIF Support"
   "pycairo|cairo|O|Cairo 绑定不可用|Cairo bindings unavailable|Cairo"

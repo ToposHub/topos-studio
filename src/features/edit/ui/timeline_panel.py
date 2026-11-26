@@ -12,17 +12,16 @@ Transport Controls (moved to ProgramViewerWidget's TransportControlBar):
 - Playhead auto-scroll during playback
 
 Toolbar Structure (single row):
-- Display options | selection / trim / blade / more tools | source edits
-- Snapping / linked selection / position lock | markers
-- Full / detail / custom zoom | slider | live audio meter | overflow
+- Left: display options, source edits, and editing tools
+- Right: zoom presets, zoom sliders, audio monitoring, and overflow
 """
 
 import logging
 from typing import Optional, Any, List, Callable
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolButton,
-    QSlider, QFrame, QLineEdit, QDialog, QDialogButtonBox,
-    QApplication, QTreeWidgetItem, QMenu, QWidgetAction, QSizePolicy, QDockWidget
+    QSlider, QSpinBox, QFrame, QLineEdit, QDialog, QDialogButtonBox,
+    QApplication, QTreeWidgetItem, QMenu, QWidgetAction, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSize, QEvent, QPointF, QRect, QSignalBlocker
 import math
@@ -34,21 +33,26 @@ from PyQt6.QtGui import (
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.panel_divider import PanelDockWidget
 from src.shared.ui.shortcut_scope import shortcut_owner_window_active, text_input_focused
+from src.shared.ui.style_sheet import SPIN_DOWN_ICON_PATH, SPIN_UP_ICON_PATH
+from src.shared.ui.widgets.timeline_output_meter import TimelineOutputMeter
 from src.features.edit.ui.timeline_view import TimelineView, EditTool, MIN_ZOOM, MAX_ZOOM, DEFAULT_ZOOM
 from src.features.edit.ui.timeline_items import TRACK_HEADER_WIDTH
 from src.features.edit.ui.timeline_layout import (
-    MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT, MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
+    MIN_AUDIO_TRACK_HEIGHT, MAX_MIXER_AUDIO_TRACK_HEIGHT, MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT,
+    DEFAULT_TRACK_HEIGHT_RATIO, MAX_EDIT_AUDIO_TRACK_HEIGHT,
 )
 from src.features.edit.ui.edit_style import EDIT_COLORS, EDIT_SIZES
 from src.shared.assets.icon_manager import (
-    icon_zoom_in, icon_zoom_out,
     icon_append_edit,
-    get_icon, IconColors
+    get_icon, icon_close, icon_list, icon_step_back, icon_step_forward, IconColors,
 )
 from src.features.edit.ui.timeline_icons import (
     timeline_icon,
     icon_snap, icon_link, icon_unlink,
     icon_insert_edit, icon_overwrite_edit, icon_marker,
+)
+from src.features.edit.ui.timeline_waveform_style import (
+    WAVEFORM_STYLE_BOTTOM, WAVEFORM_STYLE_CENTERED,
 )
 from src.features.edit.core.edit_playback_controller import (
     EditPlaybackController,
@@ -82,8 +86,8 @@ DEFAULT_FPS = 25.0
 # the user has room to navigate around it.  This is measured against the
 # timeline content area (excluding the fixed track-header column).
 MIN_ZOOM_CONTENT_FILL_RATIO = 0.10
-EDIT_ZOOM_SLIDER_WIDTH = 92
-MIXER_ZOOM_SLIDER_WIDTH = 54
+TIMELINE_ZOOM_SLIDER_WIDTH = 92
+TRACK_HEIGHT_SLIDER_WIDTH = round(TIMELINE_ZOOM_SLIDER_WIDTH * 2 / 3)
 
 
 class _TimelineToolButton(QToolButton):
@@ -150,6 +154,7 @@ class TimelinePanel(QWidget):
     pause_requested = pyqtSignal()
     seek_requested = pyqtSignal(int)  # frame number
     monitor_gain_requested = pyqtSignal(float)
+    monitor_mute_requested = pyqtSignal(bool)
     tool_changed = pyqtSignal(str)  # tool name
     playback_state_changed = pyqtSignal(bool, float, int)  # is_playing, speed, direction (1=forward, -1=backward)
     playback_reanchored = pyqtSignal(int)  # stable frame after render backpressure
@@ -204,8 +209,11 @@ class TimelinePanel(QWidget):
     recording_mode_requested = pyqtSignal(bool)
     flag_requested = pyqtSignal(str)  # chosen flag color; host commits clip metadata
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, parent: Optional[QWidget] = None, *, config_manager: Any = None,
+    ) -> None:
         super().__init__(parent)
+        self._config_manager = config_manager
         
         # Timeline metadata
         self._fps: float = DEFAULT_FPS
@@ -268,7 +276,6 @@ class TimelinePanel(QWidget):
         self._mixer_output_meter: QWidget | None = None
         self._mixer_automation_visible = False
         self._deliver_range_type: Optional[str] = None
-        self._audio_mixer_dock: QDockWidget | None = None
         
         # Setup UI
         self._setup_ui()
@@ -508,56 +515,10 @@ class TimelinePanel(QWidget):
         tools_bar.addStretch()
 
         # --- Audio Level Meter (right side, before zoom) ---
-        self._audio_level_meter = None
-        try:
-            from src.shared.ui.audio_mixer.audio_level_meter import AudioLevelMeter, TickLabelsMode
-            self._audio_level_meter = AudioLevelMeter(
-                orientation=Qt.Orientation.Horizontal,
-                tick_labels_mode=TickLabelsMode.HIDE,
-                show_clipping=True,
-                compact_mode=True,
-            )
-            self._audio_level_meter.setFixedWidth(140)
-            self._audio_level_meter.setFixedHeight(BTN_SIZE + 2)
-            self._audio_level_meter.setToolTip(I18N.tr("edit.timeline_tools.audio_level", "Audio Level"))
-            tools_bar.addWidget(self._audio_level_meter, alignment=Qt.AlignmentFlag.AlignVCenter)
-        except ImportError:
-            pass
-
-        # Separator between audio controls and zoom controls
-        separator_audio = QFrame()
-        separator_audio.setFrameShape(QFrame.Shape.VLine)
-        separator_audio.setStyleSheet(f"color: {EDIT_COLORS['border_subtle']};")
-        separator_audio.setFixedWidth(10)
-        tools_bar.addWidget(separator_audio)
-
-        # --- Mixer Toggle Button ---
-        self.btn_mixer = _TimelineToolButton()
-        self.btn_mixer.setToolTip(I18N.tr("edit.timeline_tools.audio_mixer", "Audio Mixer"))
-        self.btn_mixer.setFixedSize(BTN_SIZE, BTN_SIZE)
-        self.btn_mixer.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_mixer.setIcon(get_icon('fa5s.sliders-h', IconColors.DEFAULT))
-        self.btn_mixer.setCheckable(True)
-        self.btn_mixer.clicked.connect(self._toggle_mixer_panel)
-        tools_bar.addWidget(self.btn_mixer)
-
-        # Separator between audio group and zoom controls
-        separator_zoom = QFrame()
-        separator_zoom.setFrameShape(QFrame.Shape.VLine)
-        separator_zoom.setStyleSheet(f"color: {EDIT_COLORS['border_subtle']};")
-        separator_zoom.setFixedWidth(10)
-        tools_bar.addWidget(separator_zoom)
+        self._audio_level_meter = TimelineOutputMeter()
+        tools_bar.addWidget(self._audio_level_meter, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # --- Zoom Controls (right side) ---
-        # Zoom out
-        self.btn_zoom_out = _TimelineToolButton()
-        self.btn_zoom_out.setToolTip(I18N.tr("edit.timeline_tools.zoom_out", "Zoom Out"))
-        self.btn_zoom_out.setFixedSize(BTN_SIZE, BTN_SIZE)
-        self.btn_zoom_out.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_zoom_out.setIcon(icon_zoom_out(IconColors.DEFAULT))
-        self.btn_zoom_out.clicked.connect(self._on_zoom_out_clicked)
-        tools_bar.addWidget(self.btn_zoom_out)
-
         # Zoom slider (logarithmic mapping)
         self._log_min = math.log(self._slider_min_zoom)
         self._log_max = math.log(self._slider_max_zoom)
@@ -566,20 +527,11 @@ class TimelinePanel(QWidget):
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self.zoom_slider.setRange(0, self._zoom_slider_max)
         self.zoom_slider.setValue(self._ppf_to_slider(DEFAULT_ZOOM))
-        self.zoom_slider.setFixedWidth(100)
-        self.zoom_slider.setToolTip(I18N.tr("edit.timeline_tools.timeline_zoom", "Timeline Zoom"))
+        self.zoom_slider.setFixedWidth(TIMELINE_ZOOM_SLIDER_WIDTH)
+        self.zoom_slider.setToolTip(I18N.tr("edit.timeline_tools.timeline_zoom", "Horizontal Timeline Zoom"))
         self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
         self.zoom_slider.sliderReleased.connect(self._on_zoom_slider_released)
         tools_bar.addWidget(self.zoom_slider)
-
-        # Zoom in
-        self.btn_zoom_in = _TimelineToolButton()
-        self.btn_zoom_in.setToolTip(I18N.tr("edit.timeline_tools.zoom_in", "Zoom In"))
-        self.btn_zoom_in.setFixedSize(BTN_SIZE, BTN_SIZE)
-        self.btn_zoom_in.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
-        self.btn_zoom_in.setIcon(icon_zoom_in(IconColors.DEFAULT))
-        self.btn_zoom_in.clicked.connect(self._on_zoom_in_clicked)
-        tools_bar.addWidget(self.btn_zoom_in)
 
         # Fit to view
         self.btn_zoom_fit = _TimelineToolButton()
@@ -590,45 +542,6 @@ class TimelinePanel(QWidget):
         self.btn_zoom_fit.clicked.connect(self._on_zoom_fit_clicked)
         tools_bar.addWidget(self.btn_zoom_fit)
 
-        # Apply clean button style (transparent, no heavy backgrounds)
-        self._timeline_toolbar_widgets = [
-            self.btn_select,
-            self.btn_trim,
-            self.btn_blade,
-            self.btn_ripple,
-            self.btn_rate_stretch,
-            self.btn_roll,
-            self.btn_slip,
-            self.btn_slide,
-            self.btn_hand,
-            self.btn_zoom,
-            separator2,
-            self.btn_snap,
-            self.btn_linked_selection,
-            self.btn_marker,
-            separator3,
-            self.btn_insert,
-            self.btn_overwrite,
-            self.btn_append,
-            self.btn_edit_mode,
-            self._audio_level_meter,
-            separator_audio,
-            self.btn_mixer,
-            separator_zoom,
-            self.btn_zoom_out,
-            self.zoom_slider,
-            self.btn_zoom_in,
-            self.btn_zoom_fit,
-        ]
-        self._timeline_toolbar_widgets = [
-            widget for widget in self._timeline_toolbar_widgets if widget is not None
-        ]
-        self._timeline_zoom_widgets = {
-            self.btn_zoom_out,
-            self.zoom_slider,
-            self.btn_zoom_in,
-            self.btn_zoom_fit,
-        }
         tool_btn_style = """
             QToolButton {
                 background: transparent;
@@ -869,7 +782,7 @@ class TimelinePanel(QWidget):
         toolbar.setLayout(tools_bar)
         self._tools_bar = tools_bar
         tools_bar.setContentsMargins(8, 0, 8, 0)
-        tools_bar.setSpacing(3)
+        tools_bar.setSpacing(4)
         for widget in old_widgets:
             widget.setParent(toolbar)
             widget.hide()
@@ -897,6 +810,12 @@ class TimelinePanel(QWidget):
             timeline_icon("microphone"), True,
         )
         self.btn_recording_mode.toggled.connect(self.recording_mode_requested.emit)
+        self.btn_envelope_edit = button(
+            "timelineEnvelopeEdit",
+            I18N.tr("timeline.envelope_edit_mode", "Edit Audio Envelopes"),
+            timeline_icon("envelope"), True,
+        )
+        self.btn_envelope_edit.toggled.connect(self._on_envelope_edit_toggled)
         self.btn_advanced_tools = button("timelineAdvancedTools",
             I18N.tr("timeline.advanced_tools", "More Editing Tools"),
             timeline_icon("dynamic_trim"), True)
@@ -917,16 +836,13 @@ class TimelinePanel(QWidget):
             I18N.tr("timeline.zoom.detail", "Detail Zoom"),
             timeline_icon("zoom_detail"), True)
         self.btn_zoom_custom = button("timelineCustomZoom",
-            I18N.tr("timeline.zoom.custom", "Custom Zoom"),
+            I18N.tr("edit.timeline_tools.custom_zoom", "Custom Zoom"),
             timeline_icon("zoom_custom"), True)
         self.btn_zoom_fit.setCheckable(True)
         self.btn_zoom_fit.setToolTip(I18N.tr("timeline.zoom.full", "Full Extent Zoom"))
         self._sync_zoom_preset_buttons()
         self.btn_zoom_detail.clicked.connect(lambda: self._set_zoom_preset("detail"))
         self.btn_zoom_custom.clicked.connect(lambda: self._set_zoom_preset("custom"))
-        self.btn_zoom_out.setIcon(timeline_icon("zoom_out"))
-        self.btn_zoom_in.setIcon(timeline_icon("zoom_in"))
-        self.btn_mixer.setIcon(timeline_icon("mixer"))
         self.btn_overflow = button("timelineToolbarOverflow",
             I18N.tr("timeline.more_actions", "More Timeline Actions"),
             timeline_icon("more"))
@@ -941,14 +857,14 @@ class TimelinePanel(QWidget):
         self.btn_audio_automation.toggled.connect(lambda checked:
             self.btn_audio_automation.setIcon(get_icon(
                 "ph.activity", IconColors.ORANGE if checked else IconColors.DEFAULT)))
+        self.zoom_slider.setAccessibleName(self.zoom_slider.toolTip())
         self._track_height_control = QWidget(toolbar)
         self._track_height_control.setObjectName("timelineTrackHeight")
         self._track_height_control.setStyleSheet(
             "QWidget#timelineTrackHeight { background: transparent; border: none; }")
-        self._track_height_control.setFixedWidth(16 + 4 + MIXER_ZOOM_SLIDER_WIDTH)
         height_row = QHBoxLayout(self._track_height_control)
         height_row.setContentsMargins(0, 0, 0, 0)
-        height_row.setSpacing(4)
+        height_row.setSpacing(tools_bar.spacing())
         height_label = QLabel(self._track_height_control)
         height_label.setPixmap(get_icon("ph.arrows-out-line-vertical").pixmap(QSize(16, 16)))
         height_label.setFixedWidth(16)
@@ -957,26 +873,27 @@ class TimelinePanel(QWidget):
         self._track_height_icon = height_label
         self._track_height_slider = QSlider(Qt.Orientation.Horizontal, self._track_height_control)
         self._track_height_slider.setObjectName("timelineTrackHeightSlider")
+        self._track_height_slider.setFixedWidth(TRACK_HEIGHT_SLIDER_WIDTH)
         self._track_height_slider.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self._track_height_slider.valueChanged.connect(self._on_track_height_slider_changed)
         height_row.addWidget(self._track_height_slider)
-        self._mixer_width_icon = QLabel(toolbar)
-        self._mixer_width_icon.setPixmap(get_icon("ph.arrows-out-line-horizontal").pixmap(QSize(16, 16)))
-        self._mixer_width_icon.setFixedWidth(16)
-        self._mixer_width_icon.setToolTip(self.zoom_slider.toolTip())
-        self._mixer_width_icon.setStyleSheet("background: transparent; border: none;")
+        self._zoom_width_icon = QLabel(toolbar)
+        self._zoom_width_icon.setPixmap(get_icon("ph.arrows-out-line-horizontal").pixmap(QSize(16, 16)))
+        self._zoom_width_icon.setFixedWidth(16)
+        self._zoom_width_icon.setToolTip(self.zoom_slider.toolTip())
+        self._zoom_width_icon.setStyleSheet("background: transparent; border: none;")
         self._monitor_gain_control = QWidget(toolbar)
         self._monitor_gain_control.setObjectName("timelineMonitorVolume")
         self._monitor_gain_control.setStyleSheet(
             "QWidget#timelineMonitorVolume { background: transparent; border: none; }")
-        self._monitor_gain_control.setFixedWidth(16 + 4 + MIXER_ZOOM_SLIDER_WIDTH)
         monitor_row = QHBoxLayout(self._monitor_gain_control)
-        monitor_row.setContentsMargins(0, 0, 0, 0)
+        monitor_row.setContentsMargins(0, 0, 8, 0)
         monitor_row.setSpacing(4)
-        self._monitor_gain_icon = QLabel(self._monitor_gain_control)
-        self._monitor_gain_icon.setFixedWidth(16)
-        self._monitor_gain_icon.setPixmap(timeline_icon("speaker").pixmap(QSize(16, 16)))
-        self._monitor_gain_icon.setStyleSheet("background: transparent; border: none;")
+        self._monitor_gain_icon = button("timelineMonitorMute", "", timeline_icon("speaker"), True)
+        self._monitor_gain_icon.setFixedSize(24, 24)
+        self._monitor_gain_icon.setIconSize(QSize(16, 16))
+        self._monitor_gain_icon.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._monitor_gain_icon.toggled.connect(self._on_monitor_mute_toggled)
         monitor_row.addWidget(self._monitor_gain_icon)
         self._monitor_gain_slider = QSlider(Qt.Orientation.Horizontal, self._monitor_gain_control)
         self._monitor_gain_slider.setObjectName("timelineMonitorGainSlider")
@@ -984,10 +901,12 @@ class TimelinePanel(QWidget):
         self._monitor_gain_slider.setSingleStep(10)
         self._monitor_gain_slider.setPageStep(60)
         self._monitor_gain_slider.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        self._monitor_gain_slider.setAccessibleName(I18N.tr("timeline.monitor_volume", "Monitor Volume"))
+        self._monitor_gain_slider.setFixedWidth(54)
+        self._monitor_gain_slider.setAccessibleName(I18N.tr("mixer.monitor.gain", "Monitor level"))
+        monitor_row.addWidget(self._monitor_gain_slider)
+        self._monitor_gain_control.setFixedWidth(monitor_row.minimumSize().width())
         self.set_monitor_gain_db(0.0)
         self._monitor_gain_slider.valueChanged.connect(self._on_monitor_gain_changed)
-        monitor_row.addWidget(self._monitor_gain_slider)
         self._secondary_tool_buttons = [
             self.btn_ripple, self.btn_rate_stretch, self.btn_roll,
             self.btn_slip, self.btn_slide, self.btn_hand, self.btn_zoom,
@@ -1012,13 +931,13 @@ class TimelinePanel(QWidget):
         add(self.btn_view_options)
         add(self.btn_audio_view)
         add(self.btn_audio_automation)
+        add(self.btn_envelope_edit)
         add(self.btn_keyframe_tray)
-        add(self.btn_recording_mode)
-        tools_bar.addStretch(1)
-        for widget in (self.btn_select, self.btn_trim, self.btn_blade, self.btn_advanced_tools):
-            add(widget)
         separator()
         for widget in (self.btn_insert, self.btn_overwrite, self.btn_replace):
+            add(widget)
+        separator()
+        for widget in (self.btn_select, self.btn_trim, self.btn_blade, self.btn_advanced_tools):
             add(widget)
         separator()
         for widget in (self.btn_snap, self.btn_linked_selection, self.btn_position_lock):
@@ -1026,41 +945,37 @@ class TimelinePanel(QWidget):
         separator()
         add(self.btn_flag)
         add(self.btn_marker)
-        separator()
+        tools_bar.addStretch(1)
         for widget in (self.btn_zoom_fit, self.btn_zoom_detail, self.btn_zoom_custom):
             add(widget)
-        add(self._mixer_width_icon)
-        for widget in (self.btn_zoom_out, self.zoom_slider, self.btn_zoom_in):
-            add(widget)
+        self.btn_zoom_custom.hide()
+        add(self._zoom_width_icon)
+        add(self.zoom_slider)
         add(self._track_height_control)
-        tools_bar.addStretch(1)
-        if self._audio_level_meter is not None:
-            self._audio_level_meter.setFixedSize(140, 20)
-            add(self._audio_level_meter)
         add(self._monitor_gain_control)
-        add(self.btn_mixer)
+        add(self.btn_recording_mode)
+        add(self._audio_level_meter)
         add(self.btn_overflow)
         for widget in self._timeline_toolbar_widgets + self._secondary_tool_buttons:
             widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             if isinstance(widget, QToolButton):
                 widget.setFixedSize(28, 28)
                 widget.setIconSize(QSize(18, 18))
-        self.zoom_slider.setFixedWidth(EDIT_ZOOM_SLIDER_WIDTH)
+        self._track_height_control.setFixedWidth(height_row.minimumSize().width())
         for button in (self.btn_view_options, self.btn_advanced_tools, self.btn_flag,
                        self.btn_marker, self.btn_audio_view):
             button.setFixedWidth(38)
         self._timeline_zoom_widgets = {
-            self.btn_zoom_out, self.zoom_slider, self.btn_zoom_in, self.btn_zoom_fit,
+            self._zoom_width_icon, self.zoom_slider, self.btn_zoom_fit,
             self.btn_zoom_detail, self.btn_zoom_custom,
         }
         self._mixer_only_toolbar_widgets = {
-            self.btn_audio_view, self.btn_audio_automation,
-            self._mixer_width_icon,
+            self.btn_audio_view, self.btn_audio_automation, self.btn_envelope_edit,
         }
         self._mixer_toolbar_widgets = self._mixer_only_toolbar_widgets | {
             self.btn_select, self.btn_trim, self.btn_blade, self.btn_snap,
-            self.btn_marker,
-            self.btn_zoom_out, self.btn_zoom_in, self.zoom_slider, self.btn_overflow,
+            self.btn_marker, self.btn_overflow,
+            self._zoom_width_icon, self.zoom_slider,
             self._track_height_control, self._monitor_gain_control,
         }
         for widget in self._mixer_only_toolbar_widgets:
@@ -1073,8 +988,14 @@ class TimelinePanel(QWidget):
         advanced = QMenu(self)
         group = QActionGroup(advanced)
         group.setExclusive(True)
-        for btn, tool in self._get_tool_button_map()[3:]:
-            action = advanced.addAction(timeline_icon(tool.value), btn.toolTip())
+        for btn, tool, label in (
+            (self.btn_ripple, EditTool.RIPPLE, self.btn_ripple.toolTip()),
+            (self.btn_roll, EditTool.ROLL, self.btn_roll.toolTip()),
+            (self.btn_slip, EditTool.SLIP, self.btn_slip.toolTip()),
+            (self.btn_slide, EditTool.SLIDE, self.btn_slide.toolTip()),
+            (self.btn_rate_stretch, EditTool.RATE_STRETCH, I18N.tr("timeline.rate_stretch", "Rate Stretch (Shift+R)")),
+        ):
+            action = advanced.addAction(btn.icon(), label)
             action.setCheckable(True)
             group.addAction(action)
             action.triggered.connect(lambda _checked=False, value=tool: self._set_tool(value))
@@ -1089,8 +1010,8 @@ class TimelinePanel(QWidget):
         thumbnails = options.addMenu(I18N.tr("timeline.video_view", "Video View"))
         for mode, title in (("auto", I18N.tr("timeline.thumbnails.auto", "Automatic")),
                             ("filmstrip", I18N.tr("timeline.thumbnails.filmstrip", "Filmstrip")),
-                            ("start_end", I18N.tr("timeline.thumbnails.start_end", "First and Last Frame")),
-                            ("none", I18N.tr("timeline.thumbnails.none", "Clip Names Only"))):
+                            ("start_end", I18N.tr("timeline.thumbnails.start_end", "One Frame at Each End")),
+                            ("none", I18N.tr("timeline.thumbnails.none", "Hide Thumbnails"))):
             action = thumbnails.addAction(title)
             action.setCheckable(True)
             thumbnail_group.addAction(action)
@@ -1103,8 +1024,10 @@ class TimelinePanel(QWidget):
         options.addSeparator()
         self._track_height_sliders: dict[str, QSlider] = {}
         for track_type, title, minimum, maximum, initial in (
-            ("video", I18N.tr("timeline.video_track_height", "Video Track Height"), 36, 160, EDIT_SIZES["track_h_video"]),
-            ("audio", I18N.tr("timeline.audio_track_height", "Audio Track Height"), 28, 120, EDIT_SIZES["track_h_audio"]),
+            ("video", I18N.tr("timeline.video_track_height", "Video Track Height"),
+             MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT, self.timeline_view.default_track_height("video")),
+            ("audio", I18N.tr("timeline.audio_track_height", "Audio Track Height"),
+             MIN_AUDIO_TRACK_HEIGHT, MAX_EDIT_AUDIO_TRACK_HEIGHT, self.timeline_view.default_track_height("audio")),
         ):
             self._track_height_sliders[track_type] = self._add_track_height_slider(
                 options, track_type, title, minimum, maximum, initial)
@@ -1112,6 +1035,21 @@ class TimelinePanel(QWidget):
         self._follow_action = options.addAction(I18N.tr("timeline.follow_playhead", "Follow Playhead"))
         self._follow_action.setCheckable(True)
         self._follow_action.triggered.connect(self.timeline_view.set_playhead_follow_enabled)
+        options.addSeparator()
+        waveforms = options.addMenu(I18N.tr("timeline.waveform_style.title", "Waveform Style"))
+        waveform_group = QActionGroup(waveforms)
+        waveform_group.setExclusive(True)
+        self._waveform_style_actions: dict[str, QAction] = {}
+        for style, title in (
+            (WAVEFORM_STYLE_BOTTOM, I18N.tr("timeline.waveform_style.bottom_fill", "Bottom Fill")),
+            (WAVEFORM_STYLE_CENTERED, I18N.tr("timeline.waveform_style.centered", "Centered")),
+        ):
+            action = waveforms.addAction(title)
+            action.setCheckable(True)
+            waveform_group.addAction(action)
+            action.triggered.connect(lambda _checked=False, value=style: self.timeline_view.set_waveform_style(value))
+            self._waveform_style_actions[style] = action
+        self._add_track_height_ratio_row(options)
         options.aboutToShow.connect(self._sync_view_options)
         self.btn_view_options.setMenu(options)
         self.btn_view_options.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -1119,6 +1057,7 @@ class TimelinePanel(QWidget):
         audio_options = QMenu(self)
         audio_options.addAction(self._waveforms_action)
         audio_options.addAction(self._follow_action)
+        audio_options.addMenu(waveforms)
         audio_options.aboutToShow.connect(self._sync_view_options)
         self.btn_audio_view.setMenu(audio_options)
         self.btn_audio_view.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -1126,13 +1065,19 @@ class TimelinePanel(QWidget):
 
         overflow = QMenu(self)
         self._overflow_button_actions: dict[QToolButton, QAction] = {}
-        for btn in (self.btn_keyframe_tray, self.btn_recording_mode, self.btn_select, self.btn_trim, self.btn_blade,
-                    self.btn_insert, self.btn_overwrite, self.btn_replace, self.btn_append, self.btn_snap,
+        overflow_labels = {
+            self.btn_linked_selection: I18N.tr("timeline.linked_selection", "Linked Selection"),
+        }
+        for btn in (self.btn_keyframe_tray, self.btn_recording_mode,
+                    self.btn_insert, self.btn_overwrite, self.btn_replace, self.btn_append,
+                    self.btn_select, self.btn_trim, self.btn_blade, self.btn_snap,
                     self.btn_linked_selection, self.btn_position_lock, self.btn_marker,
                     self.btn_flag,
                     self.btn_zoom_fit, self.btn_zoom_detail, self.btn_zoom_custom,
-                    self.btn_zoom_out, self.btn_zoom_in, self.btn_mixer, self.btn_audio_automation):
-            action = overflow.addAction(btn.icon(), btn.toolTip())
+                    self.btn_audio_automation):
+            if btn in (self.btn_select, self.btn_zoom_fit):
+                overflow.addSeparator()
+            action = overflow.addAction(btn.icon(), overflow_labels.get(btn, btn.toolTip()))
             action.setCheckable(btn.isCheckable())
             action.triggered.connect(lambda _checked=False, target=btn: target.click())
             self._overflow_button_actions[btn] = action
@@ -1150,6 +1095,12 @@ class TimelinePanel(QWidget):
         overflow.aboutToShow.connect(self._sync_overflow_menu)
         self.btn_overflow.setMenu(overflow)
         self.btn_overflow.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+
+        # Cocoa hides action icons by default, even in themed popup menus.
+        for menu in (self.btn_flag.menu(), self.btn_marker.menu(), advanced, overflow):
+            for action in menu.actions():
+                if not action.icon().isNull():
+                    action.setIconVisibleInMenu(True)
 
     def _add_track_height_slider(
         self, menu: QMenu, track_type: str, title: str,
@@ -1174,6 +1125,81 @@ class TimelinePanel(QWidget):
         menu.addAction(action)
         return slider
 
+    def _add_track_height_ratio_row(self, menu: QMenu) -> None:
+        row = QWidget(menu)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(14, 6, 14, 6)
+        layout.setSpacing(6)
+        title = I18N.tr("timeline.track_height_ratio", "Video : Audio Height")
+        layout.addWidget(QLabel(title, row), stretch=1)
+        layout.addSpacing(8)
+        self._track_height_ratio_video = QSpinBox(row)
+        self._track_height_ratio_audio = QSpinBox(row)
+        for field, value, label in (
+            (self._track_height_ratio_video, DEFAULT_TRACK_HEIGHT_RATIO[0],
+             I18N.tr("timeline.track_height_ratio_video", "Video Height Ratio")),
+            (self._track_height_ratio_audio, DEFAULT_TRACK_HEIGHT_RATIO[1],
+             I18N.tr("timeline.track_height_ratio_audio", "Audio Height Ratio")),
+        ):
+            field.setRange(1, 4)
+            field.setValue(value)
+            field.setKeyboardTracking(False)
+            field.setFixedSize(50, 28)
+            field.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            field.setAccessibleName(label)
+            field.setToolTip(label)
+            field.setStyleSheet(f"""
+                QSpinBox {{
+                    background: {EDIT_COLORS["bg_input"]};
+                    color: {EDIT_COLORS["text"]};
+                    border: 1px solid {EDIT_COLORS["border"]};
+                    border-radius: 6px;
+                    padding: 0 5px 0 4px;
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QSpinBox:hover {{ border-color: {EDIT_COLORS["ruler_medium_tick"]}; }}
+                QSpinBox:focus {{ border-color: {EDIT_COLORS["accent"]}; }}
+                QSpinBox QLineEdit {{
+                    background: transparent;
+                    border: none;
+                    padding: 0;
+                }}
+                QSpinBox::up-button, QSpinBox::down-button {{
+                    subcontrol-origin: border;
+                    width: 17px;
+                    height: 12px;
+                    right: 3px;
+                    border: none;
+                    border-radius: 3px;
+                    background: transparent;
+                }}
+                QSpinBox::up-button {{ subcontrol-position: top right; top: 2px; }}
+                QSpinBox::down-button {{ subcontrol-position: bottom right; bottom: 2px; }}
+                QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+                    background: {EDIT_COLORS["border"]};
+                }}
+                QSpinBox::up-button:pressed, QSpinBox::down-button:pressed {{
+                    background: {EDIT_COLORS["ruler_medium_tick"]};
+                }}
+                QSpinBox::up-arrow {{ image: url("{SPIN_UP_ICON_PATH}"); width: 7px; height: 5px; }}
+                QSpinBox::down-arrow {{ image: url("{SPIN_DOWN_ICON_PATH}"); width: 7px; height: 5px; }}
+                QSpinBox::up-arrow:off, QSpinBox::down-arrow:off {{ image: none; }}
+            """)
+            field.valueChanged.connect(self._on_track_height_ratio_changed)
+        layout.addWidget(self._track_height_ratio_video)
+        separator = QLabel(":", row)
+        separator.setStyleSheet(f'color: {EDIT_COLORS["text_muted"]}; font-weight: 600;')
+        layout.addWidget(separator)
+        layout.addWidget(self._track_height_ratio_audio)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(row)
+        menu.addAction(action)
+
+    def _on_track_height_ratio_changed(self, _value: int) -> None:
+        ratio = (self._track_height_ratio_video.value(), self._track_height_ratio_audio.value())
+        self.timeline_view.set_track_height_ratio(ratio, resize_existing=True)
+
     def _setup_annotation_menus(self) -> None:
         """Make marker creation the primary action; use arrows for navigation."""
         self.btn_marker.clicked.disconnect(self._on_marker_toggled)
@@ -1181,19 +1207,23 @@ class TimelinePanel(QWidget):
         self.btn_marker.setToolTip(I18N.tr("timeline.add_marker", "Add Marker (M)"))
         self.btn_marker.clicked.connect(self.timeline_view.add_marker_at_playhead)
         marker_menu = QMenu(self)
-        marker_menu.addAction(I18N.tr("timeline.add_marker", "Add Marker (M)"),
+        marker_menu.addAction(self.btn_marker.icon(), I18N.tr("timeline.add_marker", "Add Marker (M)"),
                               self.timeline_view.add_marker_at_playhead)
-        marker_menu.addAction(I18N.tr("timeline.previous_marker", "Previous Marker"),
+        marker_menu.addAction(icon_step_back(), I18N.tr("timeline.previous_marker", "Previous Marker"),
                               self.timeline_view.jump_to_prev_marker)
-        marker_menu.addAction(I18N.tr("timeline.next_marker", "Next Marker"),
+        marker_menu.addAction(icon_step_forward(), I18N.tr("timeline.next_marker", "Next Marker"),
                               self.timeline_view.jump_to_next_marker)
         marker_menu.addSeparator()
-        self._marker_list_action = marker_menu.addAction(I18N.tr("tooltip.show_markers", "Show Marker List"))
+        self._marker_list_action = marker_menu.addAction(
+            icon_list(), I18N.tr("timeline.show_marker_list", "Show Marker List"))
         self._marker_list_action.setCheckable(True)
         self._marker_list_action.triggered.connect(self._set_marker_list_visible)
         self.btn_marker.setMenu(marker_menu)
         self.btn_marker.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
         flags = QMenu(self)
+        flags.addAction(icon_close(), I18N.tr("timeline.clear_flags", "Clear Flags"),
+                        lambda: self.flag_requested.emit(""))
+        flags.addSeparator()
         group = QActionGroup(flags)
         self._flag_actions: dict[str, QAction] = {}
         # W05：白名单单一真值来源在 core.timeline_v2（模型/命令/菜单共用）
@@ -1217,8 +1247,6 @@ class TimelinePanel(QWidget):
             group.addAction(action)
             action.triggered.connect(lambda _checked=False, value=color: self._choose_flag_color(value))
             self._flag_actions[color] = action
-        flags.addSeparator()
-        flags.addAction(I18N.tr("timeline.clear_flags", "Clear Flags"), lambda: self.flag_requested.emit(""))
         self.btn_flag.setMenu(flags)
         self.btn_flag.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
 
@@ -1239,40 +1267,41 @@ class TimelinePanel(QWidget):
         for value, action in self._thumbnail_actions.items():
             action.setChecked(mode == value)
         self._waveforms_action.setChecked(self.timeline_view.waveforms_visible())
+        waveform_style = self.timeline_view.waveform_style()
+        self._waveform_style_actions[waveform_style].setChecked(True)
         self._follow_action.setChecked(self.timeline_view.is_playhead_follow_enabled())
-        timeline = self.timeline_view.get_timeline()
-        if timeline is not None:
-            heights = self.timeline_view.layout_state()["track_heights"]
-            for track_type, slider in self._track_height_sliders.items():
-                tracks = [track for track in timeline.all_tracks if track.track_type == track_type]
-                if tracks:
-                    default = EDIT_SIZES["track_h_" + track_type]
-                    slider.blockSignals(True)
-                    try:
-                        slider.setValue(heights.get(tracks[0].track_id, default))
-                    finally:
-                        slider.blockSignals(False)
         self._sync_track_height_slider()
 
     def _sync_track_height_slider(self) -> None:
         timeline = self.timeline_view.get_timeline()
+        video_ratio, audio_ratio = self.timeline_view.track_height_ratio()
+        with QSignalBlocker(self._track_height_ratio_video):
+            self._track_height_ratio_video.setValue(video_ratio)
+        with QSignalBlocker(self._track_height_ratio_audio):
+            self._track_height_ratio_audio.setValue(audio_ratio)
+        for track_type, slider in self._track_height_sliders.items():
+            tracks = getattr(timeline, f"{track_type}_tracks") if timeline is not None else ()
+            default = self.timeline_view.default_track_height(track_type)
+            with QSignalBlocker(slider):
+                slider.setValue(
+                    self.timeline_view.display_track_height(tracks[0].track_id, track_type) if tracks else default,
+                )
+
         mixer = self._toolbar_display_mode == "mixer"
         video = timeline.video_tracks if timeline is not None and not mixer else ()
         audio = timeline.audio_tracks if timeline is not None else ()
         tracks = video or audio
-        if video or not (audio or mixer):
-            default = EDIT_SIZES["track_h_video"]
-            limits = (MIN_VIDEO_TRACK_HEIGHT, MAX_VIDEO_TRACK_HEIGHT)
-        else:
-            default = EDIT_SIZES["track_h_audio"]
-            limits = (MIN_AUDIO_TRACK_HEIGHT, MAX_AUDIO_TRACK_HEIGHT)
-        height = self.timeline_view.layout_state()["track_heights"].get(tracks[0].track_id, default) if tracks else default
-        title = (I18N.tr("timeline.audio_track_height", "Audio Track Height") if mixer
-                 else I18N.tr("timeline.clip_height", "Clip Height"))
+        track_type = "video" if video or not (audio or mixer) else "audio"
+        limits = ((MIN_AUDIO_TRACK_HEIGHT, MAX_MIXER_AUDIO_TRACK_HEIGHT) if mixer
+                  else self.timeline_view.media_track_height_range())
+        height = (self.timeline_view.display_track_height(tracks[0].track_id, track_type) if tracks
+                  else self.timeline_view.default_track_height(track_type))
+        title = (I18N.tr("edit.timeline_tools.audio_track_height", "Audio Track Height") if mixer
+                 else I18N.tr("edit.timeline_tools.clip_height", "Clip Height"))
         with QSignalBlocker(self._track_height_slider):
             self._track_height_slider.setRange(*limits)
             self._track_height_slider.setValue(height)
-        self._track_height_slider.setEnabled(bool(tracks))
+        self._track_height_control.setEnabled(bool(tracks))
         self._track_height_slider.setAccessibleName(title)
         self._track_height_slider.setToolTip(title)
         self._track_height_icon.setToolTip(title)
@@ -1299,6 +1328,14 @@ class TimelinePanel(QWidget):
 
     def _on_position_lock_toggled(self, enabled: bool) -> None:
         self.timeline_view.set_position_lock_enabled(enabled)
+
+    def _on_envelope_edit_toggled(self, enabled: bool) -> None:
+        self.btn_envelope_edit.setIcon(timeline_icon(
+            "envelope", IconColors.ORANGE if enabled else IconColors.DEFAULT,
+        ))
+        if enabled:
+            self.timeline_view.set_tool(EditTool.SELECT)
+        self.timeline_view.set_mixer_envelope_editing(enabled)
 
     def _sync_position_lock(self, enabled: bool) -> None:
         self.btn_position_lock.blockSignals(True)
@@ -1426,6 +1463,8 @@ class TimelinePanel(QWidget):
             self._toolbar_edit_width = self.width()
 
         if previous == "mixer":
+            self.btn_envelope_edit.setChecked(False)
+            self.btn_envelope_edit.hide()
             self._mixer_automation_visible = self.automation_lane_visible()
             if self._mixer_automation_visible != self._automation_before_mixer:
                 self.toggle_automation_lane(self._automation_before_mixer)
@@ -1440,7 +1479,7 @@ class TimelinePanel(QWidget):
         self._toolbar_display_mode = mode
         self._sync_track_height_slider()
         self.timeline_view.set_edit_wheel_controls(mode == "edit")
-        self.zoom_slider.setFixedWidth(MIXER_ZOOM_SLIDER_WIDTH if mode == "mixer" else EDIT_ZOOM_SLIDER_WIDTH)
+        self.timeline_view.set_deliver_mode(mode == "deliver")
         if self._mixer_output_meter is not None:
             toolbar = self._tools_bar.parentWidget()
             toolbar.setFixedHeight(36 if mode == "mixer" else 40)
@@ -1468,8 +1507,8 @@ class TimelinePanel(QWidget):
             # old width was explicitly hidden by its owner.  Preserve that
             # override while recomputing controls hidden only for lack of room.
             explicit_hidden = {
-                widget for widget, threshold in self._responsive_toolbar_thresholds().items()
-                if not backup.get(widget, True) and previous_width >= threshold
+                widget for widget, visible in self._responsive_toolbar_visibility(previous_width).items()
+                if visible and not backup.get(widget, True)
             }
             for widget, visible in backup.items():
                 widget.setVisible(visible)
@@ -1501,7 +1540,7 @@ class TimelinePanel(QWidget):
             return
 
         controls.setParent(self)
-        anchor_index = self._tools_bar.indexOf(self.btn_zoom_out)
+        anchor_index = self._tools_bar.indexOf(self.btn_marker) + 1
         self._tools_bar.insertWidget(anchor_index, controls)
         controls.setVisible(self._toolbar_display_mode == "deliver")
 
@@ -1620,7 +1659,10 @@ class TimelinePanel(QWidget):
             try:
                 from src.shared.config.config_manager import ConfigManager
 
-                ConfigManager().set(self._EDIT_MODE_CONFIG_KEY, mode)
+                config = self._config_manager
+                if config is None:
+                    config = ConfigManager()
+                config.set(self._EDIT_MODE_CONFIG_KEY, mode)
             except Exception:  # noqa: BLE001 — 持久化失败不阻塞切换
                 logger.debug("persist edit mode failed", exc_info=True)
 
@@ -1658,7 +1700,10 @@ class TimelinePanel(QWidget):
         try:
             from src.shared.config.config_manager import ConfigManager
 
-            stored = ConfigManager().get(self._EDIT_MODE_CONFIG_KEY)
+            config = self._config_manager
+            if config is None:
+                config = ConfigManager()
+            stored = config.get(self._EDIT_MODE_CONFIG_KEY)
         except Exception:  # noqa: BLE001
             logger.debug("read edit mode failed", exc_info=True)
         mode = stored if stored in ("insert", "overwrite") else "overwrite"
@@ -1726,54 +1771,72 @@ class TimelinePanel(QWidget):
 
         visible = self._timeline_zoom_widgets
         if mode == "mixer":
-            visible = self._mixer_toolbar_widgets
-            if self._mixer_output_meter is not None:
-                spacing = self._tools_bar.spacing()
-                room = self.width() - self._mixer_toolbar_minimum_width
-                optional = (
-                    self.btn_blade, self.btn_snap, self.btn_audio_automation, self.btn_audio_view,
-                    self.btn_trim, self.btn_marker,
-                )
-                steps = (self.btn_zoom_out, self.btn_zoom_in)
-                visible = visible.difference(optional, steps)
-                steps_width = sum(button.width() + spacing for button in steps)
-                if steps_width <= room:
-                    visible.update(steps)
-                    room -= steps_width
-                for widget in optional:
-                    cost = widget.width() + spacing
-                    if cost <= room:
-                        visible.add(widget)
-                        room -= cost
+            optional = (
+                self.btn_blade, self.btn_snap, self.btn_audio_automation, self.btn_audio_view,
+                self.btn_trim, self.btn_marker, self._track_height_control,
+            )
+            visible = self._mixer_toolbar_widgets.difference(optional)
+            spacing = self._tools_bar.spacing()
+            if self._mixer_output_meter is None:
+                margins = self._tools_bar.contentsMargins()
+                minimum = margins.left() + margins.right() - spacing
+                minimum += sum(widget.minimumWidth() + spacing for widget in visible)
+            else:
+                minimum = self._mixer_toolbar_minimum_width
+            room = self.width() - minimum
+            for widget in optional:
+                cost = widget.minimumWidth() + spacing
+                if cost <= room:
+                    visible.add(widget)
+                    room -= cost
         for widget in self._timeline_toolbar_widgets:
             widget.setVisible(widget in visible)
 
-    def _responsive_toolbar_thresholds(self) -> dict[QWidget, int]:
-        """Minimum width for optional instruments; overflow retains each action."""
-        thresholds: dict[QWidget, int] = {
-            self.btn_insert: 900, self.btn_overwrite: 900, self.btn_replace: 900,
-            self.btn_keyframe_tray: 1100, self.btn_recording_mode: 360,
-            self.btn_flag: 1000, self.btn_advanced_tools: 700,
+    @staticmethod
+    def _edit_toolbar_meter_width(width: int) -> int:
+        return 124 if width >= 1200 else 88 if width >= 700 else 68
+
+    def _responsive_toolbar_visibility(self, width: int) -> dict[QWidget, bool]:
+        """Reserve room for horizontal zoom and show track height last."""
+        visibility = {self._zoom_width_icon: width >= 560, self.zoom_slider: width >= 560}
+        fixed = (self.btn_view_options, self.btn_select, self.btn_snap, self.btn_zoom_fit,
+                 self._monitor_gain_control, self.btn_overflow)
+        margins = self._tools_bar.contentsMargins()
+        spacing = self._tools_bar.spacing()
+        room = width - margins.left() - margins.right() + spacing
+        room -= sum(widget.minimumWidth() + spacing for widget in fixed)
+        room -= sum(widget.minimumWidth() + spacing for widget, visible in visibility.items() if visible)
+        room -= self._edit_toolbar_meter_width(width) + spacing
+
+        optional = {
+            self.btn_recording_mode: 360,
             self.btn_trim: 400, self.btn_blade: 400,
-            self.btn_linked_selection: 500, self.btn_position_lock: 600,
-            self.btn_marker: 650, self.btn_mixer: 600,
-            self.zoom_slider: 750, self.btn_zoom_detail: 800,
-            self.btn_zoom_custom: 800, self.btn_zoom_out: 560, self.btn_zoom_in: 560,
-            self._track_height_control: 750,
+            self.btn_linked_selection: 500,
+            self.btn_marker: 650, self.btn_position_lock: 600,
+            self.btn_advanced_tools: 700, self.btn_zoom_detail: 800,
+            self.btn_insert: 900, self.btn_overwrite: 900, self.btn_replace: 900,
+            self.btn_flag: 1000, self.btn_keyframe_tray: 1100,
         }
-        thresholds.update({separator: 900 for separator in self._toolbar_separators})
-        return thresholds
+        optional.update({separator: 900 for separator in self._toolbar_separators})
+        optional[self._track_height_control] = 750
+        for widget, threshold in optional.items():
+            cost = widget.minimumWidth() + spacing
+            visible = width >= threshold and cost <= room
+            visibility[widget] = visible
+            if visible:
+                room -= cost
+        return visibility
 
     def _refresh_responsive_toolbar(self) -> None:
         """Apply the current width on resize and after restoring Edit from Deliver."""
         width = self.width()
+        self.btn_zoom_custom.hide()
         for button in self._secondary_tool_buttons:
             button.hide()
-        for widget, threshold in self._responsive_toolbar_thresholds().items():
-            widget.setVisible(width >= threshold)
-        if self._audio_level_meter is not None:
-            self._audio_level_meter.setFixedWidth(140 if width >= 1200 else 100 if width >= 700 else 56)
-            self._audio_level_meter.show()
+        for widget, visible in self._responsive_toolbar_visibility(width).items():
+            widget.setVisible(visible)
+        self._audio_level_meter.setFixedWidth(self._edit_toolbar_meter_width(width))
+        self._audio_level_meter.show()
 
     # ==================== Playback Control ====================
 
@@ -2460,6 +2523,8 @@ class TimelinePanel(QWidget):
         # _set_tool 的手写清单漂移——此前本函数手写 9 个按钮同步、唯独漏掉
         # btn_rate_stretch，键盘（Shift+R）切换 Rate Stretch 后工具栏
         # 互斥选中状态与实际工具不一致。
+        if tool_name != EditTool.SELECT.value:
+            self.btn_envelope_edit.setChecked(False)
         for btn, tool_enum in self._get_tool_button_map():
             btn.setChecked(tool_enum.value == tool_name)
 
@@ -2646,18 +2711,6 @@ class TimelinePanel(QWidget):
         finally:
             self._zoom_updating = False
 
-    def _on_zoom_out_clicked(self) -> None:
-        """Handle zoom out button click."""
-        current_value = self.zoom_slider.value()
-        new_value = max(0, current_value - 40)
-        self.zoom_slider.setValue(new_value)
-
-    def _on_zoom_in_clicked(self) -> None:
-        """Handle zoom in button click."""
-        current_value = self.zoom_slider.value()
-        new_value = min(self._zoom_slider_max, current_value + 40)
-        self.zoom_slider.setValue(new_value)
-
     def _on_zoom_fit_clicked(self) -> None:
         """Handle fit to view button click - zoom to show entire timeline."""
         self._set_zoom_preset("full")
@@ -2820,16 +2873,36 @@ class TimelinePanel(QWidget):
         slider = self._monitor_gain_slider
         with QSignalBlocker(slider):
             slider.setValue(round(gain_db * 10))
-        self._update_monitor_gain_tooltip(slider.value())
+        self._update_monitor_controls()
 
-    def _update_monitor_gain_tooltip(self, value: int) -> None:
+    def set_monitor_muted(self, muted: bool) -> None:
+        with QSignalBlocker(self._monitor_gain_icon):
+            self._monitor_gain_icon.setChecked(muted)
+        self._update_monitor_controls()
+
+    def _update_monitor_controls(self) -> None:
+        muted = self._monitor_gain_icon.isChecked()
+        value = self._monitor_gain_slider.value() / 10.0
+        gain_text = f"{value:.1f} dB".replace("-", "−")
         label = self._monitor_gain_slider.accessibleName()
-        tooltip = f"{label} · {value / 10:.1f} dB"
+        help_text = I18N.tr("mixer.monitor.playback_only", "Adjusts what you hear on this device.")
+        tooltip = f"{label} · {gain_text}\n{help_text}"
         self._monitor_gain_slider.setToolTip(tooltip)
-        self._monitor_gain_icon.setToolTip(tooltip)
+        action = (I18N.tr("mixer.monitor.unmute", "Unmute speakers") if muted
+                  else I18N.tr("mixer.monitor.mute", "Mute speakers"))
+        self._monitor_gain_icon.setAccessibleName(action)
+        self._monitor_gain_icon.setToolTip(f"{action}\n{help_text}")
+        self._monitor_gain_icon.setIcon(timeline_icon(
+            "speaker_muted" if muted else "speaker",
+            IconColors.ORANGE if muted else IconColors.DEFAULT,
+        ))
+
+    def _on_monitor_mute_toggled(self, muted: bool) -> None:
+        self._update_monitor_controls()
+        self.monitor_mute_requested.emit(muted)
 
     def _on_monitor_gain_changed(self, value: int) -> None:
-        self._update_monitor_gain_tooltip(value)
+        self._update_monitor_controls()
         self.monitor_gain_requested.emit(value / 10.0)
 
     def update_audio_levels(self, levels: list) -> None:
@@ -2839,8 +2912,8 @@ class TimelinePanel(QWidget):
         Args:
             levels: [left_db, right_db] 电平值列表
         """
-        if self._toolbar_display_mode != "mixer" and self._audio_level_meter is not None:
-            self._audio_level_meter.set_audio_values(levels)
+        if self._toolbar_display_mode != "mixer":
+            self._audio_level_meter.update_output_levels(levels)
 
     def install_mixer_toolbar(self, meter: QWidget) -> QHBoxLayout:
         """Add playback controls and the stereo meter to the existing toolbar."""
@@ -2848,21 +2921,21 @@ class TimelinePanel(QWidget):
         controls.setObjectName("mixerTimelineTransport")
         controls.setStyleSheet("QWidget#mixerTimelineTransport { background: transparent; border: none; }")
         layout = QHBoxLayout(controls)
-        # Separate transport from the editing tools and the zoom controls.
+        # Keep transport beside the editing tools, away from the zoom cluster.
         layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(2)
-        self._tools_bar.insertWidget(self._tools_bar.indexOf(self.btn_zoom_fit), controls)
-        self._tools_bar.insertWidget(self._tools_bar.indexOf(self._monitor_gain_control), meter)
+        self._tools_bar.insertWidget(self._tools_bar.indexOf(self.btn_marker) + 1, controls)
+        self._tools_bar.insertWidget(self._tools_bar.indexOf(self._monitor_gain_control) + 1, meter)
         self._mixer_output_meter = meter
         # Allow space for six transport buttons, Stop and Record at once.
         margins = self._tools_bar.contentsMargins()
         transport_margins = layout.contentsMargins()
+        required = (self.btn_select, self.btn_envelope_edit, self.btn_overflow,
+                    self._zoom_width_icon, self.zoom_slider, meter, self._monitor_gain_control)
         self._mixer_toolbar_minimum_width = (
             250 + transport_margins.left() + transport_margins.right()
-            + meter.width() + self.btn_select.width() + self.btn_overflow.width()
-            + self._track_height_control.width() + self._mixer_width_icon.width() + MIXER_ZOOM_SLIDER_WIDTH
-            + self._monitor_gain_control.width()
-            + margins.left() + margins.right() + 8 * self._tools_bar.spacing()
+            + sum(widget.width() for widget in required)
+            + margins.left() + margins.right() + len(required) * self._tools_bar.spacing()
         )
         for widget in (controls, meter):
             widget.hide()
@@ -2870,72 +2943,6 @@ class TimelinePanel(QWidget):
             self._mixer_only_toolbar_widgets.add(widget)
             self._mixer_toolbar_widgets.add(widget)
         return layout
-
-    def set_audio_mixer_dock(self, dock: QDockWidget) -> None:
-        """Follow the shared mixer when this timeline moves to another dock."""
-        if self._audio_mixer_dock is not dock:
-            if self._audio_mixer_dock is not None:
-                self._audio_mixer_dock.visibilityChanged.disconnect(self.sync_mixer_button)
-            self._audio_mixer_dock = dock
-            dock.visibilityChanged.connect(self.sync_mixer_button)
-        self.sync_mixer_button(dock.isVisible())
-
-    def _toggle_mixer_panel(self) -> None:
-        """切换主窗口 Audio Mixer 面板显示（toggle dock_audio_mixer）。"""
-        dock = self._audio_mixer_dock or getattr(self.window(), "dock_audio_mixer", None)
-        if dock is None:
-            self.btn_mixer.setChecked(False)
-            return
-
-        if self.btn_mixer.isChecked():
-            dock.show()
-            dock.raise_()
-            # 显示时懒同步：从当前 timeline 的音频轨填充 mixer strips。
-            # 持续同步由 _on_edit_timeline_changed 维护，这里只补首次显示。
-            self._sync_mixer_from_current_timeline(dock.parentWidget())
-        else:
-            dock.hide()
-
-    def _sync_mixer_from_current_timeline(self, main_win) -> None:
-        """从当前 timeline 同步 Audio Mixer 面板（首次显示时懒填充）。"""
-        syncer = getattr(main_win, '_sync_audio_mixer_from_current_timeline', None)
-        if callable(syncer):
-            try:
-                syncer()
-            except Exception as e:
-                logger.warning(f"Audio mixer lazy sync failed: {e}")
-            return
-        # 兜底：直接读 edit_page._current_timeline 并调 mixer panel
-        edit_page = getattr(main_win, 'edit_page', None)
-        timeline = getattr(edit_page, '_current_timeline', None) if edit_page else None
-        panel = getattr(main_win, 'audio_mixer_panel', None)
-        if panel is None or timeline is None:
-            return
-        audio_tracks = getattr(timeline, 'audio_tracks', ())
-        tracks = []
-        for idx, track in enumerate(audio_tracks, start=1):
-            tracks.append({
-                "track_id": track.track_id,
-                "name": getattr(track, 'name', '') or '',
-                "tag": f"A{idx}",
-                "volume": float(getattr(track, 'volume', 1.0)),
-                "pan": float(getattr(track, 'pan', 0.0)),
-                "is_muted": bool(getattr(track, 'is_muted', False)),
-                "is_solo": bool(getattr(track, 'is_solo', False)),
-                "color": getattr(track, "color", None),
-                # CW-A1: 空间声像器（空 dict=未使用）
-                "panner": getattr(track, 'panner', None),
-            })
-        try:
-            panel.sync_tracks(tracks)
-        except Exception as e:
-            logger.warning(f"Audio mixer sync_tracks failed: {e}")
-
-    def sync_mixer_button(self, visible: bool) -> None:
-        """同步 Mixer 按钮状态（当 dock 通过菜单或其他方式切换可见性时调用）。"""
-        self.btn_mixer.blockSignals(True)
-        self.btn_mixer.setChecked(visible)
-        self.btn_mixer.blockSignals(False)
 
     # ==================== Playhead Change Handler ====================
 

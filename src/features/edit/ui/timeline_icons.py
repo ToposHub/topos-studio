@@ -21,6 +21,11 @@ _LENS = (
     '<path d="m18.1 17.7 3.4 3.4" stroke-width="2.6"/>'
 )
 _PATHS: dict[str, str] = {
+    "envelope": (
+        '<path d="M3 17h2c3 0 4-10 7-10s4 6 7 6h2" stroke-width="2"/>'
+        '<path d="M3 14l3 3-3 3-3-3zm9-10 3 3-3 3-3-3zm9 6 3 3-3 3-3-3z" '
+        'fill="currentColor" stroke="none"/>'
+    ),
     "select": (
         '<path d="M5.4 2.2 20 13.4l-6.7.8 3.4 6-3.1 1.7-3.4-6.3-4.8 4z" '
         'fill="currentColor" stroke="none"/>'
@@ -109,8 +114,9 @@ _PATHS: dict[str, str] = {
         'M6 15l3.3 3v-2.1h5.4V18l3.3-3-3.3-3v2.1H9.3V12z" fill="currentColor" fill-rule="evenodd" stroke="none"/>'
     ),
     "view_options": (
-        '<path d="M3 5.5h18M3 12h18M3 18.5h18" stroke-width="1.5"/>'
-        '<path d="M7.5 3.5v4M16 10v4M9.5 16.5v4" stroke-width="3.5"/>'
+        '<path fill="currentColor" stroke="none" fill-rule="evenodd" '
+        'd="M5 3h14a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z'
+        'M6 7.5h12v3H6zM6 13.5h5v3H6zM13 13.5h5v3h-5z"/>'
     ),
     "keyframes": (
         '<path d="M2.4 15.5v3.6h19.2v-3.6"/>'
@@ -145,11 +151,8 @@ _PATHS: dict[str, str] = {
     ),
     "zoom_out": '<circle cx="12" cy="12" r="8.5" fill="currentColor" fill-opacity=".17" stroke="none"/><path d="M8 12h8" stroke-width="2"/>',
     "zoom_in": '<circle cx="12" cy="12" r="8.5" fill="currentColor" fill-opacity=".17" stroke="none"/><path d="M8 12h8m-4-4v8" stroke-width="2"/>',
-    "mixer": (
-        '<path d="M5 3v18M12 3v18M19 3v18" stroke-width="1.5"/>'
-        '<path d="M3.3 8h3.4m3.6 7h3.4m3.6-5h3.4" stroke-width="3.5"/>'
-    ),
     "speaker": '<path d="M3.5 9h4l5-4v14l-5-4h-4zM16 8.5a5 5 0 0 1 0 7m2.8-9.5a8.5 8.5 0 0 1 0 12"/>',
+    "speaker_muted": '<path d="M3.5 9h4l5-4v14l-5-4h-4zM16 9l5 6m0-6-5 6"/>',
     "more": '<g fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.85"/><circle cx="12" cy="12" r="1.85"/><circle cx="19" cy="12" r="1.85"/></g>',
 }
 

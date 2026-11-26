@@ -5,7 +5,7 @@
 C2 的异步 facade 在 worker 里调用这些服务；原生/插件/自动化入口共用
 同一实现，不再有第二条业务路径。
 
-分类/展示助手独立实现，不 import 旧 file_explorer。
+分类与展示助手由原生素材查询服务提供。
 """
 from __future__ import annotations
 

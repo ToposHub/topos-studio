@@ -252,8 +252,11 @@ class EditPage(QWidget):
     # in sync with the persisted state.
     scene_cut_overlay_visibility_changed = pyqtSignal(bool)  # visible
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, parent: Optional[QWidget] = None, *, config_manager: Any = None,
+    ) -> None:
         super().__init__(parent)
+        self._config_manager = config_manager
         self.setObjectName("EditPage")
 
         # Signal hub for coordinating all Edit page components
@@ -529,6 +532,7 @@ class EditPage(QWidget):
             state = getattr(self._audio_manager, "control_room_state", None)
             if state is not None:
                 self._on_monitor_gain_changed(state.gain_db)
+                self._on_monitor_muted_changed(getattr(state, "muted", False))
 
     # ==================== W09: Centralized Toolbar Request Binding ====================
 
@@ -555,6 +559,7 @@ class EditPage(QWidget):
             ("keyframe_tray_requested", self._on_timeline_keyframe_tray_requested),
             ("flag_requested", self._on_timeline_flag_requested),
             ("monitor_gain_requested", self._on_monitor_gain_requested),
+            ("monitor_mute_requested", self._on_monitor_mute_requested),
             ("clip_speed_settings_requested",
              self._on_timeline_clip_speed_settings),
         )
@@ -1206,6 +1211,7 @@ class EditPage(QWidget):
             )
             self._audio_manager = AudioPlaybackManager(parent=self)
             self._audio_manager.monitor_gain_changed.connect(self._on_monitor_gain_changed)
+            self._audio_manager.monitor_muted_changed.connect(self._on_monitor_muted_changed)
             self._audio_manager.set_sample_rate(48000)
             self._audio_manager.set_sync_mode(AudioSyncMode.AUDIO_MASTER)
 
@@ -1239,6 +1245,18 @@ class EditPage(QWidget):
         setter = getattr(self._timeline_panel, "set_monitor_gain_db", None)
         if callable(setter):
             setter(gain_db)
+
+    def _on_monitor_mute_requested(self, muted: bool) -> None:
+        manager = self._ensure_audio_manager()
+        if manager is not None:
+            manager.set_monitor_muted(muted)
+        else:
+            self._on_monitor_muted_changed(not muted)
+
+    def _on_monitor_muted_changed(self, muted: bool) -> None:
+        setter = getattr(self._timeline_panel, "set_monitor_muted", None)
+        if callable(setter):
+            setter(muted)
 
     def _reconnect_timeline_level_meter(self) -> None:
         """W08：电平信号跟随当前 timeline panel（先断旧连新，幂等）。
@@ -3801,7 +3819,7 @@ class EditPage(QWidget):
 
     _SCENE_CUT_OVERLAY_CONFIG_KEY = "edit_scene_cut_overlay_visible"
 
-    def set_scene_cut_overlay_visible(self, visible: bool) -> None:
+    def set_scene_cut_overlay_visible(self, visible: bool, *, persist: bool = True) -> None:
         """Show/hide the scene cut candidate overlay and persist the choice.
 
         Single entry point shared by the checkable View menu action and the
@@ -3809,12 +3827,14 @@ class EditPage(QWidget):
 
         Args:
             visible: True to show candidate markers on the timeline.
+            persist: Store the change when it comes from a timeline control.
         """
         visible = bool(visible)
         if visible == self._scene_cut_overlay_visible:
             return
         self._scene_cut_overlay_visible = visible
-        self._persist_scene_cut_overlay_state()
+        if persist:
+            self._persist_scene_cut_overlay_state()
         timeline_view = self._get_scene_cut_timeline_view()
         if timeline_view is not None:
             timeline_view.set_scene_cut_overlay_visible(visible)
@@ -3928,10 +3948,10 @@ class EditPage(QWidget):
         try:
             from src.shared.config.config_manager import ConfigManager
 
-            ConfigManager().set(
-                self._SCENE_CUT_OVERLAY_CONFIG_KEY,
-                self._scene_cut_overlay_visible,
-            )
+            config = self._config_manager
+            if config is None:
+                config = ConfigManager()
+            config.set(self._SCENE_CUT_OVERLAY_CONFIG_KEY, self._scene_cut_overlay_visible)
         except Exception:  # noqa: BLE001
             logger.debug("persist scene cut overlay state failed", exc_info=True)
 
@@ -3949,12 +3969,15 @@ class EditPage(QWidget):
             try:
                 from src.shared.config.config_manager import ConfigManager
 
-                stored = ConfigManager().get(self._SCENE_CUT_OVERLAY_CONFIG_KEY)
+                config = self._config_manager
+                if config is None:
+                    config = ConfigManager()
+                stored = config.get(self._SCENE_CUT_OVERLAY_CONFIG_KEY)
             except Exception:  # noqa: BLE001
                 logger.debug("read scene cut overlay state failed", exc_info=True)
             if bool(stored):
                 self._scene_cut_overlay_visible = False
-                self.set_scene_cut_overlay_visible(True)
+                self.set_scene_cut_overlay_visible(True, persist=False)
                 return
         timeline_view = self._get_scene_cut_timeline_view()
         if timeline_view is not None:

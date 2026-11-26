@@ -659,7 +659,9 @@ class EditEffectsPanel(QWidget):
     # dict contains only user overrides; template defaults fill the rest.
     caption_effect_apply_requested = pyqtSignal(str, str, dict)
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, parent: Optional[QWidget] = None, *, config_manager: ConfigManager | None = None,
+    ) -> None:
         super().__init__(parent)
         # Prevent panel from expanding horizontally beyond dock size
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
@@ -679,7 +681,9 @@ class EditEffectsPanel(QWidget):
         self._search_debounce_timer.setInterval(200)
         self._search_debounce_timer.timeout.connect(self._apply_search_filter)
 
-        self._config_manager = ConfigManager()
+        self._config_manager = (
+            config_manager if config_manager is not None else ConfigManager()
+        )
 
         # Current selected clip (for double-click apply)
         self._selected_clip_id: Optional[str] = None
@@ -748,6 +752,21 @@ class EditEffectsPanel(QWidget):
             self.tabs.currentIndex() == _TAB_INDEX_TRANSITIONS
             and self._transition_preview_mode == "animated"
         )
+
+    def reload_transition_preview_preferences(self, config: Any) -> None:
+        """Apply the saved preview style and size in one transition tree refresh."""
+        mode = "animated" if config.get("transition_preview_mode") == "animated" else "icon"
+        size = config.get("transition_preview_size")
+        if not isinstance(size, str) or size not in _TRANSITION_PREVIEW_SIZE_OPTIONS:
+            size = _DEFAULT_TRANSITION_PREVIEW_SIZE
+        if (mode, size) == (self._transition_preview_mode, self._transition_preview_size):
+            return
+        self._transition_preview_mode = mode
+        self._transition_preview_size = size
+        with QSignalBlocker(self.transition_size_slider):
+            self.transition_size_slider.setValue(_TRANSITION_PREVIEW_SIZES.index(size))
+        self._sync_transition_size_slider_visibility()
+        self._populate_transitions(self.transitions_tree)
 
     def _transition_preview_geometry(self) -> tuple[int, int, int]:
         """Return GIF width, GIF height and card height for the current size."""

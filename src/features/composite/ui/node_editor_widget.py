@@ -37,6 +37,10 @@ if TYPE_CHECKING:  # pragma: no cover - annotation-only imports
 logger = logging.getLogger(__name__)
 
 from src.features.composite.core.media_drop_payload import accepts_layer_media_drop
+from src.features.composite.preferences import (
+    NODE_CABLE_ROUTING_DEFAULT, NODE_CABLE_ROUTING_KEY, NODE_PREVIEW_ALL,
+    NODE_PREVIEW_MODE_KEY, NODE_PREVIEW_NONE, NODE_PREVIEW_SELECTED_SINGLE,
+)
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.shortcut_manager import ShortcutManager
 from src.shared.ui.style_sheet import PRESET_DIALOG_STYLE, MANAGE_PRESET_DIALOG_STYLE
@@ -280,12 +284,12 @@ class NodeEditorWidget(QGraphicsView):
     # Node thumbnail preview display modes (set from the context menu).
     # The editor owns this value and pushes per-node visibility via
     # NodeItem.set_thumbnail_visible(); NodeItem is decoupled from selection.
-    PREVIEW_NONE = "none"                     # No node shows a thumbnail
-    PREVIEW_SELECTED_SINGLE = "selected_single"  # Only the sole selected node (DEFAULT)
-    PREVIEW_ALL = "all"                       # Every node with a thumbnail
+    PREVIEW_NONE = NODE_PREVIEW_NONE
+    PREVIEW_SELECTED_SINGLE = NODE_PREVIEW_SELECTED_SINGLE
+    PREVIEW_ALL = NODE_PREVIEW_ALL
     PREVIEW_MODES = (PREVIEW_NONE, PREVIEW_SELECTED_SINGLE, PREVIEW_ALL)
-    PREVIEW_CONFIG_KEY = "composite.node_preview_mode"
-    ROUTING_CONFIG_KEY = "composite.node_cable_routing"
+    PREVIEW_CONFIG_KEY = NODE_PREVIEW_MODE_KEY
+    ROUTING_CONFIG_KEY = NODE_CABLE_ROUTING_KEY
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -306,7 +310,7 @@ class NodeEditorWidget(QGraphicsView):
 
         # Node items
         self._node_items: Dict[str, NodeItem] = {}
-        self._cable_routing = "curved"
+        self._cable_routing = NODE_CABLE_ROUTING_DEFAULT
 
         # Node-preview pipeline: dashed connection from the previewed node to the
         # Output node. None when no node is being previewed. Toggled via
@@ -1587,13 +1591,30 @@ class NodeEditorWidget(QGraphicsView):
         value = config.get(self.ROUTING_CONFIG_KEY) if config is not None else None
         return value if value in ConnectionItem.ROUTES else self._cable_routing
 
-    def _set_cable_routing(self, routing: str) -> None:
+    def _set_cable_routing(self, routing: str, *, persist: bool = True) -> None:
         self._cable_routing = routing
-        config = getattr(self.window(), "config_manager", None)
-        if config is not None:
-            config.set(self.ROUTING_CONFIG_KEY, routing)
+        if persist:
+            config = getattr(self.window(), "config_manager", None)
+            if config is not None:
+                config.set(self.ROUTING_CONFIG_KEY, routing)
         for cable, *_ in self._connection_items:
             cable.set_routing(routing)
+
+    def reload_display_preferences(self) -> None:
+        """Apply saved routing and thumbnail preferences to the live canvas."""
+        config = getattr(self.window(), "config_manager", None)
+        if config is None:
+            return
+        routing = config.get(self.ROUTING_CONFIG_KEY)
+        mode = config.get(self.PREVIEW_CONFIG_KEY)
+        self._set_cable_routing(
+            routing if routing in ConnectionItem.ROUTES else NODE_CABLE_ROUTING_DEFAULT,
+            persist=False,
+        )
+        self._set_node_preview_mode(
+            mode if mode in self.PREVIEW_MODES else self.PREVIEW_SELECTED_SINGLE,
+            persist=False,
+        )
 
     def _add_cable_routing_menu(self, menu: QMenu) -> None:
         submenu = menu.addMenu(I18N.tr("composite.node_editor.cable_routing", "Cable Routing"))
@@ -1635,8 +1656,8 @@ class NodeEditorWidget(QGraphicsView):
             pass
         return self._preview_mode
 
-    def _set_node_preview_mode(self, mode: str) -> None:
-        """Change the node thumbnail preview mode and persist it.
+    def _set_node_preview_mode(self, mode: str, *, persist: bool = True) -> None:
+        """Change the node thumbnail preview mode.
 
         Repaints only when the mode actually changes.
         """
@@ -1645,13 +1666,13 @@ class NodeEditorWidget(QGraphicsView):
         changed = (mode != self._preview_mode)
         self._preview_mode = mode
         self._preview_mode_resolved = True
-        # Persist (mirrors the shake-sensitivity config pattern).
-        try:
-            cm = getattr(self.window(), "config_manager", None)
-            if cm is not None:
-                cm.set(self.PREVIEW_CONFIG_KEY, mode)
-        except Exception as e:
-            logger.debug("Failed to persist preview mode: %s", e)
+        if persist:
+            try:
+                cm = getattr(self.window(), "config_manager", None)
+                if cm is not None:
+                    cm.set(self.PREVIEW_CONFIG_KEY, mode)
+            except Exception as e:
+                logger.debug("Failed to persist preview mode: %s", e)
         if changed:
             self._apply_preview_mode()
 

@@ -188,7 +188,11 @@ def test_orderly_shutdown_exits_with_code_and_flushes(monkeypatch):
 def test_orderly_shutdown_tolerates_worker_errors(monkeypatch):
     exits: list[int] = []
     monkeypatch.setattr(os, "_exit", lambda code: exits.append(code))
-    # file_explorer 不可导入时必须吞掉并仍走到 os._exit
-    monkeypatch.setitem(sys.modules, "file_explorer.main", None)  # 触发导入失败
+    from src.app.ui import image_decode_runtime
+
+    def unavailable() -> None:
+        raise RuntimeError("decode runtime already stopped")
+
+    monkeypatch.setattr(image_decode_runtime, "shutdown_shared_runtime", unavailable)
     main_mod._orderly_shutdown(None, 3)
     assert exits == [3]

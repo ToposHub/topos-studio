@@ -421,6 +421,16 @@ class GradeSetPanel(QWidget):
         self.view.setThumbnailSize(size)
         self._keep_current_visible()
 
+    def set_card_caption_preferences(self, *, show_filenames: bool, rating_at_bottom: bool) -> None:
+        """Refresh photo captions from the saved application preferences."""
+        delegate = self._card_delegate
+        if (delegate.show_filename, delegate.rating_at_bottom) == (show_filenames, rating_at_bottom):
+            return
+        delegate.show_filename = show_filenames
+        delegate.rating_at_bottom = rating_at_bottom
+        self._update_caption_spacing()
+        self.view.viewport().update()
+
     def _set_filenames_visible(self, visible: bool) -> None:
         self._card_delegate.show_filename = visible
         self._update_caption_spacing()

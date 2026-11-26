@@ -186,8 +186,17 @@ class ColorModule:
         Returns:
             List of ModularPreferencePage instances for this module.
         """
-        from src.features.color.preferences import ColorProcessingPreferencePage
-        return [ColorProcessingPreferencePage()]
+        from src.features.color.preferences import (
+            ColorManagementPreferencePage,
+            ColorProcessingPreferencePage,
+            ControlSurfacePreferencePage,
+        )
+
+        return [
+            ColorManagementPreferencePage(),
+            ControlSurfacePreferencePage(),
+            ColorProcessingPreferencePage(),
+        ]
 
     def register_shortcuts(self, shortcut_manager: "ShortcutManager") -> None:
         """Register Color module shortcuts with the ShortcutManager.

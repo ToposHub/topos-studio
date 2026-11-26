@@ -1,7 +1,7 @@
 """Native plugin discovery and quick launch views; snapshots and intents only."""
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from PyQt6.QtCore import QEvent, QSize, QSignalBlocker, Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence
@@ -20,14 +20,14 @@ def _tr(key: str, default: str) -> str:
     return I18N.tr(f"files.plugins.{key}", default)
 
 
-def plugin_status(info: FilesPluginInfo) -> str:
+def plugin_status(info: FilesPluginInfo, translate: Callable[[str, str], str] = _tr) -> str:
     if info.error:
-        return _tr("failed", "加载失败")
+        return translate("failed", "加载失败")
     if info.needs_restart:
-        return _tr("pending_disable", "重启后停用") if not info.desired_enabled else _tr("pending_enable", "重启后启用")
+        return translate("pending_disable", "重启后停用") if not info.desired_enabled else translate("pending_enable", "重启后启用")
     if not info.desired_enabled:
-        return _tr("disabled", "已停用")
-    return _tr("loaded", "已加载") if info.runtime_loaded else _tr("unloaded", "尚未加载")
+        return translate("disabled", "已停用")
+    return translate("loaded", "已加载") if info.runtime_loaded else translate("unloaded", "尚未加载")
 
 
 def plugin_name(info: FilesPluginInfo) -> str:

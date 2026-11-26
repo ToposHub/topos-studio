@@ -15,7 +15,7 @@ from typing import Any
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QPushButton, QCheckBox, QLineEdit,
-    QScrollArea, QGroupBox,
+    QGroupBox,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -23,7 +23,7 @@ from PyQt6.QtGui import QFont
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets import ChevronComboBox
 from src.shared.ui.widgets.topos_controls import ToposClickableSlider
-from src.shared.ui.widgets.pref_form_layout import make_pref_form, make_pref_label
+from src.shared.ui.widgets.pref_form_layout import make_pref_form, make_pref_label, make_pref_page
 from src.shared.export.export_panel import (
     _apply_text_input_style,
     _apply_compact_button_style,
@@ -50,19 +50,9 @@ class ExportPreferencePage:
         """Create the Export preference page UI."""
         self._dialog_ref = parent
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        content = QWidget()
-        content.setObjectName("PrefPageContent")
-        scroll.setWidget(content)
+        scroll, layout = make_pref_page(parent)
 
-        layout = QVBoxLayout(content)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
-
-        group = QGroupBox(I18N.tr("preferences.export.section_title",
+        group = QGroupBox(I18N.tr_preference("preferences.export.section_title",
                                     "Default Export Settings"))
         group.setObjectName("PrefSettingsGroup")
         form = make_pref_form(group)
@@ -74,7 +64,7 @@ class ExportPreferencePage:
         for fmt in formats:
             fmt_combo.addItem(fmt)
         self._widgets['default_export_format'] = fmt_combo
-        fmt_label = make_pref_label(I18N.tr("preferences.export.default_format",
+        fmt_label = make_pref_label(I18N.tr_preference("preferences.export.default_format",
                                              "Default Format:"))
         form.addRow(fmt_label, fmt_combo)
 
@@ -100,7 +90,7 @@ class ExportPreferencePage:
         quality_layout.addWidget(quality_slider, 1)
         quality_layout.addWidget(quality_value)
         self._widgets['default_export_quality'] = quality_slider
-        q_label = make_pref_label(I18N.tr("preferences.export.default_quality",
+        q_label = make_pref_label(I18N.tr_preference("preferences.export.default_quality",
                                            "Default Quality:"))
         form.addRow(q_label, quality_widget)
 
@@ -112,28 +102,28 @@ class ExportPreferencePage:
         path_edit = QLineEdit()
         path_edit.setObjectName("PrefPathEdit")
         path_edit.setPlaceholderText(
-            I18N.tr("export.select_dir_placeholder", "Select export directory...")
+            I18N.tr_preference("preferences.paths.export_directory_placeholder", "Select export directory...")
         )
         _apply_text_input_style(path_edit)
         browse_btn = QPushButton(
-            I18N.tr("preferences.export.browse", "Browse")
+            I18N.tr_preference("preferences.export.browse", "Browse")
         )
         browse_btn.setObjectName("PrefBrowseBtn")
         browse_btn.setFixedWidth(80)
         _apply_compact_button_style(browse_btn)
         browse_btn.clicked.connect(
-            lambda: self._browse_path(path_edit, "Select Export Directory")
+            lambda: self._browse_path(path_edit, I18N.tr_preference("preferences.paths.select_export_dir", "Select Export Directory"))
         )
         path_layout.addWidget(path_edit, 1)
         path_layout.addWidget(browse_btn)
         self._widgets['default_export_path'] = path_edit
-        path_label = make_pref_label(I18N.tr("preferences.export.default_path",
+        path_label = make_pref_label(I18N.tr_preference("preferences.export.default_path",
                                               "Default Export Path:"))
         form.addRow(path_label, path_widget)
 
         # Preserve metadata
         preserve = QCheckBox(
-            I18N.tr("preferences.export.preserve_metadata",
+            I18N.tr_preference("preferences.export.preserve_metadata",
                     "Preserve metadata")
         )
         self._widgets['preserve_metadata'] = preserve
@@ -144,15 +134,16 @@ class ExportPreferencePage:
         profile_combo.setMinimumWidth(120)
         profiles = ["sRGB", "Adobe RGB", "Rec.709", "DCI-P3", "None"]
         for profile in profiles:
-            profile_combo.addItem(profile)
+            label = I18N.tr_preference("preferences.export.profile_none", "None") if profile == "None" else profile
+            profile_combo.addItem(label, profile)
         self._widgets['export_color_profile'] = profile_combo
-        profile_label = make_pref_label(I18N.tr("preferences.export.color_profile",
+        profile_label = make_pref_label(I18N.tr_preference("preferences.export.color_profile",
                                                  "Export Color Profile:"))
         form.addRow(profile_label, profile_combo)
 
         # Embed ICC profile
         embed_icc = QCheckBox(
-            I18N.tr("preferences.export.embed_icc",
+            I18N.tr_preference("preferences.export.embed_icc",
                     "Embed ICC profile in exported file")
         )
         self._widgets['embed_icc_profile'] = embed_icc
@@ -160,7 +151,7 @@ class ExportPreferencePage:
 
         # Open folder after export
         open_folder = QCheckBox(
-            I18N.tr("preferences.export.open_folder_after",
+            I18N.tr_preference("preferences.export.open_folder_after",
                     "Open folder after export")
         )
         self._widgets['open_folder_after_export'] = open_folder
@@ -195,7 +186,7 @@ class ExportPreferencePage:
 
         profile = config.get('export_color_profile', 'sRGB')
         profile_combo = self._widgets['export_color_profile']
-        idx = profile_combo.findText(profile)
+        idx = profile_combo.findData(profile)
         if idx >= 0:
             profile_combo.setCurrentIndex(idx)
 
@@ -224,7 +215,7 @@ class ExportPreferencePage:
                            self._widgets['preserve_metadata'].isChecked(),
                            auto_save=False)
         config_manager.set('export_color_profile',
-                           self._widgets['export_color_profile'].currentText(),
+                           self._widgets['export_color_profile'].currentData(),
                            auto_save=False)
         config_manager.set('embed_icc_profile',
                            self._widgets['embed_icc_profile'].isChecked(),
@@ -254,7 +245,7 @@ class ExportPreferencePage:
         )
 
         profile_combo = self._widgets['export_color_profile']
-        idx = profile_combo.findText(defaults.get('export_color_profile', 'sRGB'))
+        idx = profile_combo.findData(defaults.get('export_color_profile', 'sRGB'))
         if idx >= 0:
             profile_combo.setCurrentIndex(idx)
 

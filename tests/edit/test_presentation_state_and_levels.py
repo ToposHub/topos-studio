@@ -9,10 +9,13 @@ W08：audio_level_changed → panel.update_audio_levels 跟随当前面板，
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
 from PyQt6.QtCore import QObject, QPoint, Qt, pyqtSignal
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QMenu
 
 from src.features.edit.core.timeline_v2 import EditTrack, Rational, TimelineSequence
 
@@ -45,21 +48,29 @@ def test_view_presentation_roundtrip_zero_commands(qtbot: Any) -> None:
     view = _view(qtbot)
     view.set_thumbnail_display_mode("filmstrip")
     view.set_waveforms_visible(False)
+    view.set_waveform_style("centered")
+    view.set_track_height_ratio((1, 3))
     view.set_position_lock_enabled(True)
     view._on_source_patch_requested("v2", True)
     view._on_source_patch_requested("a1", False)
     exported = view.export_presentation_state()
     assert exported["thumbnail_mode"] == "filmstrip"
     assert exported["waveforms_visible"] is False
+    assert exported["waveform_style"] == "centered"
+    assert exported["track_height_ratio"] == [1, 3]
     assert exported["position_lock"] is True
     assert exported["source_destination_ui"] == {
         "pres": {"video": "v2", "audio": None}}
 
     fresh = _view(qtbot)
     revision_before = fresh.get_timeline().revision
+    fresh.set_layout_state({"track_heights": {"v1": 82, "a1": 72}})
     fresh.apply_presentation_state(exported)
     assert fresh.thumbnail_display_mode() == "filmstrip"
     assert fresh.waveforms_visible() is False
+    assert fresh.waveform_style() == "centered"
+    assert fresh.track_height_ratio() == (1, 3)
+    assert fresh.layout_state()["track_heights"] == {"v1": 82, "a1": 72}
     assert fresh.is_position_lock_enabled() is True
     assert fresh.resolve_source_destination_track_id("video") == "v2"
     assert fresh.source_destination_stream_disabled("audio") is True
@@ -70,15 +81,20 @@ def test_view_presentation_roundtrip_zero_commands(qtbot: Any) -> None:
 
 def test_presentation_restore_invalid_values_fallback(qtbot: Any) -> None:
     view = _view(qtbot)
+    view.set_waveform_style("centered")
     view.apply_presentation_state({
         "thumbnail_mode": "hologram",     # 非法枚举 → 忽略
         "waveforms_visible": "yes",       # 非 bool → 忽略
+        "waveform_style": ["invalid"],
+        "track_height_ratio": [0, 8],
         "position_lock": 3,               # 非 bool → 忽略
         "source_destination_ui": {"pres": {"subtitle": "x", "video": 42}},
         "zoom_preset": "galaxy",
     })
     assert view.thumbnail_display_mode() == "auto"
     assert view.waveforms_visible() is True
+    assert view.waveform_style() == "bottom_fill"
+    assert view.track_height_ratio() == (4, 3)
     assert view.is_position_lock_enabled() is False
     assert view.resolve_source_destination_track_id("video") == "v1"
     assert ("pres", "subtitle") not in view._source_patch_routes
@@ -133,10 +149,12 @@ def test_uistate_presentation_roundtrip_and_legacy() -> None:
     state = UIState(active_timeline_id="pres", playhead_frame=7)
     state.timeline_presentation = {
         "thumbnail_mode": "none",
+        "waveform_style": "centered",
         "future_field": {"keep": True},
     }
     revived = UIState.from_dict(state.to_dict())
     assert revived.timeline_presentation["thumbnail_mode"] == "none"
+    assert revived.timeline_presentation["waveform_style"] == "centered"
     # 未知字段重存保留
     assert revived.timeline_presentation["future_field"] == {"keep": True}
     # 旧包缺键 → None
@@ -231,8 +249,70 @@ def test_mixer_header_uses_track_levels_and_commits_pan_with_undo(
     manager.audio_track_levels_changed.emit({"a1": {"peak": [-5.0, -3.0], "generation": 3}})
     assert header._peak_db == (-60.0, -60.0)
     view.set_audio_only(False)
-    assert header._shows_audio_controls()
+    assert not header._shows_audio_controls()
     assert header._get_button_at_pos(header._get_sync_lock_button_rect().center()) == "sync_lock"
+
+
+def test_edit_track_menu_opts_one_audio_track_into_controls_and_meters(
+    qtbot: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    panel = _panel(qtbot)
+    view = panel.get_timeline_view()
+    timeline = _timeline()
+    timeline = replace(timeline, audio_tracks=(*timeline.audio_tracks, EditTrack("a2", "A2", "audio", 1)))
+    view.load_timeline(timeline)
+    panel.resize(800, 480)
+    panel.show()
+    view._on_track_height_changed("a1", 40)
+    levels = {"a1": [-3.0, -6.0], "a2": [-8.0, -10.0]}
+    first, second = (view._track_headers[track_id] for track_id in ("a1", "a2"))
+    silent = (-60.0, -60.0)
+
+    view.update_track_header_levels(levels)
+    assert not first._shows_audio_controls() and not second._shows_audio_controls()
+    assert first._peak_db == second._peak_db == silent
+
+    checked: list[bool] = []
+
+    def toggle(menu: QMenu, _position: QPoint) -> None:
+        action = menu.findChild(QAction, "showTrackAudioMixControls")
+        assert action is not None and action.isCheckable()
+        checked.append(action.isChecked())
+        action.trigger()
+
+    def open_audio_track_menu() -> None:
+        position = view.mapFromScene(first.mapToScene(first._get_track_badge_rect().center()))
+        qtbot.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=position)
+
+    monkeypatch.setattr(QMenu, "exec", toggle)
+    open_audio_track_menu()
+    assert checked == [False]
+    assert first.track_height >= first.AUDIO_MIX_CONTROLS_MIN_HEIGHT
+    assert first._shows_audio_controls() and not second._shows_audio_controls()
+    assert first._get_button_at_pos(first._get_volume_slider_rect().center()) == "volume"
+    assert first._get_button_at_pos(first._get_pan_rect().center()) == "pan"
+    view.update_track_header_levels(levels)
+    assert first._peak_db == (-3.0, -6.0) and second._peak_db == silent
+
+    view.load_timeline(timeline)
+    first, second = (view._track_headers[track_id] for track_id in ("a1", "a2"))
+    assert first._shows_audio_controls()
+    view.set_audio_only(True)
+    view.update_track_header_levels(levels)
+    assert second._shows_audio_controls() and second._peak_db == (-8.0, -10.0)
+    view.set_audio_only(False)
+    assert first._shows_audio_controls() and not second._shows_audio_controls()
+    assert second._peak_db == silent
+    panel.set_display_mode("deliver")
+    assert second._shows_audio_controls()
+    panel.set_display_mode("edit")
+    assert not second._shows_audio_controls()
+    open_audio_track_menu()
+    assert checked == [False, True]
+    view.update_track_header_levels(levels)
+    assert not first._shows_audio_controls() and first._peak_db == silent
+    assert view.get_timeline() is timeline
+    assert not view._command_stack.can_undo()
 
 
 def test_level_feed_follows_attached_panel(qtbot: Any,
@@ -357,10 +437,12 @@ def test_b09_project_switch_isolates_routes_and_extras(qtbot: Any) -> None:
     project_b = EditProject("pb", "B")
     view.set_project(project_a)
     view._on_source_patch_requested("v1", False)  # 关闭蓝视频路由
-    view.apply_presentation_state({"future_field": {"a": 1}})
+    view.apply_presentation_state({"future_field": {"a": 1}, "waveform_style": "centered"})
     assert view.source_destination_stream_disabled("video") is True
+    assert view.waveform_style() == "centered"
 
     view.set_project(project_b)  # 同 timeline_id="pres" 的另一工程
+    assert view.waveform_style() == "bottom_fill"
     assert view.source_destination_stream_disabled("video") is False
     assert view.export_presentation_state().get("future_field") is None
     # 无任何显式条目（含嵌套扩展）——路由表整体为空

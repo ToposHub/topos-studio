@@ -394,6 +394,37 @@ def test_stereo_waveform_keeps_both_channel_peaks_in_one_lane(qtbot: QtBot, samp
     assert canvas._waveform_display_channels() == ((0,), False)
 
 
+def test_live_envelope_repaints_waveform_without_rebuilding_spectrum(
+    panel: project_clip_editor._TimelineClipPanel, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    panel.set_source_mode(False)
+    canvas = panel.canvas
+    wave, _, _ = canvas._wave_and_spec_rects()
+    x = wave.center().x()
+    y = wave.center().y() - wave.height() * 0.17
+    static_cache = canvas._static_cache
+    calls: list[bool] = []
+    original = canvas._rebuild_static_cache
+
+    def record_rebuild() -> None:
+        calls.append(True)
+        original()
+
+    def sample_wave() -> QColor:
+        image = canvas.grab().toImage()
+        ratio = image.devicePixelRatio()
+        return image.pixelColor(round(x * ratio), round(y * ratio))
+
+    monkeypatch.setattr(canvas, "_rebuild_static_cache", record_rebuild)
+    assert sample_wave() == QColor(WAVE_PEAK)
+    canvas._env_points = [{"t": 0.0, "db": -12.0, "interpolation": "bezier"}]
+    canvas._drag_mode = "env_drag"
+    canvas._refresh_processing_overlay()
+    assert sample_wave() == QColor(WAVE_BACKGROUND)
+    assert canvas._static_cache is static_cache
+    assert not calls
+
+
 def test_channel_display_menu_switches_both_panes_and_keeps_edit_view(
     panel: project_clip_editor._TimelineClipPanel, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -451,6 +482,50 @@ def test_selection_can_start_on_playhead_and_finish_between_move_events(
     assert canvas.is_selecting()
     _mouse(canvas, QEvent.Type.MouseButtonRelease, x + 2.0, y)
     assert canvas.getSelection()[:2] == pytest.approx((1.0, canvas._x_to_time(x + 2.0, wave)))
+
+
+def test_project_envelope_editing_is_opt_in_and_releases_playhead(
+    panel: project_clip_editor._TimelineClipPanel,
+) -> None:
+    panel.set_source_mode(False)
+    panel.btn_tool_envelope.setEnabled(True)
+    canvas = panel.canvas
+    canvas.project_edits_enabled = True
+    canvas._env_points = [{"t": 1.0, "db": 0.0}]
+    commits: list[list] = []
+    canvas.envelopeChanged.connect(commits.append)
+    wave, _, _ = canvas._wave_and_spec_rects()
+    y = canvas._env_db_to_y(0.0, wave)
+    at_knot = canvas._time_to_x(1.0, wave)
+    panel.update_playhead(1.0)
+
+    _mouse(canvas, QEvent.Type.MouseButtonPress, at_knot, y)
+    assert canvas.is_selecting()
+    _mouse(canvas, QEvent.Type.MouseButtonRelease, at_knot, y)
+    assert commits == [] and not panel.btn_tool_envelope.isChecked()
+
+    panel.btn_tool_envelope.click()
+    x = canvas._time_to_x(2.0, wave)
+    _mouse(canvas, QEvent.Type.MouseButtonPress, x, y)
+    _mouse(canvas, QEvent.Type.MouseButtonRelease, x, y)
+    assert len(commits) == 1
+    assert [point["t"] for point in commits[0]] == pytest.approx([1.0, 2.0])
+
+    _mouse(canvas, QEvent.Type.MouseButtonPress, x, y)
+    _mouse(canvas, QEvent.Type.MouseMove, x, y + 15.0)
+    assert canvas._env_points[1]["db"] < 0.0
+    panel._clear_selection_or_cancel_fade_curve()
+    _mouse(canvas, QEvent.Type.MouseButtonRelease, x, y + 15.0)
+    assert canvas._env_points[1]["db"] == 0.0 and len(commits) == 1
+
+    panel.btn_tool_envelope.click()
+    assert not panel.btn_tool_envelope.isChecked() and canvas._env_enabled
+    ruler_y = canvas._ruler_rect().center().y()
+    _mouse(canvas, QEvent.Type.MouseButtonPress, at_knot, ruler_y)
+    _mouse(canvas, QEvent.Type.MouseMove, x, ruler_y)
+    _mouse(canvas, QEvent.Type.MouseButtonRelease, x, ruler_y)
+    assert canvas._playhead == pytest.approx(2.0)
+    assert len(commits) == 1
 
 
 def test_gain_preview_is_cached_as_the_selection_moves(panel: project_clip_editor._TimelineClipPanel) -> None:

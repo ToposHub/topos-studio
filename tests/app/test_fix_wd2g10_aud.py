@@ -61,23 +61,6 @@ class _RecordingConfig:
         self.save_count += 1
 
 
-class _FakeFeModule:
-    """file_explorer.main 替身：内存 config + 可控 plugin_manager。"""
-
-    def __init__(self, disabled: Optional[list[str]] = None,
-                 plugins: Optional[list[dict]] = None) -> None:
-        self.conf: dict = {"disabled_plugins": list(disabled or [])}
-        self.saved: Optional[dict] = None
-        self.plugin_manager = SimpleNamespace(plugins=list(plugins or []))
-
-    def load_config(self) -> dict:
-        return dict(self.conf)
-
-    def save_config(self, conf: dict) -> None:
-        self.saved = dict(conf)
-        self.conf = dict(conf)
-
-
 class _FakeModulePage:
     """ModularPreferencePage 最小实现 + 可选失败注入与 rollback 钩子。"""
 
@@ -202,7 +185,7 @@ def _capture_warnings(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
 @pytest.fixture
 def make_dialog(qapp, monkeypatch, tmp_path) -> Iterator[
         Callable[..., tuple[PreferencesDialog, _RecordingConfig]]]:
-    """PreferencesDialog 工厂：hermetic 缓存目录 + 切断真实 FE 插件桥。"""
+    """PreferencesDialog 工厂：隔离缓存目录。"""
     import src.shared.io.file_io as file_io
     monkeypatch.setattr(file_io.FileIO, "CACHE_DIR", str(tmp_path / "images_cache"))
     monkeypatch.setattr(file_io.FileIO, "BAKED_CACHE_DIR", str(tmp_path / "baked_layers"))
@@ -213,8 +196,6 @@ def make_dialog(qapp, monkeypatch, tmp_path) -> Iterator[
               module_pages: Optional[list[Any]] = None) -> tuple[PreferencesDialog, _RecordingConfig]:
         cfg = _RecordingConfig(initial)
         dlg = PreferencesDialog(cfg, module_pages=list(module_pages or []))
-        # 默认切断真实 file_explorer 桥；需要 FE 行为的用例在测试体内重设。
-        dlg._fe_plugin_bridge = lambda: None  # type: ignore[method-assign]
         created.append(dlg)
         return dlg, cfg
 
@@ -258,51 +239,6 @@ class TestCancelPreviewRollbackSignalLock:
 
 
 class TestCancelRollbackCompleteness:
-
-    @staticmethod
-    def _fe_with_two_plugins() -> _FakeFeModule:
-        return _FakeFeModule(
-            disabled=["plugin.alpha"],
-            plugins=[
-                {"name": "plugin.alpha", "info": {"version": "1.0", "description": "A"}},
-                {"name": "plugin.beta", "info": {"version": "2.0", "description": "B"}},
-            ],
-        )
-
-    @staticmethod
-    def _uncheck(dlg: PreferencesDialog, name: str) -> None:
-        for i in range(dlg._plugin_list.count()):
-            item = dlg._plugin_list.item(i)
-            if item.data(Qt.ItemDataRole.UserRole) == name:
-                item.setCheckState(Qt.CheckState.Unchecked)
-
-    def test_cancel_after_apply_restores_fe_config(self, make_dialog) -> None:
-        """[AUD-03903] Apply 直写的 FE config 必须随 Cancel 一并还原。"""
-        dlg, _ = make_dialog()
-        fe = self._fe_with_two_plugins()
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
-        dlg._refresh_plugins()
-        self._uncheck(dlg, "plugin.beta")   # alpha 本就处于停用（未勾选）态
-
-        dlg._on_apply()
-        assert fe.conf["disabled_plugins"] == ["plugin.alpha", "plugin.beta"]
-
-        dlg._on_cancel()
-        assert fe.conf["disabled_plugins"] == ["plugin.alpha"]
-        assert fe.saved["disabled_plugins"] == ["plugin.alpha"]
-
-    def test_cancel_without_apply_never_touches_fe_config(self, make_dialog) -> None:
-        """[AUD-03903] 未 Apply 直接 Cancel 不得触碰 FE config。"""
-        dlg, _ = make_dialog()
-        fe = self._fe_with_two_plugins()
-        dlg._fe_plugin_bridge = lambda: fe  # type: ignore[method-assign]
-        dlg._refresh_plugins()
-        self._uncheck(dlg, "plugin.alpha")
-
-        dlg._on_cancel()
-        assert fe.conf["disabled_plugins"] == ["plugin.alpha"]
-        assert fe.saved is None
-        assert dlg._fe_config_snapshot is None
 
     def test_cancel_after_apply_calls_module_page_rollback(self, make_dialog) -> None:
         """[AUD-03903] 模块页副作用经可选 rollback() 钩子在 Cancel 时撤销。"""
@@ -397,7 +333,6 @@ class TestModulePageDelegationErrors:
 
         with caplog.at_level("ERROR", logger="src.app.ui.preferences_dialog"):
             dlg = PreferencesDialog(_RecordingConfig(), module_pages=[page])
-            dlg._fe_plugin_bridge = lambda: None  # type: ignore[method-assign]
         dlg.deleteLater()
 
         assert any("load failed" in record.getMessage() for record in caplog.records)
@@ -493,7 +428,7 @@ class _SilentScanWorker(QRunnable):
 
 @pytest.fixture
 def make_pm_dialog(qapp, monkeypatch) -> Iterator[Callable[[], Any]]:
-    """ProjectManagerDialog 工厂：静默扫描替身 + 假 FE/config。"""
+    """ProjectManagerDialog 工厂：静默扫描替身与测试配置。"""
     monkeypatch.setattr(
         project_manager_module, "_ProjectScanWorker",
         lambda config: _SilentScanWorker(),

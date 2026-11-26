@@ -42,6 +42,9 @@ class ClipPreviewResult:
     spectrogram: Spectrogram | list | None
     report: dict = field(default_factory=dict)
     length_maps: tuple[tuple[int, int, int], ...] = ()
+    # Time, level and outgoing segment type in the rendered waveform domain.
+    # None identifies an audition render with the processing stack bypassed.
+    waveform_envelope: tuple[tuple[float, float, str], ...] | None = ()
 
 
 class ClipPreviewWorker(QThread):

@@ -1,8 +1,4 @@
-"""Composite module preference page.
-
-Composite-specific settings. Currently exposes the node
-shake-to-disconnect sensitivity.
-"""
+"""User preferences for the Composite workspace."""
 
 from __future__ import annotations
 
@@ -15,13 +11,19 @@ from PyQt6.QtWidgets import (
 )
 from src.shared.ui.widgets import ChevronComboBox
 from src.shared.ui.widgets.topos_controls import ToposClickableSlider
-from src.shared.ui.widgets.pref_form_layout import make_pref_form, make_pref_label
+from src.shared.ui.widgets.pref_form_layout import make_pref_form, make_pref_label, make_pref_page
 
 # Config key + default for the shake-to-disconnect sensitivity slider.
 # Range 0-100: higher = easier to disconnect a node by shaking it;
 # lower = harder to trigger and ignores slow movements.
 SHAKE_SENSITIVITY_KEY = "composite.shake_disconnect_sensitivity"
 SHAKE_SENSITIVITY_DEFAULT = 50
+NODE_CABLE_ROUTING_KEY = "composite.node_cable_routing"
+NODE_CABLE_ROUTING_DEFAULT = "curved"
+NODE_PREVIEW_MODE_KEY = "composite.node_preview_mode"
+NODE_PREVIEW_NONE = "none"
+NODE_PREVIEW_SELECTED_SINGLE = "selected_single"
+NODE_PREVIEW_ALL = "all"
 
 # Colour-management config keys (stage 2). Working space is fixed to
 # scene-linear for now but is exposed so future stages (ACEScg) can add
@@ -52,13 +54,7 @@ COLOR_ENGINE_DEFAULT = "ocio"  # matches DEFAULT_CONFIG factory default
 
 
 class CompositePreferencePage:
-    """Composite preference page.
-
-    Contributes the node shake-to-disconnect sensitivity control under the
-    Composite category. Registered by CompositeModule via
-    register_preference_pages(); load/apply/restore_defaults are delegated to
-    by PreferencesDialog alongside the app-level pages.
-    """
+    """Composite settings contributed to the application Preferences dialog."""
 
     page_id = "composite.settings"
 
@@ -67,18 +63,39 @@ class CompositePreferencePage:
 
     def create_widget(self, parent: "QWidget") -> QWidget:
         from PyQt6.QtGui import QFont
+        from src.features.composite.ui.connection_item import ConnectionItem
         from src.shared.i18n.i18n import I18N
 
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(24, 20, 24, 20)
+        page, layout = make_pref_page(parent)
 
-        group = QGroupBox(I18N.tr("preferences.composite.group_title", "Node Graph"))
+        group = QGroupBox(I18N.tr_preference("preferences.composite.group_title", "Node Graph"))
         group.setObjectName("PrefSettingsGroup")
         form = make_pref_form(group)
 
+        routing_combo = ChevronComboBox()
+        for routing, label in zip(ConnectionItem.ROUTES, (
+            I18N.tr_preference("preferences.composite.cable_curved", "Curved"),
+            I18N.tr_preference("preferences.composite.cable_straight", "Straight"),
+            I18N.tr_preference("preferences.composite.cable_orthogonal", "Right angles"),
+        )):
+            routing_combo.addItem(label, routing)
+        form.addRow(make_pref_label(I18N.tr_preference(
+            "preferences.composite.node_cable_routing", "Node cable routing")), routing_combo)
+
+        preview_combo = ChevronComboBox()
+        for mode, label in (
+            (NODE_PREVIEW_NONE, I18N.tr_preference("preferences.composite.thumbnail_none", "Hidden")),
+            (NODE_PREVIEW_SELECTED_SINGLE, I18N.tr_preference(
+                "preferences.composite.thumbnail_selected", "Single selected node")),
+            (NODE_PREVIEW_ALL, I18N.tr_preference("preferences.composite.thumbnail_all", "All nodes")),
+        ):
+            preview_combo.addItem(label, mode)
+        preview_combo.setCurrentIndex(preview_combo.findData(NODE_PREVIEW_SELECTED_SINGLE))
+        form.addRow(make_pref_label(I18N.tr_preference(
+            "preferences.composite.node_thumbnail_mode", "Node thumbnails")), preview_combo)
+
         # ── Shake-to-disconnect sensitivity ──────────────────────────
-        tooltip = I18N.tr(
+        tooltip = I18N.tr_preference(
             "preferences.composite.shake_sensitivity_tooltip",
             "How easily shaking a node disconnects it. Lower values are harder "
             "to trigger and ignore slow movements.",
@@ -107,14 +124,14 @@ class CompositePreferencePage:
         sens_layout.addWidget(sens_slider, 1)
         sens_layout.addWidget(sens_value)
 
-        sens_label = make_pref_label(I18N.tr(
+        sens_label = make_pref_label(I18N.tr_preference(
             "preferences.composite.shake_sensitivity",
             "Shake-to-disconnect sensitivity"), tooltip)
         form.addRow(sens_label, sens_row)
 
         # ── Export parallel frames (A3) ──────────────────────────────
         from PyQt6.QtWidgets import QSpinBox
-        par_tooltip = I18N.tr(
+        par_tooltip = I18N.tr_preference(
             "preferences.composite.export_parallel_frames_tooltip",
             "Number of frames rendered simultaneously during exports. "
             "Each worker holds its own GPU context (more VRAM use); "
@@ -123,61 +140,61 @@ class CompositePreferencePage:
         par_spin.setRange(1, 4)
         par_spin.setValue(EXPORT_PARALLEL_FRAMES_DEFAULT)
         par_spin.setToolTip(par_tooltip)
-        par_label = make_pref_label(I18N.tr(
+        par_label = make_pref_label(I18N.tr_preference(
             "preferences.composite.export_parallel_frames",
             "Export Parallel Frames"), par_tooltip)
         form.addRow(par_label, par_spin)
 
-        hint = QLabel(I18N.tr(
+        hint = QLabel(I18N.tr_preference(
             "preferences.composite.shake_sensitivity_hint",
             "Lower this value if nodes disconnect too easily while being moved."))
         hint.setObjectName("PrefNoteLabel")
         hint.setWordWrap(True)
         layout.addWidget(group)
-        layout.addWidget(hint)
+        form.addRow("", hint)
 
         # ── Colour Management ────────────────────────────────────────
-        cm_group = QGroupBox(I18N.tr(
+        cm_group = QGroupBox(I18N.tr_preference(
             "preferences.composite.color_management_group",
             "Colour Management"))
         cm_group.setObjectName("PrefSettingsGroup")
         cm_form = make_pref_form(cm_group)
 
         # Working space (currently only scene-linear; future: ACEScg).
-        ws_tooltip = I18N.tr(
+        ws_tooltip = I18N.tr_preference(
             "preferences.composite.working_space_tooltip",
             "The colour space used for all internal compositing operations. "
             "Scene-linear gives physically correct blending.")
         ws_combo = ChevronComboBox()
-        ws_combo.addItem("Scene-Linear", "linear")
+        ws_combo.addItem(I18N.tr_preference("preferences.composite.space_scene_linear", "Scene-Linear"), "linear")
         ws_combo.setToolTip(ws_tooltip)
-        ws_label = make_pref_label(I18N.tr(
+        ws_label = make_pref_label(I18N.tr_preference(
             "preferences.composite.working_space", "Working Space"), ws_tooltip)
         cm_form.addRow(ws_label, ws_combo)
 
         # Display space (controls the viewer's default ODT).
-        ds_tooltip = I18N.tr(
+        ds_tooltip = I18N.tr_preference(
             "preferences.composite.display_space_tooltip",
             "How scene-linear data is shown on screen by default. sRGB applies "
             "a linear→sRGB encode; Linear shows raw values.")
         ds_combo = ChevronComboBox()
         ds_combo.addItem("sRGB", "srgb")
-        ds_combo.addItem("Linear", "linear")
+        ds_combo.addItem(I18N.tr_preference("preferences.composite.space_linear", "Linear"), "linear")
         ds_combo.setToolTip(ds_tooltip)
-        ds_label = make_pref_label(I18N.tr(
+        ds_label = make_pref_label(I18N.tr_preference(
             "preferences.composite.display_space", "Display Space"), ds_tooltip)
         cm_form.addRow(ds_label, ds_combo)
 
         # Color engine (built-in vs OCIO).
         from src.shared.color.color_transform_provider import is_ocio_available
         # AUD-7800: 文案默认值与实际 factory default "ocio" 对齐。
-        ce_tooltip = I18N.tr(
+        ce_tooltip = I18N.tr_preference(
             "preferences.composite.color_engine_tooltip",
             "OCIO (factory default) uses OpenColorIO for arbitrary colour "
             "transforms (requires PyOpenColorIO installed). Built-in uses "
             "fast sRGB↔linear math.")
         ce_combo = ChevronComboBox()
-        ce_combo.addItem("Built-in (sRGB/Linear)", "builtin")
+        ce_combo.addItem(I18N.tr_preference("preferences.composite.engine_builtin", "Built-in (sRGB/Linear)"), "builtin")
         ce_combo.addItem("OCIO (OpenColorIO)", "ocio")
         if not is_ocio_available():
             # Disable the OCIO option when PyOpenColorIO isn't installed.
@@ -188,15 +205,15 @@ class CompositePreferencePage:
             if item is not None:
                 item.setEnabled(False)
                 item.setToolTip(
-                    I18N.tr(
+                    I18N.tr_preference(
                         "preferences.composite.ocio_unavailable_tooltip",
                         "Install PyOpenColorIO (pip install opencolorio) to enable."))
         ce_combo.setToolTip(ce_tooltip)
-        ce_label = make_pref_label(I18N.tr(
+        ce_label = make_pref_label(I18N.tr_preference(
             "preferences.composite.color_engine", "Color Engine"), ce_tooltip)
         cm_form.addRow(ce_label, ce_combo)
 
-        cm_hint = QLabel(I18N.tr(
+        cm_hint = QLabel(I18N.tr_preference(
             "preferences.composite.color_management_hint",
             "Built-in is the fast default for sRGB/Linear workflows; its "
             "transforms are verified identical to OCIO for the common "
@@ -209,11 +226,11 @@ class CompositePreferencePage:
         cm_hint.setObjectName("PrefNoteLabel")
         cm_hint.setWordWrap(True)
         layout.addWidget(cm_group)
-        layout.addWidget(cm_hint)
+        cm_form.addRow("", cm_hint)
 
         # ── Node disk cache capacity (A6) ────────────────────────────
         from PyQt6.QtWidgets import QDoubleSpinBox
-        nc_tooltip = I18N.tr(
+        nc_tooltip = I18N.tr_preference(
             "preferences.composite.node_cache_capacity_tooltip",
             "Total size ceiling for the node result disk cache "
             "(Render-in-Place and cache_to_disk nodes). Oldest entries "
@@ -221,10 +238,10 @@ class CompositePreferencePage:
         nc_spin = QDoubleSpinBox()
         nc_spin.setRange(0.5, 2000.0)
         nc_spin.setDecimals(1)
-        nc_spin.setSuffix(I18N.tr("preferences.composite.gb_suffix", " GB"))
+        nc_spin.setSuffix(I18N.tr_preference("preferences.composite.gb_suffix", " GB"))
         nc_spin.setValue(NODE_CACHE_CAPACITY_DEFAULT)
         nc_spin.setToolTip(nc_tooltip)
-        nc_label = make_pref_label(I18N.tr(
+        nc_label = make_pref_label(I18N.tr_preference(
             "preferences.composite.node_cache_capacity",
             "Node disk cache size"), nc_tooltip)
         form.addRow(nc_label, nc_spin)
@@ -233,18 +250,18 @@ class CompositePreferencePage:
         # 格式此前只有 TOPOS_NODE_CACHE_FORMAT 环境变量入口，偏好面板
         # 无设置项。auto = topos .toos 优先 + 可诊断 npz 回退（缺 native
         # 库 / HDR 载荷超 12-bit 定点域）。
-        nf_tooltip = I18N.tr(
+        nf_tooltip = I18N.tr_preference(
             "preferences.composite.node_cache_format_tooltip",
             "Payload codec for the node result disk cache. Auto prefers "
             "the native Topos .toos image (12-bit GBR+alpha) and falls "
             "back to lossless npz for HDR results or when the native "
             "library is unavailable.")
         nf_combo = ChevronComboBox()
-        nf_combo.addItem("Auto (Topos .toos + npz fallback)", "auto")
-        nf_combo.addItem("Topos .toos only", "toos")
-        nf_combo.addItem("npz (lossless float16)", "npz")
+        nf_combo.addItem(I18N.tr_preference("preferences.composite.cache_format_auto", "Auto (Topos .toos + npz fallback)"), "auto")
+        nf_combo.addItem(I18N.tr_preference("preferences.composite.cache_format_toos", "Topos .toos only"), "toos")
+        nf_combo.addItem(I18N.tr_preference("preferences.composite.cache_format_npz", "npz (lossless float16)"), "npz")
         nf_combo.setToolTip(nf_tooltip)
-        nf_label = make_pref_label(I18N.tr(
+        nf_label = make_pref_label(I18N.tr_preference(
             "preferences.composite.node_cache_format",
             "Node cache format"), nf_tooltip)
         form.addRow(nf_label, nf_combo)
@@ -252,16 +269,19 @@ class CompositePreferencePage:
         layout.addStretch()
 
         self._widgets[SHAKE_SENSITIVITY_KEY] = sens_slider
+        self._widgets[NODE_CABLE_ROUTING_KEY] = routing_combo
+        self._widgets[NODE_PREVIEW_MODE_KEY] = preview_combo
         self._widgets[NODE_CACHE_CAPACITY_KEY] = nc_spin
         self._widgets[NODE_CACHE_FORMAT_KEY] = nf_combo
         self._widgets[EXPORT_PARALLEL_FRAMES_KEY] = par_spin
         self._widgets[WORKING_SPACE_KEY] = ws_combo
         self._widgets[DISPLAY_SPACE_KEY] = ds_combo
         self._widgets[COLOR_ENGINE_KEY] = ce_combo
-        return widget
+        return page
 
     def load(self, config: Any) -> None:
-        """Load the sensitivity + colour-management settings from config."""
+        """Load Composite preferences from config."""
+        self._load_node_display_settings(config)
         slider = self._widgets.get(SHAKE_SENSITIVITY_KEY)
         if isinstance(slider, QSlider):
             val = config.get(SHAKE_SENSITIVITY_KEY, SHAKE_SENSITIVITY_DEFAULT)
@@ -310,6 +330,15 @@ class CompositePreferencePage:
             ce_val = config.get(COLOR_ENGINE_KEY, COLOR_ENGINE_DEFAULT)
             self._set_combo_by_data(ce_combo, ce_val, COLOR_ENGINE_DEFAULT)
 
+    def _load_node_display_settings(self, values: Any) -> None:
+        for key, default in (
+            (NODE_CABLE_ROUTING_KEY, NODE_CABLE_ROUTING_DEFAULT),
+            (NODE_PREVIEW_MODE_KEY, NODE_PREVIEW_SELECTED_SINGLE),
+        ):
+            combo = self._widgets.get(key)
+            if isinstance(combo, QComboBox):
+                self._set_combo_by_data(combo, values.get(key, default), default)
+
     @staticmethod
     def _set_combo_by_data(combo: QComboBox, value: Any, default: Any) -> None:
         """Select the combo item whose userData matches ``value``."""
@@ -325,6 +354,11 @@ class CompositePreferencePage:
 
     def apply(self, config_manager: Any) -> None:
         """Write the settings to the ConfigManager (saved by the dialog)."""
+        for key in (NODE_CABLE_ROUTING_KEY, NODE_PREVIEW_MODE_KEY):
+            combo = self._widgets.get(key)
+            if isinstance(combo, QComboBox):
+                config_manager.set(key, combo.currentData(), auto_save=False)
+
         slider = self._widgets.get(SHAKE_SENSITIVITY_KEY)
         if isinstance(slider, QSlider):
             config_manager.set(SHAKE_SENSITIVITY_KEY, slider.value(), auto_save=False)
@@ -361,6 +395,7 @@ class CompositePreferencePage:
 
     def restore_defaults(self, defaults: dict) -> None:
         """Reset all settings to their defaults."""
+        self._load_node_display_settings(defaults)
         slider = self._widgets.get(SHAKE_SENSITIVITY_KEY)
         if isinstance(slider, QSlider):
             slider.setValue(defaults.get(SHAKE_SENSITIVITY_KEY, SHAKE_SENSITIVITY_DEFAULT))

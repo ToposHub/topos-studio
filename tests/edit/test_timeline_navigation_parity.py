@@ -88,7 +88,7 @@ def test_shift_z_restores_previous_view_and_keeps_selection(qtbot: Any, use_wind
     assert not view._command_stack.can_undo()
 
 
-def test_zoom_buttons_slider_and_menu_use_playhead_anchor(qtbot: Any) -> None:
+def test_zoom_shortcut_slider_and_menu_use_playhead_anchor(qtbot: Any) -> None:
     panel = TimelinePanel()
     _show(panel, qtbot)
     panel.load_timeline(_long_sequence())
@@ -101,7 +101,6 @@ def test_zoom_buttons_slider_and_menu_use_playhead_anchor(qtbot: Any) -> None:
     for zoom in (
         lambda: QTest.keyClick(view, Qt.Key.Key_Equal, Qt.KeyboardModifier.ControlModifier),
         controller.on_timeline_zoom_in,
-        panel.btn_zoom_in.click,
         lambda: panel.zoom_slider.setValue(panel.zoom_slider.value() - 80),
         controller.on_timeline_zoom_out,
     ):

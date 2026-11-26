@@ -83,7 +83,7 @@ if TYPE_CHECKING:  # pragma: no cover - annotation-only imports
 
 # Shared playback is independent of the Files host.
 try:
-    # 播放核心已从 file_explorer 插件迁到 src/shared/playback，原生面板
+    # 原生素材面板使用 src/shared/playback 播放核心，
     # 不再依赖旧 Web UI；预导入仍用于探测 QtMultimedia 组件是否存在。
     from PyQt6.QtMultimedia import QMediaPlayer  # noqa: F401
     from src.shared.playback.player_qt import UltimatePlayer  # noqa: F401 — 播放器可用性探测（置 PLAYER_AVAILABLE）
@@ -589,6 +589,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             self.menuBar().setVisible(self.menuBar().isNativeMenuBar())
             self.setup_statusbar()
             self.setup_connections()
+            self._apply_desktop_monitor_calibration()
             # M1.2/M1.3/M2.2：装配 AI 编辑子系统（dock 面板已由 setup_docks 创建）
             self._setup_ai_editing()
             QApplication.instance().installEventFilter(self)
@@ -1576,7 +1577,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
 
         if self._edit_available and self.edit_page is None:
             if EditPage is not None:
-                self.edit_page = EditPage()
+                self.edit_page = EditPage(config_manager=self.config_manager)
                 # B1: keep the checkable Scene Cut Overlay menu action in
                 # sync when the overlay is toggled from the detection dialog.
                 overlay_sig = getattr(
@@ -1611,13 +1612,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             if SourceViewerWidget is not None and self.source_viewer_widget is None:
                 self.source_viewer_widget = SourceViewerWidget()
             if TimelinePanel is not None and self.timeline_panel is None:
-                self.timeline_panel = TimelinePanel()
+                self.timeline_panel = TimelinePanel(config_manager=self.config_manager)
             if EditInfoPanel is not None and self.edit_info_panel is None:
                 self.edit_info_panel = EditInfoPanel()
             if EditPropertiesPanel is not None and self.edit_properties_panel is None:
                 self.edit_properties_panel = EditPropertiesPanel()
             if EditEffectsPanel is not None and self.edit_effects_panel is None:
-                self.edit_effects_panel = EditEffectsPanel()
+                self.edit_effects_panel = EditEffectsPanel(config_manager=self.config_manager)
             # SUB-P2-03: Caption Workspace panel.
             if (CaptionWorkspacePanel is not None
                     and self.caption_workspace_panel is None):
@@ -2695,11 +2696,6 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         if self._edit_available and self.edit_page is not None:
             self.edit_page.waveform_status_message.connect(self.status_bar.showMessage)
 
-        # Sync timeline toolbar mixer button with dock_audio_mixer visibility
-        if self._edit_available and self.timeline_panel is not None:
-            dock = getattr(self, 'dock_audio_mixer', None)
-            if dock is not None:
-                self.timeline_panel.set_audio_mixer_dock(dock)
         if self._edit_available:
             self._connect_audio_mixer_sync()
 

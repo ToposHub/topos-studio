@@ -11,6 +11,7 @@ import numpy as np
 from PyQt6.QtGui import QImage
 
 from src.shared.color.color_space_descriptor import ColorSpaceDescriptor, descriptor_for_space_preset
+from src.shared.color.monitor_calibration import CalibrationRevision, load_monitor_calibration
 from src.shared.color.video_delivery_profiles import (
     SDR_VIDEO_OUTPUTS,
     WIDE_GAMUT_TIFF_OUTPUTS,
@@ -150,3 +151,45 @@ def convert_display_image(image: QImage, preset: str, destination: bytes) -> QIm
     return QImage(
         bytes(output), image.width(), image.height(), image.bytesPerLine(), image.format(),
     ).copy()
+
+
+@lru_cache(maxsize=3)
+def build_calibrated_display_lut(
+    preset: str | None, destination: bytes, calibration_path: str,
+    calibration_version: CalibrationRevision,
+) -> np.ndarray:
+    """Compose calibration after any ICC conversion, keyed by file revision."""
+    calibrated = load_monitor_calibration(calibration_path)
+    if preset and destination:
+        source = build_display_lut(preset, destination).astype(np.float32)
+    else:
+        axis = np.linspace(0.0, 1.0, LUT_SIZE, dtype=np.float32) ** 1.5
+        source = np.empty((LUT_SIZE, LUT_SIZE, LUT_SIZE, 3), dtype=np.float32)
+        source[..., 0] = axis[None, None, :]
+        source[..., 1] = axis[None, :, None]
+        source[..., 2] = axis[:, None, None]
+    corrected = calibrated.apply_rgb(source)
+    np.clip(corrected, -65504.0, 65504.0, out=corrected)
+    corrected = np.ascontiguousarray(corrected, dtype=np.float16)
+    corrected.setflags(write=False)
+    return corrected
+
+
+def convert_calibrated_display_image(
+    image: QImage, preset: str | None, destination: bytes, calibration_path: str,
+) -> QImage:
+    """Apply display-device transforms to a detached viewer image."""
+    if preset and destination:
+        image = convert_display_image(image, preset, destination)
+    if not calibration_path or image.isNull():
+        return image
+
+    image = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    size = (image.height(), image.bytesPerLine())
+    pixels = np.frombuffer(image.constBits().asstring(image.sizeInBytes()), dtype=np.uint8)
+    pixels = pixels.reshape(size).copy()
+    rgba = pixels[:, :4 * image.width()].reshape(image.height(), image.width(), 4)
+    calibration = load_monitor_calibration(calibration_path)
+    corrected = calibration.apply_rgb(rgba[..., :3].astype(np.float32) / 255.0)
+    rgba[..., :3] = np.rint(np.clip(corrected, 0.0, 1.0) * 255.0).astype(np.uint8)
+    return QImage(pixels.data, image.width(), image.height(), image.bytesPerLine(), image.format()).copy()

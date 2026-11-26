@@ -88,6 +88,8 @@
       "copy_started": "正在复制 {n} 项…",
       "move_started": "正在移动 {n} 项…",
       "libraries_heading": "素材库",
+      "folders_heading": "文件夹",
+      "rename_folder": "重命名文件夹…",
       "inspector": "文件信息",
       "select": "选择素材查看信息",
       "basic_info": "基本信息",
@@ -1374,6 +1376,7 @@
       "default": "项目默认"
     },
     "track_header": {
+      "show_mix_controls": "显示音量、声像和电平",
       "volume": "轨道音量 · {db} dB · 左右声道峰值 · 双击恢复 0 dB",
       "pan": "左右声道平衡 · {value} · 拖动调节，双击居中"
     },
@@ -1489,6 +1492,8 @@
       "mono": "单声道",
       "dim": "DIM",
       "mute": "扬声器静音",
+      "unmute": "取消监听静音",
+      "playback_only": "仅影响本机监听音量。",
       "device": "输出设备",
       "width": "设备通道数",
       "map_hint": "自动立体声，或如 1,2,3,4,5,6",
@@ -1741,9 +1746,12 @@
   "preferences": {
     "title": "首选项",
     "categories": {
+      "control_surface": "调色台设置",
+      "video_playback": "视频播放",
+      "timeline_defaults": "时间线默认设置",
+      "advanced": "高级",
       "general": "通用",
       "appearance": "外观",
-      "color_processing": "色彩与处理",
       "color_management": "色彩管理",
       "performance": "性能",
       "export": "导出",
@@ -1753,7 +1761,10 @@
       "logs_diagnostics": "日志与诊断",
       "plugin_management": "插件管理",
       "composite": "合成",
-      "ai_editing": "AI 剪辑"
+      "ai_editing": "AI 剪辑",
+      "color_processing": "色彩与处理",
+      "edit_interaction": "剪辑操作",
+      "files_browser": "素材浏览"
     },
     "general": {
       "section_title": "应用程序",
@@ -1771,7 +1782,8 @@
       "work_mode": {
         "image": "图片调色",
         "video": "视频调色"
-      }
+      },
+      "max_recent_projects": "最近工程数上限："
     },
     "appearance": {
       "section_title": "界面设置",
@@ -1788,13 +1800,22 @@
       "show_panel_titles": "显示面板标题栏",
       "compact_mode": "紧凑模式（减少间距）",
       "zoom_speed": "鼠标滚轮缩放速度：",
-      "preview_note": "外观更改将实时预览。"
+      "preview_note": "外观更改将实时预览。",
+      "grade_set": "照片调色集",
+      "grade_set_show_filenames": "在照片卡片上显示文件名",
+      "grade_set_rating_at_bottom": "在照片卡片下方显示评分"
     },
     "color_management": {
       "section_title": "色彩设置",
       "default_color_space": "默认色彩空间：",
       "image_warning_profile": "图片配置文件警告的参考色彩空间：",
       "project_color_defaults": "工程色彩默认值",
+      "calibration_section": "监看校准",
+      "desktop_calibration_lut": "内置监看校准LUT",
+      "external_calibration_lut": "上屏卡监看校准LUT",
+      "calibration_none": "未选择 LUT",
+      "calibration_load": "加载监看校准 LUT",
+      "calibration_tip": "请使用针对这台显示设备和该路输出信号实测生成的校准 LUT。它会在显示变换后应用。",
       "color_science": "色彩科学",
       "use_display_icc": "视频查看器使用 macOS 显示器 ICC",
       "use_display_icc_tip": "与达芬奇的「对查看器使用 Mac 显示器色彩配置」设为同一状态。",
@@ -1872,7 +1893,12 @@
       "tf_srgb": "sRGB（~gamma 2.2）",
       "tf_rec709": "Rec.709（~gamma 2.4）",
       "tf_linear": "线性（不编码）",
-      "smart_default": "智能默认（时间线→Rec.709，图片→sRGB）"
+      "smart_default": "智能默认（时间线→Rec.709，图片→sRGB）",
+      "depth_8": "8 位",
+      "depth_16": "16 位",
+      "depth_float": "32 位浮点",
+      "hdr_export_metadata": "HDR10 导出包含静态元数据",
+      "hdr_export_metadata_help": "新建工程采用此值作为 HDR10 HEVC/PQ 导出的默认设置。"
     },
     "performance": {
       "section_title": "性能设置",
@@ -1883,7 +1909,25 @@
       "render_quality": "渲染质量：",
       "processing_threads": "处理线程数（0=自动）：",
       "background_rendering": "启用后台渲染",
-      "memory_limit": "内存使用上限 GB（0=自动）："
+      "memory_limit": "内存使用上限 GB（0=自动）：",
+      "graphics_auto": "自动（推荐）",
+      "graphics_opengl": "OpenGL",
+      "graphics_d3d11": "D3D11（Windows 导出）",
+      "graphics_metal": "Metal",
+      "timeline_graphics_backend": "时间线渲染后端：",
+      "timeline_graphics_backend_desc": "导出时间线时，自动模式会在满足原生 GPU 表面与零回读条件时选择 D3D11，否则使用 OpenGL。符合条件的单层片段会在所选 GPU 上完成输入色彩转换、一级调色、缩放和 H.264 YUV 转换。复杂图层或不支持的效果使用 CPU。",
+      "vt_zero_copy_auto": "自动（推荐）",
+      "vt_zero_copy_off": "禁用",
+      "vt_zero_copy_force": "强制启用",
+      "vt_zero_copy": "macOS 硬件零拷贝解码：",
+      "vt_zero_copy_desc": "使用 macOS VideoToolbox 硬件解码，省去 GPU 显存拷贝。自动模式在支持时启用，禁用会改用 CPU 解码，强制启用会在未验证配置上尝试。",
+      "fusion_conservative": "保守（推荐）",
+      "fusion_aggressive": "积极",
+      "fusion_off": "禁用",
+      "pass_fusion_mode": "渲染合并模式：",
+      "fusion_desc": "将连续的纯调色节点合并为一次 GPU 渲染。保守模式仅合并纹理尺寸相同的节点，积极模式允许自动调整尺寸后合并。禁用可保留最高画质。",
+      "resolution_original": "原始分辨率",
+      "threads_auto": "自动"
     },
     "export": {
       "section_title": "默认导出设置",
@@ -1894,7 +1938,8 @@
       "preserve_metadata": "保留元数据",
       "color_profile": "导出色彩配置文件：",
       "embed_icc": "在导出文件中嵌入 ICC 配置文件",
-      "open_folder_after": "导出后打开文件夹"
+      "open_folder_after": "导出后打开文件夹",
+      "profile_none": "无"
     },
     "shortcuts": {
       "section_title": "键盘快捷键",
@@ -1923,7 +1968,16 @@
       "clearing_thumbnail_cache": "正在清除缩略图缓存…",
       "thumbnail_cache_cleared": "已清除缩略图缓存，共移除 {count} 条记录。",
       "thumbnail_cache_clear_failed": "无法清除缩略图缓存。",
-      "calculating": "计算中..."
+      "calculating": "计算中...",
+      "section_proxy_title": "视频代理",
+      "section_render_cache_title": "渲染缓存",
+      "proxy_format_note": "Topos 代理为帧内编码的 4:2:2 10 位视频，音频始终从原始素材播放。切换格式会应用于新建代理，并使已有代理失效。",
+      "proxy_format": "代理格式：",
+      "open_directory": "打开目录",
+      "cache_cleared": "缓存已清理，共移除 {count} 个文件。",
+      "open_directory_failed": "打开目录失败：{error}",
+      "backup_off": "关闭",
+      "project_library_directory": "默认工程库目录："
     },
     "image_processing": {
       "section_default_title": "默认处理参数",
@@ -1931,7 +1985,7 @@
       "sharpen_amount": "默认锐化量：",
       "processing_bit_depth": "处理位深度：",
       "conversion_intent": "色彩转换意图：",
-      "section_ai_title": "AI 处理",
+      "section_ai_title": "AI 图像处理",
       "ai_model_path": "AI 模型路径：",
       "ai_precision": "AI 推理精度：",
       "ai_precision_fp32": "FP32（高质量）",
@@ -1969,7 +2023,59 @@
       "open_plugin_dir": "打开插件目录",
       "no_plugins_found": "未找到插件",
       "enabled": "已启用",
-      "disabled": "已禁用"
+      "disabled": "已禁用",
+      "effect_settings_title": "效果插件设置（GLSL / AI）",
+      "files_list_title": "素材插件（启停需重启）",
+      "status": {
+        "failed": "加载失败",
+        "pending_disable": "重启后停用",
+        "pending_enable": "重启后启用",
+        "disabled": "已停用",
+        "loaded": "已加载",
+        "unloaded": "尚未加载"
+      },
+      "builtins": {
+        "image_factory": {
+          "name": "图片工厂",
+          "description": "图片批处理（格式转换/压缩等）；打开窗口后手动添加素材"
+        },
+        "video_pro": {
+          "name": "视频播放器",
+          "description": "视频播放引擎：Qt Multimedia 常规格式 + Topos 原生解码（含缩略图/元数据）"
+        },
+        "audio_pro": {
+          "name": "专业音频播放器",
+          "description": "专业音频播放器，支持波形图和截辑；播放复用既有共享播放器"
+        },
+        "decode_benchmark": {
+          "name": "Topos 解码测速",
+          "description": "支持 SourceManager 离线解码及当前 Edit 时间线真实解码 / GPU 合成 / 呈现跑分"
+        },
+        "ai_library_browser": {
+          "name": "AI 素材库",
+          "description": "在 vault 中语义搜索视频/音乐/图片素材（旧侧栏，经兼容入口打开）"
+        },
+        "topos_image": {
+          "name": "Topos 图像",
+          "description": "预览 Topos .toos 图像并读取元数据。"
+        },
+        "image_editor": {
+          "name": "Darkroom",
+          "description": "旧 Web 图片编辑器（Darkroom）；经兼容入口打开，效果仍走现有 Effect Catalog"
+        },
+        "code_editor": {
+          "name": "代码编辑器",
+          "description": "基于 Monaco Editor 的代码编辑器（旧 Web 界面，经兼容入口打开）"
+        },
+        "shutdown_timer": {
+          "name": "定时关机",
+          "description": "定时关机工具；启动器仅打开窗口，不直接执行系统关机"
+        },
+        "format_factory": {
+          "name": "格式工厂",
+          "description": "视频转码与封装转换工具；现有 HTTP 启动路由一次接收一个文件"
+        }
+      }
     },
     "save": "保存",
     "apply": "应用",
@@ -1985,7 +2091,26 @@
       "subtitle_export_complete_title": "字幕导出完成",
       "subtitle_export_complete": "已导出 {count} 条字幕到：\n{path}",
       "subtitle_export_failed_title": "字幕导出失败",
-      "subtitle_export_failed": "无法导出字幕：\n{error}"
+      "subtitle_export_failed": "无法导出字幕：\n{error}",
+      "video_group": "默认视频设置",
+      "audio_group": "默认音频设置",
+      "default_fps": "帧率：",
+      "custom": "自定义",
+      "resolution": "分辨率：",
+      "square_pixels": "方形像素（1.0）",
+      "anamorphic_pixels": "高清变形像素（1.3333）",
+      "pixel_aspect": "像素宽高比：",
+      "progressive": "逐行扫描（无场）",
+      "upper_field": "上场优先",
+      "lower_field": "下场优先",
+      "field_order": "场序：",
+      "start_timecode": "起始时码：",
+      "sample_rate": "采样率：",
+      "track_mono": "单声道",
+      "track_stereo": "立体声",
+      "track_surround": "5.1 环绕声",
+      "audio_track_type": "轨道类型：",
+      "frames_suffix": " 帧"
     },
     "video_playback": {
       "section_title": "视频播放",
@@ -1994,7 +2119,9 @@
       "engine_v3": "v3 实时引擎",
       "engine_v2": "v2 兼容模式",
       "allow_fallback": "允许 v3 失败时自动回退到 v2",
-      "engine_desc": "自动：优先使用 v3 实时引擎，失败时自动回退 v2。v3：强制使用实时引擎，不回退。v2：使用旧兼容路径用于调试。"
+      "engine_desc": "自动：优先使用 v3 实时引擎，失败时自动回退 v2。v3：强制使用实时引擎，不回退。v2：使用旧兼容路径用于调试。",
+      "adaptive_quality": "自动调整播放质量",
+      "adaptive_quality_help": "播放吃紧时降低预览质量，负载下降后恢复。"
     },
     "video_pipeline": {
       "section_title": "视频管线",
@@ -2002,8 +2129,8 @@
       "v3_enabled": "启用 v3 视频架构",
       "drop_frames": "预览队列满时丢帧",
       "max_queue": "预览队列深度：",
-      "yuv_gpu_upload": "使用 GPU 进行 YUV 转换（推荐）",
-      "no_deblock": "预览时关闭去块滤波（更快，低档可能重现 8×8 色块）",
+      "yuv_gpu_upload": "使用 GPU 进行 YUV 转换",
+      "no_deblock": "预览时关闭去块滤波",
       "no_deblock_tooltip": "预览解码跳过输出去块滤波。低档解码快 1.2–2 倍，代价是 8×8 块界台阶重新可见。导出与交付路径始终保持滤波。",
       "note": "这些设置控制视频播放架构。"
     },
@@ -2013,7 +2140,35 @@
       "shake_sensitivity_tooltip": "控制摇晃节点时断开连接的难易程度。数值越低越难触发，并会忽略缓慢的移动。",
       "shake_sensitivity_hint": "如果移动节点时太容易断开连接，请调低该数值。",
       "ocio_unavailable_tooltip": "安装 PyOpenColorIO（pip install opencolorio）后可用。",
-      "gb_suffix": " GB"
+      "gb_suffix": " GB",
+      "export_parallel_frames_tooltip": "导出时同时渲染的帧数。每个工作线程使用独立的 GPU 上下文，会增加显存占用，输出与逐帧渲染一致。",
+      "working_space_tooltip": "用于内部合成的色彩空间。场景线性空间可按物理规律混合像素。",
+      "display_space_tooltip": "选择场景线性数据在屏幕上的默认显示方式。sRGB 将线性数据编码为 sRGB，线性模式显示原始数值。",
+      "color_engine_tooltip": "OCIO 为出厂默认设置，使用 OpenColorIO 进行色彩转换（需安装 PyOpenColorIO）。内置引擎使用快速的 sRGB 与线性空间转换。",
+      "node_cache_capacity_tooltip": "节点结果（就地渲染和磁盘缓存节点）的磁盘缓存容量上限。最早的条目优先清理。",
+      "node_cache_format_tooltip": "节点结果磁盘缓存使用的编码格式。自动模式优先使用 Topos .toos 格式。原生库不可用或 HDR 超出 12 位定点范围时使用 npz。",
+      "export_parallel_frames": "导出并行帧数",
+      "color_management_group": "色彩管理",
+      "space_scene_linear": "场景线性",
+      "working_space": "工作空间",
+      "space_linear": "线性",
+      "display_space": "显示空间",
+      "engine_builtin": "内置（sRGB / 线性）",
+      "color_engine": "色彩引擎",
+      "color_management_hint": "内置引擎用于快速转换 sRGB 与线性空间。选择 OCIO 后，导出与查看器使用相同的 OpenColorIO 色彩引擎。ACEScg 素材使用内置配置中的色彩矩阵。可通过色彩管理中的 OCIO 配置文件选择 ACES Studio 配置。OCIO 不可用时回退到内置引擎。",
+      "node_cache_capacity": "节点磁盘缓存大小",
+      "cache_format_auto": "自动（Topos .toos，回退至 npz）",
+      "cache_format_toos": "仅 Topos .toos",
+      "cache_format_npz": "npz（无损 float16）",
+      "node_cache_format": "节点缓存格式",
+      "node_cable_routing": "节点连线走向",
+      "cable_curved": "曲线",
+      "cable_straight": "直线",
+      "cable_orthogonal": "直角",
+      "node_thumbnail_mode": "节点缩略图",
+      "thumbnail_none": "不显示",
+      "thumbnail_selected": "仅显示单个选中节点",
+      "thumbnail_all": "显示全部"
     },
     "ai_editing": {
       "route_embedding": "素材语义搜索",
@@ -2060,7 +2215,127 @@
       "note": "开发者模式需要重启应用后生效。开启后会显示维护工具，如 Window > 设为默认（更新随仓库提交的 default_layout.json，提交后同步给所有用户）。"
     },
     "ocio_placeholder": "config.ocio",
-    "ai_model_dir_placeholder": "选择 AI 模型目录"
+    "ai_model_dir_placeholder": "选择 AI 模型目录",
+    "tangent": {
+      "section_title": "设备连接",
+      "calibration_title": "调色轮与轨迹球",
+      "surface_label": "调色台：",
+      "disabled": "禁用",
+      "auto": "自动检测",
+      "ripple": "Tangent Ripple",
+      "element": "Tangent Element",
+      "note": "通过原生 Tangent Hub 连接。Element 的四个面板作为一套设备使用。",
+      "rotation": "调色轮旋转角度：",
+      "invert_direction": "反转色相方向",
+      "smoothing": "轨迹球平滑：",
+      "lift": "Lift",
+      "gamma": "Gamma",
+      "gain": "Gain",
+      "axis_x": "X 轴",
+      "axis_y": "Y 轴",
+      "brightness": "亮度",
+      "sensitivity_note": "X / Y 轴界面值 100% 对应内部基础上限 1000%（Tangent 原生增量的 10 倍）。慢滚时增益更低，便于精调。快滚时增益可平滑提升至 20 倍。亮度沿用原生百分比。",
+      "smoothing_note": "0% 为默认值，保留原始响应以便直线斜向操作。提高平滑可抑制硬件噪声，同时会增加响应延迟。"
+    },
+    "advanced": {
+      "section_logging_title": "日志",
+      "section_diag_title": "诊断",
+      "export_diagnostics": "导出诊断报告",
+      "diagnostics_saved": "诊断报告已保存至：{path}",
+      "diagnostics_failed": "保存诊断报告失败：{error}"
+    },
+    "paths": {
+      "select_open_dir": "选择默认打开目录",
+      "select_backup_dir": "选择备份目录",
+      "select_cache_dir": "选择缓存目录",
+      "select_render_cache_dir": "选择渲染缓存目录",
+      "select_log_file": "选择日志文件",
+      "select_plugin_dir": "选择插件目录",
+      "all_files": "所有文件 (*)",
+      "json_files": "JSON 文件 (*.json)",
+      "select_ocio": "选择 OCIO 配置文件",
+      "select_ai_models": "选择 AI 模型目录",
+      "select_export_dir": "选择导出目录",
+      "export_directory_placeholder": "选择导出目录…",
+      "select_project_library": "选择工程库目录"
+    },
+    "render_cache": {
+      "codec_topos_proxy": "Topos 422 代理（推荐）",
+      "mode_off": "关闭",
+      "mode_user": "手动",
+      "mode_smart": "智能（自动）",
+      "threshold_tooltip": "自动缓存所需的最低分数，仅用于智能模式。分数 = 效果数 ×2 + 调色 ×3 + 变速 ×2 + 合成 ×4 + 动画参数 ×1。",
+      "codec_topos_standard": "Topos 422（标准）",
+      "codec_h264_proxy": "H.264 代理",
+      "res_timeline": "时间线分辨率",
+      "res_half": "二分之一",
+      "res_quarter": "四分之一",
+      "auto_mode": "渲染缓存模式：",
+      "threshold": "智能缓存分数阈值：",
+      "codec": "缓存编码：",
+      "directory": "缓存位置：",
+      "resolution": "缓存分辨率：",
+      "max_size": "缓存大小上限（GB）："
+    },
+    "restart": {
+      "title": "需要重启",
+      "message": "需要重启应用才能使更改生效。\n\n现在重启吗？"
+    },
+    "module_apply_failed": {
+      "title": "保存失败",
+      "message": "以下模块设置保存失败：\n{pages}"
+    },
+    "module_restore_failed": {
+      "title": "恢复默认失败",
+      "message": "以下模块设置恢复失败：\n{pages}"
+    },
+    "decklink": {
+      "section_title": "外接视频监看",
+      "enabled": "启用 DeckLink 监看输出",
+      "backend_native": "原生 SDK 桥接",
+      "desc": "当前监看输出固定为 1080i50 YUV。FFmpeg 后端需要启用 DeckLink 支持的 FFmpeg 构建，Homebrew 的标准构建通常不包含该支持。原生 SDK 后端使用内置桥接模块，仅安装一台 DeckLink 设备时可自动选择。",
+      "backend": "输出后端：",
+      "device": "DeckLink 设备：",
+      "ffmpeg_path": "FFmpeg 路径："
+    },
+    "scene_cut": {
+      "section_title": "场景切分检测",
+      "sensitivity": "默认灵敏度：",
+      "sensitivity_desc": "数值越低，检出的候选切点越多。提高数值可减少误报。",
+      "use_proxy": "使用代理素材加快检测",
+      "min_scene_frames": "切点的最小间隔（帧）：",
+      "show_overlay": "在时间线上显示候选切点"
+    },
+    "language_names": {
+      "en_US": "英语",
+      "zh_CN": "简体中文",
+      "ja_JP": "日语",
+      "ko_KR": "韩语",
+      "fr_FR": "法语",
+      "de_DE": "德语",
+      "es_ES": "西班牙语",
+      "pt_BR": "葡萄牙语（巴西）",
+      "ru_RU": "俄语",
+      "it_IT": "意大利语"
+    },
+    "units": {
+      "minutes": " 分钟",
+      "days": " 天"
+    },
+    "edit_interaction": {
+      "timeline": "时间线",
+      "drop_mode": "时间线拖放模式",
+      "overwrite": "覆盖",
+      "insert": "插入",
+      "transitions": "转场浏览",
+      "static": "静态图标",
+      "animated": "动画预览",
+      "preview_mode": "预览样式",
+      "preview_size": "动画预览尺寸",
+      "small": "小",
+      "medium": "中",
+      "large": "大"
+    }
   },
   "composite": {
     "external": {
@@ -2907,7 +3182,15 @@
       "hand": "手形工具",
       "hand_tooltip": "手形工具 (H)",
       "zoom": "缩放工具",
-      "zoom_tooltip": "缩放工具 (Z)"
+      "zoom_tooltip": "缩放工具 (Z)",
+      "timeline_zoom": "时间线水平缩放",
+      "zoom_out": "缩小时间线",
+      "zoom_in": "放大时间线",
+      "height_out": "降低轨道高度",
+      "height_in": "提高轨道高度",
+      "clip_height": "片段高度",
+      "audio_track_height": "音轨高度",
+      "custom_zoom": "自定义缩放"
     },
     "playback_control": {
       "jump_start": "跳到开头 (Home)",

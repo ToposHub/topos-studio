@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 from PyQt6.QtCore import QPointF, QRectF
-from PyQt6.QtGui import QImage, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import QGraphicsScene, QStyleOptionGraphicsItem
 
 from src.features.edit.ui.timeline_items import (
@@ -96,6 +96,26 @@ def test_trim_preview_does_not_stretch_cached_tail_into_extended_range(
 
     assert drawn_cells
     assert max(cell.right() for cell in drawn_cells) < 358.0
+
+
+def test_explicit_first_and_last_thumbnails_leave_the_middle_empty(qapp: Any) -> None:
+    item = _make_video_clip()
+    item._thumbnail_display_mode = "start_end"
+    head, tail = QPixmap(160, 90), QPixmap(160, 90)
+    head.fill(QColor("#fa503e"))
+    tail.fill(QColor("#6beeff"))
+    thumbs = ClipThumbnailSet("ends", [(20, head), (119, tail)], 50)
+    image = QImage(400, 70, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor("#000000"))
+    painter = QPainter(image)
+    try:
+        item._draw_cached_thumbnails(painter, QRectF(0, 17, 400, 53), thumbs, "start_end")
+    finally:
+        painter.end()
+
+    assert image.pixelColor(12, 35) == QColor("#fa503e")
+    assert image.pixelColor(200, 35) == QColor("#000000")
+    assert image.pixelColor(388, 35) == QColor("#6beeff")
 
 
 def test_trim_edge_cursors_are_distinct() -> None:

@@ -207,14 +207,16 @@ project.topos (ZIP)
 
 - **src/shared/config/config_manager.py::ConfigManager**：JSON 配置（平台数据目录下 `config.json`，tempfile 原子写入）。DEFAULT_CONFIG 覆盖窗口/布局、`locale`、`features` 段（供 feature_flags Step 4）、`work_mode`、`developer_mode`、外观、`recent_files/recent_projects` 等；内建若干惰性迁移（如默认帧率 23.976→25、Render Cache 编解码器清理）；`get_backend_selection()` 反序列化四维后端选择（P2-05）。
 - **src/shared/preferences/__init__.py::PreferencesRegistry**：feature 模块以 `PreferencePageDescriptor`（page_id/title/category/order/feature_id/懒 factory）贡献设置页；`ModularPreferencePage` Protocol 让页面完全自持 widget 创建/load/apply/defaults。PreferencesDialog 按 enabled_features 过滤动态构建。
+- Color 模块注册色彩管理（工程默认值、显示校准与色彩配置）、调色台设置（Tangent）和图像处理（含 AI 图像处理）。各页独立管理控件及配置读写，共用首选项表单布局。首选项通过 `I18N.tr_preference` 选择简体中文或英文，其他界面继续使用常规翻译入口。
+- 应用首选项保存后同步剪辑拖放、自动播放质量、转场预览、调色集和合成节点的显示设置。素材浏览继续使用原生素材面板的用户级 Qt 配置，两个素材视图读取同一设置。工程库目录和 HDR10 元数据默认值由工程创建入口读取。
 
 ### 5.3 db（src/shared/db/database.py）
 
-SQLite（`topos.db`）四张表：`settings`（KV）、`layouts`（name+work_mode 复合主键，含 legacy 单主键表自动重建迁移）、`shortcuts`、`file_meta`（主键 NFC 归一——宿主与 file_explorer 必须同一键空间，避免 NFD/NFC 双行，R1-4）。（batch-329 AUD-32901 Major：排序热路径每次调用新建/关闭连接，无复用无批量接口。）
+宿主通过 `Database` 管理配置根下的 `host.db`，包含 `settings`、`layouts`、`shortcuts` 和 `file_meta`。`layouts` 的复合主键为 `name` 和 `work_mode`，支持旧单主键表迁移。`file_meta` 的路径主键统一转为 NFC。原生素材模块在独立的 `files-data/catalog.db` 中维护素材索引和素材元数据。 [原生素材数据边界](../plans/files-replacement-data-boundary-20261117.md)
 
 ### 5.4 vault（src/shared/vault/）
 
-主项目与 vault 服务（`apps/topos_vault/` 独立进程）之间**唯一**耦合点：`client.py::VaultClient`（只读 HTTP 客户端，`VaultStats`）、`bridge.py`（vault 检索结果 → TAEP `SemanticSegment`，喂 AI 剪辑 Executor；clip/face_track/transcript/search_hit 四种转换）。当前 DORMANT（batch-386：src/ 内无生产引用，仅 tests/vault/ 引用；bridge 的 SegmentKind/字段契约与 `src/features/edit/ai_editing/editorial_models.py` 实测一致）。
+原生 AI 素材库工具通过 `client.py::VaultClient` 查询 `apps/topos_vault/` 的独立服务，使用只读 HTTP 接口获取搜索结果及 `VaultStats`。`bridge.py` 提供 clip、face track、transcript 和 search hit 到 AI 剪辑 `SemanticSegment` 的转换契约。
 
 ### 5.5 diagnostics（src/shared/diagnostics/）
 
@@ -255,8 +257,9 @@ SQLite（`topos.db`）四张表：`settings`（KV）、`layouts`（name+work_mod
 | `shared/i18n` | `I18N.tr` / `load_locale` / `reload_locale` | 全 UI 层（app + 所有 feature），main.py 启动加载 |
 | `shared/config` | `ConfigManager.get/set/save_config` / `get_backend_selection` | main.py、MainWindow、PreferencesDialog、feature_flags Step 4 |
 | `shared/preferences` | `PreferencesRegistry.register` / `PreferencePageDescriptor` | feature 模块注册设置页、PreferencesDialog 构建 |
-| `shared/db` | `Database`（settings/layouts/shortcuts/file_meta） | MainWindow 布局持久化、file_explorer 共享 file_meta |
-| `shared/vault` | `VaultClient` / `clip_to_semantic_segment` 等 | （DORMANT）TAEP AI 剪辑 Executor 预留 |
+| `shared/db` | `Database`（settings/layouts/shortcuts/file_meta） | MainWindow 的宿主设置、布局和文件属性 |
+| `shared/playback` | `DecoderBackend` / `NativePlayerHost` / `AudioOutputArbiter` | 原生素材和调色集预览、视频工具、音频输出 |
+| `shared/vault` | `VaultClient` / `clip_to_semantic_segment` 等 | 原生 AI 素材库查询及 AI 剪辑转换契约 |
 | `shared/diagnostics` | `export_performance_bundle` / resource_snapshot | 帮助菜单诊断导出、Deliver/Quick Export 复用 |
 | `shared/actions`、`shared/panels` | `MenuActionDescriptor` / `PanelRegistry` | feature 模块贡献、menu builder / Window > Panels |
 
@@ -268,7 +271,7 @@ SQLite（`topos.db`）四张表：`settings`（KV）、`layouts`（name+work_mod
 4. **线程契约**：UI 线程绝不调用 GL（.clinerules）；`GLResourceRegistry.release_group` 的 release_fn 必须在渲染线程执行；`GpuDecodedFrame.release()` 只在渲染线程安全时机调用且 exactly once；`OutputSlotPool` slot 未 ack 永不复用，禁止缓存 GPU texture id、禁止热路径每帧 glFinish；Metal `dispatch()` 不提交、`finish()` 才同步，与 GL 全局锁无关。
 5. **不静默降级**：后端选择、硬解、Metal、probe 的任何不可用都必须产出显式 reason（.clinerules:11）， AUTO 链记 fallback_trail；硬解失败降级 CPU 时记录 HardwareDecodeStatus 原因。
 6. **AI/自动化旗标默认 False**（M0 冻结）：新增 AI 能力面必须先注册为显式 False 默认的旗标，禁止 import 副作用开启；Color 恒不可禁用。
-7. **共享 SQLite 键空间**：file_meta 主键必须 NFC 归一（`_meta_key`），宿主与 file_explorer 两端一致，否则双行/误清理回归。
+7. 宿主 `file_meta` 的路径主键继续通过 `_meta_key` 统一为 NFC，避免同一文件产生 NFC 和 NFD 两条记录。
 8. **i18n**：新增语言要在 shared 与每个 feature 的 locales/ 目录同步建 JSON 并登记 `SUPPORTED_LOCALES`；运行时切语言走 `I18N.reload_locale` + `FeatureRegistry.reload_i18n`。
 9. **factory 路由**：`.mov` 按内容（TPIC magic）而非扩展名路由；新增后端时保持逐后端回退自愈与 `MediaBackendDecision` 单一判定，缓存失效键是文件签名 (size, mtime_ns)。
 10. **已知质量债**（审计佐证，改动时顺带规避）：`gl_context_hub._do_pixel_probe` 的 ctx_b 未真正参与探测（AUD-1214 Critical）；`vault/bridge.py` segment_id 三元优先级缺陷（AUD-38600）；`i18n.tr` 占位符异常逃逸（AUD-33800）；`db` 热路径每调用新建连接（AUD-32901）；`media/__init__` 私有名漏出 `__all__`（AUD-34308）。

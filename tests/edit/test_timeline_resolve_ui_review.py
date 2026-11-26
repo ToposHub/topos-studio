@@ -130,6 +130,34 @@ def test_option_edge_trim_leaves_linked_partner_untouched(
     assert len(view._command_stack._undo_stack) == 1
 
 
+@pytest.mark.parametrize("vertical", [True, False])
+def test_edit_gain_line_preserves_horizontal_clip_drag(qtbot: Any, vertical: bool) -> None:
+    view = _view(qtbot)
+    item = view._items_map["ac"]
+    original = view.get_timeline().get_clip_by_id("ac")
+    y = item._envelope_geometry()["zero_y"]
+    start = view.mapFromScene(item.mapToScene(QPointF(item._width / 2.0, y)))
+    end = start + (QPoint(0, 9) if vertical else QPoint(30, 0))
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(view.viewport(), end, 10)
+    if vertical:
+        assert view._envelope_readout is not None and view._envelope_readout.isVisible()
+        gain_readout = view._envelope_readout.text()
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=end)
+
+    updated = view.get_timeline().get_clip_by_id("ac")
+    if vertical:
+        assert updated.timeline_start == original.timeline_start
+        nodes = updated.audio_edit["envelope"]
+        assert len(nodes) == 1 and nodes[0]["gain_db"] < 0.0
+        assert f'{nodes[0]["gain_db"]:+.1f} dB' in gain_readout
+        assert view._envelope_readout.isHidden()
+    else:
+        assert updated.timeline_start > original.timeline_start
+        assert updated.audio_edit == original.audio_edit
+        assert view._envelope_readout is None
+
+
 def test_position_lock_delete_has_no_exception_or_partial_ui_change(qtbot: Any) -> None:
     view = _view(qtbot)
     QTest.mouseClick(view.viewport(), Qt.MouseButton.LeftButton, pos=_body(view))
@@ -366,6 +394,77 @@ def test_add_tracks_dialog_batches_independent_video_and_audio_positions(
     assert view.get_timeline().all_tracks == original.all_tracks
     view.redo()
     assert view.get_timeline().all_tracks == sequence.all_tracks
+
+
+@pytest.mark.parametrize("audio_only", [False, True])
+def test_cleanup_empty_tracks_from_header_is_undoable(
+    qtbot: Any, monkeypatch: pytest.MonkeyPatch, audio_only: bool,
+) -> None:
+    from dataclasses import replace
+
+    view = _view(qtbot)
+    sequence = _sequence()
+    original = replace(
+        sequence,
+        video_tracks=(
+            *sequence.video_tracks, EditTrack("locked", "Locked", "video", 2, is_locked=True),
+            EditTrack("routed", "Source destination", "video", 3),
+        ),
+        audio_tracks=(
+            *sequence.audio_tracks, EditTrack("extra-audio", "Extra", "audio", 1),
+            EditTrack("bus", "Bus", "audio", 2, is_bus=True),
+            EditTrack("patched", "Voiceover input", "audio", 3),
+        ),
+        subtitle_tracks=(EditTrack("extra-subtitle", "Extra", "subtitle", 0),),
+        format_settings={
+            "mixer_recording_inputs": {
+                "version": 1,
+                "tracks": {"patched": {"device_id": "interface", "channels": [0]}},
+            },
+        },
+    )
+    view.load_timeline(original)
+    view._on_source_patch_requested("routed", True)
+    view.set_audio_only(audio_only)
+    published: list[TimelineSequence] = []
+    view.timeline_changed.connect(published.append)
+
+    def choose_cleanup(menu: QMenu, _pos: QPoint) -> QAction:
+        return next(action for action in menu.actions() if action.objectName() == "cleanupEmptyTracks")
+
+    monkeypatch.setattr(QMenu, "exec", choose_cleanup)
+    header = view._track_headers["a1"]
+    point = view.mapFromScene(header.mapToScene(QPointF(32, 16)))
+    QTest.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=point)
+
+    cleaned = view.get_timeline()
+    expected = {"v1", "locked", "routed", "a1", "bus", "patched"}
+    if audio_only:
+        expected.update(("v2", "extra-subtitle"))
+    assert {track.track_id for track in cleaned.all_tracks} == expected
+    assert cleaned.get_clip_by_id("vc") == original.get_clip_by_id("vc")
+    assert cleaned.get_clip_by_id("ac") == original.get_clip_by_id("ac")
+    assert published == [cleaned]
+    view._on_cleanup_empty_tracks_requested()
+    assert published == [cleaned]
+    assert len(view._command_stack._undo_stack) == 1
+    view.undo()
+    assert view.get_timeline().all_tracks == original.all_tracks
+    view.redo()
+    assert view.get_timeline().all_tracks == cleaned.all_tracks
+
+
+def test_cleanup_empty_tracks_keeps_one_ordinary_video_and_audio_lane(qtbot: Any) -> None:
+    view = _view(qtbot)
+    view.load_timeline(TimelineSequence(
+        timeline_id="empty", name="Empty",
+        video_tracks=(EditTrack("v1", "V1", "video", 0), EditTrack("v2", "V2", "video", 1)),
+        audio_tracks=(EditTrack("a1", "A1", "audio", 0), EditTrack("a2", "A2", "audio", 1)),
+    ))
+
+    view._on_cleanup_empty_tracks_requested()
+
+    assert [track.track_id for track in view.get_timeline().all_tracks] == ["v1", "a1"]
 
 
 def test_cancel_add_tracks_keeps_provisional_timeline(qtbot: Any, monkeypatch: pytest.MonkeyPatch) -> None:

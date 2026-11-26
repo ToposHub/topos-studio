@@ -23,6 +23,7 @@ class ConfigManager:
         "locale": "en_US",
         "auto_save_interval": 5,
         "max_recent_files": 10,
+        "max_recent_projects": 10,
         "recent_files": [],
         "recent_projects": [],  # EditProject recent list
         "show_welcome_on_startup": True,
@@ -61,6 +62,7 @@ class ConfigManager:
         "accent_color": "#ff8800",
         "show_panel_titles": True,
         "grade_set_show_filenames": False,
+        "grade_set_rating_at_bottom": False,
         "compact_mode": False,
         "zoom_speed": 100,
         # Color Management
@@ -176,6 +178,8 @@ class ConfigManager:
         # Shake-to-disconnect sensitivity, 0-100. Higher = easier to disconnect a
         # node by shaking it; lower = harder to trigger and ignores slow movements.
         "composite.shake_disconnect_sensitivity": 50,
+        "composite.node_cable_routing": "curved",
+        "composite.node_preview_mode": "selected_single",
         # Composite colour management (stage 2). Working space is the internal
         # compositing space (scene-linear); display space controls the viewer's
         # default ODT (linear→sRGB encode on/off). color_engine selects the
@@ -201,6 +205,8 @@ class ConfigManager:
         "color.image_space": "srgb",
         # Preview (viewer ODT) — what you see on screen.
         "color.preview.use_macos_display_profile": False,
+        "color.monitor.desktop_calibration_lut": "",
+        "color.monitor.external_calibration_lut": "",
         "color.preview.timeline_primaries": "bt709",
         "color.preview.timeline_transfer": "bt709",      # BT.709 OETF
         "color.preview.image_primaries": "bt709",        # sRGB shares BT.709 primaries
