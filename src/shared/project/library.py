@@ -30,13 +30,14 @@ logger = logging.getLogger(__name__)
 #: Default library location when the config value is empty.
 DEFAULT_PROJECT_LIBRARY_NAME = "ToposProjects"
 PROJECT_LIBRARY_DIRECTORIES_KEY = "project_library_directories"
+_EXCLUDED_LIBRARIES_KEY = "excluded_project_library_directories"
 PROJECT_BACKUP_DIRECTORY_NAME = "backups"
 
 #: Filename of the project cover thumbnail inside the archive.
 COVER_THUMBNAIL_PATH = "assets/thumbnails/project_cover.jpg"
 
 
-def normalize_project_name(value: str, fallback: str = "Untitled Project") -> str:
+def normalize_project_name(value: str | None, fallback: str = "Untitled Project") -> str:
     """Return a clean display/file stem without repeated .topos suffixes."""
     name = Path(str(value or "").strip()).name
     while name.lower().endswith(".topos"):
@@ -74,65 +75,53 @@ class ProjectBackupMeta:
     created_at: float
 
 
-def get_project_library_dir(config: Any = None) -> Path:
-    """Return the video project library directory, creating it if missing.
+@dataclass(frozen=True)
+class ProjectLibraryLocation:
+    path: str
+    available: bool
 
-    Resolution order:
-      1. config "project_library_directory" if non-empty and valid
-      2. ~/Documents/ToposProjects
-    """
-    custom = ""
-    if config is not None:
+
+def project_library_key(path: str | Path) -> str:
+    return os.path.normcase(os.path.abspath(Path(path).expanduser()))
+
+
+def get_project_library_dir(config: Any = None, *, create: bool = True) -> Path:
+    """Return the primary library and create it when requested."""
+    custom = config.get("project_library_directory") if config is not None else None
+    directory = Path.home() / "Documents" / DEFAULT_PROJECT_LIBRARY_NAME
+    if isinstance(custom, (str, Path)) and custom and "\x00" not in str(custom):
+        directory = Path(custom).expanduser()
+    if create:
         try:
-            custom = config.get("project_library_directory") or ""
-        except Exception:
-            custom = ""
-    if custom:
-        p = Path(custom).expanduser()
-    else:
-        docs = Path.home() / "Documents"
-        p = docs / DEFAULT_PROJECT_LIBRARY_NAME
-    try:
-        p.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        logger.warning("Could not create project library dir %s: %s", p, exc)
-    return p
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning("Could not create project library dir %s: %s", directory, exc)
+    return directory
+
+
+def _configured_library_keys(config: Any, key: str) -> list[str]:
+    values = config.get(key) if config is not None else None
+    if not isinstance(values, (list, tuple)):
+        return []
+    return [project_library_key(path) for path in values if isinstance(path, str) and path and "\x00" not in path]
 
 
 def get_project_library_dirs(config: Any = None) -> list[Path]:
-    """Return all known project locations, including recent custom folders."""
-    locations: list[Path] = [get_project_library_dir(config)]
-    if config is not None:
-        try:
-            configured = config.get(PROJECT_LIBRARY_DIRECTORIES_KEY) or []
-        except Exception:
-            configured = []
-        for value in configured:
-            if value:
-                locations.append(Path(str(value)).expanduser())
-
-        # A project created in a custom folder must remain discoverable even
-        # before the user explicitly adds that folder to the library index.
-        try:
-            recent = config.get("recent_projects") or []
-        except Exception:
-            recent = []
-        for value in recent:
-            if value:
-                candidate = Path(str(value)).expanduser()
-                locations.append(candidate.parent if candidate.suffix.lower() == ".topos" else candidate)
-
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for location in locations:
-        key = os.path.abspath(str(location))
-        if key not in seen:
-            seen.add(key)
-            unique.append(location)
-    return unique
+    """Include configured and recent locations until explicitly removed."""
+    default = get_project_library_dir(config, create=False)
+    configured = _configured_library_keys(config, PROJECT_LIBRARY_DIRECTORIES_KEY)
+    excluded = set(_configured_library_keys(config, _EXCLUDED_LIBRARIES_KEY))
+    recent = _configured_library_keys(config, "recent_projects")
+    locations = [*configured, *(str(Path(path).parent) if Path(path).suffix.lower() == ".topos" else path
+                                for path in recent)]
+    primary = project_library_key(default)
+    return [Path(primary), *(Path(path) for path in dict.fromkeys(locations)
+                             if path != primary and path not in excluded)]
 
 
-def get_project_backup_dir(project_path: str | Path, config: Any = None) -> Path:
+def get_project_backup_dir(
+    project_path: str | Path, config: Any = None, *, create: bool = True
+) -> Path:
     """Return the single archive directory used for project backups.
 
     An explicitly configured backup directory is shared by all projects. When
@@ -153,17 +142,18 @@ def get_project_backup_dir(project_path: str | Path, config: Any = None) -> Path
     # regular file) must not propagate into scan/list/rename call sites. Callers
     # already tolerate a missing backup directory (iterdir/stat are guarded),
     # so log-and-continue mirrors get_project_library_dir().
-    try:
-        directory.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        logger.warning("Could not create project backup dir %s: %s", directory, exc)
+    if create:
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.warning("Could not create project backup dir %s: %s", directory, exc)
     return directory
 
 
 def _backup_name_pattern(project_path: str | Path) -> re.Pattern[str]:
     stem = Path(project_path).stem
     return re.compile(
-        rf"^{re.escape(stem)}_(?:legacy_)?\d{{8}}_\d{{6}}(?:_[A-Za-z0-9-]+)*\.topos$",
+        rf"^{re.escape(stem)}_(?:legacy_)?(?P<stamp>\d{{8}}_\d{{6}})(?:_[A-Za-z0-9-]+)*\.topos$",
         re.IGNORECASE,
     )
 
@@ -280,7 +270,8 @@ def list_project_backups(
     except OSError:
         return results
     for entry in entries:
-        if not entry.is_file() or not pattern.match(entry.name):
+        match = pattern.match(entry.name)
+        if not entry.is_file() or match is None:
             continue
         # A custom backup directory can be shared by projects from different
         # libraries. Filename stems alone are not an ownership boundary:
@@ -291,16 +282,14 @@ def list_project_backups(
         if project_id and backup_project_id and backup_project_id != project_id:
             continue
         try:
-            results.append(
-                ProjectBackupMeta(
-                    path=str(entry),
-                    project_path=str(project),
-                    created_at=entry.stat().st_mtime,
-                )
-            )
-        except OSError:
-            continue
-    results.sort(key=lambda item: item.created_at, reverse=True)
+            created_at = datetime.datetime.strptime(match["stamp"], "%Y%m%d_%H%M%S").timestamp()
+        except (ValueError, OSError, OverflowError):
+            try:
+                created_at = entry.stat().st_mtime
+            except OSError:
+                continue
+        results.append(ProjectBackupMeta(str(entry), str(project), created_at))
+    results.sort(key=lambda item: (item.created_at, item.path), reverse=True)
     return results
 
 
@@ -316,19 +305,6 @@ def restore_project_backup(
         return False
     if not project.parent.exists():
         project.parent.mkdir(parents=True, exist_ok=True)
-    if project.exists():
-        try:
-            snapshot = _archive_current_project(
-                project,
-                get_project_backup_dir(project, config),
-                purpose="before_restore",
-            )
-            logger.info("Created pre-restore backup %s", snapshot)
-        except OSError as exc:
-            # Restoration overwrites the active project.  Never proceed when
-            # we cannot first preserve its current state.
-            logger.error("Could not preserve project before restore %s: %s", project, exc)
-            return False
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{project.stem}.restore.", suffix=".topos.tmp", dir=str(project.parent)
     )
@@ -336,10 +312,15 @@ def restore_project_backup(
     try:
         # Keep the filename and archive's displayed project name aligned.
         _rewrite_project_archive(backup, temporary_name, name=project.stem)
+        if project.exists():
+            snapshot = _archive_current_project(
+                project, get_project_backup_dir(project, config), purpose="before_restore"
+            )
+            logger.info("Created pre-restore backup %s", snapshot)
         os.replace(temporary_name, project)
         logger.info("Restored project %s from backup %s", project, backup)
         return True
-    except (OSError, zipfile.BadZipFile) as exc:
+    except (OSError, RuntimeError, ValueError, zipfile.BadZipFile) as exc:
         # AUD-36809: a backup that passed the is_zipfile precheck can still
         # turn out truncated/corrupt once actually read (TOCTOU) — that
         # surfaces as zipfile.BadZipFile, which is not an OSError. Without
@@ -353,27 +334,43 @@ def restore_project_backup(
         return False
 
 
-def register_project_library_dir(config: Any, directory: str | Path) -> None:
-    """Persist a project folder as a known library location."""
+def register_project_library_dir(
+    config: Any, directory: str | Path, *, explicit: bool = False
+) -> None:
+    """Remember a project location, respecting explicit library exclusions."""
     if config is None:
         return
-    path = os.path.abspath(str(Path(directory).expanduser()))
-    try:
-        current = list(config.get(PROJECT_LIBRARY_DIRECTORIES_KEY) or [])
-        normalized = [os.path.abspath(str(Path(item).expanduser())) for item in current if item]
-        if path not in normalized:
-            normalized.append(path)
-            config.set(PROJECT_LIBRARY_DIRECTORIES_KEY, normalized, auto_save=True)
-    except Exception:
-        logger.debug("Could not register project library directory %s", path, exc_info=True)
+    path = project_library_key(directory)
+    current = _configured_library_keys(config, PROJECT_LIBRARY_DIRECTORIES_KEY)
+    excluded = _configured_library_keys(config, _EXCLUDED_LIBRARIES_KEY)
+    if path in excluded:
+        if not explicit:
+            return
+        config.set(_EXCLUDED_LIBRARIES_KEY, [item for item in excluded if item != path], auto_save=False)
+    if path not in current:
+        config.set(PROJECT_LIBRARY_DIRECTORIES_KEY, [*current, path], auto_save=True)
+    elif path in excluded:
+        config.set(_EXCLUDED_LIBRARIES_KEY, [item for item in excluded if item != path], auto_save=True)
+
+
+def remove_project_library_dir(config: Any, directory: str | Path) -> None:
+    """Remove a location from the browser while leaving files and recents intact."""
+    path = project_library_key(directory)
+    if path == project_library_key(get_project_library_dir(config, create=False)):
+        raise ValueError("The primary project library cannot be removed")
+    current = _configured_library_keys(config, PROJECT_LIBRARY_DIRECTORIES_KEY)
+    excluded = _configured_library_keys(config, _EXCLUDED_LIBRARIES_KEY)
+    config.set(PROJECT_LIBRARY_DIRECTORIES_KEY, [item for item in current if item != path], auto_save=False)
+    config.set(_EXCLUDED_LIBRARIES_KEY, list(dict.fromkeys([*excluded, path])), auto_save=True)
 
 
 def _read_zip_json(zf: zipfile.ZipFile, member: str) -> Optional[dict]:
     """Read a JSON member from an open zip, returning None on any error."""
     try:
         with zf.open(member) as fh:
-            return json.load(fh)
-    except (KeyError, json.JSONDecodeError, OSError):
+            value = json.load(fh)
+            return value if isinstance(value, dict) else None
+    except (KeyError, UnicodeError, json.JSONDecodeError, OSError, RuntimeError):
         return None
 
 
@@ -417,7 +414,8 @@ def read_project_meta(path: str, *, require_manifest_mode: bool = False) -> Opti
         file_mtime = 0.0
     preview_path = None
     project_dir = Path(path).parent
-    for asset in (project.get("assets") or {}).values():
+    assets = project.get("assets")
+    for asset in assets.values() if isinstance(assets, dict) else ():
         if not isinstance(asset, dict):
             continue
         relative = asset.get("path_relative")
@@ -452,47 +450,86 @@ def read_project_meta(path: str, *, require_manifest_mode: bool = False) -> Opti
     )
 
 
+def inspect_project_media(path: str) -> tuple[int, tuple[str, ...]]:
+    """Check the media index without extracting the project or touching its cache."""
+    from .resource_resolver import RESOURCE_INDEX_ARCHIVE_PATH, ResourceIndex
+    from .topos_project import is_virtual_asset_path
+
+    with zipfile.ZipFile(path) as archive:
+        members = {info.filename: info for info in archive.infolist()}
+        if "edit/media_pool.json" in members:
+            assets = _read_zip_json(archive, "edit/media_pool.json")
+        else:
+            project = _read_zip_json(archive, "project.json")
+            assets = project.get("assets", {}) if project is not None else None
+        if not isinstance(assets, dict) or any(not isinstance(asset, dict) for asset in assets.values()):
+            raise ValueError("Invalid project media index")
+        resources = ResourceIndex.from_dict(_read_zip_json(archive, RESOURCE_INDEX_ARCHIVE_PATH))
+        directory = Path(path).parent
+        missing = []
+        for asset_id, asset in assets.items():
+            source = asset.get("path")
+            uri = asset.get("resource_uri")
+            if is_virtual_asset_path(source):
+                continue
+            entry = resources.by_uri(uri) if uri else resources.for_asset(asset_id)
+            member = members.get(entry.archive_path) if entry is not None else None
+            if entry is not None and member is not None and member.file_size == entry.size_bytes:
+                continue
+            candidates = (asset.get("path_relative"), asset.get("path_original"), source)
+            if any(
+                isinstance(value, str) and value and "\x00" not in value
+                and (directory / value).is_file()
+                for value in candidates
+            ):
+                continue
+            missing.append(str(asset.get("display_name") or source or uri or asset_id))
+        return len(assets), tuple(missing)
+
+
 def is_video_project(meta: ProjectMeta) -> bool:
     """A project is a video project unless it is a standalone_image archive."""
     return meta.project_mode != "standalone_image"
 
 
 def scan_video_projects(config: Any = None) -> list[ProjectMeta]:
-    """Scan the library directory and return video projects, newest first.
+    """Return video projects across all enabled libraries, newest first."""
+    projects, _locations = scan_project_libraries(config)
+    return projects
 
-    standalone_image archives (image-mode sidecars) are skipped so the video
-    Project Manager only shows timeline/edit projects.
-    """
+
+def scan_project_libraries(
+    config: Any = None,
+) -> tuple[list[ProjectMeta], list[ProjectLibraryLocation]]:
+    """Read projects and report which registered directories could be listed."""
     results: list[ProjectMeta] = []
+    locations: list[ProjectLibraryLocation] = []
     seen_paths: set[str] = set()
+    if config is None or not config.get("project_library_directory"):
+        get_project_library_dir(config)
     for lib_dir in get_project_library_dirs(config):
-        backup_dir = get_project_backup_dir(lib_dir / "__library__.topos", config)
         try:
             entries = list(lib_dir.iterdir())
         except OSError as exc:
             logger.warning("Cannot scan project library %s: %s", lib_dir, exc)
+            locations.append(ProjectLibraryLocation(str(lib_dir), False))
+            continue
+        locations.append(ProjectLibraryLocation(str(lib_dir), True))
+        backup_dir = get_project_backup_dir(lib_dir / "__library__.topos", config, create=False)
+        if project_library_key(lib_dir) == project_library_key(backup_dir):
             continue
         for entry in entries:
-            if entry.suffix.lower() != ".topos" or not entry.is_file():
+            if entry.suffix.lower() != ".topos" or entry.stem.lower().endswith(".topos") or not entry.is_file():
                 continue
-            # Do not show generated backups or paths produced by the old
-            # autosave-extension bug as independent projects.
-            if entry.parent == backup_dir or entry.stem.lower().endswith(".topos"):
+            key = project_library_key(entry)
+            if key in seen_paths:
                 continue
-            absolute = os.path.abspath(str(entry))
-            if absolute in seen_paths:
-                continue
-            seen_paths.add(absolute)
-            meta = read_project_meta(absolute)
-            if meta is None or not is_video_project(meta):
-                continue
-            results.append(meta)
-    # Sort by most recent activity (internal modified_at, fall back to fs mtime).
-    results.sort(
-        key=lambda m: (m.modified_at or m.file_modified_at or 0.0),
-        reverse=True,
-    )
-    return results
+            seen_paths.add(key)
+            meta = read_project_meta(os.path.abspath(entry))
+            if meta is not None and is_video_project(meta):
+                results.append(meta)
+    results.sort(key=lambda m: (m.modified_at or m.file_modified_at or 0.0), reverse=True)
+    return results, locations
 
 
 def extract_cover_thumbnail(path: str) -> Optional[bytes]:
@@ -528,22 +565,27 @@ def _rewrite_project_archive(
         with zipfile.ZipFile(source_path, "r") as source_zip, zipfile.ZipFile(
             temporary_name, "w", compression=zipfile.ZIP_DEFLATED
         ) as destination_zip:
+            metadata = {
+                member: _read_zip_json(source_zip, member)
+                for member in ("manifest.json", "project.json")
+            }
+            if any(value is None for value in metadata.values()):
+                raise ValueError("Invalid project archive metadata")
             for info in source_zip.infolist():
-                data = source_zip.read(info.filename)
-                if info.filename in {"project.json", "manifest.json"}:
-                    try:
-                        payload = json.loads(data.decode("utf-8"))
-                    except (UnicodeDecodeError, json.JSONDecodeError):
-                        payload = None
-                    if isinstance(payload, dict):
-                        if info.filename == "project.json" and name is not None:
-                            payload["name"] = name
-                        if project_id is not None and "project_id" in payload:
-                            payload["project_id"] = project_id
-                        if info.filename == "manifest.json":
-                            payload["modified_at"] = time.time()
-                        data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-                destination_zip.writestr(info, data)
+                if info.filename not in metadata:
+                    with source_zip.open(info) as reader, destination_zip.open(
+                        info, "w", force_zip64=info.file_size >= zipfile.ZIP64_LIMIT
+                    ) as writer:
+                        shutil.copyfileobj(reader, writer)
+                    continue
+                payload = metadata[info.filename]
+                if info.filename == "project.json" and name is not None:
+                    payload["name"] = name
+                if project_id is not None:
+                    payload["project_id"] = project_id
+                if info.filename == "manifest.json":
+                    payload["modified_at"] = time.time()
+                destination_zip.writestr(info, json.dumps(payload, ensure_ascii=False, indent=2))
         os.replace(temporary_name, destination_path)
     except Exception:
         try:
@@ -652,21 +694,28 @@ def rename_project(path: str | Path, new_name: str, config: Any = None) -> str:
     return str(target)
 
 
-def duplicate_project(path: str | Path, new_name: str | None = None) -> str:
-    """Create an independent copy with a fresh project ID."""
+def duplicate_project(
+    path: str | Path, new_name: str | None = None, *, destination_directory: str | Path | None = None
+) -> str:
+    """Create an independent copy with a fresh project ID and a unique name."""
     source = Path(path)
-    base_name = (new_name or f"{source.stem} Copy").strip() or f"{source.stem} Copy"
-    target = source.with_name(f"{base_name}.topos")
-    index = 2
-    while target.exists():
-        target = source.with_name(f"{base_name} {index}.topos")
-        index += 1
-    _rewrite_project_archive(
-        source,
-        target,
-        name=target.stem,
-        project_id=str(uuid.uuid4()),
-    )
+    directory = source.parent if destination_directory is None else Path(destination_directory)
+    base_name = normalize_project_name(new_name, fallback=f"{source.stem} Copy")
+    index = 1
+    while True:
+        stem = base_name if index == 1 else f"{base_name} {index}"
+        target = directory / f"{stem}.topos"
+        try:
+            with target.open("xb"):
+                pass
+            break
+        except FileExistsError:
+            index += 1
+    try:
+        _rewrite_project_archive(source, target, name=target.stem, project_id=str(uuid.uuid4()))
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     return str(target)
 
 

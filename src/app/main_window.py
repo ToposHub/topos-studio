@@ -755,9 +755,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 self.library_panel.follow_directory(last_path)
                 self.files_panel.follow_directory(last_path)
 
-            # Startup dialog: video mode shows the Project Manager (DaVinci
-            # style — must pick/create a project before entering the app);
-            # image mode keeps the lightweight Welcome dialog.
+            # Video startup initializes the workspace through the Project Manager flow.
+            # Image mode keeps the lightweight Welcome dialog.
             # [R2-10] --no-startup-dialog 可整体跳过；--project 直接打开指定项目
             try:
                 from src.shared.feature_flags import get_work_mode as _get_wm

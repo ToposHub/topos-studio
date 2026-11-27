@@ -1290,11 +1290,12 @@ class MenuToolbarMixin:
     def _show_project_manager(self, startup: bool = False) -> None:
         """Show the video-mode Project Manager.
 
-        At startup, closing without choosing a project creates an unsaved
-        ``Untitled Project`` workspace instead of exiting. When opened from
-        the running app, closing the manager simply returns to the current
-        workspace.
+        At startup, skipping or closing the manager initializes an unsaved
+        workspace. Opening the manager manually always shows the dialog.
         """
+        if startup and self.config_manager.get("show_project_manager_on_startup") is False:
+            self._ensure_startup_edit_project()
+            return
         from src.app.ui.project_manager_dialog import ProjectManagerDialog
         dlg = ProjectManagerDialog(
             self.config_manager,
@@ -1307,20 +1308,21 @@ class MenuToolbarMixin:
         dlg.project_renamed.connect(self._on_project_renamed_from_manager)
         dlg.new_project_requested.connect(lambda: self._new_project_from_manager(dlg))
         result = dlg.exec()
+        if startup and result != QDialog.DialogCode.Accepted:
+            self._ensure_startup_edit_project()
+
+    def _ensure_startup_edit_project(self) -> None:
         # Keep the application usable even when the user closes the startup
         # manager without selecting a saved project.  The temporary project is
         # deliberately in-memory only; the first Save/Save As persists it.
-        if startup and result != QDialog.DialogCode.Accepted:
-            if not getattr(self, "_current_edit_project", None):
-                name = self._next_untitled_project_name()
-                try:
-                    self._auto_create_edit_project(name=name)
-                except Exception:
-                    logger.exception("Could not create the default untitled project")
-                    # A failure here is exceptional (for example, the Edit
-                    # module may be unavailable). Preserve the old safe
-                    # fallback rather than leaving the startup flow unusable.
-                    QApplication.quit()
+        if getattr(self, "_current_edit_project", None):
+            return
+        name = self._next_untitled_project_name()
+        try:
+            self._auto_create_edit_project(name=name)
+        except Exception:
+            logger.exception("Could not create the default untitled project")
+            QApplication.quit()
 
     def _next_untitled_project_name(self) -> str:
         """Return a unique in-memory project name for startup fallback.

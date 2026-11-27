@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import shutil
 import zipfile
+
+import pytest
 from pathlib import Path
 
 from src.shared.project.library import (
@@ -20,6 +22,7 @@ from src.shared.project.library import (
     scan_video_projects,
 )
 import src.shared.project.library as project_library
+from src.shared.config.config_manager import ConfigManager
 
 
 def _write_project(path, *, mode: str, asset_path: str | None = None, project_id: str | None = None) -> None:
@@ -255,3 +258,105 @@ def test_restore_preserves_current_project_and_keeps_the_current_name(tmp_path):
 def test_project_names_and_paths_have_one_extension():
     assert normalize_project_name("test05.topos.topos") == "test05"
     assert ensure_project_path("/tmp/test05.topos.topos") == "/tmp/test05.topos"
+
+
+def test_offline_library_is_not_created_and_remains_excluded_until_added(tmp_path):
+    config = ConfigManager(tmp_path / "config.json")
+    library = tmp_path / "local"
+    library.mkdir()
+    offline = tmp_path / "external" / "library"
+    recent = str(offline / "Recent.topos")
+    config.set("project_library_directory", str(library), auto_save=False)
+    config.set("recent_projects", [recent], auto_save=True)
+
+    _projects, locations = project_library.scan_project_libraries(config)
+    assert {location.path: location.available for location in locations} == {
+        str(library): True,
+        str(offline): False,
+    }
+    assert not offline.exists()
+
+    project_library.remove_project_library_dir(config, offline)
+    project_library.register_project_library_dir(config, offline)
+    assert project_library.get_project_library_dirs(ConfigManager(config.config_path)) == [library]
+    assert config.get("recent_projects") == [recent]
+
+    project_library.register_project_library_dir(config, offline, explicit=True)
+    assert project_library.get_project_library_dirs(ConfigManager(config.config_path)) == [library, offline]
+
+
+def test_media_inspection_checks_relative_embedded_and_generated_assets_without_writes(tmp_path):
+    path = tmp_path / "Media.topos"
+    (tmp_path / "media").mkdir()
+    (tmp_path / "media" / "clip.mov").write_bytes(b"video")
+    assets = {
+        "relative": {"path": "/former/clip.mov", "path_relative": "media/clip.mov"},
+        "embedded": {"path": "", "resource_uri": "topos-res://embedded"},
+        "legacy-resource": {"path": "/former/embedded.mov"},
+        "generated": {"path": "topos://generator/solid"},
+        "broken": {"path": "/former/missing.mov", "display_name": "Missing clip"},
+    }
+    entries = [
+        {
+            "resource_id": name,
+            "asset_id": name,
+            "kind": "video",
+            "archive_path": f"resources/{name}.mov",
+            "size_bytes": 3,
+            "sha256": "a" * 64,
+            "roles": ["source_media"],
+        }
+        for name in ["embedded", "legacy-resource"]
+    ]
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("project.json", json.dumps({"assets": {"fallback": {"path": "/missing"}}}))
+        archive.writestr("edit/media_pool.json", json.dumps(assets))
+        archive.writestr("resources/resources.json", json.dumps({"resources": entries}))
+        for entry in entries:
+            archive.writestr(entry["archive_path"], b"abc")
+    original = path.read_bytes()
+
+    assert project_library.inspect_project_media(str(path)) == (5, ("Missing clip",))
+    assert path.read_bytes() == original
+    assert {entry.name for entry in tmp_path.iterdir()} == {"Media.topos", "media"}
+
+
+def test_backup_copy_keeps_relative_media_and_does_not_touch_original(tmp_path):
+    original = tmp_path / "Original.topos"
+    _write_project(original, mode="edit_project")
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    backup = backups / "Original_20260812_040600.topos"
+    _write_project(backup, mode="edit_project", asset_path="clip.mov", project_id="Original")
+    (tmp_path / "clip.mov").touch()
+    with zipfile.ZipFile(backup, "a") as archive:
+        archive.writestr("extensions/unknown.dat", b"preserve this")
+    snapshot = original.read_bytes(), backup.read_bytes()
+    existing = tmp_path / "Recovered.topos"
+    existing.write_bytes(b"existing")
+
+    recovered = duplicate_project(backup, "Recovered", destination_directory=original.parent)
+
+    assert recovered == str(tmp_path / "Recovered 2.topos")
+    assert existing.read_bytes() == b"existing"
+    assert (original.read_bytes(), backup.read_bytes()) == snapshot
+    assert project_library.inspect_project_media(recovered) == (1, ())
+    with zipfile.ZipFile(recovered) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        project = json.loads(archive.read("project.json"))
+        assert manifest["project_id"] == project["project_id"] != "Original"
+        assert archive.read("extensions/unknown.dat") == b"preserve this"
+
+
+def test_invalid_backup_cannot_replace_project_or_leave_a_partial_copy(tmp_path):
+    original = tmp_path / "Original.topos"
+    _write_project(original, mode="edit_project")
+    original_bytes = original.read_bytes()
+    backup = tmp_path / "Invalid.topos"
+    with zipfile.ZipFile(backup, "w") as archive:
+        archive.writestr("project.json", "{}")
+    assert not restore_project_backup(original, backup)
+    assert original.read_bytes() == original_bytes
+    with pytest.raises(ValueError):
+        duplicate_project(backup, "Recovered")
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["Invalid.topos", "Original.topos"]
