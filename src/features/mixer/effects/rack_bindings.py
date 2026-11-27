@@ -117,6 +117,7 @@ _MULTIBAND_FIELDS = (
 
 RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
     "exciter": ("exciter", (
+        Field("quality", "ex_quality"),
         Field("crossovers.0", "ex_crossover_hz"),
         Field("global_mix", "ex_wet", _percent, _fraction),
         Field("output_gain", "ex_output_gain_db"),
@@ -130,7 +131,9 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         )),
     )),
     "subharmonic": ("subharmonic", (
+        Field("detection_mode", "sh_detection_mode"),
         Field("source.freq", "sh_source_center_hz"),
+        Field("source.bandwidth", "sh_source_bandwidth_hz"),
         Field("source.oct1_level", "sh_octave1_gain_db", lambda v: 100.0 * 10.0 ** (v / 20.0),
               lambda v: 20.0 * log10(max(v / 100.0, 1e-6))),
         Field("source.oct2_level", "sh_octave2_gain_db", lambda v: 100.0 * 10.0 ** (v / 20.0),

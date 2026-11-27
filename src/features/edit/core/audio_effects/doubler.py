@@ -14,15 +14,16 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from src.features.edit.core.audio_timepitch import (
     SUPPORTED_SEMITONES,
-    pitch_shift,
+    pitch_shift_fixed_length,
 )
 
 
@@ -63,58 +64,76 @@ def render_doubler(
     """
     if pcm is None or pcm.ndim != 2 or pcm.shape[-1] == 0:
         return pcm
-    n = pcm.shape[-1]
-    mono_input = pcm.shape[0] == 1
-    out_channels = pcm.shape[0]
+    out_channels, n = pcm.shape
     wet_level = float(np.clip(wet_mix_pct, 0.0, 100.0)) / 100.0
-    total = np.zeros((out_channels, n), dtype=np.float64)
+    dry_gain = 10.0 ** (float(np.clip(dry_gain_db, -120.0, 6.0)) / 20.0)
+    output_gain = 10.0 ** (float(np.clip(output_gain_db, -24.0, 24.0)) / 20.0)
+    active_voices: list[tuple[DoublerVoice, float, int]] = []
+    has_enabled_voice = False
     for voice in voices:
         if cancel_check is not None and cancel_check():
             return pcm
         if voice.mute or not voice.enabled:
             continue
+        has_enabled_voice = True
         semitones = float(voice.interval_st) + float(voice.detune_cents) / 100.0
         if not (SUPPORTED_SEMITONES[0] <= semitones <= SUPPORTED_SEMITONES[1]):
             raise ValueError(
                 f"voice interval+detune {semitones:+.2f} st outside "
                 f"SUPPORTED_SEMITONES {SUPPORTED_SEMITONES}")
-        shifted = pitch_shift(pcm.astype(np.float32), int(sample_rate),
-                              semitones=semitones)
-        # 变调输出长度与输入可能相差 1-2 样本（短输入更明显）：裁齐。
-        if shifted.shape[-1] > n:
-            shifted = shifted[:, :n]
-        elif shifted.shape[-1] < n:
-            shifted = np.pad(
-                shifted, ((0, 0), (0, n - shifted.shape[-1])))
         delay = int(round(float(np.clip(voice.delay_ms, 0.0, 100.0))
                           * sample_rate / 1000.0))
-        if delay > 0:
-            # 前置补零式延迟；delay ≥ n 时该声部在本缓冲内无内容
-            # （旧实现 n−delay 为负 → 负索引从尾部取，广播崩溃）。
-            take = max(0, n - delay)
-            padded = np.zeros((shifted.shape[0], n), dtype=np.float32)
-            if take > 0:
-                padded[:, delay:] = shifted[:, :take]
-            shifted = padded
+        if wet_level > 0.0 and delay < n:
+            active_voices.append((voice, semitones, delay))
+
+    if cancel_check is not None and cancel_check():
+        return pcm
+    pitch_input = pcm
+    if has_enabled_voice:
+        pitch_input = np.ascontiguousarray(pcm, dtype=np.float32)
+        if not out_channels or not np.isfinite(pitch_input).all():
+            raise ValueError("Expected finite planar PCM")
+        if int(sample_rate) <= 0:
+            raise ValueError("sample_rate must be positive")
+    if not active_voices and dry_gain == output_gain == 1.0:
+        return np.array(pcm, dtype=np.float32, order="C", copy=True)
+
+    total = np.zeros(pcm.shape, dtype=np.float64) if active_voices else None
+    remaining = Counter(semitones for _, semitones, _ in active_voices)
+    cached: dict[float, np.ndarray] = {}
+    for voice, semitones, delay in active_voices:
+        if cancel_check is not None and cancel_check():
+            return pcm
+        shifted = cached.pop(semitones, None)
+        if shifted is None:
+            shifted = pitch_input if abs(semitones) < 1e-6 else pitch_shift_fixed_length(
+                pitch_input, int(sample_rate), semitones=semitones)
+        remaining[semitones] -= 1
+        if remaining[semitones]:
+            cached[semitones] = shifted
+        # Crop at the clip boundary and add only the audible delayed samples.
+        take = n - delay
+        delayed = total[:, delay:]
+        shifted = shifted[:, :take]
         pan_l, pan_r = _equal_power_pan(voice.pan_pct)
         gain = 10.0 ** (float(np.clip(voice.gain_db, -60.0, 6.0)) / 20.0)
-        if mono_input:
+        if out_channels == 1:
             # Pan/width require stereo; mono voices retain their reference gain.
-            total[0] += shifted[0] * gain
+            delayed[0] += shifted[0] * gain
         else:
-            total[0] += shifted[0] * pan_l * gain
-            total[1] += shifted[1] * pan_r * gain
+            delayed[0] += shifted[0] * pan_l * gain
+            delayed[1] += shifted[1] * pan_r * gain
             if out_channels > 2:
-                total[2:] += shifted[2:] * gain
-    dry_gain = 10.0 ** (float(np.clip(dry_gain_db, -120.0, 6.0)) / 20.0)
-    if mono_input:
-        result = np.stack([
-            pcm[0].astype(np.float64) * dry_gain + total[0] * wet_level])
-    else:
-        result = (pcm.astype(np.float64) * dry_gain
-                  + total * wet_level)
-    result *= 10.0 ** (float(np.clip(output_gain_db, -24.0, 24.0)) / 20.0)
-    return np.ascontiguousarray(result.astype(np.float32), dtype=np.float32)
+                delayed[2:] += shifted[2:] * gain
+    if cancel_check is not None and cancel_check():
+        return pcm
+    result = pcm.astype(np.float64)
+    result *= dry_gain
+    if total is not None:
+        total *= wet_level
+        result += total
+    result *= output_gain
+    return np.ascontiguousarray(result, dtype=np.float32)
 
 
 def doubles_from_params(params: dict) -> List[DoublerVoice]:

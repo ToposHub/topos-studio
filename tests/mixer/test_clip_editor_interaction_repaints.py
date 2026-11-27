@@ -5,9 +5,10 @@ from pathlib import Path
 import numpy as np
 from PyQt6.QtCore import QEvent, QMimeData, QPoint, QPointF, QRectF, Qt
 from PyQt6.QtGui import (
-    QColor, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QImage, QMouseEvent,
+    QColor, QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QImage, QKeySequence, QMouseEvent,
     QPainter, QWheelEvent,
 )
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QMenu, QPushButton, QScrollArea, QToolButton, QWidget
 import pytest
 from pytestqt.qtbot import QtBot
@@ -322,6 +323,52 @@ def test_playhead_drag_seeks_once_without_audio_clock_taking_over(
     assert sought == []
     _mouse(head, QEvent.Type.MouseButtonRelease, head._time_to_x(2.5, ruler), 8)
     assert sought == [120000]
+
+
+def test_playing_loop_tracks_selection_shortcuts(panel: project_clip_editor._TimelineClipPanel) -> None:
+    panel.attach_pcm(np.zeros((1, 192000), dtype=np.float32), 48000)
+    canvas = panel.canvas
+    QApplication.setActiveWindow(panel)
+    canvas.setFocus()
+    canvas.setSelection(1.0, 2.0)
+    panel._toggle_loop(True)
+    assert (panel._audition._loop_start, panel._audition._loop_end) == (48000, 96000)
+
+    QTest.keyClick(canvas, Qt.Key.Key_Escape)
+    assert canvas._sel_t0 == -1.0
+    assert (panel._audition._loop_start, panel._audition._loop_end) == (0, None)
+
+    canvas.setSelection(2.0, 3.0)
+    assert (panel._audition._loop_start, panel._audition._loop_end) == (96000, 144000)
+    QTest.keySequence(canvas, QKeySequence(QKeySequence.StandardKey.SelectAll))
+    assert canvas.getSelection()[:2] == (0.0, 4.0)
+    assert (panel._audition._loop_start, panel._audition._loop_end) == (0, 192000)
+
+
+def test_hiding_during_playhead_drag_stops_audition_and_releases_gesture(
+    panel: project_clip_editor._TimelineClipPanel, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    canvas = panel.canvas
+    panel.attach_pcm(np.zeros((1, 192000), dtype=np.float32), 48000)
+    panel.update_playhead(1.0)
+    monkeypatch.setattr(panel._audition, "_playing", True)
+    ruler = canvas._ruler_rect()
+    _mouse(canvas, QEvent.Type.MouseButtonPress, canvas._time_to_x(1.0, ruler), 8)
+    _mouse(canvas, QEvent.Type.MouseMove, canvas._time_to_x(2.5, ruler), 8)
+    assert panel._pending_audition_seek == pytest.approx(2.5)
+    canvas._pan_vel_sec = 0.25
+    canvas._physics_timer.start()
+
+    panel.hide()
+    panel.show()
+    assert not panel._audition.is_playing
+    assert panel._pending_audition_seek is None
+    assert not canvas._drag_mode and not canvas._physics_timer.isActive()
+    assert canvas._pan_vel_sec == 0.0
+    assert canvas._playhead == pytest.approx(2.5)
+    monkeypatch.setattr(panel._audition, "_playing", True)
+    panel._on_audition_position(144000)
+    assert canvas._playhead == pytest.approx(3.0)
 
 
 def test_audition_does_not_undo_manual_navigation(

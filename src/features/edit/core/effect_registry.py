@@ -305,10 +305,12 @@ SUBHARMONIC_EFFECT = EffectDefinition(
     effect_type="subharmonic",
     name="Subharmonic",
     category="audio",
-    description="Confidence-gated octave-down generator for bass sources",
+    description="Source-range tracking octave-down synthesis with confidence gating",
     params_schema={
         "sh_source_center_hz": _float_schema(90.0, 45.0, 180.0, 1.0,
                                              "Source Center", "Hz"),
+        "sh_source_bandwidth_hz": _float_schema(60.0, 5.0, 270.0, 1.0,
+                                                "Source Bandwidth", "Hz"),
         "sh_octave1_gain_db": _float_schema(-6.0, -36.0, 0.0, 0.5,
                                             "Oct 1", "dB"),
         "sh_octave2_gain_db": _float_schema(-12.0, -36.0, 0.0, 0.5,
@@ -325,8 +327,9 @@ EXCITER_EFFECT = EffectDefinition(
     description="Two-band harmonic exciter (even/odd branches mixed "
                 "back into dry)",
     params_schema={
-        "ex_crossover_hz": _float_schema(2000.0, 100.0, 8000.0, 10.0,
+        "ex_crossover_hz": _float_schema(2000.0, 100.0, 16000.0, 10.0,
                                          "Crossover", "Hz"),
+        "ex_quality": _choice_schema("clean", ("legacy", "clean"), "Oversampling Path"),
         "ex_oversampling": _float_schema(1.0, 1.0, 2.0, 1.0,
                                          "Oversampling", "x"),
         "ex_wet": _float_schema(1.0, 0.0, 1.0, 0.01, "Wet", ""),

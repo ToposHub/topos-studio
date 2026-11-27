@@ -158,7 +158,10 @@ _FX_PARAM_EFFECT_TYPES = frozenset({
     "tremolo_auto_pan", "chorus_flanger", "phaser",
 })
 _DYNAMICS_STAGES = {"eg": "expander", "comp": "compressor", "lim": "limiter"}
-_SPECTRUM_EFFECT_TYPES = frozenset({"strip_eq", "dynamic_eq", "de_esser", "saturation", "imager"})
+_SPECTRUM_EFFECT_TYPES = frozenset({
+    "strip_eq", "dynamic_eq", "de_esser", "saturation", "imager", "voice_changer", "spectral_mangler",
+    "exciter", "subharmonic",
+})
 _ChainEdit = Callable[["EffectChainParams | None"], "EffectChainParams | None"]
 
 
@@ -1535,12 +1538,7 @@ class TrackMixerWidget(QWidget):
         self.track_effects_committed.emit(self._track_id, self._effect_chain)
 
     def _add_spatial_panner(self) -> None:
-        """添加空间声像器（轨级固定，Da Vinci Fairlight 语义）。
-
-        以默认参数启用本轨声像器并提交命令栈（panner_committed →
-        controller 聚合 MacroCommand 持久化），随后打开完整声像器对话框
-        供微调。已启用时不重复提交，直接打开面板。
-        """
+        """Enable the channel's panner and open its panel with the saved settings."""
         if self._is_master:
             return
         from src.features.edit.core.timeline_v2 import SpatialPannerParams
@@ -1548,10 +1546,13 @@ class TrackMixerWidget(QWidget):
         if not already:
             payload = {
                 "pan": float(self._pan),
-                "panner": SpatialPannerParams.default().to_dict(),
+                "panner": {**(self._panner or SpatialPannerParams.default().to_dict()), "enabled": True},
             }
             # 复用统一提交路径：本地记录 + panner_committed → 命令栈
+            self._panner_preview_active = False
             self._on_panner_edited(payload, commit=True)
+            if self._panner_dialog is not None:
+                self._panner_dialog.set_current_params({"pan": self._pan, "panner": self._panner})
         self._update_panner_indicator()
         self._open_panner_dialog()
 
@@ -2453,13 +2454,15 @@ class TrackMixerWidget(QWidget):
                 levels = tap.get("out_db_lr") if not (silent or tap.get("bypassed")) else None
                 panel.update_output_meters(*(levels or (output_level, output_level)))
             elif kind == "voice_changer":
+                if silent or tap.get("bypassed"):
+                    panel.clear_monitoring()
+                    continue
                 confidence = max(0.0, min(100.0, float(analysis.get("confidence", 0.0)) * 100.0))
-                # Spectra are optional in the engine payload. Keep a floor sample
-                # for the vocoder bars while no measured spectrum is available.
+                measured = tap.get("spectrum") or {}
                 panel.update_analysis(
-                    analysis.get("spectrum_hz", []),
-                    analysis.get("input_spectrum_db", []),
-                    analysis.get("output_spectrum_db", [-100.0]),
+                    measured.get("freqs", analysis.get("spectrum_hz", [])),
+                    measured.get("input_db", analysis.get("input_spectrum_db", [])),
+                    measured.get("output_db", analysis.get("output_spectrum_db", [])),
                     float(analysis.get("f0_in_hz") or 0.0),
                     float(analysis.get("f0_out_hz") or 0.0),
                     clarity_pct=confidence,
@@ -2475,7 +2478,16 @@ class TrackMixerWidget(QWidget):
                 panel.update_telemetry(
                     input_level, output_level,
                     wave_samples=analysis.get("waveform", []), grains=analysis.get("grains", []),
+                    capture_status=analysis.get("capture_status", "empty"),
+                    capture_ready=analysis.get("capture_ready", False),
+                    frozen=analysis.get("frozen", False), clipped=analysis.get("clip", False),
                 )
+            elif kind == "exciter":
+                measured = {} if silent or tap.get("bypassed") else tap.get("spectrum") or {}
+                panel.update_processor_telemetry(input_level, output_level, measured)
+            elif kind == "subharmonic":
+                measured = {"bypassed": True} if tap.get("bypassed") and not silent else analysis
+                panel.update_processor_telemetry(input_level, output_level, measured)
             elif kind == "de_esser":
                 measured = {} if silent or tap.get("bypassed") else tap.get("spectrum") or {}
                 panel.update_spectrum(measured.get("freqs", []), measured.get("input_db", []),
@@ -2553,7 +2565,8 @@ class TrackMixerWidget(QWidget):
     @staticmethod
     def _spectrum_graph(dialog: QDialog) -> QWidget | None:
         panel = getattr(dialog, "panel", None)
-        graph = getattr(panel, "eq_graph", None) or getattr(panel, "graph", None)
+        graph = (getattr(panel, "eq_graph", None) or getattr(panel, "graph", None)
+                 or getattr(panel, "sat_graph", None))
         return graph if hasattr(graph, "spectrumVisibilityChanged") else None
 
     def spectrum_targets(self) -> frozenset[str]:

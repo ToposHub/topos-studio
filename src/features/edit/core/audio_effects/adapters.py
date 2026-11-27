@@ -89,6 +89,9 @@ class _CompositeAdapterBase(AudioEffect):
 class SpectralManglerAdapter(_CompositeAdapterBase):
     effect_type = "spectral_mangler"
 
+    def measure_output(self, samples: np.ndarray) -> dict:
+        return self._impl.measure_output(samples)
+
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.spectral_mangler import (
             SpectralManglerEffect,
@@ -279,6 +282,16 @@ class PhaserAdapter(_CompositeAdapterBase):
 
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
+
+    def set_monitoring(self, enabled: bool) -> None:
+        self._impl.set_monitoring(enabled, realtime=True)
+
+    @property
+    def monitoring_active(self) -> bool:
+        return self._impl.monitoring_active
+
+    def clear_monitoring(self) -> None:
+        self._impl.clear_monitoring()
 
     def _impl_factory(self, sr):  # noqa: N802
         from src.features.edit.core.audio_effects.voice_changer import (

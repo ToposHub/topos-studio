@@ -1,9 +1,7 @@
 """P0 · Clip Editor 预览 worker（2026-11-19 计划第一阶段）。
 
-重开/切换片段的预览使用与播放同一份已处理数据：按
-``(spec, steps, view, fft, generation)`` 作为请求键在后台线程计算
-当前/原始预览与波形、频谱、计量（沿用 PCM/预渲染缓存），结果经
-Qt 信号回到主线程——UI 只做差分投影。
+Audition and waveform rendering share processed PCM. Display-only analyses
+submit separate requests so the waveform and audition can publish first.
 
 - 可取消：新请求递增 generation，旧任务的发布被丢弃；
 - 同 key 合并：与在途任务键相同直接跳过（避免重复烘焙）；
@@ -22,8 +20,6 @@ from PyQt6.QtCore import QMutex, QThread, pyqtSignal
 
 import numpy as np
 
-from src.features.mixer.spectrogram import Spectrogram
-
 logger = logging.getLogger(__name__)
 _active_workers: set[ClipPreviewWorker] = set()
 
@@ -36,10 +32,9 @@ class ClipPreviewResult:
     edited: np.ndarray
     sample_rate: int
     duration: float
-    mins: np.ndarray
-    maxs: np.ndarray
-    rmss: np.ndarray
-    spectrogram: Spectrogram | list | None
+    mins: list[list[float]]
+    maxs: list[list[float]]
+    rmss: list[list[float]]
     report: dict = field(default_factory=dict)
     length_maps: tuple[tuple[int, int, int], ...] = ()
     # Time, level and outgoing segment type in the rendered waveform domain.

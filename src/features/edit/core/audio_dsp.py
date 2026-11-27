@@ -3244,6 +3244,7 @@ class SaturationEffect(AudioEffect):
         self._recompute_k()
         # FX-14：版本化模型分支（缺键 → legacy；multiband 委托新单元）。
         self._multiband: Optional["object"] = None
+        self._use_multiband = False
 
     def _recompute_k(self) -> None:
         """由 drive（0..100）计算实际 k 系数。"""
@@ -3270,16 +3271,18 @@ class SaturationEffect(AudioEffect):
         self._enabled = bool(params.get("enabled", True))
         self._recompute_k()
         # FX-14：multiband 模型按需实例化并转发参数（legacy 不触碰）。
-        if str(params.get("model_profile", "legacy") or "legacy") == \
-                "multiband":
+        use_multiband = params.get("model_profile") == "multiband"
+        if use_multiband != self._use_multiband and self._multiband is not None:
+            self._multiband.reset_state()
+        self._use_multiband = use_multiband
+        if use_multiband:
             if self._multiband is None:
                 from src.features.edit.core.audio_effects.saturation import (
                     MultibandSaturationEffect,
                 )
-                self._multiband = MultibandSaturationEffect(self._sample_rate)
+                self._multiband = MultibandSaturationEffect(
+                    self._sample_rate, params_are_snapshots=True)
             self._multiband.set_params(params, sample_rate=sample_rate)
-        elif self._multiband is not None:
-            self._multiband.set_params({"enabled": False})
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用 sigmoid 谐波失真。
@@ -3290,7 +3293,7 @@ class SaturationEffect(AudioEffect):
         Returns:
             失真后的 samples，同 shape（旁路或 drive=0 时原样返回）。
         """
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.process(samples)
         if not self._enabled or self._k <= 1e-9 or \
                 samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
@@ -3299,11 +3302,11 @@ class SaturationEffect(AudioEffect):
         out = samples.astype(np.float64, copy=True)
         k = self._k
         # sigmoid: y = (1+k)*x / (1 + k*|x|)，向量化
-        np.divide(
-            (1.0 + k) * out,
-            (1.0 + k * np.abs(out)),
-            out=out,
-        )
+        divisor = np.abs(out)
+        divisor *= k
+        divisor += 1.0
+        out *= 1.0 + k
+        np.divide(out, divisor, out=out)
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
@@ -3312,20 +3315,25 @@ class SaturationEffect(AudioEffect):
             self._multiband.reset_state()
 
     def latency_samples(self) -> int:
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.latency_samples()
         return 0
 
     def tail_estimate_samples(self) -> int:
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.tail_estimate_samples()
         return 0
 
     @property
     def is_active(self) -> bool:
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.is_active
         return self._enabled and self._k > 1e-9
+
+    @property
+    def monitoring_active(self) -> bool:
+        """Allow analysis of the dry signal at zero Drive while the window is open."""
+        return self._enabled and not self._use_multiband
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4202,6 +4210,10 @@ class EffectChain:
             tap.clear()
         self._spectrum_taps.clear()
         self._imager_analyzers = frozenset()
+        if self._realtime_resources:
+            for instance in self._effects:
+                if instance.effect_type in {"voice_changer", "subharmonic"}:
+                    instance.set_monitoring(False)
 
     def _sync_spectrum_taps(self) -> None:
         requested = self._spectrum_instances
@@ -4211,13 +4223,25 @@ class EffectChain:
         active = set(filter(None, self._instance_ids))
         if requested is not None:
             active.intersection_update(requested)
+        if self._realtime_resources:
+            for iid, instance in zip(self._instance_ids, self._effects):
+                if instance.effect_type in {"voice_changer", "subharmonic"}:
+                    instance.set_monitoring(iid in active)
         self._imager_analyzers = frozenset(
             iid for iid, effect in zip(self._instance_ids, self._effects)
             if iid in active and isinstance(effect, ImagerEffect)
         )
         if requested is not None:
-            # Imager consumes paired PCM measurements, not a frequency spectrum.
+            # These windows consume PCM measurements instead of an FFT.
             active.difference_update(self._imager_analyzers)
+            active.difference_update(
+                iid for iid, instance in zip(self._instance_ids, self._effects)
+                if instance.effect_type == "spectral_mangler"
+            )
+        active.difference_update(
+            iid for iid, instance in zip(self._instance_ids, self._effects)
+            if instance.effect_type == "subharmonic"
+        )
         for iid in self._spectrum_taps.keys() - active:
             self._spectrum_taps.pop(iid).clear()
         missing = active - self._spectrum_taps.keys()
@@ -4293,24 +4317,30 @@ class EffectChain:
                 continue
             instance_id = str(instance_id)
             instance = None
+            was_enabled = False
             if instance_id:
                 # 精确身份匹配：同类型 + 同 instance_id
-                for j, (old_inst, _old_en, old_id) in enumerate(old_pool):
+                for j, (old_inst, old_enabled, old_id) in enumerate(old_pool):
                     if not used[j] and type(old_inst) is cls and old_id == instance_id:
                         instance = old_inst
+                        was_enabled = old_enabled
                         used[j] = True
                         break
             if instance is None and not instance_id:
                 # legacy（无 id）：按类型匹配未使用的旧实例（保持拖动参数
                 # 不重建的旧行为）
-                for j, (old_inst, _old_en, _old_id) in enumerate(old_pool):
+                for j, (old_inst, old_enabled, _old_id) in enumerate(old_pool):
                     if not used[j] and type(old_inst) is cls:
                         instance = old_inst
+                        was_enabled = old_enabled
                         used[j] = True
                         break
             if instance is None:
                 instance = cls(self._sample_rate)
                 if self._realtime_resources:
+                    if effect_type in {"voice_changer", "subharmonic"}:
+                        requested = self._spectrum_instances
+                        instance.set_monitoring(bool(instance_id) and (requested is None or instance_id in requested))
                     prepare_async = getattr(instance, "enable_async_resources", None)
                     if callable(prepare_async):
                         prepare_async()
@@ -4328,6 +4358,8 @@ class EffectChain:
                     inst_params["makeup_gain"] = 0.0
             _apply_params_with_version(instance, inst_params, self._sample_rate,
                                        algorithm_version)
+            if was_enabled and not enabled and effect_type in {"exciter", "subharmonic"}:
+                instance.reset_state()
             if effect_type == "vst3_hosted":
                 enabled = bool(enabled and (params or {}).get("enabled", True))
                 if enabled:
@@ -4410,12 +4442,19 @@ class EffectChain:
         for i, (inst, enabled) in enumerate(zip(self._effects, self._enabled_flags)):
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
             etype = getattr(inst, "effect_type", "")
-            bypassed = not (enabled and inst.is_active)
+            voice_monitor = etype == "voice_changer" and iid in self._spectrum_taps and inst.monitoring_active
+            saturation_monitor = (etype == "saturation" and iid in self._spectrum_taps
+                                  and inst.monitoring_active)
+            exciter_monitor = etype == "exciter" and iid in self._spectrum_taps and inst.monitoring_active
+            bypassed = not (enabled and (inst.is_active or voice_monitor
+                                         or saturation_monitor or exciter_monitor))
             spectrum_input = out
             tap = None
             if bypassed:
                 if iid in self._spectrum_taps:
                     self._spectrum_taps[iid].clear()
+                    if voice_monitor:
+                        inst.clear_monitoring()
                 # Standalone meters are cleared on bypass. A Dynamics group still
                 # passes through its muted stages and may have an audible makeup.
                 if iid:
@@ -4460,7 +4499,13 @@ class EffectChain:
                     if overshoot is not None:
                         tap["overshoot_db"] = float(overshoot)
                     collect_analysis = getattr(inst, "collect_telemetry", None)
-                    if callable(collect_analysis):
+                    if etype == "spectral_mangler" and (
+                        self._spectrum_instances is None or iid in self._spectrum_instances
+                    ):
+                        tap["analysis"] = inst.measure_output(out)
+                    elif callable(collect_analysis) and (
+                        etype not in {"voice_changer", "subharmonic"} or inst.monitoring_active
+                    ):
                         tap["analysis"] = dict(collect_analysis())
 
             # The group's output gain follows its last stage even when that stage

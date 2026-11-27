@@ -3129,7 +3129,11 @@ class AudioMixer:
                 self._clip_effect_chains[clip_id].set_spectrum_metering(
                     self._spectrum_targets is None and self._spectrum_metering_enabled,
                 )
-            self._clip_effect_chains[clip_id].set_params(entries, sample_rate=self._sample_rate)
+            chain = self._clip_effect_chains[clip_id]
+            chain.set_params(entries, sample_rate=self._sample_rate)
+            if self._freeze_registry:
+                from src.features.edit.core.freeze_capture_store import apply_freeze_entries
+                apply_freeze_entries(chain, entries, self._freeze_registry)
             # P0 · Clip FX PDC：记录链延迟并重算轨级补偿量。
             try:
                 self._clip_chain_lat[clip_id] = max(
@@ -6621,6 +6625,10 @@ class AudioPlaybackManager(QObject):
     def set_master_effect_chain(self, chain_params: Optional[EffectChainParams]) -> None:
         """MX-03: 设置 Master FX 机架链。转发到 AudioMixer。"""
         self._mixer.set_master_effect_chain(chain_params)
+
+    def set_freeze_registry(self, registry: Optional[dict]) -> None:
+        """Forward the project's available Spectral Mangler capture assets."""
+        self._mixer.set_freeze_registry(registry)
 
     def set_spectrum_metering(self, enabled: bool) -> None:
         """开/关频谱仪计算（EQ 对话框打开状态驱动，CW-A1）。转发到 AudioMixer。"""

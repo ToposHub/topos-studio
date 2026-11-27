@@ -625,7 +625,7 @@
         "ex_crossover_hz": {
           "default": 2000.0,
           "label": "Crossover",
-          "max": 8000.0,
+          "max": 16000.0,
           "min": 100.0,
           "type": "float"
         },
@@ -642,6 +642,13 @@
           "max": 2.0,
           "min": 1.0,
           "type": "float"
+        },
+        "ex_quality": {
+          "default": "clean",
+          "label": "Oversampling Path",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "choice"
         },
         "ex_wet": {
           "default": 1.0,
@@ -1071,7 +1078,7 @@
     },
     {
       "category": "audio",
-      "description": "Confidence-gated octave-down generator for bass sources",
+      "description": "Source-range tracking octave-down synthesis with confidence gating",
       "effect_type": "subharmonic",
       "name": "Subharmonic",
       "params": {
@@ -1094,6 +1101,13 @@
           "label": "Oct 2",
           "max": 0.0,
           "min": -36.0,
+          "type": "float"
+        },
+        "sh_source_bandwidth_hz": {
+          "default": 60.0,
+          "label": "Source Bandwidth",
+          "max": 270.0,
+          "min": 5.0,
           "type": "float"
         },
         "sh_source_center_hz": {

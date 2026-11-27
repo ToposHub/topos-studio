@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QPolygonF
 )
 
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
@@ -500,6 +501,12 @@ class ProVerticalMeter(QWidget):
             self._active = active
             self.update()
 
+    def clear(self) -> None:
+        floor = -55.0 if self._mode == "level" else 0.0
+        self._value = self._peak = floor
+        self._clipped = False
+        self.update()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._clipped = False
@@ -931,11 +938,11 @@ class ProVoiceVisualizerWidget(QWidget):
         enabled = st["enabled"]
 
         # 5. 输入人声基准频谱包络（暗灰蓝虚线/柔光）
-        if self._show_input_ghost and len(self._freqs) > 1:
+        if self._show_input_ghost and min(len(self._freqs), len(self._in_spec)) > 1:
             in_path = QPainterPath()
-            for i, f in enumerate(self._freqs):
+            for i, (f, level) in enumerate(zip(self._freqs, self._in_spec)):
                 sx = self._freq_to_x(f, plot)
-                sy = self._db_to_y(self._in_spec[i], plot)
+                sy = self._db_to_y(level, plot)
                 if i == 0:
                     in_path.moveTo(sx, sy)
                 else:
@@ -945,7 +952,7 @@ class ProVoiceVisualizerWidget(QWidget):
             p.drawPath(in_path)
 
         # 6. 声码器频带调制柱状阵（仅当 Vocoder 激活时绘制）
-        if enabled and st["vocoder"]["enabled"]:
+        if enabled and st["vocoder"]["enabled"] and self._out_spec:
             num_bands = int(st["vocoder"]["bands"])
             v_col = QColor(COLORS["vocoder"])
             for b_i in range(num_bands):
@@ -961,22 +968,24 @@ class ProVoiceVisualizerWidget(QWidget):
                 p.drawRect(bar_rect)
 
         # 7. 处理后人声共振峰主包络曲线
-        if len(self._freqs) > 1:
+        envelope = self._out_spec if enabled else self._in_spec
+        count = min(len(envelope), len(self._freqs))
+        if count > 1:
             out_path = QPainterPath()
             out_poly = QPolygonF()
             first_x = self._freq_to_x(self._freqs[0], plot)
             out_poly.append(QPointF(first_x, plot.bottom()))
 
-            for i, f in enumerate(self._freqs):
+            for i, (f, level) in enumerate(zip(self._freqs, envelope)):
                 sx = self._freq_to_x(f, plot)
-                sy = self._db_to_y(self._out_spec[i] if enabled else self._in_spec[i], plot)
+                sy = self._db_to_y(level, plot)
                 if i == 0:
                     out_path.moveTo(sx, sy)
                 else:
                     out_path.lineTo(sx, sy)
                 out_poly.append(QPointF(sx, sy))
 
-            last_x = self._freq_to_x(self._freqs[-1], plot)
+            last_x = self._freq_to_x(self._freqs[count - 1], plot)
             out_poly.append(QPointF(last_x, plot.bottom()))
 
             main_col = QColor(COLORS["formant"]) if (enabled and st["formant"]["enabled"]) else QColor(COLORS["cyan"])
@@ -1092,10 +1101,12 @@ class ProVoiceVisualizerWidget(QWidget):
         # 10. 左上角实时声学信息 HUD
         f_val = st["formant"]["shift"] if (enabled and st["formant"]["enabled"]) else 0.0
         p_val = st["pitch"]["semitones"] if (enabled and st["pitch"]["enabled"]) else 0.0
+        f0_in = f"{self._f0_in_hz:.0f}" if self._f0_in_hz > 0.0 else "—"
+        f0_out = f"{self._f0_out_hz:.0f}" if self._f0_out_hz > 0.0 else "—"
         hud_str = (
             f"F {f_val:+.1f}st · P {p_val:+.1f}st · "
-            f"F0 {int(self._f0_in_hz)}→{int(self._f0_out_hz)}Hz ({freq_to_note(self._f0_out_hz)}) · "
-            f"CLR {int(self._clarity_pct)}%"
+            f"F0 {f0_in}→{f0_out}Hz ({freq_to_note(self._f0_out_hz)}) · "
+            f"CONF {int(self._clarity_pct)}%"
         )
         p.setFont(QFont(MONO_FONT_FAM, 8))
         max_width = int(self._btn_in_rect.left() - plot.left() - 16)
@@ -2142,7 +2153,8 @@ class StudioVoiceChangerWidget(QWidget):
         self.meter_fmt = ProVerticalMeter(title="FMT", mode="activity", show_ticks=False, accent_color=COLORS["formant"])
         self.meter_pch = ProVerticalMeter(title="PCH", mode="activity", show_ticks=False, accent_color=COLORS["pitch"])
         self.meter_voc = ProVerticalMeter(title="VOC", mode="activity", show_ticks=False, accent_color=COLORS["vocoder"])
-        self.meter_clr = ProVerticalMeter(title="CLR", mode="activity", show_ticks=False, accent_color=COLORS["cyan"])
+        self.meter_clr = ProVerticalMeter(title="F0", mode="activity", show_ticks=False, accent_color=COLORS["cyan"])
+        self.meter_clr.setToolTip(I18N.tr("mixer.effect_panel.voice_f0_confidence", "Input pitch detection confidence"))
         for m in (self.meter_fmt, self.meter_pch, self.meter_voc, self.meter_clr):
             stat_row.addWidget(m)
         stat_col.addLayout(stat_row, 1)
@@ -2453,6 +2465,15 @@ class StudioVoiceChangerWidget(QWidget):
         self._banks[self._active_bank] = copy.deepcopy(state)
         self._refresh_all_views()
 
+    def use_processor_controls(self) -> None:
+        self.clear_monitoring()
+
+    def clear_monitoring(self) -> None:
+        self.update_analysis([], [], [], 0.0, 0.0, clarity_pct=0.0)
+        for meter in (self.meter_input, self.meter_output, self.meter_fmt,
+                      self.meter_pch, self.meter_voc, self.meter_clr):
+            meter.clear()
+
     def update_analysis(
         self,
         freqs_hz: list[float],
@@ -2462,7 +2483,7 @@ class StudioVoiceChangerWidget(QWidget):
         f0_out_hz: float,
         clarity_pct: float = 90.0,
     ):
-        """接入真实音频引擎的频谱包络、基频检测与可懂度评估结果"""
+        """Show the measured spectra, fundamental frequencies, and detection confidence."""
         if self._demo_timer.isActive():
             self._demo_timer.stop()
         self.voice_visualizer.updateAnalysis(freqs_hz, input_spec_db, output_spec_db, f0_in_hz, f0_out_hz, clarity_pct)

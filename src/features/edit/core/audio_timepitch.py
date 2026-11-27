@@ -21,7 +21,11 @@ import math
 
 import numpy as np
 
-from src.features.edit.core.audio_timestretch import wsola_time_stretch
+from src.features.edit.core.audio_timestretch import (
+    DEFAULT_FRAME_MS,
+    DEFAULT_SEARCH_MS,
+    wsola_time_stretch,
+)
 
 SUPPORTED_RATIO_PCT = (25.0, 400.0)
 SUPPORTED_SEMITONES = (-24.0, 24.0)
@@ -126,6 +130,40 @@ def pitch_shift(pcm: np.ndarray, sample_rate: int, semitones: float,
     combined = _resample_ratio(pcm, sample_rate, p * ratio)
     return wsola_time_stretch(
         combined, 1.0 / p, sample_rate).astype(np.float32, copy=False)
+
+
+def pitch_shift_fixed_length(pcm: np.ndarray, sample_rate: int, semitones: float) -> np.ndarray:
+    """Render a clip effect's shifted voice at the original sample count."""
+    if pcm.ndim != 2 or not SUPPORTED_SEMITONES[0] <= semitones <= SUPPORTED_SEMITONES[1]:
+        return pitch_shift(pcm, sample_rate, semitones)
+    sample_count = pcm.shape[-1]
+    if sample_count < 2 or abs(semitones) < 1e-6:
+        _validate(pcm, sample_rate)
+        return pcm.copy()
+
+    pitch_ratio = 2.0 ** (semitones / 12.0)
+    frame = max(64, round(sample_rate * DEFAULT_FRAME_MS / 1000.0))
+    frame += frame % 2
+    search = max(1, round(sample_rate * DEFAULT_SEARCH_MS / 1000.0))
+    if round(sample_count / pitch_ratio) >= frame + frame // 2 + search:
+        shifted = pitch_shift(pcm, sample_rate, semitones)
+    else:
+        _validate(pcm, sample_rate)
+        resampled = _resample_ratio(pcm, sample_rate, pitch_ratio)
+        size = resampled.shape[-1]
+        # Keep enough real samples for a short analysis frame and its search.
+        # Reflect extra context so the requested region ends before WSOLA's tail.
+        frame = max(64, min(frame, 2 * (size // 4)))
+        search = max(1, min(search, size - frame - frame // 2))
+        tail = max(frame, frame + frame // 2 + search - size)
+        extended = np.pad(resampled, ((0, 0), (0, tail)), mode="reflect")
+        shifted = wsola_time_stretch(
+            extended, 1.0 / pitch_ratio, sample_rate,
+            frame_ms=1000.0 * frame / sample_rate, search_ms=1000.0 * search / sample_rate)
+
+    if shifted.shape[-1] < sample_count:
+        return np.pad(shifted, ((0, 0), (0, sample_count - shifted.shape[-1])))
+    return shifted[:, :sample_count]
 
 
 def dominant_frequency(pcm: np.ndarray, sample_rate: int) -> float:

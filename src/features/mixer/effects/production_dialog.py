@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from src.features.edit.core.audio_dsp import strip_eq_band_response_db
 from src.features.edit.core.effect_registry import get_effect_definition
 from src.features.edit.core.timeline_v2 import (
-    DYNAMIC_EQ_SINGLE_BAND_FIELDS, CompressorParams, SpatialPannerParams,
+    DYNAMIC_EQ_SINGLE_BAND_FIELDS, CompressorParams, ExciterParams, SpatialPannerParams,
     _ensure_effect_param_registry, _params_f,
 )
 from src.shared.i18n.i18n import I18N
@@ -153,7 +153,6 @@ class ProductionEffectDialog(QDialog):
         self.set_algorithm_version(algorithm_version)
         self._default_state = self.panel.get_state()
         self._baseline: dict[str, Any] = {}
-        self._make_spectral_limiter_state()
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
         self._preview_timer.setInterval(25)
@@ -208,7 +207,8 @@ class ProductionEffectDialog(QDialog):
         elif self.fx_effect_type == "tremolo_auto_pan":
             summary = _tr("tremolo_summary", "Tempo uses the BPM set here. The phase restarts when seeking.")
         elif self.fx_effect_type in {"strip_eq", "de_esser", "transient_designer", "bus_comp",
-                                     "multiband_comp", "true_peak_limiter", "convolution_reverb"}:
+                                     "multiband_comp", "true_peak_limiter", "convolution_reverb",
+                                     "exciter", "subharmonic"}:
             summary = ""
         else:
             summary = _tr("mapped_parameters", "Some design controls are pending audio support.")
@@ -289,16 +289,6 @@ class ProductionEffectDialog(QDialog):
             with QSignalBlocker(combo):
                 combo.clear()
                 combo.addItems(["Mono", "Stereo", "Left", "Right"])
-
-    def _make_spectral_limiter_state(self) -> None:
-        if self.fx_effect_type == "spectral_mangler":
-            self.panel.master_strip.limiterToggled.connect(self._set_limiter)
-
-    def _set_limiter(self, enabled: bool) -> None:
-        state = self.panel.get_state()
-        state["limiter"] = enabled
-        self.panel.set_state(state)
-        self._on_edited(state)
 
     def set_sidechain_sources(self, sources: tuple[tuple[str, str], ...]) -> None:
         if self._sidechain_sources == sources:
@@ -390,9 +380,18 @@ class ProductionEffectDialog(QDialog):
             preset = {"waveform": "", "sync": False, "bpm": 120.0, "sync_div": "1/4",
                       "duty_cycle_pct": 50.0, "smooth_ms": 0.0, "pan_center_pct": 0.0,
                       "pan_width_pct": 100.0, "phase_offset_deg": None, "random_seed": 0, **preset}
-        pending = with_fallbacks(preset, self.current_params())
+        current = self.current_params()
+        pending = with_fallbacks(preset, current)
         if self.fx_effect_type == "dynamic_eq" and "bands" in preset:
             pending["bands"] = deepcopy(preset["bands"])
+        if self.fx_effect_type == "exciter" and "ex_bands" in preset:
+            original = current.get("ex_bands")
+            existing = list(original) if isinstance(original, (list, tuple)) else []
+            bands = ExciterParams.from_dict({"ex_bands": preset["ex_bands"]}).ex_bands
+            pending["ex_bands"] = [
+                (existing[index] if index < len(existing) and isinstance(existing[index], dict) else {}) | band
+                for index, band in enumerate(bands)
+            ] + existing[len(bands):]
         if self.fx_effect_type == "multiband_comp":
             if "crossovers" in preset:
                 pending["crossovers"] = deepcopy(preset["crossovers"])
@@ -414,6 +413,8 @@ class ProductionEffectDialog(QDialog):
 
     def _preset_params(self) -> dict[str, Any]:
         params = self._flat(self.current_params())
+        if self.fx_effect_type in {"exciter", "subharmonic"}:
+            return _normalized(self.fx_effect_type, params)
         if self.fx_effect_type == "imager":
             params.pop("_imager_audition", None)
         return params
@@ -456,24 +457,9 @@ class ProductionEffectDialog(QDialog):
                 self._populate_source_ids(self.panel.sc_source_combo, state["ext_sc_source"])
             if self.fx_effect_type == "transient_designer":
                 self._populate_source_ids(self._transient_source_combo, projection["sidechain_source_id"])
-            if self.fx_effect_type == "saturation":
-                multiband = projection.get("model_profile") == "multiband"
-                self.panel._production_multiband = multiband
-                self.panel.os_combo.setEnabled(multiband)
-                self.panel.auto_gain_btn.setEnabled(False)
-                self.panel.global_model_combo.setEnabled(multiband)
-                for card in self.panel.band_cards:
-                    card.setEnabled(multiband)
-                self.panel.global_tape_panel.g_drive_knob.setEnabled(not multiband)
-                self.panel.global_tape_panel.tape_sec.setEnabled(False)
             if self.fx_effect_type in {"chorus_flanger", "phaser"}:
                 self._configure_modulation(state)
-            if self.fx_effect_type == "exciter":
-                state["band_count"] = 2
             self.panel.set_state(state)
-            if self.fx_effect_type == "spectral_mangler":
-                self.panel.master_strip._limiter = bool(state.get("limiter", True))
-                self.panel.master_strip.update()
             self._baseline = self.panel.get_state()
             if pending_power is not None:
                 state["enabled"] = pending_power
@@ -529,14 +515,14 @@ class ProductionEffectDialog(QDialog):
         updates = {key: values[key] for key in changed}
         source = self._params | self._staged
         for key in ("bands", "mb_bands", "ex_bands"):
-            if key not in updates or not source.get(key):
+            original = source.get(key)
+            if key not in updates or not isinstance(original, (list, tuple)) or not original:
                 continue
-            original = source[key]
             projected = self._projection.get(key, [])
             updates[key] = [
                 deepcopy(original[i]) | {name: value for name, value in band.items()
                                         if i >= len(projected) or projected[i].get(name) != value}
-                if i < len(original) else deepcopy(band)
+                if i < len(original) and isinstance(original[i], dict) else deepcopy(band)
                 for i, band in enumerate(updates[key])
             ]
         if self.fx_effect_type == "spatial_panner":
@@ -548,6 +534,9 @@ class ProductionEffectDialog(QDialog):
         if self.fx_effect_type == "dynamics" and "makeup" in updates:
             updates.setdefault("comp", deepcopy(values["comp"]))["makeup_gain"] = updates["makeup"]
         result = deepcopy(self._params) | deepcopy(self._staged) | updates
+        if (self.fx_effect_type == "spectral_mangler" and self._params.get("grain_freeze")
+                and not result.get("grain_freeze") and result.get("freeze_capture_id")):
+            result["freeze_capture_id"] = ""
         if (self.fx_effect_type == "dynamic_eq" and updates.get("sidechain_source_id", "internal") != "internal"
                 and result.get("sc_on") is False):
             result["sc_on"] = True

@@ -116,6 +116,7 @@ def test_registry_session_is_parented_to_main_window_without_second_editor(qtbot
     page = QWidget()
     descriptor = PageDescriptor("mixer", "Mixer", lambda _context: page)
     host.feature_registry = SimpleNamespace(get_all_pages=lambda: [descriptor])
+    host.config_manager = MemoryConfig(work_mode="video")
     assert MainWindow._create_pages_from_registry(host)
     assert host.mixer_page is page
     assert page.parent() is host and page.isHidden()

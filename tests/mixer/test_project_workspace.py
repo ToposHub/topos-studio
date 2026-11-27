@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, Qt
+from PyQt6.QtCore import QEvent, QMimeData, QObject, QPoint, QPointF, Qt
 from PyQt6.QtGui import (
     QAction, QContextMenuEvent, QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent,
     QImage, QKeyEvent, QKeySequence, QMouseEvent, QPainter,
@@ -29,7 +29,7 @@ from src.app.ui.workspace_panel_bar import DockTabAction
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.selection import TimelineSelection
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
-from src.features.edit.ui.edit_effects_panel import EditEffectsPanel
+from src.features.edit.ui.edit_effects_panel import MIME_TYPE_EFFECT, EditEffectsPanel
 from src.features.edit.ui.edit_properties_panel import EditPropertiesPanel
 from src.features.edit.ui.edit_viewport import EditViewport
 from src.features.edit.ui.media_pool_panel import MediaPoolPanel, ViewMode
@@ -313,11 +313,14 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
         return next(action for action in menu.actions() if action.objectName() == "openProfessionalAudioEditor")
 
     monkeypatch.setattr(QMenu, "exec", choose_editor)
-    click = view.mapFromScene(item.mapToScene(QPointF(50.0, 35.0)))
+    visible_clip = view.mapFromScene(item.sceneBoundingRect()).boundingRect().intersected(view.viewport().rect())
+    assert not visible_clip.isEmpty()
+    click = visible_clip.center()
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.RightButton, pos=click)
     dock = host.dock_audio_clip_editor
     editor = dock.widget()
     assert dock.isVisible() and dock in host.tabifiedDockWidgets(host.dock_audio_timeline)
+    assert not dock.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
     assert editor.clip_id == clip.clip_id
     assert editor._panel is not None
     qtbot.waitUntil(lambda: editor._panel.peak_val_lbl.text() != "—", timeout=10000)
@@ -346,10 +349,12 @@ def test_audio_clip_context_menu_opens_professional_dock_and_updates_timeline(
     assert context.isAccepted() and chosen_actions == [menu_action]
     host._sync_floating_docks()
     assert dock.isFloating() and isinstance(dock.titleBarWidget(), FloatingDockTitleBar)
+    assert dock.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
     assert not dock.titleBarWidget().findChildren(QToolButton)
     dock.move(-20000, -20000)
     view.request_audio_clip_editor(clip.clip_id)
     assert QApplication.primaryScreen().availableGeometry().intersects(dock.geometry())
+    assert dock.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
     original_peak = editor._panel.peak_val_lbl.text()
     new_audio_path = tmp_path / "dialogue-relinked.wav"
     with wave.open(str(new_audio_path), "wb") as wav:
@@ -1511,6 +1516,138 @@ def test_clip_editor_audio_edit_stack_commits_and_undoes(project_host, qtbot, tm
     assert view.get_timeline().revision > revision  # 命令与撤销都入历史
 
 
+@pytest.mark.parametrize("effect_id, processors, legacy_mono", [
+    ("declick_dehum", ("de_click", "de_hum"), False),
+    ("pitch_correction", ("pitch_correction",), False),
+    ("doubler", ("doubler",), False),
+    ("doubler", ("doubler",), True),
+])
+def test_mixer_selection_effects_audition_commit_and_export(
+    project_host: ProjectHost, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    effect_id: str, processors: tuple[str, ...], legacy_mono: bool,
+) -> None:
+    from src.features.edit.core.audio_edit import apply_clip_audio_edit_block
+    from src.features.edit.core import pcm_render_cache
+    from src.features.mixer.ui.effects_panel import _PANEL_ROLE
+
+    rate = 48000
+    t = np.arange(rate * 5) / rate
+    tone = .16 * np.sin(2 * np.pi * 277 * t) + .06 * np.sin(2 * np.pi * 60 * t)
+    pcm = np.column_stack((tone * .6, tone))
+    pcm[rate, 1] += .6
+    if legacy_mono:
+        pcm = pcm[:, 1:]
+    path = tmp_path / "selection.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(pcm.shape[1])
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        # A frame-aligned clip can extend a few samples beyond the file.
+        wav.writeframes((pcm[:-37] * 32767).astype("<i2").tobytes())
+    audio_info = {"sample_rate": rate}
+    if not legacy_mono:
+        audio_info["channels"] = 2
+    asset = MediaAsset("audio", str(path), "audio", display_name="Selection",
+                       metadata={"audio_info": audio_info, "duration_seconds": 5.0, "fps": 24.0})
+    host = project_host
+    cache = pcm_render_cache.PcmRenderCache()
+    monkeypatch.setattr(pcm_render_cache, "get_pcm_render_cache", lambda: cache)
+    host._current_edit_project = EditProject("project", "Selection", assets={"audio": asset})
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    timeline = view.get_timeline()
+    clip = timeline.audio_tracks[0].clips[0]
+    library = host.dock_audio_effects.widget()
+    host.dock_audio_effects.show()
+    row = next(library.tree.topLevelItem(g).child(i)
+               for g in range(library.tree.topLevelItemCount())
+               for i in range(library.tree.topLevelItem(g).childCount())
+               if library.tree.topLevelItem(g).child(i).data(0, _PANEL_ROLE) == effect_id)
+    editor = host.dock_audio_clip_editor.widget()
+    library._activate(row, 0)
+    assert editor._selection_effect_dialog is None
+    view.set_selection(TimelineSelection().with_clip_selected(clip.clip_id, clip.track_id, timeline.timeline_id))
+    library._activate(row, 0)
+    dialog = editor._selection_effect_dialog
+    assert dialog is not None and dialog.isVisible()
+    assert dialog.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+    qtbot.waitUntil(dialog.preview.isEnabled, timeout=15000)
+    panel = editor._panel
+    assert editor._selection_output_range() == (0, 5 * rate)
+    if effect_id == "doubler":
+        assert dialog.voices[0].pan.isEnabled() is (not legacy_mono)
+    panel.canvas.setSelection(.5, 2.5)
+    channel = 0 if legacy_mono else 1
+    panel.canvas.setEditChannel(channel)
+    assert editor._selection_effect_target == (rate // 2, rate * 5 // 2, channel)
+    if effect_id == "declick_dehum":
+        dialog.hum_enabled.setChecked(True)
+        dialog.harmonics.setText("1，2")
+        dialog.hum_base.setCurrentIndex(2)
+        dialog.threshold.setValue(6.)
+    elif effect_id == "pitch_correction":
+        dialog.key.setCurrentIndex(9)
+        dialog.strength.setValue(90)
+        dialog.bypass_checks[1].setChecked(True)
+        assert dialog.operations()[0][1]["bypass_notes"] == ["C#"]
+        dialog.bypass_checks[1].setChecked(False)
+        dialog.note_checks[1].setChecked(False)  # remove C♯ from A major
+    else:
+        assert not dialog.voices[0].pan.isEnabled()
+        dialog.voices[0].interval.setValue(7.)
+        dialog.voices[0].detune.setValue(0.)
+        dialog.voices[1].enabled.setChecked(False)
+        dialog.wet.setValue(70.)
+    operations = dialog.operations()
+    heard = []
+
+    def audition(start: int, samples: np.ndarray) -> bool:
+        heard.append((start, samples))
+        return True
+
+    monkeypatch.setattr(panel, "start_band_preview", audition)
+    dialog.preview.click()
+    qtbot.waitUntil(lambda: len(heard) == 1, timeout=15000)
+    assert view.get_timeline().get_clip_by_id(clip.clip_id).audio_edit is None
+    dialog.delta.click()
+    qtbot.waitUntil(lambda: len(heard) == 2, timeout=15000)
+    dialog.apply.click()
+    qtbot.waitUntil(lambda: editor._selection_effect_dialog is None, timeout=15000)
+    edited_timeline = view.get_timeline()
+    edited = edited_timeline.get_clip_by_id(clip.clip_id)
+    assert editor._selection_effect_dialog is None
+    assert tuple(step["processor_id"] for step in edited.audio_edit["steps"]) == processors
+    for step, (_processor, params) in zip(edited.audio_edit["steps"], operations):
+        assert step["params"]["channels"] == [channel]
+        assert {key: step["params"][key] for key in params} == params
+    plan = pcm_render_cache.build_pre_render_plan(host._current_edit_project, edited_timeline, edited, asset)
+    assert cache.lookup(plan.spec()) is not None
+    resolution = pcm_render_cache.resolve_export_pre_render_base(
+        host._current_edit_project, edited_timeline, edited, asset)
+    original = panel._raw_pcm
+    assert original.shape == (pcm.shape[1], rate * 5) and not original[:, -37:].any()
+    exported = apply_clip_audio_edit_block(original, 0, edited.audio_edit, sample_rate=rate,
+                                           pre_render_base=resolution.ensure_exportable().base)
+    rebuilt = plan.builder()()
+    np.testing.assert_array_equal(rebuilt, resolution.base)
+    if legacy_mono:
+        disk_root = tmp_path / "render-cache"
+        pcm_render_cache.PcmRenderCache(disk_root).store(plan.spec(), rebuilt)
+        np.testing.assert_array_equal(pcm_render_cache.PcmRenderCache(disk_root).lookup(plan.spec()), rebuilt)
+    start, wet = heard[0]
+    assert start == heard[1][0] == rate // 2
+    end = start + 2 * rate
+    np.testing.assert_array_equal(wet, exported[:, start:end])
+    np.testing.assert_array_equal(heard[1][1], original[:, start:end] - wet)
+    if not legacy_mono:
+        np.testing.assert_array_equal(exported[0], original[0])
+    np.testing.assert_array_equal(exported[:, :start], original[:, :start])
+    np.testing.assert_array_equal(exported[:, end:], original[:, end:])
+    assert np.max(np.abs(heard[1][1][channel])) > .001
+    view.undo()
+    assert view.get_timeline().get_clip_by_id(clip.clip_id).audio_edit is None
+
+
 def test_clip_editor_denoise_commits_pre_render_step(project_host, qtbot, tmp_path) -> None:
     """§3.3 + P1-6：采集噪声 → 降噪入栈（spectral_denoise 预渲染步骤）。
 
@@ -1606,7 +1743,7 @@ def test_clip_editor_canvas_selection_gain_commits_to_target_channel(project_hos
     clip_id = view.get_timeline().audio_tracks[0].clips[0].clip_id
     host._open_project_audio_clip_editor(clip_id)
     panel = host.dock_audio_clip_editor.widget()._panel
-    qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=10000)
+    qtbot.waitUntil(lambda: panel._last_preview is not None, timeout=10000)
     raw = panel._raw_pcm
     panel.canvas.setSelection(1.0, 3.0)
     panel._edit_ch_btns[0].click()
@@ -1636,6 +1773,94 @@ def test_clip_editor_canvas_selection_gain_commits_to_target_channel(project_hos
     qtbot.waitUntil(lambda: np.array_equal(panel._pcm, raw), timeout=10000)
 
 
+def test_clip_editor_switches_dock_visibility_and_stays_on_top_when_floated(
+    project_host: ProjectHost, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = project_host
+    host.show_mixer()
+    host._show_project_audio_clip_editor("tabbed")
+    dock = host.dock_audio_clip_editor
+    editor = dock.widget()
+    panel = editor._ensure_panel()
+    editor._empty.hide()
+    editor._scroll.show()
+    panel.attach_pcm(np.zeros((2, 48000), dtype=np.float32), 48000)
+    assert panel._dock_active
+
+    monkeypatch.setattr(panel._audition, "_playing", True)
+    panel.canvas._drag_mode = "playhead"
+    panel._pending_audition_seek = 0.5
+    panel.btn_timeline.click()
+    qtbot.waitUntil(lambda: not panel._dock_active)
+    assert not panel._audition.is_playing
+    assert panel._pending_audition_seek is None and not panel.canvas._drag_mode
+
+    dock.raise_()
+    qtbot.waitUntil(lambda: panel._dock_active)
+    top_hint = Qt.WindowType.WindowStaysOnTopHint
+    for _ in range(2):
+        editor.float_requested.emit()
+        assert dock.isFloating() and dock.isVisible()
+        assert dock.windowFlags() & top_hint
+        assert dock.windowHandle().flags() & top_hint
+        assert panel._dock_active
+
+        editor.tab_requested.emit()
+        assert host.dock_audio_timeline in host.tabifiedDockWidgets(dock)
+        assert not dock.isFloating() and not dock.windowFlags() & top_hint
+
+
+def test_clip_editor_keeps_other_channels_when_clearing_polarity(
+    project_host: ProjectHost, qtbot: QtBot, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.features.edit.core.audio_edit import append_step, make_step
+
+    path = tmp_path / "polarity.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setparams((2, 2, 48000, 0, "NONE", "not compressed"))
+        wav.writeframes(b"\x00\x20\x00\x10" * 240000)
+    asset = MediaAsset("audio", str(path), "audio", "Polarity", {
+        "audio_info": {"sample_rate": 48000, "channels": 2},
+        "duration_seconds": 5.0, "fps": 24.0,
+    })
+    host = project_host
+    host._current_edit_project = EditProject("project", "Polarity", assets={"audio": asset})
+    view = host.timeline_panel.timeline_view
+    timeline = view.get_timeline()
+    track = timeline.audio_tracks[0]
+    shared_step = make_step("channel_polarity", 0, 240000, (0, 1), label="Both")
+    disabled_step = make_step("channel_polarity", 0, 240000, (0,), enabled=False)
+    edit = append_step(append_step(None, shared_step), disabled_step)
+    clip = replace(track.clips[0], audio_edit=edit)
+    timeline = timeline.with_track_updated(replace(track, clips=(clip,)))
+    view.load_timeline(timeline)
+    host.sync_timeline(timeline)
+    host.show_mixer()
+    host._open_project_audio_clip_editor(clip.clip_id)
+    panel = host.dock_audio_clip_editor.widget()._panel
+    qtbot.waitUntil(lambda: panel._last_preview is not None, timeout=10000)
+    mid = 96000
+    raw = panel._raw_pcm[:, mid].copy()
+    np.testing.assert_array_equal(panel._pcm[:, mid], -raw)
+    assert panel.canvas._ch_phase_inv[:2] == [True, True]
+    assert not panel.canvas._can_edit_channel_polarity(2)
+
+    monkeypatch.setattr(QMenu, "exec", lambda menu, *_args: menu.actions()[0].trigger())
+    panel.canvas._show_channel_menu(0, QPoint())
+    result = view.get_timeline().get_clip_by_id(clip.clip_id).audio_edit
+    left_cleared = {**shared_step, "params": {**shared_step["params"], "channels": [1]}}
+    assert result["steps"] == [left_cleared, disabled_step]
+    qtbot.waitUntil(lambda: panel._pcm[0, mid] == raw[0], timeout=10000)
+    np.testing.assert_array_equal(panel._pcm[:, mid], raw * [1, -1])
+    assert panel.canvas._ch_phase_inv[:2] == [False, True]
+
+    view.undo()
+    assert view.get_timeline().get_clip_by_id(clip.clip_id).audio_edit == edit
+    qtbot.waitUntil(lambda: panel._pcm[0, mid] == -raw[0], timeout=10000)
+    np.testing.assert_array_equal(panel._pcm[:, mid], -raw)
+    assert panel.canvas._ch_phase_inv[:2] == [True, True]
+
+
 def test_clip_editor_native_retime_and_sample_microfade(project_host, qtbot, tmp_path) -> None:
     import numpy as np
 
@@ -1661,7 +1886,7 @@ def test_clip_editor_native_retime_and_sample_microfade(project_host, qtbot, tmp
     host.sync_timeline(sequence)
     host._open_project_audio_clip_editor(clip.clip_id)
     panel = host.dock_audio_clip_editor.widget()._panel
-    qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=10000)
+    qtbot.waitUntil(lambda: panel._last_preview is not None, timeout=10000)
     assert panel._pcm.shape == (2, 120000)
     region = panel._pcm[0, 24000:72000]
     assert int(np.argmax(np.abs(np.fft.rfft(region)))) == 880
@@ -2401,6 +2626,92 @@ def test_effect_panel_applies_spatial_panner_to_audio_track_only(project_host) -
     assert view.get_timeline() is with_panner
     view.undo()
     assert not view.get_timeline().audio_tracks[0].panner
+
+
+def test_spatial_panner_timeline_drop_preserves_settings_and_respects_track_lock(
+    project_host: ProjectHost,
+) -> None:
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    timeline = view.get_timeline()
+    track = timeline.audio_tracks[0]
+    saved = {"enabled": False, "rotate": 31.0, "spread": 24.0, "future_option": 9}
+    disabled = replace(track, pan=-0.2, panner=saved)
+    timeline = timeline.with_track_updated(disabled)
+    view.load_timeline(timeline)
+    host.sync_timeline(timeline)
+    clip = track.clips[0]
+    mime = QMimeData()
+    mime.setData(MIME_TYPE_EFFECT, b"spatial_panner")
+
+    def drag_and_drop(*, allowed: bool) -> None:
+        item = view._items_map[clip.clip_id]
+        viewport = view.viewport().rect()
+        visible_clip = view.mapFromScene(item.sceneBoundingRect()).boundingRect().intersected(viewport)
+        assert not visible_clip.isEmpty()
+        point = visible_clip.center()
+        args = (Qt.DropAction.CopyAction, mime, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        view.dragEnterEvent(QDragEnterEvent(point, *args))
+        move = QDragMoveEvent(point, *args)
+        view.dragMoveEvent(move)
+        assert move.isAccepted() is allowed
+        drop = QDropEvent(QPointF(point), *args)
+        view.dropEvent(drop)
+        assert drop.isAccepted() is allowed
+
+    drag_and_drop(allowed=True)
+    enabled = view.get_timeline()
+    assert enabled.audio_tracks[0].panner == {**saved, "enabled": True}
+    assert enabled.audio_tracks[0].pan == disabled.pan
+    assert enabled.get_clip_by_id(clip.clip_id).effects == clip.effects
+    drag_and_drop(allowed=True)
+    assert view.get_timeline() is enabled
+    view.undo()
+    assert view.get_timeline().audio_tracks[0].panner == saved
+
+    locked = timeline.with_track_updated(replace(disabled, is_locked=True))
+    view.load_timeline(locked)
+    host.sync_timeline(locked)
+    drag_and_drop(allowed=False)
+    assert view.get_timeline() is locked
+
+
+def test_spatial_panner_strip_add_reenables_saved_settings_in_existing_window(
+    project_host: ProjectHost,
+) -> None:
+    host = project_host
+    host.show_mixer()
+    view = host.timeline_panel.timeline_view
+    timeline = view.get_timeline()
+    track = timeline.audio_tracks[0]
+    saved = {"enabled": False, "rotate": 62.0, "spread": 41.0, "future_option": 7}
+    disabled = replace(track, pan=0.3, panner=saved)
+    timeline = timeline.with_track_updated(disabled)
+    view.load_timeline(timeline)
+    host.sync_timeline(timeline)
+    host.audio_mixer_panel.track_panner_committed.connect(host._on_mixer_panner_committed)
+    strip = host.audio_mixer_panel._track_mixers[track.track_id]
+    strip._open_panner_dialog()
+    dialog = strip._panner_dialog
+    assert dialog is not None and dialog.current_params()["panner"] == saved
+
+    menu = QMenu(strip)
+    strip._populate_add_effect_menu(menu)
+    action = next(item for group in menu.actions() for item in group.menu().actions()
+                  if item.data() == "spatial_panner")
+    action.trigger()
+    enabled = view.get_timeline()
+    panner = {**saved, "enabled": True}
+    assert enabled.audio_tracks[0].panner == panner
+    assert enabled.audio_tracks[0].pan == disabled.pan
+    assert strip._panner_dialog is dialog and dialog.current_params()["panner"] == panner
+    assert dialog.panel.get_state()["enabled"] is True
+    action.trigger()
+    assert view.get_timeline() is enabled
+    view.undo()
+    assert view.get_timeline().audio_tracks[0].panner == saved
+    assert dialog.panel.get_state()["enabled"] is False
 
 
 @pytest.mark.parametrize("use_master_context_menu", [False, True])

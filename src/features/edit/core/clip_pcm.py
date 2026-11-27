@@ -90,14 +90,15 @@ class ClipAudioRenderSpec:
         channel_map = self.source_channel_map
         if channel_map and all(0 <= src < self.channel_count for src, _dst in channel_map):
             return min(2, len(channel_map))
-        return min(2, self.channel_count)
+        return min(2, self.channel_count or 2)
 
     def cache_key(self) -> tuple:
-        """结果缓存的稳定标识：源指纹 + 精确范围 + 速率/声道/选道。"""
+        """Identify decoded PCM, including whether the timeline fills its EOF tail."""
         return (
             self.source_fingerprint, self.sample_rate, self.channel_count,
             self.start_sample, self.end_sample, self.reverse,
             self.source_channel_map, self.channel_layout, self.source_asset_id,
+            bool(self.clip_id),
         )
 
 
@@ -129,7 +130,7 @@ def _audio_channel_count(asset) -> int:
     channels = getattr(asset, "audio_channels", None)
     if isinstance(channels, int) and channels > 0:
         return channels
-    return 2
+    return 0
 
 
 def _audio_channel_layout(asset) -> Optional[str]:
@@ -372,6 +373,7 @@ def decode_audio_range(
     cancel_check: Optional[Callable[[], bool]] = None,
     channel_map: Optional[tuple] = None,
     stream_index: int | None = None,
+    pad_to_end: bool = False,
 ) -> Optional[np.ndarray]:
     """Decode a half-open range as planar float32, clipped to available audio.
 
@@ -379,6 +381,7 @@ def decode_audio_range(
     Individual mono resamplers preserve independent channels for multichannel
     sources, including WAV files without a declared channel mask. The budget
     applies to the requested decoded PCM, independent of container size.
+    Timeline callers can keep the requested extent by filling the tail after EOF with silence.
     """
     import av
 
@@ -474,7 +477,12 @@ def decode_audio_range(
                     feed_multichannel(None, sample_rate)
             if pcm is None or (cancel_check is not None and cancel_check()):
                 return None
-            return pcm if collected == wanted else pcm[:, :collected].copy()
+            if collected == wanted:
+                return pcm
+            if pad_to_end:
+                pcm[:, collected:].fill(0.0)
+                return pcm
+            return pcm[:, :collected].copy()
     except (av.error.FFmpegError, OSError, ValueError) as exc:
         logger.warning("clip pcm decode failed for %s: %s", path, exc)
         return None
@@ -483,38 +491,25 @@ def decode_audio_range(
 def compute_waveform_stats(
     pcm: np.ndarray, bins: int,
 ) -> tuple[list[list[float]], list[list[float]], list[list[float]]]:
-    """每声道 min/max/RMS 包络（值域与画布约定一致：min≤0，max≥0）。"""
-    channels = pcm.shape[0]
+    """Return per-channel min/max/RMS for evenly spaced, half-open bins."""
     bins = max(2, bins)
-    mins: list[list[float]] = []
-    maxs: list[list[float]] = []
-    rmss: list[list[float]] = []
-    for ch in range(channels):
-        data = pcm[ch]
-        if data.size == 0:
-            mins.append([0.0] * bins)
-            maxs.append([0.0] * bins)
-            rmss.append([0.0] * bins)
-            continue
-        idx = np.linspace(0, data.size, bins + 1).astype(np.int64)
-        # 空桶（超采样 bins > samples）退化为逐样本
-        counts = np.diff(idx)
-        valid = counts > 0
-        segments = np.where(valid, counts, 1)
-        low = np.full(bins, 0.0, dtype=np.float32)
-        high = np.full(bins, 0.0, dtype=np.float32)
-        rms = np.full(bins, 0.0, dtype=np.float32)
-        starts = idx[:-1][valid]
-        ends = idx[1:][valid]
-        for i, (s, e) in enumerate(zip(starts, ends)):
-            seg = data[s:e]
-            low[i] = float(seg.min())
-            high[i] = float(seg.max())
-            rms[i] = float(np.sqrt(np.mean(seg.astype(np.float64) ** 2)))
-        mins.append(low.tolist())
-        maxs.append(high.tolist())
-        rmss.append(rms.tolist())
-    return mins, maxs, rmss
+    channels, samples = pcm.shape
+    edges = np.linspace(0, samples, bins + 1).astype(np.intp)
+    bin_sizes = np.diff(edges)
+    filled = np.flatnonzero(bin_sizes)
+    low = np.zeros((channels, bins), dtype=np.float32)
+    high = np.zeros_like(low)
+    rms = np.zeros_like(low)
+    for first in range(0, filled.size, 128):
+        group = filled[first:first + 128]
+        start, end = edges[group[0]], edges[group[-1] + 1]
+        segment = pcm[:, start:end]
+        offsets = edges[group] - start
+        low[:, group] = np.minimum.reduceat(segment, offsets, axis=1)
+        high[:, group] = np.maximum.reduceat(segment, offsets, axis=1)
+        energy = np.add.reduceat(np.square(segment, dtype=np.float64), offsets, axis=1)
+        rms[:, group] = np.sqrt(energy / bin_sizes[group])
+    return low.tolist(), high.tolist(), rms.tolist()
 
 
 def compute_spectrogram(
@@ -660,6 +655,7 @@ class _ClipPcmWorker(QThread):
                     spec.source_path, spec.start_sample, spec.end_sample,
                     spec.sample_rate, cancel_check=canceled,
                     channel_map=spec.source_channel_map or None,
+                    pad_to_end=bool(spec.clip_id),
                 )
             except Exception as exc:  # noqa: BLE001 - worker boundary, report the failure
                 if not canceled():

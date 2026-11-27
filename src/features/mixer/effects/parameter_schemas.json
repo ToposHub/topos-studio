@@ -883,6 +883,12 @@
       "global_drive": {
         "type": "number"
       },
+      "model_profile": {
+        "enum": ["legacy", "multiband"]
+      },
+      "crossover_mode": {
+        "enum": ["legacy", "dual"]
+      },
       "drive": {
         "type": "number",
         "minimum": 0,
@@ -958,6 +964,9 @@
   "exciter": {
     "type": "object",
     "properties": {
+      "quality": {
+        "enum": ["legacy", "clean"]
+      },
       "enabled": {
         "type": "boolean"
       },
@@ -1023,11 +1032,14 @@
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "UI state for the two-band production exciter, including its 2× oversampling path"
   },
   "subharmonic": {
     "type": "object",
     "properties": {
+      "detection_mode": {
+        "enum": ["legacy", "focused"]
+      },
       "enabled": {
         "type": "boolean"
       },
@@ -1120,7 +1132,7 @@
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "UI state for production octave synthesis. Source bandwidth is in Hz in the Mixer panel"
   },
   "transient_designer": {
     "type": "object",

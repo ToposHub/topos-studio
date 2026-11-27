@@ -49,8 +49,8 @@ class TestCatalogFreshness:
         #（de_esser/true_peak_limiter/dynamic_eq/bus_comp/multiband_comp/
         # convolution_reverb/transient_designer/tremolo_auto_pan/
         # chorus_flanger/phaser）入库后重冻结。
-        # 调制效果参数更新后，从当前生产注册表重建目录。
-        assert digest.startswith("c332c37e482d2053")
+        # 激励器路径与次谐波检测参数更新后，从生产注册表重建目录。
+        assert digest.startswith("dc44ac58800488dc")
 
 
 class TestCatalogIntegrity:

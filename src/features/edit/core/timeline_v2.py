@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from math import isfinite
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Collection, Optional, Dict, ClassVar, Literal
@@ -3165,6 +3166,7 @@ class SaturationParams:
     mb_mix: float = 1.0
     mb_output_gain_db: float = 0.0
     mb_bands: tuple = ()
+    mb_crossover_mode: str = "legacy"
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.drive <= 100.0):
@@ -3189,7 +3191,16 @@ class SaturationParams:
             "mb_mix": self.mb_mix,
             "mb_output_gain_db": self.mb_output_gain_db,
             "mb_bands": list(self.mb_bands),
+            "mb_crossover_mode": self.mb_crossover_mode,
         }
+
+    @staticmethod
+    def _bounded(value: Any, default: float, minimum: float, maximum: float) -> float:
+        try:
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return default
+        return max(minimum, min(maximum, value)) if isfinite(value) else default
 
     @staticmethod
     def _normalize_band(band: Any) -> dict[str, Any]:
@@ -3198,19 +3209,14 @@ class SaturationParams:
         if model not in ("tape", "tube", "transistor"):
             model = "tape"
 
-        def _num(key: str, default: float) -> float:
-            try:
-                return float(data.get(key, default))
-            except (TypeError, ValueError):
-                return default
-
-        return {
+        bound = SaturationParams._bounded
+        return data | {
             "enabled": bool(data.get("enabled", False)),
             "model": model,
-            "drive_db": _num("drive_db", 0.0),
-            "tone_db": _num("tone_db", 0.0),
-            "bias_pct": _num("bias_pct", 0.0),
-            "level_db": _num("level_db", 0.0),
+            "drive_db": bound(data.get("drive_db"), 0.0, 0.0, 36.0),
+            "tone_db": bound(data.get("tone_db"), 0.0, -12.0, 12.0),
+            "bias_pct": bound(data.get("bias_pct"), 0.0, -100.0, 100.0),
+            "level_db": bound(data.get("level_db"), 0.0, -24.0, 12.0),
         }
 
     @staticmethod
@@ -3218,7 +3224,9 @@ class SaturationParams:
         profile = str(data.get("model_profile", "legacy") or "legacy")
         if profile not in ("legacy", "multiband"):
             profile = "legacy"
-        raw_bands = data.get("mb_bands") or ()
+        raw_bands = data.get("mb_bands")
+        if not isinstance(raw_bands, (list, tuple)):
+            raw_bands = ()
         bands = tuple(
             SaturationParams._normalize_band(band)
             for band in list(raw_bands)[:3])
@@ -3226,18 +3234,22 @@ class SaturationParams:
             bands = bands + (SaturationParams._normalize_band({}),)
         try:
             oversampling = int(data.get("mb_oversampling", 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             oversampling = 1
+        bound = SaturationParams._bounded
+        low = bound(data.get("mb_xover_low_hz"), 250.0, 20.0, 19999.0)
+        high = max(low + 1.0, bound(data.get("mb_xover_high_hz"), 2500.0, 21.0, 20000.0))
         return SaturationParams(
-            drive=float(data.get("drive", 0.0)),
+            drive=bound(data.get("drive"), 0.0, 0.0, 100.0),
             enabled=bool(data.get("enabled", True)),
             model_profile=profile,
-            mb_xover_low_hz=float(data.get("mb_xover_low_hz", 250.0)),
-            mb_xover_high_hz=float(data.get("mb_xover_high_hz", 2500.0)),
+            mb_xover_low_hz=low,
+            mb_xover_high_hz=high,
             mb_oversampling=oversampling if oversampling in (1, 2, 4) else 1,
-            mb_mix=float(data.get("mb_mix", 1.0)),
-            mb_output_gain_db=float(data.get("mb_output_gain_db", 0.0)),
+            mb_mix=bound(data.get("mb_mix"), 1.0, 0.0, 1.0),
+            mb_output_gain_db=bound(data.get("mb_output_gain_db"), 0.0, -24.0, 24.0),
             mb_bands=bands,
+            mb_crossover_mode="dual" if data.get("mb_crossover_mode") == "dual" else "legacy",
         )
 
 
@@ -3255,6 +3267,7 @@ class SubharmonicParams:
     sh_release_ms: float = 150.0
     sh_mix: float = 0.5
     sh_output_gain_db: float = 0.0
+    sh_detection_mode: str = "focused"
 
     @staticmethod
     def default() -> "SubharmonicParams":
@@ -3272,39 +3285,41 @@ class SubharmonicParams:
             "sh_release_ms": self.sh_release_ms,
             "sh_mix": self.sh_mix,
             "sh_output_gain_db": self.sh_output_gain_db,
+            "sh_detection_mode": self.sh_detection_mode,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "SubharmonicParams":
+        def finite(key: str, default: float) -> float:
+            value = _params_f(key, data, default)
+            return value if isfinite(value) else default
+
         return SubharmonicParams(
             enabled=bool(data.get("enabled", True)),
-            sh_source_center_hz=float(data.get("sh_source_center_hz", 90.0)),
-            sh_source_bandwidth_hz=float(
-                data.get("sh_source_bandwidth_hz", 60.0)),
-            sh_octave1_gain_db=float(data.get("sh_octave1_gain_db", -6.0)),
-            sh_octave2_gain_db=float(data.get("sh_octave2_gain_db", -12.0)),
-            sh_sub_lpf_hz=float(data.get("sh_sub_lpf_hz", 120.0)),
-            sh_attack_ms=float(data.get("sh_attack_ms", 20.0)),
-            sh_release_ms=float(data.get("sh_release_ms", 150.0)),
-            sh_mix=float(data.get("sh_mix", 0.5)),
-            sh_output_gain_db=float(data.get("sh_output_gain_db", 0.0)),
+            sh_source_center_hz=finite("sh_source_center_hz", 90.0),
+            sh_source_bandwidth_hz=finite("sh_source_bandwidth_hz", 60.0),
+            sh_octave1_gain_db=finite("sh_octave1_gain_db", -6.0),
+            sh_octave2_gain_db=finite("sh_octave2_gain_db", -12.0),
+            sh_sub_lpf_hz=finite("sh_sub_lpf_hz", 120.0),
+            sh_attack_ms=finite("sh_attack_ms", 20.0),
+            sh_release_ms=finite("sh_release_ms", 150.0),
+            sh_mix=finite("sh_mix", 0.5),
+            sh_output_gain_db=finite("sh_output_gain_db", 0.0),
+            sh_detection_mode="focused" if data.get("sh_detection_mode") == "focused" else "legacy",
         )
 
 
 @dataclass(frozen=True)
 @preserves_param_extras
 class ExciterParams:
-    """激励器（FX-15 · 2026-11-21 计划）：两段谐波支路并回干声。
-
-    首版两段（low/high），每段 Amount 默认 0 → 输出精确干声；
-    Solo 属监听语义（DSP 不消费）。
-    """
+    """Two-band exciter. Missing quality retains the original 2× wet path."""
     enabled: bool = True
     ex_crossover_hz: float = 2000.0
     ex_bands: tuple = ()
     ex_oversampling: int = 1
     ex_wet: float = 1.0
     ex_output_gain_db: float = 0.0
+    ex_quality: str = "clean"
 
     @staticmethod
     def default() -> "ExciterParams":
@@ -3318,6 +3333,7 @@ class ExciterParams:
             "ex_oversampling": self.ex_oversampling,
             "ex_wet": self.ex_wet,
             "ex_output_gain_db": self.ex_output_gain_db,
+            "ex_quality": self.ex_quality,
         }
 
     @staticmethod
@@ -3326,14 +3342,16 @@ class ExciterParams:
 
         def _num(key: str, default: float) -> float:
             try:
-                return float(data.get(key, default))
-            except (TypeError, ValueError):
+                value = float(data.get(key, default))
+            except (TypeError, ValueError, OverflowError):
                 return default
+            return min(1.0, max(0.0, value)) if isfinite(value) else default
 
         mode = str(data.get("mode", "even") or "even")
         if mode not in ("even", "odd"):
             mode = "even"
         return {
+            **data,
             "enabled": bool(data.get("enabled", False)),
             "mode": mode,
             "amount": _num("amount", 0.0),
@@ -3348,17 +3366,25 @@ class ExciterParams:
             raw, (list, tuple)) else ()
         while len(bands) < 2:
             bands = bands + (ExciterParams._normalize_band({}),)
+        def _finite_param(value: object, default: float) -> float:
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError, OverflowError):
+                return default
+            return parsed if isfinite(parsed) else default
+
         try:
             oversampling = int(data.get("ex_oversampling", 1))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             oversampling = 1
         return ExciterParams(
             enabled=bool(data.get("enabled", True)),
-            ex_crossover_hz=float(data.get("ex_crossover_hz", 2000.0)),
+            ex_crossover_hz=max(100.0, _finite_param(data.get("ex_crossover_hz"), 2000.0)),
             ex_bands=bands,
             ex_oversampling=oversampling if oversampling in (1, 2) else 1,
-            ex_wet=float(data.get("ex_wet", 1.0)),
-            ex_output_gain_db=float(data.get("ex_output_gain_db", 0.0)),
+            ex_wet=min(1.0, max(0.0, _finite_param(data.get("ex_wet"), 1.0))),
+            ex_output_gain_db=min(24.0, max(-24.0, _finite_param(data.get("ex_output_gain_db"), 0.0))),
+            ex_quality="clean" if data.get("ex_quality") == "clean" else "legacy",
         )
 
 
@@ -5751,6 +5777,7 @@ FX_AUTOMATION_NEVER = frozenset({
 FX_AUTOMATION_EVENT = frozenset({
     "routing", "formant_mode", "pitch_tracking", "vocoder_carrier",
     "ring_mode", "grain_mode", "dist_curve", "grain_freeze",
+    "ex_quality", "sh_detection_mode",
 })
 
 

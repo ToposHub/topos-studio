@@ -14,7 +14,9 @@ from src.features.edit.core.timeline_v2 import DeEsserParams, DynamicEqParams
 ])
 def test_adapter_without_analysis_runs_with_instance_taps(effect_type: str) -> None:
     chain = EffectChain(48000)
-    chain.set_params([(effect_type, {}, True, "fixture-instance", ALGORITHM_VERSION)])
+    # Exciter's neutral defaults now skip DSP until a band adds harmonics.
+    params = {"bands": [{"enabled": True, "amount": .5}]} if effect_type == "exciter" else {}
+    chain.set_params([(effect_type, params, True, "fixture-instance", ALGORITHM_VERSION)])
     if effect_type == "convolution_reverb":
         chain._effects[0]._impl.set_ir(np.ones((1, 1), dtype=np.float32))
     pcm = np.random.default_rng(87).normal(0, 0.1, (2, 513)).astype(np.float32)

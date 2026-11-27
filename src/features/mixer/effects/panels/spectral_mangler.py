@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QPolygonF
 )
 
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 from src.features.mixer.effects.panel_glyphs import GlyphComboBox
@@ -95,6 +96,7 @@ def default_mangler_demo() -> dict:
         "routing": "Ring → Grain → Dist",
         "global_mix": 85.0,    # 0 ~ 100 %
         "output_gain": -1.5,   # -24.0 ~ +12.0 dB
+        "limiter": True,
         "ring": {
             "enabled": True,
             "mode": "FM-Ring",     # "Sine" | "Dual" | "FM-Ring" | "Rectify"
@@ -138,6 +140,7 @@ def default_mangler_init() -> dict:
     st["dist"]["enabled"] = False
     st["global_mix"] = 100.0
     st["output_gain"] = 0.0
+    st["limiter"] = False
     return st
 
 
@@ -614,12 +617,21 @@ class ManglerMasterStrip(QWidget):
             if emit:
                 self.gainChanged.emit(self._gain)
 
-    def setLevels(self, in_db: float, out_db: float):
+    def setLevels(self, in_db: float, out_db: float, clipped: bool | None = None) -> None:
+        previous = (self._in_db, self._out_db, self._clipped)
         self._in_db = max(-60.0, min(0.0, in_db))
         self._out_db = max(-60.0, min(0.0, out_db))
-        if out_db >= -0.1:
+        if clipped is not None:
+            self._clipped = clipped
+        elif out_db >= -0.1:
             self._clipped = True
-        self.update()
+        if previous != (self._in_db, self._out_db, self._clipped):
+            self.update()
+
+    def setLimiter(self, enabled: bool) -> None:
+        if enabled != self._limiter:
+            self._limiter = enabled
+            self.update()
 
     def _mix_track(self) -> QRectF:
         return QRectF(20.0, 22.0, 4.0, max(40.0, self.height() - 48.0))
@@ -812,6 +824,7 @@ class ProManglerVisualizerWidget(QWidget):
         # 外部真实波形缓冲 & 真实颗粒列表（接入后端后可覆盖演示模拟）
         self._external_wave: list[float] | None = None
         self._external_grains: list[dict] | None = None
+        self._processor_controls = False
 
         # 内部粒子系统（用于直观展现颗粒的破碎、漂浮、反转与散布）
         self._rng = random.Random(1337)
@@ -840,11 +853,15 @@ class ProManglerVisualizerWidget(QWidget):
         self.update()
 
     def setTelemetry(self, wave_samples: list[float] | None = None, grains: list[dict] | None = None):
-        if wave_samples is not None:
+        changed = False
+        if wave_samples is not None and self._external_wave != wave_samples:
             self._external_wave = wave_samples
-        if grains is not None:
+            changed = True
+        if grains is not None and self._external_grains != grains:
             self._external_grains = grains
-        self.update()
+            changed = True
+        if changed:
+            self.update()
 
     def stepAnimation(self, dt: float = 0.045):
         st = self._state
@@ -916,7 +933,7 @@ class ProManglerVisualizerWidget(QWidget):
         if not d["enabled"]:
             return max(-1.0, min(1.0, x))
 
-        drive_lin = 10.0 ** (d["drive"] / 24.0)
+        drive_lin = 10.0 ** (d["drive"] / 20.0)
         bias = (d["bias"] / 100.0) * 0.45
         fold_amt = d["fold"] / 100.0
         curve = d["curve"]
@@ -931,7 +948,7 @@ class ProManglerVisualizerWidget(QWidget):
             thresh = max(0.18, 1.0 - fold_amt * 0.72)
             y = max(-thresh, min(thresh, u)) / thresh
         elif curve == "BitCrush":
-            levels = max(2.0, 24.0 * (1.0 - fold_amt * 0.92))
+            levels = max(2.0, 12.0 * (1.0 - fold_amt * 0.85))
             clamped = max(-1.0, min(1.0, u))
             y = round(clamped * levels) / levels
         else:
@@ -1090,7 +1107,8 @@ class ProManglerVisualizerWidget(QWidget):
             head_grad.setColorAt(1.0, QColor(182, 124, 248, 0))
             p.fillRect(QRectF(head_x - 24, plot.top(), 48, plot.height()), head_grad)
 
-            for pt in self._particles[:active_count]:
+            particles = (self._external_grains or []) if self._processor_controls else self._particles[:active_count]
+            for pt in particles:
                 env = math.sin(max(0.0, min(1.0, pt["age"])) * math.pi)
                 alpha = int(155 * env * (g["mix"] / 100.0))
                 if alpha <= 4:
@@ -1104,7 +1122,8 @@ class ProManglerVisualizerWidget(QWidget):
         # 4. 实时环形调制 + 波形折叠示波器
         cy = plot.center().y()
         amp = plot.height() * 0.38
-        steps = 360
+        waveform = (self._external_wave or []) if self._processor_controls else []
+        steps = max(1, len(waveform) - 1) if self._processor_controls else 360
 
         dry_path = QPainterPath()
         wet_path = QPainterPath()
@@ -1144,6 +1163,15 @@ class ProManglerVisualizerWidget(QWidget):
         for i in range(steps + 1):
             t = i / steps
             x = plot.left() + t * plot.width()
+            if self._processor_controls:
+                sig = waveform[min(i, len(waveform) - 1)] if waveform else 0.0
+                wy = cy - max(-1.05, min(1.05, sig)) * amp
+                if i == 0:
+                    wet_path.moveTo(x, wy)
+                else:
+                    wet_path.lineTo(x, wy)
+                wet_area.lineTo(x, wy)
+                continue
 
             # 原始载波参考线
             base_sig = (
@@ -2294,6 +2322,7 @@ class StudioSpectralManglerWidget(QWidget):
         self.master_strip = ManglerMasterStrip()
         self.master_strip.mixChanged.connect(self._on_global_mix_changed)
         self.master_strip.gainChanged.connect(self._on_output_gain_changed)
+        self.master_strip.limiterToggled.connect(self._on_limiter_changed)
         graph_row.addWidget(self.master_strip)
 
         main_lay.addLayout(graph_row, 5)
@@ -2366,6 +2395,8 @@ class StudioSpectralManglerWidget(QWidget):
 
         self.master_strip.setMix(st["global_mix"])
         self.master_strip.setGain(st["output_gain"])
+        st.setdefault("limiter", False)
+        self.master_strip.setLimiter(bool(st["limiter"]))
 
         # 先同步真实参数，再做全局旁通纯视觉置灰（不改各自 enabled 状态树）
         self.ring_card.syncFromData(st["ring"])
@@ -2455,6 +2486,10 @@ class StudioSpectralManglerWidget(QWidget):
         st = self._current_state()
         st["output_gain"] = gain
         self.outputGainChanged.emit(gain)
+        self.stateChanged.emit(self.get_state())
+
+    def _on_limiter_changed(self, enabled: bool) -> None:
+        self._current_state()["limiter"] = enabled
         self.stateChanged.emit(self.get_state())
 
     def _on_ring_changed(self, ring_data: dict):
@@ -2587,18 +2622,42 @@ class StudioSpectralManglerWidget(QWidget):
         self._banks[self._active_bank] = copy.deepcopy(state)
         self._refresh_all_views()
 
+    def use_processor_controls(self) -> None:
+        self._demo_timer.stop()
+        self.visualizer._processor_controls = True
+        self.master_strip.setLevels(-100.0, -100.0, clipped=False)
+        self.update_telemetry(-100.0, -100.0)
+
     def update_telemetry(
         self,
         input_db: float,
         output_db: float,
         wave_samples: list[float] | None = None,
         grains: list[dict] | None = None,
-    ):
+        *,
+        capture_status: str = "empty",
+        capture_ready: bool = False,
+        frozen: bool = False,
+        clipped: bool | None = None,
+    ) -> None:
         """接入真实音频引擎实时电平、输出波形采样点及颗粒云坐标"""
         if self._demo_timer.isActive():
             self._demo_timer.stop()
-        self.master_strip.setLevels(input_db, output_db)
+        self.master_strip.setLevels(input_db, output_db, clipped=clipped)
         self.visualizer.setTelemetry(wave_samples, grains)
+        state = (capture_status, capture_ready, frozen)
+        if state == getattr(self, "_freeze_monitor_state", None):
+            return
+        self._freeze_monitor_state = state
+        if capture_status in {"missing", "failed"}:
+            message = I18N.tr("audio.fx.mangler_freeze_missing", "The saved freeze capture is unavailable.")
+        elif frozen:
+            message = I18N.tr("audio.fx.mangler_freeze_active", "Holding the captured audio.")
+        elif capture_ready:
+            message = I18N.tr("audio.fx.mangler_freeze_ready", "Hold the current granular history.")
+        else:
+            message = I18N.tr("audio.fx.mangler_freeze_wait", "Play audio to fill the granular history.")
+        self.grain_card.freeze_btn.setToolTip(message)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ _LIBRARY_KEYS = {
     "dynamics": "dynamics",
     "imager": "imager",
     "reverb": "reverb",
+    "saturation": "saturation",
     "spatial_panner": "panner",
     "spectral_mangler": "spectral_mangler",
     "strip_eq": "strip_eq",
@@ -35,12 +36,15 @@ _LIBRARY_KEYS = {
     "tremolo_auto_pan": "tremolo_auto_pan",
     "true_peak_limiter": "true_peak_limiter",
     "voice_changer": "voice_changer",
+    "exciter": "exciter",
+    "subharmonic": "subharmonic",
 }
 _PRESERVE_WHEN_LOADING = {
     "delay": ("enabled", "link_lr", "input_format"),
     "dynamics": ("enabled",),
     "imager": ("enabled",),
     "reverb": ("enabled",),
+    "saturation": ("enabled",),
     "spatial_panner": ("enabled", "boom_on"),
     "strip_eq": ("enabled",),
     "dynamic_eq": ("enabled",),
@@ -56,6 +60,8 @@ _PRESERVE_WHEN_LOADING = {
     "phaser": ("enabled",),
     "tremolo_auto_pan": ("enabled",),
     "true_peak_limiter": ("enabled",),
+    "exciter": ("enabled",),
+    "subharmonic": ("enabled",),
 }
 
 

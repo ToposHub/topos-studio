@@ -50,8 +50,10 @@ def extended_fields(effect_type: str, params: dict[str, Any]) -> tuple[Field, ..
                  ("release", "release_ms"), ("makeup", "makeup_gain"))
         return tuple(Field(f"crossovers.{i}", f"crossovers.{i}") for i in range(count - 1)) + tuple(
             Field(f"bands.{i}.{ui}", f"bands.{i}.{engine}") for i in range(count) for ui, engine in names)
-    if effect_type == "saturation" and params.get("model_profile") == "multiband":
+    if effect_type == "saturation":
         return (
+            Field("model_profile", "model_profile"), Field("crossover_mode", "mb_crossover_mode"),
+            Field("drive", "drive"),
             Field("xover_low", "mb_xover_low_hz"), Field("xover_high", "mb_xover_high_hz"),
             Field("oversampling", "mb_oversampling", lambda v: f"{v}x", lambda v: int(v[:-1])),
             Field("mix", "mb_mix", lambda v: v * 100.0, lambda v: v / 100.0),
@@ -105,6 +107,8 @@ def collect_extended(effect_type: str, state: dict[str, Any], baseline: dict[str
     fields = extended_fields(effect_type, params)
     if fields is None:
         return None
+    if effect_type == "saturation" and state["model_profile"] == "legacy":
+        fields = tuple(field for field in fields if field.ui in {"model_profile", "drive"})
     if effect_type == "multiband_comp" and state["band_count"] != baseline["band_count"]:
         count = state["band_count"]
         params["crossovers"] = list(state["crossovers"][:count - 1])

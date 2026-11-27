@@ -122,7 +122,7 @@ class PreRenderSpec:
 
     source_fingerprint: str
     sample_rate: int
-    channel_count: int
+    channel_count: int  # 0 when legacy media metadata leaves the actual layout to the decoder
     total_samples: int
     steps_signature: tuple
     output_samples: int = -1  # -1 = 无改长度步骤（与 total_samples 一致）
@@ -224,7 +224,7 @@ class PcmRenderCache:
         """Whether at least one enabled tier can retain the result."""
         if self._root is not None and self._disk_max_entries > 0 and self._disk_max_bytes > 0:
             return True
-        nbytes = spec.channel_count * spec.expected_output_samples * np.dtype(np.float32).itemsize
+        nbytes = (spec.channel_count or 2) * spec.expected_output_samples * np.dtype(np.float32).itemsize
         with self._lock:
             return self._has_memory_room_locked(spec.key, nbytes)
 
@@ -366,6 +366,11 @@ class PcmRenderCache:
     # ------------------------------------------------------------------
     # 落盘 / 回收
     # ------------------------------------------------------------------
+    def remember_render(self, spec: PreRenderSpec, pcm: np.ndarray) -> None:
+        """Reuse a finished render in the bounded memory tier without encoding it again."""
+        self._validate_payload(spec, pcm)
+        self._remember(spec.key, pcm)
+
     def store(self, spec: PreRenderSpec, pcm: np.ndarray) -> None:
         """写穿：临时文件 + 校验 + 原子替换；随后执行磁盘回收。"""
         self._validate_payload(spec, pcm)
@@ -390,7 +395,7 @@ class PcmRenderCache:
                     "key": key,
                     "source_fingerprint": spec.source_fingerprint,
                     "sample_rate": spec.sample_rate,
-                    "channel_count": spec.channel_count,
+                    "channel_count": int(pcm.shape[0]),
                     "total_samples": spec.total_samples,
                     "output_samples": spec.expected_output_samples,
                 }, handle)
@@ -517,19 +522,19 @@ class PcmRenderCache:
         try:
             with open(meta_path, "r", encoding="utf-8") as handle:
                 meta = json.load(handle)
+            channels = int(meta.get("channel_count", -1))
             if (int(meta.get("schema", -1)) != PCM_RENDER_CACHE_SCHEMA_VERSION
                     or meta.get("key") != spec.key
-                    or int(meta.get("channel_count", -1)) != spec.channel_count
+                    or (spec.channel_count and channels != spec.channel_count)
                     or int(meta.get("total_samples", -1)) != spec.total_samples
                     or int(meta.get("output_samples", -1))
                     != spec.expected_output_samples):
                 raise ValueError("meta mismatch")
             with np.load(data_path) as payload:
                 pcm = payload["pcm"]
-                if (pcm.dtype != np.float32 or pcm.ndim != 2
-                        or pcm.shape[0] != spec.channel_count
-                        or pcm.shape[1] != spec.expected_output_samples):
-                    raise ValueError("payload mismatch")
+                self._validate_payload(spec, pcm)
+                if pcm.shape[0] != channels:
+                    raise ValueError("payload channel count differs from metadata")
                 result = np.ascontiguousarray(pcm, dtype=np.float32)
             try:
                 os.utime(data_path)
@@ -550,13 +555,15 @@ class PcmRenderCache:
 
     @staticmethod
     def _validate_payload(spec: PreRenderSpec, pcm: np.ndarray) -> None:
+        allowed_channels = (spec.channel_count,) if spec.channel_count else (1, 2)
         if (not isinstance(pcm, np.ndarray) or pcm.ndim != 2
                 or pcm.dtype != np.float32
-                or pcm.shape[0] != spec.channel_count
+                or pcm.shape[0] not in allowed_channels
                 or pcm.shape[1] != spec.expected_output_samples):
+            expected = str(spec.channel_count) if spec.channel_count else "1–2"
             raise ValueError(
                 f"pre-render payload {pcm.shape if isinstance(pcm, np.ndarray) else pcm!r}"
-                f" does not match spec {spec.channel_count}x"
+                f" does not match spec {expected}x"
                 f"{spec.expected_output_samples} float32")
 
 
@@ -650,7 +657,7 @@ class PreRenderBuildPlan:
         def _build() -> np.ndarray:
             pcm = decode_audio_range(
                 plan.source_path, plan.start_sample, plan.end_sample,
-                plan.sample_rate,
+                plan.sample_rate, pad_to_end=True,
                 channel_map=plan.source_channel_map or None)
             if pcm is None:
                 raise RuntimeError(
@@ -722,7 +729,7 @@ def build_pre_render_plan(
         reverse=spec.reverse,
         # decode_audio_range 的容器布局：mono / >2ch 经 BS.775 矩阵折到
         # stereo（P0 起 LFE 策略显式、系数与交付 downmix 同源）。
-        expected_channels=spec.processing_channel_count,
+        expected_channels=spec.processing_channel_count if spec.channel_count else 0,
         blocked_reason=blocked,
         diagnostics=tuple(diagnostics),
         channel_layout=str(getattr(spec, "channel_layout", "") or ""),

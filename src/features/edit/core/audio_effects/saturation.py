@@ -19,11 +19,14 @@
 """
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from functools import lru_cache
+import math
+from typing import Optional, Tuple
 
 import numpy as np
 
-from src.features.edit.core.audio_dsp import AudioEffect
+from src.features.edit.core.audio_dsp import AudioEffect, _clamp_finite
 
 try:  # pragma: no cover - 环境探测
     from scipy.signal import butter, firwin, lfilter, sosfilt, upfirdn
@@ -38,6 +41,7 @@ PANEL_DRIVE_TO_DB = 3.0
 _TONE_CORNER_HZ = 1000.0
 _DC_CUTOFF_HZ = 5.0
 _MODELS = ("tape", "tube", "transistor")
+_DC_NUMERATOR = np.array([1.0, -1.0], dtype=np.float64)
 
 
 def _db(x: float) -> float:
@@ -62,6 +66,7 @@ def shape_transistor(x: np.ndarray) -> np.ndarray:
     return x / (1.0 + np.abs(x))
 
 
+@lru_cache(maxsize=128)
 def _rbj_high_shelf(fs: float, f0: float, gain_db: float
                     ) -> Tuple[np.ndarray, np.ndarray]:
     """RBJ high shelf biquad（cookbook，S=1）。返回归一化 (b, a)。"""
@@ -80,14 +85,29 @@ def _rbj_high_shelf(fs: float, f0: float, gain_db: float
     return (np.array([b0, b1, b2]) / a0, np.array([1.0, a1 / a0, a2 / a0]))
 
 
+@dataclass(frozen=True)
+class _Band:
+    enabled: bool
+    model: str
+    drive: float
+    bias: float
+    tube_offset: float
+    tube_divisor: float
+    tone_db: float
+    level: float
+
+    @property
+    def blocks_dc(self) -> bool:
+        return self.model == "tube" or self.bias != 0.0
+
+
 class _ChannelFilters:
     """跨块滤波状态：DC 阻断（lfilter zi）与 Tone 高架（biquad zi）。"""
 
     def __init__(self, channels: int) -> None:
-        self.channels = channels
         self.dc_zi = np.zeros((channels, 1), dtype=np.float64)
         self.tone_zi = np.zeros((channels, 2), dtype=np.float64)
-        self.tone_key: Optional[tuple] = None
+        self.tone_key: float | None = None
 
     def reset(self) -> None:
         self.dc_zi[:] = 0.0
@@ -100,67 +120,82 @@ class MultibandSaturationEffect(AudioEffect):
 
     effect_type = "saturation_multiband"
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    _DEFAULT_PARAMS = {
+        "enabled": True, "xover_low_hz": 250.0, "xover_high_hz": 2500.0,
+        "oversampling": 1, "mix": 1.0, "output_gain_db": 0.0, "bands": (),
+        "crossover_mode": "legacy",
+    }
+
+    def __init__(self, sample_rate: float = 48000.0, *,
+                 params_are_snapshots: bool = False) -> None:
         super().__init__(sample_rate)
-        self._params: dict = {
-            "enabled": True,
-            "xover_low_hz": 250.0,
-            "xover_high_hz": 2500.0,
-            "oversampling": 1,
-            "mix": 1.0,
-            "output_gain_db": 0.0,
-            "bands": (
-                {"enabled": False, "model": "tape", "drive_db": 0.0,
-                 "tone_db": 0.0, "bias_pct": 0.0, "level_db": 0.0},
-                {"enabled": False, "model": "tube", "drive_db": 0.0,
-                 "tone_db": 0.0, "bias_pct": 0.0, "level_db": 0.0},
-                {"enabled": False, "model": "transistor", "drive_db": 0.0,
-                 "tone_db": 0.0, "bias_pct": 0.0, "level_db": 0.0},
-            ),
-        }
+        self._params = dict(self._DEFAULT_PARAMS)
+        self._params_are_snapshots = params_are_snapshots
         self._channels = 0
         self._oversampling = 1
-        self._lp_sos = None          # 4 阶 Butterworth（两级 biquad）
+        self._low_sos = None
+        self._mid_sos = None
         self._zi_low = None          # low 段分频状态
         self._zi_mid = None          # mid 段分频状态
         self._up_taps = None
         self._down_taps = None
         self._up_hist: Optional[np.ndarray] = None    # (ch, 20)
         self._down_hist: Optional[np.ndarray] = None  # (ch, 20R)
-        self._filters: List[_ChannelFilters] = []
+        self._filters: list[_ChannelFilters] = []
         self._dry_delay: Optional[np.ndarray] = None
         self._crossover_key: tuple = ()
-        self._rebuild()
+        self._stream_key: tuple = ()
+        self._dc_denominator = np.ones(2, dtype=np.float64)
+        self._mix = 1.0
+        self._output_gain = 1.0
+        self._bands: tuple[_Band, ...] = ()
+        self._active_bands: tuple[int, ...] = ()
+        self._configure_parameters()
 
     # ── 拓扑 ─────────────────────────────────────────────────────
     def _oversampling_of(self, params: dict) -> int:
-        value = int(params.get("oversampling", 1))
+        try:
+            value = int(params["oversampling"])
+        except (TypeError, ValueError, OverflowError):
+            return 1
         return value if value in (1, 2, 4) else 1
 
     def _rebuild(self) -> None:
-        if not self._channels:
+        if not self._channels or not _SCIPY:
             return
-        oversampling = self._oversampling_of(self._params)
-        fs = float(self._sample_rate) * oversampling
-        low_hz = float(np.clip(self._params.get("xover_low_hz", 250.0),
-                               20.0, 0.45 * fs))
-        high_hz = float(np.clip(self._params.get("xover_high_hz", 2500.0),
-                                20.0, 0.45 * fs))
-        key = (self._channels, oversampling, float(self._sample_rate),
-               round(low_hz, 6), round(high_hz, 6))
+        fs = self._sample_rate * self._oversampling
+        stream_key = (self._channels, self._oversampling, self._sample_rate)
+        if stream_key != self._stream_key:
+            self._rebuild_stream()
+            self._stream_key = stream_key
+            self._crossover_key = ()
+        low_hz, mid_hz = self._crossover_frequencies()
+        key = (fs, low_hz, mid_hz, self._channels)
         if key == self._crossover_key:
             return
         self._crossover_key = key
-        self._oversampling = oversampling
-        self._lp_sos = np.asarray(
-            butter(4, low_hz, btype="lowpass", fs=fs, output="sos"),
-            dtype=np.float64)
-        n_sections = self._lp_sos.shape[0]
+        self._low_sos = butter(4, low_hz, btype="lowpass", fs=fs, output="sos")
+        self._mid_sos = (self._low_sos if mid_hz == low_hz else
+                         butter(4, mid_hz, btype="lowpass", fs=fs, output="sos"))
+        n_sections = self._low_sos.shape[0]
         self._zi_low = np.zeros((n_sections, self._channels, 2),
                                 dtype=np.float64)
         self._zi_mid = np.zeros((n_sections, self._channels, 2),
                                 dtype=np.float64)
-        r = oversampling
+    def _crossover_frequencies(self) -> tuple[float, float]:
+        if self._params["crossover_mode"] != "dual":
+            # Preserve the original single low-pass coefficient in both paths.
+            low = _clamp_finite(self._params["xover_low_hz"], 20.0,
+                                0.45 * self._sample_rate * self._oversampling, 250.0)
+            return low, low
+        ceiling = max(21.0, 0.45 * self._sample_rate)
+        low = _clamp_finite(self._params["xover_low_hz"], 20.0, ceiling - 1.0, 250.0)
+        high_default = max(low + 1.0, min(2500.0, ceiling))
+        high = _clamp_finite(self._params["xover_high_hz"], low + 1.0, ceiling, high_default)
+        return low, high
+
+    def _rebuild_stream(self) -> None:
+        r = self._oversampling
         if r > 1:
             # 上采样（内插）增益 ×R；下采样（抗混叠抽取）增益 1。
             proto = firwin(2 * 10 * r + 1, 1.0 / r, window=("kaiser", 5.0))
@@ -188,23 +223,49 @@ class MultibandSaturationEffect(AudioEffect):
         "mb_mix": "mix",
         "mb_output_gain_db": "output_gain_db",
         "mb_bands": "bands",
+        "mb_crossover_mode": "crossover_mode",
     }
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
-        if sample_rate is not None and sample_rate != self._sample_rate:
+        changed_rate = sample_rate is not None and sample_rate != self._sample_rate
+        if changed_rate:
             self._sample_rate = float(sample_rate)
-            self._crossover_key = ()
-        merged = dict(self._params)
+        merged = dict(self._DEFAULT_PARAMS if self._params_are_snapshots else self._params)
         if isinstance(params, dict):
             for key, value in params.items():
                 merged[self._KEY_ALIASES.get(key, key)] = value
-        self._params = merged
-        # 过采样档位立即生效（latency_samples 在首块前就要正确）；
-        # 滤波系数与历史缓冲在首块（声道数已知）时重建。
-        self._oversampling = self._oversampling_of(self._params)
-        self._rebuild()
+        if merged != self._params or changed_rate:
+            self._params = merged
+            self._configure_parameters()
+            self._rebuild()
+
+    def _configure_parameters(self) -> None:
+        params = self._params
+        self._oversampling = self._oversampling_of(params)
+        self._mix = _clamp_finite(params["mix"], 0.0, 1.0, 1.0)
+        self._output_gain = _db(_clamp_finite(params["output_gain_db"], -24.0, 24.0, 0.0))
+        fs = self._sample_rate * self._oversampling
+        self._dc_denominator[1] = -float(np.exp(-2.0 * np.pi * _DC_CUTOFF_HZ / fs))
+        bands = params["bands"] if isinstance(params["bands"], (tuple, list)) else ()
+        prepared = []
+        for index in range(3):
+            band = bands[index] if index < len(bands) and isinstance(bands[index], dict) else {}
+            model = str(band.get("model", "tape")).lower()
+            if model not in _MODELS:
+                model = "tape"
+            bias = _clamp_finite(band.get("bias_pct", 0.0), -100.0, 100.0, 0.0) / 100.0
+            tube_offset = float(np.tanh(np.clip(bias, -0.9, 0.9))) if model == "tube" else 0.0
+            prepared.append(_Band(
+                bool(band.get("enabled", False)), model,
+                _db(_clamp_finite(band.get("drive_db", 0.0), 0.0, 36.0, 0.0)),
+                bias, tube_offset, max(1.0 - tube_offset * tube_offset, 1e-6),
+                _clamp_finite(band.get("tone_db", 0.0), -12.0, 12.0, 0.0),
+                _db(_clamp_finite(band.get("level_db", 0.0), -24.0, 12.0, 0.0)),
+            ))
+        self._bands = tuple(prepared)
+        self._active_bands = tuple(i for i, band in enumerate(self._bands) if band.enabled)
 
     def reset_state(self) -> None:
         if self._zi_low is not None:
@@ -222,22 +283,32 @@ class MultibandSaturationEffect(AudioEffect):
 
     @property
     def is_active(self) -> bool:
-        return bool(self._params.get("enabled", True))
+        return _SCIPY and bool(self._params["enabled"])
 
     def latency_samples(self) -> int:
-        return 2 * OVERSAMPLE_LATENCY if self._oversampling > 1 else 0
+        return 2 * OVERSAMPLE_LATENCY if _SCIPY and self._oversampling > 1 else 0
 
     def tail_estimate_samples(self) -> int:
-        return 0  # 无记忆整形；DC/AA 滤波瞬态可忽略
+        if not self.is_active:
+            return 0
+        latency = self.latency_samples()
+        if self._mix == 0.0:
+            return latency
+        fir_tail = 2 * latency
+        if not self._active_bands:
+            return fir_tail
+        low, _ = self._crossover_frequencies()
+        slowest_pole_hz = low * math.sin(math.pi / 8.0)
+        if any(self._bands[i].blocks_dc for i in self._active_bands):
+            slowest_pole_hz = min(slowest_pole_hz, _DC_CUTOFF_HZ)
+        decay = math.log(1000.0) / (2.0 * math.pi * slowest_pole_hz)
+        return math.ceil(decay * self._sample_rate) + fir_tail
 
     # ── 处理 ─────────────────────────────────────────────────────
     def process(self, samples: np.ndarray) -> np.ndarray:
-        if not self.is_active or samples is None or samples.ndim != 2:
+        if not self.is_active or samples is None or samples.ndim != 2 or not samples.size:
             return samples
-        n = samples.shape[-1]
-        if n == 0:
-            return samples
-        channels = samples.shape[0]
+        channels, n = samples.shape
         if channels != self._channels:
             self._channels = channels
             self._crossover_key = ()
@@ -251,78 +322,50 @@ class MultibandSaturationEffect(AudioEffect):
 
         # 三段减法互补分割：low = LP(x)；res1 = x − low；
         # mid = LP(res1)；high = res1 − mid（求和精确重构）。
-        low, self._zi_low = sosfilt(self._lp_sos, x, axis=-1, zi=self._zi_low)
+        low, self._zi_low = sosfilt(self._low_sos, x, axis=-1, zi=self._zi_low)
         res1 = x - low
-        mid, self._zi_mid = sosfilt(self._lp_sos, res1, axis=-1,
+        mid, self._zi_mid = sosfilt(self._mid_sos, res1, axis=-1,
                                     zi=self._zi_mid)
         high = res1 - mid
         band_signals = (low, mid, high)
 
-        bands = self._params.get("bands", ())
-        wet = np.zeros_like(x)
-        for band_idx in range(3):
-            band = bands[band_idx] if band_idx < len(bands) else {}
-            if bool(band.get("enabled", False)):
-                processed = self._process_band(
-                    band_signals[band_idx], band, self._filters[band_idx], r)
-            else:
-                processed = band_signals[band_idx]  # 禁用段保留干声
-            wet = wet + processed
+        processed = list(band_signals)
+        for index in self._active_bands:
+            processed[index] = self._process_band(
+                band_signals[index], self._bands[index], self._filters[index])
+        wet = processed[0] + processed[1] + processed[2]
 
         if r > 1:
             wet = self._downsample(wet, n)  # 内容再延迟 10（合计 20）
-        else:
-            wet = wet
+        dry = x if r == 1 else self._delay_dry(samples, n)
+        out = dry * (1.0 - self._mix) + wet * self._mix
+        return np.ascontiguousarray(out * self._output_gain, dtype=np.float32)
 
-        mix = float(np.clip(self._params.get("mix", 1.0), 0.0, 1.0))
-        out_gain = _db(self._params.get("output_gain_db", 0.0))
-        dry = self._delay_dry(samples, n)
-        out = dry * (1.0 - mix) + wet * mix
-        return np.ascontiguousarray((out * out_gain).astype(np.float32),
-                                    dtype=np.float32)
-
-    def _process_band(self, band_signal: np.ndarray, band: dict,
-                      filters: _ChannelFilters, r: int) -> np.ndarray:
+    def _process_band(self, band_signal: np.ndarray, band: _Band,
+                      filters: _ChannelFilters) -> np.ndarray:
         """单段处理：drive → shape → DC → tone → level。"""
-        drive = _db(np.clip(float(band.get("drive_db", 0.0)), 0.0, 36.0))
-        x = band_signal * drive
-        model = str(band.get("model", "tape")).lower()
-        bias = float(np.clip(float(band.get("bias_pct", 0.0)),
-                             -100.0, 100.0)) / 100.0
-        if model == "tube":
-            y = shape_tube(x, bias)
-        elif model == "transistor":
-            y = shape_transistor(x + bias) if bias != 0.0 else \
+        x = band_signal * band.drive
+        if band.model == "tube":
+            y = (np.tanh(x + max(-0.9, min(0.9, band.bias))) - band.tube_offset) / band.tube_divisor
+        elif band.model == "transistor":
+            y = shape_transistor(x + band.bias) if band.bias != 0.0 else \
                 shape_transistor(x)
         else:
-            y = shape_tape(x + bias) if bias != 0.0 else shape_tape(x)
+            y = shape_tape(x + band.bias) if band.bias != 0.0 else shape_tape(x)
 
         # DC 阻断（tube / 带 bias 输入时必要）：一极高通 lfilter，zi 跨块。
-        if model == "tube" or bias != 0.0:
-            fs = float(self._sample_rate) * r
-            a = float(np.exp(-2.0 * np.pi * _DC_CUTOFF_HZ / fs))
-            blocked = np.empty_like(y)
-            for ch in range(y.shape[0]):
-                blocked[ch], filters.dc_zi[ch] = lfilter(
-                    np.array([1.0, -1.0]), np.array([1.0, -a]), y[ch],
-                    zi=filters.dc_zi[ch])
-            y = blocked
+        if band.blocks_dc:
+            y, filters.dc_zi = lfilter(
+                _DC_NUMERATOR, self._dc_denominator, y, axis=-1, zi=filters.dc_zi)
         # Tone 高架（RBJ，1 kHz 角频；系数变化即重置状态）。
-        tone_db = float(np.clip(float(band.get("tone_db", 0.0)),
-                                -12.0, 12.0))
-        if abs(tone_db) > 1e-6:
-            fs = float(self._sample_rate) * r
-            b, a = _rbj_high_shelf(fs, _TONE_CORNER_HZ, tone_db)
-            key = (round(tone_db, 4), round(fs, 3))
-            if filters.tone_key != key:
-                filters.tone_key = key
+        if abs(band.tone_db) > 1e-6:
+            fs = self._sample_rate * self._oversampling
+            b, a = _rbj_high_shelf(fs, _TONE_CORNER_HZ, band.tone_db)
+            if filters.tone_key != band.tone_db:
+                filters.tone_key = band.tone_db
                 filters.tone_zi[:] = 0.0
-            for ch in range(y.shape[0]):
-                y[ch], filters.tone_zi[ch] = lfilter(
-                    b, a, y[ch], zi=filters.tone_zi[ch])
-        level = _db(np.clip(float(band.get("level_db", 0.0)),
-                            -24.0, 12.0))
-        return y * level
+            y, filters.tone_zi = lfilter(b, a, y, axis=-1, zi=filters.tone_zi)
+        return y * band.level
 
     # ── 过采样（因果 FIR；每声道历史跨块） ───────────────────────
     def _upsample(self, x: np.ndarray) -> np.ndarray:
