@@ -39,7 +39,7 @@ import uuid
 from fractions import Fraction
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional
 
 from PyQt6.QtWidgets import QMessageBox, QFileDialog, QWidget, QProgressDialog
 from PyQt6.QtCore import QObject, QThread, pyqtSignal, QTimer, Qt
@@ -48,6 +48,9 @@ from PyQt6.QtGui import QPixmap
 from src.features.edit.core.playback_debug import playback_trace
 from src.shared.i18n.i18n import I18N
 from src.shared.track_colors import next_track_color
+
+if TYPE_CHECKING:
+    from src.features.edit.core.clip_params import CropParams
 
 try:
     # E01: append 拒绝（区间重叠/无目标轨）的领域错误类型
@@ -2429,6 +2432,47 @@ class EditControllerMixin:
     # ------------------------------------------------------------------
     # Edit Properties Panel Handlers
     # ------------------------------------------------------------------
+
+    def _on_edit_crop_drag_preview(
+        self, batch: list[tuple[str, str, str, CropParams]],
+    ) -> None:
+        """Render the crop gesture using a temporary sequence."""
+        timeline = getattr(self.edit_page, "_current_timeline", None)
+        renderer = self.timeline_preview_renderer
+        commands = get_command_classes()
+        if timeline is None or renderer is None or commands is None:
+            return
+
+        preview = timeline
+        for clip_id, _, _, crop in batch:
+            clip = preview.get_clip_by_id(clip_id)
+            if clip is None:
+                return
+            command = commands["UpdateClipParamCommand"].create_crop(
+                clip.track_id, clip_id, crop, clip.crop,
+            )
+            try:
+                preview = command.apply(preview)
+            except ValueError:  # A locked track rejects the entire preview batch.
+                return
+
+        renderer.update_sequence_silent(preview, preview_only=True)
+        self._request_program_viewer_update()
+
+    def _on_edit_crop_drag_finished(
+        self, batch: list[tuple[str, str, str, CropParams]],
+    ) -> None:
+        """Commit once, or restore the current sequence after a cancelled crop."""
+        timeline = getattr(self.edit_page, "_current_timeline", None)
+        if timeline is None:
+            return
+        if batch:
+            self._on_edit_clips_param_batch_changed(batch)
+        renderer = self.timeline_preview_renderer
+        # A successful commit refreshes the renderer via timeline_changed.
+        if renderer is not None and self.edit_page._current_timeline is timeline:
+            renderer.set_sequence(timeline)
+            self._request_program_viewer_update()
 
     def _on_edit_clip_param_changed(
         self, clip_id: str, param_type: str, param_path: str, value: object

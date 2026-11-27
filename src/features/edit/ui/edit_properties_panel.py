@@ -29,7 +29,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPointF, QPoint, QMimeData, QEvent, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QPolygonF, QFont, QFontMetrics,
-    QFontDatabase, QPixmap, QDrag,
+    QFontDatabase, QPixmap, QDrag, QHideEvent, QMouseEvent,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -59,6 +59,7 @@ from src.shared.ui.style_sheet import (
 from src.features.composite.nodes.base_node import ParamDef
 from src.features.edit.core.clip_params import (
     ClipBlendMode,
+    CropParams,
     RawParams,
     SpeedParams,
 )
@@ -87,6 +88,9 @@ logger = logging.getLogger(__name__)
 
 # 数值格固定宽度（与 composite 面板一致）— 保持各数值行左对齐。
 _VALUE_FIXED_WIDTH = 64
+_PAIRED_VALUE_FIXED_WIDTH = 46
+_PARAM_LABEL_MAX_WIDTH = 96
+_SECTION_CONTENT_MARGIN = 8
 
 # 宽于此值时单行 slider 显示（与 composite 一致，保证窄面板不裁切）。
 _SLIDER_SHOW_WIDTH = 380
@@ -318,6 +322,7 @@ class KeyframeIndicatorButton(QToolButton):
 
     keyframe_toggled = pyqtSignal(str, int, float)  # param_name, frame, value
     DIAMOND_SIZE = 10
+    BUTTON_SIZE = 18
 
     def __init__(self, param_name: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -326,7 +331,7 @@ class KeyframeIndicatorButton(QToolButton):
         self._is_animated = False
         self._current_frame = 0
         self._current_value = 0.0
-        self.setFixedSize(18, 18)
+        self.setFixedSize(self.BUTTON_SIZE, self.BUTTON_SIZE)
         self.setToolTip(I18N.tr("edit.keyframe.toggle", "Toggle keyframe at current frame"))
         self.clicked.connect(self._on_clicked)
 
@@ -416,16 +421,6 @@ class EditSectionWidget(QWidget):
         # 显示「打开面板」按钮以及打开哪种 dialog。
         self.effect_type: str = ""
         self._param_widgets: Dict[str, Any] = {}
-        # Numeric-row sliders live between label and DragValue and stretch to
-        # fill the available width (mirrors composite).  Unlike composite's
-        # XY-pair sliders they are ALWAYS visible: hiding them (as an earlier
-        # attempt did) collapses each row to ``[label][DragValue]+whitespace``
-        # and produces exactly the "everything left-aligned" look we are fixing.
-        self._slidable_sliders: list = []
-        # Shared minimum label width so every row's label right-edge aligns
-        # (mirrors composite's _label_min_width).  Computed by the panel before
-        # the section builder runs, from the widest param display name.
-        self._label_min_width: int = 60
 
         # Inspector sections use their own compact, neutral global template.
         # NodeSectionWidget's full-width colour gradient is retained for the
@@ -463,7 +458,9 @@ class EditSectionWidget(QWidget):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
         self._content_layout = QVBoxLayout(self._content_widget)
-        self._content_layout.setContentsMargins(8, 5, 8, 5)
+        self._content_layout.setContentsMargins(
+            _SECTION_CONTENT_MARGIN, 5, _SECTION_CONTENT_MARGIN, 5,
+        )
         self._content_layout.setSpacing(3)
         self._content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         layout.addWidget(self._content_widget)
@@ -480,7 +477,7 @@ class EditSectionWidget(QWidget):
 
     def _build_header(self) -> None:
         header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(7, 0, 3, 0)
+        header_layout.setContentsMargins(_SECTION_CONTENT_MARGIN, 0, _SECTION_CONTENT_MARGIN, 0)
         header_layout.setSpacing(2)
 
         # FX-H04-UI: Drag handle（仅 effect section 显示）— 拖拽排序入口。
@@ -522,8 +519,9 @@ class EditSectionWidget(QWidget):
 
         # 标题
         self._title_label = QLabel(self.title)
-        header_layout.addWidget(self._title_label)
-        header_layout.addStretch()
+        self._title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._title_label.setToolTip(self.title)
+        header_layout.addWidget(self._title_label, 1)
 
         # Effect-only controls.  The common leading toggle above is the
         # effect's real enable control, avoiding a duplicate eye icon.
@@ -800,6 +798,8 @@ class EditPropertiesPanel(QWidget):
     clip_param_changed = pyqtSignal(str, str, str, object)  # clip_id, param_type, param_path, value
     # RI-05/R16：多选批量参数（每片按自身原值派生），一次宏提交
     clips_param_batch_changed = pyqtSignal(list)  # [(clip_id, param_type, param_path, value)]
+    crop_drag_preview = pyqtSignal(list)  # same batch shape, for the viewer
+    crop_drag_finished = pyqtSignal(list)  # empty batch cancels the preview
     reset_transform_requested = pyqtSignal(list)            # list of clip_ids
 
     effect_param_changed = pyqtSignal(str, str, str, object)  # clip_id, effect_id, param_name, value
@@ -849,7 +849,16 @@ class EditPropertiesPanel(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._updating = False  # 防递归锁
+        self._param_label_width = min(
+            _PARAM_LABEL_MAX_WIDTH, self._compute_label_min_width(RAW_PARAM_DEFS),
+        )
         self._current_clips: List[ClipInstance] = []
+        self._crop_drag_row: tuple[str, str, DragValue | ToposClickableSlider] | None = None
+        self._crop_drag_batch: list[tuple[str, str, str, CropParams]] = []
+        self._crop_preview_timer = QTimer(self)
+        self._crop_preview_timer.setSingleShot(True)
+        self._crop_preview_timer.setInterval(16)
+        self._crop_preview_timer.timeout.connect(self._flush_crop_drag_preview)
         self._current_tracks: List[Optional[EditTrack]] = []
         self._audio_workspace = False
         self._fps: float = 24.0
@@ -938,7 +947,7 @@ class EditPropertiesPanel(QWidget):
 
         # 滚动区
         # 与 composite 一致：setWidgetResizable(True) 让内部 _content 跟随 viewport
-        # 宽度拉伸，section/数值行才能填满整个面板宽度（DragValue 贴右边缘）。
+        # 宽度拉伸，让参数列随 dock 宽度调整。
         # 之前给 _scroll/_content 加的水平 sizePolicy 限制（Preferred/Maximum）会
         # 把内容钉死在 sizeHint 宽度，导致 dock 拖宽后右侧出现大面积空白。
         self._scroll = QScrollArea()
@@ -995,6 +1004,7 @@ class EditPropertiesPanel(QWidget):
         crash in ``QScrollBar::initStyleOption``. Hide every popup before
         detaching its section so Qt processes the close against live parents.
         """
+        self._finish_crop_drag(commit=False)
         # The debounce timer captures the selected cue in its timeout closure.
         # Stop and release it before replacing sections so a queued timeout
         # cannot commit text into a cue that is no longer selected.
@@ -1066,12 +1076,17 @@ class EditPropertiesPanel(QWidget):
         self._drop_indicator.raise_()
 
     def eventFilter(self, obj: object, event: QEvent) -> bool:
-        """Handle drag events on _content for effect reorder."""
+        """Watch the active crop control and effect reorder drop target."""
+        etype = event.type()
+        crop_row = self._crop_drag_row
+        if crop_row is not None and obj is crop_row[2] and (
+            etype in (QEvent.Type.Hide, QEvent.Type.UngrabMouse)
+            or (etype == QEvent.Type.EnabledChange and not crop_row[2].isEnabled())
+        ):
+            self._cancel_crop_drag()
         if obj is not self._content:
             return super().eventFilter(obj, event)
 
-        etype = event.type()
-        from PyQt6.QtCore import QEvent
         if etype == QEvent.Type.DragEnter:
             if event.mimeData().hasFormat(self._REORDER_MIME):
                 event.acceptProposedAction()
@@ -1159,11 +1174,6 @@ class EditPropertiesPanel(QWidget):
             section.effect_delete_requested.connect(self._on_effect_delete_requested)
             # P-clip-FX: 「打开面板」按钮 → 转发到 controller 打开独立对话框
             section.effect_open_dialog_requested.connect(self._on_effect_open_dialog_requested)
-        # Compute a shared label width from the widest param display name so
-        # every row's value/slider left-edge lines up (mirrors composite's
-        # _label_min_width).  Done before the builder runs because labels are
-        # created inside the builder and read section._label_min_width then.
-        section._label_min_width = self._compute_label_min_width(param_defs or {})
         if builder is not None:
             builder(section)
         # 插到 no_selection_label 之前
@@ -1176,9 +1186,7 @@ class EditPropertiesPanel(QWidget):
     def _compute_label_min_width(param_defs: Dict[str, ParamDef]) -> int:
         """Widest param-name pixel width + padding, floored at 60.
 
-        Uses the same font metrics as composite (QFont("", 10)) so label
-        alignment matches across both panels.  Param keys are title-cased
-        the same way ``_make_param_label`` displays them.
+        Estimate the width using the same title-cased keys shown in the panel.
         """
         fm = QFontMetrics(QFont("", 10))
         widest = 36
@@ -1191,20 +1199,6 @@ class EditPropertiesPanel(QWidget):
     # 数值行构建（镜像 composite _create_numeric_row）
     # ============================================================
 
-    def _make_param_label(self, text: str, section: EditSectionWidget) -> QLabel:
-        """参数标签：统一最小宽度（按 section 内最长参数名计算），永不横向增长。
-
-        与 composite _make_param_label 一致：所有 label 共享同一个
-        ``_label_min_width``，保证不同长度的参数名右边缘对齐 —— 这样 DragValue /
-        slider 的左起点在同一垂直线上，行与行整齐。  Maximum sizePolicy 确保
-        label 永远不抢宽度，多余空间全部分给中间的 slider。
-        """
-        label = QLabel(text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(section._label_min_width)
-        label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        return label
-
     @staticmethod
     def _make_properties_row() -> QWidget:
         """Create a transparent row container inside the dark inspector."""
@@ -1213,9 +1207,69 @@ class EditPropertiesPanel(QWidget):
         row.setStyleSheet(EDIT_PROPERTIES_ROW_STYLE)
         return row
 
+    def _make_param_row(
+        self, text: str, *, label_accessories: tuple[QWidget, ...] = (),
+    ) -> tuple[QWidget, QHBoxLayout]:
+        """Give all parameter values the same starting column."""
+        row = self._make_properties_row()
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(4)
+        label = QLabel(text)
+        label.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px;")
+        label.setWordWrap(True)
+        label.setToolTip(text)
+        if label_accessories:
+            column = QWidget()
+            column.setFixedWidth(self._param_label_width)
+            column_layout = QHBoxLayout(column)
+            column_layout.setContentsMargins(0, 0, 0, 0)
+            column_layout.setSpacing(2)
+            column_layout.addWidget(label, 1)
+            for accessory in label_accessories:
+                column_layout.addWidget(accessory)
+            layout.addWidget(column)
+        else:
+            label.setFixedWidth(self._param_label_width)
+            layout.addWidget(label)
+        return row, layout
+
+    @staticmethod
+    def _make_axis_label(axis: str) -> QLabel:
+        label = QLabel(axis)
+        label.setStyleSheet(f"color: {C.TEXT_DIM}; font-size: 10px;")
+        label.setFixedWidth(8)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return label
+
+    def _make_xy_row(
+        self, title: str, link: QToolButton | None,
+    ) -> tuple[QWidget, QHBoxLayout]:
+        x_label = self._make_axis_label("x")
+        accessories = (x_label,) if link is None else (link, x_label)
+        row, layout = self._make_param_row(title, label_accessories=accessories)
+        fields = QHBoxLayout()
+        fields.setSpacing(2)
+        layout.addLayout(fields)
+        layout.addStretch()
+        return row, fields
+
+    @staticmethod
+    def _add_slider_value(
+        layout: QHBoxLayout, slider: ToposClickableSlider, value: DragValue,
+        keyframe: KeyframeIndicatorButton | None = None,
+    ) -> None:
+        """Fill the row while keeping the value and keyframe columns fixed."""
+        layout.addWidget(slider, 1)
+        layout.addWidget(value)
+        if keyframe is None:
+            layout.addSpacing(layout.spacing() + KeyframeIndicatorButton.BUTTON_SIZE)
+        else:
+            layout.addWidget(keyframe)
+
     def _make_numeric_slider(self, is_int: bool, mn: float, mx: float,
                              step: float, value: float) -> ToposClickableSlider:
-        """数值滑块（ToposClickableSlider，stretch=1 自适应宽度）。"""
+        """Create a slider with the parameter's range and step."""
         # Selection rebuilds these controls synchronously during a timeline
         # mouse press. A parentless slider shown before layout insertion is
         # a real top-level window on macOS and steals the timeline's grab.
@@ -1228,9 +1282,6 @@ class EditPropertiesPanel(QWidget):
             steps = max(int((mx - mn) / (step or 1.0)), 1)
             slider.setRange(0, steps)
             slider.setValue(int((value - mn) / (step or 1.0)))
-        # Sliders are always visible — they stretch to fill the row's middle so
-        # the value box stays pinned to the right edge (composite parity).  An
-        # earlier version hid them on narrow docks, which left-aligned every row.
         return slider
 
     def _build_numeric_row(self, section: EditSectionWidget, key: str,
@@ -1241,20 +1292,12 @@ class EditPropertiesPanel(QWidget):
                            to_model=None, from_model=None) -> QWidget:
         """构建数值行：[label] [slider?] [DragValue] [◆?]。
 
-        与 composite _create_numeric_row 一致：DragValue 固定 64px，slider stretch=1。
         G16：``keyframe_param`` 允许 ◆ 按钮携带与 section 键不同的完整参数名
         （如 rotation 行的键是 "rotation"，动画参数是 "transform.rotation"）。
         """
         is_int = pdef.ptype == "int"
-        row = self._make_properties_row()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-
-        # 标签
         display_name = key.replace("_", " ").title()
-        label = self._make_param_label(display_name, section)
-        h.addWidget(label)
+        row, h = self._make_param_row(display_name)
 
         # DragValue（主控件，固定宽度）
         drag = DragValue("", pdef.min_val, pdef.max_val, float(value),
@@ -1269,16 +1312,11 @@ class EditPropertiesPanel(QWidget):
             "step": pdef.step, "decimals": pdef.decimals,
         }
 
-        # 可选 slider（stretch=1 吃掉多余宽度）
         slider = None
         if enable_slider:
             slider = self._make_numeric_slider(
                 is_int, pdef.min_val, pdef.max_val, pdef.step, float(value)
             )
-            h.addWidget(slider, 1)
-            # Register with the section so it can be hidden when the dock is
-            # dragged narrow (see EditSectionWidget._apply_slider_visibility).
-            section._slidable_sliders.append(slider)
 
             def drag_changed(v, k=key, sl=slider, inf=info) -> None:
                 if self._updating:
@@ -1305,17 +1343,23 @@ class EditPropertiesPanel(QWidget):
                 lambda v, k=key: self._emit_section_param(section, k, v)
             )
 
-        h.addWidget(drag)
-
         # 可选关键帧按钮
+        kf_btn = None
         if enable_keyframe:
             full_param = keyframe_param or key
             kf_btn = KeyframeIndicatorButton(full_param)
             kf_btn.keyframe_toggled.connect(self._on_keyframe_button_toggled)
             self._keyframe_buttons[full_param] = kf_btn
-            h.addWidget(kf_btn)
             self._register_animated_value_widget(
                 full_param, drag, slider, info, to_model, from_model)
+
+        if slider is not None:
+            self._add_slider_value(h, slider, drag, kf_btn)
+        else:
+            h.addWidget(drag)
+            if kf_btn is not None:
+                h.addWidget(kf_btn)
+            h.addStretch()
 
         section._param_widgets[key] = info
         return row
@@ -1354,21 +1398,22 @@ class EditPropertiesPanel(QWidget):
         step = info["step"] or 1.0
         return int((value - mn) / step)
 
+    @staticmethod
+    def _make_compact_combo() -> ChevronComboBox:
+        """Allow narrow docks even when a choice list has long labels."""
+        combo = ChevronComboBox()
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        return combo
+
     def _build_combo_row(self, section: EditSectionWidget, key: str,
                          value: Any, options: List[str],
                          labels: Optional[List[str]] = None,
                          pdef: Optional[ParamDef] = None) -> QWidget:
         """构建下拉行：[label] [ChevronComboBox(stretch)]。"""
-        row = self._make_properties_row()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-
         display_name = key.replace("_", " ").title()
-        label = self._make_param_label(display_name, section)
-        h.addWidget(label)
+        row, h = self._make_param_row(display_name)
 
-        combo = ChevronComboBox()
+        combo = self._make_compact_combo()
         display_items = labels if labels else [str(o) for o in options]
         combo.addItems(display_items)
         if value in options:
@@ -1390,29 +1435,20 @@ class EditPropertiesPanel(QWidget):
                             display_name: Optional[str] = None,
                             enable_link: bool = False,
                             link_default_on: bool = False,
-                            enable_sliders: bool = True,
                             enable_keyframe: bool = False,
                             keyframe_prefix: str = "") -> QWidget:
         """构建 X/Y 配对数值行，对齐合成页 TransformNode 的 _create_xy_param_row。
 
-        布局：[label] [⛓?] [x-slider?] x[v][◆?]  [y-slider?] y[v][◆?]
+        布局：[label] [⛓?] x[v][◆?] y[v][◆?]
         - base 为 'scale' 时显示等比锁（默认锁住，1:1），与合成页一致。
-        - 每轴前有一个 10px 灰字轴标记 x/y。
-        - 两个 DragValue 固定 64px，slider 仅在 enable_sliders 时显示。
+        - 每轴前有一个灰字轴标记 x/y。
+        - 两个 DragValue 使用紧凑的固定宽度。
         - scale 联动：锁住时改一轴，另一轴 1:1 跟随（编辑页 _emit_transform_param
           已根据 self._scale_locked 处理 scale_x/scale_y 联动）。
         - G16：``enable_keyframe`` 时每轴附 ◆（动画参数名 = keyframe_prefix+轴键，
           如 "transform.translate_x"）。
         """
-        row = self._make_properties_row()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-
         name = display_name or base.replace("_", " ").title()
-        label = self._make_param_label(name, section)
-        h.addWidget(label)
-
         # 等比锁（仅 scale）：合成页 scale/radius 默认锁住、1:1。
         chain = None
         if enable_link:
@@ -1421,16 +1457,11 @@ class EditPropertiesPanel(QWidget):
                 tooltip="Link X and Y",
             )
             chain.toggled.connect(self._on_scale_lock_toggled)
-            h.addWidget(chain)
+        row, h = self._make_xy_row(name, chain)
 
-        def axis_marker(letter: str) -> QLabel:
-            m = QLabel(letter)
-            m.setStyleSheet("color: #888; font-size: 10px;")
-            m.setFixedWidth(10)
-            m.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            return m
-
-        def build_axis(key, val, pdef, letter):
+        def build_axis(
+            key: str, val: float, pdef: ParamDef,
+        ) -> tuple[DragValue, dict[str, Any]]:
             is_int = pdef.ptype == "int"
             mn, mx = pdef.min_val, pdef.max_val
             step = pdef.step or 1.0
@@ -1439,18 +1470,9 @@ class EditPropertiesPanel(QWidget):
                 "type": "int" if is_int else "float", "widget": None,
                 "min_val": mn, "max_val": mx, "step": step, "decimals": dec,
             }
-            slider = None
-            if enable_sliders:
-                slider = self._make_numeric_slider(is_int, mn, mx, step, float(val))
-                slider.setVisible(enable_sliders)
-                h.addWidget(slider, 1)
-                section._slidable_sliders.append(slider)
-                info["slider"] = slider
-
-            h.addWidget(axis_marker(letter))
             drag = DragValue("", mn, mx, float(val), decimals=dec)
             drag.setSingleStep(step)
-            drag.setFixedValueWidth(_VALUE_FIXED_WIDTH)
+            drag.setFixedValueWidth(_PAIRED_VALUE_FIXED_WIDTH)
             h.addWidget(drag)
             info["widget"] = drag
             if enable_keyframe:
@@ -1462,55 +1484,29 @@ class EditPropertiesPanel(QWidget):
                 h.addWidget(kf_btn)
                 # R10：登记行控件取值/回显闭包（transform 域无换算）。
                 self._register_animated_value_widget(
-                    full_param, drag, slider, info)
+                    full_param, drag, None, info)
 
-            def on_drag(v, k=key, sl=slider, inf=info) -> None:
-                if self._updating:
-                    return
-                if sl is not None:
-                    sl.blockSignals(True)
-                    sl.setValue(self._value_to_slider(v, inf))
-                    sl.blockSignals(False)
-                self._emit_section_param(section, k, v)
+            drag.valueChanged.connect(
+                lambda v, k=key: self._emit_section_param(section, k, v))
+            return drag, info
 
-            def on_slider(v, k=key, d=drag, inf=info) -> None:
-                if self._updating:
-                    return
-                fv = v if inf["type"] == "int" else v * inf["step"] + inf["min_val"]
-                d.blockSignals(True)
-                d.setValue(fv)
-                d.blockSignals(False)
-                self._emit_section_param(section, k, fv)
-
-            drag.valueChanged.connect(on_drag)
-            if slider is not None:
-                slider.valueChanged.connect(on_slider)
-            return drag, slider, info
-
-        drag_x, slider_x, info_x = build_axis(x_key, x_val, pdef_x, "x")
-        drag_y, slider_y, info_y = build_axis(y_key, y_val, pdef_y, "y")
-        h.addStretch()
+        drag_x, info_x = build_axis(x_key, x_val, pdef_x)
+        h.addWidget(self._make_axis_label("y"))
+        drag_y, info_y = build_axis(y_key, y_val, pdef_y)
 
         # scale 联动：锁住时改一轴，另一轴 1:1 跟随显示（_emit_transform_param
         # 会在数据层同步 scale_y/scale_x，这里仅同步显示）。
         if enable_link:
-            def sync_peer(src_drag, peer_drag, peer_key):
-                def _sync(v) -> None:
+            def sync_peer(peer_drag: DragValue) -> Callable[[float], None]:
+                def _sync(v: float) -> None:
                     if not self._scale_locked or self._updating:
                         return
                     peer_drag.blockSignals(True)
                     peer_drag.setValue(v)
                     peer_drag.blockSignals(False)
-                    # 同步 peer 的 slider 显示
-                    peer_info = section._param_widgets.get(peer_key)
-                    peer_sl = peer_info.get("slider") if peer_info else None
-                    if peer_sl is not None:
-                        peer_sl.blockSignals(True)
-                        peer_sl.setValue(self._value_to_slider(v, peer_info))
-                        peer_sl.blockSignals(False)
                 return _sync
-            drag_x.valueChanged.connect(sync_peer(drag_x, drag_y, y_key))
-            drag_y.valueChanged.connect(sync_peer(drag_y, drag_x, x_key))
+            drag_x.valueChanged.connect(sync_peer(drag_y))
+            drag_y.valueChanged.connect(sync_peer(drag_x))
 
         section._param_widgets[x_key] = info_x
         section._param_widgets[y_key] = info_y
@@ -1519,14 +1515,8 @@ class EditPropertiesPanel(QWidget):
     def _build_bool_row(self, section: EditSectionWidget, key: str,
                         value: bool, label_text: Optional[str] = None) -> QWidget:
         """构建布尔行：[label] [CheckBox]。"""
-        row = self._make_properties_row()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-
         display_name = label_text or key.replace("_", " ").title()
-        label = self._make_param_label(display_name, section)
-        h.addWidget(label)
+        row, h = self._make_param_row(display_name)
 
         checkbox = QCheckBox()
         checkbox.setChecked(bool(value))
@@ -1544,21 +1534,12 @@ class EditPropertiesPanel(QWidget):
     def _build_info_row(self, label_text: str, value_text: str,
                         bright: bool = False) -> QWidget:
         """构建只读信息行：[label] [value QLabel]。"""
-        row = self._make_properties_row()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-
-        label = QLabel(label_text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(60)
-        label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        h.addWidget(label)
-
+        row, h = self._make_param_row(label_text)
         value_label = QLabel(value_text)
         color = C.TEXT_BRIGHT if bright else C.TEXT_HINT
         value_label.setStyleSheet(f"color: {color}; font-size: 10px;")
-        value_label.setWordWrap(not bright)
+        value_label.setWordWrap(True)
+        value_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         h.addWidget(value_label, 1)
         return row
 
@@ -1584,6 +1565,17 @@ class EditPropertiesPanel(QWidget):
           "subtitle:<clip_id>:<track_id>:<group>"  ← P10.3
         """
         if self._updating:
+            return
+
+        if self._crop_drag_row is not None and self._crop_drag_row[:2] == (section_id, param_name):
+            self._crop_drag_batch = [
+                (clip.clip_id, "crop", param_name,
+                 self._derive_param_value(clip, "crop", param_name, value))
+                for clip in self._current_clips
+            ]
+            # Keep the latest value without postponing a pending preview.
+            if not self._crop_preview_timer.isActive():
+                self._crop_preview_timer.start()
             return
 
         parts = section_id.split(":")
@@ -1855,13 +1847,38 @@ class EditPropertiesPanel(QWidget):
 
     def _emit_crop_param(self, clip: ClipInstance, param_name: str, value: Any) -> None:
         """重建 CropParams（UI 显示百分比 0-50，内部存 0-0.5）。"""
-        c = clip.crop
-        if param_name == "feather":
-            new_c = c.with_feather(float(value))
-        else:
-            normalized = float(value) / 100.0
-            new_c = c.with_crop(**{param_name: normalized})
-        self.clip_param_changed.emit(clip.clip_id, "crop", param_name, new_c)
+        crop = self._derive_param_value(clip, "crop", param_name, value)
+        self.clip_param_changed.emit(clip.clip_id, "crop", param_name, crop)
+
+    def _begin_crop_drag(
+        self, section_id: str, param_name: str, widget: DragValue | ToposClickableSlider,
+    ) -> None:
+        if not self._updating:
+            self._crop_drag_row = (section_id, param_name, widget)
+
+    def _flush_crop_drag_preview(self) -> None:
+        self.crop_drag_preview.emit(self._crop_drag_batch)
+
+    def _finish_crop_drag(self, *, commit: bool = True) -> bool:
+        self._crop_preview_timer.stop()
+        batch = self._crop_drag_batch
+        row = self._crop_drag_row
+        self._crop_drag_row = None
+        self._crop_drag_batch = []
+        if not commit and row is not None:
+            row[2].cancel_pointer_drag()
+        if not batch:
+            return False
+        self.crop_drag_finished.emit(batch if commit else [])
+        return True
+
+    def _cancel_crop_drag(self) -> None:
+        if self._finish_crop_drag(commit=False):
+            self.refresh_clip_widgets_from_snapshots()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        self._cancel_crop_drag()
+        super().hideEvent(event)
 
     def _emit_speed_param(self, clip: ClipInstance, param_name: str, value: Any) -> None:
         """重建 SpeedParams。"""
@@ -1887,13 +1904,7 @@ class EditPropertiesPanel(QWidget):
         self.track_param_changed.emit(track_id, param_name, value)
 
     def _sync_paired_widget(self, key: str, value: float) -> None:
-        """scale lock 联动：同步另一轴的 DragValue **与 slider** 显示。
-
-        AUD-20002: 只 setValue DragValue 时，经滑块路径发起的联动会让
-        对侧滑块 thumb 停在旧位置（该路径不会触发 drag.valueChanged 上的
-        sync_peer），数值框与滑块显示分叉。两处都在 _updating 锁内归位
-        （setValue 触发的 valueChanged 处理器检查同一把锁，天然防递归）。
-        """
+        """Update the other scale axis without emitting a second edit."""
         # 在 transform section 里找对应 key 的 DragValue
         for section in self._sections.values():
             if ":transform" in section.section_id:
@@ -1902,10 +1913,6 @@ class EditPropertiesPanel(QWidget):
                     self._updating = True
                     try:
                         info["widget"].setValue(value)
-                        slider = info.get("slider")
-                        if slider is not None:
-                            slider.setValue(
-                                self._value_to_slider(float(value), info))
                     finally:
                         self._updating = False
                 break
@@ -2713,6 +2720,8 @@ class EditPropertiesPanel(QWidget):
             for i, existing in enumerate(self._current_clips):
                 if getattr(existing, "clip_id", None) == clip.clip_id:
                     if existing is not clip:
+                        if self._crop_drag_row is not None:
+                            self._finish_crop_drag(commit=False)
                         rebuild |= self._effect_structure(existing) != self._effect_structure(clip)
                         if getattr(self, "_audio_workspace", False):
                             rebuild |= existing.timeline_duration != clip.timeline_duration
@@ -2984,9 +2993,11 @@ def _build_subtitle_info_section(self: EditPropertiesPanel, clip) -> None:
         f"{clip.timeline_start}-{clip.timeline_end} "
         f"({_format_duration(clip.timeline_duration, self._fps)})"))
 
-    custom_box = QCheckBox(
-        I18N.tr("edit.properties.subtitle_custom", "Custom subtitle (independent of track)")
-    )
+    scope_label = I18N.tr("edit.properties.subtitle_custom", "Custom subtitle (independent of track)")
+    scope_row, scope_layout = self._make_param_row(scope_label)
+    scope_text = scope_layout.itemAt(0).widget()
+    custom_box = QCheckBox()
+    custom_box.setAccessibleName(scope_label)
     custom_box.setChecked(self._subtitle_scope == "custom")
     custom_box.setToolTip(I18N.tr(
         "edit.properties.subtitle_custom_hint",
@@ -3001,7 +3012,16 @@ def _build_subtitle_info_section(self: EditPropertiesPanel, clip) -> None:
         self.subtitle_scope_changed.emit(clip.clip_id, clip.track_id, scope)
 
     custom_box.stateChanged.connect(_scope_changed)
-    cl.addWidget(custom_box)
+
+    def _toggle_from_label(event: QMouseEvent) -> None:
+        if (event.button() == Qt.MouseButton.LeftButton
+                and scope_text.rect().contains(event.position().toPoint())):
+            custom_box.click()
+
+    scope_text.mouseReleaseEvent = _toggle_from_label
+    scope_layout.addWidget(custom_box)
+    scope_layout.addStretch()
+    cl.addWidget(scope_row)
 
 
 def _build_subtitle_text_section(self: EditPropertiesPanel, clip) -> None:
@@ -3085,7 +3105,9 @@ def _build_subtitle_text_section(self: EditPropertiesPanel, clip) -> None:
 
     edit.focusOutEvent = _on_focus_out
 
-    cl.addWidget(edit)
+    text_row, text_layout = self._make_param_row("")
+    text_layout.addWidget(edit, 1)
+    cl.addWidget(text_row)
 
 
 def _build_subtitle_font_section(self: EditPropertiesPanel, clip) -> None:
@@ -3106,7 +3128,7 @@ def _build_subtitle_font_section(self: EditPropertiesPanel, clip) -> None:
     cl = section.content_layout()
 
     # font_family — 可编辑 combo（从 QFontDatabase 填充）
-    family_combo = ChevronComboBox()
+    family_combo = self._make_compact_combo()
     family_combo.setEditable(True)
     try:
         families = list(QFontDatabase.families())
@@ -3120,12 +3142,7 @@ def _build_subtitle_font_section(self: EditPropertiesPanel, clip) -> None:
     family_combo.setCurrentText(clip.font_family)
 
     # 用 _build_combo_row 体系构建一个 family 行（特殊处理：editable combo）
-    family_row = QWidget()
-    fh = QHBoxLayout(family_row)
-    fh.setContentsMargins(0, 2, 0, 2)
-    fh.setSpacing(4)
-    family_label = self._make_param_label("Family", section)
-    fh.addWidget(family_label)
+    family_row, fh = self._make_param_row("Family")
     fh.addWidget(family_combo, 1)
     cl.addWidget(family_row)
 
@@ -3256,10 +3273,10 @@ def _build_subtitle_transform_section(self: EditPropertiesPanel, clip) -> None:
         SUBTITLE_TRANSFORM_PARAM_DEFS["translate_y"], enable_slider=False))
     cl.addWidget(self._build_numeric_row(
         section, "scale_x", clip.scale_x,
-        SUBTITLE_TRANSFORM_PARAM_DEFS["scale_x"]))
+        SUBTITLE_TRANSFORM_PARAM_DEFS["scale_x"], enable_slider=False))
     cl.addWidget(self._build_numeric_row(
         section, "scale_y", clip.scale_y,
-        SUBTITLE_TRANSFORM_PARAM_DEFS["scale_y"]))
+        SUBTITLE_TRANSFORM_PARAM_DEFS["scale_y"], enable_slider=False))
     cl.addWidget(self._build_numeric_row(
         section, "rotation", clip.rotation,
         SUBTITLE_TRANSFORM_PARAM_DEFS["rotation"]))
@@ -3278,7 +3295,7 @@ def _build_subtitle_color_button(self: EditPropertiesPanel, section,
                                  clip, group: str,
                                  r_key: str, g_key: str, b_key: str, a_key: str,
                                  label: str) -> QWidget:
-    """字幕颜色按钮：[label] [色块按钮] [R DragValue] [G] [B] [A]。
+    """字幕色块与各通道数值使用同一控件列。
 
     色块点击 → QColorDialog → 4 通道 emit。
     4 个 DragValue 单独编辑 → 单通道 emit。
@@ -3286,13 +3303,12 @@ def _build_subtitle_color_button(self: EditPropertiesPanel, section,
     param_defs = SUBTITLE_FILL_PARAM_DEFS if group == "fill" else (
         SUBTITLE_OUTLINE_PARAM_DEFS if group == "outline" else SUBTITLE_SHADOW_PARAM_DEFS
     )
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-
-    lbl = self._make_param_label(label, section)
-    h.addWidget(lbl)
+    group_widget = QWidget()
+    layout = QVBoxLayout(group_widget)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(3)
+    swatch_row, h = self._make_param_row(label)
+    layout.addWidget(swatch_row)
 
     r_val = float(getattr(clip, r_key))
     g_val = float(getattr(clip, g_key))
@@ -3346,6 +3362,7 @@ def _build_subtitle_color_button(self: EditPropertiesPanel, section,
 
     swatch.clicked.connect(_pick_color)
     h.addWidget(swatch)
+    h.addStretch()
 
     # 4 个 DragValue（紧凑）。
     # SUB-P1-01: 拖动一个通道用 begin/update/end session —— 拖动期间累积
@@ -3385,16 +3402,15 @@ def _build_subtitle_color_button(self: EditPropertiesPanel, section,
         _update_swatch()
         self.subtitle_params_changed.emit(clip.clip_id, clip.track_id, changes)
 
-    for key, val, display in (
-        (r_key, r_val, "R"), (g_key, g_val, "G"),
-        (b_key, b_val, "B"), (a_key, a_val, "A"),
+    for key, display in (
+        (r_key, "R"), (g_key, "G"), (b_key, "B"), (a_key, "A"),
     ):
-        drag = DragValue(display,
+        drag = DragValue("",
                          param_defs[key].min_val, param_defs[key].max_val,
                          float(getattr(clip, key)),
                          decimals=param_defs[key].decimals)
         drag.setSingleStep(param_defs[key].step)
-        drag.setFixedValueWidth(48)
+        drag.setFixedValueWidth(_VALUE_FIXED_WIDTH)
 
         def _on_changed(v, k=key) -> None:
             if self._updating:
@@ -3415,15 +3431,17 @@ def _build_subtitle_color_button(self: EditPropertiesPanel, section,
         drag.valueChanged.connect(_on_changed)
         drag.interaction_started.connect(_begin_color_session)
         drag.interaction_ended.connect(_commit_color_session)
-        h.addWidget(drag)
+        channel_row, channel_layout = self._make_param_row(display)
+        channel_layout.addWidget(drag)
+        channel_layout.addStretch()
+        layout.addWidget(channel_row)
         section._param_widgets[key] = {
             "type": "float", "widget": drag,
             "min_val": param_defs[key].min_val, "max_val": param_defs[key].max_val,
             "step": param_defs[key].step, "decimals": param_defs[key].decimals,
         }
 
-    h.addStretch()
-    return row
+    return group_widget
 
 
 def _build_subtitle_fill_section(self: EditPropertiesPanel, clip) -> None:
@@ -3579,7 +3597,6 @@ def _build_transform_section(self: EditPropertiesPanel, clip: ClipInstance,
         t.pivot_x, t.pivot_y,
         TRANSFORM_PARAM_DEFS["pivot_x"], TRANSFORM_PARAM_DEFS["pivot_y"],
         display_name=I18N.tr("edit.properties.pivot", "Pivot"),
-        enable_sliders=False,
     )
     pivot_editable = (t.pivot_mode == "custom")
     pivot_row.setEnabled(pivot_editable)
@@ -3626,6 +3643,17 @@ def _build_crop_section(self: EditPropertiesPanel, clip: ClipInstance,
     for key in ("left", "right", "top", "bottom", "feather"):
         cl.addWidget(self._build_numeric_row(section, key, parameters[key],
                                              CROP_PARAM_DEFS[key]))
+        widgets = section._param_widgets[key]
+        drag, slider = widgets["widget"], widgets["slider"]
+        slider.use_groove_drag_span = True
+        drag.interaction_started.connect(
+            lambda name=key, widget=drag: self._begin_crop_drag(section_id, name, widget))
+        slider.sliderPressed.connect(
+            lambda name=key, widget=slider: self._begin_crop_drag(section_id, name, widget))
+        drag.interaction_ended.connect(self._finish_crop_drag)
+        slider.sliderReleased.connect(self._finish_crop_drag)
+        drag.installEventFilter(self)
+        slider.installEventFilter(self)
 
 
 def _build_raw_section(self: EditPropertiesPanel, clip: ClipInstance,
@@ -3729,11 +3757,8 @@ def _build_opacity_section(self: EditPropertiesPanel, clip: ClipInstance,
     media_type = getattr(self, "_current_clip_media_type", None)
     if media_type not in ("video", "image", "comp_clip", "motion_graphic"):
         return
-    from PyQt6.QtWidgets import QComboBox, QLabel
-
-    row = QHBoxLayout()
-    row.addWidget(QLabel(I18N.tr("edit.properties.blend_mode", "Blend Mode")))
-    combo = QComboBox()
+    row, layout = self._make_param_row(I18N.tr("edit.properties.blend_mode", "Blend Mode"))
+    combo = self._make_compact_combo()
     for mode in ClipBlendMode:
         label = I18N.tr(
             f"edit.blend_mode.{mode.value}", mode.value.replace('_', ' ').title())
@@ -3754,8 +3779,8 @@ def _build_opacity_section(self: EditPropertiesPanel, clip: ClipInstance,
             self._updating = False
 
     combo.currentIndexChanged.connect(_on_blend_mode_changed)
-    row.addWidget(combo, 1)
-    cl.addLayout(row)
+    layout.addWidget(combo, 1)
+    cl.addWidget(row)
 
 
 def _build_solid_color_section(self: EditPropertiesPanel, clip: ClipInstance,
@@ -3867,13 +3892,8 @@ def _build_solid_color_section(self: EditPropertiesPanel, clip: ClipInstance,
     # ── Mode combo ──
     mode_options = ["solid", "checker", "gradient", "radial"]
     mode_labels = ["Solid", "Checker", "Gradient", "Radial"]
-    mode_row = self._make_properties_row()
-    mh = QHBoxLayout(mode_row)
-    mh.setContentsMargins(0, 2, 0, 2)
-    mh.setSpacing(4)
-    mode_label = self._make_param_label("Mode", section)
-    mh.addWidget(mode_label)
-    mode_combo = ChevronComboBox()
+    mode_row, mh = self._make_param_row("Mode")
+    mode_combo = self._make_compact_combo()
     mode_combo.addItems(mode_labels)
     if mode in mode_options:
         mode_combo.setCurrentIndex(mode_options.index(mode))
@@ -3901,12 +3921,7 @@ def _build_solid_color_section(self: EditPropertiesPanel, clip: ClipInstance,
 
     def _make_color_button(label_text, r_key, g_key, b_key, a_key):
         from src.shared.assets.icon_manager import icon_color_picker
-        row = self._make_properties_row()
-        rh = QHBoxLayout(row)
-        rh.setContentsMargins(0, 2, 0, 2)
-        rh.setSpacing(4)
-        lbl = self._make_param_label(label_text, section)
-        rh.addWidget(lbl)
+        row, rh = self._make_param_row(label_text)
 
         # Square color swatch (28x28, no text — matches Constant node)
         btn = QPushButton()
@@ -3991,12 +4006,7 @@ def _build_solid_color_section(self: EditPropertiesPanel, clip: ClipInstance,
     needs_color2 = mode in ("checker", "gradient", "radial")
     if needs_color2:
         # Swap button row
-        swap_row = self._make_properties_row()
-        sh = QHBoxLayout(swap_row)
-        sh.setContentsMargins(0, 2, 0, 2)
-        sh.setSpacing(4)
-        swap_lbl = self._make_param_label("", section)
-        sh.addWidget(swap_lbl)
+        swap_row, sh = self._make_param_row("")
         swap_btn = QToolButton()
         swap_btn.setText("\u21c4")
         swap_btn.setToolTip(I18N.tr("node_props.swap_colors", "Swap primary and secondary colors"))
@@ -4058,12 +4068,7 @@ def _build_solid_color_section(self: EditPropertiesPanel, clip: ClipInstance,
             ("\u2921", 0.0, 0.0, 1.0, 1.0),   # diagonal TL→BR
             ("\u2922", 1.0, 0.0, 0.0, 1.0),   # diagonal TR→BL
         ]
-        preset_row = self._make_properties_row()
-        ph = QHBoxLayout(preset_row)
-        ph.setContentsMargins(0, 2, 0, 2)
-        ph.setSpacing(4)
-        preset_lbl = self._make_param_label("Preset", section)
-        ph.addWidget(preset_lbl)
+        preset_row, ph = self._make_param_row("Preset")
         cur_sx = float(params.get("start_x", 0.0))
         cur_sy = float(params.get("start_y", 0.5))
         cur_ex = float(params.get("end_x", 1.0))
@@ -4252,18 +4257,15 @@ def _build_speed_section(self: EditPropertiesPanel, clip: ClipInstance,
                                       I18N.tr("edit.properties.reverse", "Reverse")))
 
     # A3.2: 帧混合插值下拉（只列 nearest / frame blend；optical_flow 不可用故隐藏）
-    from PyQt6.QtWidgets import QComboBox, QLabel as _QLabel
-
     current_interp = (
         clip.speed.interpolation
         if isinstance(clip.speed, SpeedParams)
         and clip.speed.interpolation in ("nearest", "frame_blend")
         else "nearest"
     )
-    interp_row = QHBoxLayout()
-    interp_row.addWidget(_QLabel(I18N.tr(
-        "edit.properties.interpolation", "Interpolation")))
-    interp_combo = QComboBox()
+    interpolation_row, layout = self._make_param_row(
+        I18N.tr("edit.properties.interpolation", "Interpolation"))
+    interp_combo = self._make_compact_combo()
     interp_combo.addItem(I18N.tr("edit.properties.interp_nearest", "Nearest"), "nearest")
     interp_combo.addItem(I18N.tr("edit.properties.interp_frame_blend", "Frame Blend"), "frame_blend")
     idx = interp_combo.findData(current_interp)
@@ -4282,8 +4284,8 @@ def _build_speed_section(self: EditPropertiesPanel, clip: ClipInstance,
             self._updating = False
 
     interp_combo.currentIndexChanged.connect(_on_interp_changed)
-    interp_row.addWidget(interp_combo, 1)
-    cl.addLayout(interp_row)
+    layout.addWidget(interp_combo, 1)
+    cl.addWidget(interpolation_row)
     # P1-08/F3.2：保调变速。预览（流式 WSOLA）与导出（整段 WSOLA）同
     # 25ms/7.5ms 参数；倒放/速度曲线两路一致回退变调并留痕。
     pp_row = self._build_bool_row(
@@ -4391,7 +4393,6 @@ def _build_effect_sections(self: EditPropertiesPanel, clip: ClipInstance) -> Non
         section_id = f"clip:{clip.clip_id}:effect:{effect_id}"
         is_selected = (self._selected_effect_id == effect_id)
 
-        # param_defs dict for _add_section (it computes label widths).
         param_defs_for_section: Dict[str, ParamDef] = {p.name: p for p in param_defs_tuple}
 
         # 折叠状态：记忆优先（按 effect_type 跨片段记忆，同类效果共享）；
@@ -4406,7 +4407,10 @@ def _build_effect_sections(self: EditPropertiesPanel, clip: ClipInstance) -> Non
                 button = QPushButton(I18N.tr("edit.properties.open_effect_panel", "Open effect panel"))
                 button.clicked.connect(lambda: self.effect_open_dialog_requested.emit(
                     _clip.clip_id, _effect_id, _effect_type))
-                cl.addWidget(button)
+                row, layout = self._make_param_row("")
+                layout.addWidget(button)
+                layout.addStretch()
+                cl.addWidget(row)
                 return
             variant_rows: Dict[str, QWidget] = {}
 
@@ -4648,179 +4652,46 @@ def _create_effect_xy_row(
     x_val: Any,
     y_val: Any,
 ) -> QWidget:
-    """Effect X/Y pair row with a ⛓ chain lock (mirrors composite page).
+    """Build paired effect values with the existing one-command link behavior."""
+    base_label = x_pdef.name.removesuffix("_x")
+    label_text = I18N.tr(f"edit.properties.{base_label}", base_label.capitalize())
 
-    Layout: ``[label] [⛓] [x slider] [x value] [y slider] [y value]``.
-
-    - chain ON by default → 1:1 equal linkage (X == Y); changing one axis
-      immediately pushes the same value to the peer axis.
-    - chain OFF → each axis emits its own single-param change independently.
-    - When linked, ONE drag emits a single ``effect_params_changed`` signal
-      carrying both (x_key, v) and (y_key, v); the controller wraps them
-      into a MacroCommand so one Ctrl+Z undoes the whole drag.
-
-    The peer axis's display is kept in sync at the widget layer
-    (``blockSignals`` around ``setValue``), matching the "effect param
-    changes do not rebuild the panel" convention.
-    """
-    is_int_x = x_pdef.ptype == "int"
-    is_int_y = y_pdef.ptype == "int"
-
-    def _slider_steps(pd: ParamDef) -> int:
-        return max(int((pd.max_val - pd.min_val) / (pd.step or 1.0)), 1)
-
-    def _value_to_slider(v: float, pd: ParamDef, is_int: bool) -> int:
-        if is_int:
-            return int(v)
-        return int((float(v) - pd.min_val) / (pd.step or 1.0))
-
-    def _slider_to_value(sv: int, pd: ParamDef, is_int: bool) -> float:
-        if is_int:
-            return int(sv)
-        return sv * (pd.step or 1.0) + pd.min_val
-
-    # Display name: derive from x param ("radius_x" → "Radius").
-    base_label = x_pdef.name
-    if base_label.endswith("_x"):
-        base_label = base_label[:-2]
-    label_text = base_label[:1].upper() + base_label[1:]
-    label_text = I18N.tr(f"edit.properties.{base_label}", label_text)
-
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(label_text)
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(60)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    h.addWidget(label)
-
-    # Chain toggle — linked ON by default (1:1 equal, like composite page).
-    # 统一小锁图标：锁定=橙 / 解锁=灰（见 icon_manager.make_link_button）。
     chain = make_link_button(
         initial_linked=True,
         tooltip=I18N.tr("edit.properties.link_xy", "Link X and Y"),
     )
-    h.addWidget(chain)
+    row, layout = self._make_xy_row(label_text, chain)
 
-    def axis_marker(letter: str) -> QLabel:
-        m = QLabel(letter)
-        m.setStyleSheet("color: #888; font-size: 10px;")
-        m.setFixedWidth(10)
-        m.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        return m
+    def build_axis(pdef: ParamDef, value: Any) -> DragValue:
+        drag = DragValue("", pdef.min_val, pdef.max_val, float(value), decimals=pdef.decimals)
+        drag.setSingleStep(pdef.step)
+        drag.setFixedValueWidth(_PAIRED_VALUE_FIXED_WIDTH)
+        layout.addWidget(drag)
+        return drag
 
-    def build_axis(pd: ParamDef, val: Any, is_int: bool, letter: str):
-        slider = ToposClickableSlider(Qt.Orientation.Horizontal, parent=row)
-        slider.enable_velocity_drag = True
-        if is_int:
-            slider.setRange(int(pd.min_val), int(pd.max_val))
-            slider.setValue(int(val))
-        else:
-            slider.setRange(0, _slider_steps(pd))
-            slider.setValue(_value_to_slider(float(val), pd, is_int))
-        h.addWidget(slider, 1)
-        h.addWidget(axis_marker(letter))
-        drag = DragValue("", pd.min_val, pd.max_val, float(val), decimals=pd.decimals)
-        drag.setSingleStep(pd.step)
-        drag.setFixedValueWidth(_VALUE_FIXED_WIDTH)
-        h.addWidget(drag)
-        return drag, slider
+    drag_x = build_axis(x_pdef, x_val)
+    layout.addWidget(self._make_axis_label("y"))
+    drag_y = build_axis(y_pdef, y_val)
+    clip_id = clip.clip_id if clip is not None else ""
 
-    drag_x, slider_x = build_axis(x_pdef, x_val, is_int_x, "x")
-    drag_y, slider_y = build_axis(y_pdef, y_val, is_int_y, "y")
-
-    x_key, y_key = x_pdef.name, y_pdef.name
-    cid = clip.clip_id if clip is not None else ""
-
-    def push_to_peer(peer_drag, peer_slider, peer_pd, peer_is_int,
-                     peer_key, peer_value):
-        """Clamp + set the peer drag AND slider, then emit peer's change.
-
-        Both the drag and the slider must stay in sync — otherwise the peer
-        axis shows the new value in its drag box while its slider thumb stays
-        at the old position. blockSignals prevents the programmatic setValue
-        from recursively triggering drag/slider handlers.
-        """
-        pv = max(float(peer_pd.min_val), min(float(peer_pd.max_val), float(peer_value)))
-        peer_drag.blockSignals(True)
-        peer_drag.setValue(pv)
-        peer_drag.blockSignals(False)
-        peer_slider.blockSignals(True)
-        peer_slider.setValue(_value_to_slider(pv, peer_pd, peer_is_int))
-        peer_slider.blockSignals(False)
-        return (peer_key, int(pv) if peer_is_int else pv)
-
-    def emit_linked(this_key: str, this_val, peer_val) -> None:
-        """Emit a single batched signal covering both axes (one undo)."""
-        peer_key = y_key if this_key == x_key else x_key
-        peer_pdef = y_pdef if this_key == x_key else x_pdef
-        peer_is_int = is_int_y if this_key == x_key else is_int_x
-        peer_change = push_to_peer(
-            drag_y if this_key == x_key else drag_x,
-            slider_y if this_key == x_key else slider_x,
-            peer_pdef, peer_is_int, peer_key, peer_val,
-        )
+    def on_drag_changed(
+        value: float, pdef: ParamDef, peer_def: ParamDef, peer: DragValue,
+    ) -> None:
+        model_value = int(value) if pdef.ptype == "int" else value
+        if not chain.isChecked():
+            self.effect_param_changed.emit(clip_id, effect_id, pdef.name, model_value)
+            return
+        peer_value = max(peer_def.min_val, min(peer_def.max_val, value))
+        peer.blockSignals(True)
+        peer.setValue(peer_value)
+        peer.blockSignals(False)
+        peer_model_value = int(peer_value) if peer_def.ptype == "int" else peer_value
         self.effect_params_changed.emit(
-            cid, effect_id,
-            [(this_key, this_val), peer_change],
+            clip_id, effect_id, [(pdef.name, model_value), (peer_def.name, peer_model_value)],
         )
 
-    def emit_single(key: str, value) -> None:
-        """Emit a single-param change (chain unlocked path)."""
-        self.effect_param_changed.emit(cid, effect_id, key, value)
-
-    # Wire X axis.
-    def _x_drag_changed(v):
-        # AUD-20003: 两种链锁状态下都先同步自身滑块。链锁分支的
-        # emit_linked/push_to_peer 只推**对侧** drag+slider，此前 X 轴滑块
-        # thumb 停在旧值，与数值框、对轴滑块显示不一致（Y 轴同理）。
-        slider_x.blockSignals(True)
-        slider_x.setValue(_value_to_slider(v, x_pdef, is_int_x))
-        slider_x.blockSignals(False)
-        if chain.isChecked():
-            emit_linked(x_key, int(v) if is_int_x else v, v)
-        else:
-            emit_single(x_key, int(v) if is_int_x else v)
-
-    def _x_slider_changed(sv) -> None:
-        fv = _slider_to_value(sv, x_pdef, is_int_x)
-        drag_x.blockSignals(True)
-        drag_x.setValue(fv)
-        drag_x.blockSignals(False)
-        if chain.isChecked():
-            emit_linked(x_key, fv, fv)
-        else:
-            emit_single(x_key, fv)
-
-    drag_x.valueChanged.connect(_x_drag_changed)
-    slider_x.valueChanged.connect(_x_slider_changed)
-
-    # Wire Y axis (symmetric).
-    def _y_drag_changed(v):
-        # AUD-20003: 同 X 轴——链锁分支也要同步自身滑块。
-        slider_y.blockSignals(True)
-        slider_y.setValue(_value_to_slider(v, y_pdef, is_int_y))
-        slider_y.blockSignals(False)
-        if chain.isChecked():
-            emit_linked(y_key, int(v) if is_int_y else v, v)
-        else:
-            emit_single(y_key, int(v) if is_int_y else v)
-
-    def _y_slider_changed(sv) -> None:
-        fv = _slider_to_value(sv, y_pdef, is_int_y)
-        drag_y.blockSignals(True)
-        drag_y.setValue(fv)
-        drag_y.blockSignals(False)
-        if chain.isChecked():
-            emit_linked(y_key, fv, fv)
-        else:
-            emit_single(y_key, fv)
-
-    drag_y.valueChanged.connect(_y_drag_changed)
-    slider_y.valueChanged.connect(_y_slider_changed)
-
+    drag_x.valueChanged.connect(lambda value: on_drag_changed(value, x_pdef, y_pdef, drag_y))
+    drag_y.valueChanged.connect(lambda value: on_drag_changed(value, y_pdef, x_pdef, drag_x))
     return row
 
 
@@ -4837,15 +4708,7 @@ def _create_effect_channel_group(
     useful. The RGB buttons are independent toggles and emit the same
     ``effect_param_changed`` signal as the former checkbox rows.
     """
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-
-    label = QLabel(I18N.tr("edit.properties.channels", "Channels"))
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(60)
-    h.addWidget(label)
+    row, h = self._make_param_row(I18N.tr("edit.properties.channels", "Channels"))
 
     channels = (
         ("channel_r", "R", "#d44"),
@@ -4919,15 +4782,7 @@ def _create_effect_param_widget_from_pdef(
 
     if pdef.ptype in ("float", "int"):
         is_int = pdef.ptype == "int"
-        row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-        label = QLabel(label_text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(60)
-        label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        h.addWidget(label)
+        row, h = self._make_param_row(label_text)
 
         slider = ToposClickableSlider(Qt.Orientation.Horizontal)
         slider.enable_velocity_drag = True
@@ -4938,7 +4793,6 @@ def _create_effect_param_widget_from_pdef(
             steps = max(int((pdef.max_val - pdef.min_val) / (pdef.step or 1.0)), 1)
             slider.setRange(0, steps)
             slider.setValue(int((float(value) - pdef.min_val) / (pdef.step or 1.0)))
-        h.addWidget(slider, 1)
 
         drag = DragValue(
             "", pdef.min_val, pdef.max_val, float(value),
@@ -4978,12 +4832,12 @@ def _create_effect_param_widget_from_pdef(
 
         slider.valueChanged.connect(_slider_changed)
         drag.valueChanged.connect(_drag_changed)
-        h.addWidget(drag)
 
         # Phase 3 / round 2: per-effect keyframe button for animatable
         # numeric params. Registered under a composite key
         # ("effect:<eid>:<param>") so _update_keyframe_buttons can route
         # the state query to the EffectInstance instead of the clip.
+        kf_btn = None
         if pdef.is_animatable() and clip is not None:
             kf_key = f"effect:{effect_id}:{pdef.name}"
             kf_btn = KeyframeIndicatorButton(pdef.name)
@@ -4993,18 +4847,11 @@ def _create_effect_param_widget_from_pdef(
                 self._on_effect_keyframe_button_toggled(eid, pn, cid, frame, value)
             )
             self._keyframe_buttons[kf_key] = kf_btn
-            h.addWidget(kf_btn)
+        self._add_slider_value(h, slider, drag, kf_btn)
         return row
 
     if pdef.ptype == "bool":
-        row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-        label = QLabel(label_text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(60)
-        h.addWidget(label)
+        row, h = self._make_param_row(label_text)
         checkbox = QCheckBox()
         checkbox.setChecked(bool(value))
         checkbox.toggled.connect(
@@ -5017,15 +4864,8 @@ def _create_effect_param_widget_from_pdef(
         return row
 
     if pdef.ptype == "option" and pdef.labels:
-        row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-        label = QLabel(label_text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(60)
-        h.addWidget(label)
-        combo = ChevronComboBox()
+        row, h = self._make_param_row(label_text)
+        combo = self._make_compact_combo()
         for choice in pdef.labels:
             combo.addItem(choice)
         if value in pdef.labels:
@@ -5042,16 +4882,11 @@ def _create_effect_param_widget_from_pdef(
         return row
 
     # Read-only fallback for color/vec2/vec3/channel/string/...
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(label_text)
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(60)
-    h.addWidget(label)
+    row, h = self._make_param_row(label_text)
     val_label = QLabel(str(value))
-    val_label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
+    val_label.setStyleSheet(f"color: {C.TEXT_SECONDARY}; font-size: 10px;")
+    val_label.setWordWrap(True)
+    val_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
     h.addWidget(val_label, 1)
     return row
 
@@ -5075,19 +4910,7 @@ def _create_effect_param_widget(self: EditPropertiesPanel, param_name: str,
             decimals=0 if is_int else 2,
             default=value,
         )
-        # 结构与 _build_numeric_row 一致：[label] [slider stretch=1] [DragValue 固定]。
-        # slider 永远显示并吃掉多余宽度，DragValue 固定 64px 钉在右侧 —— 这样数值
-        # 输入框与 transform/crop 等其它 section 的数值行视觉一致，且面板拖宽时
-        # slider 撑开而非 DragValue 被拉伸（DragValue 拉伸会产生左对齐的观感）。
-        row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-        label = QLabel(label_text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(60)
-        label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        h.addWidget(label)
+        row, h = self._make_param_row(label_text)
         clip = self._current_clips[0] if self._current_clips else None
         slider = ToposClickableSlider(Qt.Orientation.Horizontal, parent=row)
         slider.enable_velocity_drag = True
@@ -5099,7 +4922,6 @@ def _create_effect_param_widget(self: EditPropertiesPanel, param_name: str,
             slider.setRange(0, steps)
             slider.setValue(int((float(value) - pdef.min_val) / (pdef.step or 1.0)))
         slider.setVisible(True)
-        h.addWidget(slider, 1)
         drag = DragValue("", pdef.min_val, pdef.max_val, float(value), decimals=pdef.decimals)
         drag.setSingleStep(pdef.step)
         drag.setFixedValueWidth(_VALUE_FIXED_WIDTH)
@@ -5138,18 +4960,11 @@ def _create_effect_param_widget(self: EditPropertiesPanel, param_name: str,
 
         slider.valueChanged.connect(_eff_slider_changed)
         drag.valueChanged.connect(_eff_drag_changed)
-        h.addWidget(drag)
+        self._add_slider_value(h, slider, drag)
         return row
 
     elif schema.type == "bool":
-        row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-        label = QLabel(label_text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(60)
-        h.addWidget(label)
+        row, h = self._make_param_row(label_text)
         checkbox = QCheckBox()
         checkbox.setChecked(bool(value))
         clip = self._current_clips[0] if self._current_clips else None
@@ -5163,15 +4978,8 @@ def _create_effect_param_widget(self: EditPropertiesPanel, param_name: str,
         return row
 
     elif schema.type == "choice":
-        row = QWidget()
-        h = QHBoxLayout(row)
-        h.setContentsMargins(0, 2, 0, 2)
-        h.setSpacing(4)
-        label = QLabel(label_text)
-        label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-        label.setMinimumWidth(60)
-        h.addWidget(label)
-        combo = ChevronComboBox()
+        row, h = self._make_param_row(label_text)
+        combo = self._make_compact_combo()
         for choice in schema.choices:
             combo.addItem(choice)
         if value in schema.choices:
@@ -5186,16 +4994,11 @@ def _create_effect_param_widget(self: EditPropertiesPanel, param_name: str,
         return row
 
     # 默认：只读显示
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(label_text)
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(60)
-    h.addWidget(label)
+    row, h = self._make_param_row(label_text)
     val_label = QLabel(str(value))
-    val_label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
+    val_label.setStyleSheet(f"color: {C.TEXT_SECONDARY}; font-size: 10px;")
+    val_label.setWordWrap(True)
+    val_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
     h.addWidget(val_label, 1)
     return row
 
@@ -5284,16 +5087,8 @@ def _build_transition_combo_row(self: EditPropertiesPanel, section: EditSectionW
                                 key: str, options: List[str], labels: List[str],
                                 current_index: int, transition_id: str) -> QWidget:
     """转场下拉行（直接发 transition_param_changed）。"""
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(key.replace("_", " ").title())
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(section._label_min_width)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    h.addWidget(label)
-    combo = ChevronComboBox()
+    row, h = self._make_param_row(key.replace("_", " ").title())
+    combo = self._make_compact_combo()
     combo.addItems(labels)
     combo.setCurrentIndex(current_index)
     apply_combo_dropdown_style(combo)
@@ -5313,15 +5108,7 @@ def _build_transition_int_row(self: EditPropertiesPanel, section: EditSectionWid
                               key: str, value: int, pdef: ParamDef,
                               transition_id: str) -> QWidget:
     """转场整数值行。"""
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(key.replace("_", " ").title())
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(section._label_min_width)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    h.addWidget(label)
+    row, h = self._make_param_row(key.replace("_", " ").title())
     slider = ToposClickableSlider(Qt.Orientation.Horizontal)
     slider.enable_velocity_drag = True
     slider.setRange(int(pdef.min_val), int(pdef.max_val))
@@ -5343,8 +5130,7 @@ def _build_transition_int_row(self: EditPropertiesPanel, section: EditSectionWid
 
     slider.valueChanged.connect(slider_changed)
     drag.valueChanged.connect(drag_changed)
-    h.addWidget(slider, 1)
-    h.addWidget(drag)
+    self._add_slider_value(h, slider, drag)
     # AUD-20008: 注册行控件，让 Transition section 的 Reset 能归位显示。
     section._param_widgets[key] = {
         "type": "int", "widget": drag, "slider": slider, "slider_scale": 1,
@@ -5356,15 +5142,7 @@ def _build_transition_float_row(self: EditPropertiesPanel, section: EditSectionW
                                 key: str, value: float, pdef: ParamDef,
                                 transition_id: str) -> QWidget:
     """Floating-point transition parameter row."""
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(key.replace("_", " ").title())
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(section._label_min_width)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    h.addWidget(label)
+    row, h = self._make_param_row(key.replace("_", " ").title())
     slider = ToposClickableSlider(Qt.Orientation.Horizontal)
     slider.enable_velocity_drag = True
     scale = 100
@@ -5388,8 +5166,7 @@ def _build_transition_float_row(self: EditPropertiesPanel, section: EditSectionW
 
     slider.valueChanged.connect(slider_changed)
     drag.valueChanged.connect(drag_changed)
-    h.addWidget(slider, 1)
-    h.addWidget(drag)
+    self._add_slider_value(h, slider, drag)
     # AUD-20008: 注册行控件，让 Transition section 的 Reset 能归位显示
     # （float 行的滑块坐标 = 数值 × 100）。
     section._param_widgets[key] = {
@@ -5411,15 +5188,7 @@ def _build_track_section(self: EditPropertiesPanel, track: EditTrack) -> None:
     cl = section.content_layout()
 
     # 名称（可编辑）
-    name_row = QWidget()
-    nh = QHBoxLayout(name_row)
-    nh.setContentsMargins(0, 2, 0, 2)
-    nh.setSpacing(4)
-    name_label = QLabel(I18N.tr("edit.properties.track_name", "Name"))
-    name_label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    name_label.setMinimumWidth(60)
-    name_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    nh.addWidget(name_label)
+    name_row, nh = self._make_param_row(I18N.tr("edit.properties.track_name", "Name"))
     name_edit = QLineEdit(track.name)
     # AUD-20006: textChanged 逐字符提交 RenameTrackCommand（控制器一信号
     # 一命令，undo 栈被 "T"→"Tr"→"Tra" 中间态污染，且每键走完整命令链）。
@@ -5499,15 +5268,7 @@ def _build_track_section(self: EditPropertiesPanel, track: EditTrack) -> None:
 def _build_track_checkbox_row(self: EditPropertiesPanel, parent_layout: QVBoxLayout,
                               track: EditTrack, param_name: str,
                               label_text: str, value: bool) -> None:
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(label_text)
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(60)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    h.addWidget(label)
+    row, h = self._make_param_row(label_text)
     checkbox = QCheckBox()
     checkbox.setChecked(bool(value))
     checkbox.toggled.connect(
@@ -5527,15 +5288,7 @@ def _build_track_volume_row(self: EditPropertiesPanel, track: EditTrack, pdef: P
     才发出一次 track_param_changed 提交 SetTrackVolumeCommand。这样滑块跟手、
     撤销栈干净（一次拖动 = 一次撤销项）。
     """
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(I18N.tr("edit.properties.volume", "Volume"))
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(60)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    h.addWidget(label)
+    row, h = self._make_param_row(I18N.tr("edit.properties.volume", "Volume"))
     slider = ToposClickableSlider(Qt.Orientation.Horizontal)
     slider.enable_velocity_drag = True
     slider.setRange(int(pdef.min_val), int(pdef.max_val))
@@ -5595,8 +5348,7 @@ def _build_track_volume_row(self: EditPropertiesPanel, track: EditTrack, pdef: P
     slider.sliderReleased.connect(finish_drag)
     drag.interaction_started.connect(start_drag)
     drag.interaction_ended.connect(finish_drag)
-    h.addWidget(slider, 1)
-    h.addWidget(drag)
+    self._add_slider_value(h, slider, drag)
 
     # 注册引用，供 reset / 外部刷新使用
     self._audio_widget_refs.setdefault(track.track_id, {})["volume"] = (slider, drag)
@@ -5608,15 +5360,7 @@ def _build_track_pan_row(self: EditPropertiesPanel, track: EditTrack, pdef: Para
 
     同样采用三段式节流（参见 _build_track_volume_row 的说明）。
     """
-    row = QWidget()
-    h = QHBoxLayout(row)
-    h.setContentsMargins(0, 2, 0, 2)
-    h.setSpacing(4)
-    label = QLabel(I18N.tr("edit.properties.pan", "Pan"))
-    label.setStyleSheet(f"color: {C.TEXT_LABEL}; font-size: 10px;")
-    label.setMinimumWidth(60)
-    label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    h.addWidget(label)
+    row, h = self._make_param_row(I18N.tr("edit.properties.pan", "Pan"))
     slider = ToposClickableSlider(Qt.Orientation.Horizontal)
     slider.enable_velocity_drag = True
     slider.setRange(int(pdef.min_val), int(pdef.max_val))
@@ -5671,8 +5415,7 @@ def _build_track_pan_row(self: EditPropertiesPanel, track: EditTrack, pdef: Para
     slider.sliderReleased.connect(finish_drag)
     drag.interaction_started.connect(start_drag)
     drag.interaction_ended.connect(finish_drag)
-    h.addWidget(slider, 1)
-    h.addWidget(drag)
+    self._add_slider_value(h, slider, drag)
 
     self._audio_widget_refs.setdefault(track.track_id, {})["pan"] = (slider, drag)
     return row
@@ -5728,12 +5471,7 @@ def _build_audio_clip_section(self: EditPropertiesPanel, clip: ClipInstance, tra
          "Sample Trim",
          "源侧子帧修剪：入点后跳过的源样本数（@48k 参考率，≥0）"),
     ):
-        _row = self._make_properties_row()
-        _h = QHBoxLayout(_row)
-        _h.setContentsMargins(0, 2, 0, 2)
-        _h.setSpacing(4)
-        _h.addWidget(self._make_param_label(
-            I18N.tr(_label_key, _default_label), section))
+        _row, _h = self._make_param_row(I18N.tr(_label_key, _default_label))
         _drag = DragValue(
             "", 0.0, 48000.0 * 60.0,
             float(getattr(clip, _attr, 0) or 0), decimals=0)
@@ -5782,10 +5520,7 @@ def _build_asset_section(self: EditPropertiesPanel, asset: MediaAsset) -> None:
         I18N.tr("edit.properties.proxy", "Proxy"), proxy.capitalize()))
 
     # Relink 按钮
-    relink_row = QWidget()
-    rh = QHBoxLayout(relink_row)
-    rh.setContentsMargins(0, 4, 0, 0)
-    rh.setSpacing(4)
+    relink_row, rh = self._make_param_row("")
     relink_btn = QToolButton()
     relink_btn.setIcon(get_icon('fa5s.link', IconColors.WHITE))
     relink_btn.setIconSize(QSize(14, 14))

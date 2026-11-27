@@ -486,33 +486,30 @@ class TestAud20001EffectRoutingBySectionId:
 
 
 # ================================================================
-# AUD-20002 — scale lock 联动同步对侧滑块
+# AUD-20002 — scale lock 联动同步对侧数值
 # ================================================================
 
-class TestAud20002SyncPairedSlider:
-    def test_slider_peer_synced_when_scale_locked(self, qapp):
+class TestAud20002SyncPairedValue:
+    def test_peer_synced_when_scale_locked(self, qapp):
         panel = EditPropertiesPanel()
         panel.set_clip(_mock_clip())
         panel._scale_locked = True
         section = panel._sections["clip:test-clip:transform"]
         info_y = section._param_widgets["scale_y"]
-        initial_slider = info_y["slider"].value()
+        assert info_y.get("slider") is None
         rec = _Recorder(panel.clip_param_changed)
         panel._on_section_param_changed(
             "clip:test-clip:transform", "scale_x", 2.0
         )
         assert info_y["widget"].value() == pytest.approx(2.0)
-        expected = panel._value_to_slider(2.0, info_y)
-        assert expected != initial_slider  # 初始 1.0 对应的滑块位
-        assert info_y["slider"].value() == expected
         assert len(rec.calls) == 1  # 联动在 _updating 锁内，不产生第二条命令
 
 
 # ================================================================
-# AUD-20003 — 链锁下拖 DragValue 同步自身滑块
+# AUD-20003 — 链锁下拖 DragValue 同步另一轴
 # ================================================================
 
-class TestAud20003EffectXyOwnSliderSync:
+class TestAud20003EffectXyLink:
     def test_chained_drag_updates_own_and_peer_widgets(self, qapp):
         from src.features.composite.nodes.base_node import ParamDef
         from src.shared.ui.widgets import DragValue
@@ -530,18 +527,11 @@ class TestAud20003EffectXyOwnSliderSync:
             1.0,
         )
         drags = row.findChildren(DragValue)
-        sliders = row.findChildren(ToposClickableSlider)
-        assert len(drags) == 2 and len(sliders) == 2
-        drag_x, drag_y = drags[0], drags[1]
-        slider_x, slider_y = sliders[0], sliders[1]
-        assert slider_x.value() == 2  # 初始 1.0 → (1.0-0)/0.5
+        assert not row.findChildren(ToposClickableSlider)
+        drag_x, drag_y = drags
         rec = _Recorder(panel.effect_params_changed)
         drag_x.setValue(3.0)  # 链锁默认 ON
-        # 自身滑块同步（旧代码链锁分支不同步自身滑块）
-        assert slider_x.value() == 6  # (3.0 - 0) / 0.5
-        # 对侧 drag+slider 同步
         assert drag_y.value() == pytest.approx(3.0)
-        assert slider_y.value() == 6
         assert len(rec.calls) == 1
         clip_id, effect_id, pairs = rec.calls[0]
         assert (clip_id, effect_id) == ("test-clip", "fx-xy")

@@ -268,11 +268,15 @@ class ToposClickableSlider(ToposSlider):
         if event.button() == Qt.MouseButton.LeftButton and self._vdrag_active:
             if self._press_pos(event) != self._vdrag_last_pos:
                 self.mouseMoveEvent(event)
-            self._vdrag_active = False
-            self.setSliderDown(False)
+            self.cancel_pointer_drag()
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def cancel_pointer_drag(self) -> None:
+        """End a velocity drag and release the slider's pressed state."""
+        self._vdrag_active = False
+        self.setSliderDown(False)
 
     def _pos_to_value_horizontal(self, x: float) -> int:
         """将水平位置转换为滑块值"""

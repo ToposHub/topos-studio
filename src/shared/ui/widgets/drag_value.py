@@ -421,14 +421,18 @@ class DragValue(QWidget):
             if event.position().x() != self._drag_last_x:
                 self.mouseMoveEvent(event)
             was_engaged = self._drag_engaged
-            self._dragging = False
-            self._drag_engaged = False
-            if not self._editing:
-                self._value_label.setStyleSheet(
-                    self._normal_value_style if self.isEnabled() else self._disabled_value_style)
+            self.cancel_pointer_drag()
             if was_engaged:
                 self.interaction_ended.emit()
             event.accept()
+
+    def cancel_pointer_drag(self) -> None:
+        """End pointer tracking without committing the interaction."""
+        self._dragging = False
+        self._drag_engaged = False
+        if not self._editing:
+            self._value_label.setStyleSheet(
+                self._normal_value_style if self.isEnabled() else self._disabled_value_style)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:

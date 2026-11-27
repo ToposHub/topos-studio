@@ -11899,7 +11899,7 @@ class TimelinePreviewRenderer(QObject):
 
         self._schedule_current_frame_warmup()
 
-    def update_sequence_silent(self, sequence: Any) -> None:
+    def update_sequence_silent(self, sequence: Any, *, preview_only: bool = False) -> None:
         """Hot-path in-place sequence update for interactive editing (transform drag).
 
         Mirrors :meth:`update_color_stacks`: swap the sequence and fully
@@ -11915,8 +11915,12 @@ class TimelinePreviewRenderer(QObject):
         Safe only for edits that change per-clip mutable state (transform /
         opacity / effects) without altering the sequence structure (track /
         clip add/remove) — structural edits must go through ``set_sequence``.
+        For a temporary preview, force the next set_sequence to retire in-flight
+        preview frames, even if the committed sequence is still the same.
         """
         self._sequence = sequence
+        if preview_only:
+            self._sequence_render_signature = None
         self._render_plan = None
         # In-flight GPU results still have this generation. They cannot certify
         # that the displayed frame contains the changed transform or effects.
