@@ -1689,7 +1689,7 @@ class NodePropertiesPanel(QWidget):
         _tool_btn_style = TOOLBAR_FLAT_BTN_STYLE
 
         # Header
-        header = QWidget()
+        self._header = header = QWidget()
         header.setFixedHeight(28)
         header.setStyleSheet(PROPS_HEADER_STYLE)
         header_layout = QHBoxLayout(header)
@@ -1771,8 +1771,8 @@ class NodePropertiesPanel(QWidget):
         """)
 
         # Keyboard shortcut: Ctrl+F / Cmd+F to toggle search
-        search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
-        search_shortcut.activated.connect(self._on_search_shortcut)
+        self._search_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        self._search_shortcut.activated.connect(self._on_search_shortcut)
 
         # Enable context menu for float/dock toggle
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -4862,6 +4862,34 @@ class NodePropertiesPanel(QWidget):
     def clear(self) -> None:
         """Clear the panel (remove all non-pinned sections)."""
         self._clear_unpinned_sections()
+
+    def set_composition_active(self, active: bool) -> None:
+        """Show the inspector controls only while a composition is open."""
+        self._header.setVisible(active)
+        self._scroll.setVisible(active)
+        self._search_shortcut.setEnabled(active)
+        if active:
+            return
+
+        self._search_toggle_btn.setChecked(False)
+        self._toggle_search_bar()
+        self._pinned_node_ids.clear()
+        self._split_dims.clear()
+        self.clear()
+        if self._active_kf_dialog is not None:
+            self._active_kf_dialog.reject()
+
+        self._project_settings_pinned = False
+        self.hide_project_settings()
+        if self._project_settings_section is not None:
+            self._project_settings_section.deleteLater()
+            self._project_settings_section = None
+
+        self._viewer3d_settings_pinned = False
+        self.hide_viewer3d_settings()
+        if self._viewer3d_settings_section is not None:
+            self._viewer3d_settings_section.deleteLater()
+            self._viewer3d_settings_section = None
 
     # ── Project Settings section (coexists with node sections) ──
 
