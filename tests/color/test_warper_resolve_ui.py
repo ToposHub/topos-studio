@@ -651,3 +651,19 @@ def test_chroma_luma_footer_stays_inline_at_user_screenshot_width(panel: WarperP
     assert panel.footer.mapTo(panel, QPoint()).y() == wheel._h_line_bottom.y()
     assert panel._axis_group.parent() is panel._footer_row
     assert panel._axis_group.geometry().right() < panel.space_combo.geometry().left()
+
+
+@pytest.mark.parametrize("mode", ("hue_saturation", "chroma_luma", "chroma_warp"))
+def test_warper_controls_fit_narrow_secondary_grading_column(
+    panel: WarperPanel, qtbot: QtBot, mode: str,
+) -> None:
+    panel.set_mode(mode)
+    panel.resize(472, 300)
+    qtbot.wait(10)
+
+    assert panel.width() == 472
+    assert panel.active_canvas().width() >= 180
+    assert panel.tools_scroll.horizontalScrollBar().maximum() == 0
+    if mode != "chroma_warp":
+        for control in (panel.grid_combo, panel.saturation_combo, panel.link_button, panel.space_combo):
+            assert control.parentWidget().rect().contains(control.geometry())

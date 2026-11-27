@@ -154,7 +154,7 @@ class ColorViewportChrome(QObject):
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(1)
         self.zoom_button = ViewerZoomMenuButton(self.header_left)
-        self.zoom_button.setText(I18N.tr("viewport.fit_short", "Fit"))
+        self.zoom_button.setText(I18N.tr("viewport.zoom_auto", "Auto"))
         style_header_button(self.zoom_button, width=62)
         self.zoom_button.setStyleSheet(
             self.zoom_button.styleSheet() + "QToolButton:enabled { padding-right: 16px; "
@@ -260,15 +260,12 @@ class ColorViewportChrome(QObject):
         button.show()
 
     def set_zoom(self, percent: int) -> None:
-        """Use the Canvas's existing transform API, without requesting media."""
-        self.canvas.resetTransform()
-        self.canvas.scale(percent / 100.0, percent / 100.0)
-        self.canvas._update_lod()
-        self.canvas.viewport().update()
-        self.zoom_button.setText(f"{percent}%")
+        self.canvas.set_manual_zoom(percent / 100.0)
 
-    def update_zoom(self, factor: float) -> None:
-        self.zoom_button.setText(f"{round(factor * 100.0)}%")
+    def update_zoom(self, factor: float, *, auto: bool = False) -> None:
+        text = I18N.tr("viewport.zoom_auto", "Auto") if auto else f"{round(factor * 100.0)}%"
+        if self.zoom_button.text() != text:
+            self.zoom_button.setText(text)
 
     def _populate_timeline_menu(self, menu: QMenu) -> None:
         menu.clear()

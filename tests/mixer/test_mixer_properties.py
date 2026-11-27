@@ -209,20 +209,3 @@ def test_locked_track_rejects_properties_edit_and_restores_value(inspector_host)
     field.setValue(-6.0)
     assert view.get_timeline() is sequence
     assert field.value() == 0.0
-
-
-def test_existing_layout_gets_inspector_once_then_keeps_user_visibility(inspector_host, monkeypatch):
-    host = inspector_host
-    values = {}
-    host.config_manager = type("Config", (), {
-        "get": lambda _, key: values.get(key),
-        "set": lambda _, key, value, **kw: values.update({key: value}),
-        "save_config": lambda _: None,
-    })()
-    monkeypatch.setattr(host, "_save_current_layout_to_store", lambda _page: None)
-    host.dock_audio_properties.hide()
-    host._migrate_mixer_properties_layout()
-    assert not host.dock_audio_properties.isHidden()
-    host.dock_audio_properties.hide()
-    host._migrate_mixer_properties_layout()
-    assert host.dock_audio_properties.isHidden()

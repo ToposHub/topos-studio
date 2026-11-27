@@ -7,11 +7,41 @@ import pytest
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QWidget
+from pytestqt.qtbot import QtBot
 
 from src.app.controllers.dock_layout_controller import DockLayoutMixin
 from src.app.controllers.file_controller import FileOpsMixin
 from src.features.edit.module import EditModule
 from src.shared.panels.registry import PanelRegistry
+
+
+@pytest.mark.parametrize(("page", "fitted"), [
+    ("Edit", {"edit_viewport"}),
+    ("Color", {"canvas"}),
+    ("Composite", {"composite_viewer"}),
+    ("Mixer", {"edit_viewport"}),
+    ("Library", set()),
+])
+def test_project_window_resize_fits_active_viewers(qtbot: QtBot, page: str, fitted: set[str]) -> None:
+    class Host(FileOpsMixin, QMainWindow):
+        pass
+
+    host = Host()
+    qtbot.addWidget(host)
+    host.current_page = page
+    host.files_panel = None
+    fit_calls = {name: MagicMock() for name in ("edit_viewport", "canvas", "composite_viewer")}
+    for name, fit in fit_calls.items():
+        setattr(host, name, SimpleNamespace(
+            isVisible=lambda name=name: name in fitted,
+            fit_visible_monitors=fit,
+            fit_to_window=fit,
+        ))
+    host.resize(1000, 700)
+    host.show()
+    host.resize(1200, 720)
+    qtbot.waitUntil(lambda: getattr(host, "_viewer_fit_resize_page", None) is None)
+    assert {name for name, fit in fit_calls.items() if fit.called} == fitted
 
 
 def test_edit_registers_a_single_viewport_panel() -> None:

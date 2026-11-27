@@ -8,9 +8,9 @@ from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pytest
-from PyQt6.QtCore import QCoreApplication, QEvent, QItemSelectionModel, QPoint, QPointF, Qt
+from PyQt6.QtCore import QCoreApplication, QEvent, QItemSelectionModel, QPoint, QPointF, Qt, QTimer
 from PyQt6.QtGui import QMouseEvent, QWindow
-from PyQt6.QtWidgets import QDialog, QLabel, QListView, QMenu
+from PyQt6.QtWidgets import QDialog, QFileDialog, QLabel, QListView, QMenu, QMessageBox
 
 from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.shared.config.config_manager import ConfigManager
@@ -184,7 +184,7 @@ def test_sort_refresh_and_keyboard_open_preserve_selected_project(qtbot, project
     assert opened.args == [cut.path]
 
 
-def test_resume_hides_if_last_project_is_removed(qtbot, project_browser):
+def test_resume_hides_if_last_project_is_removed(qtbot, project_browser, monkeypatch):
     dialog, projects = project_browser
     cut, _grade, _delivery = projects
     assert dialog.resume_btn.isVisible()
@@ -193,8 +193,11 @@ def test_resume_hides_if_last_project_is_removed(qtbot, project_browser):
     assert opened.args == [cut.path]
 
     Path(cut.path).unlink()
+    unavailable = []
+    monkeypatch.setattr(dialog, "_show_missing_project", unavailable.append)
     with qtbot.assertNotEmitted(dialog.project_selected):
         dialog.resume_btn.click()
+    assert unavailable == [cut.path]
     assert not dialog.resume_btn.isVisible()
 
 
@@ -355,3 +358,174 @@ def test_media_result_for_previous_selection_is_ignored(qtbot, project_browser, 
 
     qtbot.waitUntil(lambda: "current.mov" in dialog.selection_label.toolTip())
     assert "stale.mov" not in dialog.selection_label.toolTip()
+
+
+def test_refresh_keeps_rows_and_latest_selection_on_success_and_error(qtbot, project_browser, monkeypatch):
+    from src.app.ui import project_manager_dialog as manager
+
+    dialog, projects = project_browser
+    cut, grade, _delivery = projects
+    started, release = Event(), Event()
+
+    def rescan(_config):
+        started.set()
+        release.wait(timeout=3)
+        return projects, dialog_locations
+
+    dialog_locations = dialog._locations
+    monkeypatch.setattr(manager, "scan_project_libraries", rescan)
+    dialog.list_widget.setCurrentRow(2)
+    dialog.refresh_btn.click()
+    try:
+        qtbot.waitUntil(started.is_set)
+        assert dialog.list_widget.count() == 3
+        assert dialog.scan_status.isVisible()
+        assert dialog.open_btn.isEnabled()
+        assert dialog._selected_paths() == [cut.path]
+        dialog.list_widget.setCurrentRow(1)
+    finally:
+        release.set()
+
+    qtbot.waitUntil(lambda: not dialog._scan_inflight)
+    assert dialog._selected_paths() == [grade.path]
+    assert not dialog.scan_status.isVisible()
+
+    def failed_scan(_config):
+        raise OSError("Unavailable")
+
+    monkeypatch.setattr(manager, "scan_project_libraries", failed_scan)
+    dialog.refresh_btn.click()
+    qtbot.waitUntil(lambda: not dialog._scan_inflight)
+    assert dialog.list_widget.count() == 3
+    assert dialog._selected_paths() == [grade.path]
+    assert dialog.scan_status.isVisible()
+    assert dialog._scan_error
+
+
+@pytest.mark.parametrize("action", ["rescan", "locate"])
+def test_missing_project_offers_rescan_and_locate(qtbot, project_browser, monkeypatch, action):
+    from src.shared.i18n.i18n import I18N
+
+    dialog, projects = project_browser
+    cut, grade, _delivery = projects
+    dialog.list_widget.setCurrentRow(2)
+    Path(cut.path).unlink()
+    invoked = []
+    monkeypatch.setattr(dialog, "_refresh_project_list", lambda: invoked.append("refresh"))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *_args: (grade.path, ""))
+    original_exec = QMessageBox.exec
+
+    def choose_action(message):
+        labels = {
+            "rescan": I18N.tr("pm.rescan", "Rescan libraries"),
+            "locate": I18N.tr("pm.locate_project", "Locate project…"),
+        }
+        assert message.informativeText() == cut.path
+        assert set(labels.values()).issubset({button.text() for button in message.buttons()})
+        button = next(button for button in message.buttons() if button.text() == labels[action])
+        QTimer.singleShot(0, button.click)
+        return original_exec(message)
+
+    monkeypatch.setattr(QMessageBox, "exec", choose_action)
+    if action == "rescan":
+        with qtbot.assertNotEmitted(dialog.project_selected):
+            dialog.open_btn.click()
+        assert invoked == ["refresh"]
+    else:
+        with qtbot.waitSignal(dialog.project_selected, timeout=1000) as opened:
+            dialog.open_btn.click()
+        assert opened.args == [grade.path]
+
+
+def test_browser_reopens_view_sort_size_but_not_transient_filters(qtbot, project_browser):
+    from src.app.ui import project_manager_dialog as manager
+
+    dialog, projects = project_browser
+    dialog.resize(900, 575)
+    dialog.list_view_btn.setChecked(True)
+    dialog.sort_box.setCurrentIndex(dialog.sort_box.findData("name"))
+    dialog.search_box.setText("Grade")
+    dialog.favorites_only_btn.setChecked(True)
+    library = str(Path(projects[0].path).parent)
+    dialog._set_library_filter(library)
+    assert dialog.clear_filters_btn.isVisible()
+    dialog.clear_filters_btn.click()
+    assert dialog.search_box.text() == ""
+    assert not dialog.favorites_only_btn.isChecked()
+    assert dialog._library_filter is None
+    assert not dialog.clear_filters_btn.isVisible()
+    dialog.search_box.setText("Delivery")
+    config_path = dialog._config.config_path
+    dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+    dialog.reject()
+
+    config = ConfigManager(config_path)
+    assert config.get("project_manager_browser") == {"view": "list", "sort": "name", "size": [900, 575]}
+    reopened = manager.ProjectManagerDialog(config)
+    qtbot.addWidget(reopened)
+    reopened.show()
+    qtbot.waitUntil(lambda: reopened.list_widget.count() == len(projects))
+    assert reopened.list_widget.viewMode() == QListView.ViewMode.ListMode
+    assert reopened.sort_box.currentData() == "name"
+    assert reopened.search_box.text() == ""
+    assert reopened.width() == min(900, max(840, reopened.screen().availableGeometry().width()))
+    assert reopened.height() == min(575, max(520, reopened.screen().availableGeometry().height()))
+
+
+def test_same_name_projects_retain_location_hints_and_current_marker(qtbot, project_browser):
+    from dataclasses import replace
+
+    from src.app.ui import project_manager_dialog as manager
+
+    dialog, projects = project_browser
+    cut, grade, delivery = projects
+    dialog._active_project_path = grade.path
+    dialog._on_scan_done(([cut, grade, replace(delivery, name=grade.name)], dialog._locations), None)
+    dialog.search_box.setText(grade.name)
+    items = dialog.list_widget.findItems(grade.name, Qt.MatchFlag.MatchExactly)
+    role = manager._ProjectCardDelegate
+    by_path = {item.data(Qt.ItemDataRole.UserRole): item for item in items}
+
+    assert not by_path[grade.path].isHidden() and not by_path[delivery.path].isHidden()
+    assert by_path[grade.path].data(role.PROJECT_ACTIVE_ROLE)
+    assert not by_path[delivery.path].data(role.PROJECT_ACTIVE_ROLE)
+    assert by_path[grade.path].data(role.PROJECT_LOCATION_LABEL_ROLE) == Path(grade.path).parent.name
+    assert by_path[delivery.path].data(role.PROJECT_LOCATION_LABEL_ROLE) == "External"
+    dialog.list_view_btn.click()
+    assert by_path[grade.path].data(role.PROJECT_ACTIVE_ROLE)
+
+
+def test_same_named_libraries_show_only_distinguishing_path(project_browser):
+    from dataclasses import replace
+
+    dialog, projects = project_browser
+    _cut, grade, delivery = projects
+    base = Path(grade.path).parent / "Long Shared Parent Directory"
+    first = replace(grade, path=str(base / "Team A" / "Projects" / "Grade.topos"))
+    second = replace(delivery, name=grade.name, path=str(base / "Team B" / "Projects" / "Grade.topos"))
+    assert dialog._duplicate_location_labels([first, second], [first.name, second.name]) == {
+        first.path: str(Path("Team A") / "Projects"),
+        second.path: str(Path("Team B") / "Projects"),
+    }
+
+
+def test_actions_menu_packages_the_selected_project(qtbot, project_browser, monkeypatch):
+    from src.shared.i18n.i18n import I18N
+
+    dialog, projects = project_browser
+    _cut, _grade, delivery = projects
+    dialog.list_widget.setCurrentRow(0)
+    packaged = []
+    monkeypatch.setattr(dialog, "_package_project", packaged.append)
+    package_label = I18N.tr("pm.package_action", "Package project…")
+
+    def choose_package(menu, _anchor):
+        return next((action for action in menu.actions() if action.text() == package_label), None)
+
+    monkeypatch.setattr(QMenu, "exec", choose_package)
+    dialog.actions_btn.click()
+    assert packaged == [delivery.path]
+
+    dialog.list_widget.item(1).setSelected(True)
+    dialog.actions_btn.click()
+    assert packaged == [delivery.path]

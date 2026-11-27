@@ -107,7 +107,7 @@ class DeliverModule:
         
         pages.append(PageDescriptor(
             page_id="deliver",
-            title=context.i18n.tr("page.deliver", "Deliver") if context.i18n else "Deliver",
+            title=context.i18n.tr("page.deliver", "Export") if context.i18n else "Export",
             factory=create_deliver_page,
             default_enabled=True,
             shortcut="Ctrl+5",

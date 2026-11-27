@@ -11,6 +11,7 @@ lines to maintain.
 from __future__ import annotations
 
 import logging
+from types import ModuleType
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,16 @@ def get_project_io_classes():
     except ImportError:
         logger.warning("Edit edit_project_io module unavailable")
         return None
+
+
+def get_project_package_api() -> ModuleType | None:
+    """Return the saved-project packaging service when Edit is available."""
+    try:
+        from src.features.edit.core import project_package
+    except ImportError:
+        logger.exception("Edit project packaging service unavailable")
+        return None
+    return project_package
 
 
 def get_project_classes():

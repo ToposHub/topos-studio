@@ -48,6 +48,8 @@ class FilesPanel(QWidget):
         self._workspace_splitter = PanelSplitter(Qt.Orientation.Vertical, self)
         self._workspace_splitter.setObjectName("libraryMediaPoolSplitter")
         self._workspace_splitter.setChildrenCollapsible(False)
+        self._media_pool_shares: dict[Qt.Orientation, float] = {}
+        self._workspace_splitter.splitterMoved.connect(self._remember_media_pool_size)
         self.content_stack = QStackedWidget(self._workspace_splitter)
         self._workspace_splitter.addWidget(self.content_stack)
         self.layout.addWidget(self._workspace_splitter)
@@ -88,6 +90,19 @@ class FilesPanel(QWidget):
     def hosts_media_pool(self, panel: QWidget) -> bool:
         return panel.parentWidget() is self._workspace_splitter
 
+    def reset_workspace_sizes(self) -> None:
+        """Reapply the browser and media-pool default splitter sizes."""
+        self._media_pool_shares.clear()
+        self._fit_media_pool(initial=True)
+        if self._native_panel is not None:
+            self._native_panel.reset_workspace_sizes()
+
+    def _remember_media_pool_size(self, _position: int, _index: int) -> None:
+        splitter = self._workspace_splitter
+        sizes = splitter.sizes()
+        if len(sizes) == 2 and sum(sizes):
+            self._media_pool_shares[splitter.orientation()] = sizes[1] / sum(sizes)
+
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._fit_media_pool()
@@ -106,13 +121,15 @@ class FilesPanel(QWidget):
         if not initial and splitter.orientation() == orientation:
             return
         splitter.setOrientation(orientation)
+        share = self._media_pool_shares.get(orientation)
         if side_by_side:
-            extent = self.width()
-            pool_size = min(extent - browser_width, max(pool_width, extent // 3))
+            extent = self.width() - splitter.handleWidth()
+            preferred = round(extent * share) if share is not None else extent // 3
+            pool_size = min(extent - browser_width, max(pool_width, preferred))
         else:
-            extent = self.height()
-            pool_size = max(220, min(350, extent * 2 // 5))
-        splitter.setSizes([extent - pool_size, pool_size])
+            extent = self.height() - splitter.handleWidth()
+            pool_size = round(extent * share) if share is not None else max(220, min(350, extent * 2 // 5))
+        splitter.setSizes([max(1, extent - pool_size), max(1, pool_size)])
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.shutdown()

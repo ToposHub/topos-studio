@@ -5,11 +5,12 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
 from PyQt6.QtCore import (
-    QModelIndex, QObject, QPoint, QRect, QRectF, QRunnable, QSignalBlocker,
+    QItemSelectionModel, QModelIndex, QObject, QPoint, QRect, QRectF, QRunnable, QSignalBlocker,
     QSize, QThreadPool, QTimer, Qt, pyqtSignal, pyqtSlot,
 )
 from PyQt6.QtGui import (
@@ -107,6 +108,8 @@ _PRIMARY_TEXT = "#ffffff"
 _SELECTED = "#39302e"
 _SCROLL_THUMB = "#606067"
 _SCROLL_THUMB_HOVER = "#76767e"
+_BADGE_BACKGROUND = "#27272b"
+_BROWSER_SETTINGS = "project_manager_browser"
 
 _MIN_CARD_CELL_WIDTH = 150
 _CARD_INSET = 6
@@ -162,6 +165,8 @@ class _ProjectCardDelegate(QStyledItemDelegate):
     PROJECT_TIME_ROLE = Qt.ItemDataRole.UserRole + 2
     PROJECT_FAVORITE_ROLE = Qt.ItemDataRole.UserRole + 3
     PROJECT_LIBRARY_ROLE = Qt.ItemDataRole.UserRole + 4
+    PROJECT_ACTIVE_ROLE = Qt.ItemDataRole.UserRole + 5
+    PROJECT_LOCATION_LABEL_ROLE = Qt.ItemDataRole.UserRole + 6
 
     def sizeHint(self, option: QStyleOptionViewItem, index: QModelIndex) -> QSize:  # noqa: N802
         if self.parent().viewMode() == QListView.ViewMode.ListMode:
@@ -198,6 +203,18 @@ class _ProjectCardDelegate(QStyledItemDelegate):
             painter.drawPixmap(preview_rect, icon.pixmap(QSize(250, 140), painter.device().devicePixelRatioF()))
             painter.restore()
 
+        active = index.data(self.PROJECT_ACTIVE_ROLE)
+        location = index.data(self.PROJECT_LOCATION_LABEL_ROLE)
+        if active:
+            self._paint_badge(
+                painter, option.font, preview_rect.adjusted(6, 5, -6, 0), active, _ACCENT,
+            )
+        if location:
+            badge_area = QRect(
+                preview_rect.left() + 6, preview_rect.bottom() - 20, preview_rect.width() - 12, 16,
+            )
+            self._paint_badge(painter, option.font, badge_area, location, _TEXT)
+
         name = str(index.data(Qt.ItemDataRole.DisplayRole))
         modified = str(index.data(self.PROJECT_TIME_ROLE) or "—")
         favorite = bool(index.data(self.PROJECT_FAVORITE_ROLE))
@@ -228,6 +245,35 @@ class _ProjectCardDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+    @staticmethod
+    def _badge_width(font: QFont, text: str) -> int:
+        badge_font = QFont(font)
+        badge_font.setPixelSize(10)
+        badge_font.setWeight(QFont.Weight.DemiBold)
+        return QFontMetrics(badge_font).horizontalAdvance(text) + 12
+
+    @staticmethod
+    def _paint_badge(
+        painter: QPainter, font: QFont, area: QRect, text: str, color: str
+    ) -> None:
+        if area.width() <= 12:
+            return
+        painter.save()
+        badge_font = QFont(font)
+        badge_font.setPixelSize(10)
+        badge_font.setWeight(QFont.Weight.DemiBold)
+        metrics = QFontMetrics(badge_font)
+        text = metrics.elidedText(text, Qt.TextElideMode.ElideMiddle, area.width() - 12)
+        badge = QRect(area.left(), area.top(), metrics.horizontalAdvance(text) + 12, 16)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(_BADGE_BACKGROUND))
+        painter.setPen(QColor(_BORDER))
+        painter.drawRoundedRect(badge, 4, 4)
+        painter.setFont(badge_font)
+        painter.setPen(QColor(color))
+        painter.drawText(badge, Qt.AlignmentFlag.AlignCenter, text)
+        painter.restore()
+
     def _paint_row(
         self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex
     ) -> None:
@@ -242,7 +288,9 @@ class _ProjectCardDelegate(QStyledItemDelegate):
             painter.setPen(QPen(QColor(_ACCENT if selected or focused else _BORDER)))
             painter.drawRoundedRect(rect, 5, 5)
         library_path = index.data(self.PROJECT_LIBRARY_ROLE)
-        library = Path(library_path).name or library_path
+        location = index.data(self.PROJECT_LOCATION_LABEL_ROLE)
+        library = location or Path(library_path).name or library_path
+        active = index.data(self.PROJECT_ACTIVE_ROLE)
         favorite = bool(index.data(self.PROJECT_FAVORITE_ROLE))
         name = str(index.data(Qt.ItemDataRole.DisplayRole))
         if favorite:
@@ -254,8 +302,14 @@ class _ProjectCardDelegate(QStyledItemDelegate):
             (library, int(rect.width() * 0.29), _MUTED, Qt.TextElideMode.ElideMiddle),
         )
         left = rect.left()
-        for text, width, color, elide_mode in columns:
+        for column, (text, width, color, elide_mode) in enumerate(columns):
             cell = QRect(left + 10, rect.top(), max(0, width - 20), rect.height())
+            if column == 0 and active:
+                badge_width = self._badge_width(option.font, active)
+                if cell.width() > badge_width + 20:
+                    badge = QRect(cell.right() - badge_width + 1, cell.center().y() - 8, badge_width, 16)
+                    self._paint_badge(painter, option.font, badge, active, _ACCENT)
+                    cell.adjust(0, 0, -badge_width - 8, 0)
             painter.setPen(QColor(color))
             painter.drawText(cell, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                              option.fontMetrics.elidedText(text, elide_mode, cell.width()))
@@ -472,6 +526,7 @@ class ProjectManagerDialog(QDialog):
         self._locations: list[ProjectLibraryLocation] = []
         self._library_filter: str | None = None
         self._scan_error = False
+        self._has_scan_snapshot = False
         self._media_path: str | None = None
         self._media_inflight = False
         self._media_generation = 0
@@ -481,12 +536,12 @@ class ProjectManagerDialog(QDialog):
         self._media_timer.timeout.connect(self._check_selected_media)
         self._scan_inflight = False
         self._scan_pending = False
-        self._pending_selection: list[str] = []
         self._empty_preview = self._placeholder_preview()
         self._thumbnail_provider = ThumbnailProvider.instance()
         self._thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
         self._setup_ui()
         self._apply_styles()
+        self._restore_browser_settings()
         self._refresh_project_list()
         self.search_box.setFocus()
 
@@ -558,6 +613,10 @@ class ProjectManagerDialog(QDialog):
         self.project_count.setAccessibleName(I18N.tr("pm.projects", "Projects"))
         self.project_count.setObjectName("pmMeta")
         heading.addWidget(self.project_count)
+        self.scan_status = QLabel()
+        self.scan_status.setObjectName("pmMeta")
+        self.scan_status.hide()
+        heading.addWidget(self.scan_status)
         heading.addStretch()
 
         self.resume_btn = self._button(
@@ -590,6 +649,12 @@ class ProjectManagerDialog(QDialog):
         self.search_box.textChanged.connect(self._apply_filter)
         self.search_box.returnPressed.connect(self._on_search_submit)
         toolbar.addWidget(self.search_box, 1)
+        self.clear_filters_btn = self._button(
+            I18N.tr("pm.clear_filters", "Clear filters"), "pmQuiet"
+        )
+        self.clear_filters_btn.clicked.connect(self._clear_filters)
+        self.clear_filters_btn.hide()
+        toolbar.addWidget(self.clear_filters_btn)
         toolbar.addStretch()
 
         self.sort_box = ChevronComboBox()
@@ -726,6 +791,45 @@ class ProjectManagerDialog(QDialog):
         for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             shortcut = QShortcut(QKeySequence(key), self.list_widget, self._on_open_clicked)
             shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+
+    def _restore_browser_settings(self) -> None:
+        saved = self._config.get(_BROWSER_SETTINGS)
+        if not isinstance(saved, dict):
+            return
+        size = saved.get("size")
+        if (
+            isinstance(size, (list, tuple)) and len(size) == 2
+            and all(type(value) is int and value > 0 for value in size)
+        ):
+            screen = self.screen()
+            available = screen.availableGeometry().size() if screen is not None else QSize(1120, 660)
+            self.resize(
+                max(self.minimumWidth(), min(size[0], available.width())),
+                max(self.minimumHeight(), min(size[1], available.height())),
+            )
+        sort = saved.get("sort")
+        if isinstance(sort, str):
+            index = self.sort_box.findData(sort)
+            if index >= 0:
+                with QSignalBlocker(self.sort_box):
+                    self.sort_box.setCurrentIndex(index)
+        self.list_view_btn.setChecked(saved.get("view") == "list")
+
+    def done(self, result: int) -> None:
+        settings = {
+            "view": "list" if self.list_view_btn.isChecked() else "cards",
+            "sort": self.sort_box.currentData(),
+            "size": [self.width(), self.height()],
+        }
+        if settings != self._config.get(_BROWSER_SETTINGS):
+            self._config.set(_BROWSER_SETTINGS, settings, auto_save=True)
+        super().done(result)
+
+    def _clear_filters(self) -> None:
+        with QSignalBlocker(self.search_box), QSignalBlocker(self.favorites_only_btn):
+            self.search_box.clear()
+            self.favorites_only_btn.setChecked(False)
+        self._set_library_filter(None)
 
     @staticmethod
     def _button(
@@ -873,31 +977,30 @@ class ProjectManagerDialog(QDialog):
         self.resume_btn.setAccessibleName(f"{prefix} · {name}")
 
     def _on_resume_last_project(self) -> None:
-        path = self._last_project_path()
-        if path:
-            self.project_selected.emit(path)
-        else:
-            self._update_resume_button()
+        last_project = self._config.get("last_project")
+        if isinstance(last_project, str) and last_project:
+            self._open_project_file(last_project)
 
     def _refresh_project_list(self) -> None:
-        """Re-scan in the thread pool and restore any surviving selection."""
+        """Scan in the background while the previous results stay usable."""
         if self._scan_inflight:
             self._scan_pending = True
             return
         self._scan_inflight = True
         self._scan_error = False
-        self._pending_selection = self._selected_paths()
-        self._all_projects = []
-        self.list_widget.clear()
-        self._preview_items.clear()
-        self._preview_paths.clear()
-        self._cover_pixmap_cache.clear()
-        self._update_resume_button()
+        self._set_scan_status(
+            I18N.tr("pm.refreshing", "Refreshing…") if self._has_scan_snapshot else ""
+        )
         self._apply_filter(self.search_box.text())
         config = self._config
         worker = _ProjectTask(lambda: scan_project_libraries(config))
         worker.signals.done.connect(self._on_scan_done)
         QThreadPool.globalInstance().start(worker)
+
+    def _set_scan_status(self, text: str, *, hint: str = "") -> None:
+        self.scan_status.setText(text)
+        self.scan_status.setToolTip(hint)
+        self.scan_status.setVisible(bool(text))
 
     @pyqtSlot(object, object)
     def _on_scan_done(
@@ -906,21 +1009,33 @@ class ProjectManagerDialog(QDialog):
         error: Exception | None,
     ) -> None:
         self._scan_inflight = False
-        self._scan_error = error is not None
-        self._all_projects, self._locations = result if result is not None else ([], [])
-        if (
-            not self._scan_pending
-            and error is None
-            and self._library_filter
-            and not any(item.path == self._library_filter for item in self._locations)
-        ):
-            self._library_filter = None
-        self._update_library_button()
-        self._update_resume_button()
-        self._rebuild_projects()
         if self._scan_pending:
             self._scan_pending = False
             self._refresh_project_list()
+            return
+        if error is not None or result is None:
+            self._scan_error = True
+            self._set_scan_status(
+                I18N.tr("pm.refresh_failed", "Refresh failed") if self._has_scan_snapshot else "",
+                hint=I18N.tr("pm.refresh_failed_cached", "Refresh failed · Showing previous results"),
+            )
+            self._apply_filter(self.search_box.text())
+            return
+
+        self._has_scan_snapshot = True
+        self._set_scan_status("")
+        self._all_projects, self._locations = result
+        if self._library_filter and not any(item.path == self._library_filter for item in self._locations):
+            self._library_filter = None
+        self._update_library_button()
+        self._update_resume_button()
+        scroll_bar = self.list_widget.verticalScrollBar()
+        scroll_position = scroll_bar.value()
+        self._cover_pixmap_cache.clear()
+        self._media_path = None
+        self._rebuild_projects()
+        self.list_widget.doItemsLayout()
+        scroll_bar.setValue(scroll_position)
 
     @staticmethod
     def _library_name(path: str) -> str:
@@ -1073,10 +1188,9 @@ class ProjectManagerDialog(QDialog):
 
     @pyqtSlot()
     def _rebuild_projects(self) -> None:
-        if self._scan_inflight:
-            return
-        selection = self._pending_selection or self._selected_paths()
-        self._pending_selection = []
+        selection = set(self._selected_paths())
+        current = self.list_widget.currentItem()
+        current_path = current.data(Qt.ItemDataRole.UserRole) if current is not None else None
         projects = list(self._all_projects)
         favorite_paths = self._favorite_paths()
         sort = self.sort_box.currentData()
@@ -1089,24 +1203,32 @@ class ProjectManagerDialog(QDialog):
         else:
             projects.sort(key=self._safe_meta_mtime, reverse=True)
 
+        names = [self._display_meta_name(meta) for meta in projects]
+        locations = self._duplicate_location_labels(projects, names)
         with QSignalBlocker(self.list_widget):
             self.list_widget.clear()
             self._preview_items.clear()
             self._preview_paths.clear()
-            for meta in projects:
-                self._add_list_item(meta, favorite=project_library_key(meta.path) in favorite_paths)
-            self._apply_filter(self.search_box.text())
+            for meta, name in zip(projects, names):
+                self._add_list_item(
+                    meta, name, favorite=project_library_key(meta.path) in favorite_paths,
+                    location_hint=locations.get(meta.path, ""),
+                )
+            self._apply_filter(self.search_box.text(), update_selection=False)
+            item = self._preview_items.get(current_path)
+            if item is not None and not item.isHidden():
+                self.list_widget.setCurrentItem(item, QItemSelectionModel.SelectionFlag.NoUpdate)
             for path in selection:
                 item = self._preview_items.get(path)
                 if item is not None and not item.isHidden():
-                    if not self.list_widget.selectedItems():
-                        self.list_widget.setCurrentItem(item)
                     item.setSelected(True)
         self._on_selection_changed()
 
-    def _apply_filter(self, text: str) -> None:
+    def _apply_filter(self, text: str, *, update_selection: bool = True) -> None:
         needle = text.strip().casefold()
         favorites_only = self.favorites_only_btn.isChecked()
+        has_filters = bool(needle or favorites_only or self._library_filter)
+        self.clear_filters_btn.setVisible(has_filters)
         delegate = _ProjectCardDelegate
         visible_count = 0
         with QSignalBlocker(self.list_widget):
@@ -1122,7 +1244,7 @@ class ProjectManagerDialog(QDialog):
                 elif item.isSelected():
                     item.setSelected(False)
 
-        if self._scan_inflight:
+        if self._scan_inflight and not self._has_scan_snapshot:
             message = I18N.tr("pm.scanning", "Scanning projects…")
         elif self._scan_error:
             message = I18N.tr("pm.scan_failed", "Could not read the project libraries. Refresh to retry.")
@@ -1130,23 +1252,59 @@ class ProjectManagerDialog(QDialog):
             message = I18N.tr("pm.offline_empty", "This project library is offline. Reconnect it and refresh.")
         elif not self._all_projects and self._locations and all(not item.available for item in self._locations):
             message = I18N.tr("pm.libraries_unavailable", "Project libraries are offline. Reconnect them and refresh.")
-        elif needle or favorites_only or self._library_filter:
+        elif has_filters:
             message = I18N.tr("pm.no_filtered_projects", "No projects match the current filters.")
         else:
             message = I18N.tr("pm.no_projects", 'No projects yet. Click "New Project" to create one.')
         self.empty_label.setText(message if visible_count == 0 else "")
         self.empty_label.setVisible(visible_count == 0)
-        if self._scan_inflight:
+        if not self._has_scan_snapshot:
             count = ""
         elif visible_count == 1:
             count = I18N.tr("pm.project_count_one", "1 project")
         else:
             count = I18N.tr("pm.project_count", "{count} projects").format(count=visible_count)
         self.project_count.setText(count)
-        self._on_selection_changed()
+        if update_selection:
+            self._on_selection_changed()
 
-    def _add_list_item(self, meta: ProjectMeta, *, favorite: bool) -> None:
-        name = self._safe_meta_name(meta) or I18N.tr("pm.untitled", "Untitled Project")
+    def _display_meta_name(self, meta: ProjectMeta) -> str:
+        return self._safe_meta_name(meta) or I18N.tr("pm.untitled", "Untitled Project")
+
+    def _duplicate_location_labels(
+        self, projects: list[ProjectMeta], names: list[str]
+    ) -> dict[str, str]:
+        groups: dict[str, list[Path]] = {}
+        for meta, name in zip(projects, names):
+            groups.setdefault(name.casefold(), []).append(Path(meta.path))
+        labels: dict[str, str] = {}
+        for paths in groups.values():
+            if len(paths) < 2:
+                continue
+            libraries: dict[str, set[Path]] = {}
+            for path in paths:
+                libraries.setdefault(path.parent.name.casefold(), set()).add(path.parent)
+            location_labels: dict[Path, str] = {}
+            for same_named_libraries in libraries.values():
+                try:
+                    common = Path(os.path.commonpath(same_named_libraries))
+                except ValueError:
+                    common = None  # Windows libraries may live on different drives.
+                for library in same_named_libraries:
+                    suffix = library.relative_to(common) if common is not None else library
+                    location_labels[library] = str(suffix) if suffix.parts else self._library_name(str(library))
+            in_library = Counter(path.parent for path in paths)
+            for path in paths:
+                library = path.parent
+                label = location_labels[library]
+                if in_library[library] > 1:
+                    label = f"{label} · {path.name}"
+                labels[str(path)] = label
+        return labels
+
+    def _add_list_item(
+        self, meta: ProjectMeta, name: str, *, favorite: bool, location_hint: str
+    ) -> None:
         modified = self._format_time(self._safe_meta_mtime(meta))
         tags = self._project_tags(meta.path)
         item = QListWidgetItem(name)
@@ -1155,8 +1313,16 @@ class ProjectManagerDialog(QDialog):
         item.setData(_ProjectCardDelegate.PROJECT_TIME_ROLE, modified)
         item.setData(_ProjectCardDelegate.PROJECT_LIBRARY_ROLE, library)
         item.setData(_ProjectCardDelegate.PROJECT_FAVORITE_ROLE, favorite)
-        item.setData(_ProjectCardDelegate.PROJECT_SEARCH_ROLE, " ".join([name, *tags]).casefold())
-        item.setToolTip("\n".join([name, modified, *tags, meta.path]))
+        active = I18N.tr("pm.active_project", "Editing") if self._is_active_project(meta.path) else ""
+        item.setData(_ProjectCardDelegate.PROJECT_ACTIVE_ROLE, active)
+        item.setData(_ProjectCardDelegate.PROJECT_LOCATION_LABEL_ROLE, location_hint)
+        item.setData(
+            _ProjectCardDelegate.PROJECT_SEARCH_ROLE,
+            " ".join([name, Path(meta.path).name, location_hint, *tags]).casefold(),
+        )
+        description = [name, *(part for part in (active, location_hint) if part)]
+        item.setData(Qt.ItemDataRole.AccessibleTextRole, " · ".join(description))
+        item.setToolTip("\n".join([*description, modified, *tags, meta.path]))
         item.setIcon(QIcon(self._project_preview(meta)))
         self._preview_items[meta.path] = item
         if meta.preview_path:
@@ -1268,7 +1434,7 @@ class ProjectManagerDialog(QDialog):
         self.search_box.selectAll()
 
     def _on_search_submit(self) -> None:
-        if not self.search_box.text().strip() or self._scan_inflight:
+        if not self.search_box.text().strip():
             return
         visible = [item for item in self._preview_items.values() if not item.isHidden()]
         if len(visible) == 1:
@@ -1342,8 +1508,52 @@ class ProjectManagerDialog(QDialog):
 
     def _on_item_double_click(self, item: QListWidgetItem) -> None:
         path = item.data(Qt.ItemDataRole.UserRole)
-        if isinstance(path, str) and os.path.exists(path):
-            self.project_selected.emit(path)
+        if isinstance(path, str):
+            self._open_project_file(path)
+
+    def _open_project_file(self, path: str, *, register: bool = False) -> None:
+        if not os.path.isfile(path):
+            last_project = self._config.get("last_project")
+            if isinstance(last_project, str) and last_project and (
+                project_library_key(last_project) == project_library_key(path)
+            ):
+                self.resume_btn.hide()
+            self._show_missing_project(path)
+            return
+        if register:
+            register_project_library_dir(self._config, os.path.dirname(path))
+        self.project_selected.emit(path)
+
+    def _show_missing_project(self, path: str) -> None:
+        message = QMessageBox(
+            QMessageBox.Icon.Warning,
+            I18N.tr("pm.missing_project_title", "Project file unavailable"),
+            I18N.tr(
+                "pm.missing_project_message",
+                "This project may have been moved, or its drive may be disconnected.",
+            ),
+            QMessageBox.StandardButton.Cancel,
+            self,
+        )
+        message.setTextFormat(Qt.TextFormat.PlainText)
+        message.setInformativeText(path)
+        rescan = message.addButton(
+            I18N.tr("pm.rescan", "Rescan libraries"), QMessageBox.ButtonRole.ActionRole
+        )
+        locate = message.addButton(
+            I18N.tr("pm.locate_project", "Locate project…"), QMessageBox.ButtonRole.ActionRole
+        )
+        message.setDefaultButton(rescan)
+        message.exec()
+        choice = message.clickedButton()
+        message.deleteLater()
+        if choice == rescan:
+            self._refresh_project_list()
+        elif choice == locate:
+            directory = os.path.dirname(path)
+            if not os.path.isdir(directory):
+                directory = str(get_project_library_dir(self._config, create=False))
+            self._choose_project_file(directory)
 
     def _on_open_clicked(self) -> None:
         items = self.list_widget.selectedItems()
@@ -1351,15 +1561,18 @@ class ProjectManagerDialog(QDialog):
             self._on_item_double_click(items[0])
 
     def _on_browse_clicked(self) -> None:
+        directory = str(get_project_library_dir(self._config, create=False))
+        self._choose_project_file(directory)
+
+    def _choose_project_file(self, directory: str) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
             I18N.tr("pm.open_from_disk", "Open Project"),
-            str(get_project_library_dir(self._config, create=False)),
+            directory,
             I18N.tr("project.file_filter", "Topos Projects (*.topos);;All Files (*)"),
         )
         if path:
-            register_project_library_dir(self._config, os.path.dirname(path))
-            self.project_selected.emit(path)
+            self._open_project_file(path, register=True)
 
     def _on_add_library_location(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -1405,6 +1618,7 @@ class ProjectManagerDialog(QDialog):
         act_favorite = None
         act_tags = None
         act_backups = None
+        act_package = None
         if len(selected_paths) == 1:
             act_rename = menu.addAction(I18N.tr("pm.rename", "Rename"))
             act_duplicate = menu.addAction(I18N.tr("pm.duplicate", "Duplicate"))
@@ -1415,19 +1629,17 @@ class ProjectManagerDialog(QDialog):
             )
             act_tags = menu.addAction(I18N.tr("pm.edit_tags", "Edit Tags..."))
             act_backups = menu.addAction(I18N.tr("pm.backup_history", "Backup history"))
+            act_package = menu.addAction(I18N.tr("pm.package_action", "Package project…"))
         menu.addSeparator()
         act_delete = menu.addAction(
             I18N.tr("pm.delete_selected", "Delete {count} Projects").format(count=len(selected_paths))
             if len(selected_paths) > 1 else I18N.tr("pm.delete", "Delete")
         )
-        act_delete.setEnabled(
-            self._active_project_path not in {os.path.abspath(p) for p in selected_paths}
-        )
+        act_delete.setEnabled(not any(self._is_active_project(p) for p in selected_paths))
         chosen = menu.exec(anchor)
         if chosen == act_open:
-            if len(selected_paths) == 1 and os.path.exists(path):
-                register_project_library_dir(self._config, os.path.dirname(path))
-                self.project_selected.emit(path)
+            if len(selected_paths) == 1:
+                self._open_project_file(path, register=True)
         elif chosen == act_reveal:
             self._reveal_in_file_manager(path)
         elif act_rename is not None and chosen == act_rename:
@@ -1441,14 +1653,59 @@ class ProjectManagerDialog(QDialog):
             self._edit_tags(path)
         elif act_backups is not None and chosen == act_backups:
             self._show_backup_history(path)
+        elif act_package is not None and chosen == act_package:
+            self._package_project(path)
         elif chosen == act_delete:
             self._delete_projects(selected_paths)
 
-    def _show_backup_history(self, path: str) -> None:
-        active = self._active_project_path is not None and (
-            project_library_key(self._active_project_path) == project_library_key(path)
+    def _package_project(self, path: str) -> None:
+        from src.app.ui.project_package_dialog import ProjectPackageDialog
+        from src.features.edit.commands_facade import get_project_package_api
+
+        api = get_project_package_api()
+        if api is None:
+            QMessageBox.warning(
+                self,
+                I18N.tr("pm.package_title", "Package Project"),
+                I18N.tr("pm.package_unavailable", "Project packaging is unavailable."),
+            )
+            return
+        dialog = ProjectPackageDialog(path, api, active=self._is_active_project(path), parent=self)
+        dialog.exec()
+        result = dialog.result_package
+        dialog.deleteLater()
+        if result is None:
+            return
+        message = QMessageBox(
+            QMessageBox.Icon.Warning if result.missing else QMessageBox.Icon.Information,
+            I18N.tr("pm.package_title", "Package Project"),
+            (
+                I18N.tr("pm.package_result_incomplete", "Package exported with {count} missing items.")
+                .format(count=len(result.missing))
+                if result.missing else I18N.tr("pm.package_result_ok", "Package exported.")
+            ),
+            QMessageBox.StandardButton.Close,
+            self,
         )
-        dialog = _BackupHistoryDialog(path, self._config, active, self)
+        message.setTextFormat(Qt.TextFormat.PlainText)
+        message.setInformativeText(result.path)
+        if result.missing:
+            message.setDetailedText("\n".join(result.missing))
+        reveal = message.addButton(
+            I18N.tr("pm.reveal_in_finder", "Reveal in File Manager"),
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        message.exec()
+        if message.clickedButton() == reveal:
+            self._reveal_in_file_manager(result.path, directory=Path(result.path).is_dir())
+        message.deleteLater()
+
+    def _is_active_project(self, path: str) -> bool:
+        active = self._active_project_path
+        return active is not None and project_library_key(active) == project_library_key(path)
+
+    def _show_backup_history(self, path: str) -> None:
+        dialog = _BackupHistoryDialog(path, self._config, self._is_active_project(path), self)
         dialog.exec()
         restored = dialog.restored_path
         dialog.deleteLater()
@@ -1491,7 +1748,7 @@ class ProjectManagerDialog(QDialog):
             if old_tags:
                 self._set_project_tags(path, [])
                 self._set_project_tags(new_path, old_tags)
-            if self._active_project_path == os.path.abspath(path):
+            if self._is_active_project(path):
                 self._active_project_path = os.path.abspath(new_path)
             self.project_renamed.emit(path, new_path)
             self._refresh_project_list()
@@ -1540,8 +1797,7 @@ class ProjectManagerDialog(QDialog):
         paths = [path for path in paths if os.path.exists(path)]
         if not paths:
             return
-        active = self._active_project_path
-        if active and any(os.path.abspath(path) == active for path in paths):
+        if any(self._is_active_project(path) for path in paths):
             QMessageBox.warning(
                 self,
                 I18N.tr("pm.delete_title", "Delete Project"),

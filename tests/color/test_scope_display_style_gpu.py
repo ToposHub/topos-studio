@@ -58,6 +58,25 @@ def _signal_pixels(rgb: np.ndarray, channel: int) -> np.ndarray:
     return (values[..., channel] > 12.0) & (values[..., channel] > others * 2.0)
 
 
+@pytest.mark.parametrize("mode", ["waveform", "parade", "luma"])
+@pytest.mark.parametrize("value", [-0.08, 1.125])
+def test_waveform_gpu_filters_excursions(scope_engine: GpuScopeEngine, mode: str, value: float) -> None:
+    rgba = np.full((32, 64, 4), value, dtype="f2")
+    rgba[..., 3] = 1.0
+    source = scope_engine.ctx.texture((64, 32), 4, rgba.tobytes(), dtype="f2")
+    try:
+        for show in (True, False):
+            scope_engine.render_demand(
+                ScopeDemand(1, 1, mode, (300, 200), analysis_size=(64, 32),
+                            show_waveform_excursions=show), source,
+            )
+            out = scope_engine._pool['wf_display']
+            pixels = np.frombuffer(out.read(), dtype=np.uint8).reshape(-1, 4)
+            assert bool(pixels[:, :3].any()) is show
+    finally:
+        source.release()
+
+
 def _two_peak_frame() -> np.ndarray:
     rgba = np.ones((100, 100, 4), dtype=np.float32)
     # Exact binary code values avoid sampling ambiguity. Both peaks also sit

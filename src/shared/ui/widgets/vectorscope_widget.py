@@ -15,11 +15,27 @@ Color positions aligned with Color Wheel (HUE_OFFSET_ANGLE = 105°).
 import numpy as np
 import cv2
 from typing import Optional, Tuple
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtWidgets import QMenu, QWidget
 from PyQt6.QtCore import Qt, QTimer, QRect, QRectF, QPointF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QImage, QFont, QPainterPath
+from src.features.color.core.scope_types import waveform_plot_range
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
+
+
+def _scope_background(widget: QWidget, fallback: int = 5) -> QColor:
+    color = widget.property("scopeBackground")
+    return color if isinstance(color, QColor) else QColor(fallback, fallback, fallback)
+
+
+def _draw_scope_plot(
+    painter: QPainter, widget: QWidget, image: QImage, rect: QRectF | None = None,
+) -> None:
+    painter.save()
+    if widget.property("scopeBackground") is not None:
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Screen)
+    painter.drawImage(widget.rect() if rect is None else rect, image)
+    painter.restore()
 
 
 # Rec. 709 RGB to YCbCr conversion coefficients
@@ -386,8 +402,7 @@ class VectorscopeWidget(QWidget):
         center_y = h / 2
         radius = min(w, h) / 2 - 20  # Leave margin for labels
 
-        # Background - pure black for additive blending
-        painter.fillRect(rect, QColor(0, 0, 0))
+        painter.fillRect(rect, _scope_background(self, fallback=0))
 
         # Draw heatmap if available
         if self._heatmap_image is not None:
@@ -578,14 +593,7 @@ class VectorscopeWidget(QWidget):
             self._update_timer.start()
 
 
-class WaveformWidget(QWidget):
-    """
-    RGB Waveform widget (extracted from original ScopePanel).
-
-    Displays the luminance distribution of each RGB channel
-    across the horizontal axis of the image.
-    """
-
+class _WaveformPlot(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.q_scope_image: Optional[QImage] = None
@@ -593,11 +601,12 @@ class WaveformWidget(QWidget):
         # P1-COLOR-06: 标尺模式（percent / nits / code10）与输入传输特性
         self._scale_mode = 'percent'
         self._transfer = 'srgb'
+        self._show_excursions = True
         self.setStyleSheet(f"background-color: {C.SCOPE_BG};")
 
     def set_scale_mode(self, mode: str) -> None:
         """设置标尺：'percent' | 'nits' | 'code10'（10-bit video range）。"""
-        if mode in ('percent', 'nits', 'code10') and mode != self._scale_mode:
+        if mode in ('percent', 'nits', 'code10', 'code10_full') and mode != self._scale_mode:
             self._scale_mode = mode
             self.update()
 
@@ -605,6 +614,39 @@ class WaveformWidget(QWidget):
         if transfer != self._transfer:
             self._transfer = transfer
             self.update()
+
+    def set_show_excursions(self, show: bool) -> None:
+        if show != self._show_excursions:
+            self._show_excursions = show
+            self.q_scope_image = None
+            self.update()
+
+    def _paint_plot(self, painter: QPainter) -> bool:
+        from src.shared.ui.widgets.gpu_scope_widget import draw_waveform_ruler
+
+        rect = self.rect()
+        painter.fillRect(rect, _scope_background(self))
+        if self.q_scope_image is None:
+            painter.setPen(QColor(100, 100, 100))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter,
+                             I18N.tr("analysis.waiting", "等待图像..."))
+            return False
+        ruler_width = 46
+        _draw_scope_plot(painter, self, self.q_scope_image,
+                         QRectF(ruler_width, 0, max(0, rect.width() - ruler_width), rect.height()))
+        scale = 'code10_video' if self._scale_mode == 'code10' else self._scale_mode
+        draw_waveform_ruler(painter, rect.height(), ruler_width, scale, self._transfer,
+                            plot_width=rect.width(), show_excursions=self._show_excursions)
+        return True
+
+
+class WaveformWidget(_WaveformPlot):
+    """
+    RGB Waveform widget (extracted from original ScopePanel).
+
+    Displays the luminance distribution of each RGB channel
+    across the horizontal axis of the image.
+    """
 
     def update_waveform(self, image_bgr_float: np.ndarray) -> None:
         """
@@ -616,48 +658,11 @@ class WaveformWidget(QWidget):
         if image_bgr_float is None or image_bgr_float.size == 0:
             return
 
-        target_w = 1024
-        h, w = image_bgr_float.shape[:2]
-        target_h = max(1, min(int(h * (target_w / w)), 512))
-
-        # Use INTER_NEAREST for fast sampling of float32 data
-        small_img = cv2.resize(
-            image_bgr_float, (target_w, target_h),
-            interpolation=cv2.INTER_NEAREST
+        small = _downsample_columns(image_bgr_float, 1024)
+        b_wf, g_wf, r_wf = (
+            _waveform_density(small[:, :, channel], show_excursions=self._show_excursions)
+            for channel in range(3)
         )
-        if not small_img.flags['C_CONTIGUOUS']:
-            small_img = np.ascontiguousarray(small_img)
-
-        # HDR scope range: -10% to 120%
-        MIN_V, MAX_V = -0.1, 1.2
-        RANGE_V = MAX_V - MIN_V
-        BINS = 300
-
-        def get_waveform_channel(chan_float: np.ndarray) -> np.ndarray:
-            cols = chan_float.shape[1]
-            rows = chan_float.shape[0]
-
-            # Map float data to bin indices (Y inverted)
-            normalized = (chan_float - MIN_V) / RANGE_V
-            y_indices = np.clip(
-                (1.0 - normalized) * (BINS - 1), 0, BINS - 1
-            ).astype(np.int32)
-
-            x_indices = np.tile(np.arange(cols), (rows, 1)).flatten()
-            flat_indices = y_indices.flatten() * cols + x_indices
-
-            counts = np.bincount(flat_indices, minlength=BINS * cols)
-            wf = counts.reshape(BINS, cols).astype(np.float32)
-
-            if wf.max() > 0:
-                wf = np.power(wf / wf.max(), 0.5) * 255
-            return wf.astype(np.uint8)
-
-        # Note: input is BGR, so channels are [B, G, R]
-        b_wf = get_waveform_channel(small_img[:, :, 0])
-        g_wf = get_waveform_channel(small_img[:, :, 1])
-        r_wf = get_waveform_channel(small_img[:, :, 2])
-
         scope_data = np.ascontiguousarray(cv2.merge([r_wf, g_wf, b_wf]))
         hh, ww = scope_data.shape[:2]
         self.q_scope_image = QImage(
@@ -669,60 +674,7 @@ class WaveformWidget(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        rect = self.rect()
-        w, h = rect.width(), rect.height()
-
-        # Background
-        painter.fillRect(rect, QColor(5, 5, 5))
-
-        if self.q_scope_image is None:
-            painter.setPen(QColor(100, 100, 100))
-            painter.drawText(
-                rect, Qt.AlignmentFlag.AlignCenter,
-                I18N.tr("analysis.waiting", "等待图像...")
-            )
-            return
-
-        # Scale to fit widget
-        painter.drawImage(rect, self.q_scope_image)
-
-        # Draw HDR reference lines
-        MIN_V, MAX_V = -0.1, 1.2
-        RANGE_V = MAX_V - MIN_V
-
-        y_100 = int(h * (MAX_V - 1.0) / RANGE_V)
-        y_0 = int(h * (MAX_V - 0.0) / RANGE_V)
-
-        painter.setFont(self.font())
-
-        # 100% line
-        painter.setPen(QPen(QColor(100, 200, 255, 180), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(0, y_100, w, y_100)
-        painter.drawText(5, y_100 - 5, I18N.tr("analysis.hundred_percent", "100%"))
-
-        # 0% line
-        painter.setPen(QPen(QColor(255, 100, 100, 180), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(0, y_0, w, y_0)
-        painter.drawText(5, y_0 - 5, I18N.tr("analysis.zero_percent", "0%"))
-
-        # P1-COLOR-06: HDR nits / 10-bit code 标尺（0/100% 线保持绘制）
-        if self._scale_mode in ('nits', 'code10'):
-            marks = waveform_scale_marks(self._scale_mode, self._transfer)
-            painter.setPen(QPen(QColor(255, 220, 120, 190), 1,
-                                Qt.PenStyle.DotLine))
-            for code, label in marks:
-                y = int(h * (MAX_V - float(code)) / RANGE_V)
-                if 8 <= y <= h - 2:
-                    painter.drawLine(w - 74, y, w - 4, y)
-                    painter.drawText(w - 70, y + 3, label)
-            unit = (I18N.tr("analysis.nits", "nits")
-                    if self._scale_mode == 'nits' else
-                    I18N.tr("analysis.code10", "10-bit"))
-            painter.drawText(w - 74, 14, unit)
-
-        # Title
-        painter.setPen(QColor(200, 200, 200, 150))
-        painter.drawText(int(w - 100), 15, I18N.tr("analysis.rgb_waveform", "RGB Waveform"))
+        self._paint_plot(painter)
 
 # ============================================================
 # P1-COLOR-06: Professional scope widgets (Parade / Luma / Histogram)
@@ -739,15 +691,17 @@ def _downsample_columns(image_bgr_float: np.ndarray, target_w: int) -> np.ndarra
     return small
 
 
-def _waveform_density(chan_float: np.ndarray, bins: int = 300) -> np.ndarray:
-    """单通道波形密度图（与 WaveformWidget 相同的 HDR -10%..120% 域）。"""
-    MIN_V, MAX_V = -0.1, 1.2
-    RANGE_V = MAX_V - MIN_V
+def _waveform_density(chan_float: np.ndarray, bins: int = 300, *, show_excursions: bool = True) -> np.ndarray:
+    """Accumulate one channel in the selected waveform value range."""
+    range_min, range_max = waveform_plot_range(show_excursions)
     rows, cols = chan_float.shape
-    normalized = (chan_float - MIN_V) / RANGE_V
+    normalized = (chan_float - range_min) / (range_max - range_min)
     y_indices = np.clip((1.0 - normalized) * (bins - 1), 0, bins - 1).astype(np.int32)
     x_indices = np.tile(np.arange(cols), (rows, 1)).flatten()
     flat_indices = y_indices.flatten() * cols + x_indices
+    if not show_excursions:
+        valid = (chan_float >= 0.0) & (chan_float <= 1.0)
+        flat_indices = flat_indices[valid.ravel()]
     counts = np.bincount(flat_indices, minlength=bins * cols)
     wf = counts.reshape(bins, cols).astype(np.float32)
     if wf.max() > 0:
@@ -755,28 +709,21 @@ def _waveform_density(chan_float: np.ndarray, bins: int = 300) -> np.ndarray:
     return wf.astype(np.uint8)
 
 
-class ParadeWidget(QWidget):
+class ParadeWidget(_WaveformPlot):
     """RGB Parade：三通道并排波形（DaVinci Parade）。
 
     调色员用它判断通道间的电平错位（色偏）与逐通道曝光——
     每通道占 1/3 宽度，垂直域与其他波形一致（-10%..120%）。
     """
 
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.q_scope_image: Optional[QImage] = None
-        self.setMinimumSize(100, 100)
-        self.setStyleSheet(f"background-color: {C.SCOPE_BG};")
-
     def update_parade(self, image_bgr_float: np.ndarray) -> None:
         if image_bgr_float is None or image_bgr_float.size == 0:
             return
-        small = _downsample_columns(image_bgr_float, 768)
-        thirds = small.shape[1] // 3
-        # 输入 BGR：左→右显示 R, G, B
-        r_wf = _waveform_density(small[:, :thirds, 2])
-        g_wf = _waveform_density(small[:, thirds:2 * thirds, 1])
-        b_wf = _waveform_density(small[:, 2 * thirds:3 * thirds, 0])
+        small = _downsample_columns(image_bgr_float, 256)
+        r_wf, g_wf, b_wf = (
+            _waveform_density(small[:, :, channel], show_excursions=self._show_excursions)
+            for channel in (2, 1, 0)
+        )
         # 每通道单色渲染：R 段红基、G 段绿基、B 段蓝基
         r_rgb = cv2.merge([np.zeros_like(r_wf), np.zeros_like(r_wf), r_wf])
         g_rgb = cv2.merge([np.zeros_like(g_wf), g_wf, np.zeros_like(g_wf)])
@@ -791,48 +738,20 @@ class ParadeWidget(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        rect = self.rect()
-        w, h = rect.width(), rect.height()
-        painter.fillRect(rect, QColor(5, 5, 5))
-        if self.q_scope_image is None:
-            painter.setPen(QColor(100, 100, 100))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter,
-                             I18N.tr("analysis.waiting", "等待图像..."))
-            return
-        painter.drawImage(rect, self.q_scope_image)
-
-        MIN_V, MAX_V = -0.1, 1.2
-        RANGE_V = MAX_V - MIN_V
-        y_100 = int(h * (MAX_V - 1.0) / RANGE_V)
-        y_0 = int(h * (MAX_V - 0.0) / RANGE_V)
-        painter.setFont(self.font())
-        painter.setPen(QPen(QColor(100, 200, 255, 180), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(0, y_100, w, y_100)
-        painter.drawText(5, y_100 - 5, I18N.tr("analysis.hundred_percent", "100%"))
-        painter.setPen(QPen(QColor(255, 100, 100, 180), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(0, y_0, w, y_0)
-        painter.drawText(5, y_0 - 5, I18N.tr("analysis.zero_percent", "0%"))
-
-        # 通道标签（各段中心）
-        painter.setPen(QColor(200, 200, 200, 150))
-        for label, x in (("R", w / 6.0), ("G", w / 2.0), ("B", 5 * w / 6.0)):
-            painter.drawText(int(x - 4), 15, label)
-        painter.drawText(int(w - 100), 15,
-                         I18N.tr("analysis.rgb_parade", "RGB Parade"))
+        if self._paint_plot(painter):
+            painter.setPen(QColor(200, 200, 200, 150))
+            plot_width = self.width() - 46
+            for channel, label in enumerate(("R", "G", "B")):
+                x = 46 + plot_width * (channel + 0.5) / 3.0
+                painter.drawText(int(x - 4), 15, label)
 
 
-class LumaWaveformWidget(QWidget):
+class LumaWaveformWidget(_WaveformPlot):
     """Luma Waveform：仅亮度（BT.709 Y）波形。
 
     与 RGB Waveform 不同，不显示通道分离——用于纯曝光/对比度判断，
     白色迹线对应 BT.709 加权亮度（0.2126R + 0.7152G + 0.0722B）。
     """
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.q_scope_image: Optional[QImage] = None
-        self.setMinimumSize(100, 100)
-        self.setStyleSheet(f"background-color: {C.SCOPE_BG};")
 
     def update_luma_waveform(self, image_bgr_float: np.ndarray) -> None:
         if image_bgr_float is None or image_bgr_float.size == 0:
@@ -842,7 +761,7 @@ class LumaWaveformWidget(QWidget):
         g = small[:, :, 1].astype(np.float32)
         r = small[:, :, 2].astype(np.float32)
         y = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        wf = _waveform_density(y)
+        wf = _waveform_density(y, show_excursions=self._show_excursions)
         scope_data = np.ascontiguousarray(cv2.merge([wf, wf, wf]))
         hh, ww = scope_data.shape[:2]
         self.q_scope_image = QImage(
@@ -852,30 +771,7 @@ class LumaWaveformWidget(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        rect = self.rect()
-        w, h = rect.width(), rect.height()
-        painter.fillRect(rect, QColor(5, 5, 5))
-        if self.q_scope_image is None:
-            painter.setPen(QColor(100, 100, 100))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter,
-                             I18N.tr("analysis.waiting", "等待图像..."))
-            return
-        painter.drawImage(rect, self.q_scope_image)
-
-        MIN_V, MAX_V = -0.1, 1.2
-        RANGE_V = MAX_V - MIN_V
-        y_100 = int(h * (MAX_V - 1.0) / RANGE_V)
-        y_0 = int(h * (MAX_V - 0.0) / RANGE_V)
-        painter.setFont(self.font())
-        painter.setPen(QPen(QColor(100, 200, 255, 180), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(0, y_100, w, y_100)
-        painter.drawText(5, y_100 - 5, I18N.tr("analysis.hundred_percent", "100%"))
-        painter.setPen(QPen(QColor(255, 100, 100, 180), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(0, y_0, w, y_0)
-        painter.drawText(5, y_0 - 5, I18N.tr("analysis.zero_percent", "0%"))
-        painter.setPen(QColor(200, 200, 200, 150))
-        painter.drawText(int(w - 110), 15,
-                         I18N.tr("analysis.luma_waveform", "Luma Waveform"))
+        self._paint_plot(painter)
 
 
 class HistogramWidget(QWidget):
@@ -926,7 +822,7 @@ class HistogramWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self.rect()
         w, h = rect.width(), rect.height()
-        painter.fillRect(rect, QColor(5, 5, 5))
+        painter.fillRect(rect, _scope_background(self))
         if self._hist_rgb is None:
             painter.setPen(QColor(100, 100, 100))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter,
@@ -1061,7 +957,8 @@ def waveform_scale_marks(scale_mode: str, transfer: str = 'srgb'):
                     (float(hlg_nits_to_code(203.0)), "203"),
                     (0.90, "640"),
                     (1.0, "1000 nits")]
-        return [(1.0, "100 nits")]  # SDR：满刻度即参考白
+        return [(1.055 * (value / 100.0) ** (1.0 / 2.4) - 0.055, str(value))
+                for value in (10, 25, 50, 75)] + [(1.0, "100 nits")]
     if scale_mode == 'code10':
         return [(0.0, str(code_value_to_10bit(0.0))),
                 (0.25, str(code_value_to_10bit(0.25))),
@@ -1269,7 +1166,7 @@ class CieChromaticityWidget(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(5, 5, 5))
+        painter.fillRect(self.rect(), _scope_background(self))
         ox, oy, pw, ph = self._plot_rect()
         if pw < 40 or ph < 40:
             return
@@ -1277,9 +1174,7 @@ class CieChromaticityWidget(QWidget):
         if self._density_image is None and self._density is not None:
             self._density_image = self._build_density_image()
         if self._density_image is not None:
-            painter.drawImage(
-                QRectF(ox, oy, pw, ph), self._density_image,
-                QRectF(0.0, 0.0, self._BINS_X, self._BINS_Y))
+            _draw_scope_plot(painter, self, self._density_image, QRectF(ox, oy, pw, ph))
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
@@ -1466,8 +1361,11 @@ class FalseColorWidget(QWidget):
         self.update()
 
     def _show_context_menu(self, pos) -> None:
-        from PyQt6.QtWidgets import QMenu
         menu = QMenu(self)
+        self.populate_options_menu(menu)
+        menu.exec(self.mapToGlobal(pos))
+
+    def populate_options_menu(self, menu: QMenu) -> None:
         title = menu.addAction(I18N.tr("analysis.false_color", "False Color"))
         title.setEnabled(False)
         for mode, label in (
@@ -1489,7 +1387,6 @@ class FalseColorWidget(QWidget):
             act.setChecked(abs(self._zebra_threshold - thr) < 1e-6)
             act.triggered.connect(lambda _=False, t=thr:
                                    self.set_zebra_threshold(t))
-        menu.exec(self.mapToGlobal(pos))
 
     def update_false_color(self, image_bgr_float: np.ndarray) -> None:
         if image_bgr_float is None or image_bgr_float.size == 0:
@@ -1535,7 +1432,7 @@ class FalseColorWidget(QWidget):
         painter = QPainter(self)
         rect = self.rect()
         w, h = rect.width(), rect.height()
-        painter.fillRect(rect, QColor(5, 5, 5))
+        painter.fillRect(rect, _scope_background(self))
         painter.setFont(self.font())
 
         if self._display_image is None:

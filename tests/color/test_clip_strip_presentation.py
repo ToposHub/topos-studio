@@ -324,3 +324,14 @@ def test_reused_card_releases_evicted_preview_and_can_retry_thumbnail(
     assert strip._cards[:2] == [first, second]
     assert not first._preview_override_active
     assert not second._thumbnail_requested
+
+
+def test_compact_workspace_uses_small_and_restores_preferred_size(strip) -> None:
+    strip._set_card_size(ui.CardSize.LARGE)
+    preferred_height = strip.height()
+    strip.set_compact_height(True)
+    assert strip._card_size is ui.CardSize.SMALL
+    assert strip.height() < preferred_height
+    strip.set_compact_height(False)
+    assert strip._card_size is ui.CardSize.LARGE
+    assert strip.height() == preferred_height

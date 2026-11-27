@@ -330,6 +330,7 @@ class VideoExportSettingsPanel(QWidget):
         # Live context (set by the workspace / controller)
         self._project: Any = None
         self._sequence: Any = None
+        self._timeline_sequences: dict[str, Any] = {}
         self._project_id: str = ""
         self._project_revision: int = 0
         self._project_name: str = ""
@@ -1633,6 +1634,10 @@ class VideoExportSettingsPanel(QWidget):
     def current_range_type(self) -> str:
         """Return the current output range mode without exposing the widget."""
         return str(self._range_combo.currentData() or RangeType.ENTIRE)
+
+    def use_in_out_range(self) -> None:
+        """Use the range the user just adjusted on the timeline ruler."""
+        self._select_combo_by_data(self._range_combo, RangeType.IN_OUT)
 
     def set_timeline_sequences(self, sequences: Any) -> None:
         """全部时间线序列（nested 音频 preflight 展开，复验 P1-14）。
@@ -3028,14 +3033,11 @@ class VideoExportSettingsPanel(QWidget):
         if sequence is None:
             return 0.0
 
-        try:
-            total_frames = int(getattr(sequence, "duration_frames", 0) or 0)
-        except (TypeError, ValueError):
-            return 0.0
-        if total_frames <= 0:
-            return 0.0
-
+        from src.features.edit.core.timeline_v2 import effective_timeline_duration_frames
         range_type = str(self._range_combo.currentData() or RangeType.ENTIRE)
+        total_frames = effective_timeline_duration_frames(
+            sequence, include_marks=range_type != RangeType.ENTIRE,
+        )
         if range_type == RangeType.IN_OUT:
             start_value = getattr(sequence, "range_start", None)
             end_value = getattr(sequence, "range_end", None)

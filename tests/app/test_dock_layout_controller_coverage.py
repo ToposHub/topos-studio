@@ -107,6 +107,7 @@ class _FakeLayoutDb:
                  settings: Optional[dict] = None) -> None:
         self.layouts: List[str] = list(layouts or [])
         self.settings: dict = dict(settings or {})
+        self.page_presets: dict[tuple[str, str], dict[str, str]] = {}
         self.saved: List[Tuple[str, str, str, dict, Any]] = []
         self.loaded: List[Tuple[str, Any]] = []
         self.deleted: List[Tuple[str, Any]] = []
@@ -121,6 +122,10 @@ class _FakeLayoutDb:
     def list_layouts(self, work_mode: Any = None) -> List[str]:
         return list(self.layouts)
 
+    def list_layout_bundles(self, work_mode: str) -> dict[str, dict[str, str]]:
+        return {name: captures for name, _geom, _state, captures, mode in self.saved
+                if mode == work_mode and name in self.layouts}
+
     def load_layout(self, name: str, work_mode: Any = None) -> Tuple[Optional[str], Optional[str], Optional[dict]]:
         self.loaded.append((name, work_mode))
         return self.blob
@@ -129,6 +134,15 @@ class _FakeLayoutDb:
         self.deleted.append((name, work_mode))
         if name in self.layouts:
             self.layouts.remove(name)
+
+    def save_page_layout(self, work_mode: str, page_id: str, name: str, state: str) -> None:
+        self.page_presets.setdefault((work_mode, page_id), {})[name] = state
+
+    def list_page_layouts(self, work_mode: str, page_id: str) -> dict[str, str]:
+        return dict(self.page_presets.get((work_mode, page_id), {}))
+
+    def delete_page_layout(self, work_mode: str, page_id: str, name: str) -> None:
+        self.page_presets.get((work_mode, page_id), {}).pop(name, None)
 
     def get_setting(self, key: str) -> Any:
         return self.settings.get(key)
@@ -756,27 +770,6 @@ def test_image_batch_export_cannot_leak_from_a_restored_color_layout(host: _Dock
     assert host.dock_export.toggleViewAction().isVisible()
 
 
-def test_photo_color_default_places_sidebars_and_groups_tools(host: _DockHost) -> None:
-    host._active_work_mode = "image"
-    host.current_page = "Color"
-    host.apply_default_layout()
-    assert host.corner(Qt.Corner.TopLeftCorner) == Qt.DockWidgetArea.LeftDockWidgetArea
-    assert host.corner(Qt.Corner.TopRightCorner) == Qt.DockWidgetArea.RightDockWidgetArea
-    assert host.dockWidgetArea(host.dock_viewport) == Qt.DockWidgetArea.TopDockWidgetArea
-    assert host.dockWidgetArea(host.dock_presets) == Qt.DockWidgetArea.LeftDockWidgetArea
-    assert set(host.tabifiedDockWidgets(host.dock_presets)) == {host.dock_lut, host.dock_plugin}
-    assert host.dock_crop in host.tabifiedDockWidgets(host.dock_info)
-    assert host.dock_layers not in host.tabifiedDockWidgets(host.dock_info)
-    assert host.dock_raw in host.tabifiedDockWidgets(host.dock_grading)
-    assert host.dock_base_grade in host.tabifiedDockWidgets(host.dock_grading)
-    assert not host.dock_base_grade.isHidden()
-    assert host.dock_chromogen in host.tabifiedDockWidgets(host.dock_base_grade)
-    assert not host.dock_chromogen.isHidden()
-    assert host.dock_warper in host.tabifiedDockWidgets(host.dock_curves)
-    assert host.dock_grain in host.tabifiedDockWidgets(host.dock_analysis)
-    assert host.dock_export.isHidden()
-
-
 def test_enforce_caption_workspace_is_hidden_on_non_edit_pages(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     """BUG-B4-02 fixed: dock_caption_workspace is in the edit_only list.
@@ -1034,8 +1027,9 @@ def test_color_keyframes_menu_opens_in_old_layout_and_stays_on_color_page(
         layout_host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(layout_host, "video", monkeypatch)
     dock = layout_host.dock_color_keyframes
-    _, _, panels = layout_host._load_factory_layout("video")
-    assert layout_host.restoreState(_from_hex(panels["Color"]))
+    # Recreate an older layout with scopes docked and keyframes unseated.
+    layout_host.dock_analysis.show()
+    dock.hide()
     # Startup can immediately save a new Qt blob before the user opens the panel.
     layout_host.page_layouts["Color"] = layout_host.saveState()
     dock.toggleViewAction().triggered.connect(layout_host._raise_color_keyframes)
@@ -1151,6 +1145,34 @@ def test_initialize_first_run_uses_factory_file(
         "first run must run the full page activation path")
 
 
+@pytest.mark.parametrize("saved_height", [None, 530])
+def test_edit_timeline_uses_factory_ratio_only_without_a_saved_layout(
+        layout_host: _DockHost, monkeypatch: pytest.MonkeyPatch, qapp,
+        saved_height: int | None) -> None:
+    _set_work_mode(layout_host, "video", monkeypatch)
+    layout_host.resize(1600, 1000)
+    monkeypatch.setattr(layout_host, "_video_project_screen_tier",
+                        lambda _defaults: ("window_2k", (1360, 800)))
+    timeline = layout_host.dock_edit_timeline
+    viewer = layout_host.dock_program_viewer
+    timeline.show()
+    viewer.show()
+    if saved_height is not None:
+        layout_host.resizeDocks([viewer, timeline], [460, saved_height], Qt.Orientation.Vertical)
+        state = layout_host.saveState()
+        layout_host.config_manager.set("page_layouts", {"Edit": _hex_of(state)})
+
+    layout_host.initialize_page_layouts()
+    if saved_height is not None:
+        assert layout_host.page_layouts["Edit"] == state
+    else:
+        assert layout_host.restoreState(layout_host.page_layouts["Edit"])
+        layout_host.show()
+        qapp.processEvents()
+        assert timeline.height() / (timeline.height() + viewer.height()) == pytest.approx(0.48, abs=0.04)
+        assert timeline.width() == layout_host.contentsRect().width()
+
+
 def test_composite_factory_layout_gives_layer_timeline_its_own_row(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch, qapp) -> None:
     _set_work_mode(host, "video", monkeypatch)
@@ -1158,6 +1180,9 @@ def test_composite_factory_layout_gives_layer_timeline_its_own_row(
     host.current_page = "Composite"
     host.dock_composite.show()
     host.initialize_page_layouts()
+    host.show()
+    host.resize(1440, 900)
+    host._apply_default_composite_layout()
     qapp.processEvents()
 
     timeline = host.dock_composite_keyframes
@@ -1174,7 +1199,8 @@ def test_composite_factory_layout_gives_layer_timeline_its_own_row(
     assert media.geometry().right() < viewer.geometry().left()
     assert viewer.geometry().right() < props.geometry().left()
     assert timeline.geometry().top() > viewer.geometry().bottom()
-    assert timeline.width() > viewer.width()
+    assert timeline.width() >= host.width() - 2
+    assert viewer.width() > max(media.width(), props.width())
     assert scopes.geometry().top() > props.geometry().bottom()
 
     for dock in (
@@ -1188,6 +1214,23 @@ def test_composite_factory_layout_gives_layer_timeline_its_own_row(
         host.dock_composite_asset_dependency)
     assert host.dock_composite_material in host.tabifiedDockWidgets(props)
     assert host.dock_composite_spline not in host.tabifiedDockWidgets(timeline)
+    for dock in (host.dock_composite_spline, host.dock_composite_asset_dependency,
+                 host.dock_composite_import_report, host.dock_composite_material):
+        dock.hide()
+    host.dock_composite.show()
+    host.dock_composite.raise_()
+    qapp.processEvents()
+    assert host.dock_composite in host.tabifiedDockWidgets(timeline)
+    assert host.dock_composite.width() >= host.width() - 2
+    assert not viewer.isHidden()
+
+    host.dock_edit_media_pool.hide()
+    host.dock_viewport.setMinimumWidth(640)
+    host.resize(1050, 780)
+    host._apply_default_composite_layout()
+    qapp.processEvents()
+    assert host.dock_edit_media_pool.isHidden()
+    assert not viewer.isHidden() and timeline.width() >= host.width() - 2
 
 
 def test_image_composite_layout_keeps_node_graph_available(host: _DockHost) -> None:
@@ -1217,6 +1260,27 @@ def test_composite_saved_layout_keeps_node_graph_open(
     assert layout_host.page_layouts["Composite"] == user_state
     layout_host.restoreState(user_state)
     assert not layout_host.dock_composite.isHidden()
+
+
+def test_composite_default_upgrade_leaves_named_presets_alone(host, monkeypatch, qapp) -> None:
+    _set_work_mode(host, "video", monkeypatch)
+    host.resize(1440, 900)
+    host.current_page = "Composite"
+    host.show()
+    host.dock_composite.show()
+    selection_key = host._active_page_layout_key()
+    monkeypatch.setattr(host, "_page_layout_choices", lambda: [("Default Layout", "factory"), ("Custom", None)])
+    host.config_manager.set(selection_key, {"name": "Custom"})
+    host._migrate_composite_default_layout()
+    assert not host.dock_composite.isHidden()
+
+    host.config_manager.set(selection_key, {"preset_id": "factory"})
+    host._migrate_composite_default_layout()
+    qapp.processEvents()
+    assert host.dock_composite.isHidden()
+    host.dock_composite.show()
+    host._migrate_composite_default_layout()
+    assert not host.dock_composite.isHidden()
 
 
 def test_initialize_falls_back_to_hardcoded_defaults(
@@ -1468,6 +1532,8 @@ def test_set_current_layout_as_default_merges_legacy_capture(
     _set_work_mode(host, "video", monkeypatch)
     host.current_page = "Color"
     host.page_layouts["Color"] = host.saveState()
+    host.page_layouts["Edit"] = host.saveState()
+    host.page_layouts["Library"] = host.saveState()
 
     host.set_current_layout_as_default()
 
@@ -1481,7 +1547,7 @@ def test_set_current_layout_as_default_merges_legacy_capture(
     }
     assert data["modes"]["video"]["geometry"] == _hex_of(host.saveGeometry())
     assert data["modes"]["video"]["state"] == _hex_of(host.saveState())
-    assert data["modes"]["video"]["panel_states"] == host._get_all_page_layouts()
+    assert data["modes"]["video"]["panel_states"] == {"Library": _hex_of(host.page_layouts["Library"])}
     assert host.status_bar.currentMessage() == I18N.tr(
         "status.factory_layout_exported",
         "Default layout updated — commit default_layout.json to ship it.")
@@ -1511,17 +1577,19 @@ def test_set_current_layout_as_default_reports_write_failure(
 def test_reset_layout_to_default_restores_factory_capture(
         layout_host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     layout_host.current_page = "Color"
+    other_page = layout_host.page_layouts["Edit"] = layout_host.saveState()
     layout_host.dock_composite.setVisible(False)
     state_hex = _hex_of(layout_host.saveState())  # captured with composite hidden
     layout_host.dock_composite.setVisible(True)  # enforcement must re-hide it
     monkeypatch.setattr(
         layout_host, "_load_factory_layout",
         lambda work_mode=None: (_hex_of(layout_host.saveGeometry()), state_hex,
-                                {"Color": state_hex}))
+                                {"Color": state_hex, "Edit": state_hex}))
 
     layout_host.reset_layout_to_default()
 
     assert layout_host.page_layouts.get("Color") is not None
+    assert layout_host.page_layouts["Edit"] == other_page
     assert _hidden(layout_host, "dock_composite"), (
         "reset must enforce page dock visibility against the factory capture")
     assert layout_host.status_bar.currentMessage() == I18N.tr(
@@ -1623,41 +1691,35 @@ def test_restore_layout_state_window_state_fallback(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def test_save_layout_dialog_persists_everything(
+def test_save_layout_dialog_captures_only_the_current_page(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(host, "video", monkeypatch)
     host._edit_available = False
+    monkeypatch.setattr(host, "_choose_layout_scope", lambda title: False)
     monkeypatch.setattr(
         dlc.QInputDialog, "getText", lambda *a, **k: ("Profile A", True))
 
     host.save_layout_dialog()
 
-    assert len(host.db.saved) == 1
-    name, geom, state, panels, work_mode = host.db.saved[0]
-    assert name == "Profile A"
-    assert geom == _hex_of(host.saveGeometry())
-    assert state == _hex_of(host.saveState())
-    assert "Color" in panels
-    assert work_mode == "video"
-    assert "dock_dockGrading_docked_size" in host.config_manager.data, (
-        "saving a layout must also persist docked sizes")
+    assert host.db.page_presets == {("video", "Color"): {"Profile A": _hex_of(host.saveState())}}
     assert "Profile A" in host.status_bar.currentMessage()
-    assert [host.layout_combo.itemText(i) for i in range(host.layout_combo.count())] == [
-        "Layout Presets", "Profile A"]
+    assert host.layout_combo.findText("Profile A") > 0
 
 
 def test_save_layout_dialog_cancelled_records_nothing(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(host, "_choose_layout_scope", lambda title: False)
     monkeypatch.setattr(
         dlc.QInputDialog, "getText", lambda *a, **k: ("ignored", False))
     host.save_layout_dialog()
-    assert host.db.saved == []
+    assert host.db.page_presets == {}
 
 
 def test_delete_layout_dialog_confirmed(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(host, "video", monkeypatch)
-    host.db.layouts = ["Old One"]
+    host.db.save_page_layout("video", "Color", "Old One", _hex_of(host.saveState()))
+    host.db.save_page_layout("video", "Edit", "Old One", "edit")
     monkeypatch.setattr(
         dlc.QInputDialog, "getItem", lambda *a, **k: ("Old One", True))
     monkeypatch.setattr(
@@ -1666,7 +1728,8 @@ def test_delete_layout_dialog_confirmed(
 
     host.delete_layout_dialog()
 
-    assert host.db.deleted == [("Old One", "video")]
+    assert host.db.list_page_layouts("video", "Color") == {}
+    assert host.db.list_page_layouts("video", "Edit") == {"Old One": "edit"}
     assert "Old One" in host.status_bar.currentMessage()
 
 
@@ -1676,7 +1739,7 @@ def test_delete_layout_dialog_no_layouts_shows_information(
     info = MagicMock()
     monkeypatch.setattr(dlc.QMessageBox, "information", info)
     host.delete_layout_dialog()
-    assert host.db.deleted == []
+    assert host.db.page_presets == {}
     assert info.called
 
 
@@ -1684,7 +1747,8 @@ def test_update_layout_combobox_lists_presets_and_custom(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(host, "video", monkeypatch)
     host._edit_available = True
-    host.db.layouts = ["Mine"]
+    host.current_page = "Edit"
+    host.db.save_page_layout("video", "Edit", "Mine", "edit")
 
     host.update_layout_combobox()
 
@@ -1694,19 +1758,28 @@ def test_update_layout_combobox_lists_presets_and_custom(
     assert texts[0] == "Layout Presets"
     assert "Mine" in texts
     preset_ids = {d for _t, d in items if isinstance(d, str)}
-    assert preset_ids == {"audio", "captions", "editing", "review"}
+    assert preset_ids == {"editing"}
 
-    host._edit_available = False
+    host.current_page = "Color"
+    host._active_work_mode = "video"
+    host.db.save_page_layout("video", "Color", "Portrait", _hex_of(dlc.save_workspace_dock_state(host, "Color")))
     host.update_layout_combobox()
     texts = [host.layout_combo.itemText(i) for i in range(host.layout_combo.count())]
-    assert texts == ["Layout Presets", "Mine"]
+    assert texts == ["Layout Presets", "Landscape Color", "Portrait"]
+    monkeypatch.setattr(host, "_reset_factory_page_layout", lambda: host.status_bar.showMessage("Reset"))
+    host.on_layout_combo_activated(host.layout_combo.findText("Landscape Color"))
+    assert "Landscape Color" in host.status_bar.currentMessage()
+    assert host.layout_combo.currentText() == "Landscape Color"
+    host.reset_layout_to_default()
+    assert host.layout_combo.currentText() == "Landscape Color"
 
 
 def test_on_layout_combo_activated_dispatches_and_resets(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(host, "video", monkeypatch)
     host._edit_available = True
-    host.db.layouts = ["Mine"]
+    host.current_page = "Edit"
+    host.db.save_page_layout("video", "Edit", "Mine", "edit")
     applied: List[str] = []
     presets: List[str] = []
     monkeypatch.setattr(host, "apply_layout", lambda name: applied.append(name))
@@ -1720,57 +1793,99 @@ def test_on_layout_combo_activated_dispatches_and_resets(
     assert applied == [] and presets == []
 
     preset_index = next(i for i in range(host.layout_combo.count())
-                        if host.layout_combo.itemData(i) == "audio")
+                        if host.layout_combo.itemData(i) == "editing")
     host.on_layout_combo_activated(preset_index)
-    assert presets == ["audio"]
-    assert host.layout_combo.currentIndex() == 0
+    assert presets == ["editing"]
+    assert host.layout_combo.currentIndex() == 1
 
     custom_index = host.layout_combo.findText("Mine")
     host.on_layout_combo_activated(custom_index)
     assert applied == ["Mine"]
-    assert host.layout_combo.currentIndex() == 0
+    assert host.layout_combo.currentIndex() == 1
 
 
 def test_update_load_layout_menu_populated_and_empty(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(host, "video", monkeypatch)
-    host.db.layouts = ["A", "B"]
+    host.current_page = "Composite"
+    host.db.save_page_layout("video", "Composite", "A", "composite")
+    host.db.save_page_layout("video", "Composite", "B", "composite")
     host.update_load_layout_menu()
-    actions = host.load_layout_menu.actions()
-    assert [a.text() for a in actions] == ["A", "B"]
+    current, all_pages = (action.menu() for action in host.load_layout_menu.actions())
+    actions = current.actions()
+    assert [a.text() for a in actions] == ["Default Layout", "A", "B"]
     assert all(a.isEnabled() for a in actions)
+    assert not all_pages.actions()[0].isEnabled()
 
-    host.db.layouts = []
+    host.current_page = "Deliver"
     host.update_load_layout_menu()
-    actions = host.load_layout_menu.actions()
+    actions = host.load_layout_menu.actions()[0].menu().actions()
     assert len(actions) == 1
-    assert not actions[0].isEnabled(), "the empty placeholder must be disabled"
+    assert actions[0].isEnabled() and actions[0].text() == "Default Layout"
 
 
-def test_apply_layout_restores_geometry_state_and_pages(
+def test_all_page_preset_load_scopes_reset_and_delete(
+        host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_work_mode(host, "video", monkeypatch)
+    host.current_page = "Color"
+    host.dock_masks.show()
+    captured_edit = host.page_layouts["Edit"] = host.saveState()
+    monkeypatch.setattr(host, "_choose_layout_scope", lambda title: True)
+    monkeypatch.setattr(dlc.QInputDialog, "getText", lambda *a, **k: ("Both", True))
+    host.save_layout_dialog()
+    assert set(host.db.list_layout_bundles("video")["Both"]) == {"Color", "Edit"}
+    assert host.layout_combo.findText("Both") == -1
+
+    host.dock_masks.hide()
+    edited = host.page_layouts["Edit"] = host.saveState()
+    host.update_load_layout_menu()
+    current, all_pages = (action.menu() for action in host.load_layout_menu.actions())
+    current.actions()[-1].menu().actions()[0].trigger()
+    assert not host.dock_masks.isHidden()
+    assert host.page_layouts["Edit"] == edited
+    all_pages.actions()[0].trigger()
+    assert host.page_layouts["Edit"] == captured_edit
+
+    host.page_layouts["Edit"] = edited
+    host.dock_masks.hide()
+    host.reset_layout_to_default()
+    assert not host.dock_masks.isHidden()
+    assert host.page_layouts["Edit"] == edited
+
+    host.db.save_page_layout("video", "Color", "Both", _hex_of(host.saveState()))
+    monkeypatch.setattr(dlc.QInputDialog, "getItem", lambda *a, **k: ("Both", True))
+    monkeypatch.setattr(dlc.QMessageBox, "question", lambda *a, **k: dlc.QMessageBox.StandardButton.Yes)
+    host.delete_layout_dialog()
+    assert host.db.list_layout_bundles("video") == {}
+    assert "Both" in host.db.list_page_layouts("video", "Color")
+    assert host.config_manager.get(host._active_page_layout_key()) is None
+
+
+def test_apply_layout_restores_only_the_current_page(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     _set_work_mode(host, "video", monkeypatch)
     host.current_page = "Color"
     host.dock_library.setVisible(False)
     state_hex = _hex_of(host.saveState())
-    geom_hex = _hex_of(host.saveGeometry())
     host.dock_library.setVisible(True)
 
-    host.db.blob = (geom_hex, state_hex, {"Color": state_hex})
+    host.db.save_page_layout("video", "Color", "My Layout", state_hex)
+    host.db.save_page_layout("video", "Edit", "My Layout", "edit")
+    host.page_layouts["Edit"] = QByteArray(b"prior-edit-state")
     host.move(300, 250)
     host.resize(700, 500)
+    before = host.geometry()
 
     host.apply_layout("My Layout")
 
-    assert host.db.loaded == [("My Layout", "video")]
-    assert host.geometry() == _restored_geometry(geom_hex)
+    assert host.geometry() == before
     assert host.dock_library.isHidden()
-    assert host.page_layouts["Color"] == _from_hex(state_hex)
+    assert host.page_layouts["Color"] == host.saveState()
+    assert host.page_layouts["Edit"] == QByteArray(b"prior-edit-state")
     assert "My Layout" in host.status_bar.currentMessage()
 
 
 def test_apply_layout_without_blob_is_noop(host: _DockHost) -> None:
-    host.db.blob = (None, None, None)
     before = host.geometry()
     host.apply_layout("Empty")
     assert host.geometry() == before
@@ -1784,16 +1899,17 @@ def test_color_only_named_layout_cannot_expose_color_tools_on_other_pages(
     layout_host.dock_warper.show()
     layout_host.dock_mixer.show()
     state_hex = _hex_of(layout_host.saveState())
-    layout_host.db.blob = (_hex_of(layout_host.saveGeometry()), state_hex, {"Color": state_hex})
+    layout_host.db.save_page_layout(layout_host._current_work_mode(), "Color", "Color Only", state_hex)
     layout_host.current_page = page
     layout_host._enforce_page_dock_visibility()
+    before = dict(layout_host.page_layouts)
 
-    layout_host.apply_layout("Legacy Color")
+    layout_host.apply_layout("Color Only")
 
     for dock in (layout_host.dock_warper, layout_host.dock_mixer):
         assert dock.isHidden()
         assert not dock.toggleViewAction().isEnabled()
-    assert layout_host.page_layouts["Color"] == _from_hex(state_hex)
+    assert layout_host.page_layouts == before
 
 
 def test_leaving_color_collapses_expanded_warper_without_losing_selection(

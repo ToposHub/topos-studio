@@ -7,32 +7,82 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal
 
-from PyQt6.QtCore import Qt, QByteArray, QTimer
-from PyQt6.QtGui import QAction
-from PyQt6.QtWidgets import (QDockWidget, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
-                             QMenu, QMessageBox, QSizePolicy, QTabWidget,
+from PyQt6.QtCore import Qt, QByteArray, QRect, QTimer
+from PyQt6.QtGui import QAction, QFontMetrics
+from PyQt6.QtWidgets import (QDockWidget, QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
+                             QListView, QMenu, QMessageBox, QScrollArea, QSizePolicy, QTabWidget,
                              QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget, QApplication)
 
+from src.app.ui.edit_workspace_layout import EditDockResizeHandles
+from src.app.ui.photo_color_layout import PhotoColorResizeHandles, front_dock
+from src.app.ui.video_color_layout import (
+    VIDEO_COLOR_PRIMARY, VIDEO_COLOR_SCOPES, VIDEO_COLOR_SECONDARY, VideoColorResizeHandles,
+)
 from src.features.color.ui.panel_chrome import (
     COLOR_TOOL_DOCK_DEFAULT_HEIGHT, COLOR_TOOL_DOCK_MAX_HEIGHT, ColorToolDockWidget,
 )
 from src.shared.i18n.i18n import I18N
+from src.shared.layout import TIMELINE_DOCK_DEFAULT_HEIGHT, TIMELINE_DOCK_MIN_HEIGHT
 from src.shared.layout.store import LayoutStore
 from src.shared.layout.profile import LayoutProfile
 from src.shared.panels.registry import get_panel_registry
 from src.shared.ui.style_sheet import DARK_THEME
 from src.shared.ui.dock_context_menu import add_dock_management_actions
 from src.shared.ui.panel_divider import PanelDockWidget
-from src.shared.ui.dock_tab_style import apply_dock_tab_bar_style
+from src.shared.ui.dock_tab_style import DOCK_TAB_BAR_HEIGHT, apply_dock_tab_bar_style
+from src.shared.ui.widgets.compact_scrollbar import CompactVerticalScrollBar
 
 if TYPE_CHECKING:
-    pass
+    from src.features.edit.core.workspace_presets import WorkspacePreset
 
 logger = logging.getLogger(__name__)
 
 _VIEWPORT_MIN_WIDTH = 640
 _VIEWPORT_MIN_HEIGHT = 360
+_PHOTO_VIEWPORT_MIN_SIZE = (400, 250)
+_PHOTO_COLOR_DEFAULTS = {"top": (18, 64, 18), "bottom": (41, 39, 20)}
+_PHOTO_COLOR_DUAL_TOOL_WIDTH = 1380
+_PHOTO_COLOR_COMPACT_TOP_WIDTH = 1200
+_PHOTO_COLOR_STACKED_DETAILS_HEIGHT = 360
+_PHOTO_COLOR_STACKED_COMPACT_WINDOW_HEIGHT = 790
+_PHOTO_COLOR_STACKED_COMPACT_TOOL_HEIGHT = 430
+_PHOTO_COLOR_SIDEBARS_KEY = "photo_color_sidebar_shares"
+_DockStacks = tuple[tuple[QDockWidget, ...], ...]
+
 _EDIT_VIEWPORT_PREFERENCES_KEY = "edit_viewport_preferences"
+
+_VIDEO_COLOR_LAYOUT_VERSION = 7
+_PREVIOUS_VIDEO_COLOR_LAYOUT_VERSION = 6
+_VIDEO_COLOR_LAYOUT_KEY = "video_color_layout_version"
+_VIDEO_COLOR_DUAL_TOOL_WIDTH = 1330
+_VIDEO_COLOR_COMPACT_CLIP_HEIGHT = 760
+_VIDEO_COLOR_SECONDARY_DOCKS = (*VIDEO_COLOR_SECONDARY, "dock_mixer")
+_VIDEO_COLOR_GALLERY = ("dock_presets", "dock_lut", "dock_plugin", "dock_grade_sets")
+_VIDEO_COLOR_TAB_DOCKS = (
+    *_VIDEO_COLOR_GALLERY, *VIDEO_COLOR_PRIMARY, *_VIDEO_COLOR_SECONDARY_DOCKS, *VIDEO_COLOR_SCOPES[1:],
+)
+_VIDEO_PROJECT_SCREEN_TIERS = (
+    ("window_4k", 3840, 2160),
+    ("window_2_5k", 2560, 1440),
+    ("window_2k", 2048, 1080),
+    ("window_compact", 0, 0),
+)
+_VIDEO_COLOR_DEFAULTS = {
+    "window_4k": (1720, 950),
+    "window_2_5k": (1520, 880),
+    "window_2k": (1360, 800),
+    "window_compact": (1200, 740),
+    "top": (21, 57, 22),
+    "bottom": (39, 39, 22),
+    "height": (56, 44),
+}
+
+_VIDEO_EDIT_DEFAULTS = {
+    "window_4k": (3, 4, 3, 50, 50),
+    "window_2_5k": (3, 4, 3, 51, 49),
+    "window_2k": (3, 4, 3, 52, 48),
+    "window_compact": (3, 4, 3, 54, 46),
+}
 
 
 # Versioned one-shot repair for a persisted Edit layout from builds that let
@@ -51,11 +101,8 @@ _EDIT_TIMELINE_DOCK_LAYOUT_MIGRATION_KEY = "edit_timeline_dock_layout_version"
 # ~102px，工具条+尺占满后 V/A 轨几乎不可编辑。低于可操作下限时一次性
 # 拉回默认高度；用户此后手动调矮不被再次覆盖（one-shot + 版本门槛）。
 _EDIT_TIMELINE_DOCK_LAYOUT_MIGRATION_VERSION = 3
-_EDIT_TIMELINE_DOCK_DEFAULT_HEIGHT = 280
 _EDIT_TIMELINE_DOCK_MIN_HEIGHT = 160
 _EDIT_TIMELINE_DOCK_MAX_HEIGHT = 480
-# 可容纳工具条+时间尺+一条可辨 V 轨与 A 轨的最小高度
-_EDIT_TIMELINE_DOCK_OPERABLE_MIN_HEIGHT = 240
 _EDIT_TIMELINE_DOCK_MIGRATION_DELAY_MS = 50
 _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY = "color_grading_dock_layout_version"
 _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_VERSION = 3
@@ -74,17 +121,45 @@ _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 2
 _COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY = "color_keyframes_dock_placed"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY = "composite_scopes_dock_layout_version"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION = 1
-# Restore newly introduced Mixer docks on the first visit with an old layout.
-_MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY = "mixer_media_docks_layout_version"
-_MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION = 2
-_MIXER_PROPERTIES_LAYOUT_MIGRATION_KEY = "mixer_properties_layout_version"
+_COMPOSITE_DEFAULT_LAYOUT_VERSION = 1
+_MIXER_WORKSPACE_LAYOUT_VERSION = 3
+_VIDEO_MIX_WORKSPACE_LAYOUT_VERSION = 3
+_MIXER_DOCK_TAB_HEIGHT = 26
 
 # 浮动 dock 标题栏高度（与原生窗口标题栏接近）
 _FLOATING_TITLEBAR_HEIGHT = 28
 
 
+def _is_video_color(window: QMainWindow, page: str) -> bool:
+    return page == "Color" and getattr(window, "_active_work_mode", None) == "video"
+
+
+def save_workspace_dock_state(window: QMainWindow, page: str) -> QByteArray:
+    if _is_video_color(window, page):
+        return window.saveState(_VIDEO_COLOR_LAYOUT_VERSION)
+    return window.saveState()
+
+
+def _qt_dock_state_version(state: QByteArray) -> int:
+    # QMainWindow saves a 32-bit marker followed by the caller's version.
+    return int.from_bytes(bytes(state[4:8]), "big") if bytes(state[:4]) == b"\x00\x00\x00\xff" else -1
+
+
+def _is_supported_video_color_state(state: QByteArray) -> bool:
+    return _qt_dock_state_version(state) in (_PREVIOUS_VIDEO_COLOR_LAYOUT_VERSION, _VIDEO_COLOR_LAYOUT_VERSION)
+
+
 def restore_workspace_dock_state(window: QMainWindow, state: QByteArray, page: str) -> bool:
     """Restore Qt geometry and place new grade tools in older Color layouts."""
+    if _is_video_color(window, page):
+        if not _is_supported_video_color_state(state):
+            return False
+        version = _qt_dock_state_version(state)
+        if not window.restoreState(state, version):
+            return False
+        if version == _PREVIOUS_VIDEO_COLOR_LAYOUT_VERSION:
+            window._upgrade_video_color_scopes_tabs()
+        return True
     if not window.restoreState(state):
         return False
     if page != "Color":
@@ -350,7 +425,8 @@ class DockLayoutMixin:
         self.dock_layers = create_custom_dock(stack_title, stack_widget, "dockLayers")
         stack_widget.show()
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_layers)
-        self.color_node_panel.view.toggle_display_mode = self._toggle_color_node_display_mode
+        if self._current_work_mode() != "video":
+            self.color_node_panel.view.toggle_display_mode = self._toggle_color_node_display_mode
 
         # Tracker 面板：按达芬奇曲线窗口提供足够横向空间，默认隐藏
         self.dock_tracker = create_custom_dock(I18N.tr("panel.tracker", "Tracker"), self.tracker_panel, "dockTracker")
@@ -418,6 +494,9 @@ class DockLayoutMixin:
         self.dock_mixer = create_custom_dock(
             I18N.tr("panel.mixer", "Mixer"), self.mixer_panel, "dockMixer"
         )
+        self.dock_mixer.toggleViewAction().triggered.connect(
+            lambda checked: self.dock_mixer.raise_() if checked else None,
+        )
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_mixer)
 
         self.dock_audio_mixer = create_custom_dock(I18N.tr("panel.audio_mixer", "Audio Mixer"), self.audio_mixer_panel, "dockAudioMixer")
@@ -438,6 +517,9 @@ class DockLayoutMixin:
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_qualifier)
         self.dock_qualifier.visibilityChanged.connect(lambda v: self.qualifier_panel.set_picker_active(False) if not v else None)
 
+        if self._current_work_mode() == "video":
+            # The LUT grid scrolls, so its extra height need not constrain the whole viewer row.
+            self.color_lut_browser.setMinimumHeight(210)
         self.dock_lut = create_custom_dock(I18N.tr("panel.lut", "3D LUT"), self.color_lut_browser, "dockLut")
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_lut)
 
@@ -1279,10 +1361,8 @@ class DockLayoutMixin:
         self.dockVideoBatchExport = None
         if self._deliver_available and self.deliver_page is not None:
             self.dock_deliver = create_custom_dock(
-                I18N.tr("panel.deliver", "Deliver"), self.deliver_page, "dockDeliver"
+                I18N.tr("page.deliver", "Export"), self.deliver_page, "dockDeliver"
             )
-            self.dock_deliver.setMinimumWidth(1220)
-            self.dock_deliver.setMinimumHeight(620)
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_deliver)
             attach_batch_host = getattr(self.deliver_page, "attach_batch_panel_host", None)
             if callable(attach_batch_host):
@@ -1412,7 +1492,12 @@ class DockLayoutMixin:
                 continue
             title_key = MIXER_PANEL_TITLE_KEYS.get(key, f"panel.audio_{key}")
             dock_title = I18N.tr(title_key, title)
-            if page.project_backed and key == "clip_editor":
+            if page.project_backed and key == "console":
+                panel = QScrollArea()
+                panel.setFrameShape(QFrame.Shape.NoFrame)
+                panel.setWidgetResizable(True)
+                panel.setVerticalScrollBar(CompactVerticalScrollBar())
+            elif page.project_backed and key == "clip_editor":
                 from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
 
                 panel = ProjectClipEditor()
@@ -1430,6 +1515,8 @@ class DockLayoutMixin:
             else:
                 panel = getattr(page, panel_attr)
             dock = factory(dock_title, panel, object_names[key])
+            if key == "timeline":
+                dock.setMinimumHeight(TIMELINE_DOCK_MIN_HEIGHT)
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea if key == "properties" else
                                Qt.DockWidgetArea.TopDockWidgetArea
                                if key in ("console", "viewer",
@@ -1440,6 +1527,11 @@ class DockLayoutMixin:
         if page.project_backed:
             self._bind_project_audio_clip_editor()
             self._bind_mixer_transport()
+            self._mixer_dock_resize_timer = QTimer(self)
+            self._mixer_dock_resize_timer.setSingleShot(True)
+            self._mixer_dock_resize_timer.timeout.connect(self._fit_video_mix_workspace_height)
+            for dock in (self.dock_audio_viewer, self.dock_audio_console, self.dock_audio_media_pool):
+                dock.installEventFilter(self)
 
     def _bind_mixer_transport(self) -> None:
         viewport = getattr(self, "edit_viewport", None)
@@ -1743,8 +1835,12 @@ class DockLayoutMixin:
         if callable(audio_inspector):
             audio_inspector(True)
         self.audio_mixer_panel.close_effect_editors()
+        console = self.dock_audio_console.widget()
+        console.setWidget(self.audio_mixer_panel)
+        panel_minimum = self.audio_mixer_panel.minimumSizeHint().width()
+        console.setMinimumWidth(panel_minimum + console.verticalScrollBar().sizeHint().width())
+        self.audio_mixer_panel.show()
         borrowed: list[tuple[QDockWidget, QWidget]] = [
-            (self.dock_audio_console, self.audio_mixer_panel),
             (self.dock_audio_viewer, self.edit_viewport or self.program_viewer_widget),
             (self.dock_audio_timeline, self.timeline_panel),
             (self.dock_audio_properties, self.edit_properties_panel),
@@ -1776,6 +1872,7 @@ class DockLayoutMixin:
             audio_inspector(False)
         self.timeline_panel.get_timeline_view().set_audio_only(False)
         self.timeline_panel.set_display_mode("edit")
+        self.dock_audio_console.widget().takeWidget()
         for dock, widget in (
             (self.dock_audio_mixer, self.audio_mixer_panel),
             (self.dock_edit_timeline, self.timeline_panel),
@@ -1819,74 +1916,355 @@ class DockLayoutMixin:
             return False
         previous = self.saveState()
         try:
-            for dock in getattr(self, "all_docks", ()):
-                dock.hide()
-            for dock in docks:
-                dock.setFloating(False)
-            media_pool = getattr(self, "dock_audio_media_pool", None)
-            effects = getattr(self, "dock_audio_effects", None)
-            project_backed = getattr(
-                getattr(self, "mixer_page", None), "project_backed", False)
-            self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, console)
-            has_library = isinstance(effects, QDockWidget) and isinstance(media_pool, QDockWidget)
-            if has_library:
-                self.splitDockWidget(console, effects, Qt.Orientation.Horizontal)
-                self.splitDockWidget(effects, viewer, Qt.Orientation.Horizontal)
-                self.tabifyDockWidget(effects, media_pool)
-                media_pool.show()
-                effects.hide()
-                media_pool.raise_()
-            else:
-                self.splitDockWidget(console, viewer, Qt.Orientation.Horizontal)
-            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline)
-            for dock in (console, viewer, timeline):
-                dock.show()
-            properties = getattr(self, "dock_audio_properties", None)
-            if isinstance(properties, QDockWidget):
-                self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
-                self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, properties)
-                properties.show()
-            clip_editor = getattr(self, "dock_audio_clip_editor", None)
-            if isinstance(clip_editor, QDockWidget):
-                if project_backed:
-                    self.tabifyDockWidget(timeline, clip_editor)
-                    clip_editor.show()
-                    timeline.raise_()
-                else:
-                    clip_editor.hide()
-            if has_library:
-                self.resizeDocks([console, effects, viewer], [540, 265, 435], Qt.Orientation.Horizontal)
-            else:
-                self.resizeDocks([console, viewer], [620, 440], Qt.Orientation.Horizontal)
-            self.resizeDocks([console, timeline], [360, 480] if project_backed else [370, 330],
-                             Qt.Orientation.Vertical)
-            if isinstance(properties, QDockWidget):
-                self.resizeDocks([properties], [300], Qt.Orientation.Horizontal)
+            self._arrange_video_mix_workspace_layout()
             self._mixer_default_layout = self.saveState()
             self.page_layouts.setdefault("Mixer", self._mixer_default_layout)
         finally:
             self.restoreState(previous)
         return True
 
-    def _migrate_mixer_properties_layout(self) -> None:
-        """Introduce the shared inspector once without resetting custom layouts."""
-        if (self.current_page != "Mixer"
-                or not getattr(getattr(self, "mixer_page", None), "project_backed", False)
-                or self.config_manager.get(_MIXER_PROPERTIES_LAYOUT_MIGRATION_KEY) == 1):
+    def _detach_audio_workspace_docks(self, *, preserve: bool = False) -> None:
+        docks = self._audio_workspace_docks()
+        if not preserve:
+            for dock in self.all_docks:
+                dock.hide()
+        for dock in docks:
+            dock.hide()
+            dock.setFloating(False)
+            self.removeDockWidget(dock)
+
+    def _arrange_audio_workspace_layout(
+        self, *, compact: bool = False, preserve: bool = False,
+    ) -> None:
+        """Build the Editing Layout rows with media in the upper-left."""
+        console, viewer, timeline = self.dock_audio_console, self.dock_audio_viewer, self.dock_audio_timeline
+        pool, effects = self.dock_audio_media_pool, self.dock_audio_effects
+        editor, properties = self.dock_audio_clip_editor, self.dock_audio_properties
+        docks = self._audio_workspace_docks()
+        shown = {dock for dock in docks if not dock.isHidden()} if preserve else set(docks)
+        window_rect = self.contentsRect()
+        front = {dock for dock in shown if dock.isVisible() and dock.geometry().intersects(window_rect)} if preserve else set()
+        left = pool or console
+        timeline_tabs = self.tabifiedDockWidgets(timeline) if preserve else ()
+        old_left = next((dock for dock in (left, effects, console) if dock in front
+                         and dock not in timeline_tabs), left)
+        old_widths = {left: old_left.width(), viewer: viewer.width()}
+        if properties is not None:
+            old_widths[properties] = properties.width()
+        self._detach_audio_workspace_docks(preserve=preserve)
+
+        top = Qt.DockWidgetArea.TopDockWidgetArea
+        horizontal = Qt.Orientation.Horizontal
+        vertical = Qt.Orientation.Vertical
+        self.addDockWidget(top, left)
+        if compact:
+            self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, timeline)
+            self.splitDockWidget(left, viewer, horizontal)
+        else:
+            self.splitDockWidget(left, timeline, vertical)
+            self.splitDockWidget(left, viewer, horizontal)
+        if properties is not None:
+            self.splitDockWidget(viewer, properties, horizontal)
+        if effects is not None:
+            self.tabifyDockWidget(left, effects)
+        if pool is not None and not compact:
+            self.tabifyDockWidget(left, console)
+        if editor is not None:
+            self.tabifyDockWidget(timeline, editor)
+        if compact:
+            self.tabifyDockWidget(timeline, console)
+        for dock in shown:
+            dock.show()
+        upper_tabs = (left, effects) if compact else (console, left, effects)
+        lower_tabs = (console, editor, timeline) if compact else (editor, timeline)
+        upper_default = left if compact else console
+        # Keep the currently active editing tool when it moves between rows.
+        for stack, default in ((upper_tabs, upper_default), (lower_tabs, timeline)):
+            active = next((dock for dock in stack if dock in front), default)
+            if active in shown:
+                active.raise_()
+        if editor is not None and getattr(self.mixer_page, "project_backed", False):
+            self._sync_mixer_clip_editor_dock_mode()
+
+        layout = self.layout()
+        layout.activate()
+        geometry = layout.geometry()
+        if geometry.isEmpty():
+            geometry = self.contentsRect()
+        layout.setGeometry(geometry)
+        left_dock = next((dock for dock in (left, *upper_tabs) if dock in shown), None)
+        columns = [(anchor, dock) for anchor, dock in ((left, left_dock), (viewer, viewer),
+                                                        (properties, properties)) if dock in shown]
+        widths = old_widths if preserve else self._mixer_editing_default_column_widths(
+            geometry.width(), left, viewer, properties,
+        )
+        if len(columns) > 1:
+            self.resizeDocks([dock for _, dock in columns], [max(1, widths[anchor]) for anchor, _ in columns], horizontal)
+            layout.setGeometry(geometry)
+        upper = next((dock for dock in (viewer, properties, *upper_tabs)
+                      if dock in shown and dock.geometry().intersects(window_rect)), None)
+        lower = next((dock for dock in (*lower_tabs, timeline)
+                      if dock in shown and dock.geometry().intersects(window_rect)), None)
+        if not preserve:
+            upper, lower = viewer, timeline
+        if upper is not None and lower is not None:
+            # Include the lower tab bar and any upper-left tab-strip offset.
+            available = lower.geometry().bottom() - min(
+                dock.y() for dock in (upper, viewer) if dock in shown
+            )
+            target = round(available * 3 / 5)
+            if not compact and console in shown and getattr(self.mixer_page, "project_backed", False):
+                mixer_height = self.audio_mixer_panel.minimumSizeHint().height() + _MIXER_DOCK_TAB_HEIGHT
+                target = min(target, available - mixer_height)
+            self.resizeDocks([upper, lower], [max(1, available - target), max(1, target)], vertical)
+            layout.setGeometry(geometry)
+            if not preserve and left_dock is not None and properties is not None:
+                self._size_mixer_editing_picture(left_dock, viewer, properties, lower, widths[properties], geometry)
+        if compact:
+            self._order_compact_mixer_tabs()
+
+    def _mixer_editing_default_column_widths(
+        self, available: int, left: QDockWidget, viewer: QDockWidget, properties: QDockWidget | None,
+    ) -> dict[QDockWidget, int]:
+        if properties is None:
+            return {left: 1, viewer: 1}
+        panel_minimum = max(properties.minimumWidth(), properties.minimumSizeHint().width())
+        left_width = max(left.minimumWidth(), left.minimumSizeHint().width())
+        viewer_minimum = max(viewer.minimumWidth(), viewer.minimumSizeHint().width())
+        property_width = max(panel_minimum, min(round(panel_minimum * 1.5), available - left_width - viewer_minimum))
+        return {left: left_width, viewer: max(viewer_minimum, available - left_width - property_width),
+                properties: property_width}
+
+    def _size_mixer_editing_picture(
+        self, left: QDockWidget, viewer: QDockWidget, properties: QDockWidget, timeline: QDockWidget,
+        property_width: int, geometry: QRect,
+    ) -> None:
+        program = getattr(self, "program_viewer_widget", None)
+        if program is None or not viewer.isAncestorOf(program):
             return
-        properties = getattr(self, "dock_audio_properties", None)
-        if not isinstance(properties, QDockWidget):
+        layout = self.layout()
+        picture = program.picture_size()
+        chrome_width = max(0, viewer.width() - picture.width())
+        requested_width = round(picture.height() * 16 / 9) + chrome_width
+        separator = max(0, properties.x() - viewer.geometry().right() - 1)
+        left_and_viewer = geometry.width() - property_width - 2 * separator
+        left_width = max(left.minimumWidth(), left.minimumSizeHint().width(), left_and_viewer - requested_width)
+        viewer_width = max(viewer.minimumWidth(), viewer.minimumSizeHint().width(), left_and_viewer - left_width)
+        self.resizeDocks([left, viewer, properties], [max(1, left_width), viewer_width, property_width],
+                         Qt.Orientation.Horizontal)
+        layout.setGeometry(geometry)
+
+        picture = program.picture_size()
+        adjustment = round(picture.width() * 9 / 16) - picture.height()
+        if abs(adjustment) > 1:
+            rows_height = timeline.geometry().bottom() + 1 - viewer.y()
+            self.resizeDocks([viewer, timeline], [max(1, viewer.height() + adjustment),
+                                                  max(1, rows_height - viewer.height() - adjustment)],
+                             Qt.Orientation.Vertical)
+            layout.setGeometry(geometry)
+        canvas = program.get_viewer()
+        if not canvas.is_fit_to_window:
+            canvas.fit_to_window()
+
+    def _arrange_video_mix_workspace_layout(self) -> None:
+        """Put a small preview above the mixer next to a full-height timeline."""
+        console, viewer, timeline = self.dock_audio_console, self.dock_audio_viewer, self.dock_audio_timeline
+        pool, effects = self.dock_audio_media_pool, self.dock_audio_effects
+        editor, properties = self.dock_audio_clip_editor, self.dock_audio_properties
+        self._detach_audio_workspace_docks()
+
+        horizontal = Qt.Orientation.Horizontal
+        vertical = Qt.Orientation.Vertical
+        self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, viewer)
+        self.splitDockWidget(viewer, timeline, horizontal)
+        lower = pool or console
+        self.splitDockWidget(viewer, lower, vertical)
+        if pool is not None:
+            self.tabifyDockWidget(pool, console)
+            if effects is not None:
+                self.tabifyDockWidget(pool, effects)
+            if properties is not None:
+                self.tabifyDockWidget(pool, properties)
+        if editor is not None:
+            self.tabifyDockWidget(timeline, editor)
+        for dock in self._audio_workspace_docks():
+            dock.show()
+        layout = self.layout()
+        layout.activate()
+        console.raise_()
+        timeline.raise_()
+        if editor is not None and getattr(self.mixer_page, "project_backed", False):
+            self._sync_mixer_clip_editor_dock_mode()
+
+        width = self.contentsRect().width()
+        sidebar = round(width * 0.34)
+        self.resizeDocks([viewer, timeline], [sidebar, width - sidebar], horizontal)
+        geometry = layout.geometry()
+        if geometry.isEmpty():
+            geometry = self.contentsRect()
+        layout.setGeometry(geometry)
+        left_height = timeline.geometry().bottom() + 1 - viewer.y()
+        if left_height <= 0:
+            left_height = geometry.height()
+        upper = max(1, round(left_height / 3))
+        self.resizeDocks([viewer, console], [upper, 2 * upper], vertical)
+        layout.setGeometry(geometry)
+
+        program = getattr(self, "program_viewer_widget", None)
+        if program is None or not viewer.isAncestorOf(program):
             return
-        self.setCorner(Qt.Corner.TopRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
-        self.setCorner(Qt.Corner.BottomRightCorner, Qt.DockWidgetArea.RightDockWidgetArea)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, properties)
-        properties.show()
-        self.resizeDocks([properties], [300], Qt.Orientation.Horizontal)
-        self.page_layouts["Mixer"] = self.saveState()
-        self.config_manager.set(_MIXER_PROPERTIES_LAYOUT_MIGRATION_KEY, 1, auto_save=False)
-        self._save_current_layout_to_store("Mixer")
-        self.config_manager.save_config()
+        picture = program.picture_size()
+        chrome_width = max(0, viewer.width() - picture.width())
+        chrome_height = max(0, viewer.height() - picture.height())
+        aspect = 16 / 9
+        sidebar = min(sidebar, round(picture.height() * aspect) + chrome_width)
+        self.resizeDocks([viewer, timeline], [sidebar, width - sidebar], horizontal)
+        layout.setGeometry(geometry)
+
+        # A minimum dock width or a tall window may make width the limiting axis.
+        picture_height = round((viewer.width() - chrome_width) / aspect)
+        upper = picture_height + chrome_height
+        self.resizeDocks([viewer, console], [upper, max(1, left_height - upper)], vertical)
+        layout.setGeometry(geometry)
+        # The native dock layout can round or redistribute the initial weights.
+        correction = picture_height - program.picture_size().height()
+        if abs(correction) > 1:
+            upper += correction
+            self.resizeDocks([viewer, console], [max(1, upper), max(1, left_height - upper)], vertical)
+            layout.setGeometry(geometry)
+        canvas = program.get_viewer()
+        if not canvas.is_fit_to_window:
+            canvas.fit_to_window()
+
+    def _mixer_needs_compact_layout(self) -> bool:
+        if not getattr(getattr(self, "mixer_page", None), "project_backed", False):
+            return False
+        height = self.contentsRect().height()
+        for widget in (getattr(self, "main_toolbar", None), getattr(self, "status_bar", None)):
+            if widget is not None and not widget.isHidden():
+                height -= widget.height()
+        # Keep the timeline taller than the upper row when both need the space.
+        minimum = self.audio_mixer_panel.minimumSizeHint().height() + _MIXER_DOCK_TAB_HEIGHT
+        return height < minimum * 2
+
+    def _order_compact_mixer_tabs(self) -> None:
+        console, timeline = self.dock_audio_console, self.dock_audio_timeline
+        if console not in self.tabifiedDockWidgets(timeline):
+            return
+        self._order_mixer_tabs(console, timeline, self.dock_audio_clip_editor)
+
+    def _order_mixer_tabs(self, *docks: QDockWidget | None) -> None:
+        titles = [dock.windowTitle() for dock in docks if dock is not None and not dock.isHidden()]
+        if len(titles) < 2:
+            return
+        self.layout().activate()
+        for bar in self.findChildren(QTabBar, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            labels = [bar.tabText(index) for index in range(bar.count())]
+            if not set(titles).issubset(labels):
+                continue
+            for target, title in enumerate(titles):
+                source = labels.index(title)
+                # Native dock tabs update the dock ordering after each adjacent move.
+                for index in range(source, target, -1):
+                    bar.moveTab(index, index - 1)
+                labels.insert(target, labels.pop(source))
+            return
+
+    def _fit_video_mix_workspace_height(self) -> None:
+        if (self.current_page != "Mixer" or not getattr(self.mixer_page, "project_backed", False)
+                or self.config_manager.get(self._active_page_layout_key()) not in (None, {"preset_id": "mixer_tabbed"})):
+            return
+        # Wait for the divider drag to end before moving a dock out of its group.
+        if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
+            self._mixer_dock_resize_timer.start(50)
+            return
+        console, pool, timeline = self.dock_audio_console, self.dock_audio_media_pool, self.dock_audio_timeline
+        if console.isHidden() or any(dock.isFloating() for dock in (console, pool, timeline)):
+            return
+        left_tabs = (pool, *self.tabifiedDockWidgets(pool))
+        on_left = console in left_tabs
+        on_right = console in self.tabifiedDockWidgets(timeline)
+        if on_right:
+            self._order_compact_mixer_tabs()
+        if not (on_left or on_right):
+            return
+        # Qt parks inactive dock tabs outside the window. Geometry also works
+        # when the active tab's child widgets cover its whole visible region.
+        window_rect = self.contentsRect()
+        left_active = next((dock for dock in left_tabs
+                            if dock.isVisible() and dock.geometry().intersects(window_rect)), None)
+        if left_active is None:
+            return
+
+        minimum = self.audio_mixer_panel.minimumSizeHint().height()
+        # If only one left tab is open, moving the mixer back creates a tab bar.
+        visible_tabs = sum(not dock.isHidden() for dock in left_tabs)
+        return_minimum = minimum + (_MIXER_DOCK_TAB_HEIGHT if visible_tabs == 1 else 0)
+        height = left_active.height()
+        if not (on_left and height < minimum or on_right and height >= return_minimum):
+            return
+        destination = timeline if on_left else pool
+        destination_tabs = (destination, *self.tabifiedDockWidgets(destination))
+        preferred = (*destination_tabs, console) if on_left else (console, *destination_tabs)
+        active = next((dock for dock in preferred
+                       if dock.isVisible() and dock.geometry().intersects(window_rect)), None)
+        self.tabifyDockWidget(destination, console)
+        if active is not None:
+            active.raise_()
+        if on_left:
+            self._order_compact_mixer_tabs()
+        else:
+            self._order_mixer_tabs(pool, console, self.dock_audio_effects, self.dock_audio_properties)
+
+    def _fit_mixer_workspace_height(self) -> None:
+        if self.current_page != "Mixer" or not getattr(self, "_mixer_default_layout", None):
+            return
+        selection = self.config_manager.get(self._active_page_layout_key())
+        if selection in (None, {"preset_id": "mixer_tabbed"}):
+            self._fit_video_mix_workspace_height()
+            return
+        if selection != {"preset_id": "factory"}:
+            return
+        compact = self._mixer_needs_compact_layout()
+        current = self.dockWidgetArea(self.dock_audio_timeline) == Qt.DockWidgetArea.BottomDockWidgetArea
+        if any(dock.isFloating() for dock in self._audio_workspace_docks()):
+            return
+        if current != compact:
+            self._arrange_audio_workspace_layout(compact=compact, preserve=True)
+        elif compact:
+            self._order_compact_mixer_tabs()
+
+    def _migrate_mixer_workspace_layout(self) -> None:
+        """Upgrade the built-in Mixer once per layout profile."""
+        if self.current_page != "Mixer" or not getattr(self, "_mixer_default_layout", None):
+            return
+        choices = self._page_layout_choices()
+        index = self._active_page_layout_index(choices)
+        preset_id = choices[index - 1][1] if index else None
+        video_mix = preset_id == "mixer_tabbed"
+        key, version = ((self._video_mix_workspace_layout_version_key(), _VIDEO_MIX_WORKSPACE_LAYOUT_VERSION)
+                        if video_mix else (f"mixer_workspace_layout_version_{self._layout_profile_mode()}",
+                                          _MIXER_WORKSPACE_LAYOUT_VERSION))
+        if self.config_manager.get(key) == version:
+            return
+        if preset_id == "factory" and not self.isVisible():
+            # The preview's native surface is sized after the window is shown.
+            QTimer.singleShot(0, lambda: self._migrate_mixer_workspace_layout() if self.isVisible() else None)
+            return
+        if preset_id in ("factory", "mixer_tabbed") and not any(dock.isFloating() for dock in self._audio_workspace_docks()):
+            if video_mix:
+                self._arrange_video_mix_workspace_layout()
+            else:
+                self._arrange_audio_workspace_layout(compact=self._mixer_needs_compact_layout())
+            self._reset_workspace_panel_controls()
+            state = save_workspace_dock_state(self, "Mixer")
+            self.page_layouts["Mixer"] = state
+            self._save_current_layout_to_store("Mixer", qt_state=state, auto_save=False)
+        self.config_manager.set(key, version)
+
+    def _video_mix_workspace_layout_version_key(self) -> str:
+        # Keep the persisted key so saved Audition-style layouts upgrade in place.
+        return f"mixer_audition_layout_version_{self._layout_profile_mode()}"
 
     def _apply_default_composite_layout(self) -> None:
         """Arrange the Composite workspace for its available editing surface."""
@@ -1901,6 +2279,14 @@ class DockLayoutMixin:
         viewer = self.dock_viewport
         inspector = self.dock_node_properties
         media = self.dock_edit_media_pool
+        scopes = self.dock_composite_scope
+        width, height = self.contentsRect().width(), self.contentsRect().height()
+        media_width = max(230, media.minimumWidth(), media.minimumSizeHint().width()) if media else 0
+        inspector_width = max(300, inspector.minimumWidth(), inspector.minimumSizeHint().width()) if inspector else 0
+        if scopes is not None:
+            inspector_width = max(inspector_width, scopes.minimumWidth(), scopes.minimumSizeHint().width())
+        viewer_minimum = max(viewer.minimumWidth(), viewer.minimumSizeHint().width())
+        compact = timeline is not None and width < media_width + viewer_minimum + inspector_width + 2
 
         for dock in self.all_docks:
             dock.hide()
@@ -1914,11 +2300,16 @@ class DockLayoutMixin:
             if dock is not None:
                 dock.setFloating(False)
                 self.addDockWidget(area, dock)
-                dock.show()
+                dock.setVisible(dock is not media or not compact)
 
         graph.setFloating(False)
-        self.splitDockWidget(viewer, graph, horizontal)
-        graph.setVisible(timeline is None)
+        if timeline is not None:
+            self.addDockWidget(bottom, graph)
+            self.tabifyDockWidget(timeline, graph)
+            graph.hide()
+        else:
+            self.splitDockWidget(viewer, graph, horizontal)
+            graph.show()
 
         # Rebuild the optional groups with their own dock identities so
         # Show Panels and saved Qt state can still address each tool.
@@ -1948,7 +2339,6 @@ class DockLayoutMixin:
             self.addDockWidget(bottom, spline)
             spline.hide()
 
-        scopes = self.dock_composite_scope
         if scopes is not None:
             scopes.setFloating(False)
             self.addDockWidget(right if timeline is not None else bottom, scopes)
@@ -1957,12 +2347,20 @@ class DockLayoutMixin:
                 self.resizeDocks([inspector, scopes], [370, 220], vertical)
 
         if timeline is not None:
-            column_sizes = [(media, 270), (viewer, 920), (inspector, 320)]
-            columns, widths = zip(*(
-                (dock, width) for dock, width in column_sizes if dock is not None
-            ))
+            layout = self.layout()
+            layout.activate()
+            for bar in (getattr(self, "main_toolbar", None), getattr(self, "status_bar", None)):
+                if bar is not None and not bar.isHidden():
+                    height -= bar.height()
+            if compact:
+                media_width = 0
+            column_sizes = ((media, media_width), (viewer, max(1, width - media_width - inspector_width)),
+                            (inspector or scopes, inspector_width))
+            columns, widths = zip(*((dock, size) for dock, size in column_sizes if dock is not None and size > 0))
             self.resizeDocks(list(columns), list(widths), horizontal)
-            self.resizeDocks([viewer, timeline], [510, 330], vertical)
+            timeline_height = max(timeline.minimumHeight(), round(height * 0.38))
+            self.resizeDocks([viewer, timeline], [max(1, height - timeline_height), timeline_height], vertical)
+            timeline.raise_()
         else:
             self.resizeDocks([viewer, graph], [800, 600], horizontal)
 
@@ -1974,6 +2372,23 @@ class DockLayoutMixin:
             return self.saveState()
         finally:
             self.restoreState(previous)
+
+    def _migrate_composite_default_layout(self) -> None:
+        if self.current_page != "Composite" or not self.dock_composite or not self.dock_composite_keyframes:
+            return
+        key = f"composite_default_layout_version_{self._layout_profile_mode()}"
+        if self.config_manager.get(key) == _COMPOSITE_DEFAULT_LAYOUT_VERSION:
+            return
+        choices = self._page_layout_choices()
+        index = self._active_page_layout_index(choices)
+        if not index or choices[index - 1][1] != "factory":
+            return
+        if any(dock.isFloating() and not dock.isHidden() for dock in self.all_docks):
+            return
+        self._apply_default_composite_layout()
+        self.page_layouts["Composite"] = save_workspace_dock_state(self, "Composite")
+        self._save_current_layout_to_store("Composite", auto_save=False)
+        self.config_manager.set(key, _COMPOSITE_DEFAULT_LAYOUT_VERSION)
 
     def _color_program_monitor_available(self) -> bool:
         project = getattr(self, "_current_edit_project", None)
@@ -2141,6 +2556,8 @@ class DockLayoutMixin:
         # Legacy Qt states are read below without promoting them to an
         # unscoped profile. The next normal save records a scoped profile.
         self.layout_store = LayoutStore(self.config_manager)
+        if _is_video_color(self, "Color"):
+            self._clear_legacy_video_color_layouts()
         saved_layouts = self.config_manager.get("page_layouts")
         _factory_geom, factory_state, factory_panels = self._load_factory_layout()
         # page_layouts may be mode-scoped: {effective_mode: {page: hex}}, or a
@@ -2164,6 +2581,36 @@ class DockLayoutMixin:
         # Overlay mode-scoped profiles on the older page-layout mirror.
         self._load_layouts_from_store()
 
+        if _is_video_color(self, "Color"):
+            color_state = self.page_layouts.get("Color", QByteArray())
+            if not _is_supported_video_color_state(color_state):
+                previous = self.saveState()
+                self._apply_default_video_color_layout(initial=True)
+                self.page_layouts["Color"] = save_workspace_dock_state(self, "Color")
+                self.restoreState(previous)
+                self._configure_video_color_dock_controls(False)
+
+        edit_key = self._active_page_layout_key("Edit")
+        edit_selection = self.config_manager.get(edit_key)
+        retired_edit = isinstance(edit_selection, dict) and edit_selection.get("preset_id") in (
+            "audio", "captions", "review",
+        )
+        if self._edit_available and ("Edit" not in self.page_layouts or retired_edit):
+            from src.features.edit.core.workspace_presets import EDITING_PRESET
+
+            previous = self.saveState()
+            initial_window = not (
+                self.config_manager.get("window_geometry") or self.db.get_setting("last_geometry")
+            )
+            self._arrange_edit_workspace(EDITING_PRESET, initial_window=initial_window)
+            self.page_layouts["Edit"] = self.saveState()
+            if retired_edit:
+                self._save_current_layout_to_store("Edit", auto_save=False)
+            self.restoreState(previous)
+            self._mark_default_edit_layout()
+            if retired_edit or edit_selection is None:
+                self.config_manager.set(edit_key, {"preset_id": EDITING_PRESET.preset_id}, auto_save=False)
+
         # A partial factory file leaves the layer workspace to the live
         # dock layout. User profiles and explicit captures take precedence.
         if (
@@ -2177,8 +2624,8 @@ class DockLayoutMixin:
         # When no factory capture exists for this mode, generate the layout
         # for each page below and overlay these saved states afterwards.
         for page, state_hex in (factory_panels or {}).items():
-            if isinstance(state_hex, str):
-                self.page_layouts.setdefault(page, QByteArray.fromHex(state_hex.encode()))
+            if isinstance(state_hex, str) and page not in self.page_layouts:
+                self.page_layouts[page] = QByteArray.fromHex(state_hex.encode())
         if factory_state and saved_layouts:
             self.page_layouts.setdefault(self.current_page, QByteArray.fromHex(factory_state.encode()))
 
@@ -2295,112 +2742,12 @@ class DockLayoutMixin:
         if self.dock_composite_scope:
             self.dock_composite_scope.setVisible(False)
         # Save current state as base for Color (default page)
-        self.page_layouts["Color"] = self.saveState()
+        if "Color" not in self.page_layouts:
+            self.page_layouts["Color"] = save_workspace_dock_state(self, "Color")
 
         # 1. Library Layout
-        if self._current_work_mode() == "image":
-            self._apply_image_library_layout()
-        else:
-            for dock in self.all_docks:
-                dock.hide()
-            self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
-            self.dock_files.show()
+        self._apply_default_library_layout()
         self.page_layouts["Library"] = self.saveState()
-
-        # 2. Edit Layout (P1 phase) - conditional
-        # Default layout: Media Pool left, unified Viewport top, Timeline bottom.
-        if self._edit_available:
-            for d in self.all_docks: d.setVisible(False)
-            if self.dock_properties is not None and self.edit_properties_panel is not None:
-                self.dock_properties.setWidget(self.edit_properties_panel)
-            if self.dock_program_viewer:
-                self.dock_program_viewer.setVisible(True)
-            if self.dock_edit_media_pool:
-                self.dock_edit_media_pool.setVisible(True)
-            if self.dock_edit_timeline:
-                self.dock_edit_timeline.setVisible(True)
-            if self.dock_properties:
-                self.dock_properties.setVisible(True)
-            if self.dock_edit_info:
-                self.dock_edit_info.setVisible(True)
-            if self.dock_edit_effects:
-                self.dock_edit_effects.setVisible(True)
-            if self.dock_program_viewer:
-                self.addDockWidget(Qt.DockWidgetArea.TopDockWidgetArea, self.dock_program_viewer)
-            if self.dock_program_viewer:
-                self.dock_program_viewer.raise_()
-            if self.dock_edit_media_pool:
-                self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_edit_media_pool)
-            if self.dock_edit_timeline:
-                self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.dock_edit_timeline)
-            if self.dock_properties:
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_properties)
-            if self.dock_edit_info:
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_edit_info)
-            if self.dock_edit_effects:
-                self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_edit_effects)
-            if self.dock_edit_media_pool and self.dock_edit_effects:
-                self.tabifyDockWidget(self.dock_edit_media_pool, self.dock_edit_effects)
-                self.dock_edit_media_pool.raise_()
-            if self.dock_properties and self.dock_edit_info:
-                self.tabifyDockWidget(self.dock_properties, self.dock_edit_info)
-            # SUB-P2-03: Caption Workspace joins the right-area stack.
-            if self.dock_caption_workspace:
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
-                                   self.dock_caption_workspace)
-                if self.dock_properties:
-                    self.tabifyDockWidget(self.dock_properties,
-                                          self.dock_caption_workspace)
-                # Default to hidden; user opens via Panels menu / tab.
-                self.dock_caption_workspace.setVisible(False)
-            # P1-10: ADR Take Sheet joins the right-area stack (default hidden).
-            if self.dock_adr_take_sheet:
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
-                                   self.dock_adr_take_sheet)
-                if self.dock_properties:
-                    self.tabifyDockWidget(self.dock_properties,
-                                          self.dock_adr_take_sheet)
-                self.dock_adr_take_sheet.setVisible(False)
-            # P1-01: Multicam 同一右侧栈（默认隐藏）。
-            if self.dock_multicam:
-                self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea,
-                                   self.dock_multicam)
-                if self.dock_properties:
-                    self.tabifyDockWidget(self.dock_properties, self.dock_multicam)
-                self.dock_multicam.setVisible(False)
-            # Re-adding Properties above detaches hidden tabs from its stack.
-            # Keep the default Edit layout's AI panel in that shared group;
-            # the panel itself remains hidden until the user enables it.
-            if self.dock_properties and self.dock_ai_edit_assistant:
-                self.tabifyDockWidget(
-                    self.dock_properties, self.dock_ai_edit_assistant
-                )
-            # Resize docks (only if they exist)
-            resize_docks_list = []
-            resize_docks_sizes = []
-            if self.dock_edit_media_pool:
-                resize_docks_list.append(self.dock_edit_media_pool)
-                resize_docks_sizes.append(250)
-            if self.dock_program_viewer:
-                resize_docks_list.append(self.dock_program_viewer)
-                resize_docks_sizes.append(600)
-            if self.dock_properties:
-                resize_docks_list.append(self.dock_properties)
-                resize_docks_sizes.append(280)
-            if resize_docks_list:
-                self.resizeDocks(
-                    resize_docks_list,
-                    resize_docks_sizes,
-                    Qt.Orientation.Horizontal
-                )
-            # Vertical resize for timeline
-            if self.dock_edit_timeline:
-                self.resizeDocks(
-                    [self.dock_edit_timeline],
-                    [_EDIT_TIMELINE_DOCK_DEFAULT_HEIGHT],
-                    Qt.Orientation.Vertical
-                )
-            self.page_layouts["Edit"] = self.saveState()
 
         # 3. Deliver Layout (P9.3) - conditional
         if self._deliver_available and self._current_work_mode() == "image":
@@ -2409,20 +2756,7 @@ class DockLayoutMixin:
             if "Deliver" not in saved_page_layouts:
                 self._image_deliver_default_size_pending = True
         elif self._deliver_available and self.dock_deliver:
-            for d in self.all_docks: d.setVisible(False)
-            self.dock_viewport.setVisible(True)
-            self.dock_deliver.setVisible(True)
-            self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_deliver)
-            self.resizeDocks(
-                [self.dock_deliver],
-                [1320],
-                Qt.Orientation.Horizontal
-            )
-            self.resizeDocks(
-                [self.dock_deliver],
-                [680],
-                Qt.Orientation.Vertical
-            )
+            self._apply_default_video_deliver_layout()
             self.page_layouts["Deliver"] = self.saveState()
 
         # 4. Composite Layout (if available)
@@ -2433,7 +2767,7 @@ class DockLayoutMixin:
         self.page_layouts.update(saved_page_layouts)
         # Ensure current_page has a layout state (for pages other than Color/Library/Deliver)
         if self.current_page not in self.page_layouts:
-            self.page_layouts[self.current_page] = self.saveState()
+            self.page_layouts[self.current_page] = save_workspace_dock_state(self, self.current_page)
 
         # Return to current page (usually Color for first time)
         # Before switching, hide page-specific docks that apply_default_layout made visible
@@ -2546,7 +2880,7 @@ class DockLayoutMixin:
         try:
             product_mode = self._layout_profile_mode()
             if qt_state is None:
-                qt_state = self.saveState()
+                qt_state = save_workspace_dock_state(self, page_id)
             qt_state_hex = qt_state.toHex().data().decode()
 
             # Collect visible panel IDs from registered panels
@@ -2761,85 +3095,6 @@ class DockLayoutMixin:
         self.config_manager.save_config()
         logger.info("Added Composite Scopes dock to legacy layout")
 
-    def _migrate_mixer_media_docks_layout(self) -> None:
-        """Upgrade the old Mixer layout while retaining custom floating docks."""
-        migration_version = self.config_manager.get(
-            _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY
-        )
-        if not isinstance(migration_version, int):
-            migration_version = 0
-        if migration_version >= _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION:
-            return
-
-        media_pool = getattr(self, "dock_audio_media_pool", None)
-        effects = getattr(self, "dock_audio_effects", None)
-        if (
-            self.current_page != "Mixer"
-            or not getattr(getattr(self, "mixer_page", None), "project_backed", False)
-            or not isinstance(media_pool, QDockWidget)
-            or not isinstance(effects, QDockWidget)
-        ):
-            return
-
-        console = self.dock_audio_console
-        viewer = self.dock_audio_viewer
-        grouped = effects in self.tabifiedDockWidgets(media_pool)
-        open_pool, open_effects = not media_pool.isHidden(), not effects.isHidden()
-        same_area = self.dockWidgetArea(media_pool) == self.dockWidgetArea(effects)
-        only_one_open = same_area and open_pool != open_effects
-        missing_library = migration_version == 0 and not (open_pool or open_effects or grouped)
-        foreground = media_pool if open_pool and (
-            not open_effects or not media_pool.visibleRegion().isEmpty()
-        ) else effects
-        top_area = Qt.DockWidgetArea.TopDockWidgetArea
-        library_below = self.dockWidgetArea(effects) == Qt.DockWidgetArea.BottomDockWidgetArea
-        library_after_viewer = (self.dockWidgetArea(effects) == top_area
-                                and self.dockWidgetArea(viewer) == top_area
-                                and not viewer.isFloating() and not viewer.isHidden()
-                                and console.geometry().x() < viewer.geometry().x() < foreground.geometry().x())
-        if ((missing_library or ((grouped or only_one_open) and (library_below or library_after_viewer)))
-                and self.dockWidgetArea(console) == top_area
-                and not console.isFloating()
-                and not self.tabifiedDockWidgets(console)
-                and not (media_pool.isFloating() or effects.isFloating())):
-            self.splitDockWidget(console, effects, Qt.Orientation.Horizontal)
-            self.tabifyDockWidget(effects, media_pool)
-            effects.setVisible(open_effects or missing_library)
-            media_pool.setVisible(open_pool or missing_library)
-            foreground.raise_()
-            self.resizeDocks([effects], [270], Qt.Orientation.Horizontal)
-        mixer_state = self.saveState()
-        self.page_layouts["Mixer"] = mixer_state
-
-        # Keep the legacy page_layouts mirror valid for both its historical
-        # flat shape and the newer mode-scoped shape.
-        saved_layouts = self.config_manager.get("page_layouts")
-        if isinstance(saved_layouts, dict):
-            saved_layouts = dict(saved_layouts)
-            state_hex = mixer_state.toHex().data().decode()
-            if all(isinstance(value, str) for value in saved_layouts.values()):
-                saved_layouts["Mixer"] = state_hex
-            else:
-                mode_key = self._layout_profile_mode()
-                bucket = saved_layouts.get(mode_key)
-                if not isinstance(bucket, dict):
-                    mode_key = "all"
-                    bucket = saved_layouts.get(mode_key)
-                if isinstance(bucket, dict):
-                    bucket = dict(bucket)
-                    bucket["Mixer"] = state_hex
-                    saved_layouts[mode_key] = bucket
-            self.config_manager.set("page_layouts", saved_layouts, auto_save=False)
-
-        self.config_manager.set(
-            _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_KEY,
-            _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION,
-            auto_save=False,
-        )
-        self._save_current_layout_to_store("Mixer")
-        self.config_manager.save_config()
-        logger.info("Updated Mixer dock layout to version %d", _MIXER_MEDIA_DOCKS_LAYOUT_MIGRATION_VERSION)
-
     def _migrate_ai_assistant_dock_layout(self) -> None:
         """Merge the AI assistant into the Edit right-side tab group once.
 
@@ -2956,7 +3211,7 @@ class DockLayoutMixin:
             <= saved_height
             <= _EDIT_TIMELINE_DOCK_MAX_HEIGHT
         ):
-            target_height = _EDIT_TIMELINE_DOCK_DEFAULT_HEIGHT
+            target_height = TIMELINE_DOCK_DEFAULT_HEIGHT
         else:
             target_height = saved_height
         # Only migrate when the saved splitter state clearly disagrees with
@@ -2964,12 +3219,12 @@ class DockLayoutMixin:
         # tall Timeline layout created after the migration is available.
         current_height = dock.height()
         undersized = (
-            current_height < _EDIT_TIMELINE_DOCK_OPERABLE_MIN_HEIGHT
-            and target_height < _EDIT_TIMELINE_DOCK_OPERABLE_MIN_HEIGHT
+            current_height < TIMELINE_DOCK_MIN_HEIGHT
+            and target_height < TIMELINE_DOCK_MIN_HEIGHT
         )
         if undersized:
             # APP-03：过矮布局（如 102px）无法编辑——拉回可操作默认高度
-            target_height = _EDIT_TIMELINE_DOCK_DEFAULT_HEIGHT
+            target_height = TIMELINE_DOCK_DEFAULT_HEIGHT
         elif current_height <= max(
             target_height + 200, int(target_height * 1.6)
         ):
@@ -3008,7 +3263,8 @@ class DockLayoutMixin:
 
     def _migrate_color_grading_dock_height(self) -> None:
         """Apply the default bottom row height once, including its dock tabs."""
-        if self.current_page != "Color":
+        if (self.current_page != "Color" or _is_video_color(self, self.current_page)
+                or self._current_work_mode() == "image"):
             return
         migration_version = self.config_manager.get(
             _COLOR_GRADING_DOCK_LAYOUT_MIGRATION_KEY
@@ -3093,6 +3349,12 @@ class DockLayoutMixin:
         Only Mixer needs initial placement. Later launches honor both docks'
         independent visibility, floating geometry and user tab arrangements.
         """
+        if _is_video_color(self, "Color") or (
+            self._current_work_mode() == "image"
+            and self.dock_warper in self.tabifiedDockWidgets(self.dock_curves)
+            and self.dockWidgetArea(self.dock_warper) == Qt.DockWidgetArea.TopDockWidgetArea
+        ):
+            return
         self._migrate_color_resource_dock_layout(force=force)
         self._place_grade_sets_dock(force=force)
         migration_version = self.config_manager.get(
@@ -3159,7 +3421,8 @@ class DockLayoutMixin:
             self._factory_color_tools_compacted = True
 
     def _toggle_color_node_display_mode(self) -> None:
-        self.dock_viewport.setVisible(self.dock_viewport.isHidden())
+        if not _is_video_color(self, self.current_page):
+            self.dock_viewport.setVisible(self.dock_viewport.isHidden())
 
     def _migrate_color_resource_dock_layout(self, force: bool = False) -> None:
         """One-time upgrade; later launches preserve custom/floating arrangements."""
@@ -3378,23 +3641,35 @@ class DockLayoutMixin:
         if name in ("dockCurves", "dockMasks", "dockEditTimeline"):
             return
 
+        features = QDockWidget.DockWidgetFeature
+        if not dock.features() & (features.DockWidgetFloatable | features.DockWidgetClosable):
+            return
         menu = QMenu(self)
         menu.setStyleSheet(DARK_THEME)
-
         add_dock_management_actions(menu, dock)
-
         menu.exec(dock.mapToGlobal(pos))
 
     # ------------------------------------------------------------------
     # _style_dock_tab_bars
     # ------------------------------------------------------------------
-    def _style_dock_tab_bars(self) -> None:
+    def _style_dock_tab_bars(self, *, only_changed: bool = False) -> None:
         """Apply platform-neutral styling to Qt's internal dock tab bars."""
+        photo = self.current_page == "Color" and self._current_work_mode() == "image"
         for tab_bar in self.findChildren(QTabBar):
             # QMainWindow creates this internal bar directly under itself;
             # regular panel QTabBars are descendants of their own widgets.
-            if tab_bar.parent() is self:
-                apply_dock_tab_bar_style(tab_bar)
+            if tab_bar.parent() is not self:
+                continue
+            compact = False
+            if photo:
+                font = tab_bar.font()
+                font.setBold(True)
+                metrics = QFontMetrics(font)
+                normal_width = 16 + sum(metrics.horizontalAdvance(tab_bar.tabText(index)) + 28
+                                        for index in range(tab_bar.count()))
+                compact = not tab_bar.isVisible() or tab_bar.width() < normal_width
+            if not only_changed or tab_bar.property("_topos_dock_tabs_compact") != compact:
+                apply_dock_tab_bar_style(tab_bar, compact=compact)
         # Qt can leave a dormant dock tab bar at (0, 0) during a layout
         # restore. Keep the toolbar above those internal widgets so they
         # cannot paint over the menu or intercept its mouse input.
@@ -3481,6 +3756,9 @@ class DockLayoutMixin:
         if not checked:
             return
         dock = self.dock_color_keyframes
+        if _is_video_color(self, self.current_page):
+            dock.raise_()
+            return
         if (
             (getattr(self, "_color_keyframes_reseat", False)
              or not self.config_manager.get(_COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY))
@@ -3519,6 +3797,9 @@ class DockLayoutMixin:
         hidden in image mode, so the first-run layout matches the workflow.
         """
         work_mode = self._current_work_mode()
+        if _is_video_color(self, "Color"):
+            self._apply_default_video_color_layout()
+            return
         if work_mode == "image":
             self._apply_default_photo_color_layout()
             return
@@ -3609,57 +3890,642 @@ class DockLayoutMixin:
         # Save default dock sizes to config
         self._save_all_docked_sizes()
 
-    def _apply_default_photo_color_layout(self) -> None:
-        """Build the image Color arrangement before applying any saved layout."""
-        left, right = Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea
-        top, bottom = Qt.DockWidgetArea.TopDockWidgetArea, Qt.DockWidgetArea.BottomDockWidgetArea
+    def _clear_legacy_video_color_layouts(self) -> None:
+        """Retire old video Color snapshots while retaining other page layouts."""
+        config = self.config_manager
+        mode = self._layout_profile_mode()
+        version_key = f"{_VIDEO_COLOR_LAYOUT_KEY}_{mode}"
+        if config.get(version_key) == _PREVIOUS_VIDEO_COLOR_LAYOUT_VERSION:
+            return
+        layouts = config.get("page_layouts")
+        if isinstance(layouts, dict) and isinstance(layouts.get(mode), dict):
+            scoped = dict(layouts[mode])
+            scoped.pop("Color", None)
+            config.set("page_layouts", {**layouts, mode: scoped}, auto_save=False)
+        self.layout_store.delete_profile(mode, "Color")
+        for name in self.db.list_layouts(work_mode="video"):
+            try:
+                geometry, state, pages = self.db.load_layout(name, work_mode="video")
+            except json.JSONDecodeError:
+                logger.warning("Skipping malformed video layout preset %r", name)
+                continue
+            if not isinstance(pages, dict) or not isinstance(color := pages.get("Color"), str):
+                continue
+            if _is_supported_video_color_state(QByteArray.fromHex(color.encode())):
+                continue
+            remaining = {page: capture for page, capture in pages.items() if page != "Color"}
+            if remaining:
+                self.db.save_layout(name, geometry, next(iter(remaining.values())) if state == color else state,
+                                    remaining, work_mode="video")
+            else:
+                self.db.delete_layout(name, work_mode="video")
+        config.set(f"workspace_panel_restore_{mode}_Color_{self.dock_presets.objectName()}", None, auto_save=False)
+        config.set(version_key, _PREVIOUS_VIDEO_COLOR_LAYOUT_VERSION)
+
+    def _configure_video_color_dock_controls(self, active: bool) -> None:
+        """Keep required panels open and limit child panels to their tab groups."""
+        feature = QDockWidget.DockWidgetFeature
+        for attr in ("dock_viewport", *_VIDEO_COLOR_TAB_DOCKS):
+            dock = getattr(self, attr, None)
+            if dock is None:
+                continue
+            original = dock.property("videoColorOriginalFeatures")
+            if active and original is None:
+                dock.setProperty("videoColorOriginalFeatures", dock.features().value)
+                dock.setFeatures(feature.DockWidgetClosable if attr == "dock_mixer"
+                                 else feature.NoDockWidgetFeatures)
+            elif not active and original is not None:
+                dock.setFeatures(feature(original))
+                dock.setProperty("videoColorOriginalFeatures", None)
+            dock.toggleViewAction().setVisible(not active or attr == "dock_mixer")
+
+        width, height = (400, 225) if active else (_VIEWPORT_MIN_WIDTH, _VIEWPORT_MIN_HEIGHT)
+        self.dock_viewport.setMinimumSize(width, height)
+        self.viewport_container.setMinimumSize(width, height)
+        handles = getattr(self, "_video_color_resize_handles", None)
+        if handles is None and active:
+            handles = VideoColorResizeHandles(
+                self, gallery=self._video_color_docks(_VIDEO_COLOR_GALLERY),
+                viewer=self.dock_viewport, nodes=self.dock_layers, clips=self.dock_color_timeline_clips,
+                primary=self._video_color_docks(VIDEO_COLOR_PRIMARY),
+                secondary=self._video_color_docks(_VIDEO_COLOR_SECONDARY_DOCKS),
+                scopes=self._video_color_docks(VIDEO_COLOR_SCOPES),
+                fit_layout=self._fit_video_color_layout,
+            )
+            self._video_color_resize_handles = handles
+        if handles is not None:
+            handles.set_active(active)
+        if active:
+            screen = self.screen()
+            if screen is not None and screen.availableGeometry().width() < _VIDEO_COLOR_DUAL_TOOL_WIDTH:
+                self._fit_video_color_tools_to_screen(screen.availableGeometry().width())
+            for dock in (self.dock_viewport, self.dock_grading, self.dock_curves):
+                if dock.isHidden():
+                    dock.show()
+
+    def _video_color_docks(self, names: tuple[str, ...]) -> tuple[QDockWidget, ...]:
+        return tuple(dock for name in names if (dock := getattr(self, name, None)) is not None)
+
+    def _read_workspace_defaults(
+        self, section: str, fallback: dict[str, tuple[int, ...]],
+    ) -> dict[str, tuple[int, ...]]:
+        defaults = dict(fallback)
+        try:
+            with open(self._get_factory_layout_path(), encoding="utf-8") as file:
+                data = json.load(file)
+        except (OSError, json.JSONDecodeError):
+            return defaults
+        section_data = data.get(section) if isinstance(data, dict) else None
+        if isinstance(section_data, dict):
+            for key, default in fallback.items():
+                values = section_data.get(key)
+                if (isinstance(values, list) and len(values) == len(default)
+                        and all(type(value) is int and value > 0 for value in values)):
+                    defaults[key] = tuple(values)
+        return defaults
+
+    def _video_color_defaults(self) -> dict[str, tuple[int, ...]]:
+        return self._read_workspace_defaults("video_color", _VIDEO_COLOR_DEFAULTS)
+
+    def _video_project_screen_tier(
+        self, defaults: dict[str, tuple[int, ...]],
+    ) -> tuple[str, tuple[int, int]]:
+        screen = self.screen()
+        if screen is None:
+            return "window_2k", defaults["window_2k"]
+        geometry, available = screen.geometry(), screen.availableGeometry()
+        dpr = screen.devicePixelRatio()
+        pixels = round(geometry.width() * dpr), round(geometry.height() * dpr)
+        # Leave room for the native window frame inside the OS work area.
+        width_limit = max(1, available.width() - 24)
+        height_limit = max(1, available.height() - 30)
+        for key, min_width, min_height in _VIDEO_PROJECT_SCREEN_TIERS:
+            width, height = defaults[key]
+            if (pixels[0] >= min_width and pixels[1] >= min_height
+                    and width <= width_limit and height <= height_limit):
+                return key, (width, height)
+        width, height = defaults["window_compact"]
+        return "window_compact", (min(width, width_limit), min(height, height_limit))
+
+    def _video_project_window_size(self) -> tuple[int, int]:
+        return self._video_project_screen_tier(self._video_color_defaults())[1]
+
+    def _apply_video_project_window_size(self) -> None:
+        if self._current_work_mode() != "video" or self.isFullScreen() or self.isMaximized():
+            return
+        self.resize(*self._video_project_window_size())
+        self._ensure_window_on_screen(self)
+        if getattr(self, "current_page", None) == "Edit":
+            self._configure_edit_resize_handles()
+
+    def _fit_video_color_layout(self, width: int, height: int) -> None:
+        self._fit_video_color_tools_to_screen(width)
+        clips = self.dock_color_timeline_clips
+        strip = clips.widget()
+        preferred_extra = getattr(strip, "preferred_height_delta", None)
+        if preferred_extra is not None and not clips.isHidden() and not clips.isFloating():
+            # Anticipate Qt's minimum window height with the chosen preset.
+            # A Large strip can otherwise block resizing before the cutoff.
+            preferred_minimum = self.minimumSizeHint().height() + preferred_extra()
+            compact_height = max(_VIDEO_COLOR_COMPACT_CLIP_HEIGHT, preferred_minimum + 12)
+            strip.set_compact_height(height < compact_height)
+
+    def _fit_video_color_tools_to_screen(self, available_width: int) -> None:
+        primary, secondary = self.dock_grading, self.dock_curves
+        if primary.isHidden() or secondary.isHidden():
+            return
+        compact = secondary in self.tabifiedDockWidgets(primary)
+        if not compact:
+            # Qt can clamp the window above the normal breakpoint when the
+            # translated tools need more room. Retain that limit while compact.
+            self._video_color_tool_breakpoint = max(
+                _VIDEO_COLOR_DUAL_TOOL_WIDTH, self.minimumSizeHint().width() + 1,
+            )
+        needs_compact = available_width < getattr(
+            self, "_video_color_tool_breakpoint", _VIDEO_COLOR_DUAL_TOOL_WIDTH,
+        )
+        if compact == needs_compact:
+            return
+        if not needs_compact:
+            self._expand_video_color_tools(available_width)
+            return
+        area = self.dockWidgetArea(primary)
+        for dock in self._video_color_docks(_VIDEO_COLOR_SECONDARY_DOCKS):
+            visible = not dock.isHidden()
+            self.removeDockWidget(dock)
+            self.addDockWidget(area, dock)
+            self.tabifyDockWidget(primary, dock)
+            dock.setVisible(visible)
+        primary.raise_()
+
+    def _expand_video_color_tools(self, available_width: int) -> None:
+        clips, viewer = self.dock_color_timeline_clips, self.dock_viewport
+        primary, secondary, scopes = self.dock_grading, self.dock_curves, self.dock_analysis
+        area = self.dockWidgetArea(clips)
+        if clips.isFloating() or self.dockWidgetArea(primary) != area:
+            return
+
+        groups = (
+            (primary, self._video_color_docks(VIDEO_COLOR_PRIMARY)),
+            (secondary, self._video_color_docks(_VIDEO_COLOR_SECONDARY_DOCKS)),
+            (scopes, self._video_color_docks(VIDEO_COLOR_SCOPES)),
+        )
+        prior_front = {dock for _, docks in groups for dock in docks
+                       if not dock.visibleRegion().isEmpty() and not dock.isFloating()}
+        tool_front = next((dock for dock in prior_front if dock not in groups[-1][1]), primary)
+        scope_front = next((dock for dock in groups[-1][1] if dock in prior_front), None)
+        prior_scope_width = scope_front.width() if scope_front is not None else 0
+        prior_view_height = viewer.height()
+        prior_tools_height = tool_front.geometry().bottom() - clips.geometry().bottom()
+        visibility = {dock: not dock.isHidden() for _, docks in groups for dock in docks if not dock.isFloating()}
+        # Leave any separately floating scopes in place. The remaining tabs
+        # still belong to the scopes column when the main window grows.
+        scopes_anchor = next((dock for dock in groups[-1][1] if dock in visibility), None)
+        raw = getattr(self, "dock_raw", None)
+        primary_anchor = raw if visibility.get(raw) else primary
+        for dock in visibility:
+            self.removeDockWidget(dock)
+
+        vertical, horizontal = Qt.Orientation.Vertical, Qt.Orientation.Horizontal
+        self.splitDockWidget(clips, primary_anchor, vertical)
+        self.splitDockWidget(primary_anchor, secondary, horizontal)
+        if scopes_anchor is not None:
+            self.splitDockWidget(secondary, scopes_anchor, horizontal)
+        for anchor, docks in ((primary_anchor, groups[0][1]), groups[1], (scopes_anchor, groups[-1][1])):
+            if anchor is None:
+                continue
+            for dock in docks:
+                if dock not in visibility:
+                    continue
+                if dock is not anchor:
+                    self.tabifyDockWidget(anchor, dock)
+                dock.setVisible(visibility[dock])
+            anchor.raise_()
+        primary.raise_()
+        for dock in (tool_front, scope_front):
+            if dock is not None:
+                dock.raise_()
+        if prior_tools_height > 0:
+            self.resizeDocks([viewer, primary], [prior_view_height, prior_tools_height], vertical)
+        if scope_front is not None:
+            tool_minimum = primary.minimumSizeHint().width() + secondary.minimumSizeHint().width()
+            scope_width = min(prior_scope_width, max(scope_front.minimumWidth(), available_width - tool_minimum))
+            tools_width = (available_width - scope_width) // 2
+            self.resizeDocks([primary, secondary, scope_front],
+                             [tools_width, tools_width, scope_width], horizontal)
+
+    def _upgrade_video_color_scopes_tabs(self) -> None:
+        scopes = self.dock_analysis
+        shown, floating = not scopes.isHidden(), scopes.isFloating()
+        scopes.setFloating(False)
+        scopes.show()
+        area = self.dockWidgetArea(scopes)
+        tabs = self._video_color_docks(VIDEO_COLOR_SCOPES[1:])
+        for dock in tabs:
+            self.removeDockWidget(dock)
+            self.addDockWidget(area, dock)
+            dock.show()
+            self.tabifyDockWidget(scopes, dock)
+        for dock in (scopes, *tabs):
+            dock.setVisible(shown)
+        if shown:
+            scopes.raise_()
+        if floating:
+            scopes.setFloating(True)
+        self.dock_mixer.hide()
+
+    def _apply_default_video_color_layout(self, *, initial: bool = False) -> None:
+        """Build the same six regions for first use and Reset to Default."""
+        top = Qt.DockWidgetArea.TopDockWidgetArea
         horizontal, vertical = Qt.Orientation.Horizontal, Qt.Orientation.Vertical
-        self.setCorner(Qt.Corner.TopLeftCorner, left)
-        self.setCorner(Qt.Corner.TopRightCorner, right)
-        self.setCorner(Qt.Corner.BottomLeftCorner, bottom)
-        self.setCorner(Qt.Corner.BottomRightCorner, bottom)
+        gallery, viewer, nodes = self.dock_presets, self.dock_viewport, self.dock_layers
+        clips, primary, secondary, scopes = (self.dock_color_timeline_clips, self.dock_grading,
+                                             self.dock_curves, self.dock_analysis)
+        primary_anchor = getattr(self, "dock_raw", primary)
+        for dock in self.all_docks:
+            dock.hide()
+        # Remove all participating docks first, otherwise Qt keeps an old tab
+        # relationship when a previously grouped dock is passed to splitDockWidget.
+        for attr in ("dock_viewport", "dock_layers", "dock_color_timeline_clips",
+                     "dock_analysis", *_VIDEO_COLOR_TAB_DOCKS):
+            dock = getattr(self, attr, None)
+            if dock is not None:
+                dock.setFloating(False)
+                self.removeDockWidget(dock)
+
+        self.addDockWidget(top, gallery)
+        self.splitDockWidget(gallery, clips, vertical)
+        self.splitDockWidget(clips, primary_anchor, vertical)
+        self.splitDockWidget(gallery, viewer, horizontal)
+        self.splitDockWidget(viewer, nodes, horizontal)
+        defaults = self._video_color_defaults()
+        width, height = self._video_project_window_size() if initial else (self.width(), self.height())
+        screen = self.screen()
+        available_width = min(width, screen.availableGeometry().width()) if screen else width
+        expanded_tools = available_width >= _VIDEO_COLOR_DUAL_TOOL_WIDTH
+        tool_groups = [(primary_anchor, VIDEO_COLOR_PRIMARY)]
+        if expanded_tools:
+            self.splitDockWidget(primary_anchor, secondary, horizontal)
+            tool_groups.append((secondary, _VIDEO_COLOR_SECONDARY_DOCKS))
+        else:
+            tool_groups[0] = (primary_anchor, (*VIDEO_COLOR_PRIMARY, *_VIDEO_COLOR_SECONDARY_DOCKS))
+        self.splitDockWidget(secondary if expanded_tools else primary_anchor, scopes, horizontal)
+
+        for anchor, members in [(gallery, _VIDEO_COLOR_GALLERY), *tool_groups, (scopes, VIDEO_COLOR_SCOPES)]:
+            for attr in members:
+                dock = getattr(self, attr, None)
+                if dock is None:
+                    continue
+                if dock is not anchor:
+                    self.tabifyDockWidget(anchor, dock)
+                dock.setVisible(attr not in ("dock_script", "dock_color_keyframes", "dock_mixer"))
+            anchor.raise_()
+        primary.raise_()
+        for dock in (viewer, nodes, clips, scopes):
+            dock.show()
+
+        self._configure_video_color_dock_controls(True)
+        top_width = available_width
+        available_height = max(1, height - clips.sizeHint().height())
+        self.resizeDocks([gallery, viewer, nodes],
+                         [max(1, top_width * share // sum(defaults["top"]))
+                          for share in defaults["top"]], horizontal)
+        primary_size, secondary_size, scopes_size = (
+            max(1, top_width * share // sum(defaults["bottom"]))
+            for share in defaults["bottom"]
+        )
+        if expanded_tools:
+            self.resizeDocks([primary, secondary, scopes],
+                             [primary_size, secondary_size, scopes_size], horizontal)
+        else:
+            self.resizeDocks([primary, scopes], [primary_size + secondary_size, scopes_size], horizontal)
+        self.resizeDocks([viewer, primary],
+                         [max(1, available_height * share // sum(defaults["height"]))
+                          for share in defaults["height"]], vertical)
+
+    def _photo_color_groups(self) -> tuple[
+        tuple[QDockWidget, ...], tuple[QDockWidget, ...], tuple[QDockWidget, ...],
+        tuple[QDockWidget, ...], tuple[QDockWidget, ...],
+    ]:
+        resources = tuple(dock for dock in (
+            getattr(self, "dock_grade_sets", None), self.dock_presets, self.dock_lut, self.dock_plugin,
+        ) if dock is not None)
+        return (
+            resources, (self.dock_layers, self.dock_info, self.dock_crop),
+            (self.dock_raw, self.dock_grading, self.dock_base_grade, self.dock_chromogen,
+             self.dock_denoise, self.dock_deblur),
+            (self.dock_curves, self.dock_warper, self.dock_mixer,
+             self.dock_qualifier, self.dock_masks, self.dock_effects),
+            (self.dock_analysis, self.dock_grain),
+        )
+
+    def _photo_color_defaults(self) -> dict[str, tuple[int, ...]]:
+        defaults = getattr(self, "_photo_color_default_sizes", None)
+        if defaults is None:
+            defaults = self._read_workspace_defaults("photo_color", _PHOTO_COLOR_DEFAULTS)
+            self._photo_color_default_sizes = defaults
+        return defaults
+
+    def _photo_color_tabs_match(self, group: tuple[QDockWidget, ...]) -> bool:
+        visible = tuple(dock for dock in group if not dock.isHidden())
+        if not visible:
+            return True
+        anchor = visible[0]
+        tabs = set(self.tabifiedDockWidgets(anchor))
+        return set(visible[1:]) <= tabs <= set(group) - {anchor}
+
+    def _photo_color_stacks(
+        self, compact: bool, merge_tools: bool, stack_details: bool = False,
+    ) -> tuple[_DockStacks, _DockStacks]:
+        resources, right, primary, secondary, analysis = self._photo_color_groups()
+        layers, *details = right
+        if compact:
+            resources = (*resources, self.dock_deblur, self.dock_grain)
+            primary = tuple(dock for dock in primary if dock is not self.dock_deblur)
+            analysis = (self.dock_analysis, *(details if stack_details else right))
+        upper = (resources, (self.dock_viewport,))
+        if not compact:
+            upper += (tuple(details), (layers,)) if stack_details else (right,)
+        lower = ((*primary, *secondary), analysis) if merge_tools else (primary, secondary, analysis)
+        if compact and stack_details:
+            lower += ((layers,),)
+        return upper, lower
+
+    def _photo_color_stacks_for_size(self, width: int, *, initializing: bool = False) -> tuple[_DockStacks, _DockStacks]:
+        _, right, primary, secondary, analysis = self._photo_color_groups()
+        minimum = sum(max(max(dock.minimumWidth(), dock.minimumSizeHint().width()) for dock in group)
+                      for group in (primary, secondary, analysis))
+        compact = width < _PHOTO_COLOR_COMPACT_TOP_WIDTH
+        height = self.height()
+        if compact:
+            stack_details = height >= _PHOTO_COLOR_STACKED_COMPACT_WINDOW_HEIGHT
+        else:
+            preview = self.dock_viewport
+            upper_height = (height - COLOR_TOOL_DOCK_DEFAULT_HEIGHT - 60
+                            if initializing or preview.isHidden() else preview.height())
+            layers, *details = right
+            minimum_heights = [max(dock.minimumHeight(), dock.minimumSizeHint().height()) for dock in details]
+            stacked_minimum = (max(minimum_heights) + max(layers.minimumHeight(), layers.minimumSizeHint().height())
+                               + DOCK_TAB_BAR_HEIGHT + 12)
+            stack_details = upper_height >= max(_PHOTO_COLOR_STACKED_DETAILS_HEIGHT, stacked_minimum)
+        # Fold before Qt clamps the window at the expanded layout's minimum.
+        return self._photo_color_stacks(
+            compact, width < max(_PHOTO_COLOR_DUAL_TOOL_WIDTH, minimum + 52), stack_details,
+        )
+
+    def _arrange_photo_color(
+        self, upper: _DockStacks, lower: _DockStacks, shown: dict[QDockWidget, bool], *,
+        previous_view_height: int = 0, previous_tool_height: int = 0,
+        selected: tuple[QDockWidget, ...] = (),
+    ) -> None:
+        top = Qt.DockWidgetArea.TopDockWidgetArea
+        horizontal, vertical = Qt.Orientation.Horizontal, Qt.Orientation.Vertical
+        for dock in shown:
+            self.removeDockWidget(dock)
+
+        # One nested split for both rows lets a vertical divider transfer space
+        # between the preview and tools, independent of the side column widths.
+        self.addDockWidget(top, upper[0][0])
+        upper[0][0].show()
+        self.splitDockWidget(upper[0][0], lower[0][0], vertical)
+        lower[0][0].show()
+        for row in (upper, lower):
+            for before, after in zip(row, row[1:]):
+                self.splitDockWidget(before[0], after[0],
+                                     vertical if after == (self.dock_layers,) else horizontal)
+                after[0].show()
+            for group in row:
+                for dock in group[1:]:
+                    self.tabifyDockWidget(group[0], dock)
+                    dock.show()
+        for dock, visible in shown.items():
+            dock.setVisible(visible)
+
+        self._sync_photo_color_height_limits(upper, lower)
+        split_lower = lower[-1] == (self.dock_layers,)
+        split_upper = upper[-1] == (self.dock_layers,)
+        defaults = (self.dock_layers, self.dock_info, self.dock_grading, self.dock_curves, self.dock_analysis)
+        fronts = {}
+        for group in (*upper, *lower):
+            front = next((dock for dock in (*selected, *defaults, *group)
+                          if dock in group and shown[dock]), None)
+            if front is not None:
+                front.raise_()
+                fronts[group] = front
+
+        first, second, scopes = self._photo_color_defaults()["bottom"]
+        lower_columns = lower[:-2] + (lower[-2] + lower[-1],) if split_lower else lower
+        shares = (first, second, scopes) if len(lower_columns) == 3 else (first + second, scopes)
+        columns = [(dock, share) for group, share in zip(lower_columns, shares)
+                   if (dock := next((dock for dock in group if shown[dock]), None)) is not None]
+        if columns:
+            self.resizeDocks([dock for dock, _ in columns],
+                             [max(1, round(self.width() * share / sum(shares))) for _, share in columns],
+                             horizontal)
+            tools_height = previous_tool_height or COLOR_TOOL_DOCK_DEFAULT_HEIGHT
+            if split_lower:
+                tools_height = _PHOTO_COLOR_STACKED_COMPACT_TOOL_HEIGHT
+            view_height = previous_view_height or max(1, self.height() - tools_height)
+            self.resizeDocks([self.dock_viewport, columns[0][0]], [view_height, tools_height], vertical)
+        if split_upper or split_lower:
+            details, layers = (upper if split_upper else lower)[-2:]
+            if details in fronts and layers in fronts:
+                self.resizeDocks([fronts[details], fronts[layers]], [240, 180], vertical)
+        self._size_photo_color_top(self.width(), upper)
+        self._perform_update_all_titlebars()
+
+    def _apply_default_photo_color_layout(self) -> None:
+        """Build the same layout for a new profile and Reset to Default."""
         for dock in self.all_docks:
             dock.hide()
             if dock.isFloating():
                 dock.setFloating(False)
-
-        grade_sets = getattr(self, "dock_grade_sets", None)
-        resources = tuple(dock for dock in (
-            grade_sets, self.dock_presets, self.dock_lut, self.dock_plugin) if dock is not None)
-        primary = (self.dock_raw, self.dock_grading, self.dock_base_grade, self.dock_chromogen,
-                   self.dock_denoise, self.dock_deblur)
-        secondary = (self.dock_curves, self.dock_warper, self.dock_mixer,
-                     self.dock_qualifier, self.dock_masks, self.dock_effects)
-        analysis = (self.dock_analysis, self.dock_grain)
-        right_tools = (self.dock_info, self.dock_crop)
-        visible = (*resources, *primary, *secondary, *analysis, *right_tools,
-                   self.dock_layers, self.dock_viewport)
-        for dock in visible:
-            self.removeDockWidget(dock)
-
-        self.addDockWidget(top, self.dock_viewport)
-        self.addDockWidget(right, self.dock_info)
-        self.splitDockWidget(self.dock_info, self.dock_layers, vertical)
-        self.tabifyDockWidget(self.dock_info, self.dock_crop)
-        self.addDockWidget(left, resources[0])
-        self.addDockWidget(bottom, primary[0])
-        self.splitDockWidget(primary[0], secondary[0], horizontal)
-        self.splitDockWidget(secondary[0], analysis[0], horizontal)
-        for group in (resources, primary, secondary, analysis):
-            for dock in group[1:]:
-                self.tabifyDockWidget(group[0], dock)
-        for dock in visible:
-            dock.show()
-        for dock in (resources[0], self.dock_grading, self.dock_curves,
-                     self.dock_analysis, self.dock_info):
-            dock.raise_()
-        self.resizeDocks([resources[0], self.dock_viewport, self.dock_info], [320, 900, 320], horizontal)
-        self.resizeDocks([self.dock_info, self.dock_layers], [250, 420], vertical)
-        self.resizeDocks([primary[0], secondary[0], analysis[0]], [500, 565, 385], horizontal)
-        self.resizeDocks([self.dock_viewport, primary[0]],
-                         [650, COLOR_TOOL_DOCK_DEFAULT_HEIGHT], vertical)
+        self._set_photo_color_viewport_minimum(True)
+        upper, lower = self._photo_color_stacks_for_size(
+            self._photo_color_available_width(self.width()), initializing=True,
+        )
+        shown = dict.fromkeys((dock for group in (*upper, *lower) for dock in group), True)
+        self._arrange_photo_color(upper, lower, shown)
         self._enforce_work_mode_dock_visibility()
-        self._perform_update_all_titlebars()
+
+    def _photo_color_sidebar_shares(self) -> tuple[float, float]:
+        left, center, right = self._photo_color_defaults()["top"]
+        default = (left / (left + center + right), right / (left + center + right))
+        saved = self.config_manager.get(_PHOTO_COLOR_SIDEBARS_KEY)
+        if (isinstance(saved, list) and len(saved) == 2
+                and all(type(share) in (int, float) and 0 < share < 1 for share in saved)):
+            return saved[0], saved[1]
+        return default
+
+    def _fit_photo_color_left_labels(self, tabs: tuple[QDockWidget, ...] = ()) -> int:
+        originals = getattr(self, "_photo_color_left_minimums", {})
+        visible = [dock for dock in tabs if not dock.isHidden()]
+        width = 0
+        if len(visible) > 1:
+            # Reserve enough room for every left-hand tab, including the
+            # selected tab's heavier text and the compact horizontal padding.
+            font = visible[0].font()
+            font.setBold(True)
+            metrics = QFontMetrics(font)
+            width = 16 + sum(metrics.horizontalAdvance(dock.windowTitle()) + 10 for dock in visible)
+        for dock in originals.keys() - set(tabs):
+            dock.setMinimumWidth(originals[dock])
+        self._photo_color_left_minimums = {dock: originals.get(dock, dock.minimumWidth()) for dock in tabs}
+        for dock, original_width in self._photo_color_left_minimums.items():
+            dock.setMinimumWidth(max(original_width, width))
+        return width
+
+    def _size_photo_color_top(self, width: int, upper: _DockStacks) -> None:
+        viewer = self.dock_viewport
+        if viewer.isHidden():
+            return
+        left_share, right_share = self._photo_color_sidebar_shares()
+        left_minimum = self._fit_photo_color_left_labels(upper[0])
+        left_share = max(left_share, left_minimum / max(1, width))
+        sides = ((upper[0], left_share), (tuple(dock for group in upper[2:] for dock in group), right_share))
+        columns = [(dock, share) for group, share in sides
+                   if (dock := next((dock for dock in group if not dock.isHidden()), None)) is not None]
+        if not columns:
+            return
+        available = width - len(columns)
+        sizes = [max(1, round(available * share)) for _, share in columns]
+        self.resizeDocks([viewer, *(dock for dock, _ in columns)],
+                         [max(1, available - sum(sizes)), *sizes], Qt.Orientation.Horizontal)
+
+    def _photo_color_is_factory(self) -> bool:
+        selection = self.config_manager.get(self._active_page_layout_key("Color"))
+        return not isinstance(selection, dict) or selection.get("preset_id") == "factory"
+
+    def _remember_photo_color_sidebar(self, side: int) -> None:
+        if not self._photo_color_is_factory():
+            return
+        self.layout().activate()
+        resources, right, *_ = self._photo_color_groups()
+        group = (*resources, self.dock_deblur, self.dock_grain) if side == 0 else right
+        dock = front_dock(group)
+        if dock is not None and dock.geometry().top() < self.dock_viewport.geometry().bottom():
+            shares = list(self._photo_color_sidebar_shares())
+            shares[side] = dock.width() / self.contentsRect().width()
+            self.config_manager.set(_PHOTO_COLOR_SIDEBARS_KEY, shares)
+
+    def _photo_color_available_width(self, width: int) -> int:
+        screen = self.screen()
+        return min(width, screen.availableGeometry().width()) if screen else width
+
+    def _is_stock_photo_color(self, upper: _DockStacks, lower: _DockStacks) -> bool:
+        top = Qt.DockWidgetArea.TopDockWidgetArea
+        groups = (*upper, *lower)
+        return (all(not dock.isFloating() and self.dockWidgetArea(dock) == top
+                    for group in groups for dock in group)
+                and all(self._photo_color_tabs_match(group) for group in groups))
+
+    def _fit_photo_color_layout(self, width: int, resize_columns: bool = True) -> None:
+        upper, lower = self._photo_color_stacks_for_size(self._photo_color_available_width(width))
+        wanted = (upper, lower)
+        current = wanted if self._is_stock_photo_color(*wanted) else None
+        if current is None:
+            for compact, merge_tools, stack_details in (
+                (False, False, False), (False, False, True), (False, True, False),
+                (False, True, True), (True, True, False), (True, True, True),
+            ):
+                candidate = self._photo_color_stacks(compact, merge_tools, stack_details)
+                if self._is_stock_photo_color(*candidate):
+                    current = candidate
+                    break
+
+        # A named preset keeps its geometry. If its tool groups match the
+        # factory stacks, they still use the photo workspace's height limits.
+        if current is None or not self._photo_color_is_factory():
+            self._fit_photo_color_left_labels()
+            self._sync_photo_color_height_limits(*(current or ((), ())))
+        elif current == wanted:
+            self._sync_photo_color_height_limits(upper, lower)
+            if resize_columns:
+                self._size_photo_color_top(width, upper)
+        else:
+            self._reflow_photo_color(upper, lower, *current)
+
+    def _sync_photo_color_height_limits(self, upper: _DockStacks = (), lower: _DockStacks = ()) -> None:
+        # A capped tab also caps the row that contains it. Only keep the
+        # grading-tool cap on the lower row so the photo preview can grow.
+        upper_docks = {dock for group in upper for dock in group}
+        tall_lower = lower and lower[-1] == (self.dock_layers,)
+        lower_docks = {dock for group in lower for dock in group} if tall_lower else set()
+        for group in self._photo_color_groups():
+            for dock in group:
+                if isinstance(dock, ColorToolDockWidget):
+                    limit = None if dock in upper_docks else COLOR_TOOL_DOCK_MAX_HEIGHT
+                    if dock in lower_docks:
+                        limit = _PHOTO_COLOR_STACKED_COMPACT_TOOL_HEIGHT
+                    dock.set_docked_height_limit(limit)
+
+    def _reflow_photo_color(
+        self, upper: _DockStacks, lower: _DockStacks, previous_upper: _DockStacks, previous_lower: _DockStacks,
+    ) -> None:
+        previous_tools = next((dock for group in previous_lower if (dock := front_dock(group)) is not None), None)
+        tool_height = 0
+        view_height = self.dock_viewport.height()
+        if previous_tools is not None:
+            tool_height = previous_tools.geometry().bottom() - self.dock_viewport.geometry().bottom()
+        selected = tuple(dock for group in (*previous_upper, *previous_lower)
+                         if (dock := front_dock(group)) is not None)
+        if (self.dock_crop not in selected and (self.dock_layers,) in (*previous_upper, *previous_lower)):
+            selected = (self.dock_layers, *selected)
+        shown = {dock: not dock.isHidden() for group in (*upper, *lower) for dock in group}
+        self._arrange_photo_color(upper, lower, shown, previous_view_height=view_height,
+                                  previous_tool_height=max(0, tool_height), selected=selected)
+
+    def _set_photo_color_viewport_minimum(self, active: bool) -> None:
+        size = _PHOTO_VIEWPORT_MIN_SIZE if active else (_VIEWPORT_MIN_WIDTH, _VIEWPORT_MIN_HEIGHT)
+        self.dock_viewport.setMinimumSize(*size)
+        container = getattr(self, "viewport_container", None)
+        if container is not None:
+            container.setMinimumSize(*size)
+
+    def _migrate_photo_color_layout(self) -> None:
+        if not self._photo_color_is_factory():
+            return
+        resources, right, primary, secondary, analysis = self._photo_color_groups()
+        left_area = Qt.DockWidgetArea.LeftDockWidgetArea
+        right_area = Qt.DockWidgetArea.RightDockWidgetArea
+        top = Qt.DockWidgetArea.TopDockWidgetArea
+        bottom = Qt.DockWidgetArea.BottomDockWidgetArea
+        previous_upper = (resources, (self.dock_viewport,), (right[0],), right[1:])
+        previous_lower = (primary, secondary, analysis)
+        old_groups = (*previous_upper, *previous_lower)
+        old_areas = (left_area, top, right_area, right_area, bottom, bottom, bottom)
+        if any(dock.isFloating() or self.dockWidgetArea(dock) != area
+               for group, area in zip(old_groups, old_areas) for dock in group):
+            return
+        if not all(self._photo_color_tabs_match(group) for group in old_groups):
+            return
+        if any(not dock.isHidden() and not dock.isFloating()
+               and all(dock not in group for group in old_groups) for dock in self.all_docks):
+            return
+        upper, lower = self._photo_color_stacks_for_size(self._photo_color_available_width(self.width()))
+        self._reflow_photo_color(upper, lower, previous_upper, previous_lower)
+
+    def _configure_photo_color_layout(self, active: bool) -> None:
+        self._set_photo_color_viewport_minimum(active)
+        if not active:
+            self._fit_photo_color_left_labels()
+            self._sync_photo_color_height_limits()
+        if self.canvas is not None:
+            self.canvas.photo_fit_on_resize = active
+        handles = getattr(self, "_photo_color_resize_handles", None)
+        if active:
+            resources, right, primary, secondary, analysis = self._photo_color_groups()
+            self._migrate_photo_color_layout()
+            if handles is None:
+                handles = PhotoColorResizeHandles(
+                    self, self.dock_viewport, sides=((*resources, self.dock_deblur, self.dock_grain), right),
+                    tools=(primary, secondary, (*analysis, *right)),
+                    fit_layout=self._fit_photo_color_layout, remember_sidebar=self._remember_photo_color_sidebar,
+                    restyle_tabs=lambda: self._style_dock_tab_bars(only_changed=True),
+                )
+                self._photo_color_resize_handles = handles
+        if handles is not None:
+            handles.set_active(active)
 
     # ------------------------------------------------------------------
     # _get_all_page_layouts
@@ -3667,7 +4533,7 @@ class DockLayoutMixin:
     def _get_all_page_layouts(self) -> dict:
         """获取所有页面的布局状态（保存当前页面状态后再收集）"""
         # 确保当前页面状态已保存
-        self.page_layouts[self.current_page] = self.saveState()
+        self.page_layouts[self.current_page] = save_workspace_dock_state(self, self.current_page)
 
         # 收集所有页面的布局状态（转换为hex字符串）
         panel_states = {}
@@ -3679,150 +4545,266 @@ class DockLayoutMixin:
     # ------------------------------------------------------------------
     # _apply_all_page_layouts
     # ------------------------------------------------------------------
-    def _apply_all_page_layouts(self, panel_states: dict) -> None:
+    def _apply_all_page_layouts(self, panel_states: dict[str, str]) -> set[str]:
         """Replace each captured page in memory and in its persisted profile."""
-        if not panel_states:
-            return
-
         profile_mode = self._layout_profile_mode()
+        applied = set()
         for page, state_hex in panel_states.items():
-            if not isinstance(state_hex, str):
+            state = QByteArray.fromHex(state_hex.encode())
+            if page == self.current_page and not restore_workspace_dock_state(self, state, page):
                 continue
-            self.page_layouts[page] = QByteArray.fromHex(state_hex.encode())
+            self.page_layouts[page] = state
             self.layout_store.save_profile(LayoutProfile(
                 product_mode=profile_mode, page_id=page, qt_state_hex=state_hex,
-            ))
-
-        # 立即应用当前页面的布局
-        if self.current_page in self.page_layouts:
-            restore_workspace_dock_state(self, self.page_layouts[self.current_page], self.current_page)
+            ), auto_save=False)
+            applied.add(page)
+        return applied
 
     # ------------------------------------------------------------------
     # save_layout_dialog
     # ------------------------------------------------------------------
+    def _custom_page_layouts(self) -> dict[str, str]:
+        layouts = self.db.list_page_layouts(self._current_work_mode(), self.current_page)
+        if _is_video_color(self, self.current_page):
+            return {name: state for name, state in layouts.items()
+                    if _is_supported_video_color_state(QByteArray.fromHex(state.encode()))}
+        return layouts
+
+    def _layout_bundles(self) -> dict[str, dict[str, str]]:
+        bundles = {}
+        for name, captures in self.db.list_layout_bundles(self._current_work_mode()).items():
+            valid = {}
+            for page, state_hex in captures.items():
+                if page not in self.page_layouts and page != self.current_page:
+                    continue
+                state = QByteArray.fromHex(state_hex.encode())
+                if _is_video_color(self, page):
+                    usable = _is_supported_video_color_state(state)
+                else:
+                    usable = _qt_dock_state_version(state) == 0
+                if usable:
+                    valid[page] = state_hex
+            if valid:
+                bundles[name] = valid
+        return bundles
+
+    def _choose_layout_scope(self, title: str) -> bool | None:
+        scopes = [I18N.tr("workspace.layout_current_page", "Current Page"),
+                  I18N.tr("workspace.layout_all_pages", "All Pages")]
+        selected, ok = QInputDialog.getItem(
+            self, title, I18N.tr("workspace.layout_scope", "Layout scope"), scopes, 0, False)
+        return selected == scopes[1] if ok else None
+
     def save_layout_dialog(self) -> None:
-        name, ok = QInputDialog.getText(self, "Save Layout", "Layout Name:")
+        title = I18N.tr("dialog.save_layout", "Save Layout")
+        all_pages = self._choose_layout_scope(title)
+        if all_pages is None:
+            return
+        name, ok = QInputDialog.getText(self, title, I18N.tr("dialog.layout_name", "Layout name"))
+        name = name.strip()
         if ok and name:
-            geom = self.saveGeometry().toHex().data().decode()
-            state = self.saveState().toHex().data().decode()
-            panel_states = self._get_all_page_layouts()
-            self.db.save_layout(name, geom, state, panel_states, work_mode=self._current_work_mode())
-
-            # Also save dock sizes to config.json so _restore_docked_sizes uses correct sizes
-            self._save_all_docked_sizes()
-
-            self.status_bar.showMessage(f"Layout '{name}' saved.", 3000)
+            mode, page = self._current_work_mode(), self.current_page
+            if all_pages:
+                captures = self._get_all_page_layouts()
+                self.db.save_layout(name, "", captures[page], captures, work_mode=mode)
+            else:
+                state = save_workspace_dock_state(self, page).toHex().data().decode()
+                self.db.save_page_layout(mode, page, name, state)
+            self.status_bar.showMessage(
+                I18N.tr("workspace.layout_saved", "Layout '{name}' saved.").format(name=name), 3000)
             self.update_layout_combobox()
 
-    # ------------------------------------------------------------------
-    # delete_layout_dialog
-    # ------------------------------------------------------------------
     def delete_layout_dialog(self) -> None:
-        layouts = self.db.list_layouts(work_mode=self._current_work_mode())
-        if not layouts:
-            QMessageBox.information(self, "Delete Layout", "No custom layouts to delete.")
+        title = I18N.tr("dialog.delete_layout", "Delete Layout")
+        current, bundles = self._custom_page_layouts(), self._layout_bundles()
+        if not current and not bundles:
+            QMessageBox.information(self, title, I18N.tr("dialog.no_layouts", "No custom layouts to delete."))
+            return
+        all_pages = self._choose_layout_scope(title) if current and bundles else bool(bundles)
+        if all_pages is None:
             return
 
-        name, ok = QInputDialog.getItem(self, "Delete Layout", "Select Layout to Delete:", layouts, 0, False)
+        name, ok = QInputDialog.getItem(
+            self, title, I18N.tr("dialog.select_layout_delete", "Select Layout to Delete"),
+            list(bundles if all_pages else current), 0, False,
+        )
         if ok and name:
-            confirm = QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to delete layout '{name}'?",
+            message = I18N.tr("dialog.confirm_delete_layout", "Delete layout '{name}'?").format(name=name)
+            confirm = QMessageBox.question(self, title, message,
                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if confirm == QMessageBox.StandardButton.Yes:
-                self.db.delete_layout(name, work_mode=self._current_work_mode())
-                self.status_bar.showMessage(f"Layout '{name}' deleted.", 3000)
+                mode = self._current_work_mode()
+                if all_pages:
+                    self.db.delete_layout(name, work_mode=mode)
+                    for page in bundles[name]:
+                        key = self._active_page_layout_key(page)
+                        if self.config_manager.get(key) == {"bundle": name}:
+                            self.config_manager.set(key, None, auto_save=False)
+                    self.config_manager.save_config()
+                else:
+                    self.db.delete_page_layout(mode, self.current_page, name)
+                    key = self._active_page_layout_key()
+                    if self.config_manager.get(key) == {"name": name}:
+                        self.config_manager.set(key, None)
+                self.status_bar.showMessage(
+                    I18N.tr("workspace.layout_deleted", "Layout '{name}' deleted.").format(name=name), 3000)
                 self.update_layout_combobox()
 
-    # ------------------------------------------------------------------
-    # update_layout_combobox
-    # ------------------------------------------------------------------
+    def _builtin_page_layouts(self) -> list[tuple[str, str]]:
+        if self.current_page == "Color":
+            title = I18N.tr("workspace.horizontal_color", "Landscape Color")
+            if _is_video_color(self, self.current_page):
+                return [(title, "horizontal_color")]
+            if self._current_work_mode() == "image":
+                return [(title, "factory")]
+        if self.current_page == "Edit" and getattr(self, "_edit_available", False):
+            return [(I18N.tr("edit.workspace.editing", "默认布局"), "editing")]
+        default = I18N.tr("edit.workspace.editing", "Default Layout")
+        if self.current_page == "Mixer":
+            video_mix = I18N.tr("workspace.mixer_video_mix", "Video Mixing")
+            editing = I18N.tr("workspace.mixer_editing_layout", "Editing Layout")
+            return [(video_mix, "mixer_tabbed"), (editing, "factory")]
+        return [(default, "factory")]
+
+    def _page_layout_choices(self) -> list[tuple[str, str | None]]:
+        return [*self._builtin_page_layouts(), *((name, None) for name in self._custom_page_layouts())]
+
+    def _active_page_layout_key(self, page: str | None = None) -> str:
+        return f"active_layout_preset_{self._layout_profile_mode()}_{page or self.current_page}"
+
+    def _active_page_layout_index(self, choices: list[tuple[str, str | None]]) -> int:
+        config = getattr(self, "config_manager", None)
+        selected = config.get(self._active_page_layout_key()) if config is not None else None
+        for index, (name, preset_id) in enumerate(choices, start=1):
+            if selected == ({"preset_id": preset_id} if preset_id is not None else {"name": name}):
+                return index
+        bundle = selected.get("bundle") if isinstance(selected, dict) else None
+        if isinstance(bundle, str) and self.current_page in self._layout_bundles().get(bundle, {}):
+            return 0
+        return int(bool(choices))
+
+    def _remember_page_layout_choice(self, name: str, preset_id: str | None) -> None:
+        config = getattr(self, "config_manager", None)
+        if config is not None:
+            key = self._active_page_layout_key()
+            selection = {"preset_id": preset_id} if preset_id is not None else {"name": name}
+            if config.get(key) != selection:
+                config.set(key, selection)
+        self._configure_edit_resize_handles()
+        if getattr(self, "layout_combo", None) is not None:
+            self.update_layout_combobox()
+
     def update_layout_combobox(self) -> None:
-        from src.features.edit.core.workspace_presets import (
-            list_workspace_presets,
-        )
+        choices = self._page_layout_choices()
+        signals_blocked = self.layout_combo.blockSignals(True)
+        try:
+            self.layout_combo.clear()
+            self.layout_combo.addItem(I18N.tr("workspace.layout_presets", "Layout Presets"))
+            for name, preset_id in choices:
+                self.layout_combo.addItem(name, preset_id)
+            if isinstance(view := self.layout_combo.view(), QListView):
+                view.setRowHidden(0, True)
+            self.layout_combo.setCurrentIndex(self._active_page_layout_index(choices))
+        finally:
+            self.layout_combo.blockSignals(signals_blocked)
 
-        self.layout_combo.blockSignals(True)
-        self.layout_combo.clear()
-        self.layout_combo.addItem(I18N.tr("workspace.layout_presets", "Layout Presets"))
-        # P1-24：内建工作区预设排最前，itemData 携带 preset_id；
-        # 用户自定义布局 itemData 为 None，on_layout_combo_activated 据此分流。
-        if getattr(self, "_edit_available", False):
-            for preset in list_workspace_presets():
-                self.layout_combo.addItem(preset.label, preset.preset_id)
-        layouts = self.db.list_layouts(work_mode=self._current_work_mode())
-        if layouts:
-            self.layout_combo.addItems(layouts)
-        self.layout_combo.blockSignals(False)
-
-    # ------------------------------------------------------------------
-    # on_layout_combo_activated
-    # ------------------------------------------------------------------
-    def on_layout_combo_activated(self, index) -> None:
-        if index > 0:
-            preset_id = self.layout_combo.itemData(index)
-            if isinstance(preset_id, str) and preset_id:
-                self.apply_edit_workspace_preset(preset_id)
+    def _apply_page_layout_choice(self, name: str, preset_id: str | None) -> bool:
+        if preset_id is None:
+            return self.apply_layout(name)
+        video_mix = preset_id == "mixer_tabbed" and self.current_page == "Mixer"
+        if preset_id == "factory" or video_mix or (
+            preset_id == "horizontal_color" and _is_video_color(self, self.current_page)
+        ):
+            if video_mix:
+                self._reset_factory_page_layout(video_mix=True)
             else:
-                name = self.layout_combo.itemText(index)
-                self.apply_layout(name)
-        self.layout_combo.setCurrentIndex(0)
+                self._reset_factory_page_layout()
+            self._remember_page_layout_choice(name, preset_id)
+            if video_mix:
+                self._fit_video_mix_workspace_height()
+            self.status_bar.showMessage(
+                I18N.tr("workspace.layout_loaded", "Layout '{name}' loaded.").format(name=name), 3000)
+            return True
+        return self.current_page == "Edit" and self.apply_edit_workspace_preset(preset_id)
 
-    # ------------------------------------------------------------------
-    # update_load_layout_menu
-    # ------------------------------------------------------------------
+    def on_layout_combo_activated(self, index: int) -> None:
+        if not 0 < index < self.layout_combo.count() or not self._apply_page_layout_choice(
+            self.layout_combo.itemText(index), self.layout_combo.itemData(index),
+        ):
+            self.update_layout_combobox()
+
     def update_load_layout_menu(self) -> None:
         self.load_layout_menu.clear()
-        layouts = self.db.list_layouts(work_mode=self._current_work_mode())
-        if not layouts:
-            self.load_layout_menu.addAction(I18N.tr("dialog.no_saved_layouts", "No saved layouts")).setEnabled(False)
-            return
+        page = self.current_page
+        current = self.load_layout_menu.addMenu(I18N.tr("workspace.layout_current_page", "Current Page"))
+        all_pages = self.load_layout_menu.addMenu(I18N.tr("workspace.layout_all_pages", "All Pages"))
+        for name, preset_id in self._page_layout_choices():
+            action = current.addAction(name)
+            action.triggered.connect(
+                lambda checked, n=name, pid=preset_id: self._apply_page_layout_choice(n, pid)
+                if self.current_page == page else None
+            )
+        bundles = self._layout_bundles()
+        from_bundle = [name for name, captures in bundles.items() if page in captures]
+        if from_bundle:
+            menu = current.addMenu(I18N.tr("workspace.layout_from_bundle", "From an All Pages Preset"))
+            for name in from_bundle:
+                menu.addAction(name, lambda checked=False, n=name: self.apply_layout_bundle(n, all_pages=False)
+                               if self.current_page == page else None)
+        for name in bundles:
+            all_pages.addAction(name, lambda checked=False, n=name: self.apply_layout_bundle(n, all_pages=True))
+        for menu in (current, all_pages):
+            if not menu.actions():
+                menu.addAction(I18N.tr("dialog.no_saved_layouts", "No saved layouts")).setEnabled(False)
 
-        for name in layouts:
-            action = QAction(name, self)
-            action.triggered.connect(lambda checked, n=name: self.apply_layout(n))
-            self.load_layout_menu.addAction(action)
+    def apply_layout(self, name: str) -> bool:
+        page = self.current_page
+        state_hex = self._custom_page_layouts().get(name)
+        if not state_hex or not restore_workspace_dock_state(self, QByteArray.fromHex(state_hex.encode()), page):
+            return False
 
-    # ------------------------------------------------------------------
-    # apply_layout
-    # ------------------------------------------------------------------
-    def apply_layout(self, name) -> None:
-        geom, state, panel_states = self.db.load_layout(name, work_mode=self._current_work_mode())
-        if geom and state:
-            self.restoreGeometry(QByteArray.fromHex(geom.encode()))
-            self._ensure_window_on_screen(self)
-            restore_workspace_dock_state(self, QByteArray.fromHex(state.encode()), self.current_page)
-            # 恢复所有页面的布局状态
-            if panel_states:
-                self._apply_all_page_layouts(panel_states)
-            # A named layout may contain only a Color capture even while
-            # another page is active. Apply page rules after the final Qt
-            # restore so the independent tools cannot leak across pages.
-            self._enforce_page_dock_visibility()
-            panel_bar = getattr(self, "workspace_panel_bar", None)
-            if panel_bar is not None:
-                panel_bar.set_page(self.current_page)
-            # Restore docked dock sizes
-            QTimer.singleShot(60, self._restore_docked_sizes)
-            # Sync floating docks tracking after restore
-            QTimer.singleShot(100, self._sync_floating_docks)
-            # Update dock titlebars after layout restore
-            QTimer.singleShot(50, self.update_all_dock_titlebars)
-            # ``resizeDocks`` in _restore_docked_sizes can grow the window
-            # past the screen for layouts saved on another monitor/DPI
-            # setup; re-clamp once its 60ms timer has settled.
-            # N16：DeferredDelete 冲刷可能先于延迟回调销毁宿主——回调内
-            # 防御已删对象（与 apply_layout 路径的 _clamp_safely 同款）。
-            def _clamp_after_restore():
-                try:
-                    self._ensure_window_on_screen(self)
-                except RuntimeError:
-                    pass
-            QTimer.singleShot(300, _clamp_after_restore)
-            self.status_bar.showMessage(f"Layout '{name}' loaded.", 3000)
+        self._remember_page_layout_choice(name, None)
+        self._refresh_after_named_layout()
+        self.status_bar.showMessage(
+            I18N.tr("workspace.layout_loaded", "Layout '{name}' loaded.").format(name=name), 3000)
+        return True
+
+    def apply_layout_bundle(self, name: str, *, all_pages: bool) -> bool:
+        page = self.current_page
+        captures = self._layout_bundles().get(name, {})
+        if not all_pages:
+            captures = {page: captures[page]} if page in captures else {}
+        applied = self._apply_all_page_layouts(captures)
+        if not applied:
+            return False
+
+        for applied_page in applied:
+            self.config_manager.set(self._active_page_layout_key(applied_page), {"bundle": name}, auto_save=False)
+        if page in applied:
+            self._refresh_after_named_layout()
+        self.config_manager.save_config()
+        self._configure_edit_resize_handles()
+        self.update_layout_combobox()
+        self.status_bar.showMessage(
+            I18N.tr("workspace.layout_loaded", "Layout '{name}' loaded.").format(name=name), 3000)
+        return True
+
+    def _refresh_after_named_layout(self) -> None:
+        page = self.current_page
+        self._enforce_page_dock_visibility()
+        panel_bar = getattr(self, "workspace_panel_bar", None)
+        if panel_bar is not None:
+            panel_bar.set_page(page)
+        self._sync_floating_docks()
+        self.update_all_dock_titlebars()
+        state = save_workspace_dock_state(self, page)
+        self.page_layouts[page] = state
+        self._save_current_layout_to_store(page, qt_state=state)
 
     # ------------------------------------------------------------------
     # Edit workspace presets (P1-24)
     # ------------------------------------------------------------------
-    def _workspace_dock_map(self) -> dict:
+    def _workspace_dock_map(self) -> dict[str, QDockWidget]:
         """objectName → QDockWidget，仅覆盖 Edit 工作区受管 dock。
 
         缺失的 dock（图像模式没有 Media Pool、字幕工作区未构建等）直接
@@ -3832,7 +4814,7 @@ class DockLayoutMixin:
             EDIT_WORKSPACE_MANAGED_DOCKS,
         )
 
-        docks: dict = {}
+        docks: dict[str, QDockWidget] = {}
         for name in EDIT_WORKSPACE_MANAGED_DOCKS:
             dock = self.findChild(QDockWidget, name)
             if dock is not None:
@@ -3840,7 +4822,7 @@ class DockLayoutMixin:
         return docks
 
     def apply_edit_workspace_preset(self, preset_id: str) -> bool:
-        """P1-24：应用内建 Edit 工作区预设（Editing/Audio/Captions/Review）。
+        """应用内建剪辑布局。
 
         流程：隐藏全部受管 dock → 按预设重摆区域 → tab 化 → 显示 →
         尺寸提示 → 快照进 page_layouts["Edit"] 与 LayoutStore。之后
@@ -3849,9 +4831,7 @@ class DockLayoutMixin:
         Returns:
             True 表示已应用；False 表示预设不存在或 Edit 功能不可用。
         """
-        from src.features.edit.core.workspace_presets import (
-            get_workspace_preset,
-        )
+        from src.features.edit.core.workspace_presets import get_workspace_preset
 
         if not getattr(self, "_edit_available", False):
             return False
@@ -3861,57 +4841,13 @@ class DockLayoutMixin:
         if getattr(self, "current_page", "Edit") != "Edit":
             self.switch_to_page("Edit")
 
-        dock_map = self._workspace_dock_map()
-
-        # 1) 全部受管 dock 先隐藏，避免预设外的残留（用户手动开的面板、
-        #    上一个预设的 dock）泄漏进快照。
-        for dock in dock_map.values():
-            dock.setVisible(False)
-
-        # 2) 重摆区域。addDockWidget 会把 dock 从旧堆栈拆出，等价于
-        #    “重置归位”，避免在用户当前布局的碎片上叠加 tab。
-        area_enum = {
-            "left": Qt.DockWidgetArea.LeftDockWidgetArea,
-            "right": Qt.DockWidgetArea.RightDockWidgetArea,
-            "top": Qt.DockWidgetArea.TopDockWidgetArea,
-            "bottom": Qt.DockWidgetArea.BottomDockWidgetArea,
-        }
-        for name, area in preset.dock_areas:
-            dock = dock_map.get(name)
-            if dock is not None:
-                self.addDockWidget(area_enum[area], dock)
-
-        # 3) tab 化（组内首成员为基准）。
-        for group in preset.tabify_groups:
-            base = dock_map.get(group[0])
-            if base is None:
-                continue
-            for member in group[1:]:
-                dock = dock_map.get(member)
-                if dock is not None:
-                    self.tabifyDockWidget(base, dock)
-
-        # 4) 按预设显示。
-        for name in preset.visible_docks:
-            dock = dock_map.get(name)
-            if dock is not None:
-                dock.setVisible(True)
-
-        # 5) 尺寸提示（与出厂 Edit 布局的同步 resizeDocks 用法一致）。
-        for sizes, orientation in (
-            (preset.h_sizes, Qt.Orientation.Horizontal),
-            (preset.v_sizes, Qt.Orientation.Vertical),
-        ):
-            docks_list = [dock_map[n] for n, _s in sizes if n in dock_map]
-            size_vals = [s for n, s in sizes if n in dock_map]
-            if docks_list:
-                self.resizeDocks(docks_list, size_vals, orientation)
-
-        focus = dock_map.get(preset.focus_dock) if preset.focus_dock else None
-        if focus is not None:
-            focus.raise_()
-        if preset_id == "audio" and (effects := getattr(self, "edit_effects_panel", None)) is not None:
-            effects.select_subtitles()
+        handles = getattr(self, "_edit_dock_resize_handles", None)
+        if handles is not None:
+            handles.reset_column_shares()
+        self._arrange_edit_workspace(preset)
+        if getattr(self, "config_manager", None) is not None:
+            self._mark_default_edit_layout()
+            self._reset_workspace_panel_controls()
 
         # 6) 持久化到两套布局系统 + 遵守页面 dock 可见性契约。
         self._enforce_page_dock_visibility()
@@ -3931,35 +4867,134 @@ class DockLayoutMixin:
             self.status_bar.showMessage(
                 I18N.tr(
                     "edit.workspace.applied",
-                    f"工作区已切换：{preset.label} ({preset.label_en})",
+                    "Workspace applied: {name}",
+                    name=I18N.tr(f"edit.workspace.{preset.preset_id}", preset.label),
                 ),
                 3000,
             )
+        self._remember_page_layout_choice(preset.label, preset_id)
         return True
 
-    def update_workspace_menu(self) -> None:
-        """Window > Workspaces 子菜单的 aboutToShow 刷新。"""
-        from src.features.edit.core.workspace_presets import (
-            list_workspace_presets,
-        )
+    def _arrange_edit_workspace(self, preset: WorkspacePreset, *, initial_window: bool = False) -> None:
+        from src.features.edit.core.workspace_presets import EDITING_PRESET
 
+        dock_map = self._workspace_dock_map()
+
+        # 1) 全部受管 dock 先隐藏，避免预设外的残留（用户手动开的面板、
+        #    上一个预设的 dock）泄漏进快照。
+        for dock in self.all_docks:
+            dock.hide()
+
+        # 2) 重摆区域。addDockWidget 会把 dock 从旧堆栈拆出，等价于
+        #    “重置归位”，避免在用户当前布局的碎片上叠加 tab。
+        area_enum = {
+            "left": Qt.DockWidgetArea.LeftDockWidgetArea,
+            "right": Qt.DockWidgetArea.RightDockWidgetArea,
+            "top": Qt.DockWidgetArea.TopDockWidgetArea,
+            "bottom": Qt.DockWidgetArea.BottomDockWidgetArea,
+        }
+        self.setCorner(Qt.Corner.TopLeftCorner, area_enum["left"])
+        self.setCorner(Qt.Corner.TopRightCorner, area_enum["right"])
+        self.setCorner(Qt.Corner.BottomLeftCorner, area_enum["bottom"])
+        self.setCorner(Qt.Corner.BottomRightCorner, area_enum["bottom"])
+        for name, area in preset.dock_areas:
+            dock = dock_map.get(name)
+            if dock is not None:
+                dock.setFloating(False)
+                self.removeDockWidget(dock)
+                self.addDockWidget(area_enum[area], dock)
+
+        if preset is EDITING_PRESET:
+            # As in Color, build the upper row as a single horizontal dock split.
+            media = dock_map.get("dockEditMediaPool")
+            viewer = dock_map.get("dockProgramViewer")
+            inspector = dock_map.get("dockProperties")
+            if media is not None and viewer is not None:
+                self.splitDockWidget(media, viewer, Qt.Orientation.Horizontal)
+            if viewer is not None and inspector is not None:
+                self.splitDockWidget(viewer, inspector, Qt.Orientation.Horizontal)
+
+        # 3) tab 化（组内首成员为基准）。
+        for group in preset.tabify_groups:
+            base = dock_map.get(group[0])
+            if base is None:
+                continue
+            for member in group[1:]:
+                dock = dock_map.get(member)
+                if dock is not None:
+                    self.tabifyDockWidget(base, dock)
+
+        # 4) 按预设显示。
+        for name in preset.visible_docks:
+            dock = dock_map.get(name)
+            if dock is not None:
+                dock.setVisible(True)
+
+        for group in preset.tabify_groups:
+            if (anchor := dock_map.get(group[0])) is not None:
+                anchor.raise_()
+
+        if preset is EDITING_PRESET:
+            if (inspector := dock_map.get("dockProperties")) is not None:
+                for name in ("dockCaptionWorkspace", "dockMulticam"):
+                    if (dock := dock_map.get(name)) is not None:
+                        dock.setFloating(False)
+                        self.removeDockWidget(dock)
+                        self.addDockWidget(area_enum["top"], dock)
+                        self.tabifyDockWidget(inspector, dock)
+                        dock.hide()
+            if initial_window:
+                self._apply_video_project_window_size()
+            self._size_default_edit_workspace(dock_map)
+
+        for sizes, orientation in (
+            (preset.h_sizes, Qt.Orientation.Horizontal),
+            (preset.v_sizes, Qt.Orientation.Vertical),
+        ):
+            docks_list = [dock_map[n] for n, _s in sizes if n in dock_map]
+            size_vals = [s for n, s in sizes if n in dock_map]
+            if docks_list:
+                self.resizeDocks(docks_list, size_vals, orientation)
+
+        focus = dock_map.get(preset.focus_dock) if preset.focus_dock else None
+        if focus is not None:
+            focus.raise_()
+
+    def _mark_default_edit_layout(self) -> None:
+        """Keep legacy dock repair callbacks from changing the new default."""
+        for key, version in (
+            (_EDIT_PROPERTIES_DOCK_LAYOUT_MIGRATION_KEY, _EDIT_PROPERTIES_DOCK_LAYOUT_MIGRATION_VERSION),
+            (_EDIT_INFO_DOCK_LAYOUT_MIGRATION_KEY, _EDIT_INFO_DOCK_LAYOUT_MIGRATION_VERSION),
+            (_AI_ASSISTANT_DOCK_LAYOUT_MIGRATION_KEY, _AI_ASSISTANT_DOCK_LAYOUT_MIGRATION_VERSION),
+            (_EDIT_TIMELINE_DOCK_LAYOUT_MIGRATION_KEY, _EDIT_TIMELINE_DOCK_LAYOUT_MIGRATION_VERSION),
+        ):
+            current = self.config_manager.get(key)
+            if not isinstance(current, int) or current < version:
+                self.config_manager.set(key, version, auto_save=False)
+
+    def _size_default_edit_workspace(self, docks: dict[str, QDockWidget]) -> None:
+        tier, _ = self._video_project_screen_tier(self._video_color_defaults())
+        defaults = self._read_workspace_defaults("video_edit", _VIDEO_EDIT_DEFAULTS)
+        shares = defaults[tier]
+        layout = self.layout()
+        layout.activate()
+        names = ("dockProgramViewer", "dockEditTimeline")
+        panels = [(docks[name], ratio) for name, ratio in zip(names, shares[3:]) if name in docks]
+        if panels:
+            height = self.contentsRect().height()
+            total = sum(shares[3:])
+            self.resizeDocks(
+                [dock for dock, _ in panels], [max(1, height * ratio // total) for _, ratio in panels],
+                Qt.Orientation.Vertical,
+            )
+
+    def update_workspace_menu(self) -> None:
+        """Show the current page's factory preset in Window > Workspaces."""
         self.workspace_menu.clear()
-        if not getattr(self, "_edit_available", False):
-            placeholder = self.workspace_menu.addAction(
-                I18N.tr("edit.workspace.unavailable", "Editing Unavailable")
+        for name, preset_id in self._builtin_page_layouts():
+            self.workspace_menu.addAction(
+                name, lambda checked=False, label=name, key=preset_id: self._apply_page_layout_choice(label, key),
             )
-            placeholder.setEnabled(False)
-            return
-        for preset in list_workspace_presets():
-            action = QAction(
-                I18N.tr(f"edit.workspace.{preset.preset_id}", preset.label),
-                self,
-            )
-            action.setToolTip(preset.description)
-            action.triggered.connect(
-                lambda checked, pid=preset.preset_id: self.apply_edit_workspace_preset(pid)
-            )
-            self.workspace_menu.addAction(action)
 
     # ------------------------------------------------------------------
     # Factory default layout (committed with the repository)
@@ -4039,108 +5074,107 @@ class DockLayoutMixin:
     # reset_layout_to_default
     # ------------------------------------------------------------------
     def reset_layout_to_default(self) -> None:
-        """Reset the layout to the factory default committed with the repo.
-
-        Priority:
-        1. ``default_layout.json`` at the project root (tracked by git, only
-           changes through a commit — runtime user actions can never
-           contaminate it)
-        2. Hardcoded ``apply_default_layout()`` when the file is missing,
-           corrupt or rejected by this build's ``restoreState``
-
-        The legacy runtime default sources (DB ``layouts`` row and the
-        ``.topos`` seed file) are deliberately NOT consulted: they were
-        user-overwritable, which is exactly how the "default" could end up
-        permanently messed up with no way back.
-        """
-        if self.current_page == "Mixer" and self._audio_workspace_docks():
-            self._seed_audio_workspace_layout()
-            self.page_layouts["Mixer"] = self._mixer_default_layout
-            self.restoreState(self._mixer_default_layout)
-            self._enforce_page_dock_visibility()
-            self._sync_floating_docks()
-            self._perform_update_all_titlebars()
-            self._save_current_layout_to_store("Mixer")
-            panel_bar = getattr(self, "workspace_panel_bar", None)
-            if panel_bar is not None:
-                panel_bar.reset_groups("Mixer")
-                panel_bar.set_page(self.current_page)
+        """Restore the current page's selected preset, or its shipped default."""
+        choices = self._page_layout_choices()
+        index = self._active_page_layout_index(choices)
+        selection = self.config_manager.get(self._active_page_layout_key())
+        bundle = selection.get("bundle") if isinstance(selection, dict) else None
+        if index and choices[index - 1][1] == "factory":
+            self._reset_factory_page_layout()
+            return
+        restored = (self._apply_page_layout_choice(*choices[index - 1]) if index else
+                    isinstance(bundle, str) and self.apply_layout_bundle(bundle, all_pages=False))
+        if restored:
+            if not index or choices[index - 1][1] not in ("horizontal_color", "editing"):
+                self._reset_workspace_panel_controls()
             self.status_bar.showMessage(I18N.tr("status.layout_reset", "Layout reset to default."), 3000)
             return
-        factory_geom, factory_state, panel_states = self._load_factory_layout()
-        restored = False
-        if factory_geom and factory_state:
-            self.restoreGeometry(QByteArray.fromHex(factory_geom.encode()))
-            self._ensure_window_on_screen(self)
-            restored = restore_workspace_dock_state(
-                self, QByteArray.fromHex(factory_state.encode()), self.current_page
-            )
+        self._reset_factory_page_layout(video_mix=self.current_page == "Mixer")
 
-        if restored:
-            if (
-                self._composite_available and self.dock_composite
-                and self.dock_composite_keyframes and "Composite" not in (panel_states or {})
-            ):
-                composite_state = self._capture_default_composite_layout()
-                panel_states = {
-                    **(panel_states or {}),
-                    "Composite": bytes(composite_state.toHex()).decode("ascii"),
-                }
-            # 恢复所有页面的布局状态
-            if panel_states:
-                self._apply_all_page_layouts(panel_states)
-                if "Color" in panel_states:
-                    self._color_tool_height_reset_pending = True
+    def _reset_factory_page_layout(self, *, video_mix: bool = False) -> None:
+        page = self.current_page
+        hardcoded = False
+        if page == "Mixer" and self._seed_audio_workspace_layout():
+            if video_mix:
+                self._arrange_video_mix_workspace_layout()
+            else:
+                self._arrange_audio_workspace_layout(compact=self._mixer_needs_compact_layout())
+        elif _is_video_color(self, page):
+            self._apply_default_video_color_layout()
+        elif page == "Color" and self._current_work_mode() == "image":
+            self.config_manager.set(_PHOTO_COLOR_SIDEBARS_KEY, None, auto_save=False)
+            self._apply_default_photo_color_layout()
+        elif page == "Edit" and getattr(self, "_edit_available", False):
+            from src.features.edit.core.workspace_presets import EDITING_PRESET
+
+            self._arrange_edit_workspace(EDITING_PRESET)
+            self._mark_default_edit_layout()
+        elif page == "Library":
+            self._apply_default_library_layout()
+            browser_attr = "library_panel" if self._current_work_mode() == "image" else "files_panel"
+            browser = getattr(self, browser_attr, None)
+            reset_sizes = getattr(browser, "reset_workspace_sizes", None)
+            if callable(reset_sizes):
+                reset_sizes()
+        elif page == "Composite" and self.dock_composite:
+            self._apply_default_composite_layout()
+            key = f"composite_default_layout_version_{self._layout_profile_mode()}"
+            self.config_manager.set(key, _COMPOSITE_DEFAULT_LAYOUT_VERSION)
+        else:
+            _, _, panel_states = self._load_factory_layout()
+            state_hex = (panel_states or {}).get(page)
+            restored = isinstance(state_hex, str) and restore_workspace_dock_state(
+                self, QByteArray.fromHex(state_hex.encode()), page)
+            if not restored:
+                hardcoded = True
+                self._apply_hardcoded_page_layout(page)
+
+        if page == "Color" and not _is_video_color(self, page) and self._current_work_mode() != "image":
             keyframes = getattr(self, "dock_color_keyframes", None)
             if keyframes is not None:
                 keyframes.hide()
                 self._color_keyframes_reseat = True
-            # 出厂文件可能采集自另一种工作模式，修正越界的 dock 可见性
-            self._enforce_page_dock_visibility()
-            self._reset_workspace_panel_controls()
-            self._sync_floating_docks()
-            self._perform_update_all_titlebars()
-            if self.current_page == "Composite":
-                self._migrate_composite_scopes_dock_visibility()
-            if self.current_page == "Color":
-                self._migrate_color_remapping_dock_layout(force=True)
-                self._color_tool_height_reset_pending = True
-                QTimer.singleShot(50, self._migrate_color_grading_dock_height)
-            self.status_bar.showMessage(I18N.tr("status.layout_reset", "Layout reset to default."), 3000)
-            return
-
-        # Factory file missing or incompatible with this build — the
-        # hardcoded programmatic default keeps the button working.
-        logger.warning(
-            "Factory layout unavailable or restoreState rejected it; "
-            "falling back to hardcoded default layout"
-        )
-        if self.current_page == "Composite" and self.dock_composite and self.dock_composite_keyframes:
-            self._apply_default_composite_layout()
-            self.page_layouts["Composite"] = self.saveState()
-            self._save_current_layout_to_store("Composite")
-        else:
-            self.apply_default_layout()
+            self._migrate_color_remapping_dock_layout(force=True)
+            self._color_tool_height_reset_pending = True
+            QTimer.singleShot(50, self._migrate_color_grading_dock_height)
+        if page == "Composite":
+            self._migrate_composite_scopes_dock_visibility()
         self._enforce_page_dock_visibility()
         self._reset_workspace_panel_controls()
         self._sync_floating_docks()
         self._perform_update_all_titlebars()
-        if self.current_page == "Composite":
-            self._migrate_composite_scopes_dock_visibility()
-        if self.current_page == "Color":
-            self._migrate_color_remapping_dock_layout(force=True)
-            self._color_tool_height_reset_pending = True
-            QTimer.singleShot(50, self._migrate_color_grading_dock_height)
-        self.status_bar.showMessage(I18N.tr("status.layout_reset_hardcoded", "Layout reset to hardcoded default."), 3000)
+        self.page_layouts[page] = save_workspace_dock_state(self, page)
+        self._save_current_layout_to_store(page)
+        if video_mix:
+            self.config_manager.set(self._video_mix_workspace_layout_version_key(), _VIDEO_MIX_WORKSPACE_LAYOUT_VERSION)
+        message = (I18N.tr("status.layout_reset_hardcoded", "Layout reset to hardcoded default.")
+                   if hardcoded else I18N.tr("status.layout_reset", "Layout reset to default."))
+        self.status_bar.showMessage(message, 3000)
+
+    def _apply_hardcoded_page_layout(self, page: str) -> None:
+        if page == "Composite" and self.dock_composite:
+            self._apply_default_composite_layout()
+        elif page == "Edit" and self._edit_available:
+            self.apply_edit_workspace_preset("editing")
+        elif page == "Library":
+            self._apply_default_library_layout()
+        elif page == "Deliver":
+            if self._current_work_mode() == "image":
+                self._apply_image_deliver_layout(reset=True)
+            elif self.dock_deliver:
+                self._apply_default_video_deliver_layout()
+        elif page == "Color":
+            self.apply_default_layout()
 
     def _reset_workspace_panel_controls(self) -> None:
         panel_bar = getattr(self, "workspace_panel_bar", None)
         if panel_bar is not None:
-            panel_bar.reset_groups()
+            panel_bar.reset_groups(self.current_page)
             panel_bar.set_page(self.current_page)
-        reset_queue = getattr(getattr(self, "deliver_page", None), "reset_render_queue_visibility", None)
-        if callable(reset_queue):
-            reset_queue()
+        if self.current_page == "Deliver":
+            reset_queue = getattr(getattr(self, "deliver_page", None), "reset_render_queue_visibility", None)
+            if callable(reset_queue):
+                reset_queue()
 
     # ------------------------------------------------------------------
     # set_current_layout_as_default (developer mode only)
@@ -4158,7 +5192,7 @@ class DockLayoutMixin:
         set it again, then commit.
         """
         geom = self.saveGeometry().toHex().data().decode()
-        state = self.saveState().toHex().data().decode()
+        state = save_workspace_dock_state(self, self.current_page).toHex().data().decode()
         panel_states = self._get_all_page_layouts()
         work_mode = self._current_work_mode()
 
@@ -4180,6 +5214,11 @@ class DockLayoutMixin:
                         "state": existing.get("state"),
                         "panel_states": existing.get("panel_states"),
                     }
+            if work_mode == "video":
+                # Video Color and Edit use responsive factory defaults.
+                live_states = (panel_states.pop("Color", None), panel_states.pop("Edit", None))
+                if state in live_states:
+                    state = panel_states.get("Library") or state
             modes[work_mode] = {
                 "geometry": geom,
                 "state": state,
@@ -4187,7 +5226,7 @@ class DockLayoutMixin:
             }
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
-                json.dump({"schema": 1, "modes": modes}, f, indent=2)
+                json.dump({**existing, "schema": 1, "modes": modes}, f, indent=2)
         except (OSError, json.JSONDecodeError) as exc:
             logger.error("Failed to export factory layout to %s: %s", path, exc)
             self.status_bar.showMessage(I18N.tr("status.factory_layout_export_failed", "Failed to export factory layout."), 3000)
@@ -4222,7 +5261,8 @@ class DockLayoutMixin:
                 # Composite owns its Node Properties dock (widget bound at
                 # creation), so there is no swap needed for it. Edit still
                 # uses the shared dock_properties with its own panel.
-                if self.dock_properties is not None and self.edit_properties_panel is not None:
+                if (self.current_page != "Mixer" and self.dock_properties is not None
+                        and self.edit_properties_panel is not None):
                     self.dock_properties.setWidget(self.edit_properties_panel)
                 restore_workspace_dock_state(self, self.page_layouts[self.current_page], self.current_page)
             else:
@@ -4235,6 +5275,11 @@ class DockLayoutMixin:
                         self, QByteArray.fromHex(last_state.encode()), self.current_page
                     )
 
+        if self.current_page == "Mixer":
+            self._attach_edit_panels_to_mixer()
+            self._migrate_mixer_workspace_layout()
+            self._fit_mixer_workspace_height()
+
         # Sync floating docks and update titlebars
         self._sync_floating_docks()
 
@@ -4242,6 +5287,8 @@ class DockLayoutMixin:
         # Saved layouts from older versions (or from a time when composite was
         # on-screen during Color save) may have these docks visible incorrectly.
         self._enforce_page_dock_visibility()
+        if not last_geom and (_is_video_color(self, self.current_page) or self.current_page == "Edit"):
+            self._apply_video_project_window_size()
         panel_bar = getattr(self, "workspace_panel_bar", None)
         if panel_bar is not None:
             panel_bar.set_page(self.current_page)
@@ -4270,6 +5317,7 @@ class DockLayoutMixin:
                 self._migrate_color_grading_dock_height,
             )
         elif self.current_page == "Composite":
+            QTimer.singleShot(0, self._migrate_composite_default_layout)
             QTimer.singleShot(0, self._migrate_composite_scopes_dock_visibility)
         elif self.current_page == "Deliver" and self._current_work_mode() == "image":
             QTimer.singleShot(50, self._migrate_deliver_layout)
@@ -4307,6 +5355,24 @@ class DockLayoutMixin:
     # ------------------------------------------------------------------
     def _is_image_library_page(self) -> bool:
         return getattr(self, "current_page", None) == "Library" and self._current_work_mode() == "image"
+
+    def _apply_default_library_layout(self) -> None:
+        if self._current_work_mode() == "image":
+            self._apply_image_library_layout()
+            return
+        for dock in self.all_docks:
+            dock.hide()
+        self.dock_files.setFloating(False)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.dock_files)
+        self.dock_files.show()
+
+    def _apply_default_video_deliver_layout(self) -> None:
+        for dock in self.all_docks:
+            if dock is not self.dock_deliver:
+                dock.hide()
+        self.dock_deliver.setFloating(False)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.dock_deliver)
+        self.dock_deliver.show()
 
     def _apply_image_library_layout(self) -> None:
         """Give the image browser the whole workspace, including old layouts."""
@@ -4394,6 +5460,61 @@ class DockLayoutMixin:
                 # A saved state or delayed tool callback must not resurrect it.
                 dock.visibilityChanged.connect(lambda visible, d=dock: d.hide() if visible else None)
 
+    def _edit_uses_default_columns(self) -> bool:
+        config = getattr(self, "config_manager", None)
+        selection = config.get(self._active_page_layout_key("Edit")) if config is not None else None
+        if not isinstance(selection, dict):
+            return True
+        if selection.get("name"):
+            return selection["name"] not in self._custom_page_layouts()
+        bundle = selection.get("bundle")
+        return not isinstance(bundle, str) or "Edit" not in self._layout_bundles().get(bundle, {})
+
+    def _configure_edit_resize_handles(self) -> None:
+        active = self.current_page == "Edit" and getattr(self, "_edit_available", False)
+        handles = getattr(self, "_edit_dock_resize_handles", None)
+        if active and handles is None and self.dock_program_viewer and self.dock_edit_timeline:
+            from src.features.edit.core.workspace_presets import EDITING_PRESET
+
+            dock_map = self._workspace_dock_map()
+            sides = tuple(dock for dock in dock_map.values()
+                          if dock not in (self.dock_program_viewer, self.dock_edit_timeline))
+            media, inspector = EDITING_PRESET.tabify_groups
+            groups = tuple(
+                tuple(dock_map[name] for name in names if name in dock_map)
+                for names in (media, (*inspector, "dockCaptionWorkspace", "dockMulticam"))
+            )
+            config = getattr(self, "config_manager", None)
+            # Start the rebuilt default from its configured ratios, without old pixel overrides.
+            mode = self._layout_profile_mode()
+            key = f"edit_column_shares_{mode}"
+            compact_key = f"edit_compact_column_share_{mode}"
+            stored = config.get(key) if config is not None else None
+            compact = config.get(compact_key) if config is not None else None
+            shares = None
+            if (isinstance(stored, list) and len(stored) == 3
+                    and all(type(share) is int and share > 0 for share in stored)):
+                shares = stored[0], stored[1], stored[2]
+            handles = EditDockResizeHandles(
+                self, self.dock_program_viewer, self.dock_edit_timeline, sides, groups, saved_shares=shares,
+                saved_compact_share=compact if type(compact) is float and 0 < compact < 1 else None,
+            )
+            if config is not None:
+                handles.column_shares_changed.connect(
+                    lambda shares: config.set(key, list(shares), auto_save=False),
+                )
+                handles.compact_share_changed.connect(
+                    lambda share: config.set(compact_key, share, auto_save=False),
+                )
+            self._edit_dock_resize_handles = handles
+        if handles is not None:
+            shares = None
+            if active and self._edit_uses_default_columns():
+                tier, _ = self._video_project_screen_tier(self._video_color_defaults())
+                left, viewer, right, *_ = self._read_workspace_defaults("video_edit", _VIDEO_EDIT_DEFAULTS)[tier]
+                shares = left, viewer, right
+            handles.set_active(active, shares)
+
     def _enforce_page_dock_visibility(self) -> None:
         """Ensure page-specific docks are only visible on their own page.
 
@@ -4405,7 +5526,12 @@ class DockLayoutMixin:
         mode they stay usable. Media Pool is already unavailable in image mode
         (Edit feature disabled at startup).
         """
+        self._configure_edit_resize_handles()
         color_active = self.current_page == "Color"
+        if _is_video_color(self, "Color"):
+            self._configure_video_color_dock_controls(color_active)
+        if self._current_work_mode() == "image" and getattr(self, "viewport_container", None) is not None:
+            self._configure_photo_color_layout(color_active)
         for attr in ("dock_base_grade", "dock_chromogen"):
             dock = getattr(self, attr, None)
             if dock is not None:
@@ -4734,28 +5860,25 @@ class DockLayoutMixin:
         Earlier builds created the video queue as a separate bottom dock.
         Saved Qt layouts from earlier builds can restore the Deliver dock at a
         width where a side-by-side inspector and queue are unusable.  The
-        queue is now inside DeliverWorkspace, so enforce a usable minimum and
-        reapply the intended right-side geometry after restoreState() settles.
+        queue is now inside DeliverWorkspace, which sizes its panes from the
+        available space after restoreState() settles.
         """
+        if self.current_page != "Deliver":
+            return
         if self._current_work_mode() == "image":
-            if self.current_page == "Deliver":
-                self._enforce_page_dock_visibility()
-                if getattr(self, "_image_deliver_default_size_pending", False):
-                    self._image_deliver_default_size_pending = False
-                    grade_sets = getattr(self, "dock_grade_sets", None)
-                    if grade_sets is not None:
-                        # Factory states are captured before the window reaches its restored size.
-                        self._resize_image_deliver_docks(grade_sets, self.dock_export)
+            self._enforce_page_dock_visibility()
+            if getattr(self, "_image_deliver_default_size_pending", False):
+                self._image_deliver_default_size_pending = False
+                grade_sets = getattr(self, "dock_grade_sets", None)
+                if grade_sets is not None:
+                    # Factory states are captured before the window reaches its restored size.
+                    self._resize_image_deliver_docks(grade_sets, self.dock_export)
             return
         dock = getattr(self, "dock_deliver", None)
         if dock is None:
             return
-        dock.setMinimumWidth(1220)
-        dock.setMinimumHeight(620)
         dock.setVisible(True)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        self.resizeDocks([dock], [1320], Qt.Orientation.Horizontal)
-        self.resizeDocks([dock], [680], Qt.Orientation.Vertical)
         workspace = getattr(self, "deliver_page", None)
         ensure_layout = getattr(workspace, "ensure_deliver_layout", None)
         if callable(ensure_layout):
@@ -4785,6 +5908,11 @@ class DockLayoutMixin:
         This is called after restoreState to apply saved dock sizes.
         Uses resizeDocks for proper splitter proportion restoration.
         """
+        if _is_video_color(self, self.current_page) or (
+            self.current_page == "Color" and self._current_work_mode() == "image"
+        ):
+            return  # Qt already restored the nested row/column proportions.
+
         # Group docks by their dock area to restore proportions correctly
         dock_areas = {}
         for dock in self.all_docks:

@@ -28,7 +28,10 @@ DOCK_TAB_BAR_STYLE = (
 )
 
 
-def apply_dock_tab_bar_style(tab_bar: QTabBar) -> None:
+_COMPACT_DOCK_TAB_BAR_STYLE = DOCK_TAB_BAR_STYLE.replace("padding: 3px 14px", "padding: 3px 5px")
+
+
+def apply_dock_tab_bar_style(tab_bar: QTabBar, *, compact: bool = False) -> None:
     """Apply the shared dock-tab geometry and style to one internal tab bar."""
 
     tab_bar.setObjectName("ToposDockTabBar")
@@ -36,9 +39,12 @@ def apply_dock_tab_bar_style(tab_bar: QTabBar) -> None:
     tab_bar.setExpanding(False)
     tab_bar.setDrawBase(False)
     tab_bar.setDocumentMode(False)
-    if not tab_bar.property("_topos_dock_tab_style_applied"):
-        tab_bar.setStyleSheet(DOCK_TAB_BAR_STYLE)
-        tab_bar.setProperty("_topos_dock_tab_style_applied", True)
+    if tab_bar.property("_topos_dock_tabs_compact") != compact:
+        tab_bar.setStyleSheet(_COMPACT_DOCK_TAB_BAR_STYLE if compact else DOCK_TAB_BAR_STYLE)
+        tab_bar.setProperty("_topos_dock_tabs_compact", compact)
+    if compact:
+        for index in range(tab_bar.count()):
+            tab_bar.setTabToolTip(index, tab_bar.tabText(index))
     tab_bar.updateGeometry()
     tab_bar.update()
     install_tab_divider_overlay(tab_bar)

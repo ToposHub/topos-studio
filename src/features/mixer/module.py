@@ -70,7 +70,7 @@ class MixerModule:
                 title_key=title_key,
                 fallback_title=title, feature_id="mixer", category="Mixer",
                 page_ids=("Mixer",), dock_attr=dock_attr, order=order,
-                default_visible=key not in ("clip_editor", "effects"), work_mode="video",
+                default_visible=True, work_mode="video",
             ))
 
     def register_i18n(self) -> None:

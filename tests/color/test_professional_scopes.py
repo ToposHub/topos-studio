@@ -442,7 +442,8 @@ class TestScopePanelColorState:
         assert panel.cie_widget._transfer == 'pq'
         assert panel.cie_widget._primaries == 'bt2020'
         assert panel.falsecolor_widget._transfer == 'pq'
-        assert panel.waveform_widget._transfer == 'pq'
+        assert panel._gpu_fc_presenter._transfer == 'pq'
+        assert panel.waveform_widget._transfer == 'srgb'
 
     def test_waveform_scale_switch(self, qtbot):
         from src.features.color.ui.scope_panel import ScopePanel
@@ -450,7 +451,8 @@ class TestScopePanelColorState:
         qtbot.addWidget(panel)
         panel._set_waveform_scale('nits', 'pq')
         assert panel.waveform_widget._scale_mode == 'nits'
-        assert panel._scope_transfer == 'pq'
+        assert panel.waveform_widget._transfer == 'pq'
+        assert panel._scope_transfer == 'srgb'
         panel._set_waveform_scale('code10')
         assert panel.waveform_widget._scale_mode == 'code10'
         assert panel.split_waveform._scale_mode == 'code10'
@@ -463,7 +465,7 @@ class TestScopePanelColorState:
         assert panel._scope_transfer == 'srgb'
         assert panel._scope_primaries == 'bt709'
         panel._set_waveform_scale('bogus')
-        assert panel._waveform_scale == 'percent'
+        assert panel._waveform_scale == 'code10_full'
 
     def test_new_modes_registered(self):
         assert 'cie' in MODE_ORDER and 'falsecolor' in MODE_ORDER
@@ -505,7 +507,7 @@ class TestMeasurementDomainBadge:
         panel = ScopePanel()
         qtbot.addWidget(panel)
         text = panel.domain_badge.text()
-        assert "显示域" in text and "全帧" in text and "0–1" in text
+        assert "显示域" in text and "全帧" in text and "0–1023" in text
         # tooltip 携带完整声明（差一层显示变换/采样通路/几何）
         tip = panel.domain_badge.toolTip()
         assert "显示变换" in tip and "全帧回读" in tip and "极坐标" in tip
@@ -527,4 +529,4 @@ class TestMeasurementDomainBadge:
         panel._set_waveform_scale("code10", "srgb")
         assert "64–940" in panel.domain_badge.text()
         panel._set_waveform_scale("percent", "srgb")
-        assert "0–1" in panel.domain_badge.text()
+        assert "0–100%" in panel.domain_badge.text()

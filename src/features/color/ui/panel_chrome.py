@@ -55,6 +55,7 @@ class ColorToolDockWidget(PanelDockWidget):
     def __init__(self, title: str, host: QMainWindow) -> None:
         super().__init__(title, host)
         self._dock_host = host
+        self._docked_height_limit: int | None = COLOR_TOOL_DOCK_MAX_HEIGHT
         self.setMaximumHeight(COLOR_TOOL_DOCK_MAX_HEIGHT)
         self.topLevelChanged.connect(self.sync_height_limit)
         self.dockLocationChanged.connect(self._dock_area_changed)
@@ -65,11 +66,17 @@ class ColorToolDockWidget(PanelDockWidget):
             not other.isHidden() for other in self._dock_host.tabifiedDockWidgets(self)
         ) else 0
 
+    def set_docked_height_limit(self, limit: int | None) -> None:
+        if self._docked_height_limit != limit:
+            self._docked_height_limit = limit
+            self.sync_height_limit()
+
     def sync_height_limit(self, is_floating: bool | None = None) -> None:
         floating = self.isFloating() if is_floating is None else is_floating
         docked = (not floating and self._dock_host.dockWidgetArea(self)
                   != Qt.DockWidgetArea.NoDockWidgetArea)
-        height = COLOR_TOOL_DOCK_MAX_HEIGHT - self.tab_height() if docked else QWIDGETSIZE_MAX
+        limit = self._docked_height_limit
+        height = limit - self.tab_height() if docked and limit is not None else QWIDGETSIZE_MAX
         if self.maximumHeight() != height:
             self.setMaximumHeight(height)
 

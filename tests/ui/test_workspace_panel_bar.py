@@ -6,15 +6,15 @@ from unittest.mock import Mock
 import pytest
 from pytest import MonkeyPatch
 from PyQt6.QtCore import QPoint, QPointF, QSettings, QSize, Qt
-from PyQt6.QtGui import QAction, QColor, QDragEnterEvent, QDropEvent, QImage
-from PyQt6.QtWidgets import QApplication, QDockWidget, QHBoxLayout, QMainWindow, QMenu, QToolBar, QWidget
+from PyQt6.QtGui import QAction, QColor, QContextMenuEvent, QDragEnterEvent, QDropEvent, QImage
+from PyQt6.QtWidgets import QApplication, QDockWidget, QHBoxLayout, QMainWindow, QMenu, QToolBar, QToolButton, QWidget
 from pytestqt.qtbot import QtBot
 
 from src.app.controllers.dock_layout_controller import DockLayoutMixin
 from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.app.ui.files_panel import FilesPanel
 from src.app.ui.native_files_prefs import NativeFilesPreferences
-from src.app.ui.workspace_panel_bar import WorkspacePanelBar
+from src.app.ui.workspace_panel_bar import WorkspacePanelBar, WorkspaceToolbarContents
 from src.features.edit.core.project import EditProject
 from src.features.edit.ui.media_pool_panel import MediaPoolPanel
 from src.shared.i18n.i18n import I18N
@@ -75,6 +75,62 @@ def _edit_window(qtbot, config: _Config) -> tuple[_Window, WorkspacePanelBar]:
     return window, window.create_panel_bar("Edit")
 
 
+def test_mixer_toolbar_has_five_independent_labeled_panel_switches(qtbot: QtBot) -> None:
+    window = _Window(_Config())
+    qtbot.addWidget(window)
+    top = Qt.DockWidgetArea.TopDockWidgetArea
+    console = window.add_panel("dock_audio_console", top)
+    pool = window.add_panel("dock_audio_media_pool", top)
+    effects = window.add_panel("dock_audio_effects", top)
+    viewer = window.add_panel("dock_audio_viewer", top)
+    properties = window.add_panel("dock_audio_properties", top)
+    timeline = window.add_panel("dock_audio_timeline", Qt.DockWidgetArea.BottomDockWidgetArea)
+    editor = window.add_panel("dock_audio_clip_editor", Qt.DockWidgetArea.BottomDockWidgetArea)
+    for dock in (pool, effects):
+        window.tabifyDockWidget(console, dock)
+    properties.hide()
+    bar = window.create_panel_bar("Mixer")
+    window.show()
+    effects.raise_()
+    qtbot.waitUntil(lambda: not effects.visibleRegion().isEmpty())
+
+    pool_action, mixer_action, effects_action = [action for action in bar.actions() if action.isVisible()]
+    preview, inspector = bar.right_tools.actions()
+    assert (pool_action, mixer_action, effects_action, preview, inspector) == tuple(
+        dock.toggleViewAction() for dock in (pool, console, effects, viewer, properties)
+    )
+    for toolbar, actions in ((bar, (pool_action, mixer_action, effects_action)),
+                             (bar.right_tools, (preview, inspector))):
+        for action in actions:
+            button = toolbar.widgetForAction(action)
+            assert isinstance(button, QToolButton)
+            assert button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+            assert button.text() and not button.icon().isNull()
+    assert preview.isChecked() and not inspector.isChecked()
+    assert mixer_action.isChecked()
+    mixer_action.trigger()
+    assert console.isHidden() and not pool.isHidden() and not effects.isHidden()
+    mixer_action.trigger()
+    qtbot.waitUntil(lambda: not console.visibleRegion().isEmpty())
+    assert all(not dock.isHidden() for dock in (console, pool, effects))
+
+    preview.trigger()
+    inspector.trigger()
+    assert viewer.isHidden() and not properties.isHidden()
+    assert not timeline.isHidden() and not editor.isHidden()
+    preview.trigger()
+    inspector.trigger()
+    assert not viewer.isHidden() and properties.isHidden()
+
+    for action in (pool_action, mixer_action, effects_action, preview):
+        action.trigger()
+    assert all(dock.isHidden() for dock in (pool, console, effects, viewer, properties))
+    assert not timeline.isHidden() and not editor.isHidden()
+    effects_action.trigger()
+    qtbot.waitUntil(lambda: not effects.visibleRegion().isEmpty())
+    assert all(dock.isHidden() for dock in (pool, console, viewer, properties))
+
+
 def test_grading_tools_keep_grade_tabs_available(qtbot: QtBot) -> None:
     window = _Window(_Config())
     qtbot.addWidget(window)
@@ -91,8 +147,7 @@ def test_grading_tools_keep_grade_tabs_available(qtbot: QtBot) -> None:
     window.show()
 
     for expected in (base_grade, raw, chromogen, wheels):
-        selected = next(action for action in bar._tools_menu.actions()
-                        if action.text() == expected.windowTitle())
+        selected = next(action for action, dock in bar._color_tool_actions if dock is expected)
         selected.trigger()
         qtbot.waitUntil(lambda: not expected.visibleRegion().isEmpty())
         assert not wheels.isHidden()
@@ -170,6 +225,9 @@ def test_library_pool_toggle_switches_layout_and_imports_into_the_live_project(
         qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
         qtbot.waitUntil(lambda: pool.isVisible() and pool.y() > browser.content_stack.y())
         assert browser.hosts_media_pool(pool)
+        splitter = browser._workspace_splitter
+        splitter.moveSplitter(480, 1)
+        split_before = splitter.sizes()[1] / sum(splitter.sizes())
         window.resize(1220, 500)
         qtbot.waitUntil(lambda: pool.x() > browser.content_stack.x())
         assert pool.y() == browser.content_stack.y()
@@ -191,6 +249,11 @@ def test_library_pool_toggle_switches_layout_and_imports_into_the_live_project(
         assert all(path.is_file() for path in paths)
         window.resize(1220, 760)
         qtbot.waitUntil(lambda: pool.y() > browser.content_stack.y())
+        assert splitter.sizes()[1] / sum(splitter.sizes()) == pytest.approx(split_before, abs=0.025)
+        bar.reset_groups("Library")
+        assert not toggle.isChecked() and not browser.hosts_media_pool(pool)
+        toggle.trigger()
+        assert browser.hosts_media_pool(pool)
 
         # The exact same widget goes back to Edit and keeps its project.
         window.set_library_media_pool_visible(False)
@@ -225,27 +288,33 @@ def test_main_and_panel_menu_buttons_align_in_top_toolbar(qtbot, monkeypatch, mo
                         lambda: MenuToolbarMixin._is_video_work_mode(window), raising=False)
     welcome = Mock()
     project_manager = Mock()
+    preferences = Mock()
     monkeypatch.setattr(window, "_show_welcome_dialog", welcome, raising=False)
     monkeypatch.setattr(window, "_show_project_manager", project_manager, raising=False)
+    monkeypatch.setattr(window, "show_preferences_dialog", preferences, raising=False)
     for name in (
-        "switch_to_page", "on_reset_all_click", "show_preferences_dialog",
+        "switch_to_page", "on_reset_all_click",
         "on_layout_combo_activated", "update_layout_combobox", "export_file_as",
     ):
         monkeypatch.setattr(window, name, lambda *_: None, raising=False)
 
     MenuToolbarMixin.setup_toolbar(window)
+    window.resize(1600, 550)
     window.show()
     main_button = window.application_menu_button
     panel_button = window.workspace_panel_bar._panels_button
     qtbot.waitUntil(panel_button.isVisible)
 
     home_button = window.project_manager_btn
+    qtbot.waitUntil(lambda: home_button.width() > 28)
     assert home_button.isVisible()
-    assert home_button.size() == QSize(28, 28)
+    assert home_button.height() == 28 and home_button.width() > 28
     assert not home_button.icon().isNull()
     home_label = (I18N.tr("welcome.recent_projects", "Recent Projects") if mode == "image"
                   else I18N.tr("action.open_project_manager", "Open Project Manager..."))
     assert home_button.toolTip() == home_button.accessibleName() == home_label
+    assert home_button.text() == (home_label if mode == "image" else
+                                  I18N.tr("action.project_manager_label", "Project Manager"))
     qtbot.mouseClick(home_button, Qt.MouseButton.LeftButton)
     if mode == "image":
         welcome.assert_called_once()
@@ -254,22 +323,70 @@ def test_main_and_panel_menu_buttons_align_in_top_toolbar(qtbot, monkeypatch, mo
         project_manager.assert_called_once()
         welcome.assert_not_called()
 
-    assert main_button.size() == panel_button.size() == QSize(28, 28)
+    assert main_button.text() == I18N.tr("menu.application_menu", "Menu")
+    assert panel_button.text() == I18N.tr("menu.panels", "Panels")
+    assert main_button.toolButtonStyle() == panel_button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+    assert main_button.height() == panel_button.height() == 28
+    assert min(main_button.width(), panel_button.width()) > 28
     assert main_button.iconSize() == panel_button.iconSize() == QSize(16, 16)
+    assert window.pref_btn.isVisible() and not window.pref_btn.icon().isNull()
+    assert not hasattr(window, "reset_all_btn")
+    assert window.pref_btn.text() == I18N.tr("action.preferences_label", "Preferences")
+    assert window.pref_btn.height() == 28 and window.pref_btn.width() > 28
+    qtbot.mouseClick(window.pref_btn, Qt.MouseButton.LeftButton)
+    preferences.assert_called_once()
     main_pos = main_button.mapTo(window, QPoint())
     panel_pos = panel_button.mapTo(window, QPoint())
-    assert main_pos.y() == panel_pos.y()
-    assert panel_pos.x() - main_pos.x() == main_button.width() + 3
+    home_pos = home_button.mapTo(window, QPoint())
+    assert main_pos.y() == panel_pos.y() == home_pos.y()
+    assert panel_pos.x() - main_pos.x() == main_button.width() + 2
+    assert home_pos.x() - panel_pos.x() == panel_button.width() + 2
 
     icon_centers = []
     for button in (main_button, panel_button):
         image = button.grab().toImage()
+        icon_region_width = round(21 * image.devicePixelRatio())
         rows = [
             y for y in range(image.height())
-            if any(image.pixelColor(x, y).lightness() > 120 for x in range(image.width()))
+            if any(image.pixelColor(x, y).lightness() > 120 for x in range(icon_region_width))
         ]
         icon_centers.append((rows[0] + rows[-1]) / (2 * image.devicePixelRatio()))
     assert abs(icon_centers[0] - icon_centers[1]) <= 0.5
+
+    contents = window.main_toolbar.actions()[0].defaultWidget()
+    compact_width = contents.minimumSizeHint().width()
+    window.resize(compact_width + 35, 550)
+    qtbot.waitUntil(lambda: main_button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly)
+    buttons = (main_button, panel_button, home_button, window.pref_btn)
+    qtbot.waitUntil(lambda: all(button.isVisible() for button in buttons))
+    for button in buttons:
+        assert button.isVisible() and button.toolTip()
+        assert button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
+
+    window.resize(1600, 550)
+    qtbot.waitUntil(lambda: main_button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+
+    point = panel_button.rect().center()
+    QApplication.sendEvent(panel_button, QContextMenuEvent(
+        QContextMenuEvent.Reason.Mouse, point, panel_button.mapToGlobal(point),
+    ))
+    qtbot.waitUntil(contents._menu.isVisible)
+    labels = contents._menu.actions()[0]
+    assert labels.isChecked()
+    qtbot.mouseClick(contents._menu, Qt.MouseButton.LeftButton,
+                     pos=contents._menu.actionGeometry(labels).center())
+    assert window.config_manager.get("toolbar_show_icon_labels") is False
+    assert all(button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly for button in buttons)
+    restored = WorkspaceToolbarContents(window.config_manager)
+    qtbot.addWidget(restored)
+    assert not restored._menu.actions()[0].isChecked()
+    labels.trigger()
+    assert window.config_manager.get("toolbar_show_icon_labels") is True
+    assert main_button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+
+    window.workspace_panel_bar.set_page("Library")
+    qtbot.waitUntil(panel_button.isHidden)
+    assert home_button.isVisible()
 
 
 def test_toolbar_panel_shortcuts_and_popups_paint_against_dark_theme(qtbot) -> None:
@@ -287,6 +404,10 @@ def test_toolbar_panel_shortcuts_and_popups_paint_against_dark_theme(qtbot) -> N
     assert active.size() == inactive.size()
     assert active.pixelColor(2, active.height() // 2) == inactive.pixelColor(2, inactive.height() // 2)
     assert active != inactive
+    label_x = round(28 * active.devicePixelRatio())
+    assert active.copy(label_x, 0, active.width() - label_x, active.height()) == inactive.copy(
+        label_x, 0, inactive.width() - label_x, inactive.height(),
+    )
 
     # An application-menu popup is nested under a plain toolbar container.
     app_menu = QMenu(bar.parentWidget())
@@ -301,46 +422,43 @@ def test_toolbar_panel_shortcuts_and_popups_paint_against_dark_theme(qtbot) -> N
         assert color.alpha() == 255
 
 
-def test_edit_media_pool_and_audio_mixer_are_adjacent_icon_only_shortcuts(qtbot: QtBot) -> None:
+def test_edit_media_pool_shortcut_collapses_mixer_tab_and_restores_focus(qtbot: QtBot) -> None:
     window = _Window(_Config())
     qtbot.addWidget(window)
     window.setStyleSheet(DARK_THEME)
     area = Qt.DockWidgetArea.LeftDockWidgetArea
     pool = window.add_panel("dock_edit_media_pool", area)
-    window.add_panel("dock_edit_effects", area).hide()
+    effects = window.add_panel("dock_edit_effects", area)
     mixer = window.add_panel("dock_audio_mixer", area)
-    mixer.setWindowTitle(I18N.tr("panel.audio_mixer", "Audio Mixer"))
+    window.tabifyDockWidget(pool, effects)
     window.tabifyDockWidget(pool, mixer)
-    mixer.hide()
     bar = window.create_panel_bar("Edit")
     window.show()
+    mixer.raise_()
+    qtbot.waitUntil(lambda: not mixer.visibleRegion().isEmpty())
+
     pool_action = window.findChild(QAction, "workspace_edit_dock_edit_media_pool")
-    mixer_action = window.findChild(QAction, "shortcut_dock_audio_mixer")
+    assert window.findChild(QAction, "shortcut_dock_audio_mixer") is None
     pool_button = bar.widgetForAction(pool_action)
-    mixer_button = bar.widgetForAction(mixer_action)
-    assert bar.actions().index(mixer_action) == bar.actions().index(pool_action) + 1
-    assert pool_button.geometry().right() < mixer_button.geometry().left()
-    for action, button in ((pool_action, pool_button), (mixer_action, mixer_button)):
-        assert button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonIconOnly
-        assert button.accessibleName() == button.toolTip() == action.text()
-        icon = button.icon().pixmap(QSize(16, 16)).toImage()
-        assert any(icon.pixelColor(x, y).alpha() > 0
-                   for x in range(icon.width()) for y in range(icon.height()))
-    assert pool_action.isChecked() and not mixer_action.isChecked()
-    qtbot.mouseClick(mixer_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: mixer_action.isChecked() and not mixer.visibleRegion().isEmpty())
-    pool.raise_()
-    qtbot.waitUntil(lambda: not mixer_action.isChecked())
-    qtbot.mouseClick(mixer_button, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: mixer_action.isChecked() and not mixer.visibleRegion().isEmpty())
-    qtbot.mouseClick(mixer_button, Qt.MouseButton.LeftButton)
-    assert mixer.isHidden() and pool_action.isChecked()
+    assert pool_button.toolButtonStyle() == Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+    assert pool_button.text() == pool_action.iconText()
+    assert pool_button.accessibleName() == pool_button.toolTip() == pool_action.text()
+    assert not pool_button.icon().isNull()
+
     qtbot.mouseClick(pool_button, Qt.MouseButton.LeftButton)
-    assert pool.isHidden() and not pool_action.isChecked()
+    assert all(dock.isHidden() for dock in (pool, effects, mixer))
+    assert not pool_action.isChecked()
     qtbot.mouseClick(pool_button, Qt.MouseButton.LeftButton)
-    assert pool.isVisible() and pool_action.isChecked()
-    bar.set_page("Color")
-    assert mixer_action not in bar.actions()
+    qtbot.waitUntil(lambda: not mixer.visibleRegion().isEmpty())
+    assert all(not dock.isHidden() for dock in (pool, effects, mixer))
+
+    pool.hide()
+    effects.hide()
+    assert pool_action.isChecked()
+    qtbot.mouseClick(pool_button, Qt.MouseButton.LeftButton)
+    assert mixer.isHidden() and not pool_action.isChecked()
+    qtbot.mouseClick(pool_button, Qt.MouseButton.LeftButton)
+    assert not mixer.isHidden() and pool_action.isChecked()
 
 
 def test_edit_switch_recovers_preview_space_and_restores_selected_tab(qtbot) -> None:
@@ -400,7 +518,7 @@ def test_composite_toolbar_opens_node_graph_without_closing_timeline(qtbot: QtBo
     assert not timeline.isHidden()
 
 
-def test_color_toolbar_filters_work_mode_and_replaces_the_active_tool(qtbot) -> None:
+def test_photo_color_toolbar_filters_work_mode_and_selects_the_active_tool(qtbot) -> None:
     window = _Window(_Config(), mode="image")
     qtbot.addWidget(window)
     bottom = Qt.DockWidgetArea.BottomDockWidgetArea
@@ -415,13 +533,13 @@ def test_color_toolbar_filters_work_mode_and_replaces_the_active_tool(qtbot) -> 
     assert clips.toggleViewAction() not in bar.actions()
     assert scopes.toggleViewAction() in bar.right_tools.actions()
     curves.hide()
-    # The menu can always select a hidden tool without showing another tab.
+    # Selecting a tool keeps the other tabs available as the window narrows.
     next(action for action in bar._tools_menu.actions() if action.text() == curves.windowTitle()).trigger()
-    assert wheel.isHidden()
-    assert not curves.isHidden()
-    next(action for action in bar._tools_menu.actions() if action.text() == wheel.windowTitle()).trigger()
-    assert curves.isHidden()
+    qtbot.waitUntil(lambda: not curves.visibleRegion().isEmpty())
     assert not wheel.isHidden()
+    next(action for action in bar._tools_menu.actions() if action.text() == wheel.windowTitle()).trigger()
+    qtbot.waitUntil(lambda: not wheel.visibleRegion().isEmpty())
+    assert not curves.isHidden()
 
     bar.set_page("Library")
     assert not bar.isVisible()

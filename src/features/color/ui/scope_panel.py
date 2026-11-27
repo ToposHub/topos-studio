@@ -20,6 +20,7 @@ import logging
 
 from src.shared.ui.panel_splitter import PanelSplitter
 from src.shared.ui.style_sheet import C
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_HEX
 from src.features.color.ui.panel_chrome import (
     HEADER_CONTROL_HEIGHT, HEADER_HEIGHT, HEADER_ICON_SIZE, SECTION_TITLE_STYLE,
     create_panel_header, header_button_color, style_header_button,
@@ -281,7 +282,10 @@ class ScopePanel(QWidget):
         # P1-COLOR-06: scope 输入色彩状态（标尺/CIE 线性化用）
         self._scope_transfer = 'srgb'
         self._scope_primaries = 'bt709'
-        self._waveform_scale = 'percent'
+        self._waveform_scale = 'code10_full'
+        self._waveform_transfer = 'srgb'
+        self._show_waveform_excursions = True
+        self._pure_black_background = False
         # P1-COLOR-07: 输入源（graded 调色后 / source 未调色 / reference 参考帧）
         self._scope_source = 'graded'
         # 可用输入源集合：Color 页提供全部三项（GPU graded + CPU 缓存帧）；
@@ -356,6 +360,22 @@ class ScopePanel(QWidget):
             'histogram': self.histogram_widget, 'cie': self.cie_widget,
             'falsecolor': self.falsecolor_widget,
         }
+
+    def _set_pure_black_background(self, enabled: bool) -> None:
+        self._pure_black_background = enabled
+        color = QColor("#000000" if enabled else VIEWER_BACKGROUND_HEX)
+        self.display_stack.setStyleSheet(
+            f"QStackedWidget#scopeDisplay {{ background-color: {color.name()}; }}"
+        )
+        for widget in (*self._cpu_scope_widgets().values(), self.split_waveform, self.split_vectorscope):
+            widget.setProperty("scopeBackground", color)
+            widget.update()
+        for mode, attr in _MODE_PRESENTER_ATTR.items():
+            presenter = getattr(self, attr, None)
+            if presenter is not None:
+                # The CIE heatmap has a baked 0.012 floor in both GPU backends.
+                presenter.set_scope_background(color, tint_plot=mode != 'falsecolor',
+                                               plot_floor=3 if mode == 'cie' else 0)
 
     def _configure_scope_layout(self, mode: str) -> None:
         """Move the existing presenters; allocate no extra GL contexts."""
@@ -524,18 +544,16 @@ class ScopePanel(QWidget):
         # solely for an explicitly enabled diagnostic fallback and is never
         # fed by normal frame updates.
         self.display_stack = QStackedWidget()
-        self.display_stack.setStyleSheet("background-color: #050505;")
+        self.display_stack.setObjectName("scopeDisplay")
 
         # ---- CPU scope page (legacy diagnostic fallback) ----
         cpu_page = QWidget()
-        cpu_page.setStyleSheet("background-color: #050505;")
         cpu_layout = QVBoxLayout(cpu_page)
         cpu_layout.setContentsMargins(0, 0, 0, 0)
         cpu_layout.setSpacing(0)
 
         # Stacked widget for scope modes (waveform/vectorscope)
         self.stack = QStackedWidget()
-        self.stack.setStyleSheet("background-color: #050505;")
 
         # Create scope widgets
         self.waveform_widget = WaveformWidget()
@@ -554,7 +572,6 @@ class ScopePanel(QWidget):
 
         # Split view container (for side-by-side display)
         self.split_container = QWidget()
-        self.split_container.setStyleSheet("background-color: #050505;")
         split_layout = QHBoxLayout(self.split_container)
         split_layout.setContentsMargins(0, 0, 0, 0)
         split_layout.setSpacing(2)
@@ -565,11 +582,6 @@ class ScopePanel(QWidget):
 
         # Use splitter for resizable split view
         self.splitter = PanelSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setStyleSheet(f"""
-            QSplitter {{
-                background-color: #050505;
-            }}
-        """)
         self.splitter.addWidget(self.split_waveform)
         self.splitter.addWidget(self.split_vectorscope)
         self.splitter.setSizes([200, 200])  # Equal split
@@ -587,9 +599,7 @@ class ScopePanel(QWidget):
 
         # ---- GPU scope page (display-only QOpenGLWidget presenters) ----
         gpu_page = QWidget()
-        gpu_page.setStyleSheet("background-color: #050505;")
         self._gpu_stack = QStackedWidget()
-        self._gpu_stack.setStyleSheet("background-color: #050505;")
 
         self._gpu_display_active = False
         self._gpu_fallback_reason = None
@@ -607,9 +617,6 @@ class ScopePanel(QWidget):
             )
             # GPU split container mirrors the CPU splitter layout.
             self._gpu_splitter = PanelSplitter(Qt.Orientation.Horizontal)
-            self._gpu_splitter.setStyleSheet(f"""
-                QSplitter {{ background-color: #050505; }}
-            """)
 
             # Professional scope presenters (parade / luma / histogram /
             # cie / falsecolor). Parade and luma share the waveform value
@@ -699,6 +706,8 @@ class ScopePanel(QWidget):
         )
         self.display_stack.setCurrentIndex(1 if gpu_available else 0)
         self._gpu_display_active = gpu_available
+        self._set_pure_black_background(False)
+        self._apply_waveform_scale()
 
         # FalseColor 模式/阈值变化会改变 GPU demand 内容（HDR 分档、zebra
         # 阈值），需要 bump revision 让在途旧帧作废。
@@ -783,8 +792,6 @@ class ScopePanel(QWidget):
             " padding: 0px 4px; font-size: 11px; }")
         self._update_domain_badge()
 
-        self.selector_container.adjustSize()
-
         # The selector spans the panel header; the plot starts below it.
         main_layout.insertWidget(0, self.selector_container)
 
@@ -831,6 +838,11 @@ class ScopePanel(QWidget):
             info.setEnabled(False)
             info.setToolTip(label.toolTip())
         menu.setToolTipsVisible(True)
+        menu.addSeparator()
+        background = menu.addAction(I18N.tr("analysis.pure_black_background", "Pure Black Background"))
+        background.setCheckable(True)
+        background.setChecked(self._pure_black_background)
+        background.toggled.connect(self._set_pure_black_background)
         menu.addSeparator()
         dock = self._host_dock()
         layout_modes = ('waveform', 'split', 'quad', 'all') if dock is None or dock.isFloating() else ()
@@ -887,6 +899,8 @@ class ScopePanel(QWidget):
         menu.addAction(scale_label)
         for mode, transfer, label in (
             ('percent', 'srgb', I18N.tr("analysis.scale_percent", "% (SDR)")),
+            ('code10_full', 'srgb', I18N.tr("analysis.scale_code10_full", "10-bit (0–1023)")),
+            ('nits', 'srgb', I18N.tr("analysis.scale_nits_sdr", "nits (SDR · 100-nit white)")),
             ('nits', 'pq', I18N.tr("analysis.scale_nits_pq", "nits (PQ)")),
             ('nits', 'hlg', I18N.tr("analysis.scale_nits_hlg", "nits (HLG)")),
             ('code10', 'srgb', I18N.tr("analysis.scale_code10", "10-bit (64-940)")),
@@ -895,10 +909,15 @@ class ScopePanel(QWidget):
             act.setCheckable(True)
             act.setChecked(
                 self._waveform_scale == mode
-                and (mode != 'nits' or self._scope_transfer == transfer))
+                and (mode != 'nits' or self._waveform_transfer == transfer))
             act.triggered.connect(
                 lambda _=False, m=mode, t=transfer: self._set_waveform_scale(m, t))
             menu.addAction(act)
+
+        excursions = menu.addAction(I18N.tr("analysis.hide_waveform_excursions", "Hide Out-of-Range Signal"))
+        excursions.setCheckable(True)
+        excursions.setChecked(not self._show_waveform_excursions)
+        excursions.toggled.connect(lambda hidden: self._set_show_waveform_excursions(not hidden))
 
         menu.addSeparator()
 
@@ -917,6 +936,10 @@ class ScopePanel(QWidget):
             act.triggered.connect(
                 lambda _=False, pm=primaries: self._set_scope_primaries(pm))
             menu.addAction(act)
+
+        if self._current_mode == 'falsecolor' or 'falsecolor' in _MULTI_LAYOUTS.get(self._current_mode, ()):
+            menu.addSeparator()
+            self.falsecolor_widget.populate_options_menu(menu)
 
         # Apply settings to all vectorscope widgets
         button = anchor if anchor is not None else self.settings_btn
@@ -941,14 +964,16 @@ class ScopePanel(QWidget):
         self._scope_source = source
         self._pending_image = None
         self._pending_mask = None
+        self._last_image = None
+        self._last_mask = None
         self._update_source_label()
+        self._update_domain_badge()
+        self._clear_scope_display()
         cached = self._source_images.get(source)
         if cached is not None:
             self._pending_image = cached
             if not self._update_timer.isActive():
                 self._update_timer.start()
-        else:
-            self._clear_scope_display()
         # source/reference 没有 GPU 分析路径，强制 CPU 页显示
         if source != 'graded':
             self._gpu_display_active = False
@@ -989,14 +1014,13 @@ class ScopePanel(QWidget):
         label.setText(
             f"{prefix}: {texts.get(self._scope_source, self._scope_source)}"
         )
-        self.selector_container.adjustSize()
 
     def _update_domain_badge(self) -> None:
         """M19.3b · 测量域角标：域/采样/单位三要素短标注。
 
         域=显示域（预览 ODT 后——与导出域/场景线性域差一层显示变换）；
         采样=全帧（Composite lane 设定 ``_cpu_analysis_max_width`` 后
-        显示下采样上限）；单位随波形标尺（percent 0–1 / nits / code10
+        显示下采样上限）；单位随波形标尺（percent 0–100% / nits / code10
         64..940；矢量恒为显示域色度归一）。完整声明在 tooltip，不占
         面板空间——跨工程对比读数前先看此标注。
         """
@@ -1008,13 +1032,16 @@ class ScopePanel(QWidget):
             sampling = I18N.tr(
                 "analysis.sampling_downsampled", "下采样",
             ) + f"≤{self._cpu_analysis_max_width}px"
+        elif self._scope_source in ('source', 'reference'):
+            sampling = I18N.tr("analysis.sampling_downsampled", "下采样") + "≤768px"
         else:
             sampling = I18N.tr("analysis.sampling_fullframe", "全帧")
         units = {
-            'percent': '0–1',
+            'percent': '0–100%',
             'nits': I18N.tr("analysis.unit_nits", "nit"),
             'code10': '64–940',
-        }.get(self._waveform_scale, '0–1')
+            'code10_full': '0–1023',
+        }[self._waveform_scale]
         badge.setText(f"{domain} · {sampling} · {units}")
         badge.setToolTip(I18N.tr(
             "analysis.domain_tooltip",
@@ -1023,8 +1050,6 @@ class ScopePanel(QWidget):
             "（输入为 scope 专用全帧回读，非预览视口降采样）。\n单位：波形"
             " {units}；矢量=显示域色度归一；几何：波形逐列投影、矢量色度"
             "极坐标。", sampling=sampling, units=units))
-        if hasattr(self, 'selector_container'):
-            self.selector_container.adjustSize()
 
     def _clear_scope_display(self) -> None:
         """清空所有 CPU scope widget 的显示（切换输入源防旧帧）。"""
@@ -1043,15 +1068,25 @@ class ScopePanel(QWidget):
             self.cie_widget._density = None
             self.cie_widget._density_image = None
             self.cie_widget.update()
+        self.histogram_widget._hist_rgb = None
+        self.histogram_widget.update()
         if hasattr(self, 'falsecolor_widget') and self.falsecolor_widget is not None:
             self.falsecolor_widget._display_image = None
             self.falsecolor_widget.update()
+
+    def clear_scope_input(self, source: str) -> None:
+        """Discard the cached frame for an unavailable source."""
+        self._source_images.pop(source, None)
+        if source == self._scope_source:
+            self._pending_image = self._pending_mask = None
+            self._last_image = self._last_mask = None
+            self._clear_scope_display()
 
     def set_color_state(self, transfer: str = 'srgb',
                         primaries: str = 'bt709') -> None:
         """声明 scope 输入图像的色彩状态（P1-COLOR-06/P1-COLOR-07）。
 
-        驱动波形 nits 标尺、CIE 线性化与 False Color HDR 分档。
+        驱动 CIE 线性化与 False Color HDR 分档。
         控制器在知道源媒体传输特性时调用；未调用时按 SDR 处理。
         """
         transfer = transfer if transfer in ('srgb', 'bt709', 'pq', 'hlg',
@@ -1063,54 +1098,57 @@ class ScopePanel(QWidget):
         self._scope_transfer = transfer
         self._scope_primaries = primaries
         self._apply_color_state()
+        self._reprocess_last_scope_image()
         # 传输特性/色域会改变 CIE 线性化与 False Color HDR 分档 → 在途
         # GPU demand 帧需要作废。
         self.bump_demand_revision()
 
     def _apply_color_state(self) -> None:
-        """把色彩状态下发到各 scope widget 与 GPU presenter 标尺。"""
-        self.waveform_widget.set_color_state(self._scope_transfer)
-        self.split_waveform.set_color_state(self._scope_transfer)
+        """Apply analysis color-space settings to the matching plots."""
         self.cie_widget.set_color_state(self._scope_transfer,
                                         self._scope_primaries)
         self.falsecolor_widget.set_color_state(self._scope_transfer)
-        if self._waveform_scale == 'code10':
-            scale = 'code10_video'
-        elif self._waveform_scale == 'nits':
-            scale = 'nits'
-        else:
-            scale = 'code10'
-        # 波形值轴 presenter：RGB waveform / parade / luma 共用同一标尺。
+        self._sync_falsecolor_legend()
+
+    def _apply_waveform_scale(self) -> None:
+        mode = self._waveform_scale
+        transfer = self._waveform_transfer
+        for widget in (self.waveform_widget, self.split_waveform,
+                       self.parade_widget, self.luma_widget):
+            widget.set_scale_mode(mode)
+            widget.set_color_state(transfer)
+        scale = {'code10': 'code10_video', 'code10_full': 'code10'}.get(mode, mode)
         for attr in ('_gpu_wf_presenter', '_gpu_parade_presenter',
                      '_gpu_luma_presenter'):
             presenter = getattr(self, attr, None)
             if presenter is not None:
-                if self._waveform_scale == 'nits':
-                    presenter.set_scale_mode('nits', self._scope_transfer)
-                else:
-                    presenter.set_scale_mode(scale)
+                presenter.set_scale_mode(scale, transfer)
 
     def _set_waveform_scale(self, mode: str, transfer: str = 'srgb') -> None:
         """波形标尺模式：'percent' | 'nits' | 'code10'（64..940）。"""
-        if mode not in ('percent', 'nits', 'code10'):
+        if mode not in ('percent', 'nits', 'code10', 'code10_full') or transfer not in ('srgb', 'pq', 'hlg'):
             return
         self._waveform_scale = mode
-        if mode == 'nits':
-            self._scope_transfer = transfer if transfer in ('pq', 'hlg') \
-                else 'pq'
-        self.waveform_widget.set_scale_mode(mode)
-        self.split_waveform.set_scale_mode(mode)
-        self._apply_color_state()
-        # M19.3b：单位随标尺变化 → 角标同步
+        self._waveform_transfer = transfer
+        self._apply_waveform_scale()
         self._update_domain_badge()
-        # nits 标尺会改变 _scope_transfer，进而改变 GPU CIE 线性化与
-        # False Color HDR 分档 → 在途 demand 帧作废。
+
+    def _set_show_waveform_excursions(self, show: bool) -> None:
+        if show == self._show_waveform_excursions:
+            return
+        self._show_waveform_excursions = show
+        for widget in (self.waveform_widget, self.split_waveform, self.parade_widget, self.luma_widget,
+                       self._gpu_wf_presenter, self._gpu_parade_presenter, self._gpu_luma_presenter):
+            if widget is not None:
+                widget.set_show_excursions(show)
+        self._reprocess_last_scope_image()
         self.bump_demand_revision()
 
     def _set_scope_primaries(self, primaries: str) -> None:
         if primaries in ('bt709', 'p3', 'bt2020'):
             self._scope_primaries = primaries
             self.cie_widget.set_color_state(self._scope_transfer, primaries)
+            self._reprocess_last_scope_image()
             self.bump_demand_revision()
 
     def _set_zoom(self, level: int) -> None:
@@ -1126,9 +1164,14 @@ class ScopePanel(QWidget):
             # GPU scope frames for the old zoom are discarded.
             self.bump_demand_revision()
 
-            # Reprocess if we have pending image
-            if self._pending_image is not None:
-                self._process_pending_image()
+            self._reprocess_last_scope_image()
+
+    def _reprocess_last_scope_image(self) -> None:
+        if self._pending_image is None and self._last_image is not None:
+            self._pending_image = self._last_image
+            self._pending_mask = self._last_mask
+        if self._pending_image is not None:
+            self._process_pending_image()
 
     def _apply_mode_page(self, mode: str, index: int) -> None:
         """CPU/GPU 页选择：全部模式都有 GPU pass，presenter 可用时保持
@@ -1159,10 +1202,7 @@ class ScopePanel(QWidget):
             self.bump_demand_revision()
 
             # 切换模式时用最后一次的缓存图像立即更新新模式的 widget
-            if hasattr(self, '_last_image') and self._last_image is not None:
-                self._pending_image = self._last_image
-                self._pending_mask = getattr(self, '_last_mask', None)
-                self._process_pending_image()
+            self._reprocess_last_scope_image()
 
     def resizeEvent(self, event) -> None:
         """Handle resize and invalidate size-dependent scope output."""
@@ -1180,6 +1220,8 @@ class ScopePanel(QWidget):
             dock.topLevelChanged.connect(self._update_layout_controls)
             self._bound_scope_dock = dock
         self._update_layout_controls()
+        if self._pending_image is not None:
+            self._update_timer.start()
 
     def hideEvent(self, event) -> None:
         """Panel hidden: clear the GPU presenter.
@@ -1249,8 +1291,6 @@ class ScopePanel(QWidget):
 
         # 面板不可见时跳过计算
         if not self.isVisible():
-            self._pending_image = None
-            self._pending_mask = None
             return
 
         image = self._pending_image
@@ -1363,6 +1403,7 @@ class ScopePanel(QWidget):
             'mode': self._current_mode,
             'display_size': display_size,
             'vectorscope_zoom': float(self._zoom_level),
+            'show_waveform_excursions': self._show_waveform_excursions,
             'scope_transfer': self._scope_transfer,
             'scope_primaries': self._scope_primaries,
             'falsecolor_mode': getattr(
@@ -1373,11 +1414,15 @@ class ScopePanel(QWidget):
 
     def _on_falsecolor_variant_changed(self, *_) -> None:
         """FalseColor mode/threshold changed: sync legend + bump revision."""
+        self._sync_falsecolor_legend()
+        self._reprocess_last_scope_image()
+        self.bump_demand_revision()
+
+    def _sync_falsecolor_legend(self) -> None:
         presenter = getattr(self, '_gpu_fc_presenter', None)
         if presenter is not None and hasattr(presenter, 'set_legend'):
             mode = getattr(self.falsecolor_widget, '_mode', 'sdr')
-            presenter.set_legend(f'falsecolor_{mode}')
-        self.bump_demand_revision()
+            presenter.set_legend(f'falsecolor_{mode}', transfer=self._scope_transfer)
 
     def bump_demand_revision(self) -> int:
         """Increment and return the panel-side demand revision.

@@ -37,5 +37,6 @@ def add_dock_management_actions(
             toggle_floating if toggle_floating is not None else lambda: dock.setFloating(not dock.isFloating())
         )
 
-    close_action = menu.addAction(I18N.tr("dock.close", "Close"))
-    close_action.triggered.connect(lambda: dock.setVisible(False))
+    if dock.features() & QDockWidget.DockWidgetFeature.DockWidgetClosable:
+        close_action = menu.addAction(I18N.tr("dock.close", "Close"))
+        close_action.triggered.connect(lambda: dock.setVisible(False))

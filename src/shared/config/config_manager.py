@@ -19,6 +19,7 @@ class ConfigManager:
         "last_opened_file": "",
         "current_page": "Color",
         "page_layouts": {},
+        "toolbar_show_icon_labels": True,
         # General
         "locale": "en_US",
         "auto_save_interval": 5,
@@ -28,6 +29,7 @@ class ConfigManager:
         "recent_projects": [],  # EditProject recent list
         "show_welcome_on_startup": True,
         "show_project_manager_on_startup": True,
+        "project_manager_browser": {},
         "confirm_before_reset": True,
         "auto_load_last_project": True,
         "undo_history_limit": 50,

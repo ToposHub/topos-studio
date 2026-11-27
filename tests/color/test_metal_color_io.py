@@ -30,6 +30,7 @@ from src.shared.color.color_transform_provider import (
 )
 from src.shared.gpu.metal.context import MetalComputeContext
 from src.shared.gpu.metal.kernels_video import yuv_to_rgba_reference
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGBA
 
 requires_metal = pytest.mark.skipif(
     not MetalComputeContext.is_supported(), reason="无 Metal 设备（NOT RUN）")
@@ -316,6 +317,19 @@ class TestP010HdrOnMetal:
 
 @requires_metal
 class TestDisplayEncodeOnMetal:
+    def test_photo_backdrop_composites_only_transparent_pixels(self, metal_ctx: MetalComputeContext) -> None:
+        io = MetalColorIO(metal_ctx)
+        pixels = np.array([[[0.5, 0.25, 0.125, 0.0], [0.5, 0.25, 0.125, 1.0]]], np.float32)
+        source = io.upload_rgba16f(pixels)
+        output = io.encode_for_display(
+            source, DisplayOutputDescription("sdr_passthrough"),
+            viewport_background=VIEWER_BACKGROUND_RGBA[:3],
+        )
+        metal_ctx.finish()
+        result = io.read_rgba16f(output)
+        np.testing.assert_allclose(result[0, 0], VIEWER_BACKGROUND_RGBA, atol=1e-4)
+        np.testing.assert_array_equal(result[0, 1], pixels[0, 1])
+
     def _encode(self, metal_ctx, linear, output_kind, **kwargs):
         from src.features.color.core.frame_color_description import (
             DisplayOutputDescription,

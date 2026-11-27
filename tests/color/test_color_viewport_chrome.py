@@ -6,13 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 from PyQt6.QtCore import QPoint, QRectF, QSize, QSizeF, QPointF, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QColor, QIcon, QImage, QPainter
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QDockWidget, QGraphicsScene, QGraphicsView, QMainWindow, QToolButton, QWidget
 
 from src.features.color.ui.canvas import Canvas, VideoControlBar, ViewportMenuBar
 from src.features.color.ui.color_viewport_chrome import ColorViewportChrome
 from src.features.color.ui.panel_chrome import HEADER_CONTROL_HEIGHT
+from src.shared.video.viewer_colors import VIEWER_BACKGROUND_RGBA
 
 
 class _CanvasHost(QGraphicsView):
@@ -20,6 +21,7 @@ class _CanvasHost(QGraphicsView):
 
     update_video_control_bar_position = Canvas.update_video_control_bar_position
     _on_color_monitor_toggled = Canvas._on_color_monitor_toggled
+    set_manual_zoom = Canvas.set_manual_zoom
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -356,22 +358,63 @@ def test_color_display_toggles_keep_fine_vector_artwork(chrome) -> None:
         assert button.icon().cacheKey() == icon.cacheKey()
 
 
-def test_color_native_and_qt_backdrops_use_the_same_191919_surround(qapp) -> None:
-    from src.features.color.ui.gl_viewport import VIEWER_BACKGROUND
-    from PyQt6.QtGui import QColor
-
-    assert QColor.fromRgbF(*VIEWER_BACKGROUND).name() == "#191919"
-    # Construct the real Canvas with a native QWidget viewport instead of a
-    # QOpenGLWidget so no renderer/context/decoder is created in this test.
-    from unittest.mock import patch
-
+@pytest.mark.parametrize("photo_mode", [False, True])
+def test_color_qt_and_gl_surrounds_match(qtbot, monkeypatch, photo_mode: bool) -> None:
     class ViewportStub(QWidget):
         gl_initialized = pyqtSignal()
 
-    with patch("src.features.color.ui.canvas.GLCanvasViewport", ViewportStub):
-        canvas = Canvas()
-    assert canvas.backgroundBrush().color().name() == "#191919"
-    canvas.close()
+    monkeypatch.setattr("src.features.color.ui.canvas.GLCanvasViewport", ViewportStub)
+    canvas = Canvas(photo_mode=photo_mode)
+    qtbot.addWidget(canvas)
+    expected = "#191919"
+    assert QColor.fromRgbF(*VIEWER_BACKGROUND_RGBA).name() == expected
+    assert canvas.backgroundBrush().color().name() == expected
+
+    if photo_mode:
+        assert canvas.photo_viewer_background == VIEWER_BACKGROUND_RGBA
+        image = QImage(16, 16, QImage.Format.Format_RGB32)
+        image.fill(Qt.GlobalColor.black)
+        canvas.engine = SimpleNamespace(renderer=SimpleNamespace(current_front_tex_id=None))
+        painter = QPainter(image)
+        try:
+            canvas.drawBackground(painter, QRectF(image.rect()))
+        finally:
+            painter.end()
+            canvas.engine = None
+        assert image.pixelColor(8, 8).name() == expected
+
+
+def test_color_video_fit_tracks_viewport_resize_until_manual_zoom(monkeypatch, qtbot) -> None:
+    class ViewportStub(QWidget):
+        gl_initialized = pyqtSignal()
+
+    monkeypatch.setattr("src.features.color.ui.canvas.GLCanvasViewport", ViewportStub)
+    canvas = Canvas()
+    qtbot.addWidget(canvas)
+    ColorViewportChrome(canvas)
+    canvas.logical_size = QSizeF(1920.0, 1080.0)
+    canvas.video_control_bar.show_for_video()
+    canvas.resize(900, 500)
+    canvas.show()
+    canvas.fit_to_window()
+
+    def check_fit() -> None:
+        view = canvas.viewport()
+        available_height = view.height() - canvas.video_control_bar.height()
+        assert canvas.transform().m11() == pytest.approx(min(view.width() / 1920, available_height / 1080))
+        assert canvas.mapFromScene(QPointF(1920, 1080)).y() <= available_height + 1
+
+    check_fit()
+    canvas.resize(600, 500)
+    check_fit()
+    canvas.resize(600, 300)
+    check_fit()
+    canvas.viewport_menu._set_actual_size()
+    canvas.resize(920, 460)
+    assert canvas.transform().m11() == 1.0
+    canvas.fit_to_window()
+    canvas.resize(820, 380)
+    check_fit()
 
 
 @pytest.mark.parametrize("video_visible", [True, False])

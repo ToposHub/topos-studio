@@ -12,18 +12,22 @@ from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 from src.features.edit.ui.edit_viewport import EditViewport
 from src.features.edit.ui.program_viewer import ProgramViewerBar, TransportControlBar
 from src.features.edit.ui.source_viewer import SourceSlider, SourceViewerBar
+from src.shared.i18n.i18n import I18N
 
 
 class _Canvas(QWidget):
     zoom_changed = pyqtSignal(float)
+    is_fit_to_window = True
 
     def fit_to_window(self) -> None:
+        self.is_fit_to_window = True
         self.zoom_changed.emit(1.0)
 
     def actual_size(self) -> None:
-        self.zoom_changed.emit(2.0)
+        self.set_zoom(2.0)
 
     def set_zoom(self, zoom: float) -> None:
+        self.is_fit_to_window = False
         self.zoom_changed.emit(zoom)
 
 
@@ -126,7 +130,7 @@ def test_switch_preserves_marks_scrub_position_and_zoom(viewport) -> None:
     viewport.show_source()
     assert source.slider.value() == 37
     assert (source.toolbar._in_point, source.toolbar._out_point) == (10, 60)
-    source.viewer.zoom_changed.emit(1.5)
+    source.viewer.set_zoom(1.5)
     assert viewport.source_header.zoom_button.text() == "150%"
 
 
@@ -187,7 +191,7 @@ def test_opening_another_source_resets_header_zoom_and_metadata(qapp, widget_she
     assert widget.source_header.zoom_button.text() == "150%"
     source.open_asset(SimpleNamespace(asset_id="two", display_name="Camera B.mov",
                                      total_frames=500, fps=25.0, width=1920, height=1080))
-    assert widget.source_header.zoom_button.text() == "100%"
+    assert widget.source_header.zoom_button.text() == I18N.tr("viewport.zoom_auto", "Auto")
     assert widget.source_header.title.text() == "Camera B.mov"
     assert widget.source_header.timecode.text() == "00:00:00:00"
     assert source.slider.maximum() == 499
@@ -466,6 +470,24 @@ def test_dual_program_range_mirrors_timeline_marks_clear_and_undo(viewport, qtbo
     assert (slider._in_point, slider._out_point) == (None, None)
     viewport.set_dual_view(False)
     assert slider.isHidden()
+
+
+def test_fit_visible_monitors_resets_only_the_shown_canvases(viewport: EditViewport) -> None:
+    program = viewport.program_viewer.get_viewer()
+    source = viewport.source_viewer.viewer
+    program.set_zoom(2.0)
+    source.set_zoom(1.5)
+
+    viewport.fit_visible_monitors()
+    assert program.is_fit_to_window
+    assert not source.is_fit_to_window
+    assert viewport.program_header.zoom_button.text() == I18N.tr("viewport.zoom_auto", "Auto")
+
+    viewport.set_dual_view(True)
+    program.set_zoom(0.5)
+    viewport.fit_visible_monitors()
+    assert program.is_fit_to_window and source.is_fit_to_window
+    assert viewport.source_header.zoom_button.text() == I18N.tr("viewport.zoom_auto", "Auto")
 
 
 def test_program_zoom_presets_keep_viewer_api(viewport) -> None:

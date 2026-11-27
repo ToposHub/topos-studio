@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 import cv2
 import numpy as np
-from PyQt6.QtGui import QImage
+from PyQt6.QtGui import QImage, QResizeEvent
 from PyQt6.QtWidgets import QMainWindow
 
 from PyQt6.QtWidgets import (QFileDialog, QMessageBox, QInputDialog,
@@ -687,6 +687,9 @@ class FileOpsMixin:
             # path" message and leaves timeline edits out of the saved file.
             if getattr(self, "current_page", "") != "Edit":
                 self.switch_to_page("Edit")
+            apply_window_size = getattr(self, "_apply_video_project_window_size", None)
+            if callable(apply_window_size):
+                apply_window_size()
         if loaded:
             self._sync_mg_preset_project_root(filepath)
 
@@ -8761,7 +8764,10 @@ class FileOpsMixin:
         # No need to call it here to avoid double-stopping
 
         # Update current page layout in the dictionary before saving
-        self.page_layouts[self.current_page] = self.saveState()
+        from src.app.controllers.dock_layout_controller import save_workspace_dock_state
+
+        current_state = save_workspace_dock_state(self, self.current_page)
+        self.page_layouts[self.current_page] = current_state
 
         # Phase A: Also save to LayoutStore for current page
         if hasattr(self, '_save_current_layout_to_store'):
@@ -8794,7 +8800,7 @@ class FileOpsMixin:
 
         # Save geometry and state to config.json (batch update, no auto-save)
         self.config_manager.set("window_geometry", self.saveGeometry().toHex().data().decode(), auto_save=False)
-        self.config_manager.set("window_state", self.saveState().toHex().data().decode(), auto_save=False)
+        self.config_manager.set("window_state", current_state.toHex().data().decode(), auto_save=False)
 
         # Save floating dock sizes and positions
         for dock in self.all_docks:
@@ -8849,7 +8855,7 @@ class FileOpsMixin:
 
         # Legacy database save for compatibility
         self.db.set_setting("last_geometry", self.saveGeometry().toHex().data().decode())
-        self.db.set_setting("last_state", self.saveState().toHex().data().decode())
+        self.db.set_setting("last_state", current_state.toHex().data().decode())
 
         # Stop background threads
         if hasattr(self, 'engine') and self.engine:
@@ -8917,9 +8923,14 @@ class FileOpsMixin:
             # Open Media 的视频/图像/邻接工程分发保持一致。
             self._open_media_path(files[0])
 
-    def resizeEvent(self, event) -> None:
-        """主窗口大小改变时，更新播放器大小"""
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """Update the floating players and fit the active project viewers."""
         QMainWindow.resizeEvent(self, event)
+        page = getattr(self, "current_page", None)
+        if page in ("Edit", "Color", "Composite", "Mixer") and event.oldSize().isValid():
+            if not getattr(self, "_viewer_fit_resize_page", None):
+                QTimer.singleShot(0, self._fit_active_viewers_after_resize)
+            self._viewer_fit_resize_page = page
         # 当主窗口大小改变时，确保播放器也更新大小
         files_panel = self.files_panel
         if not files_panel:
@@ -8928,6 +8939,30 @@ class FileOpsMixin:
             p = getattr(self, attr, None)
             if p is not None and p.isVisible():
                 p.setGeometry(files_panel.rect())
+
+    def _fit_active_viewers_after_resize(self) -> None:
+        page = self._viewer_fit_resize_page
+        self._viewer_fit_resize_page = None
+        if page != self.current_page:
+            return
+
+        if page == "Mixer":
+            fit_layout = getattr(self, "_fit_mixer_workspace_height", None)
+            if callable(fit_layout):
+                fit_layout()
+        if page in ("Edit", "Color", "Mixer"):
+            viewport = getattr(self, "edit_viewport", None)
+            if viewport is not None and viewport.isVisible():
+                viewport.fit_visible_monitors()
+
+        if page == "Color":
+            viewer = getattr(self, "canvas", None)
+        elif page == "Composite":
+            viewer = getattr(self, "composite_viewer", None)
+        else:
+            return
+        if viewer is not None and viewer.isVisible():
+            viewer.fit_to_window()
 
     # ------------------------------------------------------------------
     # Auto-save trigger

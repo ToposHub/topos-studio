@@ -280,6 +280,19 @@ class TestDensityParity:
         assert got[3].sum() > 0, "over 平面应有计数（val > 1.0）"
         assert got[4].sum() == 0
 
+    @pytest.mark.parametrize("mode", ["waveform", "parade", "luma"])
+    def test_waveform_excursion_filter_preserves_legal_signal(self, mode: str) -> None:
+        image = np.full((16, 32, 3), 1.125, np.float32)
+        image[:4] = -0.08
+        image[-4:] = 0.5
+        assert _run(self.engine, self.ctx, image, mode, analysis_size=(32, 16),
+                    show_waveform_excursions=False)
+        density = self.engine.read_waveform_density()
+        assert not density[3:].any()
+        assert density[:3].any()
+        assert not density[:3, :130].any()
+        assert not density[:3, 170:].any()
+
     def test_vectorscope_color_bars(self):
         image = color_bars(64, 32)
         _run(self.engine, self.ctx, image, "vectorscope")
@@ -366,15 +379,14 @@ class TestDisplayPasses:
                              display_size=(300, 200))
         assert self.engine.render_demand(demand, src) is False
 
-    def test_waveform_graticule_visible_without_signal(self):
-        # 全黑输入：琥珀 graticule（0%/100% 线）仍可见——GL 同语义
+    def test_waveform_texture_leaves_ruler_to_presenter(self):
         frames = _run(self.engine, self.ctx,
                       np.zeros((16, 32, 3), np.float32), "waveform")
         image = self.engine.read_display(frames[0], "waveform")
-        # grid 色 (0.38,0.28,0.025)*255 ≈ (97,71,6)：R>G>B 的琥珀色存在
         amber = (image[..., 0].astype(int) > image[..., 1].astype(int) + 8) \
             & (image[..., 1].astype(int) > image[..., 2].astype(int))
-        assert amber.sum() > 0, "graticule 未绘制"
+        assert not amber.any()
+        assert image[..., :3].max() > 0
 
     def test_vectorscope_rim_visible(self):
         frames = _run(self.engine, self.ctx, color_bars(64, 32),

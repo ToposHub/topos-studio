@@ -35,6 +35,8 @@ logger = logging.getLogger(__name__)
 __all__ = ["DeliverWorkspace"]
 
 _DEFAULT_QUEUE_WIDTH = 370
+_DEFAULT_SETTINGS_WIDTH = 440
+_PREFERRED_PREVIEW_WIDTH = 400
 
 
 class DeliverWorkspace(QWidget):
@@ -66,10 +68,6 @@ class DeliverWorkspace(QWidget):
         self.setStyleSheet(
             f"QWidget#DeliverWorkspace {{ background-color: {C.BG_PANEL}; }}"
         )
-        # The nested Deliver layout needs room for the settings inspector,
-        # viewer and a readable queue while leaving a substantial timeline.
-        self.setMinimumSize(1240, 620)
-
         self._controller = VideoBatchExportController(parent=self)
         self._settings_panel = VideoExportSettingsPanel(self)
         self._settings_panel.range_type_changed.connect(self._on_range_type_changed)
@@ -114,7 +112,7 @@ class DeliverWorkspace(QWidget):
         self._right_splitter.setChildrenCollapsible(False)
         self._right_splitter.addWidget(self._edit_preview_splitter)
         self._right_splitter.addWidget(self._timeline_placeholder)
-        self._right_splitter.setStretchFactor(0, 0)
+        self._right_splitter.setStretchFactor(0, 1)
         self._right_splitter.setStretchFactor(1, 1)
         self._right_splitter.setSizes([600, 430])
 
@@ -135,7 +133,7 @@ class DeliverWorkspace(QWidget):
         self._splitter.addWidget(self._right_splitter)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
-        self._splitter.setSizes([440, 1000])
+        self._splitter.setSizes([_DEFAULT_SETTINGS_WIDTH, 1000])
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -179,6 +177,7 @@ class DeliverWorkspace(QWidget):
             self.return_batch_panel_to_deliver()
         else:
             self._apply_render_queue_visibility()
+        self.ensure_deliver_layout()
         self._save_render_queue_layout()
 
     @property
@@ -205,15 +204,19 @@ class DeliverWorkspace(QWidget):
         return self._splitter
 
     def ensure_deliver_layout(self) -> None:
-        """Restore the Resolve-style proportions after Qt state restore."""
-        width = max(self._splitter.width(), self.minimumWidth())
-        settings_width = 440
-        right_width = max(760, width - settings_width - self._splitter.handleWidth())
-        self._splitter.setSizes([settings_width, right_width])
+        """Size the export panels for the current dock geometry."""
+        available = self._splitter.width() - self._splitter.handleWidth()
+        queue_width = (self._batch_panel.minimumWidth() + self._edit_preview_splitter.handleWidth()
+                       if self._batch_panel_host.dock is None
+                       and self._render_queue_visibility_action.isChecked() else 0)
+        settings_width = max(self._settings_panel.minimumWidth(),
+                             min(_DEFAULT_SETTINGS_WIDTH,
+                                 available - queue_width - _PREFERRED_PREVIEW_WIDTH))
+        self._splitter.setSizes([settings_width, max(1, available - settings_width)])
         if self._edit_panels_attached:
-            right_height = max(self._right_splitter.height(), 520)
-            top_height = max(360, int(right_height * 0.57))
-            self._right_splitter.setSizes([top_height, max(240, right_height - top_height)])
+            available_height = max(0, self._right_splitter.height() - self._right_splitter.handleWidth())
+            top_height = round(available_height * 0.57)
+            self._right_splitter.setSizes([top_height, available_height - top_height])
         self._apply_render_queue_visibility()
 
     # ------------------------------------------------------------------
@@ -339,9 +342,11 @@ class DeliverWorkspace(QWidget):
         if not splitter.isVisible():
             # Seed the ratio before the workspace has received its first layout.
             available = 680 + self._render_queue_width
-        self._edit_preview_splitter.setSizes(
-            [max(1, available - self._render_queue_width), self._render_queue_width]
-        )
+        queue_width = self._render_queue_width
+        if queue_width == _DEFAULT_QUEUE_WIDTH:
+            queue_width = max(self._batch_panel.minimumWidth(),
+                              min(queue_width, available - _PREFERRED_PREVIEW_WIDTH))
+        self._edit_preview_splitter.setSizes([max(1, available - queue_width), queue_width])
 
     def _apply_render_queue_visibility(self) -> None:
         visible = self._render_queue_visibility_action.isChecked()
@@ -357,9 +362,7 @@ class DeliverWorkspace(QWidget):
             if visible:
                 self._restore_embedded_render_queue_width()
 
-    def _on_render_queue_visibility_requested(self, checked: bool) -> None:
-        if not checked:
-            self._remember_embedded_render_queue_width()
+    def _on_render_queue_visibility_requested(self, _checked: bool) -> None:
         self._apply_render_queue_visibility()
         self._save_render_queue_layout()
 
@@ -382,7 +385,6 @@ class DeliverWorkspace(QWidget):
     def float_batch_panel(self) -> None:
         """Detach only the queue into a floatable/dockable QDockWidget."""
         if self._main_window is not None:
-            self._remember_embedded_render_queue_width()
             self._batch_panel_host.float_panel()
 
     def return_batch_panel_to_deliver(self) -> None:
@@ -502,13 +504,16 @@ class DeliverWorkspace(QWidget):
 
         self._edit_preview_splitter.setStretchFactor(0, 3)
         self._edit_preview_splitter.setStretchFactor(1, 0)
-        self._right_splitter.setStretchFactor(0, 0)
+        self._right_splitter.setStretchFactor(0, 1)
         self._right_splitter.setStretchFactor(1, 1)
         self._right_splitter.setSizes([600, 430])
         self._edit_panels_attached = True
         timeline_changed = getattr(timeline_panel, "timeline_changed", None)
         if timeline_changed is not None:
             timeline_changed.connect(self._on_shared_timeline_changed)
+        range_adjusted = getattr(timeline_panel, "deliver_range_adjusted", None)
+        if range_adjusted is not None:
+            range_adjusted.connect(self._settings_panel.use_in_out_range)
         self._on_range_type_changed(self._settings_panel.current_range_type())
         self.ensure_deliver_layout()
         self.edit_panels_borrowed.emit()
@@ -524,7 +529,6 @@ class DeliverWorkspace(QWidget):
         """
         if not self._edit_panels_attached:
             return
-        self._remember_embedded_render_queue_width()
         fully_restored = True
         if self._shared_program_viewer is not None:
             dock = self._program_viewer_dock
@@ -545,6 +549,9 @@ class DeliverWorkspace(QWidget):
                 self._shared_program_viewer.show()
 
         if self._shared_timeline_panel is not None:
+            range_adjusted = getattr(self._shared_timeline_panel, "deliver_range_adjusted", None)
+            if range_adjusted is not None:
+                range_adjusted.disconnect(self._settings_panel.use_in_out_range)
             timeline_changed = getattr(self._shared_timeline_panel, "timeline_changed", None)
             if timeline_changed is not None:
                 try:

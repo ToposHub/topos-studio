@@ -404,7 +404,7 @@ class ProgramViewerBar(ViewportToolBarBase):
         menu.addAction(I18N.tr("viewport.zoom_in", "Zoom In"), self.zoom_in_requested.emit)
         menu.addAction(I18N.tr("viewport.zoom_out", "Zoom Out"), self.zoom_out_requested.emit)
         menu.addSeparator()
-        menu.addAction(I18N.tr("viewport.fit", "Fit to Window"), self.fit_requested.emit)
+        menu.addAction(I18N.tr("viewport.zoom_auto", "Auto"), self.fit_requested.emit)
         menu.addAction(I18N.tr("viewport.actual_size", "Actual Size"), self.actual_size_requested.emit)
         menu.addSeparator()
         menu.addAction(I18N.tr("viewport.fullscreen", "Fullscreen"), self.fullscreen_requested.emit)
@@ -2564,6 +2564,14 @@ class ProgramViewer(QOpenGLWidget):
         self._view_transform.mode = "manual"
         self.update()
 
+    @property
+    def is_fit_to_window(self) -> bool:
+        return self._view_transform.mode == "fit"
+
+    def fit_to_window(self) -> None:
+        """Activate automatic whole-frame fitting."""
+        self._fit_to_window()
+
     def _fit_to_window(self) -> None:
         """Fit video to window (reset zoom and pan)."""
         self._view_transform.reset_fit()
@@ -3576,6 +3584,10 @@ class ProgramViewerWidget(QWidget):
     def get_viewer(self) -> ProgramViewer:
         """Get the ProgramViewer instance."""
         return self._viewer
+
+    def picture_size(self) -> QSize:
+        """Return the preview surface size shared by the OpenGL and Metal views."""
+        return self._viewer_container.size()
 
     def set_monitor_readback_enabled(self, enabled: bool) -> None:
         """Enable GPU PBO readback for external monitor output."""

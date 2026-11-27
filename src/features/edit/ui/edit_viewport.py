@@ -33,8 +33,8 @@ from src.features.edit.ui.viewport_scrubber import MonitorScrubber
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from src.features.edit.ui.program_viewer import ProgramViewerWidget
-    from src.features.edit.ui.source_viewer import SourceViewerWidget
+    from src.features.edit.ui.program_viewer import ProgramViewer, ProgramViewerWidget
+    from src.features.edit.ui.source_viewer import SourceViewer, SourceViewerWidget
 
 HEADER_HEIGHT = 30
 HEADER_TITLE_GAP = 8
@@ -263,7 +263,7 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         self.zoom_button.setFixedSize(62, 28)
         self.zoom_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.zoom_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.zoom_button.setText(I18N.tr("viewport.fit", "Fit"))
+        self.zoom_button.setText(I18N.tr("viewport.zoom_auto", "Auto"))
         self.zoom_button.setToolTip(I18N.tr("edit.viewport.zoom", "Viewer Zoom"))
         self.zoom_button.setAccessibleName(self.zoom_button.toolTip())
         self.zoom_button.setStyleSheet(_BUTTON_STYLE + "QToolButton { padding-right: 12px; border-left: 1px solid #131316; border-right: 1px solid #131316; }")
@@ -309,6 +309,14 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.position_title()
+
+    def bind_zoom(self, canvas: ProgramViewer | SourceViewer) -> None:
+        def update_label(value: float) -> None:
+            label = I18N.tr("viewport.zoom_auto", "Auto") if canvas.is_fit_to_window else f"{value * 100.0:.0f}%"
+            if self.zoom_button.text() != label:
+                self.zoom_button.setText(label)
+
+        canvas.zoom_changed.connect(update_label)
 
     def add_display_control(self, control: QWidget) -> None:
         """Insert a reference display cell between timecode and mode switch."""
@@ -459,10 +467,10 @@ class EditViewport(QWidget):
         header = _MonitorHeader(bar.source_label, bar.timecode_label, bar.duration_label, viewer)
         layout.insertWidget(0, header)
         zoom_menu = QMenu(header)
-        zoom_menu.addAction(I18N.tr("viewport.fit", "Fit to Window"), viewer.viewer.fit_to_window)
+        zoom_menu.addAction(I18N.tr("viewport.zoom_auto", "Auto"), viewer.viewer.fit_to_window)
         zoom_menu.addAction(I18N.tr("viewport.actual_size", "Actual Size"), viewer.viewer.actual_size)
         header.zoom_button.setMenu(zoom_menu)
-        viewer.viewer.zoom_changed.connect(lambda value: header.zoom_button.setText(f"{value * 100.0:.0f}%"))
+        header.bind_zoom(viewer.viewer)
         options = QMenu(header)
         clear_label = I18N.tr("timeline.range.clear", "Clear Range")
         clear_action = options.addAction(viewer_icon("clear_range"), clear_label, bar.btn_clear.click)
@@ -548,7 +556,7 @@ class EditViewport(QWidget):
         toolbar.view_menu.addSeparator()
         for zoom in (0.125, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0):
             toolbar.view_menu.addAction(f"{zoom * 100.0:g}%", lambda checked=False, value=zoom: viewer.get_viewer().set_zoom(value))
-        viewer.get_viewer().zoom_changed.connect(lambda value: header.zoom_button.setText(f"{value * 100.0:.0f}%"))
+        header.bind_zoom(viewer.get_viewer())
         options = QMenu(header)
         options.addMenu(toolbar.view_menu).setText(I18N.tr("viewport.view", "View"))
         options.addMenu(toolbar.quality_menu).setText(I18N.tr("edit.viewport.quality", "Timeline Proxy Resolution"))
@@ -793,6 +801,12 @@ class EditViewport(QWidget):
         action.setChecked(self.source_viewer.loop_enabled)
         action.setEnabled(self.source_viewer.current_asset is not None)
         del blocker
+
+    def fit_visible_monitors(self) -> None:
+        """Return the visible monitors to automatic whole-frame fitting."""
+        for canvas in (self.program_viewer.get_viewer(), self.source_viewer.viewer):
+            if canvas.isVisible() and not canvas.is_fit_to_window:
+                canvas.fit_to_window()
 
     def set_dual_view(self, enabled: bool) -> None:
         """Switch monitor presentation while retaining both viewer instances."""

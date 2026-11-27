@@ -2209,6 +2209,12 @@ class LayerOpsMixin:
             interacting = bool(getattr(engine, 'is_interacting', False))
             curves_frozen = is_playing or interacting or self._scope_scrub_is_active()
             scope_visible = self._is_scope_panel_visible()
+            scope_source = getattr(getattr(self, 'scope_panel', None), 'scope_source', 'graded')
+            if scope_visible and scope_source in ('source', 'reference'):
+                self._refresh_alternate_scope_input(scope_source)
+                scope_visible = False
+            elif scope_source == 'graded':
+                self._alternate_scope_input = None
             curves_overlay = self._is_curves_panel_visible() and not curves_frozen
             if not scope_visible and not curves_overlay:
                 _scope_diag().record("submit", "panel_hidden",
@@ -2341,6 +2347,7 @@ class LayerOpsMixin:
                 display_size=state['display_size'],
                 analysis_size=analysis,
                 vectorscope_zoom=state['vectorscope_zoom'],
+                show_waveform_excursions=state.get('show_waveform_excursions', True),
                 is_playing=is_playing,
                 mask_layer_id=mask_layer_id,
                 mask_enabled=mask_enabled,
@@ -2378,6 +2385,10 @@ class LayerOpsMixin:
             return
         is_playing = self._scope_playback_is_active()
         self._submit_gpu_scope_demand(is_playing=is_playing, force=True)
+
+    def _on_scope_reference_changed(self) -> None:
+        if self.scope_panel.scope_source == 'reference' and self._is_scope_panel_visible():
+            self._refresh_alternate_scope_input('reference')
 
     def _current_curve_mode(self) -> str:
         mode = getattr(getattr(self, 'curves_panel', None), 'curve_mode', 'Custom')
@@ -2687,6 +2698,30 @@ class LayerOpsMixin:
                 self.canvas.update_mask_overlay(active_layer)
         self.update_undo_redo_actions()
 
+    def _refresh_alternate_scope_input(self, source: str) -> None:
+        """Refresh an explicitly selected CPU input when its image changes."""
+        image = (self.engine.img_full_original if source == 'source'
+                 else self.engine.get_reference_still_cpu())
+        previous = getattr(self, '_alternate_scope_input', None)
+        if previous is not None and previous[0] == source and previous[1] is image:
+            return
+        self._alternate_scope_input = (source, image)
+        if image is None or image.size == 0:
+            self.scope_panel.clear_scope_input(source)
+            return
+        height, width = image.shape[:2]
+        scale = min(1.0, 768 / max(width, height))
+        if scale < 1.0:
+            image = cv2.resize(image, (max(1, round(width * scale)), max(1, round(height * scale))),
+                               interpolation=cv2.INTER_AREA)
+        if image.ndim == 2:
+            image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        divisor = np.iinfo(image.dtype).max if np.issubdtype(image.dtype, np.integer) else 1.0
+        image = np.ascontiguousarray(image[:, :, :3], dtype=np.float32)
+        if divisor != 1.0:
+            image = image / divisor
+        self.scope_panel.update_scope(image, source=source)
+
     def _update_scope_panel(self, result_img: np.ndarray) -> None:
         """Push a final BGR float image to scopes, preserving mask analysis.
 
@@ -2694,25 +2729,8 @@ class LayerOpsMixin:
         reference 模式喂参考 still（无则不更新），graded 走原有路径。
         """
         source = getattr(self.scope_panel, 'scope_source', 'graded')
-        if source == 'source':
-            orig = getattr(self.engine, 'img_full_original', None)
-            if orig is None or orig.size == 0:
-                return
-            if orig.dtype == np.uint8:
-                img = orig.astype(np.float32) / 255.0
-            elif orig.dtype == np.uint16:
-                img = orig.astype(np.float32) / 65535.0
-            else:
-                img = orig.astype(np.float32)
-            self.scope_panel.update_scope(np.ascontiguousarray(img),
-                                          source='source')
-            return
-        if source == 'reference':
-            getter = getattr(self.engine, 'get_reference_still_cpu', None)
-            ref = getter() if callable(getter) else None
-            if ref is None or ref.size == 0:
-                return
-            self.scope_panel.update_scope(ref, source='reference')
+        if source in ('source', 'reference'):
+            self._refresh_alternate_scope_input(source)
             return
 
         mask_data = None

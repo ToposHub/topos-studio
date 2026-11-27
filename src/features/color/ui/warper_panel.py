@@ -96,6 +96,7 @@ class WarperPanel(QWidget):
         self._isolation_item: QGraphicsPixmapItem | None = None
         self._dialog: QDialog | None = None
         self._footer_narrow: bool | None = None
+        self._footer_space_narrow = False
         self._resolutions = {"hue_saturation": (6, 6), "chroma_luma": (6, 6)}
         self._linked = {"hue_saturation": True, "chroma_luma": True}
         self._spaces = {"hue_saturation": "HSP", "chroma_luma": "HSP"}
@@ -105,7 +106,7 @@ class WarperPanel(QWidget):
         from src.features.color.core.warper_chroma709 import chroma_warp_position
 
         self.setObjectName("colorWarperPanel")
-        self.setMinimumWidth(600)
+        self.setMinimumWidth(420)
         self.setStyleSheet(f"QWidget#warperSurface {{ background: {C.BG_PANEL}; }}")
         self._host_layout = QVBoxLayout(self)
         self._host_layout.setContentsMargins(0, 0, 0, 0)
@@ -313,15 +314,23 @@ class WarperPanel(QWidget):
         axis_spectrum.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ba1741, stop:0.25 #dfb63a, stop:0.5 #42baa5, stop:0.75 #2990c3, stop:1 #ba1741);")
         axis_group_layout.addWidget(axis_spectrum)
         footer.addWidget(self._axis_group)
-        space_icon = tool_button("space", tr("color_space", "Color Space"))
-        space_icon.setFixedWidth(20)
-        footer.addWidget(space_icon)
+        self._space_icon = tool_button("space", tr("color_space", "Color Space"))
+        self._space_icon.setFixedWidth(20)
+        footer.addWidget(self._space_icon)
         self.space_combo = self._combo(["HSV", "HSL", "HSY", "HSP"], 64)
         self.space_combo.setCurrentText("HSP")
         self.space_combo.setAccessibleName(tr("color_space", "Color Space"))
         self.space_combo.currentTextChanged.connect(self._space_changed)
         footer.addWidget(self.space_combo)
-        space_icon.clicked.connect(lambda: self.space_combo.showPopup())
+        self._space_icon.clicked.connect(lambda: self.space_combo.showPopup())
+        self._space_row = QWidget()
+        self._space_row.setFixedHeight(PARAMETER_BAR_HEIGHT)
+        self._space_row_layout = QHBoxLayout(self._space_row)
+        self._space_row_layout.setContentsMargins(0, 0, 0, 0)
+        self._space_row_layout.setSpacing(2)
+        self._space_row_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._footer_layout.insertWidget(1, self._space_row)
+        self._space_row.hide()
         layout.addWidget(self.footer)
 
     def _build_tools(self, body: QHBoxLayout) -> None:
@@ -716,21 +725,36 @@ class WarperPanel(QWidget):
         if not hasattr(self, "tools_scroll"):
             return
         canvas_width = self.surface.width() - self.tools_scroll.width() - self._tools_divider.width()
-        inline_width = self._footer_controls.minimumSize().width()
-        if self._footer_narrow:
-            # The wrapped axis controls currently live outside the main row.
-            inline_width += self._axis_group.minimumSizeHint().width() + self._footer_controls.spacing()
-        narrow = self.mode == "chroma_luma" and canvas_width < inline_width
-        if narrow == self._footer_narrow:
-            return
-        self._footer_narrow = narrow
-        self._footer_controls.removeWidget(self._axis_group)
-        self._footer_layout.removeWidget(self._axis_group)
-        if narrow:
-            self._footer_layout.insertWidget(0, self._axis_group, 0, Qt.AlignmentFlag.AlignCenter)
-        else:
-            self._footer_controls.insertWidget(self._footer_controls.count() - 2, self._axis_group,
-                                              0, Qt.AlignmentFlag.AlignVCenter)
+        footer = self._footer_controls
+        margins = footer.contentsMargins()
+        base_width = (margins.left() + margins.right() + 6 * footer.spacing()
+                      + sum(widget.minimumWidth() for widget in (
+                          self.resolution_h_icon, self.grid_combo, self.resolution_s_icon,
+                          self.saturation_combo, self.link_button, self._space_icon, self.space_combo)))
+        wrap_space = canvas_width < base_width
+        if wrap_space != self._footer_space_narrow:
+            self._footer_space_narrow = wrap_space
+            source, target = ((footer, self._space_row_layout) if wrap_space
+                              else (self._space_row_layout, footer))
+            for widget in (self._space_icon, self.space_combo):
+                source.removeWidget(widget)
+                target.addWidget(widget)
+                widget.show()
+            self._space_row.setVisible(wrap_space)
+
+        wrap_axis = (self.mode == "chroma_luma"
+                     and canvas_width < base_width + self._axis_group.minimumSizeHint().width() + footer.spacing())
+        if wrap_axis != self._footer_narrow:
+            self._footer_narrow = wrap_axis
+            footer.removeWidget(self._axis_group)
+            self._footer_layout.removeWidget(self._axis_group)
+            if wrap_axis:
+                self._footer_layout.insertWidget(0, self._axis_group, 0, Qt.AlignmentFlag.AlignCenter)
+            else:
+                inline_index = footer.indexOf(self._space_icon)
+                footer.insertWidget(inline_index if inline_index >= 0 else footer.count(), self._axis_group,
+                                    0, Qt.AlignmentFlag.AlignVCenter)
+            self._axis_group.setVisible(self.mode == "chroma_luma")
 
     def ui_state(self) -> dict[str, Any]:
         return {"version": 1, "mode": self.mode, "linked": dict(self._linked),

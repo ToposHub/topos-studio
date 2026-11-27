@@ -25,7 +25,6 @@ from src.app.controllers.edit_controller import EditControllerMixin
 from src.app.controllers.layer_controller import LayerOpsMixin
 from src.app.controllers.mixer_recording_controller import MixerRecordingControllerMixin
 from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
-from src.app.ui.workspace_panel_bar import DockTabAction
 from src.features.edit.core.project import EditProject, MediaAsset
 from src.features.edit.core.selection import TimelineSelection
 from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
@@ -146,6 +145,52 @@ def project_host(qtbot) -> ProjectHost:
     return host
 
 
+@pytest.mark.parametrize("visible_at_capture", [False, True])
+def test_mixer_editing_layout_gives_timeline_three_fifths(
+    project_host: ProjectHost, visible_at_capture: bool,
+) -> None:
+    host = project_host
+    host.setVisible(visible_at_capture)
+    host.resize(1450, 1260)
+    host.all_docks = host.findChildren(QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
+    host._arrange_audio_workspace_layout()
+    host._attach_edit_panels_to_mixer()
+    host.show()
+    QApplication.processEvents()
+
+    timeline = host.dock_audio_timeline
+    viewer = host.dock_audio_viewer
+    lower_row = timeline.geometry().bottom() - viewer.geometry().bottom()
+    assert lower_row / (lower_row + viewer.height()) == pytest.approx(0.6, abs=0.015)
+    assert timeline.minimumHeight() == 260
+
+
+def test_timeline_keeps_minimum_height_across_workspaces(project_host: ProjectHost) -> None:
+    host = project_host
+    timeline = host.timeline_panel
+    host.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, host.dock_edit_timeline)
+
+    def assert_minimum_height(dock: QDockWidget) -> None:
+        dock.show()
+        QApplication.processEvents()
+        host.resizeDocks([dock], [100], Qt.Orientation.Vertical)
+        QApplication.processEvents()
+
+        assert timeline.isVisible()
+        assert timeline.height() >= 260
+        assert dock.height() >= 260
+
+    assert_minimum_height(host.dock_edit_timeline)
+    host.dock_edit_timeline.hide()
+    host.show_mixer()
+    assert_minimum_height(host.dock_audio_timeline)
+
+    host.dock_audio_timeline.hide()
+    host._restore_edit_panels_from_mixer()
+    host.current_page = "Edit"
+    assert_minimum_height(host.dock_edit_timeline)
+
+
 def test_volume_and_insert_rack_share_commands_across_workspaces(project_host, qtbot) -> None:
     host = project_host
     panel = host.audio_mixer_panel
@@ -159,7 +204,7 @@ def test_volume_and_insert_rack_share_commands_across_workspaces(project_host, q
 
     host.edit_viewport.set_dual_view(True)
     host.show_mixer()
-    assert panel.parentWidget() is host.dock_audio_console.widget()
+    assert host.dock_audio_console.widget().widget() is panel
     assert host.dock_audio_console.windowTitle() == host.dock_audio_mixer.windowTitle()
     assert host.timeline_panel.parentWidget() is host.dock_audio_timeline.widget()
     assert host.edit_viewport.parentWidget() is host.dock_audio_viewer.widget()
@@ -913,6 +958,8 @@ def test_mixer_effects_library_is_independent_and_pool_restores(project_host, tm
     assert pool.parentWidget() is host.dock_audio_media_pool.widget()
     assert effects.parentWidget() is host.dock_edit_effects
     assert pool._current_bin_id == "all_audio" and pool._current_bin_is_smart
+    assert pool.action_show_smart_bins.isChecked()
+    assert not pool.smart_bin_tree.topLevelItem(1).isExpanded()
     assert pool.btn_metadata_view.isHidden() and pool.thumb_slider.isHidden()
     assert effects.tabs.currentIndex() == 0
     library.search.setText("reverb")
@@ -934,90 +981,177 @@ def test_mixer_effects_library_is_independent_and_pool_restores(project_host, tm
     assert pool._audio_workspace_saved is None
 
 
-def test_project_mixer_factory_positions_console_left_and_timeline_below(project_host, qtbot) -> None:
+def test_mixer_editing_layout_positions_console_left_and_timeline_below(project_host, qtbot) -> None:
     host = project_host
+    host.resize(1734, 1030)
     host.all_docks += (
         host.dock_audio_mixer, host.dock_program_viewer, host.dock_edit_timeline,
         host.dock_properties, host.dock_edit_media_pool, host.dock_edit_effects,
     )
-    assert host._seed_audio_workspace_layout()
-    assert host.restoreState(host.page_layouts["Mixer"])
     host.show_mixer()
-    console, viewer, timeline, _, pool, effects, properties = host._audio_workspace_docks()
-    qtbot.waitUntil(lambda: all(not dock.visibleRegion().isEmpty()
-                                for dock in (console, viewer, timeline, pool, properties)))
-    assert effects.isHidden()
-    assert console.geometry().right() < pool.geometry().left() < viewer.geometry().left()
-    assert host.dockWidgetArea(properties) == Qt.DockWidgetArea.RightDockWidgetArea
-    assert 280 <= properties.width() <= 400
-    assert host.dockWidgetArea(effects) == Qt.DockWidgetArea.TopDockWidgetArea
-    assert console.geometry().bottom() < timeline.geometry().top()
-    assert timeline.geometry().right() < properties.geometry().left()
-    pool_shortcut = DockTabAction(pool, host)
-    pool_shortcut.sync()
-    assert pool_shortcut.isChecked()
-    effects.show()
-    effects.raise_()
-    assert pool in host.tabifiedDockWidgets(effects)
-    pool_shortcut.sync()
-    assert not pool_shortcut.isChecked()
-    pool_shortcut.trigger()
-    qtbot.waitUntil(lambda: not pool.visibleRegion().isEmpty())
-    assert effects.visibleRegion().isEmpty()
-    pool_shortcut.trigger()
-    assert pool.isHidden()
-    panel = host.dock_audio_clip_editor
-    editor_shortcut = DockTabAction(panel, host)
-    editor_shortcut.sync()
-    assert not editor_shortcut.isChecked() and not panel.isHidden()
-    editor_shortcut.trigger()
-    qtbot.waitUntil(lambda: not panel.visibleRegion().isEmpty())
+    host._arrange_audio_workspace_layout()
+    console, viewer, timeline, editor, pool, effects, properties = host._audio_workspace_docks()
+    qtbot.waitUntil(lambda: all(dock.geometry().intersects(host.rect()) for dock in (console, viewer, timeline)))
+    assert set(host.tabifiedDockWidgets(pool)) == {console, effects}
+    assert not console.isHidden() and not effects.isHidden()
+    assert not properties.isHidden()
+    minimum = max(properties.minimumWidth(), properties.minimumSizeHint().width())
+    assert properties.width() == pytest.approx(minimum * 1.5, abs=8)
+    assert viewer.width() > properties.width()
+    picture = host.program_viewer_widget.picture_size()
+    assert picture.width() == pytest.approx(picture.height() * 16 / 9, abs=3)
+    assert console.geometry().right() < viewer.geometry().left()
+    assert viewer.geometry().bottom() < timeline.geometry().top()
+
+    properties.toggleViewAction().trigger()
+    assert properties.isHidden()
+    properties.toggleViewAction().trigger()
+    qtbot.waitUntil(lambda: not properties.visibleRegion().isEmpty())
+    assert host.dockWidgetArea(properties) == Qt.DockWidgetArea.TopDockWidgetArea
+    assert viewer.geometry().right() < properties.geometry().left()
+    assert properties.geometry().bottom() < timeline.geometry().top()
+    assert timeline.width() >= host.width() - 12
+
+    assert editor in host.tabifiedDockWidgets(timeline)
+    assert not editor.isHidden()
+    editor.raise_()
+    qtbot.waitUntil(lambda: not editor.visibleRegion().isEmpty())
     assert timeline.visibleRegion().isEmpty()
 
 
-@pytest.mark.parametrize(("library_below", "hide_effects"), [(True, False), (False, False), (False, True)])
-def test_older_mixer_layout_moves_library_and_preserves_foreground_tab(
-    project_host, qtbot, monkeypatch, library_below, hide_effects,
+@pytest.mark.parametrize("builtin_selected", [True, False])
+def test_mixer_layout_upgrade_applies_once_only_to_builtin(
+    project_host, monkeypatch, builtin_selected: bool,
 ) -> None:
     host = project_host
-    host.all_docks += (
-        host.dock_audio_mixer, host.dock_program_viewer, host.dock_edit_timeline,
-        host.dock_properties, host.dock_edit_media_pool, host.dock_edit_effects,
-    )
     assert host._seed_audio_workspace_layout()
-    assert host.restoreState(host.page_layouts["Mixer"])
+    host._arrange_audio_workspace_layout()
     host.show_mixer()
-    console, viewer, timeline, editor, pool, effects, _ = host._audio_workspace_docks()
-    if library_below:
-        host.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, effects)
-    else:
-        host.splitDockWidget(viewer, effects, Qt.Orientation.Horizontal)
+    console, viewer, timeline, _, pool, effects, properties = host._audio_workspace_docks()
+    monkeypatch.setattr(host, "_mixer_needs_compact_layout", lambda: False)
+    host.splitDockWidget(viewer, effects, Qt.Orientation.Horizontal)
     host.tabifyDockWidget(effects, pool)
     effects.show()
     pool.show()
-    pool.raise_()
-    if hide_effects:
-        effects.hide()
-    qtbot.waitUntil(lambda: all(not dock.visibleRegion().isEmpty()
-                                for dock in (pool, console, viewer, timeline)))
-    if library_below:
-        assert host.dockWidgetArea(effects) == Qt.DockWidgetArea.BottomDockWidgetArea
-    else:
-        assert viewer.geometry().right() < pool.geometry().left()
-    options: dict[str, object] = {"mixer_media_docks_layout_version": 1}
+    properties.hide()
+    options: dict[str, object] = {}
     host.config_manager = SimpleNamespace(
         get=options.get, set=lambda key, value, **_kwargs: options.update({key: value}),
-        save_config=lambda: None,
     )
-    monkeypatch.setattr(host, "_save_current_layout_to_store", lambda _page: None)
-    host._migrate_mixer_media_docks_layout()
-    qtbot.waitUntil(lambda: not pool.visibleRegion().isEmpty())
-    qtbot.waitUntil(lambda: console.geometry().right() < pool.geometry().left() < viewer.geometry().left())
-    assert host.dockWidgetArea(effects) == Qt.DockWidgetArea.TopDockWidgetArea
-    assert not pool.visibleRegion().isEmpty() and effects.visibleRegion().isEmpty()
-    assert effects.isHidden() is hide_effects
-    assert console.geometry().right() < pool.geometry().left() < viewer.geometry().left()
-    assert editor in host.tabifiedDockWidgets(timeline)
+    monkeypatch.setattr(host, "_page_layout_choices", lambda: [("Default Layout", "factory"), ("Custom", None)])
+    monkeypatch.setattr(host, "_active_page_layout_index", lambda _choices: 1 if builtin_selected else 2)
+    saved = []
+    monkeypatch.setattr(host, "_save_current_layout_to_store", lambda page, **kwargs: saved.append(page))
+    host._migrate_mixer_workspace_layout()
+    assert properties.isHidden() is not builtin_selected
+    assert (set(host.tabifiedDockWidgets(console)) == {pool, effects}) is builtin_selected
+    assert saved == (["Mixer"] if builtin_selected else [])
+
+    timeline.hide()
+    host._migrate_mixer_workspace_layout()
+    assert timeline.isHidden()
+
+
+def test_video_mixing_upgrades_legacy_preset_and_moves_console_at_minimum_height(
+    project_host, monkeypatch, qtbot,
+) -> None:
+    host = project_host
+    host.resize(1450, 1150)
+    host.all_docks = host.findChildren(QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
+    assert host._seed_audio_workspace_layout()
+    assert host.restoreState(host.page_layouts["Mixer"])
+    host.show_mixer()
+    console, viewer, timeline, editor, pool, effects, properties = host._audio_workspace_docks()
+    viewer.hide()
+    options: dict[str, object] = {}
+    host.config_manager = SimpleNamespace(
+        get=options.get, set=lambda key, value, **_kwargs: options.update({key: value}),
+    )
+    options[host._active_page_layout_key()] = {"preset_id": "mixer_tabbed"}
+    options[host._video_mix_workspace_layout_version_key()] = 2
+    monkeypatch.setattr(host, "_custom_page_layouts", lambda: {})
+    monkeypatch.setattr(host, "_save_current_layout_to_store", lambda *_args, **_kwargs: None)
+    host._migrate_mixer_workspace_layout()
+    qtbot.waitUntil(lambda: not viewer.visibleRegion().isEmpty() and console.geometry().intersects(host.rect()))
+    assert any(bar.tabText(bar.currentIndex()) == console.windowTitle() for bar in host.findChildren(QTabBar))
+    assert viewer.x() == console.x()
+    assert viewer.geometry().bottom() < console.y()
+    assert viewer.geometry().right() < timeline.x()
+    assert timeline.y() < console.y() < timeline.geometry().bottom()
+    assert timeline.width() > viewer.width()
+    left_height = console.geometry().bottom() + 1 - viewer.y()
+    picture = host.program_viewer_widget.picture_size()
+    assert abs(picture.width() - picture.height() * 16 / 9) <= 3
+    assert viewer.width() <= round(host.width() * 0.34) + 2
+    assert set(host.tabifiedDockWidgets(pool)) == {console, effects, properties}
+    _assert_mixer_tab_order(host, pool, console, effects, properties)
+    assert not properties.isHidden()
+    assert host.tabifiedDockWidgets(timeline) == [editor]
+
+    minimum = host.audio_mixer_panel.minimumSizeHint().height()
+    host._fit_video_mix_workspace_height()
+    assert console in host.tabifiedDockWidgets(pool)
+    host.resizeDocks([viewer, console], [left_height - minimum + 75, minimum - 75], Qt.Orientation.Vertical)
+    qtbot.waitUntil(lambda: console.height() < minimum)
+    host._fit_video_mix_workspace_height()
+    assert set(host.tabifiedDockWidgets(timeline)) == {editor, console}
+    _assert_mixer_tab_order(host, console, timeline, editor)
+    assert not timeline.visibleRegion().isEmpty()
+    pool.raise_()
+    qtbot.waitUntil(lambda: not viewer.visibleRegion().isEmpty() and pool.geometry().intersects(host.rect()))
+    host.resizeDocks([viewer, pool], [left_height - minimum - 75, minimum + 75], Qt.Orientation.Vertical)
+    qtbot.waitUntil(lambda: pool.height() >= minimum)
+    host._fit_video_mix_workspace_height()
+    assert console in host.tabifiedDockWidgets(pool)
+    _assert_mixer_tab_order(host, pool, console, effects, properties)
+    console.raise_()
+
+    viewer.toggleViewAction().trigger()
+    host._migrate_mixer_workspace_layout()
+    assert viewer.isHidden()
+    viewer.toggleViewAction().trigger()
+    qtbot.waitUntil(lambda: not viewer.visibleRegion().isEmpty() and viewer.x() == console.x()
+                    and viewer.geometry().bottom() < console.y())
+
+
+def _assert_mixer_tab_order(host: ProjectHost, *docks: QDockWidget) -> None:
+    assert [dock.windowTitle() for dock in docks] in [
+        [bar.tabText(index) for index in range(bar.count())] for bar in host.findChildren(QTabBar)
+    ]
+
+
+def test_short_mixer_workspace_moves_only_console_to_timeline_and_back(project_host, monkeypatch, qtbot) -> None:
+    host = project_host
+    host.resize(1500, 900)
+    host.all_docks = host.findChildren(QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly)
+    assert host._seed_audio_workspace_layout()
+    host.show_mixer()
+    host._arrange_audio_workspace_layout()
+    console, viewer, timeline, editor, pool, effects, properties = host._audio_workspace_docks()
+    host.config_manager = SimpleNamespace(get=lambda _key: {"preset_id": "factory"})
+    compact = False
+    monkeypatch.setattr(host, "_mixer_needs_compact_layout", lambda: compact)
+    qtbot.waitUntil(lambda: not timeline.visibleRegion().isEmpty())
+    host.resizeDocks([viewer, properties], [390, 340], Qt.Orientation.Horizontal)
+    QApplication.processEvents()
+    inspector_width = properties.width()
+
+    compact = True
+    host._fit_mixer_workspace_height()
+    qtbot.waitUntil(lambda: set(host.tabifiedDockWidgets(timeline)) == {editor, console})
+    _assert_mixer_tab_order(host, console, timeline, editor)
+    assert host.tabifiedDockWidgets(pool) == [effects]
+    assert not properties.isHidden() and not viewer.isHidden()
+    assert properties.width() == pytest.approx(inspector_width, abs=8)
+    console.raise_()
+    qtbot.waitUntil(lambda: console.geometry().intersects(host.rect()))
+
+    compact = False
+    host._fit_mixer_workspace_height()
+    qtbot.waitUntil(lambda: set(host.tabifiedDockWidgets(pool)) == {effects, console})
+    assert host.tabifiedDockWidgets(timeline) == [editor]
+    assert console.geometry().intersects(host.rect()) and not timeline.visibleRegion().isEmpty()
+    assert properties.width() == pytest.approx(inspector_width, abs=8)
 
 
 def test_mixer_effect_activation_applies_and_opens_clip_effect(project_host, monkeypatch) -> None:
@@ -1233,8 +1367,7 @@ def test_mixer_ignores_removed_output_in_saved_layout(project_host, qtbot, float
         host.dock_audio_mixer, host.dock_program_viewer, host.dock_edit_timeline,
         host.dock_properties, host.dock_edit_media_pool, host.dock_edit_effects,
     )
-    assert host._seed_audio_workspace_layout()
-    assert host.restoreState(host.page_layouts["Mixer"])
+    host._arrange_audio_workspace_layout()
     host.show_mixer()
     timeline, editor = host.dock_audio_timeline, host.dock_audio_clip_editor
     old_output = host.make_dock("Master Output", QWidget(), "dockAudioMasterOutput")
@@ -1248,9 +1381,7 @@ def test_mixer_ignores_removed_output_in_saved_layout(project_host, qtbot, float
     old_output.hide()
     old_output.setParent(None)
     assert host.restoreState(state)
-    properties = host.dock_audio_properties
-    qtbot.waitUntil(lambda: timeline.geometry().right() < properties.geometry().left()
-                   and timeline.width() >= host.width() - properties.width() - 12)
+    qtbot.waitUntil(lambda: timeline.width() >= host.width() - 12)
     assert editor in host.tabifiedDockWidgets(timeline)
     assert host.findChild(QDockWidget, "dockAudioMasterOutput") is None
 
@@ -2083,7 +2214,7 @@ def test_routing_overview_opens_owned_editor_and_shares_timeline_history(
     overview.close()
 
     host.show_mixer()
-    assert panel.parentWidget() is host.dock_audio_console.widget()
+    assert host.dock_audio_console.widget().widget() is panel
     host._show_dock_context_menu(QPoint(), host.dock_audio_console)
     assert panel._routing_overview is overview
     assert overview.isVisible()

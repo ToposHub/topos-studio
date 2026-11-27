@@ -755,7 +755,7 @@ class VideoBatchExportPanel(QWidget):
         act_float = QAction(I18N.tr("deliver.queue.float", "Float Queue Panel"), self)
         act_float.triggered.connect(self.detach_requested.emit)
         more_menu.addAction(act_float)
-        act_return = QAction(I18N.tr("deliver.queue.return_to_deliver", "Return to Deliver"), self)
+        act_return = QAction(I18N.tr("deliver.queue.return_to_deliver", "Return to Export"), self)
         act_return.triggered.connect(self.return_to_deliver_requested.emit)
         more_menu.addAction(act_return)
         self._more_btn.setMenu(more_menu)

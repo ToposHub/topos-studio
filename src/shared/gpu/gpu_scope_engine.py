@@ -33,6 +33,7 @@ from src.features.color.core.scope_types import (
     DEFAULT_HISTOGRAM_DENSITY_SIZE as HISTOGRAM_DENSITY_SIZE,
     DEFAULT_HISTOGRAM_DISPLAY_SIZE as HISTOGRAM_DISPLAY_SIZE,
     DEFAULT_CURVES_HISTOGRAM_SIZE as CURVES_HISTOGRAM_SIZE,
+    waveform_plot_range,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,10 +43,6 @@ DEFAULT_SHADER_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "features", "color", "shaders",
     "gpu_scope.glsl",
 )
-
-# Scope value axis (HDR headroom) shared by waveform / parade / luma.
-SCOPE_RANGE_MIN = -0.1
-SCOPE_RANGE_MAX = 1.2
 
 # NOTE: the histogram reduce/display shaders hard-code the same 512-wide /
 # 256-row bins as DEFAULT_HISTOGRAM_DENSITY_SIZE — change them together.
@@ -448,7 +445,7 @@ class GpuScopeEngine:
             prog['u_mask_texture'].value = 1
         self._render_quad(prog)
 
-    def accumulate_waveform(self, pool: dict, channel: int = -1) -> None:
+    def accumulate_waveform(self, pool: dict, channel: int = -1, *, show_excursions: bool = True) -> None:
         """RGB (channels 0/1/2) or luma (channel 3) point-splat waveform."""
         prog = self.programs.get('scope_waveform_accum')
         if prog is None:
@@ -461,8 +458,8 @@ class GpuScopeEngine:
         prog['u_sample_size'].value = (float(aw), float(ah))
         prog['u_density_size'].value = (float(ww), float(wh))
         prog['u_viewport_x'].value = 0.0
-        prog['u_range_min'].value = SCOPE_RANGE_MIN
-        prog['u_range_max'].value = SCOPE_RANGE_MAX
+        prog['u_range_min'].value, prog['u_range_max'].value = waveform_plot_range(show_excursions)
+        prog['u_show_excursions'].value = show_excursions
         self._enable_additive()
         try:
             vao = self._points_vao(prog, aw * ah)
@@ -475,7 +472,7 @@ class GpuScopeEngine:
 
     def display_waveform(self, pool: dict, single_channel: bool = False,
                          *, target: str = 'wf_display', parade: bool = False) -> None:
-        """Tone-map waveform/luma density -> RGBA8 with graticule."""
+        """Tone-map waveform/luma density into the plot texture."""
         prog = self.programs.get('scope_waveform_display')
         if prog is None:
             return
@@ -484,8 +481,6 @@ class GpuScopeEngine:
         pool['wf_density'].use(0)
         prog['u_density'].value = 0
         prog['u_density_size'].value = (float(ww), float(wh))
-        prog['u_range_min'].value = SCOPE_RANGE_MIN
-        prog['u_range_max'].value = SCOPE_RANGE_MAX
         prog['u_parade'].value = parade
         _aw, ah = pool['analysis_size']
         # Fixed gain derived from sample/plot resolution. Single-channel
@@ -535,7 +530,7 @@ class GpuScopeEngine:
         prog['u_zoom'].value = float(zoom)
         self._render_quad(prog)
 
-    def accumulate_parade(self, pool: dict) -> None:
+    def accumulate_parade(self, pool: dict, *, show_excursions: bool = True) -> None:
         """RGB parade: waveform accumulation viewport-partitioned in thirds.
 
         The waveform accum shader maps the source row to NDC [-1, 1]; three
@@ -558,8 +553,8 @@ class GpuScopeEngine:
         prog['u_sample_tex'].value = 0
         prog['u_sample_size'].value = (float(aw), float(ah))
         prog['u_density_size'].value = (float(third), float(wh))
-        prog['u_range_min'].value = SCOPE_RANGE_MIN
-        prog['u_range_max'].value = SCOPE_RANGE_MAX
+        prog['u_range_min'].value, prog['u_range_max'].value = waveform_plot_range(show_excursions)
+        prog['u_show_excursions'].value = show_excursions
         self._enable_additive()
         try:
             vao = self._points_vao(prog, aw * ah)
@@ -796,6 +791,7 @@ class GpuScopeEngine:
         waveform_size, vectorscope_size = scope_density_sizes(demand.display_size, demand.mode)
         pool = self.ensure_pool(analysis, waveform_size, vectorscope_size)
         mode = demand.mode
+        show_excursions = getattr(demand, 'show_waveform_excursions', True)
         outputs: Dict[str, tuple] = {}
 
         needs_sample = (
@@ -807,7 +803,7 @@ class GpuScopeEngine:
                         mask_texture=mask_texture, mask_uv_rect=mask_uv_rect)
 
         if mode_needs_waveform(mode):
-            self.accumulate_waveform(pool)
+            self.accumulate_waveform(pool, show_excursions=show_excursions)
             self.display_waveform(pool)
             outputs['waveform'] = (pool['wf_display'].glo, pool['waveform_size'])
         if mode_needs_vectorscope(mode):
@@ -816,12 +812,12 @@ class GpuScopeEngine:
             outputs['vectorscope'] = (pool['vs_display'].glo,
                                       pool['vectorscope_size'])
         if mode_needs_parade(mode):
-            self.accumulate_parade(pool)
+            self.accumulate_parade(pool, show_excursions=show_excursions)
             target = 'parade_display' if mode in ('quad', 'all') else 'wf_display'
             self.display_parade(pool, target=target)
             outputs['parade'] = (pool[target].glo, pool['waveform_size'])
         if mode_needs_luma(mode):
-            self.accumulate_waveform(pool, channel=3)
+            self.accumulate_waveform(pool, channel=3, show_excursions=show_excursions)
             target = 'luma_display' if mode == 'all' else 'wf_display'
             self.display_waveform(pool, single_channel=True, target=target)
             outputs['luma'] = (pool[target].glo, pool['waveform_size'])

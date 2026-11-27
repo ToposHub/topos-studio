@@ -42,6 +42,7 @@ def test_waveform_ruler_font_and_right_aligned_value_positions(qapp) -> None:
 @pytest.mark.parametrize(('height', 'mode', 'transfer'), [
     (60, 'code10', 'srgb'), (100, 'code10', 'srgb'),
     (80, 'code10_video', 'srgb'), (100, 'nits', 'pq'), (100, 'nits', 'hlg'),
+    (100, 'nits', 'srgb'), (100, 'percent', 'srgb'),
 ])
 def test_short_waveform_labels_do_not_overlap(qapp, height: int, mode: str, transfer: str) -> None:
     _, labels = _paint(250, height, lambda painter: draw_waveform_ruler(painter, height, 46, mode, transfer))
@@ -51,6 +52,27 @@ def test_short_waveform_labels_do_not_overlap(qapp, height: int, mode: str, tran
     for label, rect, _ in labels:
         assert rect.top() >= 0 and rect.bottom() <= height
         assert 'nits' not in label  # Keep the selected unit's numerical labels inside the margin.
+
+
+@pytest.mark.parametrize(('mode', 'transfer', 'endpoints'), [
+    ('percent', 'srgb', ('100%', '0%')),
+    ('code10_video', 'srgb', ('940', '64')),
+    ('nits', 'srgb', ('100', '0')),
+    ('nits', 'pq', ('10k', '0')),
+    ('nits', 'hlg', ('1000', '0')),
+])
+def test_grid_and_labels_share_the_selected_scale(qapp, mode, transfer, endpoints) -> None:
+    image, labels = _paint(250, 320, lambda painter: draw_waveform_ruler(
+        painter, 320, 46, mode, transfer, plot_width=250))
+    assert (labels[0][0], labels[-1][0]) == endpoints
+    assert {y for y in range(320) if image.pixelColor(180, y).alpha()} == {y for _, _, y in labels}
+
+
+def test_hiding_excursions_puts_full_range_at_plot_edges(qapp) -> None:
+    _, labels = _paint(250, 300, lambda painter: draw_waveform_ruler(
+        painter, 300, 46, plot_width=250, show_excursions=False))
+    assert (labels[0][0], labels[0][2]) == ('1023', 0)
+    assert (labels[-1][0], labels[-1][2]) == ('0', 299)
 
 
 @pytest.mark.parametrize(('width', 'codes'), [

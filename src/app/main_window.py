@@ -406,6 +406,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # 避免留下半初始化窗口。
         try:
             self.db = Database(db_path=get_host_db_path())
+            self.db.reset_obsolete_layout_presets()
             self.engine = ImageEngine()
             self.engine.history.max_steps = self.config_manager.get("undo_history_limit") or 50
         except Exception as exc:
@@ -914,7 +915,13 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
             pass
 
     def eventFilter(self, obj, event):
-        if event.type() != QEvent.Type.KeyPress:
+        event_type = event.type()
+        if event_type in (QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.Hide):
+            timer = getattr(self, "_mixer_dock_resize_timer", None)
+            if (timer is not None and self.current_page == "Mixer" and obj in (
+                    self.dock_audio_viewer, self.dock_audio_console, self.dock_audio_media_pool)):
+                timer.start(50)
+        if event_type != QEvent.Type.KeyPress:
             return super().eventFilter(obj, event)
         if (event.key() == Qt.Key.Key_Space
                 and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
@@ -1334,7 +1341,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         from src.features.color.ui.tracker_panel import TrackerPanel
         from src.features.color.tracking.tracking_service import TrackingService
 
-        self.canvas = Canvas()
+        self.canvas = Canvas(photo_mode=self._active_work_mode == "image")
         self.canvas.engine = self.engine
         self.engine.canvas_ref = self.canvas  # P4-2 SAFETY: Enable paint/render cycle detection
         self.canvas.config_manager = self.config_manager
@@ -2207,6 +2214,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # Native GPU scope descriptor (no CPU pixel readback).
         if hasattr(self.engine, 'gpu_scope_ready'):
             self.engine.gpu_scope_ready.connect(self.on_gpu_scope_ready)
+        self.engine.scope_reference_changed.connect(self._on_scope_reference_changed)
         if hasattr(self.scope_panel, 'demand_changed'):
             self.scope_panel.demand_changed.connect(self._on_scope_demand_changed)
         self.curves_widget.histogram_geometry_changed.connect(self._on_scope_demand_changed)
@@ -2360,6 +2368,7 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self.layer_panel.layer_added.connect(self.on_layer_added)
         self.layer_panel.layer_removed.connect(self.on_layer_removed)
         self.layer_panel.layer_reset.connect(self.on_layer_reset)
+        self.layer_panel.reset_all_requested.connect(self.on_reset_all_click)
         self.layer_panel.layer_moved.connect(self.on_layer_moved)
         self.layer_panel.layer_visibility_changed.connect(self.on_layer_visibility_changed)
         self.layer_panel.layer_renamed.connect(self.on_layer_renamed)

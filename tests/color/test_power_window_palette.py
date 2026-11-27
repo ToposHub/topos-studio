@@ -254,3 +254,16 @@ def test_curve_rotation_is_not_baked_twice(qapp):
     palette.controls["rotate"].setValue(45)
     assert spy[-1][1]["rotation"] == 45
     assert spy[-1][1]["points"] == shape.points
+
+
+def test_video_palette_fits_narrow_secondary_grading_column(qtbot) -> None:
+    palette = PowerWindowPanel()
+    qtbot.addWidget(palette)
+    palette.resize(440, 300)
+    palette.show()
+
+    assert palette.width() == 440
+    assert palette.scroll.horizontalScrollBar().maximum() == 0
+    for control in (*palette.add_buttons.values(), palette.delete_button, *palette.controls.values()):
+        assert palette.rect().contains(control.mapTo(palette, control.rect().topLeft()))
+        assert palette.rect().contains(control.mapTo(palette, control.rect().bottomRight()))

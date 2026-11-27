@@ -1,4 +1,4 @@
-"""P1-24 内建工作区预设（Editing/Audio/Captions/Review）测试。
+"""P1-24 内建工作区预设测试。
 
 两层验证：
 - 纯数据层（workspace_presets.py）：预设规格自洽、与出厂 Edit 布局同构。
@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, QRect, Qt
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QWidget
+from pytestqt.qtbot import QtBot
 
 from src.app.controllers.dock_layout_controller import DockLayoutMixin
 from src.features.edit.core.workspace_presets import (
@@ -19,6 +22,8 @@ from src.features.edit.core.workspace_presets import (
     get_workspace_preset,
     list_workspace_presets,
 )
+from src.shared.ui.dock_resize_handle import DockResizeHandle
+from src.shared.ui.style_sheet import DARK_THEME
 
 pytestmark = pytest.mark.edit_ui
 
@@ -30,7 +35,7 @@ pytestmark = pytest.mark.edit_ui
 def test_preset_ids_unique_and_stable():
     presets = list_workspace_presets()
     ids = [p.preset_id for p in presets]
-    assert sorted(ids) == ["audio", "captions", "editing", "review"]
+    assert sorted(ids) == ["editing"]
     assert len(set(ids)) == len(ids)
 
 
@@ -51,33 +56,20 @@ def test_editing_preset_matches_factory_edit_layout():
         "dockEditTimeline",
         "dockProperties",
         "dockEditEffects",
+        "dockAudioMixer",
+        "dock_ai_edit_assistant",
         "dockEditInfo",
     }
-    # Source lives inside Viewport; only the right inspector stack is tabified.
     assert "dockSourceViewer" not in EDIT_WORKSPACE_MANAGED_DOCKS
-    assert ("dockEditMediaPool", "dockEditEffects") in preset.tabify_groups
-    assert ("dockProperties", "dockEditInfo") in preset.tabify_groups
+    assert preset.tabify_groups == (
+        ("dockEditMediaPool", "dockEditEffects", "dockAudioMixer"),
+        ("dockProperties", "dock_ai_edit_assistant", "dockEditInfo"),
+    )
 
 
-def test_task_presets_swap_panels_meaningfully():
-    audio = get_workspace_preset("audio")
-    assert "dockAudioMixer" in audio.visible_docks
-    assert "dockEditEffects" in audio.visible_docks
-    assert "dockAdrTakeSheet" not in audio.visible_docks
-    assert "dockProperties" not in audio.visible_docks
-    assert audio.focus_dock == "dockAudioMixer"
-
-    captions = get_workspace_preset("captions")
-    assert "dockCaptionWorkspace" in captions.visible_docks
-    assert captions.focus_dock == "dockCaptionWorkspace"
-
-    review = get_workspace_preset("review")
-    # 审阅隐藏一切编辑工具，只保留监视器/时间线/信息。
-    assert set(review.visible_docks) == {
-        "dockProgramViewer",
-        "dockEditTimeline",
-        "dockEditInfo",
-    }
+@pytest.mark.parametrize("preset_id", ["audio", "captions", "review"])
+def test_retired_builtin_presets_cannot_be_loaded(preset_id: str) -> None:
+    assert get_workspace_preset(preset_id) is None
 
 
 def test_invalid_preset_spec_rejected():
@@ -163,8 +155,9 @@ class _WorkspaceHost(DockLayoutMixin, QMainWindow):
 
 
 class _FakeLayoutDb:
-    def list_layouts(self, work_mode=None):
-        return ["My Layout"]
+    def list_page_layouts(self, work_mode: str, page_id: str) -> dict[str, str]:
+        assert (work_mode, page_id) == ("all", "Edit")
+        return {"My Layout": "edit-state"}
 
 
 def _visible(host: _WorkspaceHost) -> set:
@@ -189,14 +182,149 @@ def test_apply_editing_preset_visibility_and_tabs(qapp):
     assert not host.page_layouts["Edit"].isEmpty()
 
 
-def test_apply_audio_then_editing_flips_visibility(qapp):
+def test_default_edit_timeline_divider_resizes_both_rows(qtbot: QtBot) -> None:
     host = _WorkspaceHost()
-    assert host.apply_edit_workspace_preset("audio") is True
-    assert _visible(host) == set(get_workspace_preset("audio").visible_docks)
-    assert host.apply_edit_workspace_preset("editing") is True
-    assert _visible(host) == set(get_workspace_preset("editing").visible_docks)
-    # Audio Mixer 在切回剪辑预设后被收起。
-    assert not host.docks_by_name["dockAudioMixer"].isVisible()
+    qtbot.addWidget(host)
+    host.setStyleSheet(DARK_THEME)
+    host.resize(1360, 800)
+    host.apply_edit_workspace_preset("editing")
+    host.show()
+    viewer, timeline = host.dock_program_viewer, host.dock_edit_timeline
+    seam = lambda: QPoint(viewer.geometry().center().x(), timeline.y())
+    qtbot.waitUntil(lambda: isinstance(host.childAt(seam()), DockResizeHandle))
+
+    handle = host.childAt(seam())
+    start = handle.mapFrom(host, seam())
+    end = start + QPoint(0, 36)
+    old_viewer, old_timeline = viewer.height(), timeline.height()
+    qtbot.mousePress(handle, Qt.MouseButton.LeftButton, pos=start)
+    qtbot.mouseMove(handle, pos=end)
+    qtbot.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=end)
+    qtbot.waitUntil(lambda: timeline.height() < old_timeline - 20)
+    assert viewer.height() > old_viewer + 20
+
+    host.current_page = "Color"
+    host._configure_edit_resize_handles()
+    assert handle.isHidden()
+
+
+def test_default_edit_columns_fit_after_restore_without_feedback(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _WorkspaceHost()
+    qtbot.addWidget(host)
+    host.setStyleSheet(DARK_THEME)
+    host.resize(1360, 800)
+    host.apply_edit_workspace_preset("editing")
+    host.show()
+    columns = (host.dock_edit_media_pool, host.dock_program_viewer, host.dock_properties)
+    resize_docks = host.resizeDocks
+    writes: list[list[int]] = []
+
+    def record(docks: list[QDockWidget], widths: list[int], orientation: Qt.Orientation) -> None:
+        writes.append(widths)
+        resize_docks(docks, widths, orientation)
+
+    monkeypatch.setattr(host, "resizeDocks", record)
+    # Qt can apply an old allocation just after the page becomes visible.
+    resize_docks(columns, [510, 338, 510], Qt.Orientation.Horizontal)
+    host.layout().activate()
+
+    def matches_default() -> bool:
+        total = sum(dock.width() for dock in columns)
+        return all(abs(dock.width() - total * share / 10) <= 3
+                   for dock, share in zip(columns, (3, 4, 3)))
+
+    assert not matches_default()
+    qtbot.waitUntil(matches_default)
+    assert len(writes) <= 1
+
+    # A size notification from the docks must not initiate another correction.
+    resize_docks(columns, [460, 438, 460], Qt.Orientation.Horizontal)
+    host.layout().activate()
+    qtbot.wait(180)
+    assert len(writes) <= 1
+
+    for width in (1560, 1160, 1560, 1360):
+        host.resize(width, 800)
+        qtbot.waitUntil(matches_default)
+        assert columns[1].width() > max(columns[0].width(), columns[2].width())
+
+
+def test_edit_divider_drag_sets_ratio_used_by_window_resize(qtbot: QtBot) -> None:
+    host = _WorkspaceHost()
+    qtbot.addWidget(host)
+    host.setStyleSheet(DARK_THEME)
+    host.resize(1360, 800)
+    host.apply_edit_workspace_preset("editing")
+    host.show()
+    media, viewer, properties = host.dock_edit_media_pool, host.dock_program_viewer, host.dock_properties
+    columns = (media, viewer, properties)
+
+    def target() -> QPoint:
+        return QPoint(properties.x(), viewer.geometry().center().y())
+
+    qtbot.waitUntil(lambda: isinstance(host.childAt(target()), DockResizeHandle))
+    assert all(host.dockWidgetArea(dock) == Qt.DockWidgetArea.TopDockWidgetArea for dock in columns)
+    handle = host.childAt(target())
+    start = host.mapToGlobal(target())
+    end = start - QPoint(50, 0)
+    original = properties.width()
+    qtbot.mousePress(handle, Qt.MouseButton.LeftButton, pos=handle.mapFromGlobal(start))
+    qtbot.mouseMove(handle, pos=handle.mapFromGlobal(end))
+    qtbot.mouseRelease(handle, Qt.MouseButton.LeftButton, pos=handle.mapFromGlobal(end))
+    qtbot.waitUntil(lambda: properties.width() > original + 30)
+    shares = [dock.width() for dock in columns]
+
+    for width in (1510, 1260, 1430, 1360):
+        host.resize(width, 800)
+        expected = [(width - 2) * share / sum(shares) for share in shares]
+        qtbot.wait(30)
+        assert all(abs(dock.width() - target) < 3 for dock, target in zip(columns, expected))
+        qtbot.wait(100)
+        assert all(abs(dock.width() - target) < 3 for dock, target in zip(columns, expected))
+
+    host.apply_edit_workspace_preset("editing")
+    qtbot.waitUntil(lambda: abs(viewer.width() - (host.width() - 2) * 0.4) < 3)
+
+
+def test_default_edit_combines_side_groups_below_minimum_width(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    host = _WorkspaceHost()
+    qtbot.addWidget(host)
+    host.setStyleSheet(DARK_THEME)
+    media, viewer, properties = host.dock_edit_media_pool, host.dock_program_viewer, host.dock_properties
+    media.widget().setMinimumWidth(400)
+    viewer.widget().setMinimumWidth(330)
+    properties.widget().setMinimumWidth(320)
+    host.resize(1360, 800)
+    host.apply_edit_workspace_preset("editing")
+    screen_width = 1920
+    monkeypatch.setattr(host, "screen", lambda: SimpleNamespace(
+        availableGeometry=lambda: QRect(0, 0, screen_width, 1080),
+    ))
+    host.show()
+    qtbot.waitUntil(lambda: host.dockWidgetArea(properties) == Qt.DockWidgetArea.TopDockWidgetArea)
+
+    host.resize(1060, 800)
+    qtbot.waitUntil(lambda: properties in host.tabifiedDockWidgets(media))
+    assert host.tabifiedDockWidgets(viewer) == []
+    assert not properties.isHidden() and not media.isHidden()
+    properties.raise_()
+    qtbot.waitUntil(lambda: not properties.visibleRegion().isEmpty())
+
+    host.resize(1360, 800)
+    qtbot.waitUntil(lambda: properties not in host.tabifiedDockWidgets(media))
+    assert host.dock_edit_info in host.tabifiedDockWidgets(properties)
+    assert host.dock_edit_effects in host.tabifiedDockWidgets(media)
+    assert not media.visibleRegion().isEmpty() and not properties.visibleRegion().isEmpty()
+
+    screen_width = 1000
+    host.resize(1290, 800)
+    qtbot.waitUntil(lambda: properties in host.tabifiedDockWidgets(media))
+    qtbot.waitUntil(lambda: host.width() <= screen_width)
+    assert not viewer.visibleRegion().isEmpty()
 
 
 def test_apply_preset_unknown_or_unavailable(qapp):
@@ -219,9 +347,9 @@ def test_apply_preset_switches_to_edit_page(qapp):
         host.current_page = page_name
 
     host.switch_to_page = _fake_switch  # type: ignore[assignment]
-    assert host.apply_edit_workspace_preset("review") is True
+    assert host.apply_edit_workspace_preset("editing") is True
     assert switched == ["Edit"]
-    assert _visible(host) == set(get_workspace_preset("review").visible_docks)
+    assert _visible(host) == set(get_workspace_preset("editing").visible_docks)
 
 
 def test_layout_combobox_lists_presets_before_custom_layouts(qapp):
@@ -232,12 +360,12 @@ def test_layout_combobox_lists_presets_before_custom_layouts(qapp):
     host.db = _FakeLayoutDb()
     host._current_work_mode = lambda: "all"  # type: ignore[assignment]
     host.update_layout_combobox()
-    # 占位 + 4 内建预设 + 1 自定义布局。
-    assert host.layout_combo.count() == 6
-    assert host.layout_combo.itemText(1) == "剪辑"
+    assert host.layout_combo.count() == 3
+    assert host.layout_combo.view().isRowHidden(0)
+    assert host.layout_combo.itemText(1) == "默认布局"
     assert host.layout_combo.itemData(1) == "editing"
-    assert host.layout_combo.itemText(5) == "My Layout"
-    assert host.layout_combo.itemData(5) is None
+    assert host.layout_combo.itemText(2) == "My Layout"
+    assert host.layout_combo.itemData(2) is None
 
 
 def test_layout_combo_activated_routes_preset_and_custom(qapp):
@@ -254,17 +382,17 @@ def test_layout_combo_activated_routes_preset_and_custom(qapp):
     host.apply_edit_workspace_preset = lambda pid: applied_presets.append(pid) or True  # type: ignore[assignment]
     host.apply_layout = lambda name: applied_layouts.append(name)  # type: ignore[assignment]
 
-    host.on_layout_combo_activated(3)  # 字幕预设（1=剪辑 2=音频 3=字幕）
-    assert applied_presets == ["captions"]
+    host.on_layout_combo_activated(1)
+    assert applied_presets == ["editing"]
     assert applied_layouts == []
-    assert host.layout_combo.currentIndex() == 0  # 回到占位项
+    assert host.layout_combo.currentIndex() == 1
 
-    host.on_layout_combo_activated(5)  # 自定义布局
+    host.on_layout_combo_activated(2)  # 自定义布局
     assert applied_layouts == ["My Layout"]
-    assert applied_presets == ["captions"]
+    assert applied_presets == ["editing"]
 
     host.on_layout_combo_activated(0)  # 占位项不动作
-    assert applied_presets == ["captions"]
+    assert applied_presets == ["editing"]
     assert applied_layouts == ["My Layout"]
 
 
@@ -275,14 +403,6 @@ def test_workspace_menu_lists_presets_when_edit_available(qapp):
     host.workspace_menu = QMenu()
     host.update_workspace_menu()
     labels = [a.text() for a in host.workspace_menu.actions()]
-    assert labels == ["剪辑", "音频", "字幕", "审阅"]
-    # 点击"音频"菜单项 → 应用 audio 预设。
-    host.workspace_menu.actions()[1].trigger()
+    assert labels == ["默认布局"]
+    host.workspace_menu.actions()[0].trigger()
     assert "dockAudioMixer" in _visible(host)
-
-    no_edit = _WorkspaceHost(edit_available=False)
-    no_edit.workspace_menu = QMenu()
-    no_edit.update_workspace_menu()
-    actions = no_edit.workspace_menu.actions()
-    assert len(actions) == 1
-    assert not actions[0].isEnabled()

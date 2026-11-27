@@ -265,6 +265,7 @@ class ImageEngine(QObject, WindowRasterizer):
     frame_ready = pyqtSignal(int)
     grade_set_preview_ready = pyqtSignal(object, object)  # (source epoch, grade revision), RGB pixels
     scope_snapshot_ready = pyqtSignal(object)
+    scope_reference_changed = pyqtSignal()
     warper_input_ready = pyqtSignal(object)
     gpu_scope_ready = pyqtSignal(object)  # ScopeGpuFrame descriptor (no CPU readback)
     error_occurred = pyqtSignal(str)
@@ -1813,6 +1814,7 @@ class ImageEngine(QObject, WindowRasterizer):
             self._reference_still_cpu = image.astype(np.float32)
         self.reference_is_still = True
         self._ab_showing_reference = False
+        self.scope_reference_changed.emit()
         if not self.split_view_active:
             self.set_split_view_mode(True)
         else:
@@ -1826,6 +1828,7 @@ class ImageEngine(QObject, WindowRasterizer):
         self.reference_is_still = False
         self._ab_showing_reference = False
         self._reference_still_cpu = None
+        self.scope_reference_changed.emit()
         self.render_pipeline()
 
     def get_reference_still_cpu(self):
@@ -3365,6 +3368,9 @@ class ImageEngine(QObject, WindowRasterizer):
                         forget(render_params['render_request_id'])
                     raise
             else:
+                photo_viewer_background = getattr(self.canvas_ref, "photo_viewer_background", None)
+                if photo_viewer_background is not None:
+                    render_params["viewport_background"] = photo_viewer_background
                 # The clip's initial CPU image establishes geometry and the
                 # reference. Only the graded video command may present it.
                 if self._is_video_mode and getattr(self.renderer, "video_texture_pending", False) is True:

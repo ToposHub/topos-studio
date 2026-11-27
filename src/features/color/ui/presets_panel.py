@@ -236,7 +236,8 @@ class PresetsPanel(QWidget):
     def _toggle_float(self) -> None:
         """Float the panel as an independent window."""
         dock = self._find_dock_widget()
-        if dock and not dock.isFloating():
+        if (dock and not dock.isFloating()
+                and dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable):
             dock.setFloating(True)
 
     def _dock_panel(self) -> None:
@@ -253,7 +254,8 @@ class PresetsPanel(QWidget):
         is_floating = dock.isFloating() if dock else False
 
         float_action = menu.addAction(I18N.tr("panel.float", "Float") if not is_floating else I18N.tr("panel.floating", "Floating"))
-        float_action.setEnabled(not is_floating)
+        float_action.setEnabled(bool(dock and not is_floating
+                                     and dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable))
         float_action.triggered.connect(self._toggle_float)
 
         dock_action = menu.addAction(I18N.tr("panel.dock", "Dock") if is_floating else I18N.tr("panel.docked", "Docked"))

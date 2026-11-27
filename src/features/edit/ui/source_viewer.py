@@ -1512,6 +1512,10 @@ class SourceViewer(QOpenGLWidget):
 
     # ==================== Zoom/Pan ====================
 
+    @property
+    def is_fit_to_window(self) -> bool:
+        return self._view_transform.mode == "fit"
+
     def fit_to_window(self) -> None:
         """Fit video to window (reset zoom and pan)."""
         self._view_transform.reset_fit()

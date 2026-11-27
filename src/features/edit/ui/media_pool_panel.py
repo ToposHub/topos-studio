@@ -1006,12 +1006,16 @@ class BinTreeWidget(QTreeWidget):
                 continue
             item = find_item(root)
             if item is not None:
-                keep_collapsed = is_smart_bin and not root.isExpanded()
                 previous = self.blockSignals(True)
                 try:
-                    self.setCurrentItem(item)
-                    if keep_collapsed:
-                        root.setExpanded(False)
+                    if is_smart_bin and not root.isExpanded():
+                        # Making a hidden child current can expand its section
+                        # when Qt next shows the tree and scrolls to that child.
+                        self.setCurrentItem(None)
+                        self.clearSelection()
+                        item.setSelected(True)
+                    else:
+                        self.setCurrentItem(item)
                 finally:
                     self.blockSignals(previous)
                 return True

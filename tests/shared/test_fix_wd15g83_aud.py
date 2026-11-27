@@ -1053,6 +1053,34 @@ class TestAud32902AtomicMigration:
         conn.close()
         assert leftovers == []
 
+    def test_named_layouts_migrate_into_independent_page_presets(self, tmp_path: Path) -> None:
+        path = str(tmp_path / "page-presets.db")
+        with sqlite3.connect(path) as conn:
+            conn.execute(self.NEW_SCHEMA)
+            conn.executemany('INSERT INTO layouts VALUES (?, ?, ?, ?, ?, ?)', [
+                ("Studio", "geom", "global", '{"Color": "color", "Edit": "edit"}', 0, "video"),
+                ("Studio", "geom", "global", '{"Color": "photo"}', 0, "image"),
+                ("Unknown page", "geom", "global", None, 0, "video"),
+                ("Broken", "geom", "global", '{"Color":', 0, "video"),
+            ])
+
+        db = Database(path)
+        assert db.list_page_layouts("video", "Color") == {"Studio": "color"}
+        assert db.list_page_layouts("video", "Edit") == {"Studio": "edit"}
+        assert db.list_page_layouts("image", "Color") == {"Studio": "photo"}
+        assert db.list_page_layouts("video", "Composite") == {}
+        db.save_page_layout("video", "Color", "Studio", "new-color")
+        db.delete_page_layout("video", "Edit", "Studio")
+        db.close()
+
+        db = Database(path)
+        assert db.list_page_layouts("video", "Color") == {"Studio": "new-color"}
+        assert db.list_page_layouts("video", "Edit") == {}
+        db.clear_layouts()
+        assert db.list_page_layouts("video", "Color") == {}
+        assert db.list_layouts("video") == []
+        db.close()
+
     def test_migration_rollback_on_error(self, tmp_path: Path,
                                          monkeypatch: pytest.MonkeyPatch) -> None:
         # 注入回填失败：整个迁移事务回滚，旧表原样保留（RENAME 不残留）

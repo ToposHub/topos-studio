@@ -1440,14 +1440,15 @@ class NativeFilesPanel(QWidget):
         self.inspector.setVisible(checked)
         self._preferences().inspector_preference = checked
         if checked:
-            self._apply_default_inspector_layout()
+            self.reset_workspace_sizes()
 
-    def _apply_default_inspector_layout(self) -> None:
-        sidebar_visible = not self.sidebar.isHidden()
-        sidebar_width = _LOCATION_DEFAULT_WIDTH if sidebar_visible else 0
-        handle_width = self.splitter.handleWidth() * (2 if sidebar_visible else 1)
-        gallery_width = max(1, self.splitter.width() - sidebar_width - _INSPECTOR_DEFAULT_WIDTH - handle_width)
-        self.splitter.setSizes([_LOCATION_DEFAULT_WIDTH, gallery_width, _INSPECTOR_DEFAULT_WIDTH])
+    def reset_workspace_sizes(self) -> None:
+        """Restore the side widths and leave the remaining space to the gallery."""
+        sidebar_width = 0 if self.sidebar.isHidden() else _LOCATION_DEFAULT_WIDTH
+        inspector_width = 0 if self.inspector.isHidden() else _INSPECTOR_DEFAULT_WIDTH
+        handle_width = self.splitter.handleWidth() * (bool(sidebar_width) + bool(inspector_width))
+        gallery_width = max(1, self.splitter.width() - sidebar_width - inspector_width - handle_width)
+        self.splitter.setSizes([sidebar_width, gallery_width, inspector_width])
 
     def _sort_changed(self, index: int) -> None:
         column = (0, 3, 2, 4, 1)[index]
@@ -1564,7 +1565,7 @@ class NativeFilesPanel(QWidget):
         with QSignalBlocker(self.inspector_button):
             self.inspector_button.setChecked(show)
         if show and changed:
-            self._apply_default_inspector_layout()
+            self.reset_workspace_sizes()
 
     def _image_for_entry(self, entry: Any) -> QImage | None:
         if not isinstance(entry, Entry):

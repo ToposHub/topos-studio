@@ -306,6 +306,7 @@ class LayerPanel(QWidget):
     layer_added = pyqtSignal()
     layer_removed = pyqtSignal(int)
     layer_reset = pyqtSignal(int)
+    reset_all_requested = pyqtSignal()
     layer_moved = pyqtSignal(int, int)
     layer_visibility_changed = pyqtSignal(int, bool)
     layer_renamed = pyqtSignal(int, str)
@@ -347,6 +348,13 @@ class LayerPanel(QWidget):
         style_header_button(self.settings_btn, width=28, icon=icon_settings())
         self.settings_btn.clicked.connect(self._show_settings_menu)
         header_layout.addWidget(self.settings_btn)
+        reset_button = QPushButton()
+        reset_button.setObjectName("colorLayersResetAllButton")
+        style_reset_button(reset_button, global_reset=True)
+        reset_button.setToolTip(I18N.tr("action.reset_all_layers", "Reset All Layer Adjustments"))
+        reset_button.setAccessibleName(reset_button.toolTip())
+        reset_button.clicked.connect(self.reset_all_requested.emit)
+        header_layout.addWidget(reset_button)
         layout.addWidget(header)
 
         # Offline Mode Warning Banner

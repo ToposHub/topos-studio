@@ -164,6 +164,20 @@ class TestControllerDispatch:
         ctrl._update_scope_panel(_img(10))
         ctrl.scope_panel.update_scope.assert_not_called()
 
+    def test_reference_changes_refresh_visible_plot_and_clear_removed_image(self):
+        ctrl = self._make()
+        ctrl.scope_panel.scope_source = 'reference'
+        ctrl._is_scope_panel_visible = lambda: True
+        ref = _img(12)
+        ctrl.engine.get_reference_still_cpu.return_value = ref
+        ctrl._on_scope_reference_changed()
+        ctrl._on_scope_reference_changed()
+        ctrl.scope_panel.update_scope.assert_called_once()
+        np.testing.assert_array_equal(ctrl.scope_panel.update_scope.call_args.args[0], ref)
+        ctrl.engine.get_reference_still_cpu.return_value = None
+        ctrl._on_scope_reference_changed()
+        ctrl.scope_panel.clear_scope_input.assert_called_once_with('reference')
+
     def test_graded_mode_unchanged(self):
         ctrl = self._make()
         img = _img(11)

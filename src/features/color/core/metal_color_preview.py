@@ -99,6 +99,7 @@ class ColorMetalPreview:
         cancelled: Callable[[], bool],
         display: tuple[int, int, int] | None,
         scope_output: bool = False,
+        viewport_background: tuple[float, float, float] = (0.1, 0.1, 0.1),
         input_sample: tuple[str, Callable[[np.ndarray, Mapping[str, Any] | None], None]] | None = None,
     ) -> bool:
         """Return success only after the compatible GL texture is complete."""
@@ -177,7 +178,7 @@ class ColorMetalPreview:
                         (width, height),
                         lambda target: self._io.encode_for_display(
                             output, display_profile, target=target,
-                            composite_viewport_background=True),
+                            viewport_background=viewport_background),
                         frame=serial, generation_id=generation,
                         color_info=PresentColorInfo(color_range="full", color_transfer="srgb"),
                         working_release=lambda: self._executor.release_revision(request_id),

@@ -42,6 +42,7 @@ from src.features.edit.ui.timeline_layout import (
     DEFAULT_TRACK_HEIGHT_RATIO, MAX_EDIT_AUDIO_TRACK_HEIGHT,
 )
 from src.features.edit.ui.edit_style import EDIT_COLORS, EDIT_SIZES
+from src.shared.layout import TIMELINE_DOCK_MIN_HEIGHT
 from src.shared.assets.icon_manager import (
     icon_append_edit,
     get_icon, icon_close, icon_list, icon_step_back, icon_step_forward, IconColors,
@@ -208,11 +209,14 @@ class TimelinePanel(QWidget):
     keyframe_tray_requested = pyqtSignal(bool)
     recording_mode_requested = pyqtSignal(bool)
     flag_requested = pyqtSignal(str)  # chosen flag color; host commits clip metadata
+    deliver_range_adjusted = pyqtSignal()
 
     def __init__(
         self, parent: Optional[QWidget] = None, *, config_manager: Any = None,
     ) -> None:
         super().__init__(parent)
+        # Keep the toolbar, ruler, and tracks usable in both Edit and Mixer docks.
+        self.setMinimumHeight(TIMELINE_DOCK_MIN_HEIGHT)
         self._config_manager = config_manager
         
         # Timeline metadata
@@ -596,6 +600,7 @@ class TimelinePanel(QWidget):
         self.timeline_view.corner_timecode_clicked.connect(self._on_timecode_panel_clicked)
         # Forward timeline_changed signal to external listeners
         self.timeline_view.timeline_changed.connect(self.timeline_changed.emit)
+        self.timeline_view.deliver_range_adjusted.connect(self.deliver_range_adjusted.emit)
         self.timeline_changed.connect(lambda _t: self.refresh_automation_lane())
         self.timeline_view.project_changed.connect(self.project_changed.emit)
         self.timeline_view.project_needed.connect(self.project_needed.emit)
@@ -764,6 +769,7 @@ class TimelinePanel(QWidget):
         self._zoom_preset: str = "custom"
         self._applying_zoom_preset: bool = False
         self._custom_zoom: tuple[float, int] = (DEFAULT_ZOOM, 0)
+        self._zoom_before_deliver: tuple[str, tuple[float, int]] | None = None
         toolbar = QWidget(self)
         toolbar.setObjectName("timelineToolbar")
         toolbar.setFixedHeight(40)
@@ -1356,10 +1362,11 @@ class TimelinePanel(QWidget):
         UIState 原样往返。FileController 在保存工程时收集。
         """
         state = self.timeline_view.export_presentation_state()
+        preset, custom = self._zoom_before_deliver or (self._zoom_preset, self._custom_zoom)
         state.update({
-            "zoom_preset": self._zoom_preset,
-            "custom_pixels_per_frame": float(self._custom_zoom[0]),
-            "custom_scroll": int(self._custom_zoom[1]),
+            "zoom_preset": preset,
+            "custom_pixels_per_frame": float(custom[0]),
+            "custom_scroll": int(custom[1]),
             "keyframe_tray_visible": self.is_keyframe_tray_visible(),
         })
         return state
@@ -1438,6 +1445,10 @@ class TimelinePanel(QWidget):
             self._applying_zoom_preset = False
         self._sync_zoom_preset_buttons()
 
+    def _fit_deliver_timeline(self) -> None:
+        if self._toolbar_display_mode == "deliver" and self._zoom_preset == "full":
+            self._set_zoom_preset("full")
+
     def set_display_mode(self, mode: str) -> None:
         """Switch the toolbar between Edit, audio mixing and Deliver.
 
@@ -1480,6 +1491,18 @@ class TimelinePanel(QWidget):
         self._sync_track_height_slider()
         self.timeline_view.set_edit_wheel_controls(mode == "edit")
         self.timeline_view.set_deliver_mode(mode == "deliver")
+        if mode == "deliver":
+            self._apply_pending_slider_zoom()
+            self._zoom_before_deliver = (self._zoom_preset, self._custom_zoom)
+            self._zoom_preset = "full"
+            QTimer.singleShot(0, self._fit_deliver_timeline)
+        elif self._zoom_before_deliver is not None:
+            preset, custom = self._zoom_before_deliver
+            self._zoom_before_deliver = None
+            self._apply_pending_slider_zoom()
+            self._zoom_preset = "full"
+            self._custom_zoom = custom
+            self._set_zoom_preset(preset)
         if self._mixer_output_meter is not None:
             toolbar = self._tools_bar.parentWidget()
             toolbar.setFixedHeight(36 if mode == "mixer" else 40)
@@ -1554,19 +1577,7 @@ class TimelinePanel(QWidget):
         """
         self._deliver_range_type = range_type
 
-        set_visibility = getattr(
-            self.timeline_view,
-            "set_deliver_range_visibility",
-            None,
-        )
-        if callable(set_visibility):
-            if range_type == "in_out":
-                set_visibility(True)
-            elif range_type == "entire":
-                set_visibility(False)
-            else:
-                # Leaving Deliver restores the normal Edit visualization.
-                set_visibility(None)
+        self.timeline_view.set_deliver_ruler_range(range_type)
 
         if range_type != "in_out":
             return
@@ -1760,6 +1771,8 @@ class TimelinePanel(QWidget):
         # Defer the calculation until child widgets have resized.
         if hasattr(self, "timeline_view"):
             QTimer.singleShot(0, self._refresh_zoom_slider_bounds)
+            if event.size().width() != event.oldSize().width():
+                QTimer.singleShot(0, self._fit_deliver_timeline)
 
     def _refresh_workspace_toolbar(self) -> None:
         if not hasattr(self, "_mixer_toolbar_widgets"):
@@ -3372,6 +3385,7 @@ class TimelinePanel(QWidget):
         # Once clips exist, reloads preserve the user's current zoom instead of
         # repeatedly forcing the slider back to its minimum.
         self._reset_empty_timeline_zoom(timeline)
+        self._fit_deliver_timeline()
 
         # Loading a project always begins at frame zero. QGraphicsView may
         # retain a startup/layout scroll offset unless it is reset after the

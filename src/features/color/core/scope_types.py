@@ -37,6 +37,14 @@ ScopeMode = Literal[
     'histogram', 'cie', 'falsecolor', 'quad', 'all',
 ]
 
+SCOPE_RANGE_MIN = -0.1
+SCOPE_RANGE_MAX = 1.2
+
+
+def waveform_plot_range(show_excursions: bool) -> tuple[float, float]:
+    return (SCOPE_RANGE_MIN, SCOPE_RANGE_MAX) if show_excursions else (0.0, 1.0)
+
+
 # Default analysis sizes (pre-sampled front texture dimensions).
 # 320x180 = 57,600 samples: dynamic multi-view budget and the initial idle
 # tier. Single-view playback/adjustment uses the denser tier below.
@@ -150,6 +158,7 @@ class ScopeDemand:
     # Curve-only demands share histogram counts without drawing a hidden
     # standalone histogram. Default preserves existing independent callers.
     standalone_enabled: bool = True
+    show_waveform_excursions: bool = True
 
 
 @dataclass(frozen=True)
