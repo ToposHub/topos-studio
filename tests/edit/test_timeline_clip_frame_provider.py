@@ -786,6 +786,22 @@ class TestOriginConvention:
 class TestSourceTextureCache:
     """Source texture cache (LRU, max 3 entries)."""
 
+    def test_new_pictures_get_new_revisions_even_when_texture_names_are_reused(self) -> None:
+        from src.features.edit.core.timeline_clip_frame_provider import (
+            TimelineClipFrameProvider, _TexResult, _to_texture_result,
+        )
+
+        provider = TimelineClipFrameProvider()
+        first = provider._cache_source_texture("/test.mov", 0, _TexResult(texture_id=1))
+        first_revision = _to_texture_result(first).revision
+        assert first_revision > 0
+        provider._cache_source_texture("/test.mov", 0, first)
+        assert first.revision == first_revision
+
+        second = provider._cache_source_texture("/test.mov", 1, _TexResult(texture_id=1))
+        assert _to_texture_result(second).revision > first_revision
+        assert first.revision == first_revision
+
     def test_cache_miss_triggers_decode(self):
         """Cache miss triggers _upload_decoded_frame."""
         from src.features.edit.core.timeline_clip_frame_provider import TimelineClipFrameProvider, _TexResult

@@ -211,6 +211,41 @@ def test_service_receives_playhead_and_source_in(gl_ctx):
     assert stub.calls[-1]["source_in"] == 5
 
 
+def test_async_playback_resumes_after_backward_seek(gl_ctx) -> None:
+    node = _node_ready_for_stub_service(_StubVideoContext())
+    node._vt_gpu_disabled = True
+    node._preload_frames = lambda frame, mode: node._record_frame_request(frame)
+    pixels = _stub_decoded_frame().data
+
+    def present(requested: int) -> int:
+        node._record_frame_request(requested)
+        assert node.upload_frame(gl_ctx, requested)
+        return node._current_frame
+
+    try:
+        node._frame_cache[120] = pixels
+        assert present(120) == 120
+        assert present(20) == 120
+
+        # Neither a stale frame behind the seek nor a future frame may appear.
+        node._frame_cache.update({19: pixels, 22: pixels})
+        assert present(21) == 120
+        # Playback is already one tick ahead when the landing frame is ready.
+        node._frame_cache[20] = pixels
+        assert present(21) == 20
+        node._frame_cache.pop(22)
+        node._frame_cache[21] = pixels
+        assert present(22) == 21
+
+        # If the playhead jumps past the frame on screen, keep forward ordering.
+        assert present(1) == 21
+        node._frame_cache[10] = pixels
+        node._frame_cache.pop(120)
+        assert present(35) == 21
+    finally:
+        node.cleanup()
+
+
 # ── fallback decode path honours the source range ────────────────────────
 
 class _RecordingSource:
@@ -356,7 +391,9 @@ def test_layer_bar_uses_video_source_length():
         generated_merge_node_ids = []
 
     controller = SimpleNamespace(
-        graph=g, layers_map=lambda: layers, main_stack=lambda: _Stack())
+        graph=g, layers_map=lambda: layers, main_stack=lambda: _Stack(),
+        layer_motion_blur_states=lambda _layers: {},
+    )
 
     m = KeyframesModel()
     m.set_comp_range(0, 99)

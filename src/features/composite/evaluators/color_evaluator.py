@@ -669,6 +669,7 @@ class ColorEvaluatorMixin:
                 bbox=input_tex.bbox,
                 alpha_premultiplied=input_tex.alpha_premultiplied,
                 color_space=input_tex.color_space,
+                revision=input_tex.revision,
             )
         }
 

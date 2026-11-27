@@ -1,5 +1,7 @@
 """Regression coverage for Transform connections to Merge and Output."""
 
+from unittest.mock import Mock
+
 import pytest
 
 from src.features.composite.core.format import BBox, ImageFormat
@@ -61,6 +63,31 @@ def test_direct_output_places_a_packed_transform_into_its_input_canvas() -> None
 
     assert result["display"] is transformed
     assert calls == [(transformed, canvas)]
+
+
+def test_custom_output_resizes_a_decoded_proxy_to_fill_the_canvas() -> None:
+    output = OutputNode()
+    output.parameters.update(format_mode="custom", width=3840, height=2160)
+    proxy = TextureResult(texture_id=5, width=1920, height=1080, revision=4)
+    output._resize = Mock(return_value={"display": TextureResult(
+        texture_id=6, width=3840, height=2160, revision=proxy.revision,
+    )})
+    output._place_on_canvas = Mock()
+    ctx, fb_manager, pool = object(), object(), object()
+
+    display = output._apply_format(proxy, ctx, fb_manager, pool)["display"]
+
+    output._resize.assert_called_once_with(proxy, 3840, 2160, ctx, fb_manager, pool)
+    output._place_on_canvas.assert_not_called()
+    assert display.bbox == BBox.full_frame(3840, 2160)
+    assert display.revision == proxy.revision
+
+
+def test_custom_output_keeps_geometry_of_a_different_aspect_ratio() -> None:
+    portrait = TextureResult(texture_id=5, width=1080, height=1920)
+    landscape = ImageFormat(width=3840, height=2160, name="UHD")
+
+    assert OutputNode._needs_canvas_placement(portrait, landscape)
 
 
 def test_output_ring_releases_framebuffer_before_texture() -> None:

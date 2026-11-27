@@ -155,6 +155,7 @@ class TimelineClipFrameProvider:
         self._debug_placeholder_cache: dict[tuple[int, int], Any] = {}
         self._yuv_uploader: Any | None = None
         self._source_texture_cache: dict[tuple[str, int], _TexResult] = {}
+        self._texture_revision = 0
         self._source_cache_order: list[tuple[str, int]] = []
         self._SOURCE_CACHE_MAX = 3
         # AUD-18321: source textures evicted/replaced while a returned
@@ -566,6 +567,10 @@ class TimelineClipFrameProvider:
         """Cache an owned source texture and evict within the bounded budget."""
         cache_key = (asset_path, source_frame)
         stale = self._source_texture_cache.get(cache_key)
+        if stale is not result:
+            # Downstream passes may reuse the same GL texture names for new
+            # frames. Keep their cache keys tied to the uploaded pixels.
+            result.revision = self._next_texture_revision()
         if stale is not None and stale.texture_id != result.texture_id:
             if stale.texture_id in self._owned_textures:
                 self._retire_source_texture(stale.texture_id)
@@ -584,6 +589,10 @@ class TimelineClipFrameProvider:
                 # 渲染线程入口再释放。
                 self._retire_source_texture(old_result.texture_id)
         return result
+
+    def _next_texture_revision(self) -> int:
+        self._texture_revision += 1
+        return self._texture_revision
 
     def _touch_source_cache_key(self, cache_key: tuple[str, int]) -> None:
         """Mark a source texture cache key as most recently used.
@@ -921,6 +930,7 @@ class TimelineClipFrameProvider:
             texture_id=current_glo,
             width=width,
             height=height,
+            revision=self._next_texture_revision(),
             format=getattr(base_tex, "format", ("rgba16f", 4)),
             alpha_premultiplied=getattr(base_tex, "alpha_premultiplied", True),
             color_space=getattr(base_tex, "color_space", None),

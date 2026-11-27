@@ -9,7 +9,12 @@ Validates:
 - Node capabilities are properly defined
 """
 
+from types import SimpleNamespace
+from unittest.mock import Mock
+
 import pytest
+from src.features.composite.evaluators.color_evaluator import ColorEvaluatorMixin
+from src.features.composite.nodes.base_node import TextureResult
 from src.features.composite.nodes.topos_color_node import ToposColorNode
 from src.features.composite.core.node_engine import NODE_REGISTRY, NODE_CATEGORIES
 from src.features.composite.core.node_capabilities import (
@@ -19,6 +24,22 @@ from src.features.composite.core.node_capabilities import (
     get_bypass_mapping,
 )
 from src.features.composite.ui.composite_page import CompositePage
+
+
+def test_topos_color_keeps_input_revision_when_output_texture_is_reused() -> None:
+    evaluator = ColorEvaluatorMixin()
+    evaluator.utility_shaders = {"topos_color": object()}
+    evaluator._resource_pool = Mock()
+    evaluator._resource_pool.acquire_texture.return_value = SimpleNamespace(glo=13)
+    evaluator._render_topos_grade_pass = Mock()
+
+    first = TextureResult(texture_id=7, width=4, height=4, revision=41)
+    second = first.with_updates(revision=42)
+    out1 = evaluator._apply_topos_color(first, {}, 4, 4)["result"]
+    out2 = evaluator._apply_topos_color(second, {}, 4, 4)["result"]
+
+    assert out1.texture_id == out2.texture_id == 13
+    assert (out1.revision, out2.revision) == (41, 42)
 
 
 class TestToposColorNodeContract:

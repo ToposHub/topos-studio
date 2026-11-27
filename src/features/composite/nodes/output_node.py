@@ -344,6 +344,12 @@ class OutputNode(Node):
     @staticmethod
     def _needs_canvas_placement(src: TextureResult, target_fmt: ImageFormat) -> bool:
         """Return whether a packed source must be restored into its canvas."""
+        if (
+            src.bbox is None and src.format is None
+            and src.width * target_fmt.height == src.height * target_fmt.width
+        ):
+            # An aspect-matched proxy without a data window fills the canvas.
+            return False
         bbox = src.effective_bbox()
         return (
             bbox.x != target_fmt.origin_x

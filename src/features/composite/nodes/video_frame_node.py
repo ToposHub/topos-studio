@@ -342,6 +342,7 @@ class VideoFrameNode(Node):
         self._prev_frame_request_frame: Optional[int] = None
         self._last_frame_request_frame: Optional[int] = None
         self._last_frame_request_at: float = 0.0
+        self._backward_seek_frame: int | None = None
         # 请求变化时间戳与步长（近期突发检测：150ms 内 ≥2 次变化且含跳变/
         # 换向 = 拖拽/快梭，走 VT 交互式 coarse 读取；播放的 +1 单调节奏
         # 和单帧步进（~200ms 间隔）不算）
@@ -1318,6 +1319,8 @@ class VideoFrameNode(Node):
             if len(self._request_change_times) > 4:
                 self._request_change_times.pop(0)
             if prev is not None:
+                if center_frame < prev:
+                    self._backward_seek_frame = center_frame
                 self._request_change_deltas.append(int(center_frame) - int(prev))
                 if len(self._request_change_deltas) > 4:
                     self._request_change_deltas.pop(0)
@@ -1719,7 +1722,14 @@ class VideoFrameNode(Node):
         # worker 侧按代际拒绝过期写入。
         self._stop_preload_thread(join=False)
         self._media_generation += 1
+        self._backward_seek_frame = None
+        self._prev_frame_request_frame = None
+        self._last_frame_request_frame = None
+        self._last_frame_request_at = 0.0
+        self._request_change_times.clear()
+        self._request_change_deltas.clear()
         with self._cache_lock:
+            self._preload_target = None
             self._frame_cache.clear()
             self._async_fail_counts.clear()
             self._failed_async_frames.clear()
@@ -1988,6 +1998,23 @@ class VideoFrameNode(Node):
 
     # ── GPU Upload ──
 
+    def _latest_frame_floor(self, requested: int) -> int:
+        """First frame eligible for preview while the decoder catches up."""
+        if self._backward_seek_frame is not None and requested < self._current_frame:
+            # Keep the old texture visible until a frame from the new position arrives.
+            return self._backward_seek_frame
+        return self._current_frame + 1
+
+    def _mark_frame_uploaded(self, frame_number: int, requested: int) -> None:
+        self._revision += 1
+        self._current_frame = frame_number
+        self._load_state = VideoLoadState.UPLOADED_GPU
+        self._is_fallback = False
+        if self._backward_seek_frame is not None and (
+            self._backward_seek_frame <= frame_number <= requested
+        ):
+            self._backward_seek_frame = None
+
     def upload_frame(
         self,
         ctx: moderngl.Context,
@@ -2028,10 +2055,7 @@ class VideoFrameNode(Node):
         if vt_taken is not None:
             vt_num, vt_entry = vt_taken
             if self._upload_frame_gpu_vt(ctx, vt_entry):
-                self._revision += 1
-                self._current_frame = vt_num
-                self._load_state = VideoLoadState.UPLOADED_GPU
-                self._is_fallback = False
+                self._mark_frame_uploaded(vt_num, frame_number)
                 return True
             # 绑定/渲染失败：entry 已释放，持旧帧等待回退路径
             return self._gpu_texture is not None
@@ -2066,15 +2090,16 @@ class VideoFrameNode(Node):
                 # 原持帧语义，notify 后的求值会精确命中 frame_number。
                 # VT 可用源时 CPU 缓存帧同样不参与混显（同上 vt_gate）。
                 if self._requests_advancing():
+                    floor = self._latest_frame_floor(frame_number)
                     with self._cache_lock:
                         newer = None
                         for f in self._frame_cache:
-                            if self._current_frame < f <= frame_number and (
-                                newer is None or f > newer
+                            if (
+                                floor <= f <= frame_number
+                                and (not vt_gate or f in self._vt_cpu_ok)
+                                and (newer is None or f > newer)
                             ):
                                 newer = f
-                        if newer is not None and vt_gate and newer not in self._vt_cpu_ok:
-                            newer = None
                         if newer is not None:
                             frame_data = self._frame_cache[newer]
                             present_latest_frame = newer
@@ -2101,10 +2126,7 @@ class VideoFrameNode(Node):
                 if isinstance(frame_data, _VtFrameData):
                     # VT 帧不进 _frame_cache，直接绑定上屏
                     if self._upload_frame_gpu_vt(ctx, frame_data):
-                        self._revision += 1
-                        self._current_frame = frame_number
-                        self._load_state = VideoLoadState.UPLOADED_GPU
-                        self._is_fallback = False
+                        self._mark_frame_uploaded(frame_number, frame_number)
                         return True
                     return False
                 with self._cache_lock:
@@ -2120,14 +2142,12 @@ class VideoFrameNode(Node):
             # _gpu_texture 既是 FBO 颜色附件也是对下游输出的纹理（契约不变）。
             if not self._upload_frame_gpu(ctx, frame_data):
                 return False
-            self._revision += 1
             # present-latest 时记录实际上屏的帧号（而非超前于画面的请求帧
             # 号），保证后续扫描的单调性与"下一帧"判断正确。
-            self._current_frame = (
-                present_latest_frame if present_latest_frame is not None else frame_number
+            self._mark_frame_uploaded(
+                present_latest_frame if present_latest_frame is not None else frame_number,
+                frame_number,
             )
-            self._load_state = VideoLoadState.UPLOADED_GPU
-            self._is_fallback = False
             return True
 
         try:
@@ -2167,14 +2187,12 @@ class VideoFrameNode(Node):
                 # 省一次 4K float32 ≈132MB 的 tobytes 整帧拷贝）
                 self._gpu_texture.write(data)
 
-            self._revision += 1
             # present-latest 时记录实际上屏的帧号（而非超前于画面的请求帧
             # 号），保证后续扫描的单调性与"下一帧"判断正确。
-            self._current_frame = (
-                present_latest_frame if present_latest_frame is not None else frame_number
+            self._mark_frame_uploaded(
+                present_latest_frame if present_latest_frame is not None else frame_number,
+                frame_number,
             )
-            self._load_state = VideoLoadState.UPLOADED_GPU
-            self._is_fallback = False
 
             return True
 
@@ -2843,6 +2861,8 @@ class VideoFrameNode(Node):
                     # Try fallback
                     if not self._upload_fallback(ctx):
                         return {}
+        else:
+            self._backward_seek_frame = None
 
         # If still no texture, try fallback
         if self._gpu_texture is None:

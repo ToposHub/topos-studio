@@ -448,6 +448,10 @@ class TestProviderAfterClipEffectsRouting:
             result = provider._apply_after_clip_effects(
                 base_tex, (eff,), 64, 64, context,
             )
+            result_again = provider._apply_after_clip_effects(
+                base_tex, (eff,), 64, 64, context,
+            )
 
-        assert result.texture_id == 99
-        assert sampled_frames == [("radius", 105)]
+        assert result.texture_id == result_again.texture_id == 99
+        assert 0 < result.revision < result_again.revision
+        assert sampled_frames == [("radius", 105), ("radius", 105)]
