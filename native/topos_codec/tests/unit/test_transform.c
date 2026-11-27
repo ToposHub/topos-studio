@@ -1,5 +1,7 @@
 /* 变换：表自验（C 侧重验正交性/W 推导）+ 已知值 + 全链路 roundtrip + 界探测 */
 #include "simd/dispatch.h"
+#include "common/cpudetect.h"
+#include "topos_codec.h"
 #include "entropy/scan.h"
 #include "transform/transform.h"
 #include "transform/quant.h"
@@ -13,6 +15,18 @@
 
 int main(void)
 {
+#if defined(__x86_64__) || defined(_M_X64)
+    MT_CHECK(tc_simd_have_avx2());
+    if ((tc_internal_cpu_flags() & TOPOS_CPU_X86_AVX2) != 0u) {
+        tc_dev_set_simd_mode(TC_SIMD_AUTO);
+        MT_CHECK(strcmp(tc_dev_simd_backend(), "avx2") == 0);
+        MT_CHECK(tc_simd_avx2_enabled());
+        tc_dev_set_simd_mode(TC_SIMD_SCALAR);
+        MT_CHECK(strcmp(tc_dev_simd_backend(), "scalar") == 0);
+        MT_CHECK(!tc_simd_avx2_enabled());
+        tc_dev_set_simd_mode(TC_SIMD_AUTO);
+    }
+#endif
     const int16_t* M = tc_transform_matrix();
     const uint32_t* W = tc_transform_weights();
     const uint32_t* E = tc_transform_energies();
@@ -248,6 +262,37 @@ int main(void)
         MT_CHECK_EQ_I64(xh[3u * 8u + 4u], -3922);
         MT_CHECK_EQ_I64(xh[4u * 8u + 3u], -3922);
         MT_CHECK_EQ_I64(xh[4u * 8u + 4u], 3922);
+
+        q[coefficient] = TC_TRANSFORM_MAX_ABS_F - 1;
+        tc_simd_dequant_inverse_8x8(&ctx, q, xh, 1u | (1u << 3));
+        MT_CHECK_EQ_I64(xh[3u * 8u + 3u], 3921);
+        MT_CHECK_EQ_I64(xh[3u * 8u + 4u], -3921);
+        MT_CHECK_EQ_I64(xh[4u * 8u + 3u], -3921);
+        MT_CHECK_EQ_I64(xh[4u * 8u + 4u], 3921);
+    }
+
+    /* At the dequant clamp, align all active contributions to one sample.
+     * Exercise every decoder row mask, both signs, and mirrored output. */
+    {
+        tc_quant_ctx ctx = {0};
+        for (int i = 0; i < 64; ++i) { ctx.Q[i] = 1u; }
+        for (uint32_t mask = 1u; mask < 256u; mask += 2u) {
+            for (int sign = -1; sign <= 1; sign += 2) {
+                int32_t q[64] = {0};
+                int32_t expected[64], actual[64];
+                for (int u = 0; u < 8; ++u) {
+                    if ((mask & (1u << u)) == 0u) { continue; }
+                    for (int v = 0; v < 8; ++v) {
+                        const int basis = M[u * 8 + 3] * M[v * 8 + 4];
+                        q[u * 8 + v] = sign * (basis < 0 ? -TC_TRANSFORM_MAX_ABS_F
+                                                         : TC_TRANSFORM_MAX_ABS_F);
+                    }
+                }
+                tc_transform_inverse_8x8_scalar(q, expected);
+                tc_simd_dequant_inverse_8x8(&ctx, q, actual, mask);
+                MT_CHECK(memcmp(actual, expected, sizeof(expected)) == 0);
+            }
+        }
     }
 
     /* —— M10-2B：稀疏 basis 逆变换 vs 稠密内核差分（随机/极值块 ≥ 50,000） ——
@@ -619,6 +664,59 @@ int main(void)
             tc_dequant_block_ctx(&ctx, q, Fp);
             tc_transform_inverse_8x8_scalar(Fp, xh);
             for (int i = 0; i < 64; ++i) { MT_CHECK_EQ_I64(xh[i], x[i]); }
+        }
+    }
+
+    /* With only coefficient row 0 populated all reconstructed rows agree.
+     * Compare runtime SIMD against the scalar path, including both clamp signs. */
+    {
+        uint16_t qmf[64];
+        for (int i = 0; i < 64; ++i) { qmf[i] = 16u; }
+        const tc_single_ac_store_fn single_ac =
+            tc_simd_resolve_single_ac_store(tc_simd_resolve_dequant_inverse(0u));
+        for (uint8_t depth = 8u; depth <= 12u; depth += 2u) {
+            tc_quant_ctx ctx;
+            tc_quant_ctx_init_bd(&ctx, qmf, 39u, depth);
+            for (int block = 0; block < 128; ++block) {
+                int32_t q[64] = { 0 };
+                int32_t dequant[64], reference[64], actual[64];
+                for (int i = 0; i < 8; ++i) {
+                    q[i] = (int32_t)(mt_rand_u64() % 65536u) - 32768;
+                }
+                tc_dequant_block_ctx(&ctx, q, dequant);
+                tc_transform_inverse_8x8_scalar(dequant, reference);
+                tc_simd_dequant_inverse_8x8(&ctx, q, actual, 1u);
+                MT_CHECK(memcmp(actual, reference, sizeof(actual)) == 0);
+
+                if (single_ac != NULL) {
+                    enum { STRIDE = 13 };
+                    const uint32_t natural = (uint32_t)block % 63u + 1u;
+                    const int32_t dc = q[0];
+                    const int32_t ac = q[1];
+                    const int32_t mid = 1 << (depth - 1u);
+                    const uint16_t max = (uint16_t)((1u << depth) - 1u);
+                    uint16_t pixels[8 * STRIDE];
+                    memset(q, 0, sizeof(q));
+                    memset(pixels, 0xff, sizeof(pixels));
+                    q[0] = dc;
+                    q[natural] = ac;
+                    tc_dequant_block_ctx(&ctx, q, dequant);
+                    tc_transform_inverse_8x8_scalar(dequant, reference);
+                    single_ac(&ctx, dc, natural, ac, pixels + 1, STRIDE, mid, max);
+                    for (int y = 0; y < 8; ++y) {
+                        MT_CHECK_EQ_U64(pixels[y * STRIDE], UINT16_MAX);
+                        for (int x = 0; x < 8; ++x) {
+                            int32_t value = reference[y * 8 + x] + mid;
+                            if (value < 0) { value = 0; }
+                            if (value > max) { value = max; }
+                            MT_CHECK_EQ_I64(pixels[y * STRIDE + x + 1], value);
+                        }
+                        for (int x = 9; x < STRIDE; ++x) {
+                            MT_CHECK_EQ_U64(pixels[y * STRIDE + x], UINT16_MAX);
+                        }
+                    }
+                }
+            }
         }
     }
 

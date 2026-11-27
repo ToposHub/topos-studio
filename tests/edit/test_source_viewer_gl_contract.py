@@ -119,6 +119,29 @@ def _make_viewer(qtbot):
     return viewer
 
 
+def test_playhead_changes_do_not_advance_source_presentations(qtbot, monkeypatch) -> None:
+    import src.features.edit.ui.source_viewer as sv
+
+    widget = sv.SourceViewerWidget()
+    qtbot.addWidget(widget)
+    viewer = widget.viewer
+    viewer._prog = 1
+    monkeypatch.setattr(viewer, "_render_texture", MagicMock(return_value=True))
+    monkeypatch.setattr(sv, "_gl", MagicMock())
+    indicator = widget.toolbar.fps_indicator
+    indicator.set_playback_state(True, 24.0)
+
+    viewer.set_shared_texture(7, 1920, 1080, frame=3)
+    viewer._paintGL_content()
+    widget._current_frame = 11
+    viewer._paintGL_content()
+    assert len(indicator._samples) == 1
+
+    viewer.set_shared_texture(7, 1920, 1080, frame=5)
+    viewer._paintGL_content()
+    assert len(indicator._samples) == 2
+
+
 def test_render_texture_sets_display_and_flip_uniforms(qtbot, monkeypatch) -> None:
     """mock GL 下验证 4f/1f 参数；location=-1 也安全。"""
     import src.features.edit.ui.source_viewer as sv

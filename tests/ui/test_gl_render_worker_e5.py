@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtGui import QSurfaceFormat  # noqa: E402
+from PyQt6.QtWidgets import QWidget  # noqa: E402
 from pytestqt.qtbot import QtBot  # noqa: E402
 
 from src.shared.playback.gl_render_worker import (  # noqa: E402
@@ -59,9 +60,15 @@ def _yuv_frame(color: str, w: int = 8, h: int = 6) -> YuvFrame:
 
 
 @pytest.fixture()
-def gl_canvas(qtbot):
+def gl_canvas(qtbot, request):
     """每用例一块真 GL 画布；无 GL 环境整组跳过。"""
-    canvas = GLVideoCanvas()
+    parent = None
+    if getattr(request, "param", False):
+        parent = QWidget()
+        qtbot.addWidget(parent)
+        parent.resize(240, 180)
+        parent.show()
+    canvas = GLVideoCanvas(parent)
     canvas.resize(120, 90)
     canvas.show()
     qtbot.waitUntil(lambda: canvas._ctx is not None or canvas._gpu_error,
@@ -148,6 +155,7 @@ def test_latest_wins_drops_stale_queued_frames(qtbot, gl_canvas):
     _assert_redish(pixels[pixels.shape[0] // 2, pixels.shape[1] // 2])
 
 
+@pytest.mark.parametrize("gl_canvas", [False, True], indirect=True, ids=["window", "embedded"])
 def test_gui_present_paints_front(qtbot, gl_canvas):
     """端到端：GUI paintGL 呈现渲染线程前台帧（跨上下文纹理采样）。"""
     canvas = gl_canvas
@@ -163,6 +171,32 @@ def test_gui_present_paints_front(qtbot, gl_canvas):
     assert not image.isNull()
     center = image.pixelColor(image.width() // 2, image.height() // 2)
     assert center.red() > 150, f"中心应为画面（红主导），得到 {center.name()}"
+
+    canvas.resize(160, 100)
+    _wait_rendered(qtbot, worker, minimum=2)
+    image = canvas.grabFramebuffer()
+    assert image.pixelColor(image.width() // 2, image.height() // 2).red() > 150
+
+
+def test_failed_texture_blit_repaints_paused_frame(qtbot: QtBot, gl_canvas: GLVideoCanvas,
+                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.shared.playback import gl_video_canvas
+
+    worker = gl_canvas._render_worker
+    if worker is None or not worker.alive:
+        pytest.skip("渲染线程不可用")
+    if not worker.probe(lambda state: state["shared"]):
+        pytest.skip("当前画布已走回读路径")
+
+    def broken_binder() -> None:
+        raise RuntimeError("injected shared texture present failure")
+
+    monkeypatch.setattr(gl_video_canvas, "_raw_gl_binder", broken_binder)
+    gl_canvas.set_image(_yuv_frame("red"))
+    _wait_rendered(qtbot, worker, minimum=2)
+    assert worker.front_texture()[0] == "cpu"
+    image = gl_canvas.grabFramebuffer()
+    assert image.pixelColor(image.width() // 2, image.height() // 2).red() > 150
 
 
 # ---------------------------------------------------------------------------

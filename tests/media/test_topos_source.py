@@ -882,7 +882,7 @@ def test_readahead_batch_bitexact_and_engagement(codec: ToposCodec, tmp_path) ->
 
 
 def test_readahead_auto_depth_and_env_override(codec: ToposCodec, tmp_path, monkeypatch) -> None:
-    """播放默认关闭；导出自动使用有界深度，环境变量/参数可覆盖。"""
+    """旧码流播放默认关闭；导出使用有界深度，环境变量/参数可覆盖。"""
     from src.shared.media import topos_source as ts
     from src.shared.media.topos_source import ToposMediaSource
 
@@ -926,6 +926,74 @@ def test_readahead_auto_depth_and_env_override(codec: ToposCodec, tmp_path, monk
         assert src._ra_depth == ts._READAHEAD_EXPORT_DEPTH
     finally:
         src.close()
+
+
+@pytest.mark.parametrize(("tier", "hd_depth"), [("proxy", 4), ("lt", 2)])
+def test_low_tier_readahead_pauses_when_workers_are_shared(
+    codec: ToposCodec, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tier: str, hd_depth: int,
+) -> None:
+    from dataclasses import replace
+
+    from src.shared.codec.decode_worker_budget import DecodeWorkerBudget
+    from src.shared.codec.topos_profiles import TOPOS_TIER_IDS
+    from src.shared.media import topos_source as ts
+
+    if not (codec._has_scalable_encoder and codec._has_decoder_batch
+            and codec._has_decoder_worker_budget):
+        pytest.skip("需要 V7 编码和带 worker 配额的批量解码")
+
+    budget = DecodeWorkerBudget(capacity=24, max_workers=24)
+    monkeypatch.setattr(ts, "DECODE_WORKER_BUDGET", budget)
+    # A decoder context's explicit allocation can exceed the process default.
+    monkeypatch.setattr(ToposCodec, "slice_threads", lambda self: 16)
+    monkeypatch.delenv("TOPOS_READAHEAD", raising=False)
+    monkeypatch.delenv("TOPOS_DECODE_WORKERS", raising=False)
+
+    path = str(tmp_path / "v7_proxy.mov")
+    fc = _frame_config(W, H)
+    with ToposMuxFile(codec, path, codec.movie_config(W, H, qp=20, qmatrix=1)) as mux:
+        mux.set_movie_meta(tier_id=TOPOS_TIER_IDS[tier])
+        for i in range(7):
+            packet = codec.encode_scalable(fc, _plane_bytes(i, W, H, False), base_max_dim=16)
+            mux.add_packet(packet, pts=i * FRAME_DUR, dur=FRAME_DUR)
+        mux.finish()
+
+    with ts.ToposMediaSource(path, read_ahead=0) as reference:
+        expected = [tuple(p.tobytes() for p in reference.read_frame(i).planes) for i in range(7)]
+
+    with ts.ToposMediaSource(path) as src:
+        assert src.diagnostics['read_ahead_depth'] == 2
+        assert src.diagnostics['decode_workers_assigned'] == 24
+        assert tuple(p.tobytes() for p in src.read_frame(0).planes) == expected[0]
+        assert tuple(p.tobytes() for p in src.read_frame(1).planes) == expected[1]
+        assert src.diagnostics['read_ahead_stats']['batch_decodes'] == 1
+
+        with ts.ToposMediaSource(path, read_ahead=0):
+            assert src.diagnostics['decode_workers_assigned'] == 12
+            for i in range(2, 5):
+                assert tuple(p.tobytes() for p in src.read_frame(i).planes) == expected[i]
+            assert src.diagnostics['read_ahead_stats']['cache_hits'] == 1
+            assert src.diagnostics['read_ahead_stats']['batch_decodes'] == 1
+
+        assert src.diagnostics['decode_workers_assigned'] == 24
+        assert tuple(p.tobytes() for p in src.read_frame(5).planes) == expected[5]
+        assert src.diagnostics['read_ahead_stats']['batch_decodes'] == 2
+        summary = src._summary
+        assert summary is not None
+        # Exercise the full HD depth and the 4K guard without encoding
+        # large materials in this worker/seek integration test.
+        src._summary = replace(summary, width=1920, height=1080)
+        assert src._readahead_depth() == hd_depth
+        src._summary = replace(summary, width=3840, height=2160)
+        assert src._readahead_depth() == 0
+        src._summary = summary
+
+    with ts.ToposMediaSource(path, decode_workers=16) as limited:
+        assert limited.diagnostics['read_ahead_depth'] == 0
+
+    with ts.ToposMediaSource(path, target_size=(W // 2, H // 2)) as reduced:
+        assert reduced.diagnostics['read_ahead_depth'] == 0
 
 
 def test_readahead_budget_cap_and_unsafe_override(codec: ToposCodec, tmp_path, monkeypatch) -> None:
@@ -1066,6 +1134,21 @@ def test_decode_worker_budget_rebalances_live_sources(codec: ToposCodec, tmp_pat
             first.diagnostics["decode_worker_budget"]["capacity"]
     finally:
         first.close()
+
+
+def test_wide_playback_budget_keeps_export_and_reduced_decode_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    from src.shared.codec.decode_worker_budget import DecodeWorkerBudget
+    from src.shared.media import topos_source
+
+    monkeypatch.setattr(topos_source, "DECODE_WORKER_BUDGET", DecodeWorkerBudget(capacity=24, max_workers=24))
+    monkeypatch.delenv("TOPOS_DECODE_WORKERS", raising=False)
+    assert topos_source.ToposMediaSource("full.mov")._resolve_decode_workers() == 0
+    assert topos_source.ToposMediaSource("full.mov", decode_role="export")._resolve_decode_workers() == 16
+    assert topos_source.ToposMediaSource("full.mov", target_size=(1920, 1080))._resolve_decode_workers() == 16
+    for workers in (0, 24):
+        source = topos_source.ToposMediaSource("full.mov", target_size=(1920, 1080), decode_workers=workers)
+        assert source._resolve_decode_workers() == 16
+    assert topos_source.ToposMediaSource("full.mov", decode_workers=6)._resolve_decode_workers() == 6
 
 
 def test_readahead_corruption_semantics(codec: ToposCodec, tmp_path) -> None:

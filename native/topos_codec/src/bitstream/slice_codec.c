@@ -63,7 +63,8 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
                                           const uint8_t* payload, size_t payload_size,
                                           tc_color_block_sink_fn sink, void* ctx,
                                           uint64_t* symbol_hash,
-                                          tc_scan_dc_ctx* dc);
+                                          tc_scan_dc_ctx* dc,
+                                          tc_color_store_ctx* store);
 
 typedef struct rans_arr_sink_ctx { int32_t* q_out; } rans_arr_sink_ctx;
 
@@ -227,7 +228,7 @@ int32_t tc_color_slice_decode(const topos_frame_header* fh, const topos_slice_he
         rans_arr_sink_ctx actx = { q_out };
         int32_t rc = tc_color_rans2_decode_core(fh, sh, payload, payload_size,
                                                 q_out != NULL ? rans_arr_sink : NULL,
-                                                &actx, symbol_hash, &dc);
+                                                &actx, symbol_hash, &dc, NULL);
         tc_free(dc.prev_row); tc_free(dc.row);
         return rc;
     }
@@ -556,7 +557,8 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
                                           const uint8_t* payload, size_t payload_size,
                                           tc_color_block_sink_fn sink, void* ctx,
                                           uint64_t* symbol_hash,
-                                          tc_scan_dc_ctx* dc)
+                                          tc_scan_dc_ctx* dc,
+                                          tc_color_store_ctx* store)
 {
     /* 最小前缀 = flags + 全 order-0 表（29+64+28）+ 终态 4B = 126 */
     if (payload_size < 1u + TC_RANS_TABLE_BYTES + TC_RANS_STATE_BYTES) {
@@ -634,18 +636,15 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
     int32_t ac_block[64];
     /* Immediate EOB reuses the zero AC coefficients across blocks. */
     int32_t dc_block[64] = {0};
-    uint32_t prev_dc_cat = 0u;
-    int first_block = 1;
+    const tc_single_ac_store_fn single_ac = store != NULL && store->max <= 4095u
+        ? tc_simd_resolve_single_ac_store(store->dinv) : NULL;
+    const uint32_t eob_start = run_m.cum[63];
+    const uint32_t eob_freq = run_m.freq[63];
+    uint32_t dc_ctx = 0u;
     for (uint32_t by = 0u; by < band; ++by) {
         for (uint32_t bx = 0u; bx < cols; ++bx) {
-            const uint32_t dctx_d = first_block != 0
-                ? 0u : tc_rans2_dc_ctx(prev_dc_cat, 1);
-            const tc_rans_model* dmv = dc_model == TC_RANS2_DC_PREV
-                ? &dc_m[dctx_d] : &dc_m[0];
-            const tc_rans_lut* dlv = dc_model == TC_RANS2_DC_PREV
-                ? &dc_luts[dctx_d] : &dc_luts[0];
             uint32_t cat = 0u;
-            rc = tc_rans_get_lut(&dec, dlv, dmv, &cat);
+            rc = tc_rans_get_lut(&dec, &dc_luts[dc_ctx], &dc_m[dc_ctx], &cat);
             if (rc != TC_OK) { goto done; }
             uint32_t m = 0u;
             rc = tc_rans_get_suffix(&dec, cat, &m);
@@ -661,8 +660,21 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
             int32_t dc_value = 0;
             rc = tc_dc_reconstruct_checked_bd(pred, m, fh->bit_depth, &dc_value);
             if (rc != TC_OK) { goto done; }
-            prev_dc_cat = cat;
-            first_block = 0;
+            dc_ctx = dc_model == TC_RANS2_DC_PREV ? tc_rans2_dc_ctx(cat, 1) : 0u;
+
+            /* EOB is the last RUN symbol. Its upper interval identifies an
+             * immediate EOB directly, including the empty interval at 4096. */
+            const uint32_t run_slot = dec.x & (TC_RANS_SCALE_TOTAL - 1u);
+            if (store != NULL && !want_hash && run_slot >= eob_start) {
+                rc = tc_rans_advance(&dec, eob_freq, run_slot - eob_start);
+                if (rc != TC_OK) { goto done; }
+                dc->row[bx] = dc_value;
+                dc_block[0] = dc_value;
+                rc = tc_color_store_block_xy(store, by * cols + bx, bx,
+                                             store->block_y0 + by, dc_block, 0u);
+                if (rc != TC_OK) { goto done; }
+                continue;
+            }
 
             uint32_t rowmask = 1u;
             uint32_t pos = 1u;
@@ -671,6 +683,7 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
             uint32_t run_sym = 0u;
             rc = tc_rans_get_lut(&dec, run_lut, &run_m, &run_sym);
             if (rc != TC_OK) { goto done; }
+            const uint32_t first_ac = run_sym + 1u;
             int32_t* blk = dc_block;
             if (run_sym != 63u) {
                 blk = ac_block;
@@ -724,9 +737,25 @@ static int32_t tc_color_rans2_decode_core(const topos_frame_header* fh,
                 }
             }
             dc->row[bx] = blk[0];
-            if (sink != NULL) {
-                /* Row zero also contains AC coefficients. Only an immediate
-                 * EOB after DC qualifies for the constant-fill inverse. */
+            /* Row zero also contains AC coefficients. Only an immediate
+             * EOB after DC qualifies for the constant-fill inverse. */
+            if (store != NULL) {
+                const uint32_t y = store->block_y0 + by;
+                /* pos advances strictly. Equality here means only one AC
+                 * was read, even when its explicitly coded level is zero. */
+                if (single_ac != NULL && rowmask != 1u && pos == first_ac + 1u &&
+                    bx * 8u + 8u <= store->vis_w && y * 8u + 8u <= store->vis_h) {
+                    const uint32_t natural = kTcZigzag[first_ac];
+                    uint16_t* dst = store->dst + (size_t)(y * 8u) * store->stride + bx * 8u;
+                    single_ac(store->qctx, dc_value, natural, blk[natural], dst,
+                              store->stride, (int32_t)store->mid, (uint16_t)store->max);
+                    continue;
+                }
+                rc = tc_color_store_block_xy(store, by * cols + bx, bx,
+                                             y, blk,
+                                             has_prev ? rowmask : 0u);
+                if (rc != TC_OK) { goto done; }
+            } else if (sink != NULL) {
                 rc = sink(ctx, by * cols + bx, blk, has_prev ? rowmask : 0u);
                 if (rc != TC_OK) { goto done; }
             }
@@ -989,7 +1018,7 @@ int32_t tc_color_slice_decode_stream(const topos_frame_header* fh, const topos_s
             return TC_ERR_OUT_OF_MEMORY;
         }
         int32_t rc = tc_color_rans2_decode_core(fh, sh, payload, payload_size,
-                                                sink, ctx, symbol_hash, &dc);
+                                                sink, ctx, symbol_hash, &dc, NULL);
         tc_free(dc.prev_row); tc_free(dc.row);
         return rc;
     }
@@ -1025,7 +1054,7 @@ int32_t tc_color_slice_decode_stream_scratch(const topos_frame_header* fh,
     }
     if (tc_slice_use_rans2(fh)) {
         return tc_color_rans2_decode_core(fh, sh, payload, payload_size, sink, ctx,
-                                          symbol_hash, dc);
+                                          symbol_hash, dc, NULL);
     }
     return tc_color_scan_decode_scratch(fh, sh, payload, payload_size, sink, ctx,
                                         symbol_hash, dc);
@@ -1062,9 +1091,16 @@ int32_t tc_color_slice_decode_to_plane(const topos_frame_header* fh,
                                          tc_c1_store_sink, &c, NULL, dc);
     }
     if (tc_slice_use_rans2(fh)) {
+        if (store->scaled == 0u && store->stats == NULL &&
+            (store->coefficient_limit == 0u || store->coefficient_limit >= 63u)) {
+            /* The scanner already has block coordinates. Avoid the generic
+             * sink's indirect call and its division to recover those coordinates. */
+            return tc_color_rans2_decode_core(fh, sh, payload, payload_size,
+                                              NULL, NULL, NULL, dc, store);
+        }
         tc_c1_store_sink_ctx c = { store };
         return tc_color_rans2_decode_core(fh, sh, payload, payload_size,
-                                          tc_c1_store_sink, &c, NULL, dc);
+                                          tc_c1_store_sink, &c, NULL, dc, NULL);
     }
     return tc_color_scan_to_plane(fh, sh, payload, payload_size, dc, store);
 }

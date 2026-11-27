@@ -68,6 +68,7 @@ src/image/image_writer.c
 src/image/half_map.c
 src/simd/dispatch.c
 src/simd/transform_avx2.c
+src/simd/deblock_avx2.c
 src/simd/color_convert_avx2.c
 src/simd/planar_convert_avx2.c
 src/simd/transform_neon.c

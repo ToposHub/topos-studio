@@ -3,6 +3,12 @@
 #include <stdatomic.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#include <limits.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 #include "endian.h"
 
 /* 基表由 poly 0xEDB88320 逐位生成（见 test_crc32.c 的运行时参考实现交叉验证）；
@@ -73,8 +79,42 @@ static void crc32_slice8_ensure(void)
 #define TOPOS_CRC_LE 1
 #endif
 
+#if defined(_WIN32)
+/* The optional OS routine computes the same incremental IEEE CRC-32. */
+typedef ULONG (NTAPI *crc32_windows_fn)(ULONG, const UCHAR*, ULONG);
+static INIT_ONCE s_crc32_windows_once = INIT_ONCE_STATIC_INIT;
+static crc32_windows_fn s_crc32_windows;
+
+static BOOL CALLBACK crc32_windows_init(PINIT_ONCE once, PVOID parameter, PVOID* context)
+{
+    (void)once;
+    (void)parameter;
+    (void)context;
+
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if (ntdll != NULL) {
+        FARPROC symbol = GetProcAddress(ntdll, "RtlComputeCrc32");
+        crc32_windows_fn impl = (crc32_windows_fn)(void (NTAPI *)(void))symbol;
+        static const UCHAR check[] = "123456789";
+        if (impl != NULL && impl(impl(0u, check, 4u), check + 4u, 5u) == 0xCBF43926u) {
+            s_crc32_windows = impl;
+        }
+    }
+    return TRUE;
+}
+#endif
+
 uint32_t tc_crc32_update(uint32_t crc, const void* data, size_t size)
 {
+#if defined(_WIN32)
+    /* Keep short headers on the table path and stay within signed 32-bit length. */
+    if (size >= 1024u && size <= (size_t)INT_MAX &&
+        InitOnceExecuteOnce(&s_crc32_windows_once, crc32_windows_init, NULL, NULL) &&
+        s_crc32_windows != NULL) {
+        return s_crc32_windows((ULONG)crc, (const UCHAR*)data, (ULONG)size);
+    }
+#endif
+
     const uint8_t* p = (const uint8_t*)data;
     uint32_t c = crc ^ 0xFFFFFFFFu;
 

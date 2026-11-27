@@ -22,7 +22,6 @@ pytest.importorskip("PyQt6.QtWidgets")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QWidget
 
 from src.features.edit.ui.preview_view_transform import PreviewViewTransform
@@ -262,22 +261,23 @@ class TestRouting:
 
 
 class TestFpsReadout:
-    def test_the_fps_readout_is_drawn_above_the_layer(self, widget, qapp) -> None:
+    def test_native_layer_does_not_need_a_copy_of_the_title_bar_label(self, widget, qapp) -> None:
         renderer = _FakeRenderer()
         host = _arm(widget, renderer)
-        indicator = widget.viewer._fps_indicator
         widget.set_native_gpu_frame(_present(frame=40), frame=40, generation=6)
         qapp.processEvents()
-        image = host.overlay_images[-1]
-        assert isinstance(image, QImage) and not image.isNull()
-        assert (image.width(), image.height()) == host.drawable_size
+        assert not host.isHidden()
+        assert not host.overlay_images
 
     def test_a_presented_native_frame_feeds_the_fps_counter(self, widget) -> None:
         renderer = _FakeRenderer()
         _arm(widget, renderer)
-        indicator = widget.viewer._fps_indicator
+        indicator = widget.toolbar.fps_indicator
         indicator.set_playback_state(True, 24.0)      # frames count only while playing
         before = len(indicator._samples)
+        renderer.native_frame_presented.emit(39)    # layer is not visible yet
+        assert len(indicator._samples) == before
+        assert widget.set_native_gpu_frame(_present(frame=40), frame=40, generation=6)
         renderer.native_frame_presented.emit(40)
         assert len(indicator._samples) == before + 1
         renderer.native_frame_presented.emit(40)      # same frame is not counted twice

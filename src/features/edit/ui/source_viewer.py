@@ -341,6 +341,8 @@ class SourceViewerBar(QFrame):
         self.setFixedHeight(36)
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setAutoFillBackground(False)
+        self.fps_indicator = RealtimeFpsIndicator(self)
+        self.fps_indicator.hide()
 
         self._is_playing: bool = False
         self._presentation_icon_provider: Optional[Callable[[str], QIcon]] = None
@@ -782,6 +784,7 @@ class SourceViewer(QOpenGLWidget):
 
     seek_requested = pyqtSignal(int)
     zoom_changed = pyqtSignal(float)
+    frame_presented = pyqtSignal(int)
     gl_initialized = pyqtSignal(object)  # QOpenGLContext (for GPU pipeline)
     # I04-1：左键拖出阈值到达时请求发起 Source 剪辑拖拽（容器负责构造
     # 载荷与 QDrag——canvas 不持有素材/In/Out 状态）。平移仍归中键。
@@ -793,7 +796,6 @@ class SourceViewer(QOpenGLWidget):
         self.setObjectName("SourceViewer")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._clip_drag_press = None
-        self._fps_indicator = RealtimeFpsIndicator(self)
         self._display_color = VideoDisplayColor(self, self.update)
 
         # Texture state
@@ -806,6 +808,8 @@ class SourceViewer(QOpenGLWidget):
         self._shared_tex_id: Optional[int] = None
         self._shared_tex_width: int = 0
         self._shared_tex_height: int = 0
+        self._shared_frame: int | None = None
+        self._texture_frame: int | None = None
 
         # GL resources
         self._gl_initialized: bool = False
@@ -826,6 +830,7 @@ class SourceViewer(QOpenGLWidget):
         # context is current (AUD-20902).
         self._pending_qimage: Optional[QImage] = None
         self._pending_display_size: Optional[Tuple[int, int]] = None
+        self._pending_frame: int | None = None
 
         # Zoom/Pan state
         self._view_transform = PreviewViewTransform()
@@ -1022,17 +1027,6 @@ class SourceViewer(QOpenGLWidget):
         if self._view_transform.mode == "fit":
             self.fit_to_window()
 
-    def resizeEvent(self, event: Any) -> None:
-        """Keep the FPS readout in the preview's top-right corner."""
-        super().resizeEvent(event)
-        self._fps_indicator.adjustSize()
-        self._fps_indicator.move(
-            max(8, self.width() - self._fps_indicator.width() - 8), 8)
-
-    def set_playback_state(self, is_playing: bool, target_fps: float = 24.0) -> None:
-        """Update the source preview FPS indicator state."""
-        self._fps_indicator.set_playback_state(is_playing, target_fps)
-
     def paintGL(self) -> None:
         """Render the viewer content.
 
@@ -1084,8 +1078,10 @@ class SourceViewer(QOpenGLWidget):
                         )
                     else:
                         self.set_texture_from_qimage(pending)
+                    self._texture_frame = self._pending_frame
                 self._pending_qimage = None
                 self._pending_display_size = None
+                self._pending_frame = None
 
         # Clear background
         _gl.glClearColor(*VIEWER_BACKGROUND_RGBA)
@@ -1102,10 +1098,10 @@ class SourceViewer(QOpenGLWidget):
 
         # Render video texture if available (shared pool texture referenced
         # read-only, or the viewer-owned uploaded texture)
-        if self._display_tex_id() is not None and self._prog:
-            self._render_texture(display_rect)
-            frame = getattr(self.parentWidget(), "_current_frame", None)
-            self._fps_indicator.record_presented_frame(frame)
+        if self._prog and self._render_texture(display_rect):
+            frame = self._shared_frame if self._shared_tex_id is not None else self._texture_frame
+            if frame is not None:
+                self.frame_presented.emit(frame)
 
     def _display_tex_id(self) -> Optional[int]:
         """Resolve which texture ID to draw this frame.
@@ -1150,7 +1146,7 @@ class SourceViewer(QOpenGLWidget):
         return tuple(  # type: ignore[return-value]
             float(v) for v in self._view_transform.display_rect_px(tex_w, tex_h, w, h))
 
-    def _render_texture(self, display_rect: Tuple[float, float, float, float]) -> None:
+    def _render_texture(self, display_rect: Tuple[float, float, float, float]) -> bool:
         """Render the texture to the display rect."""
         x, y, width, height = display_rect
 
@@ -1159,14 +1155,14 @@ class SourceViewer(QOpenGLWidget):
         # slot ack); an invalid viewer-owned ID just gets dereferenced.
         tex_id = self._display_tex_id()
         if tex_id is None or tex_id == 0:
-            return
+            return False
         if not _gl.glIsTexture(tex_id):
             logger.warning(f"SourceViewer: texture ID {tex_id} is invalid, clearing")
             if self._shared_tex_id == tex_id:
                 self._shared_tex_id = None
             elif self._current_tex_id == tex_id:
                 self._current_tex_id = None
-            return
+            return False
 
         # GPU FBO textures have GL orientation (y=0 = bottom of image).
         # CPU-uploaded QImages are flipped by glTexImage2D (y=0 = top of image),
@@ -1203,6 +1199,7 @@ class SourceViewer(QOpenGLWidget):
         # Cleanup
         _gl.glBindVertexArray(0)
         _gl.glUseProgram(0)
+        return True
 
     # ==================== Texture Management ====================
 
@@ -1211,6 +1208,8 @@ class SourceViewer(QOpenGLWidget):
         qimage: QImage,
         display_width: int = 0,
         display_height: int = 0,
+        *,
+        frame: int | None = None,
     ) -> None:
         """Stage a CPU-decoded frame for deferred upload inside paintGL.
 
@@ -1232,6 +1231,7 @@ class SourceViewer(QOpenGLWidget):
         if qimage.isNull():
             return
         self._pending_qimage = qimage
+        self._pending_frame = frame
         if display_width > 0 and display_height > 0:
             self._pending_display_size = (display_width, display_height)
             # 显示比来自媒体元数据，与代理解码尺寸无关
@@ -1255,6 +1255,7 @@ class SourceViewer(QOpenGLWidget):
         and never deleted by this widget.
         """
         self._current_tex_id = tex_id
+        self._texture_frame = None
         self._tex_width = width
         self._tex_height = height
         self._shared_tex_id = None  # Clear shared texture
@@ -1270,7 +1271,9 @@ class SourceViewer(QOpenGLWidget):
 
         self.update()
 
-    def set_shared_texture(self, tex_id: int, width: int, height: int) -> None:
+    def set_shared_texture(
+        self, tex_id: int, width: int, height: int, *, frame: int | None = None,
+    ) -> None:
         """
         Set a shared GPU texture for display (GPU pipeline path).
 
@@ -1292,8 +1295,10 @@ class SourceViewer(QOpenGLWidget):
         self._shared_tex_id = tex_id
         self._shared_tex_width = width
         self._shared_tex_height = height
+        self._shared_frame = frame
         self._pending_qimage = None  # Clear CPU path
         self._pending_display_size = None
+        self._pending_frame = None
 
         # Use texture dimensions for sampling, but DON'T update aspect ratio.
         # Aspect ratio comes from media metadata via the parent widget.
@@ -1482,6 +1487,7 @@ class SourceViewer(QOpenGLWidget):
         self._tex_height = 0
         self._pending_qimage = None
         self._pending_display_size = None
+        self._pending_frame = self._texture_frame = self._shared_frame = None
         self.update()
 
     def _delete_viewer_texture(self, tex_id: int) -> None:
@@ -1939,9 +1945,6 @@ class SourceViewerWidget(QWidget):
         self._metal_host: Optional[QWidget] = None
         self._native_renderer: Optional[QObject] = None
         self._native_showing: bool = False
-        self._native_overlay_timer = QTimer(self)
-        self._native_overlay_timer.setInterval(500)
-        self._native_overlay_timer.timeout.connect(self._refresh_native_overlay)
         self._current_frame: int = 0
         self._in_point: Optional[int] = None
         self._out_point: Optional[int] = None
@@ -2127,6 +2130,7 @@ class SourceViewerWidget(QWidget):
         # Toolbar (bottom — playback controls, timecode, edit buttons)
         self.toolbar = SourceViewerBar(self)
         layout.addWidget(self.toolbar)
+        self.viewer.frame_presented.connect(self._on_gl_frame_presented)
 
     def _connect_signals(self) -> None:
         """Connect toolbar signals."""
@@ -2301,7 +2305,7 @@ class SourceViewerWidget(QWidget):
         self.toolbar.set_enabled(True)
         self.toolbar.btn_source_patch.setEnabled(not preview_only)
         self.toolbar.update_play_state(False)
-        self.viewer.set_playback_state(False, self._fps)
+        self.toolbar.fps_indicator.set_playback_state(False, self._fps)
         self.toolbar.update_in_out_state(self._in_point, self._out_point)
 
         # Restoring controls is one projection of the saved source state.
@@ -2448,7 +2452,7 @@ class SourceViewerWidget(QWidget):
         self.toolbar.set_frame_number(0)
         self.toolbar.set_duration("--:--:--:--")
         self.toolbar.update_play_state(False)
-        self.viewer.set_playback_state(False, 24.0)
+        self.toolbar.fps_indicator.set_playback_state(False)
         self.toolbar.update_in_out_state(None, None)
 
         self.slider.setRange(0, 100)
@@ -2651,11 +2655,7 @@ class SourceViewerWidget(QWidget):
             if host.isHidden():
                 host.show()
                 host.raise_()
-            if not self._native_overlay_timer.isActive():
-                self._native_overlay_timer.start()
-            self._refresh_native_overlay()
         else:
-            self._native_overlay_timer.stop()
             if not host.isHidden():
                 host.hide()
 
@@ -2747,9 +2747,12 @@ class SourceViewerWidget(QWidget):
         sender = self.sender()
         if sender is not None and sender is not self.__dict__.get("_native_renderer"):
             return
-        indicator = getattr(self.viewer, "_fps_indicator", None)
-        if indicator is not None:
-            indicator.record_presented_frame(int(frame))
+        if self._native_showing and self._native_host_can_show():
+            self.toolbar.fps_indicator.record_presented_frame(frame)
+
+    def _on_gl_frame_presented(self, frame: int) -> None:
+        if not self._native_showing or not self._native_host_can_show():
+            self.toolbar.fps_indicator.record_presented_frame(frame)
 
     def _on_native_viewport_failed(self, reason: str) -> None:
         """The renderer cannot present natively: back to the GL canvas."""
@@ -2765,30 +2768,6 @@ class SourceViewerWidget(QWidget):
                 self.disable_native_viewport()
             except Exception:  # noqa: BLE001
                 logger.debug("SourceViewerWidget: native viewport teardown failed", exc_info=True)
-
-    def _refresh_native_overlay(self) -> None:
-        """Keep the canvas's FPS readout visible above the Metal layer."""
-        host = self.__dict__.get("_metal_host")
-        indicator = getattr(self.viewer, "_fps_indicator", None)
-        if host is None:
-            return
-        if indicator is None or indicator.isHidden() or not indicator.text():
-            host.set_overlay_image(None)
-            return
-        scale = self.viewer.devicePixelRatioF()
-        image = QImage(
-            max(1, round(self.viewer.width() * scale)),
-            max(1, round(self.viewer.height() * scale)),
-            QImage.Format.Format_ARGB32_Premultiplied,
-        )
-        image.fill(Qt.GlobalColor.transparent)
-        image.setDevicePixelRatio(scale)
-        painter = QPainter(image)
-        try:
-            painter.drawPixmap(indicator.pos(), indicator.grab())
-        finally:
-            painter.end()
-        host.set_overlay_image(image)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self.viewer and event.type() in {QEvent.Type.Resize, QEvent.Type.Show}:
@@ -2851,7 +2830,7 @@ class SourceViewerWidget(QWidget):
         self._gpu_watchdog_timer.stop()
         self._gpu_pending_frame = -1
 
-        self.viewer.set_shared_texture(tex_id, width, height)
+        self.viewer.set_shared_texture(tex_id, width, height, frame=frame if frame >= 0 else None)
         self._last_good_frame = frame
         self._error_message = None
         # A GL frame takes the screen back from the native viewport.
@@ -3036,7 +3015,7 @@ class SourceViewerWidget(QWidget):
         self._playback_start_frame = self._current_frame
         self._playback_timer.start()
         self.toolbar.update_play_state(True)
-        self.viewer.set_playback_state(True, self._fps)
+        self.toolbar.fps_indicator.set_playback_state(True, self._fps)
         # Start continuous audio playback.  The audio manager (built by
         # _sync_scrub_audio_for_asset) is a full AudioPlaybackManager: it
         # already has the asset wired as a track with the right fps/duration,
@@ -3050,7 +3029,7 @@ class SourceViewerWidget(QWidget):
         self._is_playing = False
         self._playback_timer.stop()
         self.toolbar.update_play_state(False)
-        self.viewer.set_playback_state(False, self._fps)
+        self.toolbar.fps_indicator.set_playback_state(False, self._fps)
         # Pause continuous audio to match the frozen playhead.
         self._pause_source_audio()
         self.playback_state_changed.emit(False)
@@ -3081,7 +3060,7 @@ class SourceViewerWidget(QWidget):
         self._playback_start_frame = self._current_frame
         self._playback_timer.start()
         self.toolbar.update_play_state(True)
-        self.viewer.set_playback_state(True, self._fps)
+        self.toolbar.fps_indicator.set_playback_state(True, self._fps)
         self.playback_state_changed.emit(True)
         logger.debug("Reverse playback started (video only)")
 
@@ -3795,7 +3774,7 @@ class SourceViewerWidget(QWidget):
         # Check cache first
         if frame in self._frame_cache:
             # AUD-20902: UI 槽只暂存图像，GL 上传发生在 paintGL 内
-            self.viewer.submit_qimage(self._frame_cache[frame])
+            self.viewer.submit_qimage(self._frame_cache[frame], frame=frame)
             return
 
         # Load frame based on media type
@@ -3894,7 +3873,7 @@ class SourceViewerWidget(QWidget):
                     if result is not None:
                         tex_id, w, h = result
                         if tex_id is not None and tex_id != 0:
-                            self.viewer.set_shared_texture(tex_id, w, h)
+                            self.viewer.set_shared_texture(tex_id, w, h, frame=frame)
                             trace.decode_path = 'gpu_provider'
                             trace.render_path = 'gpu_direct'
                             trace.total_ms = (_time.perf_counter() - t0) * 1000
@@ -4007,6 +3986,7 @@ class SourceViewerWidget(QWidget):
                            else self._media_display_width or image.width()),
             display_height=(image.height() if self._current_asset.is_image
                             else self._media_display_height or image.height()),
+            frame=frame,
         )
         self._frame_cache_lru_put(frame, image)
         self._last_good_qimage = image

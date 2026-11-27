@@ -70,6 +70,8 @@ def test_color_transport_keeps_original_objects_and_big_orange_playback(chrome, 
     assert bar.btn_play.iconSize() == QSize(18, 18)
     assert bar.btn_first.parentWidget() is chrome.transport_center
     assert bar.label_frame.isHidden()
+    assert chrome.toolbar.fps_indicator.parentWidget() is chrome.header_right
+    assert chrome.toolbar.fps_indicator.isVisible()
 
 
 def test_color_fusion_image_transitions_restore_original_control_owners(chrome, qapp) -> None:

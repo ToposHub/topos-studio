@@ -11,9 +11,9 @@
 
 /* ---- 后端注册（transform_avx2.c / transform_neon.c 编译期按架构提供） ---- */
 
-#if (defined(__x86_64__) || defined(_M_X64)) && !defined(__AVX2__)
+#if defined(__x86_64__) || defined(_M_X64)
 /* target-attribute（gcc/clang）或整 TU /arch:AVX2（MSVC）编译的 AVX2 内核；
- * 运行时由 cpuid 判定是否调用（无 AVX2 CPU 不受影响） */
+ * 运行时由 cpuid 判定是否调用。调用方 TU 自带 AVX2 时也需要注册内核。 */
 void tc_transform_forward_8x8_avx2(const int16_t x[64], int32_t F[64]);
 void tc_transform_inverse_8x8_avx2(const int32_t coef[64], int32_t xhat[64]);
 void tc_transform_inverse_8x8_samples_avx2(const int32_t coef[64], const uint8_t* xs,
@@ -30,6 +30,9 @@ void tc_dequant_inverse_samples_half_avx2_limited(const struct tc_quant_ctx* ctx
                                                   uint8_t max_scan_pos, int32_t* out);
 void tc_dequant_inverse_8x8_avx2(const struct tc_quant_ctx* ctx, const int32_t q[64],
                                  int32_t xhat[64], uint32_t ac_rowmask);
+void tc_single_ac_store_avx2(const struct tc_quant_ctx* ctx, int32_t dc,
+                             uint32_t natural, int32_t ac, uint16_t* dst,
+                             size_t stride, int32_t mid, uint16_t max);
 /* M10-2C：四块 SoA 批量内核（qsoa[64][4] 为 int32 值符号扩展入 i64 lane） */
 void tc_dequant_inverse_8x8x4_avx2(const struct tc_quant_ctx* ctx, const int64_t* qsoa,
                                    int32_t* xh4, uint32_t rm_union);
@@ -101,6 +104,7 @@ static void (* volatile s_quant_zz)(const struct tc_quant_ctx*, const int32_t*,
                                     int32_t*, uint64_t*) = NULL;
 static atomic_int s_mode = TC_SIMD_AUTO; /* dev 强制模式 */
 static atomic_int s_init_state = 0;
+static atomic_int s_avx2_enabled;
 static const char* s_backend = "scalar";
 
 int tc_simd_have_avx2(void)
@@ -135,6 +139,7 @@ static void simd_select(int mode)
     void (*dinv)(const struct tc_quant_ctx*, const int32_t*, int32_t*, uint32_t) = NULL;
     void (*qzz)(const struct tc_quant_ctx*, const int32_t*, int32_t*, uint64_t*) = NULL;
     const char* name = "scalar";
+    int avx2_enabled = 0;
 
     uint32_t flags = tc_internal_cpu_flags();
 #if TOPOS_HAVE_AVX2_KERNEL
@@ -149,6 +154,7 @@ static void simd_select(int mode)
         dinv = &tc_dequant_inverse_8x8_avx2;  /* 解码深化：融合反量化+逆变换 */
         qzz = &tc_quant_block_zigzag_avx2;    /* M10-6.3B：gather 型量化 */
         name = "avx2";
+        avx2_enabled = 1;
     }
 #endif
 #if TOPOS_HAVE_NEON_KERNEL
@@ -184,6 +190,7 @@ static void simd_select(int mode)
     s_dequant_inverse = dinv;
     s_quant_zz = qzz;
     s_backend = name;
+    atomic_store_explicit(&s_avx2_enabled, avx2_enabled, memory_order_relaxed);
     atomic_store(&s_init_state, 2);
 }
 
@@ -214,6 +221,12 @@ const char* tc_dev_simd_backend(void)
 {
     simd_ensure();
     return s_backend;
+}
+
+int tc_simd_avx2_enabled(void)
+{
+    simd_ensure();
+    return atomic_load_explicit(&s_avx2_enabled, memory_order_relaxed);
 }
 
 void tc_simd_forward_8x8(const int16_t x[64], int32_t F[64])
@@ -366,6 +379,15 @@ tc_dequant_inverse_fn tc_simd_resolve_dequant_inverse(uint8_t wide)
     }
 #endif
     return &dequant_inverse_compose;
+}
+
+tc_single_ac_store_fn tc_simd_resolve_single_ac_store(tc_dequant_inverse_fn inverse)
+{
+#if TOPOS_HAVE_AVX2_KERNEL
+    if (inverse == tc_dequant_inverse_8x8_avx2) { return tc_single_ac_store_avx2; }
+#endif
+    (void)inverse;
+    return NULL;
 }
 
 /* M10-6.3B：scalar 回退——量化同源（tc_quant_block_zigzag），掩码顺序推导 */

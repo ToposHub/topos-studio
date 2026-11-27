@@ -187,20 +187,26 @@ typedef struct tc_rans_lut { uint8_t sym[TC_RANS_SCALE_TOTAL]; } tc_rans_lut;
 
 void tc_rans_lut_build(tc_rans_lut* l, const tc_rans_model* m);
 
+/* Advance the state for a symbol whose interval has already been identified. */
+static inline int32_t tc_rans_advance(tc_rans_dec* d, uint32_t freq, uint32_t interval_offset)
+{
+    d->x = freq * (d->x >> TC_RANS_SCALE_BITS) + interval_offset;
+    while (d->x < TC_RANS_L) {
+        if (d->pos >= d->size) { return TC_ERR_TRUNCATED; }
+        d->x = (d->x << 8) | d->buf[d->pos++];
+    }
+    return TC_OK;
+}
+
 /* slot→sym 查 LUT（免线性扫）；状态更新用模型 freq/cum（同通用 get） */
 static inline int32_t tc_rans_get_lut(tc_rans_dec* d, const tc_rans_lut* l,
                                       const tc_rans_model* m, uint32_t* sym_out)
 {
     const uint32_t slot = d->x & (TC_RANS_SCALE_TOTAL - 1u);
     const uint32_t s = l->sym[slot];
-    const uint32_t f = m->freq[s];
-    d->x = f * (d->x >> TC_RANS_SCALE_BITS) + slot - m->cum[s];
-    while (d->x < TC_RANS_L) {
-        if (d->pos >= d->size) { return TC_ERR_TRUNCATED; }
-        d->x = (d->x << 8) | d->buf[d->pos++];
-    }
-    *sym_out = s;
-    return TC_OK;
+    const int32_t rc = tc_rans_advance(d, m->freq[s], slot - m->cum[s]);
+    if (rc == TC_OK) { *sym_out = s; }
+    return rc;
 }
 
 /* ---- V2-R slice 表传输（ADR-C034；三族 = DC_CAT/RUN/LEVEL_CAT）----

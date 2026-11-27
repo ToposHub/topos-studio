@@ -108,6 +108,7 @@ add_library(topos_codec SHARED
 target_sources(topos_codec PRIVATE
   src/simd/transform_avx2.c
   src/simd/color_convert_avx2.c
+  src/simd/deblock_avx2.c
   src/simd/planar_convert_avx2.c
   src/simd/transform_neon.c)
 
@@ -125,6 +126,8 @@ if(MSVC)
   set_source_files_properties(src/simd/color_convert_avx2.c PROPERTIES
     COMPILE_OPTIONS "/arch:AVX2")
   set_source_files_properties(src/simd/planar_convert_avx2.c PROPERTIES
+    COMPILE_OPTIONS "/arch:AVX2")
+  set_source_files_properties(src/simd/deblock_avx2.c PROPERTIES
     COMPILE_OPTIONS "/arch:AVX2")
 endif()
 

@@ -154,11 +154,16 @@ def test_header_uses_same_live_labels_and_timeline_selector(viewport, qapp) -> N
     assert viewport.source_header.title.text() == "Camera A.mov"
     assert viewport.source_header.timecode.text() == "01:02:03:04"
     assert viewport.source_header.duration.text() == "00:00:10:00"
+    assert viewport.source_header.fps_indicator is source_bar.fps_indicator
+    assert viewport.source_header.isAncestorOf(source_bar.fps_indicator)
     transport = viewport.program_viewer.get_transport_bar()
     transport.update_timecode("10:20:30:05")
     assert viewport.program_header.timecode is transport.timecode_label
     assert viewport.program_header.timecode.text() == "10:20:30:05"
     toolbar = viewport.program_viewer.get_toolbar()
+    assert viewport.program_header.fps_indicator is toolbar.fps_indicator
+    assert viewport.program_header.isAncestorOf(toolbar.fps_indicator)
+    assert toolbar.fps_indicator.isVisible()
     toolbar.set_timeline_choices({"one": SimpleNamespace(name="Timeline 1"), "two": SimpleNamespace(name="Timeline 2")}, "two")
     qapp.processEvents()
     assert viewport.program_header.title is toolbar._timeline_selector
@@ -503,11 +508,13 @@ def test_mode_buttons_stay_inside_header_at_narrow_width(viewport, qapp, width, 
     assert viewport.width() == width
     assert not mode_button.isHidden()
     timecode_x = header.timecode.mapTo(header, QPoint(0, 0)).x()
+    fps_x = header.fps_indicator.mapTo(header, QPoint(0, 0)).x()
     mode_x = mode_button.mapTo(header, QPoint(0, 0)).x()
     options_x = header.options_button.mapTo(header, QPoint(0, 0)).x()
     assert mode_x >= 0
     assert options_x + header.options_button.width() <= header.width()
-    assert timecode_x + header.timecode.width() <= mode_x
+    assert timecode_x + header.timecode.width() <= fps_x
+    assert fps_x + header.fps_indicator.width() <= mode_x
     if not header.title.isHidden():
         assert header.title.geometry().right() < timecode_x
 

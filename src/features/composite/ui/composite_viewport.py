@@ -1067,6 +1067,7 @@ class CompositeViewer(QOpenGLWidget):
         super().__init__(parent)
         # Texture state
         self._current_tex_id = None
+        self._display_frame_revision = 0
         self._tex_width = 0
         self._tex_height = 0
         # Beauty is copied into _owned_display_tex_id; auxiliary passes are
@@ -1476,6 +1477,8 @@ class CompositeViewer(QOpenGLWidget):
         if self._selected_render_pass == "beauty" or not self._owned_aov_tex_ids:
             self._current_tex_id = display_tex_id
             self._tex_width, self._tex_height = actual_size
+            if display_tex_id and display_tex_id > 0:
+                self._display_frame_revision += 1
         if image_format is not None:
             self._overlay_format = image_format
         if bbox is not None:
@@ -1572,6 +1575,8 @@ class CompositeViewer(QOpenGLWidget):
                     self._owned_aov_tex_sizes[name] = (
                         descriptor["width"], descriptor["height"])
                     self._owned_aov_tex_storage[name] = descriptor["storage"]
+                    if name == self._selected_render_pass:
+                        self._display_frame_revision += 1
                 else:
                     self._delete_owned_aov_texture(name, assume_current=True)
         except Exception as exc:
@@ -1651,6 +1656,7 @@ class CompositeViewer(QOpenGLWidget):
             if bbox is not None:
                 self._overlay_bbox = bbox
             self._inspector_bar.update_format_info(self._tex_width, self._tex_height)
+            self._display_frame_revision += 1
             self.update()
             return True
         except Exception as e:
@@ -3476,7 +3482,7 @@ class CompositeViewer(QOpenGLWidget):
             self._draw_3d_viewport_overlay()
             self._update_inspector_from_framebuffer(vp_w, vp_h)
             if self.video_control_bar.is_playing:
-                self._toolbar.record_presented_frame(self.video_control_bar.current_frame)
+                self._toolbar.record_presented_frame(self._display_frame_revision)
             return
 
         # Compute letterbox + zoom + pan vertices
@@ -3673,10 +3679,9 @@ class CompositeViewer(QOpenGLWidget):
         # Read pixel at mouse position for inspector
         self._update_inspector_from_framebuffer(vp_w, vp_h)
 
-        # Count the frame after the viewer has completed its paint pass. The
-        # transport frame token prevents ordinary repaints from inflating FPS.
+        # Repaints of the same composited output do not advance the counter.
         if self.video_control_bar.is_playing:
-            self._toolbar.record_presented_frame(self.video_control_bar.current_frame)
+            self._toolbar.record_presented_frame(self._display_frame_revision)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

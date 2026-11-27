@@ -23,6 +23,7 @@ from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
 from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
 from src.shared.video.viewer_colors import VIEWER_TRANSPORT_BACKGROUND
+from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 from src.shared.ui.widgets.viewport_toolbar_base import ViewerZoomMenuButton
 from src.shared.assets.icon_manager import (
     IconColors, icon_jump_start, icon_step_back, icon_play, icon_pause,
@@ -219,7 +220,10 @@ class _MonitorFooter(QFrame):
 class _MonitorHeader(QFrame):
     """Reference-aligned cells with an independently centered timeline title."""
 
-    def __init__(self, title: QWidget, timecode: QLabel, duration: QLabel, parent: QWidget) -> None:
+    def __init__(
+        self, title: QWidget, timecode: QLabel, duration: QLabel,
+        fps_indicator: RealtimeFpsIndicator, parent: QWidget,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("editMonitorHeader")
         self.setFixedHeight(HEADER_HEIGHT)
@@ -284,6 +288,9 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         timecode.setAccessibleName(timecode.toolTip())
         self.right.addWidget(timecode)
         timecode.show()
+        self.fps_indicator = fps_indicator
+        self.right.addWidget(fps_indicator)
+        fps_indicator.show()
         self.single_button = _tool("single_view", I18N.tr("edit.viewport.single", "Single Viewer Mode"), self.right_group, 36)
         self.dual_button = _tool("dual_view", I18N.tr("edit.viewport.dual", "Dual Viewer Mode"), self.right_group, 36)
         for button in (self.single_button, self.dual_button):
@@ -319,6 +326,9 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
     def position_title(self) -> None:
         """Keep the title at the exact monitor center without covering tools."""
         width = self.width()
+        compact = width < 350 and not self.mixer_mode
+        self.zoom_button.setFixedWidth(48 if compact else 62)
+        self.timecode.setFixedWidth(116 if self.mixer_mode else (78 if compact else 90))
         for button in (self.source_button, self.timeline_button):
             button.setVisible(self.show_monitor_switches)
         self.source_tape_button.setVisible(self.show_monitor_switches and width >= 560)
@@ -332,7 +342,9 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         duration_width = self.duration.minimumWidth()
         show_duration = not self.mixer_mode and width >= 560 and left_width + duration_width <= side_budget
         self.duration.setVisible(show_duration)
-        right_tools = (self.timecode, self.single_button, self.dual_button, self.options_button)
+        right_tools = (
+            self.timecode, self.fps_indicator, self.single_button, self.dual_button, self.options_button,
+        )
         right_width = sum(tool.minimumWidth() for tool in right_tools if not tool.isHidden())
         extra_width = sum(tool.minimumWidth() for tool in self.extra_controls)
         show_extras = not self.mixer_mode and width >= 760 and right_width + extra_width <= side_budget
@@ -456,7 +468,9 @@ class EditViewport(QWidget):
         bar.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if not bar.source_label.text():
             bar.source_label.setText(I18N.tr("edit.viewport.source", "Source"))
-        header = _MonitorHeader(bar.source_label, bar.timecode_label, bar.duration_label, viewer)
+        header = _MonitorHeader(
+            bar.source_label, bar.timecode_label, bar.duration_label, bar.fps_indicator, viewer,
+        )
         layout.insertWidget(0, header)
         zoom_menu = QMenu(header)
         zoom_menu.addAction(I18N.tr("viewport.fit", "Fit to Window"), viewer.viewer.fit_to_window)
@@ -542,7 +556,10 @@ class EditViewport(QWidget):
             lambda name: _legacy_transport_icon(name, transport._loop_enabled))
         self._program_toolbar = toolbar
         self._program_transport = transport
-        header = _MonitorHeader(toolbar._timeline_selector, transport.timecode_label, QLabel("00:00:00:00"), viewer)
+        header = _MonitorHeader(
+            toolbar._timeline_selector, transport.timecode_label, QLabel("00:00:00:00"),
+            toolbar.fps_indicator, viewer,
+        )
         viewer.layout().insertWidget(0, header)
         header.zoom_button.setMenu(toolbar.view_menu)
         toolbar.view_menu.addSeparator()

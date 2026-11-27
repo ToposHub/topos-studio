@@ -4089,7 +4089,8 @@ class Canvas(QGraphicsView):
         self.setViewport(self.gl_viewport)
         self._display_color = VideoDisplayColor(self.gl_viewport, self._refresh_display_color)
         self._video_display: tuple[str | None, bool] = (None, False)
-        self._timeline_monitor_image: QImage | None = None
+        self._timeline_monitor_frame: tuple[QImage, int] | None = None
+        self._timeline_pixmap_frame: int | None = None
         self._color_metal_host = None
         self._color_metal_ready = False
         self.gl_viewport.gl_initialized.connect(self._schedule_color_metal_viewer)
@@ -4361,12 +4362,13 @@ class Canvas(QGraphicsView):
         self._sync_color_metal_host()
 
     def _refresh_display_color(self) -> None:
-        if self._timeline_preview_active and self._timeline_monitor_image is not None:
-            self._display_color.display_image(self._timeline_monitor_image, self._paint_timeline_preview_image)
+        if self._timeline_preview_active and self._timeline_monitor_frame is not None:
+            image, frame = self._timeline_monitor_frame
+            self.set_timeline_preview_image(image, frame)
         self.scene.invalidate(QRectF(), QGraphicsScene.SceneLayer.BackgroundLayer)
         self.viewport().update()
 
-    def set_timeline_preview_image(self, image: QImage) -> None:
+    def set_timeline_preview_image(self, image: QImage, frame: int) -> None:
         """Present a completed Edit timeline preview without re-decoding it.
 
         The Color page uses this while timeline transport is playing.  The
@@ -4378,10 +4380,12 @@ class Canvas(QGraphicsView):
             return
         self._timeline_preview_active = True
         self._sync_color_metal_host()
-        self._timeline_monitor_image = image
-        self._display_color.display_image(image, self._paint_timeline_preview_image)
+        self._timeline_monitor_frame = (image, frame)
+        self._display_color.display_image(
+            image, lambda adjusted: self._paint_timeline_preview_image(adjusted, frame),
+        )
 
-    def _paint_timeline_preview_image(self, image: QImage) -> None:
+    def _paint_timeline_preview_image(self, image: QImage, frame: int) -> None:
         if not self._timeline_preview_active:
             return
         pixmap = QPixmap.fromImage(image)
@@ -4399,6 +4403,7 @@ class Canvas(QGraphicsView):
             self._update_scene_pan_bounds()
             self._update_lod()
         self.pixmap_item.setPixmap(pixmap)
+        self._timeline_pixmap_frame = frame
         self.pixmap_item.setPos(0.0, 0.0)
         # Fit the view BEFORE revealing the pixmap.  Showing it first left one
         # repaint where the new pixmap was laid out under a stale view transform
@@ -4421,7 +4426,8 @@ class Canvas(QGraphicsView):
         background, so it must never be composited with that renderer's last
         front texture.
         """
-        self._timeline_monitor_image = None
+        self._timeline_monitor_frame = None
+        self._timeline_pixmap_frame = None
         self._display_color.cancel_images()
         self._timeline_preview_active = True
         self._sync_color_metal_host()
@@ -4432,7 +4438,8 @@ class Canvas(QGraphicsView):
     def end_timeline_preview(self) -> None:
         """Return the canvas to the normal Color OpenGL presentation path."""
         self._timeline_preview_active = False
-        self._timeline_monitor_image = None
+        self._timeline_monitor_frame = None
+        self._timeline_pixmap_frame = None
         self._display_color.cancel_images()
         self._timeline_preview_needs_fit = False
         self.pixmap_item.setVisible(False)
@@ -6742,7 +6749,9 @@ class Canvas(QGraphicsView):
             return
         self._color_metal_status_serial = serial
         self._color_metal_ready = ready and self._color_metal_host_can_show()
-        if not self._sync_color_metal_host():
+        if self._sync_color_metal_host():
+            self._record_presented_preview_frame(("metal", generation, serial))
+        else:
             self.scene.invalidate(QRectF(), QGraphicsScene.SceneLayer.BackgroundLayer)
             self.viewport().update()
 
@@ -6888,7 +6897,6 @@ class Canvas(QGraphicsView):
                 # whole exposed rect; otherwise the uninitialised GL buffer
                 # leaks as bright-green bands around the fitted QImage.
                 painter.fillRect(rect, QColor(VIEWER_BACKGROUND_HEX))
-                self._record_presented_preview_frame()
                 return
             if self.engine and self.engine.renderer:
                 dpr = self.gl_viewport.devicePixelRatio()
@@ -6915,7 +6923,9 @@ class Canvas(QGraphicsView):
                         self._video_present_retry_key = None
                         self._video_present_retry_attempts = 0
                         _diag_blit_tex = int(tex_id)
-                        self._record_presented_preview_frame()
+                        drawn_frame = getattr(self.engine, "drawn_video_frame", None)
+                        if drawn_frame is not None:
+                            self._record_presented_preview_frame(("source", drawn_frame))
                     else:
                         # A failed blit can share its frame with a scope pass.
                         # Retry the published front without regrading it.
@@ -6938,10 +6948,16 @@ class Canvas(QGraphicsView):
                         'blit', tex=_diag_blit_tex, pending=_diag_pending,
                     )
 
-    def _record_presented_preview_frame(self) -> None:
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawForeground(painter, rect)
+        if (self._timeline_preview_active and self._timeline_pixmap_frame is not None
+                and self.pixmap_item.isVisible() and rect.intersects(self.pixmap_item.sceneBoundingRect())):
+            self._record_presented_preview_frame(("timeline", self._timeline_pixmap_frame))
+
+    def _record_presented_preview_frame(self, frame_token: object) -> None:
         """Record a frame after the Color preview has painted it."""
         toolbar = getattr(self, "viewport_menu", None)
         bar = getattr(self, "video_control_bar", None)
         if toolbar is None or bar is None or not bar.is_playing:
             return
-        toolbar.record_presented_frame(bar.current_frame)
+        toolbar.record_presented_frame(frame_token)

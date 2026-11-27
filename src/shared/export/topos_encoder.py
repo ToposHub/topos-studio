@@ -1139,6 +1139,11 @@ class ToposVideoEncoder:
             self._frame_cfg = fc
             self._movie_cfg = movie_cfg
             if packet_copy_source is not None:
+                if (self._tier.tier_id == "lt" and movie_cfg.qmatrix_id == 0
+                        and packet_copy_source.qmatrix_id == self._tier.qmatrix_id):
+                    # Keep the original LT matrix in the MOV's sample description.
+                    movie_cfg.qmatrix_id = packet_copy_source.qmatrix_id
+                    fc.qmatrix_id = packet_copy_source.qmatrix_id
                 self.check_packet_copy_source(packet_copy_source)
                 parent = os.path.dirname(os.path.abspath(self._output_path))
                 os.makedirs(parent, exist_ok=True)
@@ -1173,6 +1178,17 @@ class ToposVideoEncoder:
     #:   netproxy 为最粗域（同源 qp 单调性），恒启用。
     _EDGE_BALANCED_4K_SUPPRESS = frozenset({"standard", "hq"})
 
+    def _is_sdr_422_intra_mov(self) -> bool:
+        """Match the opaque Rec.709 path used by the SDR quality tests."""
+        return (
+            self._container_mode == "mov"
+            and (self._stream_pixel_format, self._stream_bit_depth, self._native_profile) == (0, 10, 3)
+            and self._rans2 and self._gop == "intra"
+            and self._qp_override is None and not self._has_alpha and not self._aq_on
+            and all(self._cfg_fields[key] == 1 for key in ("primaries", "transfer", "matrix"))
+            and self._cfg_fields["range_code"] == 0
+        )
+
     def _effective_qmatrix_id(self) -> int:
         """帧配置量化矩阵（P5.1 档位矩阵；图片档位导出在子类覆写）。
 
@@ -1189,8 +1205,13 @@ class ToposVideoEncoder:
                 and self._native_profile == 3
             ):
                 return 0
-            if (int(self._config.width) >= 3840
-                    and self._tier.tier_id in self._EDGE_BALANCED_4K_SUPPRESS):
+            size = (int(self._config.width), int(self._config.height))
+            tier = self._tier.tier_id
+            if ((tier, size) in {("proxy", (3840, 2160)), ("lt", (1920, 1080))}
+                    and self._is_sdr_422_intra_mov()):
+                # Matched-rate comparisons and holdouts favored flat quantization here.
+                return 0
+            if size[0] >= 3840 and tier in self._EDGE_BALANCED_4K_SUPPRESS:
                 return 0
         return qm
 
@@ -1233,9 +1254,10 @@ class ToposVideoEncoder:
         is_gbr = self._stream_pixel_format in (2, 3)
         matrix_code = 0 if is_gbr else f['matrix']
         range_code = 1 if is_gbr else f['range_code']
+        qmatrix = self._movie_cfg.qmatrix_id if self._packet_copy else self._effective_qmatrix_id()
         movie_cfg = self._codec.movie_config(
             int(self._config.width), int(self._config.height),
-            qp=f['qp'], qmatrix=self._effective_qmatrix_id(),  # P5.1 档位矩阵
+            qp=f['qp'], qmatrix=qmatrix,  # P5.1 档位矩阵
             profile=self._native_profile,   # R4.4：tier → 帧头/tpcC profile
             alpha_mode=self._alpha_mode,
             alpha_bit_depth=alpha_bit_depth if self._has_alpha else 0,
@@ -1259,7 +1281,7 @@ class ToposVideoEncoder:
         fc.qp_base = f['qp']
         # P2 码率效率战役：444 profile 色度 qp 偏移（tier 声明；422 家族=0）
         fc.qp_delta_chroma = int(getattr(self._tier, 'chroma_qp_offset', 0) or 0)
-        fc.qmatrix_id = self._effective_qmatrix_id()   # P5.1（ADR-C033）
+        fc.qmatrix_id = qmatrix   # P5.1（ADR-C033）
         fc.profile = self._native_profile
         fc.pixel_format = self._stream_pixel_format  # R4.2/3：1=4:4:4，2=GBR
         fc.bit_depth = self._stream_bit_depth
@@ -2959,6 +2981,29 @@ class ToposVideoEncoder:
         return self._tier.frame_target_bytes(
             int(self._config.width), int(self._config.height))
 
+    def _stabilize_hq_rate_seed(self, fc: Any, planes: list, target: int,
+                                packet: bytes, stats: Any, qp: int) -> tuple[bytes, Any, int]:
+        """Prefer the adjacent coarser UHD HQ seed when both fit within 2% of target."""
+        if not (
+            64 <= qp < TOPOS_QP_MAX and 100 * len(packet) >= 98 * target
+            and self._tier.tier_id == "hq"
+            and (int(self._config.width), int(self._config.height)) == (3840, 2160)
+            and self._max_video_bytes is None and self._max_file_bytes is None
+            and self._is_sdr_422_intra_mov()
+        ):
+            return packet, stats, qp
+
+        trial_cfg = self._clone_frame_cfg(fc)
+        trial_cfg.qp_base = qp + 1
+        try:
+            trial, trial_stats = self._codec.encode_frame(trial_cfg, planes)
+        except ToposCodecError as error:
+            logger.warning("Topos HQ: 首帧 QP %d 探测失败：%s", qp + 1, error)
+            return packet, stats, qp
+        if 98 * target <= 100 * len(trial) and len(trial) <= min(target, len(packet)):
+            return trial, trial_stats, qp + 1
+        return packet, stats, qp
+
     def _encode_packet(self, planes: list, frame_cfg: Any = None) -> Tuple[bytes, Any]:
         """编码一帧 → (packet, stats)。
 
@@ -2994,6 +3039,8 @@ class ToposVideoEncoder:
         if rc is None or not rc.active:
             pkt, stats, qp_used = self._codec.encode_sized(
                 fc, planes, target, qp_min=0, qp_max=TOPOS_QP_MAX)
+            pkt, stats, qp_used = self._stabilize_hq_rate_seed(
+                fc, planes, target, pkt, stats, qp_used)
             # V2.x AQ qp 顶格守卫：搜索落到 qp95 且超目标时关 AQ 重编同 qp
             #（AQ 在 qp95 只会更胖——+偏移被钳 95、−偏移细化忙带；地板档
             # 低码率 tier 不因 AQ 加重 qp 顶格超支。确定性判定，

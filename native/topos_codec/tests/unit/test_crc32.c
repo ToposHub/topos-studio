@@ -14,10 +14,10 @@ static uint32_t crc_ref_byte(uint32_t crc, uint8_t b)
     return crc;
 }
 
-static uint32_t crc_ref(const void* data, size_t size)
+static uint32_t crc_ref(uint32_t seed, const void* data, size_t size)
 {
     const uint8_t* p = (const uint8_t*)data;
-    uint32_t crc = 0xFFFFFFFFu;
+    uint32_t crc = seed ^ 0xFFFFFFFFu;
     for (size_t i = 0; i < size; ++i) { crc = crc_ref_byte(crc, p[i]); }
     return crc ^ 0xFFFFFFFFu;
 }
@@ -26,7 +26,7 @@ int main(void)
 {
     /* 规范自测向量（强制） */
     MT_CHECK_EQ_U64(tc_crc32("123456789", 9), 0xCBF43926ull);
-    MT_CHECK_EQ_U64(crc_ref("123456789", 9), 0xCBF43926ull);
+    MT_CHECK_EQ_U64(crc_ref(0u, "123456789", 9), 0xCBF43926ull);
 
     /* 其他标准向量（RFC 1952 / 常见校验集） */
     MT_CHECK_EQ_U64(tc_crc32("", 0), 0x00000000ull);
@@ -41,7 +41,7 @@ int main(void)
         size_t n = (size_t)(mt_rand_u64() % 601ull);
         for (size_t i = 0; i < n; ++i) { buf[i] = (uint8_t)(mt_rand_u64() >> 24); }
         uint32_t a = tc_crc32(buf, n);
-        uint32_t b = crc_ref(buf, n);
+        uint32_t b = crc_ref(0u, buf, n);
         if (a != b) {
             mt_report(__FILE__, __LINE__, "random cross-check mismatch");
             break;
@@ -54,6 +54,22 @@ int main(void)
         if (inc != a) {
             mt_report(__FILE__, __LINE__, "incremental mismatch");
             break;
+        }
+    }
+
+    /* Large, unaligned buffers and an incremental stream crossing 1 KiB. */
+    uint8_t large[8192 + 16];
+    for (size_t i = 0; i < sizeof(large); ++i) { large[i] = (uint8_t)mt_rand_u64(); }
+    const size_t lengths[] = { 1023u, 1024u, 1025u, 4097u, 8192u };
+    for (size_t offset = 0; offset < 16u; ++offset) {
+        const uint8_t* data = large + offset;
+        for (size_t i = 0; i < sizeof(lengths) / sizeof(lengths[0]); ++i) {
+            const size_t length = lengths[i];
+            const uint32_t seed = (uint32_t)mt_rand_u64();
+            const uint32_t expected = crc_ref(seed, data, length);
+            MT_CHECK_EQ_U64(tc_crc32_update(seed, data, length), expected);
+            const uint32_t first = tc_crc32_update(seed, data, 1u);
+            MT_CHECK_EQ_U64(tc_crc32_update(first, data + 1u, length - 1u), expected);
         }
     }
 
