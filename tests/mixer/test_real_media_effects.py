@@ -1,4 +1,4 @@
-"""Real AAC media through the production panels, models and playback mixer.
+"""Decoded audio through the production panels, models and playback mixer.
 
 This is an integration gate, not a substitute for hardware listening or native
 mouse/keyboard QA. No decoder or DSP processor is mocked.
@@ -55,9 +55,10 @@ CONTROLS = {
 def render_mix(
     chain: EffectChainParams | None, target: str, qtbot: Any,
     panner: dict[str, Any] | None = None,
+    *, media: Path = MEDIA, source_start: int = 125,
 ) -> np.ndarray:
     decoder = AudioDecoder()
-    assert decoder.open(MEDIA, timeline_fps=FPS, source_start=125, source_fps=FPS)
+    assert decoder.open(media, timeline_fps=FPS, source_start=source_start, source_fps=FPS)
     mixer = AudioMixer()
     mixer.add_track("real", decoder, AudioTrackState(track_id="real"))
     try:
@@ -108,6 +109,17 @@ def ir_path(tmp_path_factory: Any) -> str:
     return str(path)
 
 
+@pytest.fixture(scope="module")
+def subharmonic_media(tmp_path_factory: Any) -> Path:
+    """Give the detector a controlled bass fundamental in both input channels."""
+    path = tmp_path_factory.mktemp("real-media-subharmonic") / "bass.wav"
+    left = (7000.0 * np.sin(2 * np.pi * 90.0 * np.arange(RATE * 2) / RATE)).astype("<i2")
+    with wave.open(str(path), "wb") as output:
+        output.setparams((2, 2, RATE, 0, "NONE", "not compressed"))
+        output.writeframes(np.column_stack((left, -left)).tobytes())
+    return path
+
+
 @pytest.mark.real_media
 @pytest.mark.parametrize("effect_type", CONTROLS)
 @pytest.mark.parametrize("target", ["track", "bus", "master"])
@@ -115,7 +127,9 @@ def test_production_panel_real_playback_and_bypass(
     qtbot: Any, effect_type: str, target: str, ir_path: str, caplog: Any,
     request: pytest.FixtureRequest,
 ) -> None:
-    if not MEDIA.is_file():
+    media = request.getfixturevalue("subharmonic_media") if effect_type == "subharmonic" else MEDIA
+    source_start = 0 if effect_type == "subharmonic" else 125
+    if not media.is_file():
         pytest.skip("Repository 2K_h264.mp4 is unavailable")
     defaults = _effect_default_params(effect_type)
     if effect_type == "convolution_reverb":
@@ -140,9 +154,10 @@ def test_production_panel_real_playback_and_bypass(
     persisted = TrackEffectInstance.from_dict(instance.to_dict())
     dialog.set_current_params(persisted.params, enabled=True)
     assert dialog.current_params() == params
-    active = render_mix(EffectChainParams((persisted,)), target, qtbot)
-    bypassed = render_mix(EffectChainParams((replace(persisted, enabled=False),)), target, qtbot)
-    dry = render_mix(None, target, qtbot)
+    active = render_mix(EffectChainParams((persisted,)), target, qtbot, media=media, source_start=source_start)
+    bypassed = render_mix(EffectChainParams((replace(persisted, enabled=False),)), target, qtbot,
+                          media=media, source_start=source_start)
+    dry = render_mix(None, target, qtbot, media=media, source_start=source_start)
     np.testing.assert_array_equal(bypassed, dry)
     delta = float(np.sqrt(np.mean((active.astype(np.float64) - dry) ** 2)))
     assert delta > 1e-6, effect_type

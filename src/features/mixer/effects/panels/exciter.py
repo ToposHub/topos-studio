@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont
 )
 
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
@@ -118,11 +119,10 @@ def format_freq(hz: float) -> str:
 def parse_freq(text: str, fallback: float) -> float:
     s = text.strip().lower().replace("hz", "").strip()
     try:
-        if s.endswith("k"):
-            return float(s[:-1]) * 1000.0
-        return float(s)
+        value = float(s[:-1]) * 1000.0 if s.endswith("k") else float(s)
     except ValueError:
         return fallback
+    return value if math.isfinite(value) else fallback
 
 
 def format_harmonics(val: float) -> str:
@@ -475,6 +475,13 @@ class ProVerticalMeter(QWidget):
             self._active = active
             self.update()
 
+    def clear(self) -> None:
+        if self._value == self._peak == self._min_val and not self._clipped:
+            return
+        self._value = self._peak = self._min_val
+        self._clipped = False
+        self.update()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._clipped = False
@@ -569,13 +576,14 @@ class OutputFaderStrip(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._gain = 0.0
+        self.range_db = 12.0
         self._dragging = False
         self.setFixedWidth(54)
         self.setMinimumHeight(175)
         self.setCursor(Qt.CursorShape.SizeVerCursor)
 
     def setGain(self, val: float, emit: bool = False):
-        clamped = max(-12.0, min(12.0, round(val, 1)))
+        clamped = max(-self.range_db, min(self.range_db, round(val, 1)))
         if abs(clamped - self._gain) > 1e-4:
             self._gain = clamped
             self.update()
@@ -588,7 +596,7 @@ class OutputFaderStrip(QWidget):
     def _y_to_gain(self, y: float) -> float:
         tr = self._track_rect()
         norm = max(0.0, min(1.0, (y - tr.top()) / tr.height()))
-        return 12.0 - norm * 24.0
+        return self.range_db * (1.0 - 2.0 * norm)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -621,8 +629,8 @@ class OutputFaderStrip(QWidget):
         mid_y = tr.center().y()
 
         p.setFont(QFont(MONO_FONT_FAM, 7))
-        for val in (12, 6, 0, -6, -12):
-            norm = (12.0 - val) / 24.0
+        for val in (int(self.range_db), int(self.range_db / 2), 0, -int(self.range_db / 2), -int(self.range_db)):
+            norm = (self.range_db - val) / (2.0 * self.range_db)
             ty = tr.top() + norm * tr.height()
             p.setPen(QColor("#9A9AA2"))
             lbl = f"+{val} -" if val > 0 else ("0 -" if val == 0 else f"{val} -")
@@ -632,7 +640,7 @@ class OutputFaderStrip(QWidget):
         p.setBrush(QColor("#0E0E11"))
         p.drawRoundedRect(tr, 2.0, 2.0)
 
-        norm = (12.0 - self._gain) / 24.0
+        norm = (self.range_db - self._gain) / (2.0 * self.range_db)
         cy = tr.top() + norm * tr.height()
         if abs(self._gain) > 0.05:
             top_y = min(cy, mid_y)
@@ -674,6 +682,7 @@ class ProExciterGraphWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_exciter_demo()
+        self.processor_controls = False
         self._selected_band = 2  # 默认选中高频 Air 段
 
         # 实时基波频谱与激励后生成的谐波泛音频谱 (64 频点)
@@ -712,6 +721,16 @@ class ProExciterGraphWidget(QWidget):
                 self._spectrum_freqs = [20.0 * ((20000.0 / 20.0) ** (i / (n - 1))) for i in range(n)]
             self._wet_dbs = list(wet_dbs) if wet_dbs is not None else list(dry_dbs)
             self.update()
+
+    def set_processor_spectrum(
+        self, freqs: list[float], input_db: list[float], output_db: list[float],
+    ) -> None:
+        if (freqs, input_db, output_db) == (self._spectrum_freqs, self._dry_dbs, self._wet_dbs):
+            return
+        self._spectrum_freqs = freqs
+        self._dry_dbs = input_db
+        self._wet_dbs = output_db
+        self.update()
 
     def _plot_rect(self) -> QRectF:
         return QRectF(
@@ -820,7 +839,8 @@ class ProExciterGraphWidget(QWidget):
             idx = self._drag_index
             cnt = self._state["band_count"]
             xovers = self._state["crossovers"]
-            low_bound = 80.0 if idx == 0 else xovers[idx - 1] * 1.25
+            minimum = 100.0 if self.processor_controls else 80.0
+            low_bound = minimum if idx == 0 else xovers[idx - 1] * 1.25
             high_bound = 16000.0 if idx >= cnt - 2 else xovers[idx + 1] / 1.25
             raw_hz = self._x_to_freq(event.position().x(), plot)
             clamped_hz = max(low_bound, min(high_bound, raw_hz))
@@ -973,28 +993,29 @@ class ProExciterGraphWidget(QWidget):
                 p.setFont(QFont(MONO_FONT_FAM, 8, QFont.Weight.Bold))
                 p.setPen(col if is_audible else QColor("#666670"))
                 p.drawText(
-                    QRectF(x1 + 7, plot.top() + 5, band_w - 50, 16),
+                    QRectF(x1 + 7, plot.top() + 5, band_w - (14 if self.processor_controls else 50), 16),
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     f"B{i + 1} · {band_names[i]}"
                 )
 
-                m_rect = QRectF(x2 - 21.0, plot.top() + 5.0, 16.0, 15.0)
-                s_rect = QRectF(x2 - 40.0, plot.top() + 5.0, 16.0, 15.0)
-                self._solo_rects.append(s_rect)
-                self._mute_rects.append(m_rect)
+                if not self.processor_controls:
+                    m_rect = QRectF(x2 - 21.0, plot.top() + 5.0, 16.0, 15.0)
+                    s_rect = QRectF(x2 - 40.0, plot.top() + 5.0, 16.0, 15.0)
+                    self._solo_rects.append(s_rect)
+                    self._mute_rects.append(m_rect)
 
-                p.setPen(QPen(QColor("#F0A848") if b["solo"] else QColor("#3A3A42"), 1.0))
-                p.setBrush(QColor("#3A2E18") if b["solo"] else QColor("#18181C"))
-                p.drawRoundedRect(s_rect, 2.5, 2.5)
-                p.setPen(QColor("#F0A848") if b["solo"] else QColor("#9A9AA2"))
-                p.drawText(s_rect, Qt.AlignmentFlag.AlignCenter, "S")
+                    p.setPen(QPen(QColor("#F0A848") if b["solo"] else QColor("#3A3A42"), 1.0))
+                    p.setBrush(QColor("#3A2E18") if b["solo"] else QColor("#18181C"))
+                    p.drawRoundedRect(s_rect, 2.5, 2.5)
+                    p.setPen(QColor("#F0A848") if b["solo"] else QColor("#9A9AA2"))
+                    p.drawText(s_rect, Qt.AlignmentFlag.AlignCenter, "S")
 
-                p.setPen(QPen(QColor("#F26D6D") if b["mute"] else QColor("#3A3A42"), 1.0))
-                p.setBrush(QColor("#381C1E") if b["mute"] else QColor("#18181C"))
-                p.drawRoundedRect(m_rect, 2.5, 2.5)
-                p.setPen(QColor("#F26D6D") if b["mute"] else QColor("#9A9AA2"))
-                p.drawText(m_rect, Qt.AlignmentFlag.AlignCenter, "M")
-            else:
+                    p.setPen(QPen(QColor("#F26D6D") if b["mute"] else QColor("#3A3A42"), 1.0))
+                    p.setBrush(QColor("#381C1E") if b["mute"] else QColor("#18181C"))
+                    p.drawRoundedRect(m_rect, 2.5, 2.5)
+                    p.setPen(QColor("#F26D6D") if b["mute"] else QColor("#9A9AA2"))
+                    p.drawText(m_rect, Qt.AlignmentFlag.AlignCenter, "M")
+            elif not self.processor_controls:
                 self._solo_rects.append(QRectF())
                 self._mute_rects.append(QRectF())
 
@@ -1008,43 +1029,44 @@ class ProExciterGraphWidget(QWidget):
             node_points.append((i, pt, is_active))
 
         # 生成平滑插值曲线展示各频段激励抬升轮廓
-        env_path = QPainterPath()
-        fill_path = QPainterPath()
-        steps = 160
-        for s in range(steps + 1):
-            px = plot.left() + (s / steps) * plot.width()
-            # 高斯权重平滑叠加各频段激励抬升
-            lift_y = y_zero
-            for idx, pt, is_active in node_points:
-                if is_active:
-                    x1, x2 = ranges[idx]
-                    sigma = max(28.0, (x2 - x1) * 0.48)
-                    w = math.exp(-0.5 * ((px - pt.x()) / sigma) ** 2)
-                    lift_y -= (y_zero - pt.y()) * w
-            if s == 0:
-                env_path.moveTo(px, lift_y)
-                fill_path.moveTo(px, y_zero)
-                fill_path.lineTo(px, lift_y)
-            else:
-                env_path.lineTo(px, lift_y)
-                fill_path.lineTo(px, lift_y)
-        fill_path.lineTo(plot.right(), y_zero)
-        fill_path.closeSubpath()
+        if not self.processor_controls:
+            env_path = QPainterPath()
+            fill_path = QPainterPath()
+            steps = 160
+            for s in range(steps + 1):
+                px = plot.left() + (s / steps) * plot.width()
+                # 高斯权重平滑叠加各频段激励抬升
+                lift_y = y_zero
+                for idx, pt, is_active in node_points:
+                    if is_active:
+                        x1, x2 = ranges[idx]
+                        sigma = max(28.0, (x2 - x1) * 0.48)
+                        w = math.exp(-0.5 * ((px - pt.x()) / sigma) ** 2)
+                        lift_y -= (y_zero - pt.y()) * w
+                if s == 0:
+                    env_path.moveTo(px, lift_y)
+                    fill_path.moveTo(px, y_zero)
+                    fill_path.lineTo(px, lift_y)
+                else:
+                    env_path.lineTo(px, lift_y)
+                    fill_path.lineTo(px, lift_y)
+            fill_path.lineTo(plot.right(), y_zero)
+            fill_path.closeSubpath()
 
-        if master_on:
-            env_grad = QLinearGradient(plot.topLeft(), QPointF(plot.left(), y_zero))
-            env_grad.setColorAt(0.0, QColor(40, 216, 240, 48))
-            env_grad.setColorAt(1.0, QColor(40, 216, 240, 4))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(env_grad)
-            p.drawPath(fill_path)
+            if master_on:
+                env_grad = QLinearGradient(plot.topLeft(), QPointF(plot.left(), y_zero))
+                env_grad.setColorAt(0.0, QColor(40, 216, 240, 48))
+                env_grad.setColorAt(1.0, QColor(40, 216, 240, 4))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(env_grad)
+                p.drawPath(fill_path)
 
-            p.setPen(QPen(QColor(40, 216, 240, 60), 4.0))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawPath(env_path)
+                p.setPen(QPen(QColor(40, 216, 240, 60), 4.0))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawPath(env_path)
 
-            p.setPen(QPen(QColor("#28D8F0"), 1.8))
-            p.drawPath(env_path)
+                p.setPen(QPen(QColor("#28D8F0"), 1.8))
+                p.drawPath(env_path)
 
         # 绘制频段控制节点（内环显示奇偶谐波色彩倾向）
         for idx, pt, is_active in node_points:
@@ -1067,9 +1089,14 @@ class ProExciterGraphWidget(QWidget):
 
             # 节点中心小点根据奇偶谐波极性着色（偶次琥珀金 / 奇次珊瑚红）
             if is_active:
-                core_col = QColor(COLORS["even"]) if b["harmonics"] < -5 else (
-                    QColor(COLORS["odd"]) if b["harmonics"] > 5 else QColor("#28D8F0")
-                )
+                if self.processor_controls:
+                    core_col = QColor(COLORS["odd"] if b["mode"] == "Odd" else COLORS["even"])
+                elif b["harmonics"] < -5:
+                    core_col = QColor(COLORS["even"])
+                elif b["harmonics"] > 5:
+                    core_col = QColor(COLORS["odd"])
+                else:
+                    core_col = QColor(COLORS["cyan"])
                 p.setPen(Qt.PenStyle.NoPen)
                 p.setBrush(core_col)
                 p.drawEllipse(pt, 2.2, 2.2)
@@ -1209,8 +1236,13 @@ class KnobParameterCell(QWidget):
         self.pill.setText(self._formatter(val))
         self.valueChanged.emit(val)
 
-    def _on_pill_edited(self, text: str):
-        parsed = self._parser(text, self._val)
+    def _on_pill_edited(self, text: str) -> None:
+        try:
+            parsed = self._parser(text.strip().removesuffix("%").removesuffix("dB").strip(), self._val)
+        except (ValueError, OverflowError):
+            return
+        if not math.isfinite(parsed):
+            return
         clamped = max(self._min, min(self._max, parsed))
         self.setValue(clamped)
         self.valueChanged.emit(clamped)
@@ -1527,6 +1559,7 @@ class StudioExciterWidget(QWidget):
         self.setMinimumSize(880, 340)
 
         self._active_bank = "A"
+        self._processor_default: dict | None = None
         self._selected_band = 2
         self._banks = {
             "A": default_exciter_demo(),
@@ -1883,12 +1916,14 @@ class StudioExciterWidget(QWidget):
         tb_lay.addSpacing(8)
 
         # 1-3 频段拓扑选择器（1段经典 Aphex / 2段 / 3段 Ozone）
-        bands_lbl = QLabel("Bands:")
+        self._bands_lbl = QLabel("Bands:")
+        bands_lbl = self._bands_lbl
         bands_lbl.setStyleSheet("color: #8A8A94; font-size: 10px; font-weight: 600;")
         tb_lay.addWidget(bands_lbl)
 
         self._band_count_btns: dict[int, QPushButton] = {}
-        bc_wrap = QFrame()
+        self._band_count_wrap = QFrame()
+        bc_wrap = self._band_count_wrap
         bc_wrap.setStyleSheet("background-color: #18181B; border: 1px solid #121214; border-radius: 3px;")
         bc_lay = QHBoxLayout(bc_wrap)
         bc_lay.setContentsMargins(2, 2, 2, 2)
@@ -1915,6 +1950,17 @@ class StudioExciterWidget(QWidget):
         self.os_combo.setToolTip("非线性谐波抗混叠过采样倍率（抑制高频镜像混叠）")
         self.os_combo.currentTextChanged.connect(self._on_os_changed)
         tb_lay.addWidget(self.os_combo)
+
+        self.quality_combo = ChevronComboBox()
+        self.quality_combo.addItem(I18N.tr("mixer.effect_panel.exciter_legacy", "Original"), "legacy")
+        self.quality_combo.addItem(I18N.tr("mixer.effect_panel.exciter_clean", "Preserve Dry"), "clean")
+        self.quality_combo.setToolTip(I18N.tr(
+            "mixer.effect_panel.exciter_quality_hint",
+            "Preserve Dry oversamples only the added harmonics. Original retains the saved 2× timbre.",
+        ))
+        self.quality_combo.currentIndexChanged.connect(self._change_quality)
+        self.quality_combo.hide()
+        tb_lay.addWidget(self.quality_combo)
 
         # 自动增益补偿按钮
         self.btn_auto_gain = QPushButton("Auto Gain")
@@ -2001,7 +2047,9 @@ class StudioExciterWidget(QWidget):
         up_lay.addWidget(_vsep())
 
         # 2.3 各频段谐波发生能量表 (Harmonics %)
+        self._harmonic_panel = QWidget()
         harm_col = self._build_meter_column("Harmonics")
+        self._harmonic_panel.setLayout(harm_col)
         harm_row = QHBoxLayout()
         harm_row.setContentsMargins(4, 0, 4, 0)
         harm_row.setSpacing(4)
@@ -2018,8 +2066,9 @@ class StudioExciterWidget(QWidget):
             self.band_harm_meters.append(m)
             harm_row.addWidget(m)
         harm_col.addLayout(harm_row, 1)
-        up_lay.addLayout(harm_col)
-        up_lay.addWidget(_vsep())
+        up_lay.addWidget(self._harmonic_panel)
+        self._harmonic_sep = _vsep()
+        up_lay.addWidget(self._harmonic_sep)
 
         # 2.4 全局干湿比 Master Mix 控制列
         mix_col = self._build_meter_column("Global Mix")
@@ -2178,6 +2227,9 @@ class StudioExciterWidget(QWidget):
         self.c_global_mix.setValue(st["global_mix"])
         self.c_global_mix.setModuleActive(st["enabled"])
         self.out_fader.setGain(st["output_gain"])
+        if self._processor_default is not None:
+            with QSignalBlocker(self.quality_combo):
+                self.quality_combo.setCurrentIndex(self.quality_combo.findData(st.get("quality", "legacy")))
         self._update_top_bar_styles()
 
         edges = [20.0] + xovers[: cnt - 1] + [20000.0]
@@ -2223,6 +2275,8 @@ class StudioExciterWidget(QWidget):
         st = self._current_state()
         st["enabled"] = enabled
         self._refresh_all_views()
+        if self._processor_default is not None and not enabled:
+            self.update_processor_telemetry(-100.0, -100.0, {})
         self.bypassChanged.emit(enabled)
         self.stateChanged.emit(self.get_state())
 
@@ -2322,7 +2376,8 @@ class StudioExciterWidget(QWidget):
         st = self._current_state()
         cnt = st["band_count"]
         xovers = st["crossovers"]
-        low_bound = 80.0 if xover_idx == 0 else xovers[xover_idx - 1] * 1.25
+        minimum = 100.0 if self._processor_default is not None else 80.0
+        low_bound = minimum if xover_idx == 0 else xovers[xover_idx - 1] * 1.25
         high_bound = 16000.0 if xover_idx >= cnt - 2 else xovers[xover_idx + 1] / 1.25
         clamped = max(low_bound, min(high_bound, raw_hz))
         xovers[xover_idx] = round(clamped, 1)
@@ -2332,8 +2387,11 @@ class StudioExciterWidget(QWidget):
 
     def _load_preset(self, name: str):
         if name in self._presets:
-            curr_mode = self._current_state()["ui_mode"]
+            current = self._current_state()
+            curr_mode = current["ui_mode"]
             self._banks[self._active_bank] = copy.deepcopy(self._presets[name])
+            if self._processor_default is not None:
+                self._current_state()["enabled"] = current["enabled"]
             self._banks[self._active_bank]["ui_mode"] = curr_mode
             self._selected_band = min(self._selected_band, self._banks[self._active_bank]["band_count"] - 1)
             self._refresh_all_views()
@@ -2343,7 +2401,10 @@ class StudioExciterWidget(QWidget):
     def _step_preset(self, step: int):
         cnt = self.preset_combo.count()
         if cnt > 0:
-            self.preset_combo.setCurrentIndex((self.preset_combo.currentIndex() + step) % cnt)
+            index = self.preset_combo.currentIndex()
+            if index < 0 and step < 0:
+                index = 0
+            self.preset_combo.setCurrentIndex((index + step) % cnt)
 
     def _save_new_preset(self):
         name, ok = QInputDialog.getText(self, "保存 Exciter 预设", "输入预设名称:")
@@ -2422,16 +2483,23 @@ class StudioExciterWidget(QWidget):
     # -----------------------------------------------------------------
     def reset_exciter(self):
         curr_mode = self._current_state()["ui_mode"]
-        self._banks[self._active_bank] = default_exciter_flat()
+        current = self._current_state()
+        if self._processor_default is None:
+            self._banks[self._active_bank] = default_exciter_flat()
+        else:
+            self._banks[self._active_bank] = copy.deepcopy(self._processor_default)
+            self._current_state().update(enabled=current["enabled"], quality=current["quality"])
         self._banks[self._active_bank]["ui_mode"] = curr_mode
         self._refresh_all_views()
         self._emit_solo_list()
         self.stateChanged.emit(self.get_state())
 
     def use_processor_controls(self) -> None:
-        for count, button in self._band_count_btns.items():
-            button.setEnabled(count == 2)
-        self.btn_auto_gain.hide()
+        """Use the two-band engine and real input/output meters in Mixer."""
+        for widget in (self._bands_lbl, self._band_count_wrap, self.btn_auto_gain, self.btn_sub_mode,
+                       self._harmonic_panel, self._harmonic_sep):
+            widget.hide()
+        self.quality_combo.show()
         with QSignalBlocker(self.os_combo):
             self.os_combo.clear()
             self.os_combo.addItems(["1x Off", "2x"])
@@ -2439,11 +2507,62 @@ class StudioExciterWidget(QWidget):
             with QSignalBlocker(card.mode_combo):
                 card.mode_combo.clear()
                 card.mode_combo.addItems(["Even", "Odd"])
+            card.mode_combo.setToolTip(I18N.tr(
+                "mixer.effect_panel.exciter_harmonics_hint", "Even adds the second harmonic. Odd adds the third.",
+            ))
             for control in (card.c_harmonics, card.c_bias, card.c_output, card.btn_solo, card.btn_mute):
                 control.hide()
-        for bank in self._banks.values():
-            bank["band_count"] = 2
+
+        flat = default_exciter_flat()
+        flat.update(band_count=2, crossovers=[2000.0, 4800.0], oversampling="1x Off",
+                    quality="clean", auto_gain=False)
+        for band in flat["bands"]:
+            band.update(mode="Even", mix=100.0)
+        presence = copy.deepcopy(flat)
+        presence.update(oversampling="2x", global_mix=65.0)
+        presence["bands"][1].update(enabled=True, mode="Even", amount=40.0)
+        detail = copy.deepcopy(flat)
+        detail.update(oversampling="2x", global_mix=60.0)
+        detail["bands"][0].update(enabled=True, mode="Even", amount=22.0)
+        detail["bands"][1].update(enabled=True, mode="Odd", amount=34.0)
+        self._processor_default = flat
+        self._presets = {
+            I18N.tr("mixer.effect_panel.exciter_preset_presence", "Vocal Presence"): presence,
+            I18N.tr("mixer.effect_panel.exciter_preset_detail", "Two-Band Detail"): detail,
+            I18N.tr("mixer.effect_panel.exciter_preset_flat", "Flat"): flat,
+        }
+        with QSignalBlocker(self.preset_combo):
+            self.preset_combo.clear()
+            self.preset_combo.addItems(list(self._presets))
+        self._banks = {name: copy.deepcopy(flat) for name in self._banks}
+        self._selected_band = 1
+        self.out_fader.range_db = 24.0
+        self.exciter_graph.processor_controls = True
+        self.exciter_graph.setToolTip(I18N.tr(
+            "mixer.effect_panel.exciter_graph_hint",
+            "Blue is input. Amber is output. Drag a band node to set Amount.",
+        ))
         self._refresh_all_views()
+        self.update_processor_telemetry(-100.0, -100.0, {})
+
+    def _change_quality(self, index: int) -> None:
+        if index < 0:
+            return
+        self._current_state()["quality"] = self.quality_combo.itemData(index)
+        self.stateChanged.emit(self.get_state())
+
+    def update_processor_telemetry(
+        self, input_db: float, output_db: float, spectrum: dict[str, list[float]],
+    ) -> None:
+        if input_db <= -100.0 and output_db <= -100.0:
+            self._demo_timer.stop()
+            self.meter_input.clear()
+            self.meter_output.clear()
+        else:
+            self.update_meters(input_db, [], output_db)
+        self.exciter_graph.set_processor_spectrum(
+            spectrum.get("freqs", []), spectrum.get("input_db", []), spectrum.get("output_db", []),
+        )
 
     def get_state(self) -> dict:
         return copy.deepcopy(self._current_state())

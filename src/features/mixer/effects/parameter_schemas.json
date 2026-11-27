@@ -770,10 +770,18 @@
       },
       "tail_db": {
         "type": "number"
+      },
+      "dry_level": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "true_stereo": {
+        "type": "boolean"
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "Production preview and export use WAV impulse response, wet, dry, and true stereo. Other fields belong to the standalone design panel."
   },
   "panner": {
     "type": "object",
@@ -875,6 +883,12 @@
       "global_drive": {
         "type": "number"
       },
+      "model_profile": {
+        "enum": ["legacy", "multiband"]
+      },
+      "crossover_mode": {
+        "enum": ["legacy", "dual"]
+      },
       "drive": {
         "type": "number",
         "minimum": 0,
@@ -950,6 +964,9 @@
   "exciter": {
     "type": "object",
     "properties": {
+      "quality": {
+        "enum": ["legacy", "clean"]
+      },
       "enabled": {
         "type": "boolean"
       },
@@ -1015,11 +1032,14 @@
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "UI state for the two-band production exciter, including its 2× oversampling path"
   },
   "subharmonic": {
     "type": "object",
     "properties": {
+      "detection_mode": {
+        "enum": ["legacy", "focused"]
+      },
       "enabled": {
         "type": "boolean"
       },
@@ -1112,7 +1132,7 @@
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "UI state for production octave synthesis. Source bandwidth is in Hz in the Mixer panel"
   },
   "transient_designer": {
     "type": "object",
@@ -1211,6 +1231,9 @@
       "enabled": {
         "type": "boolean"
       },
+      "mode": {
+        "enum": ["chorus", "flanger"]
+      },
       "routing": {
         "type": "string"
       },
@@ -1234,6 +1257,14 @@
           },
           "delay_ms": {
             "type": "number"
+          },
+          "feedback": {
+            "type": "number"
+          },
+          "voices": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
           },
           "spread": {
             "type": "number"
@@ -1268,6 +1299,11 @@
           "manual_ms": {
             "type": "number"
           },
+          "voices": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          },
           "spread": {
             "type": "number"
           },
@@ -1298,6 +1334,9 @@
           "center_hz": {
             "type": "number"
           },
+          "stereo_processing": {
+            "type": "boolean"
+          },
           "spread": {
             "type": "number"
           },
@@ -1309,7 +1348,7 @@
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "Production chorus, flanger, and phaser use the active processor's mapped parameters."
   },
   "tremolo_autopan": {
     "type": "object",
@@ -1364,7 +1403,7 @@
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "Production tremolo and auto-pan map waveform, tempo, stereo phase, and pan spread to the shared playback and export processor. The waveform curves are nominal. Playback displays measured modulation gains."
   },
   "doubler": {
     "type": "object",

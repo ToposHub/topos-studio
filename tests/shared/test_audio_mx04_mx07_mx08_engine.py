@@ -416,20 +416,15 @@ class TestMx09SpectrumCorrectness:
     def test_sample_rate_chain_reaches_dialog(self, qapp):
         """engine.sample_rate_changed → panel → strip → EQ 对话框。"""
         from src.shared.ui.audio_mixer.audio_mixer_panel import AudioMixerPanel
-        from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
 
         panel = AudioMixerPanel()
+        panel.register_track("t1", "Track 1", "A1")
+        strip = panel._track_mixers["t1"]
         try:
-            pushed = []
-            strip = TrackMixerWidget.__new__(TrackMixerWidget)
-            from PyQt6.QtWidgets import QWidget
-            QWidget.__init__(strip)
-            strip._eq_dialog = None
-            strip._strip_eq_dialogs = {}
-            strip._engine_sample_rate = 48000.0
-            strip._iter_eq_dialogs = lambda: []  # 无打开对话框
-            panel._track_mixers["t1"] = strip
+            strip._open_eq_from_badge()
             panel.on_engine_sample_rate(96000.0)
             assert strip._engine_sample_rate == 96000.0
+            assert strip._eq_dialog.eq_graph._sample_rate == 96000.0
         finally:
+            strip.close_all_dialogs()
             panel.deleteLater()

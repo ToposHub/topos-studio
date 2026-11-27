@@ -1110,10 +1110,9 @@ class AudioGraphRenderer:
                         frame_c, fps, n, self._sample_rate, node.pan), dtype=output.dtype)
                 bus_samples = pan_clip_pcm(bus_samples, 2, node.pan, pan_ramp,
                                            native=node.bus_layout is ChannelLayout.MONO)
-                pan_scalar = float(pan_ramp[0]) if pan_ramp is not None and pan_ramp.size else node.pan
                 # CW-A1: Bus 空间声像器（与 mix_samples Bus 阶段同级）
                 if node.panner is not None and node.panner.is_active:
-                    bus_samples = node.panner.process(bus_samples, pan_scalar)
+                    bus_samples = node.panner.process(bus_samples, node.pan, pan_ramp=pan_ramp)
                 # EQ
                 if node.eq_filter is not None and node.eq_filter.is_active:
                     bus_samples = node.eq_filter.process(bus_samples)

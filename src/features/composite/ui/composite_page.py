@@ -762,8 +762,8 @@ class CompositePage(QWidget):
         layout.addWidget(editor_container)
         self._node_toolbar = toolbar
 
-        # Build default graph
-        self._build_default_graph()
+        self._node_editor.build_from_graph(self._node_graph)
+        self._empty_workspace_graph = self._node_graph.to_dict()
 
         # Initialize thumbnail manager
         self._thumbnail_manager = NodeThumbnailManager(self._node_graph)
@@ -789,6 +789,7 @@ class CompositePage(QWidget):
         current Media Pool selection.  Clearing a Media Pool selection after
         opening a Comp Clip therefore does not unexpectedly lock the graph.
         """
+        was_active = self._composition_active
         if not active:
             # A page reset can happen while either the independent comp timer
             # or an injected timeline transport is playing. Stop that source
@@ -810,6 +811,13 @@ class CompositePage(QWidget):
                 self._composition_active and self._is_active
             )
         self._minimap.setEnabled(self._composition_active)
+
+        properties_panel = getattr(self, "_properties_panel", None)
+        if properties_panel is not None and hasattr(
+                properties_panel, "set_composition_active"):
+            properties_panel.set_composition_active(self._composition_active)
+        if self._composition_active and not was_active and self._is_active:
+            QTimer.singleShot(0, self._show_default_project_settings)
 
         keyframes_panel = getattr(self, "_keyframes_panel", None)
         if keyframes_panel is not None and hasattr(
@@ -859,24 +867,12 @@ class CompositePage(QWidget):
         if callable(fit):
             fit()
 
-    def _build_default_graph(self) -> None:
-        """Create the default TimelineClipInput → Output graph."""
-        self._node_graph.create_default_graph()
-        self._node_editor.build_from_graph(self._node_graph)
-
     def reset_to_empty_workspace(self, *, reuse_clean_graph: bool = False) -> None:
-        """Reset the page to an unbound, non-persistent scratch workspace.
-
-        This is used when the user opens Composite directly without selecting
-        an existing Comp Clip.  Keep a standalone Output node so the graph
-        editor remains usable, but clear all composition/runtime identity so
-        edits cannot be written into a previously opened Comp Clip.
-        """
-        reuse_output = (
+        """Clear the composition identity and return to a blank workspace."""
+        reuse_graph = (
             reuse_clean_graph and self._empty_workspace_graph is not None
             and not self._current_composite_id and self._runtime_context is None
-            and not self._composition_active
-            and len(self._node_graph.nodes) == 1
+            and not self._composition_active and not self._node_graph.nodes
             # The serialized graph includes notes and navigation state, which
             # can change without bumping the render generation.
             and self._node_graph.to_dict() == self._empty_workspace_graph
@@ -929,19 +925,14 @@ class CompositePage(QWidget):
 
         self._node_graph.fps = self._composite_fps
         self._node_graph.duration_frames = 0
-        if not reuse_output:
+        if not reuse_graph:
+            self.reset_composite_session()
             self._node_graph.clear()
-            self._node_editor.clear_all()
-            # Keep an Output-only graph without creating a composition record.
-            output_node = OutputNode()
-            output_node.position = (300, 200)
-            output_node.set_parameter("format_mode", "custom")
-            self._node_graph.add_node(output_node)
             self._node_editor.build_from_graph(self._node_graph)
             self._empty_workspace_graph = self._node_graph.to_dict()
+            self._update_minimap_deferred()
         if self._viewer is not None:
             self._viewer.set_texture(0, 0, 0)
-        self._rebind_properties_panel_to_live_node()
         self._refresh_keyframes_panel()
         self._node_graph._force_full_eval = True
         self._color_dirty = True
@@ -1419,13 +1410,16 @@ class CompositePage(QWidget):
         self._node_graph.clear()
         self._node_editor.clear_all()
         self._node_graph.create_default_graph()
-        self._node_editor.build_from_graph(self._node_graph)
+        # An unbound video preview needs the render graph only.
+        if self._composition_active:
+            self._node_editor.build_from_graph(self._node_graph)
         self.ensure_topos_color_node(color_stack_id)
 
         self._node_graph._force_full_eval = True
         self._color_dirty = True
         self._evaluate_graph()
-        self._rebind_properties_panel_to_live_node()
+        if self._composition_active:
+            self._rebind_properties_panel_to_live_node()
         return True
 
     def has_timeline_clip_input(self) -> bool:
@@ -1706,13 +1700,13 @@ class CompositePage(QWidget):
         # composition's resolution/fps/duration/background at a glance on entry
         # (not pinned — user can close it or pin it to keep it). Deferred one
         # frame so the properties panel and node graph are fully wired up.
-        if self._properties_panel is not None and self._node_graph is not None:
-            QTimer.singleShot(0, lambda: self._show_default_project_settings())
+        if self._composition_active and self._properties_panel is not None:
+            QTimer.singleShot(0, self._show_default_project_settings)
 
     def _show_default_project_settings(self) -> None:
         """Show Project Settings on page entry (no pin)."""
         if (self._properties_panel is None or self._node_graph is None
-                or not self._is_active):
+                or not self._is_active or not self._composition_active):
             return
         self._properties_panel.show_project_settings(
             self._node_graph,
@@ -3418,14 +3412,14 @@ class CompositePage(QWidget):
 
     def _on_project_settings_requested(self) -> None:
         """Toggle the properties panel's Project Settings view (S shortcut)."""
-        if self._properties_panel is None or self._node_graph is None:
+        if not self._composition_active or self._properties_panel is None:
             return
         self._properties_panel.toggle_project_settings(
             self._node_graph, settings_callback=self._apply_project_settings)
 
     def _on_viewer3d_settings_requested(self) -> None:
         """Toggle the default 3D Viewer scene settings section."""
-        if self._properties_panel is None or self._node_graph is None:
+        if not self._composition_active or self._properties_panel is None:
             return
         self._properties_panel.toggle_viewer3d_settings(
             self._node_graph, settings_callback=self._apply_viewer3d_settings)
@@ -7214,7 +7208,7 @@ class CompositePage(QWidget):
 
     @properties_panel.setter
     def properties_panel(self, panel) -> None:
-        self._properties_panel = panel
+        self.set_properties_panel(panel)
         if panel:
             if hasattr(panel, "set_scale_link_state") and "_scale_link_state" in self.__dict__:
                 panel.set_scale_link_state(self._scale_link_state)
@@ -8517,9 +8511,11 @@ class CompositePage(QWidget):
 
     # ── Thumbnail Preview ──
 
-    def set_properties_panel(self, panel) -> None:
+    def set_properties_panel(self, panel: Any) -> None:
         """Set reference to properties panel for thumbnail updates."""
         self._properties_panel = panel
+        if panel is not None and hasattr(panel, "set_composition_active"):
+            panel.set_composition_active(self._composition_active)
 
     def set_keyframes_panel(self, panel) -> None:
         """Bind the Fusion-style Keyframes panel (P3/P5).

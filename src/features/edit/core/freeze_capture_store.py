@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 FREEZE_CAPTURE_META_VERSION = 1
 
 _STORE_DIRNAME = "freeze_captures"
+_CAPTURE_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}")
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -53,10 +55,11 @@ class FreezeCaptureStore:
     def save(self, capture: Dict[str, Any]) -> bool:
         """保存捕获（capture 见 ``_GrainModule.capture_freeze`` 的 dict）。"""
         cid = str(capture.get("id", "") or "")
-        if not cid:
+        if not _CAPTURE_ID.fullmatch(cid):
             return False
         hist = capture.get("history")
-        if not isinstance(hist, np.ndarray) or hist.ndim != 2:
+        if (not isinstance(hist, np.ndarray) or hist.ndim != 2 or hist.dtype.kind not in "fiu"
+                or not np.isfinite(hist).all()):
             return False
         pcm = np.ascontiguousarray(hist.astype(np.float32))
         meta = {
@@ -70,16 +73,22 @@ class FreezeCaptureStore:
             "params": dict(capture.get("params", {}) or {}),
             "created_at": str(capture.get("created_at", "")),
         }
+        if (not 1 <= meta["channels"] <= 2 or not 1.0 <= meta["sample_rate"] <= 384000.0
+                or not 0 < meta["length"] <= max(1024, int(8 * meta["sample_rate"]))
+                or meta["anchor_sample"] <= 0):
+            return False
+        metadata = json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8")
         _atomic_write_bytes(self._dir / f"{cid}.f32", pcm.tobytes())
-        _atomic_write_bytes(
-            self._dir / f"{cid}.json",
-            json.dumps(meta, ensure_ascii=False, indent=1).encode("utf-8"))
+        _atomic_write_bytes(self._dir / f"{cid}.json", metadata)
         return True
 
     # ── 装载 ──
     def load(self, capture_id: str) -> Optional[Dict[str, Any]]:
         """装载捕获；缺失/损坏返回 None 并记录诊断（不静默伪造）。"""
         cid = str(capture_id or "")
+        if not _CAPTURE_ID.fullmatch(cid):
+            logger.warning("invalid freeze capture ID %r", cid)
+            return None
         meta_path = self._dir / f"{cid}.json"
         pcm_path = self._dir / f"{cid}.f32"
         if not meta_path.exists() or not pcm_path.exists():
@@ -90,28 +99,46 @@ class FreezeCaptureStore:
             return None
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            if (not isinstance(meta, dict) or meta.get("id", cid) != cid
+                    or meta.get("meta_version", 1) != FREEZE_CAPTURE_META_VERSION):
+                logger.warning("freeze capture %r metadata is invalid", cid)
+                return None
             ch = int(meta.get("channels", 2))
             length = int(meta.get("length", 0))
-            raw = np.frombuffer(pcm_path.read_bytes(), dtype=np.float32)
-            if raw.size != ch * length:
+            sample_rate = float(meta.get("sample_rate", 48000.0))
+            anchor = int(meta.get("anchor_sample", 0))
+            seed = int(meta.get("seed", 0))
+            params = dict(meta.get("params", {}) or {})
+            if not 1 <= ch <= 2 or not 1.0 <= sample_rate <= 384000.0 or anchor <= 0:
+                logger.warning("freeze capture %r channel layout, rate or anchor is invalid", cid)
+                return None
+            expected = ch * length * np.dtype(np.float32).itemsize
+            size = pcm_path.stat().st_size
+            if not 0 < length <= max(1024, int(8 * sample_rate)) or expected != size:
                 logger.warning(
                     "freeze capture %r size mismatch: %d != %d",
-                    cid, raw.size, ch * length)
+                    cid, size, expected)
                 return None
+            raw = np.frombuffer(pcm_path.read_bytes(), dtype=np.float32)
             hist = raw.reshape(ch, length).astype(np.float64)
-        except Exception as exc:
+            if not np.isfinite(hist).all():
+                logger.warning("freeze capture %r contains invalid samples", cid)
+                return None
+        except (OSError, TypeError, ValueError, OverflowError) as exc:
             logger.warning("freeze capture %r unreadable: %r", cid, exc)
             return None
         return {
             "id": cid,
-            "anchor": int(meta.get("anchor_sample", 0)),
-            "seed": int(meta.get("seed", 0)),
-            "sample_rate": float(meta.get("sample_rate", 48000.0)),
+            "anchor": anchor,
+            "seed": seed,
+            "sample_rate": sample_rate,
             "history": hist,
-            "params": dict(meta.get("params", {}) or {}),
+            "params": params,
         }
 
     def remove(self, capture_id: str) -> bool:
+        if not _CAPTURE_ID.fullmatch(str(capture_id or "")):
+            return False
         ok = False
         for ext in (".f32", ".json"):
             p = self._dir / f"{capture_id}{ext}"
@@ -157,23 +184,36 @@ def apply_freeze_registry(dsp_chain: Any, chain_params: Any,
 
     返回成功安装数；缺资产/类型不符逐条诊断（调用方 preflight 汇总）。
     """
-    installed = 0
     effects = getattr(chain_params, "effects", ()) or ()
-    for e in effects:
-        params = getattr(e, "params", None)
+    entries = ((e.effect_type, e.params, e.enabled, e.instance_id) for e in effects)
+    return apply_freeze_entries(dsp_chain, entries, registry)
+
+
+def apply_freeze_entries(dsp_chain: Any, entries: Any,
+                         registry: Dict[str, Dict[str, Any]]) -> int:
+    """Resolve captures for both track snapshots and the clip chain entry format."""
+    installed = 0
+    for entry in entries:
+        if len(entry) < 4 or entry[0] != "spectral_mangler":
+            continue
+        _, params, _, instance_id = entry[:4]
         cid = params.get("freeze_capture_id") if isinstance(params, dict) else None
         if not cid:
+            continue
+        if not isinstance(cid, str) or not _CAPTURE_ID.fullmatch(cid):
+            logger.warning("invalid freeze capture reference on instance %s", instance_id)
             continue
         capture = registry.get(cid)
         if capture is None:
             logger.warning(
                 "freeze capture %r not in registry; instance %s replays "
-                "current history", cid, getattr(e, "instance_id", ""))
+                "current history", cid, instance_id)
             continue
         try:
-            if dsp_chain.install_freeze_capture_by_id(
-                    getattr(e, "instance_id", ""), capture):
+            if dsp_chain.install_freeze_capture_by_id(instance_id, capture):
                 installed += 1
+            else:
+                logger.warning("freeze capture %r rejected by instance %s", cid, instance_id)
         except Exception as exc:
             logger.warning("freeze capture %r install failed: %r", cid, exc)
     return installed
@@ -184,4 +224,5 @@ __all__ = [
     "FreezeCaptureStore",
     "freeze_registry_from_project",
     "apply_freeze_registry",
+    "apply_freeze_entries",
 ]

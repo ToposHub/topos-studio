@@ -496,6 +496,36 @@ class KnobParameterCell(QWidget):
 # =====================================================================
 # 6. 控件：交互式延迟脉冲示波器（包络曲线 + 相位反转 + 直接拖拽交互）
 # =====================================================================
+def _cross_feedback_echoes(
+    delays: tuple[float, float], feedback: tuple[float, float],
+    blend: float, damping: float, end_ms: float,
+) -> tuple[dict[float, float], dict[float, float]]:
+    """Predict cross-channel echo paths, merging paths with the same arrival."""
+    echoes: tuple[dict[float, float], dict[float, float]] = ({}, {})
+    if blend <= 0.0 or not any(feedback):
+        return echoes
+    pending = {(1, 0, 0): 1.0, (0, 1, 1): 1.0}
+    for _ in range(47):
+        following: dict[tuple[int, int, int], float] = {}
+        for (left, right, channel), amplitude in pending.items():
+            arrival = left * delays[0] + right * delays[1]
+            if arrival > end_ms or abs(amplitude) < 0.001:
+                continue
+            if left and right:
+                time = round(arrival, 6)
+                lane = echoes[channel]
+                lane[time] = lane.get(time, 0.0) + amplitude
+            gain = amplitude * feedback[channel] * damping
+            for target, key in enumerate(((left + 1, right, 0), (left, right + 1, 1))):
+                amount = gain * (1.0 - blend if target == channel else blend)
+                if amount:
+                    following[key] = following.get(key, 0.0) + amount
+        if not following:
+            break
+        pending = following
+    return dict(sorted(echoes[0].items())), dict(sorted(echoes[1].items()))
+
+
 class ProDelayTapGraphWidget(QWidget):
     tapDragged = pyqtSignal(str, float, float)   # channel ("L"|"R"), delay_ms, feedback_pct
     highRatioScrolled = pyqtSignal(float)        # delta
@@ -509,6 +539,9 @@ class ProDelayTapGraphWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_delay_demo()
+        self._sample_rate = 48000.0
+        self._echo_key = ()
+        self._cross_echoes: tuple[dict[float, float], dict[float, float]] = ({}, {})
         self._show_envelope = True
         self._show_ghost = True
 
@@ -522,8 +555,27 @@ class ProDelayTapGraphWidget(QWidget):
         self._btn_ghost_rect = QRectF()
 
     def setState(self, state: dict):
-        self._state = state
+        self._state = state.copy()
         self.update()
+
+    def _cross_feedback_for_paint(self) -> tuple[dict[float, float], dict[float, float]]:
+        state = self._state
+        key = (self._sample_rate, state["left_delay"], state["right_delay"],
+               state["left_feedback"], state["right_feedback"],
+               state["stereo_blend"], state["high_ratio"])
+        if key != self._echo_key:
+            sample_rate, left, right, fb_l, fb_r, blend, high_ratio = key
+            minimum = 1000.0 / sample_rate
+            self._cross_echoes = _cross_feedback_echoes(
+                (max(minimum, left), max(minimum, right)), (fb_l / 100.0, fb_r / 100.0),
+                blend / 100.0, 1.0 - high_ratio / 100.0 * 0.16, self.MAX_TIME_MS)
+            self._echo_key = key
+        return self._cross_echoes
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        if sample_rate > 0.0 and sample_rate != self._sample_rate:
+            self._sample_rate = sample_rate
+            self.update()
 
     def _lanes_geometry(self):
         ml, mr, mt, mb = 32.0, 14.0, 10.0, 10.0
@@ -649,6 +701,8 @@ class ProDelayTapGraphWidget(QWidget):
         l_rect, axis_rect, r_rect = self._lanes_geometry()
         is_mono = (self._state["input_format"] == "Mono")
         enabled = self._state["enabled"]
+        cross_l, cross_r = (self._cross_feedback_for_paint()
+                            if enabled and self._show_ghost else ({}, {}))
 
         if is_mono:
             mono_rect = QRectF(l_rect.left(), l_rect.top(), l_rect.width(), r_rect.bottom() - l_rect.top() - 18.0)
@@ -659,8 +713,7 @@ class ProDelayTapGraphWidget(QWidget):
                 p, mono_rect,
                 delay_ms=self._state["left_delay"],
                 fb_pct=self._state["left_feedback"],
-                cross_delay_ms=None,
-                cross_fb_pct=0.0,
+                cross_echoes=cross_l,
                 accent_hex=COLORS["cyan"],
                 is_focus=(self._hover_target == "L" or self._dragging_target == "L"),
             )
@@ -674,8 +727,7 @@ class ProDelayTapGraphWidget(QWidget):
                 p, l_rect,
                 delay_ms=self._state["left_delay"],
                 fb_pct=self._state["left_feedback"],
-                cross_delay_ms=self._state["right_delay"],
-                cross_fb_pct=self._state["right_feedback"],
+                cross_echoes=cross_l,
                 accent_hex=COLORS["cyan"],
                 is_focus=(self._hover_target == "L" or self._dragging_target == "L"),
             )
@@ -683,8 +735,7 @@ class ProDelayTapGraphWidget(QWidget):
                 p, r_rect,
                 delay_ms=self._state["right_delay"],
                 fb_pct=self._state["right_feedback"],
-                cross_delay_ms=self._state["left_delay"],
-                cross_fb_pct=self._state["left_feedback"],
+                cross_echoes=cross_r,
                 accent_hex=COLORS["right"],
                 is_focus=(self._hover_target == "R" or self._dragging_target == "R"),
             )
@@ -695,7 +746,7 @@ class ProDelayTapGraphWidget(QWidget):
         self._btn_ghost_rect = QRectF(top_overlay_rect.right() - 46, top_overlay_rect.top() + 7, 40, 18)
         for rect, label, active in (
             (self._btn_env_rect, "ENV", self._show_envelope),
-            (self._btn_ghost_rect, "GHOST", self._show_ghost and not is_mono),
+            (self._btn_ghost_rect, "GHOST", self._show_ghost),
         ):
             p.setPen(QPen(QColor("#3A4252") if active else QColor("#141416"), 1.0))
             p.setBrush(QColor(24, 46, 56, 210) if active else QColor(21, 21, 24, 180))
@@ -796,7 +847,7 @@ class ProDelayTapGraphWidget(QWidget):
     def _draw_tap_cluster(
         self, p: QPainter, rect: QRectF,
         delay_ms: float, fb_pct: float,
-        cross_delay_ms: float | None, cross_fb_pct: float,
+        cross_echoes: dict[float, float],
         accent_hex: str, is_focus: bool
     ):
         p.save()
@@ -807,30 +858,31 @@ class ProDelayTapGraphWidget(QWidget):
         enabled = self._state["enabled"]
         base_col = QColor(accent_hex if enabled else "#585C68")
 
-        fb = fb_pct / 100.0
         blend = self._state["stereo_blend"] / 100.0
+        fb = (1.0 - blend) * fb_pct / 100.0
         damping = 1.0 - (self._state["high_ratio"] / 100.0) * 0.16
+        min_delay = 1000.0 / self._sample_rate
+        eff_delay = max(min_delay, delay_ms)
 
         # 1. 交叉串扰幽灵脉冲 (Stereo Blend > 0)
-        if self._show_ghost and enabled and cross_delay_ms is not None and cross_delay_ms > 2.0 and blend > 0.01:
+        if cross_echoes:
             ghost_col = QColor(base_col)
             ghost_col.setAlpha(58)
             p.setBrush(ghost_col)
             p.setPen(Qt.PenStyle.NoPen)
-            c_fb = cross_fb_pct / 100.0
-            for k in range(1, 24):
-                t_ms = k * cross_delay_ms
-                if t_ms > self.MAX_TIME_MS:
-                    break
-                amp = blend * 0.62 * (c_fb ** (k - 1)) * (damping ** (k - 1))
+            # Keep the earliest visible events, including multiple ping-pong returns.
+            shown = 0
+            for t_ms, amp in cross_echoes.items():
                 if abs(amp) < 0.015:
+                    continue
+                if shown == 47:
                     break
+                shown += 1
                 x = rect.left() + (t_ms / self.MAX_TIME_MS) * rect.width()
                 h = amp * max_h
                 p.drawRoundedRect(QRectF(x - 1.4, mid_y - h if h >= 0 else mid_y, 2.8, abs(h)), 1.2, 1.2)
 
         # 2. 指数衰减包络曲线（增强视觉科技感）
-        eff_delay = max(4.0, delay_ms)
         if self._show_envelope and abs(fb) > 0.02:
             env_path = QPainterPath()
             first_x = rect.left() + (eff_delay / self.MAX_TIME_MS) * rect.width()
@@ -929,16 +981,17 @@ class StereoOutputMeter(QWidget):
         self._r_clip = False
         self._active = True
 
-    def setLevels(self, left_db: float, right_db: float):
-        self._l_db = max(self.MIN_DB, min(self.MAX_DB, left_db))
-        self._r_db = max(self.MIN_DB, min(self.MAX_DB, right_db))
-        self._l_peak = max(self._l_db, self._l_peak - 0.35)
-        self._r_peak = max(self._r_db, self._r_peak - 0.35)
-        if left_db >= -0.1:
-            self._l_clip = True
-        if right_db >= -0.1:
-            self._r_clip = True
-        self.update()
+    def setLevels(self, left_db: float, right_db: float) -> None:
+        left = max(self.MIN_DB, min(self.MAX_DB, left_db))
+        right = max(self.MIN_DB, min(self.MAX_DB, right_db))
+        levels = (left, right, max(left, self._l_peak - 0.35),
+                  max(right, self._r_peak - 0.35), self._l_clip or left_db >= -0.1,
+                  self._r_clip or right_db >= -0.1)
+        if levels != (self._l_db, self._r_db, self._l_peak, self._r_peak,
+                      self._l_clip, self._r_clip):
+            (self._l_db, self._r_db, self._l_peak, self._r_peak,
+             self._l_clip, self._r_clip) = levels
+            self.update()
 
     def setActive(self, active: bool):
         self._active = active
@@ -1523,9 +1576,9 @@ class StudioDelayWidget(QWidget):
         self.card_filter.setModuleActive(en)
         self.card_left.setModuleActive(en)
         self.card_left.setBadgeText("MONO" if is_mono else "CH L")
-        self.card_right.setModuleActive(en and not is_mono)
+        self.card_right.setModuleActive(en)
         self.card_fb.setModuleActive(en)
-        self._cells["stereo_blend"].setModuleActive(en and not is_mono)
+        self._cells["stereo_blend"].setModuleActive(en)
         self.card_out.setModuleActive(en)
 
         self.output_meter.setActive(en)
@@ -1567,42 +1620,30 @@ class StudioDelayWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_param_changed(self, key: str, val: float):
+        self._set_delay_parameter(key, val)
+        self.tap_graph.setState(self._current_state())
+        self.stateChanged.emit(self.get_state())
+
+    def _set_delay_parameter(self, key: str, val: float) -> None:
         st = self._current_state()
         st[key] = val
 
         if st["link_lr"]:
-            if key == "left_delay":
-                st["right_delay"] = val
-                self._cells["right_delay"].setValue(val)
-                self.parameterChanged.emit("right_delay", val)
-            elif key == "right_delay":
-                st["left_delay"] = val
-                self._cells["left_delay"].setValue(val)
-                self.parameterChanged.emit("left_delay", val)
-            elif key == "left_feedback":
-                st["right_feedback"] = val
-                self._cells["right_feedback"].setValue(val)
-                self.parameterChanged.emit("right_feedback", val)
-            elif key == "right_feedback":
-                st["left_feedback"] = val
-                self._cells["left_feedback"].setValue(val)
-                self.parameterChanged.emit("left_feedback", val)
-
-        self.tap_graph.setState(st)
+            linked = {"left_delay": "right_delay", "right_delay": "left_delay",
+                      "left_feedback": "right_feedback", "right_feedback": "left_feedback"}.get(key)
+            if linked:
+                st[linked] = val
+                self._cells[linked].setValue(val)
+                self.parameterChanged.emit(linked, val)
         self.parameterChanged.emit(key, val)
-        self.stateChanged.emit(self.get_state())
 
-    def _on_graph_tap_dragged(self, channel: str, delay_ms: float, fb_pct: float):
-        if channel == "L":
-            self._cells["left_delay"].setValue(delay_ms)
-            self._cells["left_feedback"].setValue(fb_pct)
-            self._on_param_changed("left_delay", delay_ms)
-            self._on_param_changed("left_feedback", fb_pct)
-        else:
-            self._cells["right_delay"].setValue(delay_ms)
-            self._cells["right_feedback"].setValue(fb_pct)
-            self._on_param_changed("right_delay", delay_ms)
-            self._on_param_changed("right_feedback", fb_pct)
+    def _on_graph_tap_dragged(self, channel: str, delay_ms: float, fb_pct: float) -> None:
+        side = "left" if channel == "L" else "right"
+        for key, value in ((f"{side}_delay", delay_ms), (f"{side}_feedback", fb_pct)):
+            self._cells[key].setValue(value)
+            self._set_delay_parameter(key, value)
+        self.tap_graph.setState(self._current_state())
+        self.stateChanged.emit(self.get_state())
 
     def _on_graph_hr_scrolled(self, delta: float):
         st = self._current_state()
@@ -1662,6 +1703,9 @@ class StudioDelayWidget(QWidget):
     def set_state(self, state: dict):
         self._banks[self._active_bank] = copy.deepcopy(state)
         self._refresh_all_views()
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        self.tap_graph.set_sample_rate(sample_rate)
 
     def update_output_meters(self, left_db: float, right_db: float):
         """接入真实音频引擎双声道输出峰值电平 (-55.0 ~ 0.0 dBFS)"""

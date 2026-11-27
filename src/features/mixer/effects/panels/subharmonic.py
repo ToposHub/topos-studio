@@ -8,12 +8,13 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QLineEdit, QInputDialog
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QSignalBlocker, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont, QPolygonF
 )
 
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
@@ -21,6 +22,8 @@ from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 # =====================================================================
 SPEC_FREQ_MIN = 15.0
 SPEC_FREQ_MAX = 1200.0
+DETECT_MIN_HZ = 45.0
+DETECT_MAX_HZ = 180.0
 
 UI_FONT_CSS = "'Helvetica Neue', 'PingFang SC'"
 MONO_FONT_CSS = "'Menlo'"
@@ -35,6 +38,29 @@ COLORS = {
 }
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def _tr(key: str, fallback: str) -> str:
+    return I18N.tr(f"mixer.effect_panel.sh_{key}", fallback)
+
+
+def _number(value: object, fallback: float = 0.0) -> float:
+    if not isinstance(value, (int, float)):
+        return fallback
+    try:
+        number = float(value)
+    except OverflowError:
+        return fallback
+    return number if math.isfinite(number) else fallback
+
+
+def _detection_bounds(state: dict) -> tuple[float, float]:
+    if state.get("detection_mode") != "focused":
+        return DETECT_MIN_HZ, DETECT_MAX_HZ
+    source = state["source"]
+    half_band = max(5.0, min(270.0, _number(source["bandwidth"], 60.0))) * 0.5
+    center = min(DETECT_MAX_HZ, max(DETECT_MIN_HZ, _number(source["freq"], 90.0)))
+    return max(DETECT_MIN_HZ, center - half_band), min(DETECT_MAX_HZ, center + half_band)
 
 
 def freq_to_note(hz: float) -> str:
@@ -125,6 +151,17 @@ def default_subharmonic_flat() -> dict:
     st["output"]["mix"] = 0.0
     st["output"]["trim_db"] = 0.0
     return st
+
+
+def _default_processor_state() -> dict:
+    state = default_subharmonic_flat()
+    state["detection_mode"] = "legacy"
+    state["source"].update(freq=90.0, bandwidth=60.0, sub_lpf=120.0,
+                           oct1_level=100.0 * 10.0 ** (-6.0 / 20.0),
+                           oct2_level=100.0 * 10.0 ** (-12.0 / 20.0))
+    state["drive"].update(attack=20.0, release=150.0)
+    state["output"].update(mix=50.0, trim_db=0.0)
+    return state
 
 
 # =====================================================================
@@ -470,6 +507,13 @@ class ProVerticalMeter(QWidget):
             self._active = active
             self.update()
 
+    def clear(self) -> None:
+        if self._value_db == self._peak_db == self._min_db and not self._clipped:
+            return
+        self._value_db = self._peak_db = self._min_db
+        self._clipped = False
+        self.update()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._clipped = False
@@ -584,6 +628,8 @@ class ProSubharmonicGraphWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_subharmonic_demo()
+        self._processor_mode = False
+        self._processor_telemetry: dict = {}
         self._show_dry_spec = True
         self._show_wet_spec = True
         self._show_peak = True
@@ -618,6 +664,17 @@ class ProSubharmonicGraphWidget(QWidget):
         self._state = state
         self.update()
 
+    def use_processor_controls(self) -> None:
+        self._processor_mode = True
+        self.update()
+
+    def set_processor_telemetry(self, analysis: dict) -> None:
+        reading = {key: analysis[key] for key in ("detection_mode", "source_low_hz", "source_high_hz",
+                                                 "env", "confidence", "f0_hz", "locked") if key in analysis}
+        if self._processor_telemetry != reading:
+            self._processor_telemetry = reading
+            self.update()
+
     def update_spectrum(
         self,
         freqs_hz: list[float],
@@ -643,13 +700,15 @@ class ProSubharmonicGraphWidget(QWidget):
         )
 
     def _freq_to_x(self, freq: float, plot: QRectF) -> float:
-        f = max(SPEC_FREQ_MIN, min(SPEC_FREQ_MAX, freq))
-        norm = math.log10(f / SPEC_FREQ_MIN) / math.log10(SPEC_FREQ_MAX / SPEC_FREQ_MIN)
+        low, high = (10.0, 500.0) if self._processor_mode else (SPEC_FREQ_MIN, SPEC_FREQ_MAX)
+        f = max(low, min(high, freq))
+        norm = math.log10(f / low) / math.log10(high / low)
         return plot.left() + norm * plot.width()
 
     def _x_to_freq(self, x: float, plot: QRectF) -> float:
+        low, high = (10.0, 500.0) if self._processor_mode else (SPEC_FREQ_MIN, SPEC_FREQ_MAX)
         norm = max(0.0, min(1.0, (x - plot.left()) / plot.width()))
-        return SPEC_FREQ_MIN * ((SPEC_FREQ_MAX / SPEC_FREQ_MIN) ** norm)
+        return low * ((high / low) ** norm)
 
     def _drive_to_y(self, drive_db: float, plot: QRectF) -> float:
         # 0 dB -> 偏下基准线 (0.68), 24 dB -> 顶部 (0.14)
@@ -670,11 +729,15 @@ class ProSubharmonicGraphWidget(QWidget):
 
     def _src_node_pos(self, plot: QRectF) -> QPointF:
         src = self._state["source"]
+        if self._processor_mode:
+            return QPointF(self._freq_to_x(src["freq"], plot), plot.top() + plot.height() * 0.37)
         drv = self._state["drive"]
         return QPointF(self._freq_to_x(src["freq"], plot), self._drive_to_y(drv["drive_db"], plot))
 
     def _lpf_node_pos(self, plot: QRectF) -> QPointF:
         src = self._state["source"]
+        if self._processor_mode:
+            return QPointF(self._freq_to_x(src["sub_lpf"], plot), plot.top() + plot.height() * 0.76)
         return QPointF(self._freq_to_x(src["sub_lpf"], plot), self._zero_db_y(plot))
 
     def _cut_node_pos(self, plot: QRectF) -> QPointF:
@@ -688,11 +751,14 @@ class ProSubharmonicGraphWidget(QWidget):
         if not self._state["enabled"]:
             return ""
         src_pt = self._src_node_pos(plot)
-        if math.hypot(pos.x() - src_pt.x(), pos.y() - src_pt.y()) <= 13.0:
+        src_enabled = not self._processor_mode or self._state.get("detection_mode") == "focused"
+        if src_enabled and math.hypot(pos.x() - src_pt.x(), pos.y() - src_pt.y()) <= 13.0:
             return "src"
         lpf_pt = self._lpf_node_pos(plot)
         if math.hypot(pos.x() - lpf_pt.x(), pos.y() - lpf_pt.y()) <= 11.0:
             return "lpf"
+        if self._processor_mode:
+            return ""
         cut_pt = self._cut_node_pos(plot)
         if math.hypot(pos.x() - cut_pt.x(), pos.y() - cut_pt.y()) <= 11.0:
             return "cut"
@@ -736,15 +802,17 @@ class ProSubharmonicGraphWidget(QWidget):
         if self._dragging_target == "src":
             mods = event.modifiers()
             if not (mods & Qt.KeyboardModifier.ControlModifier):
-                new_f = max(30.0, min(180.0, round(self._x_to_freq(event.position().x(), plot), 1)))
+                minimum = DETECT_MIN_HZ if self._processor_mode else 30.0
+                new_f = max(minimum, min(DETECT_MAX_HZ, round(self._x_to_freq(event.position().x(), plot), 1)))
                 self.sourceFreqDragged.emit(new_f)
-            if not (mods & Qt.KeyboardModifier.AltModifier):
+            if not self._processor_mode and not (mods & Qt.KeyboardModifier.AltModifier):
                 new_d = max(0.0, min(24.0, round(self._y_to_drive(event.position().y(), plot), 1)))
                 self.driveDragged.emit(new_d)
             return
 
         if self._dragging_target == "lpf":
-            new_lpf = max(40.0, min(250.0, round(self._x_to_freq(event.position().x(), plot), 1)))
+            maximum = 400.0 if self._processor_mode else 250.0
+            new_lpf = max(40.0, min(maximum, round(self._x_to_freq(event.position().x(), plot), 1)))
             self.subLpfDragged.emit(new_lpf)
             return
 
@@ -772,9 +840,109 @@ class ProSubharmonicGraphWidget(QWidget):
         if self._hover_target == "src" or self._dragging_target == "src":
             delta = event.angleDelta().y() / 120.0
             cur_bw = self._state["source"]["bandwidth"]
-            new_bw = max(0.5, min(6.0, round(cur_bw + delta * 0.2, 1)))
+            if self._processor_mode:
+                new_bw = max(5.0, min(270.0, round(cur_bw + delta * 5.0, 1)))
+            else:
+                new_bw = max(0.5, min(6.0, round(cur_bw + delta * 0.2, 1)))
             self.bandwidthScrolled.emit(new_bw)
             event.accept()
+
+    def _paint_processor(self, painter: QPainter, plot: QRectF) -> None:
+        state = self._state
+        enabled = bool(state["enabled"])
+        analysis = self._processor_telemetry if enabled else {}
+        mode = state.get("detection_mode", "legacy")
+        low, high = _detection_bounds(state)
+        if analysis.get("detection_mode") == mode:
+            low = _number(analysis.get("source_low_hz"), low)
+            high = _number(analysis.get("source_high_hz"), high)
+        envelope = max(0.0, min(1.0, _number(analysis.get("env"))))
+        confidence = max(0.0, min(1.0, _number(analysis.get("confidence"))))
+        f0 = _number(analysis.get("f0_hz"))
+        locked = bool(analysis.get("locked"))
+        releasing = mode == "focused" and not locked and envelope > 0.0
+        painter.setFont(QFont("Helvetica Neue", 8))
+        painter.fillRect(plot, QColor("#1D1D20"))
+
+        for frequency in (10, 20, 40, 80, 120, 180, 250, 400):
+            x = self._freq_to_x(frequency, plot)
+            painter.setPen(QPen(QColor("#2C2C31"), 1.0))
+            painter.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+            painter.setPen(QColor("#9A9AA2"))
+            painter.drawText(QRectF(x - 16.0, plot.bottom() + 3.0, 32.0, 15.0),
+                             Qt.AlignmentFlag.AlignCenter, str(frequency))
+        painter.drawText(QRectF(plot.right() + 5.0, plot.bottom() + 3.0, 28.0, 15.0),
+                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "Hz")
+
+        band_x, band_right = self._freq_to_x(low, plot), self._freq_to_x(high, plot)
+        band_y = self._src_node_pos(plot).y()
+        band_rect = QRectF(band_x, band_y - 13.0, max(2.0, band_right - band_x), 26.0)
+        painter.fillRect(band_rect, QColor(240, 168, 72, 34 if enabled else 12))
+        painter.setPen(QPen(QColor(COLORS["src"] if enabled else "#696974"), 1.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(band_rect)
+        painter.drawText(QRectF(plot.left() + 8.0, band_y - 35.0, plot.width() - 16.0, 18.0),
+                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                         f"{_tr('source_band', 'Detection Band')}  {low:g}–{high:g} Hz")
+        if mode == "focused":
+            center = self._src_node_pos(plot)
+            self._paint_processor_handle(painter, center, COLORS["src"], "src", enabled)
+
+        if enabled and f0 > 0.0 and (locked or releasing):
+            octave_tracks = [(f0, "F0", COLORS["cyan"])]
+            mix = state["output"]["mix"]
+            if mix > 0.0 and state["source"]["oct1_level"] > 0.5:
+                octave_tracks.append((f0 * 0.5, "−1", COLORS["src"]))
+            if mix > 0.0 and state["source"]["oct2_level"] > 0.5:
+                octave_tracks.append((f0 * 0.25, "−2", COLORS["oct2"]))
+            octave_y = plot.top() + plot.height() * 0.56
+            for frequency, label, color in octave_tracks:
+                x = self._freq_to_x(frequency, plot)
+                painter.setPen(QPen(QColor(color), 1.25))
+                painter.drawLine(QPointF(x, octave_y - 9.0), QPointF(x, octave_y + 9.0))
+                label_width = 70.0
+                text_x = max(plot.left(), min(plot.right() - label_width, x - 0.5 * label_width))
+                painter.drawText(QRectF(text_x, octave_y + 10.0, label_width, 16.0),
+                                 Qt.AlignmentFlag.AlignCenter, f"{label} {frequency:.1f}")
+
+        lpf = self._lpf_node_pos(plot)
+        self._paint_processor_handle(painter, lpf, COLORS["filter"], "lpf", enabled)
+        painter.setPen(QColor(COLORS["filter"] if enabled else "#696974"))
+        text_width = 84.0
+        text_x = max(plot.left(), min(plot.right() - text_width, lpf.x() - 0.5 * text_width))
+        painter.drawText(QRectF(text_x, lpf.y() + 9.0, text_width, 16.0), Qt.AlignmentFlag.AlignCenter,
+                         f"LPF {state['source']['sub_lpf']:g} Hz")
+
+        if not enabled:
+            status = _tr("bypassed", "Bypassed")
+        elif locked:
+            status = _tr("tracking", "Locked")
+        elif releasing:
+            status = _tr("releasing", "Releasing")
+        elif analysis:
+            status = _tr("searching", "Searching")
+        else:
+            status = _tr("waiting", "Waiting for audio")
+        if analysis:
+            status += f"  ·  {_tr('confidence', 'Confidence')} {confidence:.0%}"
+        painter.setPen(QColor(COLORS["cyan"] if locked else "#B8BAC4"))
+        painter.drawText(QRectF(plot.left() + 8.0, plot.top() + 5.0, plot.width() - 16.0, 18.0),
+                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, status)
+        env_strip = QRectF(plot.left() + 8.0, plot.bottom() - 15.0, plot.width() - 16.0, 8.0)
+        painter.fillRect(env_strip, QColor("#131317"))
+        painter.fillRect(QRectF(env_strip.x(), env_strip.y(), env_strip.width() * envelope, env_strip.height()),
+                         QColor(COLORS["drive"]))
+        painter.setPen(QColor("#B8BAC4"))
+        painter.drawText(QRectF(env_strip.left(), env_strip.top() - 16.0, env_strip.width(), 14.0),
+                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                         f"{_tr('envelope', 'Envelope')} {envelope:.0%}")
+
+    def _paint_processor_handle(self, painter: QPainter, point: QPointF, color: str,
+                                target: str, enabled: bool) -> None:
+        active = enabled and target in (self._hover_target, self._dragging_target)
+        painter.setPen(QPen(QColor(color if enabled else "#696974"), 1.3))
+        painter.setBrush(QColor(color if active else "#1D1D20"))
+        painter.drawEllipse(point, 5.0, 5.0)
 
     # -----------------------------------------------------------------
     # 绘制频谱、滤波器包络、八度谐波映射弧与交互控制点
@@ -783,6 +951,9 @@ class ProSubharmonicGraphWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         plot = self._plot_rect()
+        if self._processor_mode:
+            self._paint_processor(p, plot)
+            return
 
         # 1. 画布纯平底色
         p.fillRect(plot, QColor("#1D1D20"))
@@ -1171,8 +1342,13 @@ class KnobParameterCell(QWidget):
         self.pill.setText(self._formatter(val))
         self.valueChanged.emit(val)
 
-    def _on_pill_edited(self, text: str):
-        parsed = self._parser(text, self._val)
+    def _on_pill_edited(self, text: str) -> None:
+        try:
+            parsed = self._parser(text, self._val)
+        except (TypeError, ValueError, OverflowError):
+            return
+        if not math.isfinite(parsed):
+            return
         clamped = max(self._min, min(self._max, parsed))
         self.setValue(clamped)
         self.valueChanged.emit(clamped)
@@ -1199,6 +1375,7 @@ class SourceOctaveCard(QFrame):
         header = QWidget()
         header.setFixedHeight(38)
         h_lay = QHBoxLayout(header)
+        self._header = h_lay
         h_lay.setContentsMargins(10, 7, 10, 6)
         h_lay.setSpacing(8)
 
@@ -1233,6 +1410,7 @@ class SourceOctaveCard(QFrame):
         b_lay.setSpacing(10)
 
         row1 = QHBoxLayout()
+        self._frequency_controls = row1
         row1.setSpacing(4)
         self.c_freq = KnobParameterCell(
             "Source Freq", 30.0, 180.0, 64.0, self._accent,
@@ -1283,6 +1461,42 @@ class SourceOctaveCard(QFrame):
         self.c_harm.valueChanged.connect(lambda v: self._set_field("harmonics", round(v, 0)))
 
         self.syncFromData(self._data)
+
+    def use_processor_controls(self) -> None:
+        self.power_sw.hide()
+        self.oct_btns["Dual"].parentWidget().hide()
+        self.c_harm.hide()
+        title = QLabel(_tr("source_band", "Detection Band"))
+        title.setStyleSheet(f"color: {self._accent}; font-size: 11px; font-weight: 700;")
+        self._header.addWidget(title, 1)
+        controls = (
+            ("c_freq", "freq", _tr("source_center", "Center"), DETECT_MIN_HZ, DETECT_MAX_HZ, 90.0),
+            ("c_bw", "bandwidth", _tr("bandwidth", "Bandwidth"), 5.0, 270.0, 60.0),
+            ("c_lpf", "sub_lpf", "Sub LPF", 40.0, 400.0, 120.0),
+        )
+        for attribute, key, label, minimum, maximum, default in controls:
+            original = getattr(self, attribute)
+            control = KnobParameterCell(
+                label, minimum, maximum, default, COLORS["filter"] if key == "sub_lpf" else self._accent,
+                f"{minimum:g}", "Hz", f"{maximum:g}", lambda v: f"{v:g}Hz", parse_freq, mode="log",
+            )
+            control.valueChanged.connect(lambda value, field=key: self._set_field(field, round(value, 1)))
+            self._frequency_controls.replaceWidget(original, control)
+            original.hide()
+            original.deleteLater()
+            setattr(self, attribute, control)
+        hint = _tr("bandwidth_hint", "Center and bandwidth apply in Focused mode.")
+        self.c_freq.setToolTip(hint)
+        self.c_bw.setToolTip(hint)
+
+    def set_processor_mode(self, focused: bool, enabled: bool) -> None:
+        self.c_freq.setEnabled(focused and enabled)
+        self.c_bw.setEnabled(focused and enabled)
+        self.c_freq.setModuleActive(focused and enabled)
+        self.c_bw.setModuleActive(focused and enabled)
+        for control in (self.c_lpf, self.c_oct1, self.c_oct2):
+            control.setEnabled(enabled)
+            control.setModuleActive(enabled)
 
     def syncFromData(self, data: dict):
         self._updating = True
@@ -1389,6 +1603,7 @@ class DriveCharacterCard(QFrame):
         header = QWidget()
         header.setFixedHeight(38)
         h_lay = QHBoxLayout(header)
+        self._header = h_lay
         h_lay.setContentsMargins(10, 7, 10, 6)
         h_lay.setSpacing(8)
 
@@ -1473,6 +1688,15 @@ class DriveCharacterCard(QFrame):
         self.c_phase.valueChanged.connect(lambda v: self._set_field("phase", round(v, 0)))
 
         self.syncFromData(self._data)
+
+    def use_processor_controls(self) -> None:
+        self.power_sw.hide()
+        self.eng_btns["RBass"].parentWidget().hide()
+        for control in (self.c_drive, self.c_sat, self.c_punch, self.c_phase):
+            control.hide()
+        title = QLabel(_tr("envelope", "Envelope"))
+        title.setStyleSheet(f"color: {self._accent}; font-size: 11px; font-weight: 700;")
+        self._header.addWidget(title, 1)
 
     def syncFromData(self, data: dict):
         self._updating = True
@@ -1585,9 +1809,9 @@ class OutputMixCard(QFrame):
         h_lay.addWidget(self.title_lbl)
         h_lay.addStretch()
 
-        badge = QLabel("SUBSONIC GUARD")
-        badge.setStyleSheet("color: #787882; font-size: 9px; font-weight: 700; letter-spacing: 0.6px;")
-        h_lay.addWidget(badge)
+        self._guard_badge = QLabel("SUBSONIC GUARD")
+        self._guard_badge.setStyleSheet("color: #787882; font-size: 9px; font-weight: 700; letter-spacing: 0.6px;")
+        h_lay.addWidget(self._guard_badge)
         root.addWidget(header)
 
         # Body (2x3 旋钮矩阵)
@@ -1648,6 +1872,11 @@ class OutputMixCard(QFrame):
         self.c_trim.valueChanged.connect(lambda v: self._set_field("trim_db", round(v, 1)))
 
         self.syncFromData(self._data)
+
+    def use_processor_controls(self) -> None:
+        self._guard_badge.hide()
+        for control in (self.c_direct, self.c_sub, self.c_lowcut, self.c_width):
+            control.hide()
 
     def syncFromData(self, data: dict):
         self._updating = True
@@ -1711,6 +1940,8 @@ class StudioSubharmonicWidget(QWidget):
         self.setMinimumSize(940, 630)
 
         self._active_bank = "A"
+        self._processor_mode = False
+        self.detection_mode_combo: ChevronComboBox | None = None
         self._banks = {
             "A": default_subharmonic_demo(),
             "B": default_subharmonic_flat(),
@@ -1901,6 +2132,7 @@ class StudioSubharmonicWidget(QWidget):
         top_bar.setObjectName("TopBar")
         top_bar.setStyleSheet("QFrame#TopBar { background-color: #27272B; border-bottom: 1px solid #141416; }")
         tb_lay = QHBoxLayout(top_bar)
+        self._processor_toolbar = tb_lay
         tb_lay.setContentsMargins(10, 6, 10, 6)
         tb_lay.setSpacing(6)
 
@@ -2126,7 +2358,34 @@ class StudioSubharmonicWidget(QWidget):
         self.out_card.syncFromData(st["output"])
         self.out_card.setDirectMutedBySolo(bool(st["sub_solo"]))
         self.meter_sub_gen.setActive(bool(st["enabled"]) and bool(st["source"]["enabled"]))
+        if self.detection_mode_combo is not None:
+            detection = st.get("detection_mode", "legacy")
+            with QSignalBlocker(self.detection_mode_combo):
+                self.detection_mode_combo.setCurrentIndex(self.detection_mode_combo.findData(detection))
+            self._sync_processor_controls()
         self.sub_graph.setState(st)
+
+    def _sync_processor_controls(self) -> None:
+        state = self._current_state()
+        enabled = bool(state["enabled"])
+        self.src_card.set_processor_mode(state.get("detection_mode") == "focused", enabled)
+        for control in (self.drv_card.c_attack, self.drv_card.c_release, self.out_card.c_mix,
+                        self.out_card.c_trim):
+            control.setEnabled(enabled)
+            control.setModuleActive(enabled)
+        if self.detection_mode_combo is not None:
+            self.detection_mode_combo.setEnabled(enabled)
+
+    def _on_detection_mode_changed(self, index: int) -> None:
+        if self.detection_mode_combo is None or index < 0:
+            return
+        mode = self.detection_mode_combo.itemData(index)
+        state = self._current_state()
+        if mode in ("legacy", "focused") and mode != state.get("detection_mode"):
+            state["detection_mode"] = mode
+            self.sub_graph.set_processor_telemetry({})
+            self._refresh_all_views()
+            self.stateChanged.emit(self.get_state())
 
     def _switch_bank(self, bank: str):
         if bank != self._active_bank:
@@ -2143,6 +2402,10 @@ class StudioSubharmonicWidget(QWidget):
         st["enabled"] = enabled
         self.meter_sub_gen.setActive(enabled and bool(st["source"]["enabled"]))
         self.sub_graph.setState(st)
+        if self._processor_mode:
+            self._sync_processor_controls()
+            if not enabled:
+                self.update_processor_telemetry(-100.0, -100.0, {})
         self.bypassChanged.emit(enabled)
         self.stateChanged.emit(self.get_state())
 
@@ -2158,6 +2421,8 @@ class StudioSubharmonicWidget(QWidget):
         st = self._current_state()
         st["source"] = src_data
         self.meter_sub_gen.setActive(bool(st["enabled"]) and bool(src_data["enabled"]))
+        if self._processor_mode:
+            self._sync_processor_controls()
         self.sub_graph.setState(st)
         self.sourceOctaveChanged.emit(copy.deepcopy(src_data))
         self.stateChanged.emit(self.get_state())
@@ -2181,6 +2446,8 @@ class StudioSubharmonicWidget(QWidget):
         st = self._current_state()
         st["source"]["freq"] = freq
         self.src_card.syncFromData(st["source"])
+        if self._processor_mode:
+            self._sync_processor_controls()
         self.sub_graph.setState(st)
         self.sourceOctaveChanged.emit(copy.deepcopy(st["source"]))
         self.stateChanged.emit(self.get_state())
@@ -2197,6 +2464,8 @@ class StudioSubharmonicWidget(QWidget):
         st = self._current_state()
         st["source"]["bandwidth"] = bw
         self.src_card.syncFromData(st["source"])
+        if self._processor_mode:
+            self._sync_processor_controls()
         self.sub_graph.setState(st)
         self.sourceOctaveChanged.emit(copy.deepcopy(st["source"]))
         self.stateChanged.emit(self.get_state())
@@ -2205,6 +2474,8 @@ class StudioSubharmonicWidget(QWidget):
         st = self._current_state()
         st["source"]["sub_lpf"] = lpf
         self.src_card.syncFromData(st["source"])
+        if self._processor_mode:
+            self._sync_processor_controls()
         self.sub_graph.setState(st)
         self.sourceOctaveChanged.emit(copy.deepcopy(st["source"]))
         self.stateChanged.emit(self.get_state())
@@ -2219,14 +2490,20 @@ class StudioSubharmonicWidget(QWidget):
 
     def _load_preset(self, name: str):
         if name in self._presets:
-            self._banks[self._active_bank] = copy.deepcopy(self._presets[name])
+            preset = copy.deepcopy(self._presets[name])
+            if self._processor_mode:
+                preset["enabled"] = self._current_state()["enabled"]
+            self._banks[self._active_bank] = preset
             self._refresh_all_views()
             self.stateChanged.emit(self.get_state())
 
     def _step_preset(self, step: int):
         cnt = self.preset_combo.count()
         if cnt > 0:
-            self.preset_combo.setCurrentIndex((self.preset_combo.currentIndex() + step) % cnt)
+            index = self.preset_combo.currentIndex()
+            if index < 0:
+                index = -1 if step > 0 else 0
+            self.preset_combo.setCurrentIndex((index + step) % cnt)
 
     def _save_new_preset(self):
         name, ok = QInputDialog.getText(self, "保存 Subharmonic 预设", "输入预设名称:")
@@ -2314,9 +2591,64 @@ class StudioSubharmonicWidget(QWidget):
     # 公开 API：供外部后端 DSP / 工程文件序列化调用
     # -----------------------------------------------------------------
     def reset_subharmonic(self):
-        self._banks[self._active_bank] = default_subharmonic_flat()
+        self._banks[self._active_bank] = _default_processor_state() if self._processor_mode else default_subharmonic_flat()
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
+
+    def use_processor_controls(self) -> None:
+        if self._processor_mode:
+            return
+        self._processor_mode = True
+        self.sub_solo_btn.hide()
+        self.sub_graph.use_processor_controls()
+        self.src_card.use_processor_controls()
+        self.drv_card.use_processor_controls()
+        self.out_card.use_processor_controls()
+
+        combo = ChevronComboBox()
+        combo.setAccessibleName(_tr("detection", "Detection"))
+        combo.setToolTip(_tr("bandwidth_hint", "Center and bandwidth apply in Focused mode."))
+        combo.addItem(_tr("legacy", "Legacy"), "legacy")
+        combo.addItem(_tr("focused", "Focused"), "focused")
+        combo.currentIndexChanged.connect(self._on_detection_mode_changed)
+        combo.setFixedHeight(22)
+        self._processor_toolbar.insertWidget(self._processor_toolbar.indexOf(self.sub_solo_btn), combo)
+        self.detection_mode_combo = combo
+
+        neutral = _default_processor_state()
+        flat = copy.deepcopy(neutral)
+        flat["output"]["mix"] = 0.0
+        self._banks = {"A": neutral, "B": flat}
+        variants = (
+            ("Kick Gut-Punch (RBass)", "Kick Weight", 40.0),
+            ("Cinematic LFE Rumble (LoAir)", "Cinematic LFE Rumble", 30.0),
+            ("808 & Sub Bass Weight", "808 & Sub Bass Weight", 42.0),
+            ("Thin Bass Restoration", "Thin Bass Restoration", 60.0),
+        )
+        presets = {"Dry Signal": copy.deepcopy(flat)}
+        for demo_name, name, bandwidth in variants:
+            preset = copy.deepcopy(self._presets[demo_name])
+            preset["detection_mode"] = "focused"
+            preset["source"]["bandwidth"] = bandwidth
+            presets[name] = preset
+        self._presets = presets
+        with QSignalBlocker(self.preset_combo):
+            self.preset_combo.clear()
+            self.preset_combo.addItems(self._presets.keys())
+            self.preset_combo.setCurrentIndex(-1)
+        self.update_processor_telemetry(-100.0, -100.0, {})
+        self._refresh_all_views()
+
+    def update_processor_telemetry(self, input_db: float, output_db: float, analysis: dict) -> None:
+        if self._demo_timer.isActive():
+            self._demo_timer.stop()
+        self.sub_graph.set_processor_telemetry(analysis)
+        if analysis:
+            self.update_meters(_number(input_db, -100.0), _number(analysis.get("sub_peak_db"), -100.0),
+                               _number(output_db, -100.0))
+        else:
+            for meter in (self.meter_input, self.meter_sub_gen, self.meter_output):
+                meter.clear()
 
     def get_state(self) -> dict:
         return copy.deepcopy(self._current_state())

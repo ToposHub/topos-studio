@@ -65,25 +65,65 @@ def test_minimap_deferred_slot_is_bound_method(qtbot, qapp):
         page.deleteLater()
 
 
-def test_page_entry_reuses_only_an_unchanged_empty_output(qtbot) -> None:
+def test_page_entry_reuses_only_an_unchanged_empty_graph(qtbot) -> None:
     from src.features.composite.ui.composite_page import CompositePage
 
     page = CompositePage(parent=None)
     qtbot.addWidget(page)
-    page.reset_to_empty_workspace()
-    output_id = next(iter(page._node_graph.nodes))
+    generation = page.node_graph.generation
+    assert not page.node_graph.nodes
+    assert not page._node_editor._node_items
 
     page.reset_to_empty_workspace(reuse_clean_graph=True)
-    assert list(page._node_graph.nodes) == [output_id]
+    assert page.node_graph.generation == generation
 
-    page._node_graph.add_sticky_note("scratch-note", {"text": "temporary"})
+    page.node_graph.add_sticky_note("scratch-note", {"text": "temporary"})
     page.reset_to_empty_workspace(reuse_clean_graph=True)
-    assert output_id not in page._node_graph.nodes
-    assert not page._node_graph.get_sticky_notes()
-    new_id = next(iter(page._node_graph.nodes))
+    assert page.node_graph.generation > generation
+    assert not page.node_graph.get_sticky_notes()
+    assert not page.node_graph.nodes
 
+
+def test_inactive_workspace_clears_inspector_and_guards_deferred_settings(qtbot, monkeypatch) -> None:
+    from src.features.composite.nodes.output_node import OutputNode
+    from src.features.composite.ui.composite_page import CompositePage
+    from src.features.composite.ui.node_properties_panel import NodePropertiesPanel
+
+    page = CompositePage()
+    panel = NodePropertiesPanel()
+    qtbot.addWidget(page)
+    qtbot.addWidget(panel)
+    page.properties_panel = panel
+    monkeypatch.setattr(page, "_ensure_renderer_initialized", lambda: None)
+
+    page.on_enter()
+    qtbot.wait(1)
+    panel.project_settings_requested.emit()
+    panel.viewer3d_settings_requested.emit()
+    assert panel._header.isHidden()
+    assert panel._content_layout.count() == 0
+
+    output = OutputNode()
+    composition = {"composite_id": "test-comp", "nodes": [output.to_dict()]}
+    page.load_composite_data(composition)
+    qtbot.waitUntil(lambda: panel._project_settings_visible)
+    page._on_node_selected(output.id)
+    panel._sections[output.id]._pin_btn.click()
+    panel._project_settings_section._pin_btn.click()
+    panel.viewer3d_settings_requested.emit()
+    panel._viewer3d_settings_section._pin_btn.click()
+    assert not panel._header.isHidden()
+    assert panel._content_layout.count() == 3
+
+    page.on_enter()
     page.reset_to_empty_workspace()
-    assert new_id not in page._node_graph.nodes
+    qtbot.wait(1)
+    assert not page.node_graph.nodes
+    assert not page._node_editor._node_items
+    assert not page._minimap._nodes_data
+    assert panel._header.isHidden()
+    assert panel._content_layout.count() == 0
+    assert panel._current_node_id is None
 
 
 def test_frame_ready_handler_survives_page_destruction(qtbot, qapp):

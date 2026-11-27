@@ -14,6 +14,7 @@ from src.features.edit.core.hosted_vst3 import (
 )
 from src.features.mixer.ui.clip_preview_worker import ClipPreviewWorker
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.audio_mixer.pro_widgets import apply_float_panel
 
 
 class Vst3InsertDialog(QDialog):
@@ -22,6 +23,7 @@ class Vst3InsertDialog(QDialog):
     def __init__(self, sample_rate: float, parent: QWidget,
                  initial: HostedVst3Params | None = None) -> None:
         super().__init__(parent)
+        apply_float_panel(self)
         self.setWindowTitle(I18N.tr("audio.fx.vst3.title", "VST3 plug-in"))
         self.resize(440, 460)
         self._initial = initial

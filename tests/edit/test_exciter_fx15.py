@@ -140,3 +140,81 @@ class TestExciter:
         assert params.ex_bands[0]["mode"] == "odd"
         restored = ExciterParams.from_dict(params.to_dict())
         assert restored == params
+
+
+def test_exciter_neutral_2x_delays_the_dry_path_without_shaping() -> None:
+    pcm = np.zeros((2, 80), np.float32)
+    pcm[:, 0] = .25
+    delayed = np.roll(pcm, 20, axis=1)
+    clean = {"ex_quality": "clean", "ex_oversampling": 2,
+             "ex_bands": [{"enabled": True, "amount": 1.0, "mix": 0.0}]}
+    for params in (clean, {"ex_oversampling": 2}, clean | {
+        "ex_wet": 0.0, "ex_bands": [{"enabled": True, "amount": 1.0}],
+    }):
+        fx = _chain(ExciterParams.from_dict(params))
+        assert fx.latency_samples() == fx.tail_estimate_samples() == 20
+        np.testing.assert_array_equal(fx.process(pcm), delayed)
+        trim = _chain(ExciterParams.from_dict(params | {"ex_output_gain_db": -6.020599913279624}))
+        np.testing.assert_array_equal(trim.process(pcm), delayed * .5)
+        bypass = _chain(ExciterParams.from_dict(params | {"enabled": False}))
+        assert bypass.latency_samples() == 0
+        np.testing.assert_array_equal(bypass.process(pcm), pcm)
+
+
+def test_exciter_dry_delay_remains_continuous_when_wet_crosses_zero() -> None:
+    pcm = np.random.default_rng(318).normal(0.0, .12, (2, 140)).astype(np.float32)
+    fx = EffectChain(RATE)
+    params = {"ex_quality": "clean", "ex_oversampling": 2, "ex_wet": 0.0,
+              "ex_bands": [{"enabled": True, "amount": .75}]}
+    fx.set_params([("exciter", params, True, "exciter")])
+    np.testing.assert_array_equal(fx.process(pcm[:, :100])[:, 20:], pcm[:, :80])
+    fx.set_params([("exciter", params | {"ex_wet": .6}, True, "exciter")])
+    assert fx.latency_samples() == 20
+    actual = fx.process(pcm[:, 100:])
+    np.testing.assert_array_equal(actual[:, 0], pcm[:, 80])
+
+
+@pytest.mark.parametrize("quality", ["legacy", "clean"])
+def test_exciter_live_mix_and_trim_keep_filter_and_fir_history(quality: str) -> None:
+    pcm = np.random.default_rng(51).normal(0.0, .1, (3, 1372)).astype(np.float32)
+    params = ExciterParams.from_dict({
+        "ex_quality": quality, "ex_oversampling": 2,
+        "ex_bands": [{"enabled": True, "mode": "even", "amount": .4},
+                     {"enabled": True, "mode": "odd", "amount": .7}],
+    }).to_dict()
+    streamed = EffectChain(RATE)
+    streamed.set_params([("exciter", params, True, "exciter")])
+    start = streamed.process(pcm[:, :513])
+    updated = params | {"ex_output_gain_db": -6.020599913279624, "ex_wet": .38}
+    streamed.set_params([("exciter", updated, True, "exciter")])
+    rest = streamed.process(pcm[:, 513:])
+    dry_reference = _chain(ExciterParams.from_dict(params)).process(pcm)
+    adjusted = _chain(ExciterParams.from_dict(updated)).process(pcm)
+    np.testing.assert_array_equal(start, dry_reference[:, :513])
+    np.testing.assert_array_equal(rest, adjusted[:, 513:])
+    assert streamed.latency_samples() == 20
+    assert streamed.tail_estimate_samples() > 2 * streamed.latency_samples()
+
+
+def test_clean_2x_exciter_preserves_dry_high_frequencies() -> None:
+    t = np.arange(2 * RATE) / RATE
+    pcm = (.12 * np.sin(2 * np.pi * 21_000.0 * t))[None, :].astype(np.float32)
+    params = {"ex_oversampling": 2, "ex_bands": [{},
+              {"enabled": True, "mode": "even", "amount": .01}]}
+    legacy = _chain(ExciterParams.from_dict(params)).process(pcm)
+    clean = _chain(ExciterParams.from_dict(params | {"ex_quality": "clean"})).process(pcm)
+    assert _amp(clean, 21_000) == pytest.approx(.12, abs=1e-7)
+    assert _amp(legacy, 21_000) < .115
+    assert ExciterParams.from_dict(params).ex_quality == "legacy"
+    assert ExciterParams.default().ex_quality == "clean"
+
+
+def test_clean_2x_exciter_reduces_folded_third_harmonic() -> None:
+    t = np.arange(2 * RATE) / RATE
+    pcm = (.35 * np.sin(2 * np.pi * 13_000.0 * t))[None, :].astype(np.float32)
+    params = {"ex_quality": "clean", "ex_bands": [{},
+              {"enabled": True, "mode": "odd", "amount": .8}]}
+    full_rate = _chain(ExciterParams.from_dict(params)).process(pcm)
+    oversampled = _chain(ExciterParams.from_dict(params | {"ex_oversampling": 2})).process(pcm)
+    assert _amp(full_rate, 9000) > .007
+    assert _amp(oversampled, 9000) < _amp(full_rate, 9000) / 100.0

@@ -36,7 +36,8 @@ PALETTE = {
 }
 
 MONO_MAKER_MIN = 20.0
-MONO_MAKER_MAX = 1000.0
+MONO_MAKER_MAX = 2000.0
+TRIM_LIMIT_DB = 24.0
 
 
 def format_freq_hz(hz: float) -> str:
@@ -52,7 +53,7 @@ def parse_freq_hz(text: str, fallback: float) -> float:
             val = float(s[:-1]) * 1000.0
         else:
             val = float(s)
-        return max(MONO_MAKER_MIN, min(MONO_MAKER_MAX, val))
+        return max(MONO_MAKER_MIN, min(MONO_MAKER_MAX, val)) if math.isfinite(val) else fallback
     except ValueError:
         return fallback
 
@@ -62,13 +63,13 @@ def default_imager_state() -> dict:
         "enabled": True,
         "width": 100.0,               # 0.0% (Mono) ~ 100.0% (Original) ~ 200.0% (Super Wide)
         "pan": 0.0,                   # -100.0 (Left) ~ 0.0 (Center) ~ 100.0 (Right)
-        "mid_gain": 0.0,              # -12.0 ~ +12.0 dB
-        "side_gain": 0.0,             # -12.0 ~ +12.0 dB
-        "mono_maker_on": True,        # 低频单声道化开关
-        "mono_maker_freq": 120.0,     # 20.0 ~ 1000.0 Hz
-        "mono_maker_slope": "24dB",   # "12dB" | "24dB" | "Ellip"
+        "mid_gain": 0.0,
+        "side_gain": 0.0,
+        "mono_maker_on": False,
+        "mono_maker_freq": 200.0,
+        "mono_maker_slope": "6dB",
         "solo_mode": "None",          # "None" | "Mid" | "Side" | "Mono"
-        "output_gain": 0.0,           # -12.0 ~ +12.0 dB
+        "output_gain": 0.0,
         "scope_mode": "Lissajous",    # "Lissajous" | "Polar"
     }
 
@@ -357,8 +358,9 @@ class StereoVectorscopeWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_imager_state()
-        self._correlation = 0.86
-        self._corr_avg = 0.84
+        self._processed_samples = False
+        self._correlation: float | None = None
+        self._corr_avg = 0.0
         self._trail_history: deque[list[tuple[float, float]]] = deque(maxlen=6)
 
         self._dragging = False
@@ -371,11 +373,25 @@ class StereoVectorscopeWidget(QWidget):
         self._state = copy.deepcopy(state)
         self.update()
 
-    def pushSamples(self, samples_l: list[float], samples_r: list[float], correlation: float):
+    def pushSamples(
+        self, samples_l: list[float], samples_r: list[float], correlation: float | None,
+        *, processed: bool = False,
+    ) -> None:
+        if self._processed_samples != processed:
+            self._trail_history.clear()
+            self._processed_samples = processed
         pairs = list(zip(samples_l, samples_r))
-        self._trail_history.append(pairs)
-        self._correlation = max(-1.0, min(1.0, correlation))
-        self._corr_avg = self._corr_avg * 0.88 + self._correlation * 0.12
+        if pairs:
+            self._trail_history.append(pairs)
+        else:
+            self._trail_history.clear()
+        if correlation is None:
+            self._correlation = None
+            self._corr_avg = 0.0
+        else:
+            measured = max(-1.0, min(1.0, correlation))
+            self._corr_avg = measured if self._correlation is None else self._corr_avg * 0.88 + measured * 0.12
+            self._correlation = measured
         self.update()
 
     # -----------------------------------------------------------------
@@ -513,9 +529,15 @@ class StereoVectorscopeWidget(QWidget):
 
         # 2. 绘制实时李萨如 / 极坐标余辉点云
         solo = self._state["solo_mode"]
-        width_scale = (self._state["width"] / 100.0) if en else 1.0
-        m_gain_lin = (10.0 ** (self._state["mid_gain"] / 20.0)) if en else 1.0
-        s_gain_lin = (10.0 ** (self._state["side_gain"] / 20.0)) if en else 1.0
+        mid_scale = side_scale = 0.5
+        if not self._processed_samples:
+            if en:
+                mid_scale *= 10.0 ** (self._state["mid_gain"] / 20.0)
+                side_scale *= self._state["width"] / 100.0 * 10.0 ** (self._state["side_gain"] / 20.0)
+            if solo in {"Mid", "Mono"}:
+                side_scale = 0.0
+            elif solo == "Side":
+                mid_scale = 0.0
 
         num_frames = len(self._trail_history)
         for f_idx, frame_pairs in enumerate(self._trail_history):
@@ -526,14 +548,8 @@ class StereoVectorscopeWidget(QWidget):
 
             poly = QPolygonF()
             for l_raw, r_raw in frame_pairs:
-                # 实时预览用户调节的 Width、M/S Gain 与 Solo 状态
-                m_val = 0.5 * (l_raw + r_raw) * m_gain_lin
-                s_val = 0.5 * (l_raw - r_raw) * width_scale * s_gain_lin
-
-                if solo == "Mid" or solo == "Mono":
-                    s_val = 0.0
-                elif solo == "Side":
-                    m_val = 0.0
+                m_val = (l_raw + r_raw) * mid_scale
+                s_val = (l_raw - r_raw) * side_scale
 
                 # 李萨如标准坐标：X = S (左右侧差), Y = M (垂直和声)
                 if is_polar:
@@ -613,8 +629,10 @@ class StereoVectorscopeWidget(QWidget):
         p.setPen(QColor("#9A9AA2"))
         p.drawText(QRectF(area.left(), area.top(), 140, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "PHASE CORRELATION")
 
-        corr_val = self._correlation
-        if corr_val < 0.0:
+        corr_val = self._correlation if self._correlation is not None else 0.0
+        if self._correlation is None:
+            val_col = QColor("#9A9AA2")
+        elif corr_val < 0.0:
             val_col = QColor(PALETTE["coral"])
         elif corr_val < 0.35:
             val_col = QColor(PALETTE["amber"])
@@ -622,7 +640,8 @@ class StereoVectorscopeWidget(QWidget):
             val_col = QColor(PALETTE["green"])
 
         p.setPen(val_col)
-        p.drawText(QRectF(area.right() - 70, area.top(), 70, 14), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"{corr_val:+.2f}")
+        label = "—" if self._correlation is None else f"{corr_val:+.2f}"
+        p.drawText(QRectF(area.right() - 70, area.top(), 70, 14), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
 
         # 轨道凹槽
         bar_rect = QRectF(area.left(), area.top() + 16.0, area.width(), 8.0)
@@ -648,12 +667,12 @@ class StereoVectorscopeWidget(QWidget):
         p.drawLine(QPointF(mid_x, bar_rect.top() - 1.5), QPointF(mid_x, bar_rect.bottom() + 1.5))
 
         # 平均值游标 + 瞬时白针
-        avg_x = bar_rect.left() + ((self._corr_avg + 1.0) * 0.5) * bar_rect.width()
-        p.setPen(QPen(QColor("#9A9AA2"), 1.2))
-        p.drawLine(QPointF(avg_x, bar_rect.top()), QPointF(avg_x, bar_rect.bottom()))
-
-        p.setPen(QPen(QColor("#FFFFFF"), 1.8))
-        p.drawLine(QPointF(curr_x, bar_rect.top() - 1.5), QPointF(curr_x, bar_rect.bottom() + 1.5))
+        if self._correlation is not None:
+            avg_x = bar_rect.left() + ((self._corr_avg + 1.0) * 0.5) * bar_rect.width()
+            p.setPen(QPen(QColor("#9A9AA2"), 1.2))
+            p.drawLine(QPointF(avg_x, bar_rect.top()), QPointF(avg_x, bar_rect.bottom()))
+            p.setPen(QPen(QColor("#FFFFFF"), 1.8))
+            p.drawLine(QPointF(curr_x, bar_rect.top() - 1.5), QPointF(curr_x, bar_rect.bottom() + 1.5))
 
         # 底部刻度标签 (-1, 0, +1)
         p.setFont(QFont(MONO_FONT_FAM, 7))
@@ -772,6 +791,9 @@ class MSMeterColumnWidget(QFrame):
     def setLevels(self, mid_db: float, side_db: float):
         self.meter_canvas.setLevels(mid_db, side_db)
 
+    def clear_levels(self) -> None:
+        self.meter_canvas.clear_levels()
+
 
 class _DualMSMeterCanvas(QWidget):
     def __init__(self, parent=None):
@@ -798,6 +820,13 @@ class _DualMSMeterCanvas(QWidget):
             self._mid_clip = True
         if self._side_db >= -0.1:
             self._side_clip = True
+        self.update()
+
+    def clear_levels(self) -> None:
+        if self._mid_db == self._side_db == self._mid_peak == self._side_peak == -60.0:
+            return
+        self._mid_db = self._side_db = self._mid_peak = self._side_peak = -60.0
+        self._mid_clip = self._side_clip = False
         self.update()
 
     def mousePressEvent(self, event):
@@ -954,11 +983,11 @@ class StudioStereoImagerWidget(QWidget):
     # 对接后端音频引擎的完整信号接口
     imagerBypassChanged = pyqtSignal(bool)
     widthChanged = pyqtSignal(float)                   # 0.0 ~ 200.0 (%)
-    midGainChanged = pyqtSignal(float)                 # -12.0 ~ +12.0 (dB)
-    sideGainChanged = pyqtSignal(float)                # -12.0 ~ +12.0 (dB)
+    midGainChanged = pyqtSignal(float)                 # -24.0 ~ +24.0 (dB)
+    sideGainChanged = pyqtSignal(float)                # -24.0 ~ +24.0 (dB)
     monoMakerChanged = pyqtSignal(bool, float, str)    # enabled, freq_hz, slope
     soloModeChanged = pyqtSignal(str)                  # "None" | "Mid" | "Side" | "Mono"
-    outputGainChanged = pyqtSignal(float)              # -12.0 ~ +12.0 (dB)
+    outputGainChanged = pyqtSignal(float)              # -24.0 ~ +24.0 (dB)
     stateChanged = pyqtSignal(dict)
 
     def __init__(self, track_name: str = "Master Bus", parent=None):
@@ -984,11 +1013,11 @@ class StudioStereoImagerWidget(QWidget):
             "Mastering Default (100%)": default_imager_state(),
             "Tight Bass + Wide Air": {
                 **default_imager_state(),
-                "width": 128.0, "side_gain": 1.2, "mono_maker_on": True, "mono_maker_freq": 135.0, "mono_maker_slope": "24dB",
+                "width": 128.0, "side_gain": 1.2, "mono_maker_on": True, "mono_maker_freq": 135.0, "mono_maker_slope": "12dB",
             },
             "Club Mono Low-End (<160Hz)": {
                 **default_imager_state(),
-                "width": 112.0, "mid_gain": 0.5, "mono_maker_on": True, "mono_maker_freq": 160.0, "mono_maker_slope": "Ellip",
+                "width": 112.0, "mid_gain": 0.5, "mono_maker_on": True, "mono_maker_freq": 160.0, "mono_maker_slope": "12dB",
             },
             "Vocal Focus (Narrow Sides)": {
                 **default_imager_state(),
@@ -1238,12 +1267,12 @@ class StudioStereoImagerWidget(QWidget):
         ms_hdr.setStyleSheet(f"color: {PALETTE['green']}; font-size: 11px; font-weight: 700; letter-spacing: 0.4px;")
         ms_lay.addWidget(ms_hdr)
 
-        self.knob_mid = ProRotaryKnob(-12.0, 12.0, 0.0, 0.0, PALETTE["green"], mode="bipolar", diameter=38)
+        self.knob_mid = ProRotaryKnob(-TRIM_LIMIT_DB, TRIM_LIMIT_DB, 0.0, 0.0, PALETTE["green"], mode="bipolar", diameter=38)
         self.knob_mid.valueChanged.connect(self._on_mid_gain_changed)
         self.pill_mid = EditableValuePill("0.0dB", PALETTE["green"], width=62)
         self.pill_mid.valueEdited.connect(self._on_mid_gain_text)
 
-        self.knob_side = ProRotaryKnob(-12.0, 12.0, 0.0, 0.0, PALETTE["amber"], mode="bipolar", diameter=38)
+        self.knob_side = ProRotaryKnob(-TRIM_LIMIT_DB, TRIM_LIMIT_DB, 0.0, 0.0, PALETTE["amber"], mode="bipolar", diameter=38)
         self.knob_side.valueChanged.connect(self._on_side_gain_changed)
         self.pill_side = EditableValuePill("0.0dB", PALETTE["amber"], width=62)
         self.pill_side.valueEdited.connect(self._on_side_gain_text)
@@ -1251,8 +1280,8 @@ class StudioStereoImagerWidget(QWidget):
         ms_ctrl = QHBoxLayout()
         ms_ctrl.setContentsMargins(0, 0, 0, 0)
         ms_ctrl.setSpacing(0)
-        ms_ctrl.addLayout(self._make_knob_cell("Mid (M)", self.knob_mid, self.pill_mid, ("-12", "0", "+12")), 1)
-        ms_ctrl.addLayout(self._make_knob_cell("Side (S)", self.knob_side, self.pill_side, ("-12", "0", "+12")), 1)
+        ms_ctrl.addLayout(self._make_knob_cell("Mid (M)", self.knob_mid, self.pill_mid, ("-24", "0", "+24")), 1)
+        ms_ctrl.addLayout(self._make_knob_cell("Side (S)", self.knob_side, self.pill_side, ("-24", "0", "+24")), 1)
         ms_lay.addStretch(1)
         ms_lay.addLayout(ms_ctrl)
         ms_lay.addStretch(1)
@@ -1279,20 +1308,20 @@ class StudioStereoImagerWidget(QWidget):
         self.btn_mm_toggle.clicked.connect(self._on_mm_toggled)
         mm_lay.addWidget(self.btn_mm_toggle)
 
-        self.knob_mm_freq = ProRotaryKnob(MONO_MAKER_MIN, MONO_MAKER_MAX, 120.0, 120.0, PALETTE["violet"], mode="log", diameter=38)
+        self.knob_mm_freq = ProRotaryKnob(MONO_MAKER_MIN, MONO_MAKER_MAX, 200.0, 200.0, PALETTE["violet"], mode="log", diameter=38)
         self.knob_mm_freq.valueChanged.connect(self._on_mm_freq_changed)
         self.pill_mm_freq = EditableValuePill("120Hz", PALETTE["violet"], width=64)
         self.pill_mm_freq.valueEdited.connect(self._on_mm_freq_text)
 
         mm_lay.addStretch(1)
-        mm_lay.addLayout(self._make_knob_cell("Cutoff Freq", self.knob_mm_freq, self.pill_mm_freq, ("20", "120", "1K")))
+        mm_lay.addLayout(self._make_knob_cell("Cutoff Freq", self.knob_mm_freq, self.pill_mm_freq, ("20", "200", "2K")))
         mm_lay.addStretch(1)
 
         # 滤波斜率 / 椭圆滤波器切换
         mm_slope_row = QHBoxLayout()
         mm_slope_row.setSpacing(3)
         self.mm_slope_btns: dict[str, QPushButton] = {}
-        for sl in ("12dB", "24dB", "Ellip"):
+        for sl in ("6dB", "12dB"):
             btn = QPushButton(sl)
             btn.setObjectName("SegBtn")
             btn.setCheckable(True)
@@ -1315,13 +1344,13 @@ class StudioStereoImagerWidget(QWidget):
         out_hdr.setStyleSheet(f"color: {PALETTE['amber']}; font-size: 11px; font-weight: 700; letter-spacing: 0.4px;")
         out_lay.addWidget(out_hdr)
 
-        self.knob_out = ProRotaryKnob(-12.0, 12.0, 0.0, 0.0, PALETTE["amber"], mode="bipolar", diameter=38)
+        self.knob_out = ProRotaryKnob(-TRIM_LIMIT_DB, TRIM_LIMIT_DB, 0.0, 0.0, PALETTE["amber"], mode="bipolar", diameter=38)
         self.knob_out.valueChanged.connect(self._on_out_gain_changed)
         self.pill_out = EditableValuePill("0.0dB", PALETTE["amber"], width=62)
         self.pill_out.valueEdited.connect(self._on_out_gain_text)
 
         out_lay.addStretch(1)
-        out_lay.addLayout(self._make_knob_cell("Output Trim", self.knob_out, self.pill_out, ("-12", "0dB", "+12")))
+        out_lay.addLayout(self._make_knob_cell("Output Trim", self.knob_out, self.pill_out, ("-24", "0dB", "+24")))
         out_lay.addStretch(1)
 
         # 底部同步 Solo M / Solo S 快捷按钮行
@@ -1582,7 +1611,7 @@ class StudioStereoImagerWidget(QWidget):
 
     def _on_mid_gain_text(self, text: str):
         try:
-            v = max(-12.0, min(12.0, round(float(text.strip()), 1)))
+            v = max(-TRIM_LIMIT_DB, min(TRIM_LIMIT_DB, round(float(text.strip()), 1)))
             self._on_mid_gain_changed(v)
         except ValueError:
             pass
@@ -1595,7 +1624,7 @@ class StudioStereoImagerWidget(QWidget):
 
     def _on_side_gain_text(self, text: str):
         try:
-            v = max(-12.0, min(12.0, round(float(text.strip()), 1)))
+            v = max(-TRIM_LIMIT_DB, min(TRIM_LIMIT_DB, round(float(text.strip()), 1)))
             self._on_side_gain_changed(v)
         except ValueError:
             pass
@@ -1651,7 +1680,7 @@ class StudioStereoImagerWidget(QWidget):
 
     def _on_out_gain_text(self, text: str):
         try:
-            v = max(-12.0, min(12.0, round(float(text.strip()), 1)))
+            v = max(-TRIM_LIMIT_DB, min(TRIM_LIMIT_DB, round(float(text.strip()), 1)))
             self._on_out_gain_changed(v)
         except ValueError:
             pass
@@ -1714,13 +1743,7 @@ class StudioStereoImagerWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def use_processor_controls(self) -> None:
-        self.mm_slope_btns["24dB"].hide()
-        self.mm_slope_btns["Ellip"].hide()
-        button = QPushButton("6dB", self)
-        button.setCheckable(True)
-        button.clicked.connect(lambda: self._on_mm_slope_changed("6dB"))
-        self.mm_slope_btns["12dB"].parentWidget().layout().addWidget(button)
-        self.mm_slope_btns["6dB"] = button
+        self.update_metering([], [], -100.0, -100.0, None)
 
     def get_state(self) -> dict:
         return copy.deepcopy(self._st())
@@ -1735,8 +1758,8 @@ class StudioStereoImagerWidget(QWidget):
         samples_r: list[float],
         mid_db: float,
         side_db: float,
-        correlation: float,
-    ):
+        correlation: float | None,
+    ) -> None:
         """
         接入真实音频引擎实时遥测数据：
         - samples_l / samples_r: 当前音频缓冲区的左右声道采样切片 (-1.0 ~ +1.0)
@@ -1745,8 +1768,11 @@ class StudioStereoImagerWidget(QWidget):
         """
         if self._demo_timer.isActive():
             self._demo_timer.stop()
-        self.vectorscope.pushSamples(samples_l, samples_r, correlation)
-        self.ms_monitor.setLevels(mid_db, side_db)
+        self.vectorscope.pushSamples(samples_l, samples_r, correlation, processed=True)
+        if samples_l and samples_r:
+            self.ms_monitor.setLevels(mid_db, side_db)
+        else:
+            self.ms_monitor.clear_levels()
 
 
 if __name__ == "__main__":

@@ -2,10 +2,9 @@
 
 - IR 资源登记：``IrResource``（URI + SHA-256 指纹 + 域信息）；装载统一
   重采样（会话率）、首尾静音裁切与峰值规范化；
-- 低延迟分区 FFT 卷积（overlap-save）：频域分区 kernel 在装载时一次
-  冻结；每个 ≤P 子块只做一次输入 FFT（窗口 = [P 样本历史 | 子块]），
-  与全部分区谱相乘累加后一次逆变换——输出因果、与输入逐样本对齐，
-  ``latency`` 恒为实测 onset（0）；端点加窗防爆音；
+- 低延迟分区 FFT 卷积（overlap-save）：加载时预计算分区谱，
+  头部分区用滑动窗口，尾部用较大分区降低刷新频率；对齐时复用
+  输入 FFT 并合并逆变换。输出因果、逐样本对齐，端点加窗防爆音；
 - 声道矩阵：mono IR → 各声道同卷积（mono→stereo）；立体声 IR 逐声道；
   true stereo 四路径（LL/LR/RL/RR，第一字母=输出，规格显式；4 路 WAV
   按声道序显式成矩阵，2 路 WAV 交叉路径缺数据 → 对角退化）；
@@ -22,7 +21,8 @@ import wave
 from collections import OrderedDict, deque
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Callable, Deque, Dict, List, Optional, Tuple
+from itertools import islice
+from typing import Callable, Deque, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -30,7 +30,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from src.features.edit.core.audio_dsp import AudioEffect
+from src.features.edit.core.audio_dsp import AudioEffect, _clamp_finite
 
 try:  # pragma: no cover - 环境探测
     from scipy.signal import resample_poly
@@ -129,6 +129,8 @@ def load_ir(
         data = signed.astype(np.float32) / 8388608.0
     else:
         raise ValueError(f"unsupported IR sample width: {width}")
+    if not data.size:
+        raise ValueError("IR WAV contains no PCM samples")
     data = data.reshape(-1, channels).T  # (channels, n)
 
     # 统一重采样到会话率。
@@ -172,206 +174,197 @@ def load_ir(
     return np.ascontiguousarray(data, dtype=np.float32), resource
 
 
+class _ConvolutionTail:
+    """Delayed FFT partitions with enough input history to render the next grid block."""
+
+    def __init__(self, kernel: np.ndarray, part: int) -> None:
+        self.part = part
+        self._nfft = 2 * part
+        count = (kernel.shape[-1] + part - 1) // part
+        parts = np.zeros((kernel.shape[0], count * part), dtype=np.float32)
+        parts[:, :kernel.shape[-1]] = kernel
+        self._specs = np.fft.rfft(
+            parts.reshape(kernel.shape[0], count, part).transpose(1, 0, 2),
+            n=self._nfft, axis=-1)
+        self.reset(0, None)
+
+    def reset(self, channels: int, indices: Optional[np.ndarray]) -> None:
+        self._stream_specs = (
+            self._specs if indices is None else self._specs[:, indices, :])
+        self._window = np.zeros((channels, self._nfft), dtype=np.float32)
+        self._prev = np.zeros((channels, self.part), dtype=np.float32)
+        self._grid = np.zeros((channels, self.part), dtype=np.float32)
+        self._fill = 0
+        self._blocks = 0
+        self._fdl: Deque[np.ndarray] = deque(maxlen=len(self._specs))
+        self._pending: Deque[Tuple[int, np.ndarray]] = deque()
+
+    def take_aligned_spectrum(self, start_abs: int) -> Optional[np.ndarray]:
+        """Give the head its tail spectrum when both use the same FFT window."""
+        if self._pending and self._pending[0][0] * self.part == start_abs:
+            return self._pending.popleft()[1]
+        return None
+
+    def add(self, x: np.ndarray, out: np.ndarray, start_abs: int,
+            aligned_spec: Optional[np.ndarray]) -> None:
+        part = self.part
+        n = x.shape[-1]
+        pos = 0
+        while pos < n:
+            take = min(part - self._fill, n - pos)
+            self._grid[:, self._fill:self._fill + take] = x[:, pos:pos + take]
+            self._fill += take
+            pos += take
+            if self._fill < part:
+                continue
+
+            if aligned_spec is None:
+                self._window[:, :part] = self._prev
+                self._window[:, part:] = self._grid
+                spec = np.fft.rfft(self._window, axis=-1)
+            else:
+                spec = aligned_spec
+            self._fdl.appendleft(spec)
+            self._prev, self._grid = self._grid, self._prev
+            self._fill = 0
+            self._blocks += 1
+            # Compact partitions avoid visiting zeros/old spectra on stream start.
+            # Keep the original FFT precision and forward summation order.
+            acc = self._stream_specs[0] * spec
+            for kernel, previous in zip(self._stream_specs[1:], islice(self._fdl, 1, None)):
+                acc += kernel * previous
+            self._pending.append((self._blocks, acc))
+
+        end_abs = start_abs + n
+        while self._pending:
+            block, tail = self._pending[0]
+            block_start = block * part
+            if block_start >= end_abs:
+                break
+            if np.iscomplexobj(tail):
+                tail = np.fft.irfft(tail, n=self._nfft, axis=-1)[:, part:]
+                tail = tail.astype(np.float32, copy=False)
+                self._pending[0] = block, tail
+            lo = max(start_abs, block_start)
+            hi = min(end_abs, block_start + part)
+            out[:, lo - start_abs:hi - start_abs] += tail[:, lo - block_start:hi - block_start]
+            if hi < block_start + part:
+                break
+            self._pending.popleft()
+
+
 class PartitionedConvolver:
-    """低延迟分区 FFT 卷积（头分区滑动卷积 + 尾部 UPC 频域延迟线）。
+    """Zero-latency overlap-save with a fine head grid and coarser long-tail grid.
 
-    - 头分区（IR 前 P 样本）：滑动 overlap-save 处理任意块长子块
-      （窗口 = [P 历史 | 子块]，FFT 恒 2P，不随 IR 全长膨胀）——
-      零算法延迟（推导：``(h⊛w)[P+j] = Σ h[k]·x[s+j-k] = y[s+j]``）；
-    - 其余分区在 P 对齐网格上跑均匀分区卷积（UPC）：输出块 B 的尾部
-      贡献 ``W_B = Σ_{i≥1} IFFT(H_i · X̂_{B-i})``，其中 ``X̂_j`` 是
-      输入块 j 的 2P 窗谱。``W_B`` 只依赖截至 ``B·P`` 的输入 →
-      部分段（网格未齐）的输出同样零延迟；
-    - 频域分区 kernel 在构造时一次冻结，``process`` 不再重复变换。
-
-    输出因果且与输入逐样本对齐：``latency`` 恒为实测 onset（0）；
-    ``tail`` = IR 长度（全部因果样本）。
+    The first partition covers the current callback via a sliding window. Every
+    delayed grid starts at the corresponding FFT partition length, so the
+    complete preceding input window is available before its output is needed.
+    Longer IRs use a coarser grid for the late tail. This reduces how often the
+    long frequency-domain delay line is updated without shifting the output.
     """
 
     def __init__(self, ir: np.ndarray, block: int = CONV_BLOCK) -> None:
         kernel = np.asarray(ir, dtype=np.float32)
         if kernel.ndim == 1:
             kernel = kernel.reshape(1, -1)
-        self._kernel_channels = int(kernel.shape[0])
-        self._ir_len = int(kernel.shape[-1])
-        # 分区大小：短 IR 收缩 FFT 尺寸；长 IR 封顶 block，避免 FFT 随
-        # IR 全长增大（旧实现 next_pow2(block + ir_len - 1)）。
-        self._part = int(max(
-            64, min(int(block), _next_pow2(max(1, self._ir_len)))))
+        if kernel.ndim != 2 or not kernel.size:
+            raise ValueError("IR kernel must contain at least one channel and sample")
+        self._kernel_channels, self._ir_len = kernel.shape
+        self._part = max(64, min(int(block), _next_pow2(self._ir_len)))
+        max_part = max(self._part, 4 * min(int(block), CONV_BLOCK))
         self._nfft = 2 * self._part
-        # 1 样本 IR：逐声道增益直通（mono 广播、多声道逐列）。
-        self._gain: Optional[np.ndarray] = (
-            kernel.astype(np.float32).copy()
-            if self._ir_len == 1 and kernel.size else None)
-        # 冻结频域分区 kernel：head = IR[0:P]；tail = 余下 P 大小的分区。
+        self._gain: Optional[np.ndarray] = None
         self._head_spec: Optional[np.ndarray] = None
-        self._tail_specs: List[np.ndarray] = []
-        if self._ir_len > 1:
-            head = kernel[:, :self._part]
-            self._head_spec = np.fft.rfft(head, n=self._nfft, axis=-1)
-            for start in range(self._part, self._ir_len, self._part):
-                part = kernel[:, start:start + self._part]
-                self._tail_specs.append(
-                    np.fft.rfft(part, n=self._nfft, axis=-1))
-        self._reset_stream()
+        self._tails: list[_ConvolutionTail] = []
+        if self._ir_len == 1:
+            self._gain = kernel.copy()
+        else:
+            self._head_spec = np.fft.rfft(
+                kernel[:, :self._part], n=self._nfft, axis=-1)
+            part = self._part
+            while part < self._ir_len:
+                far_part = 4 * part
+                if far_part > max_part or self._ir_len <= 2 * far_part:
+                    self._tails.append(_ConvolutionTail(kernel[:, part:], part))
+                    break
+                self._tails.append(_ConvolutionTail(kernel[:, part:far_part], part))
+                part = far_part
+        self._reset_stream(0)
 
-    # -- 状态 ----------------------------------------------------------
-
-    def _reset_stream(self) -> None:
-        part = self._part
-        kch = self._kernel_channels
-        self._hist = np.zeros((kch, part), dtype=np.float32)
-        self._prev_block = np.zeros((kch, part), dtype=np.float32)
-        self._grid_buf = np.zeros((kch, part), dtype=np.float32)
-        self._grid_fill = 0
-        self._blocks_done = 0
+    def _reset_stream(self, channels: int) -> None:
+        self._channels = channels
+        self._window = np.zeros((channels, self._nfft), dtype=np.float32)
+        self._hist = np.zeros((channels, self._part), dtype=np.float32)
         self._out_pos = 0
-        # 频域延迟线：最近 N 个输入块谱（X̂_{B-i}）；N = 尾部分区数。
-        self._fdl: Deque[np.ndarray] = deque(maxlen=len(self._tail_specs))
-        # 待消费的网格尾部输出：(块号 B, W_B 覆盖 [B·P,(B+1)·P))。
-        self._pending: Deque[Tuple[int, np.ndarray]] = deque()
+        indices = None
+        self._stream_head_spec = self._head_spec
+        if channels and self._kernel_channels not in (1, channels):
+            indices = self._channel_indices(channels)
+            if self._head_spec is not None:
+                self._stream_head_spec = self._head_spec[indices]
+        for tail in self._tails:
+            tail.reset(channels, indices)
 
     def reset(self) -> None:
-        self._reset_stream()
+        self._reset_stream(self._channels)
 
     @property
     def latency(self) -> int:
-        """实测算法延迟：头滑动段 + 网格尾部均因果对齐，恒为 0（= onset）。"""
         return 0
 
     @property
     def ir_length(self) -> int:
         return self._ir_len
 
-    # -- 处理 ----------------------------------------------------------
-
-    @staticmethod
-    def _apply_spec(spec: np.ndarray, spec_x: np.ndarray,
-                    channels: int) -> np.ndarray:
-        """分区谱 × 输入谱：mono 广播、多声道截断/平铺（保持旧语义）。"""
-        kch = spec.shape[0]
-        if kch == 1 or kch == channels:
-            return spec * spec_x
-        if kch > channels:
-            return spec[:channels] * spec_x
-        return np.repeat(spec, channels // kch, axis=0) * spec_x
-
-    def _process_head(self, x: np.ndarray, channels: int,
-                      n: int) -> np.ndarray:
-        """头分区贡献：任意块长滑动 overlap-save（零延迟）。"""
-        if self._hist.shape != (channels, self._part):
-            self._hist = np.zeros((channels, self._part), dtype=np.float32)
-        out = np.empty((channels, n), dtype=np.float32)
-        pos = 0
-        while pos < n:
-            take = min(self._part, n - pos)
-            window = np.zeros((channels, self._nfft), dtype=np.float32)
-            window[:, :self._part] = self._hist
-            window[:, self._part:self._part + take] = x[:, pos:pos + take]
-            spec_x = np.fft.rfft(window, axis=-1)
-            conv = np.fft.irfft(
-                self._apply_spec(self._head_spec, spec_x, channels),
-                n=self._nfft, axis=-1)
-            out[:, pos:pos + take] = conv[:, self._part:self._part + take]
-            if take == self._part:
-                self._hist = x[:, pos:pos + take].copy()
-            else:
-                self._hist = np.concatenate(
-                    (self._hist[:, take:], x[:, pos:pos + take]), axis=1)
-            pos += take
-        return out
-
-    def _feed_grid(self, x: np.ndarray, channels: int, n: int) -> None:
-        """喂入网格输入并完成尽可能多的网格块（更新延迟线与待发尾部）。"""
-        pos = 0
-        while pos < n:
-            take = min(self._part - self._grid_fill, n - pos)
-            self._grid_buf[:, self._grid_fill:self._grid_fill + take] = \
-                x[:, pos:pos + take]
-            self._grid_fill += take
-            if self._grid_fill == self._part:
-                self._complete_grid_block(channels)
-            pos += take
-
-    def _complete_grid_block(self, channels: int) -> None:
-        window = np.concatenate((self._prev_block, self._grid_buf), axis=1)
-        spec_x = np.fft.rfft(window, axis=-1)
-        self._fdl.append(spec_x)
-        self._prev_block = self._grid_buf.copy()
-        self._grid_fill = 0
-        self._blocks_done += 1
-        if not self._tail_specs:
-            return
-        # W_B = Σ_{i≥1} H_i·X̂_{B-i}（流首缺的老谱按零处理）。
-        acc = np.zeros_like(spec_x)
-        fdl = self._fdl
-        for i, h_spec in enumerate(self._tail_specs, start=1):
-            if i > len(fdl):
-                break
-            acc += self._apply_spec(h_spec, fdl[-i], channels)
-        tail = np.fft.irfft(acc, n=self._nfft, axis=-1)[:, self._part:]
-        self._pending.append(
-            (self._blocks_done, np.ascontiguousarray(tail, dtype=np.float32)))
-
-    def _add_pending_tail(self, out: np.ndarray, channels: int,
-                          start_abs: int, n: int) -> None:
-        """把网格尾部贡献加进输出（按绝对样本位消费待发块）。"""
-        end_abs = start_abs + n
-        idx = start_abs
-        while idx < end_abs:
-            block = idx // self._part
-            while self._pending and self._pending[0][0] < block:
-                self._pending.popleft()  # 过期保护（正常不发生）
-            if self._pending and self._pending[0][0] == block:
-                w = self._pending[0][1]
-                seg_end = min(end_abs, (block + 1) * self._part)
-                lo = idx - block * self._part
-                hi = seg_end - block * self._part
-                out[:, idx - start_abs:seg_end - start_abs] += w[:, lo:hi]
-                if seg_end == (block + 1) * self._part:
-                    self._pending.popleft()
-                idx = seg_end
-            else:
-                # 流首块（B=0）无尾部贡献（历史为零）。
-                idx = (block + 1) * self._part
+    def _channel_indices(self, channels: int) -> np.ndarray:
+        """Truncate or repeat IR channels in the same order as the gain path."""
+        if channels <= self._kernel_channels:
+            return np.arange(channels)
+        return np.arange(channels) * self._kernel_channels // channels
 
     def process(self, x: np.ndarray) -> np.ndarray:
-        """x: (channels, n)；返回 (channels, n)，逐样本对齐、状态跨块。"""
+        """Process any callback length in the input channel layout."""
         x = np.asarray(x, dtype=np.float32)
-        channels = int(x.shape[0])
-        n = int(x.shape[-1])
-        if self._ir_len <= 1:
-            self._reset_stream()
+        channels, n = x.shape
+        if not channels or not n:
+            return x
+        if self._gain is not None:
             gain = self._gain
-            kch = int(gain.shape[0])
-            if kch == 1 or kch == channels:
-                scaled = x * gain
-            elif kch > channels:
-                scaled = x * gain[:channels]
-            else:
-                scaled = x * np.repeat(
-                    gain, channels // kch, axis=0)
-            return np.ascontiguousarray(scaled, dtype=np.float32)
-        if channels != self._kernel_channels and self._kernel_channels != 1:
-            # 声道布局变化超出合同：整流复位（保持因果，不串旧状态）。
-            self._reset_stream()
-        if self._grid_buf.shape != (channels, self._part):
-            # mono kernel 广播 / 首次 stereo 输入：网格状态按输入声道就位。
-            self._grid_buf = np.zeros(
-                (channels, self._part), dtype=np.float32)
-            self._prev_block = np.zeros(
-                (channels, self._part), dtype=np.float32)
-            self._grid_fill = 0
-            self._blocks_done = 0
-            self._fdl.clear()
-            self._pending.clear()
-        out = self._process_head(x, channels, n)
-        if self._tail_specs:
-            self._feed_grid(x, channels, n)
-            self._add_pending_tail(
-                out, channels, self._out_pos, n)
+            if self._kernel_channels not in (1, channels):
+                gain = gain[self._channel_indices(channels)]
+            return np.ascontiguousarray(x * gain, dtype=np.float32)
+        if channels != self._channels:
+            self._reset_stream(channels)
+
+        out = np.empty_like(x, order="C")
+        part = self._part
+        window = self._window
+        near = self._tails[0] if self._tails else None
+        for pos in range(0, n, part):
+            take = min(part, n - pos)
+            block = x[:, pos:pos + take]
+            window[:, :part] = self._hist
+            window[:, part:part + take] = block
+            window[:, part + take:] = 0.0
+            spec = np.fft.rfft(window, axis=-1)
+            acc = self._stream_head_spec * spec
+            start = self._out_pos + pos
+            aligned = take == part and start % part == 0
+            if near is not None and aligned:
+                tail_spec = near.take_aligned_spectrum(start)
+                if tail_spec is not None:
+                    acc += tail_spec
+            conv = np.fft.irfft(acc, n=self._nfft, axis=-1)
+            block_out = out[:, pos:pos + take]
+            block_out[:] = conv[:, part:part + take]
+            self._hist[:] = window[:, take:part + take]
+            if near is not None:
+                # A whole aligned block already computed the near grid's FFT.
+                near.add(block, block_out, start, spec if aligned else None)
+        for tail in self._tails[1:]:
+            tail.add(x, out, self._out_pos, None)
         self._out_pos += n
-        return np.ascontiguousarray(out, dtype=np.float32)
+        return out
 
 
 #: 解码后的 IR 缓存（键含内容指纹；同文件多实例/试听共用，容量有界）。
@@ -381,11 +374,11 @@ _IR_CACHE_LOCK = threading.Lock()
 _IR_WORKERS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="topos-ir")
 
 
-def _cached_ir(path: str, rate: int, true_stereo: bool,
+def _cached_ir(path: str, rate: int,
                cancel_check: Optional[Callable[[], bool]] = None
                ) -> Tuple[tuple, np.ndarray, IrResource]:
     """Read and validate on the preparation thread, never the device callback."""
-    key = (path, _ir_fingerprint(path), rate, true_stereo)
+    key = (path, _ir_fingerprint(path), rate)
     with _IR_CACHE_LOCK:
         cached = _IR_CACHE.get(key)
         if cached is not None:
@@ -401,6 +394,34 @@ def _cached_ir(path: str, rate: int, true_stereo: bool,
     return key, cached[0], cached[1]
 
 
+@dataclass(frozen=True)
+class IrWaveform:
+    resource: IrResource
+    left: tuple[float, ...]
+    right: tuple[float, ...]
+
+
+def _read_ir_waveform(path: str, rate: int, true_stereo: bool,
+                      cancelled: threading.Event) -> IrWaveform:
+    _, ir, resource = _cached_ir(path, rate, cancelled.is_set)
+    if cancelled.is_set():
+        raise CancelledError()
+    bins = min(280, resource.samples)
+    starts = np.arange(bins) * resource.samples // bins
+    peaks = np.maximum.reduceat(np.abs(ir), starts, axis=-1)
+    if true_stereo and resource.channels == 4:
+        left, right = np.maximum(peaks[0], peaks[1]), np.maximum(peaks[2], peaks[3])
+    else:
+        left, right = peaks[0], peaks[min(1, resource.channels - 1)]
+    return IrWaveform(resource, tuple(left.tolist()), tuple(right.tolist()))
+
+
+def prepare_ir_waveform(path: str, rate: int, true_stereo: bool,
+                        cancelled: threading.Event) -> Future[IrWaveform]:
+    """Prepare the panel preview from decoded IR data without touching the UI thread."""
+    return _IR_WORKERS.submit(_read_ir_waveform, path, rate, true_stereo, cancelled)
+
+
 def _prepare_ir(path: str, rate: int, true_stereo: bool,
                 previous_key: Optional[tuple], cancelled: threading.Event,
                 algorithm_version: Optional[int]
@@ -409,7 +430,7 @@ def _prepare_ir(path: str, rate: int, true_stereo: bool,
     if key == previous_key:
         return key, None
     try:
-        _cache_key, ir, resource = _cached_ir(path, rate, true_stereo, cancelled.is_set)
+        _cache_key, ir, resource = _cached_ir(path, rate, cancelled.is_set)
     except (OSError, ValueError, EOFError, wave.Error) as exc:
         return key, exc
     if cancelled.is_set():
@@ -435,10 +456,16 @@ def _ir_fingerprint(path: str) -> Tuple[int, int]:
 class ConvolutionReverbEffect(AudioEffect):
     """卷积混响（mono→stereo / 立体声 / true stereo 四路径）。"""
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    _DEFAULT_PARAMS = {"enabled": True, "wet": 0.35, "dry": 1.0,
+                       "ir_path": "", "true_stereo": False}
+
+    def __init__(self, sample_rate: float = 48000.0, *,
+                 params_are_snapshots: bool = False) -> None:
         super().__init__(sample_rate)
-        self._params: dict = {"enabled": True, "wet": 0.35, "dry": 1.0,
-                              "true_stereo": False}
+        self._params_are_snapshots = params_are_snapshots
+        self._params = dict(self._DEFAULT_PARAMS)
+        self._wet_gain = 0.35
+        self._dry_gain = 1.0
         self._algorithm_version: Optional[int] = None
         self._mono_ir: Optional[np.ndarray] = None
         self._stereo_ir: Optional[np.ndarray] = None
@@ -527,12 +554,13 @@ class ConvolutionReverbEffect(AudioEffect):
                 self._loaded_ir_key or self._failed_ir_key,
                 self._prepare_cancel, self._algorithm_version)
             self._next_probe = now + 1.0
-            if self._loaded_ir_key is None:
+            if self._loaded_ir_key is None and self._failed_ir_key is None:
                 self._resource_status = "preparing"
 
     def collect_telemetry(self) -> dict:
         return {"resource_status": self._resource_status,
                 "resource_error": self._resource_error,
+                "ir_path": self._params["ir_path"],
                 "ir_samples": self._resource.samples if self._resource else 0,
                 "ir_sha256": self._resource.sha256 if self._resource else ""}
 
@@ -596,10 +624,12 @@ class ConvolutionReverbEffect(AudioEffect):
         self._algorithm_version = algorithm_version
         if sample_rate is not None and sample_rate != self._sample_rate:
             self._sample_rate = float(sample_rate)
-        merged = dict(self._params)
+        merged = dict(self._DEFAULT_PARAMS if self._params_are_snapshots else self._params)
         if isinstance(params, dict):
             merged.update(params)
         self._params = merged
+        self._wet_gain = _clamp_finite(merged["wet"], 0.0, 1.0, 0.35)
+        self._dry_gain = _clamp_finite(merged["dry"], 0.0, 1.0, 1.0)
         # UI 文件选择/序列化往返：params 携带 ir_path 时按需装载 IR。
         # 键 = (path, 内容指纹, sample_rate, true_stereo)；set_params 在
         # 自动化路径逐块触发，必须保持廉价（stat + 键比较）。
@@ -612,6 +642,7 @@ class ConvolutionReverbEffect(AudioEffect):
                 self.release_resources()
                 self._unload_ir()
                 self._loaded_ir_key = None
+                self._failed_ir_key = None
                 self._resource_status = "empty"
                 self._resource_error = ""
             return
@@ -636,7 +667,7 @@ class ConvolutionReverbEffect(AudioEffect):
     def _attempt_ir_load(self, ir_path: str, key: tuple,
                          true_stereo: bool) -> None:
         try:
-            _cache_key, ir, resource = _cached_ir(ir_path, int(self._sample_rate), true_stereo)
+            _cache_key, ir, resource = _cached_ir(ir_path, int(self._sample_rate))
         except (OSError, ValueError, EOFError, wave.Error) as exc:
             logger.warning("convolution reverb: IR load failed for %s: %s",
                            ir_path, exc)
@@ -705,21 +736,30 @@ class ConvolutionReverbEffect(AudioEffect):
             return samples
         n = samples.shape[-1]
         channels = samples.shape[0]
-        wet_gain = float(np.clip(self._params.get("wet", 0.35), 0.0, 1.0))
-        dry_gain = float(np.clip(self._params.get("dry", 1.0), 0.0, 1.0))
-        if self._matrix_convs and channels >= 2:
+        if not n or not channels:
+            return samples
+        wet_gain = self._wet_gain
+        dry_gain = self._dry_gain
+        if self._matrix_convs:
+            if channels == 1 and self._algorithm_version is not None and self._algorithm_version <= 4:
+                return samples
             # 四路径求和：out_L = LL⊛xL + LR⊛xR；out_R = RL⊛xL + RR⊛xR。
             xl = samples[0:1]
-            xr = samples[1:2]
-            wet = np.zeros_like(samples)
+            xr = samples[1:2] if channels >= 2 else xl
+            wet = np.zeros((max(2, channels), n), dtype=samples.dtype)
             for key, target in (("LL", 0), ("LR", 0), ("RL", 1), ("RR", 1)):
                 conv = self._matrix_convs.get(key)
                 if conv is None:
                     continue
                 source = xl if key in ("LL", "RL") else xr
                 wet[target] += conv.process(source)[0][:n]
-            for ch in range(2, channels):
-                wet[ch] = wet[ch % 2]
+            if channels == 1:
+                # The host owns the mono layout. Fold the two actual matrix
+                # outputs back to it using the usual unity-gain average.
+                wet = (wet[0:1] + wet[1:2]) * 0.5
+            else:
+                for ch in range(2, channels):
+                    wet[ch] = wet[ch % 2]
         else:
             if self._conv is None:
                 return samples

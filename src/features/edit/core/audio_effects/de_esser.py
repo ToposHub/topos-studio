@@ -23,6 +23,7 @@ from typing import Any, Optional
 import numpy as np
 
 from src.features.edit.core.audio_dsp import AudioEffect, _smooth_attack_release
+from src.features.edit.core.audio_effects.base import moving_mean_power
 
 _SCIPY_AVAILABLE = True
 try:  # pragma: no cover - 环境探测
@@ -33,25 +34,6 @@ except ImportError:  # pragma: no cover
 
 def scipy_available() -> bool:
     return _SCIPY_AVAILABLE
-
-
-def _moving_mean_power(
-    power: np.ndarray, history: Optional[np.ndarray], window: int,
-) -> tuple[np.ndarray, Optional[np.ndarray]]:
-    """Causal boxcar with zero prehistory and a finite power history.
-
-    Prefix sums over the retained overlap cost O(block + window). Recomputing
-    the sum from that overlap avoids numerical drift across long streams.
-    """
-    if window == 1:
-        return power, None
-    if history is None or len(history) != window - 1:
-        history = np.zeros(window - 1, dtype=np.float64)
-    samples = np.concatenate((history, power))
-    totals = np.empty(samples.size + 1, dtype=np.float64)
-    totals[0] = 0.0
-    np.cumsum(samples, out=totals[1:])
-    return (totals[window:] - totals[:-window]) / window, samples[1 - window:].copy()
 
 
 #: 默认参数（与 UI schema 同源）。
@@ -81,14 +63,16 @@ class DeEsserEffect(AudioEffect):
     路径（滤波前平均声道）。
     """
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    def __init__(self, sample_rate: float = 48000.0, *, params_are_snapshots: bool = False) -> None:
         super().__init__(sample_rate)
+        self._params_are_snapshots = params_are_snapshots
         self._params: dict = dict(DEFAULTS)
         self._env = 0.0
         self._bp_state: Optional[np.ndarray] = None  # lfilter zi（1D）
         self._bp_ba: Optional[tuple] = None
         self._rms_history: Optional[np.ndarray] = None
         self._last_reduction_db = 0.0
+        self._last_detector_db = -120.0
         # 新版支路状态。
         self._v2_bp_state: Optional[np.ndarray] = None   # (order, ch)
         self._v2_delay_state: Optional[np.ndarray] = None  # 延迟线
@@ -106,13 +90,23 @@ class DeEsserEffect(AudioEffect):
         if rate_changed:
             self._sample_rate = float(sample_rate)
             self.reset_state()
-        merged = dict(self._params)
+        merged = dict(DEFAULTS if self._params_are_snapshots else self._params)
         if isinstance(params, dict):
             merged.update(params)
+        for key in ("detector_shape", "lookahead_ms", "output_gain_db"):
+            if merged.get(key) is None:
+                merged.pop(key, None)
         old = self._params
         if not rate_changed and merged == old and self._bp_ba is not None:
             return
+        old_latency = self.latency_samples()
+        was_v2 = self._uses_v2()
         self._params = merged
+        if was_v2 != self._uses_v2():
+            self.reset_state()
+        elif old_latency != self.latency_samples():
+            self._v2_delay_state = None
+            self._v2_delayed_bp_state = None
         self._rebuild_filters()
         # Parameter/automation updates retain the envelope and lookahead PCM.
         # Only a changed detector topology invalidates its filter histories.
@@ -129,6 +123,7 @@ class DeEsserEffect(AudioEffect):
             self._bp_state = np.zeros_like(self._bp_state)
         self._rms_history = None
         self._last_reduction_db = 0.0
+        self._last_detector_db = -120.0
         self._v2_bp_state = None
         self._v2_delay_state = None
         self._v2_delayed_bp_state = None
@@ -201,7 +196,7 @@ class DeEsserEffect(AudioEffect):
         # 50 ms 移动平方均值。每个采样与前一采样的包络比较，保持分块一致。
         sq = band.astype(np.float64) ** 2
         win = max(1, int(0.05 * self._sample_rate))
-        power, self._rms_history = _moving_mean_power(sq, self._rms_history, win)
+        power, self._rms_history = moving_mean_power(sq, self._rms_history, win)
         gain = self._detector_gain(power)
 
         if bool(params.get("listen", False)):
@@ -226,6 +221,7 @@ class DeEsserEffect(AudioEffect):
             self._env = level
         params = self._params
         detector_db = 20.0 * np.log10(np.sqrt(np.maximum(env, 1e-12)) + 1e-12)
+        self._last_detector_db = float(detector_db[-1])
         threshold = float(params.get("threshold_dbfs", -32.0))
         ratio = float(np.clip(params.get("ratio", 4.0), 1.0, 50.0))
         max_red = float(np.clip(params.get("max_reduction_db", 12.0),
@@ -239,6 +235,7 @@ class DeEsserEffect(AudioEffect):
     def collect_telemetry(self) -> dict:
         return {
             "gain_reduction_db": round(self._last_reduction_db, 3),
+            "detector_dbfs": round(self._last_detector_db, 3),
             "mode": str(self._params.get("mode", "split")),
             "threshold_dbfs": float(self._params.get("threshold_dbfs", -32.0)),
         }
@@ -334,22 +331,23 @@ class DeEsserEffect(AudioEffect):
             zi=self._v2_bp_state)
         # 各声道带功率取平均（反相安全）。
         ch_power = np.mean(band_ch ** 2, axis=0)
-        power, self._v2_rms_history = _moving_mean_power(ch_power, self._v2_rms_history, win)
+        power, self._v2_rms_history = moving_mean_power(ch_power, self._v2_rms_history, win)
         gain = self._detector_gain(power, v2=True)
 
-        if bool(params.get("listen", False)):
-            return np.ascontiguousarray(
-                np.stack([band_ch.mean(axis=0)] * channels),
-                dtype=np.float32)
+        # The detector already filtered the output source at zero lookahead.
+        if not lookahead:
+            band_delayed = band_ch
+            self._v2_delayed_bp_state = self._v2_bp_state
+        else:
+            if (self._v2_delayed_bp_state is None
+                    or self._v2_delayed_bp_state.shape != (channels, order)):
+                self._v2_delayed_bp_state = np.zeros((channels, order), dtype=np.float64)
+            band_delayed, self._v2_delayed_bp_state = lfilter(
+                ba[0], ba[1], delayed.astype(np.float64), axis=-1,
+                zi=self._v2_delayed_bp_state)
 
-        # 延迟后音频的逐声道带（Split 用；独立状态）。
-        if (self._v2_delayed_bp_state is None
-                or self._v2_delayed_bp_state.shape != (channels, order)):
-            self._v2_delayed_bp_state = np.zeros(
-                (channels, order), dtype=np.float64)
-        band_delayed, self._v2_delayed_bp_state = lfilter(
-            ba[0], ba[1], delayed.astype(np.float64), axis=-1,
-            zi=self._v2_delayed_bp_state)
+        if bool(params.get("listen", False)):
+            return np.ascontiguousarray(band_delayed, dtype=np.float32)
 
         mode = str(params.get("mode", "split"))
         if mode == "wide":

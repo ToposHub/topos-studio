@@ -871,6 +871,7 @@ class ProTruePeakDisplayWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_limiter_demo()
+        self.processor_controls = False
         self._integrated_lufs = -14.2
         self._max_tp_dbtp = -1.0
 
@@ -947,7 +948,7 @@ class ProTruePeakDisplayWidget(QWidget):
         if abs(pos.y() - ceil_y) <= 7.0:
             return "ceiling"
         tar_y = self._db_to_y(self._state["target_lufs"], plot)
-        if abs(pos.y() - tar_y) <= 7.0:
+        if not self.processor_controls and abs(pos.y() - tar_y) <= 7.0:
             return "target_lufs"
         return ""
 
@@ -1114,20 +1115,21 @@ class ProTruePeakDisplayWidget(QWidget):
                             p.drawPath(diamond)
 
         # 7. Target LUFS 琥珀金参考线（可上下拖拽）
-        tar_y = self._db_to_y(st["target_lufs"], plot)
-        tar_hi = (self._hover_target == "target_lufs" or self._drag_target == "target_lufs")
-        tar_col = QColor(COLORS["amber"])
-        tar_col.setAlpha(245 if tar_hi else 165)
-        p.setPen(QPen(tar_col, 1.8 if tar_hi else 1.2, Qt.PenStyle.DashLine))
-        p.drawLine(QPointF(plot.left(), tar_y), QPointF(plot.right(), tar_y))
+        if not self.processor_controls:
+            tar_y = self._db_to_y(st["target_lufs"], plot)
+            tar_hi = (self._hover_target == "target_lufs" or self._drag_target == "target_lufs")
+            tar_col = QColor(COLORS["amber"])
+            tar_col.setAlpha(245 if tar_hi else 165)
+            p.setPen(QPen(tar_col, 1.8 if tar_hi else 1.2, Qt.PenStyle.DashLine))
+            p.drawLine(QPointF(plot.left(), tar_y), QPointF(plot.right(), tar_y))
 
-        tar_pill = QRectF(plot.left() + 8.0, tar_y - 9.0, 118.0, 18.0)
-        p.setPen(QPen(tar_col, 1.0))
-        p.setBrush(QColor(21, 21, 24, 225))
-        p.drawRoundedRect(tar_pill, 3.5, 3.5)
-        p.setFont(QFont(MONO_FONT_FAM, 8, QFont.Weight.Bold))
-        p.setPen(tar_col)
-        p.drawText(tar_pill, Qt.AlignmentFlag.AlignCenter, f"LUFS {st['target_lufs']:.1f}")
+            tar_pill = QRectF(plot.left() + 8.0, tar_y - 9.0, 118.0, 18.0)
+            p.setPen(QPen(tar_col, 1.0))
+            p.setBrush(QColor(21, 21, 24, 225))
+            p.drawRoundedRect(tar_pill, 3.5, 3.5)
+            p.setFont(QFont(MONO_FONT_FAM, 8, QFont.Weight.Bold))
+            p.setPen(tar_col)
+            p.drawText(tar_pill, Qt.AlignmentFlag.AlignCenter, f"LUFS {st['target_lufs']:.1f}")
 
         # 8. Ceiling (dBTP) 珊瑚红砖墙天花板线（可上下拖拽）
         ceil_y = self._db_to_y(st["ceiling"], plot)
@@ -2419,10 +2421,12 @@ class StudioTruePeakLimiterWidget(QWidget):
         self.meter_tp = TruePeakOutputMeter()
         tp_col.addWidget(self.meter_tp, 1, Qt.AlignmentFlag.AlignHCenter)
         up_lay.addLayout(tp_col)
-        up_lay.addWidget(_vsep())
+        self._lufs_separator = _vsep()
+        up_lay.addWidget(self._lufs_separator)
 
         # 2.5 LUFS 响度表
         lufs_col = self._build_meter_column("LUFS")
+        self._lufs_label = lufs_col.itemAt(0).widget()
         self.meter_lufs = ProLufsMeter()
         lufs_col.addWidget(self.meter_lufs, 1, Qt.AlignmentFlag.AlignHCenter)
         up_lay.addLayout(lufs_col)
@@ -2824,6 +2828,10 @@ class StudioTruePeakLimiterWidget(QWidget):
 
     def use_processor_controls(self) -> None:
         self.engine_card.use_processor_controls(self.gain_lufs_card.c_ceiling)
+        self.tp_display.processor_controls = True
+        self._lufs_separator.hide()
+        self._lufs_label.hide()
+        self.meter_lufs.hide()
         self.gain_lufs_card.hide()
         self.delivery_card.hide()
         self._delivery_label.hide()
@@ -2832,6 +2840,22 @@ class StudioTruePeakLimiterWidget(QWidget):
         for factor, button in self._os_btns.items():
             button.setVisible(factor == 4)
             button.setEnabled(False)
+
+    def update_processor_meters(
+        self, input_db: float, input_true_peak: float | None, output_db: float,
+        output_true_peak: float | None, reduction_db: float,
+    ) -> None:
+        self.meter_input.setValue(input_db)
+        self.meter_gr.setValue(reduction_db)
+        self.meter_tp.setValues(output_db, -120.0 if output_true_peak is None else output_true_peak)
+        overshoot = max(0.0, input_true_peak - input_db) if input_true_peak is not None else 0.0
+        self.engine_card.updateRealtimeBadges(overshoot, reduction_db)
+        self.tp_display.pushFrame(
+            boosted_db=input_db,
+            output_dbtp=output_db if output_true_peak is None else output_true_peak,
+            gr_db=reduction_db, isp_caught=overshoot > 0.05 and reduction_db > 0.05,
+            integrated_lufs=-70.0, max_tp_dbtp=self.meter_tp._max_tp_hold,
+        )
 
     def get_state(self) -> dict:
         state = copy.deepcopy(self._current_state())

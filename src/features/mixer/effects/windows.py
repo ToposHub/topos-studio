@@ -9,6 +9,7 @@ from PyQt6.QtGui import QCloseEvent, QHideEvent
 from PyQt6.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.audio_mixer.pro_widgets import apply_float_panel, present_effect_window
 
 from .catalog import EffectInstance, create_panel, get_effect
 from .panel_style import fit_effect_window
@@ -25,6 +26,7 @@ class EffectParameterWindow(QDialog):
 
     def __init__(self, instance: EffectInstance, owner_name: str, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
+        apply_float_panel(self)
         self.instance = instance
         descriptor = get_effect(instance.effect_id)
         self.setWindowTitle(f"{descriptor.name_zh} — {owner_name or instance.owner_id}")
@@ -99,10 +101,8 @@ class EffectWindowManager(QObject):
                 state_changed.connect(lambda state, win=window: self._state_changed(win, state))
         else:
             self._synchronize_window(window, instance)
-        window.show()
+        present_effect_window(window)
         stop_panel_timers(window.panel)
-        window.raise_()
-        window.activateWindow()
         return window
 
     def _synchronize_window(self, window: EffectParameterWindow, instance: EffectInstance) -> None:

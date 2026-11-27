@@ -13,6 +13,8 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QPolygonF
 )
 
+from src.features.edit.core.audio_effects.reverb_analysis import predict_reverb_reflections
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
@@ -836,6 +838,10 @@ class ImpulseResponseGraphWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.params = DEFAULT_PRESETS["Cathedral"].copy()
+        self._sample_rate = 48000.0
+        self._geometry_key = ()
+        self._reflections, self._late_onset = predict_reverb_reflections(
+            self.params, self._sample_rate)
         self._enabled = True
         self._show_envelope = True
         self._show_bars = True
@@ -853,10 +859,25 @@ class ImpulseResponseGraphWidget(QWidget):
         self.setMinimumSize(430, 220)
         self.setMouseTracking(True)
 
-    def setState(self, params: dict, enabled: bool = True):
+    def setState(self, params: dict, enabled: bool = True) -> None:
         self.params = params.copy()
         self._enabled = enabled
+        self._update_geometry()
         self.update()
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        if sample_rate > 0.0 and sample_rate != self._sample_rate:
+            self._sample_rate = sample_rate
+            self._update_geometry()
+            self.update()
+
+    def _update_geometry(self) -> None:
+        key = (self._sample_rate, *(self.params[k] for k in (
+            "height", "width", "length", "distance", "pre_delay")))
+        if key != self._geometry_key:
+            self._geometry_key = key
+            self._reflections, self._late_onset = predict_reverb_reflections(
+                self.params, self._sample_rate)
 
     def _plot_rect(self) -> QRectF:
         return QRectF(
@@ -964,16 +985,12 @@ class ImpulseResponseGraphWidget(QWidget):
         mod = self.params["modulation"] / 100.0
         dry_wet = self.params["dry_wet"] / 100.0
 
-        def db_to_lin(db: float) -> float:
-            if db <= -59.5:
-                return 0.0
-            return min(1.15, 10.0 ** (db / 20.0))
+        def gain(db: float) -> float:
+            return 0.0 if db <= -59.5 else 10.0 ** (db / 20.0)
 
-        direct_amp = db_to_lin(self.params["direct_db"]) * (1.0 - dry_wet * 0.30)
-        er_amp = db_to_lin(self.params["er_db"]) * (0.25 + 0.75 * dry_wet)
-        rev_amp = db_to_lin(self.params["reverb_db"]) * (0.20 + 0.80 * dry_wet)
-
-        room_mean = (self.params["height"] + self.params["length"] + self.params["width"]) / 3.0
+        direct_amp = gain(self.params["direct_db"]) * (1.0 - dry_wet)
+        er_amp = gain(self.params["er_db"]) * dry_wet
+        rev_amp = gain(self.params["reverb_db"]) * dry_wet
         dist_delay_ms = (dist / 343.0) * 1000.0
 
         # 4. 直达声脉冲 (0ms - 亮白)
@@ -990,25 +1007,19 @@ class ImpulseResponseGraphWidget(QWidget):
             p.drawEllipse(QPointF(x_zero, y_top), 2.5, 2.5)
 
         # 5. 早期反射簇 (Early Reflections - 琥珀金 #F0A848)
-        er_start_ms = max(-190.0, pre_delay + dist_delay_ms)
-        er_span_ms = max(45.0, room_mean * 3.8)
-        er_tone_boost = 1.0 + (self.params["er_hi_gain"] + self.params["er_lo_gain"]) * 0.018
-        er_weights = [0.85, 0.68, 0.76, 0.55, 0.64, 0.48, 0.58, 0.42, 0.50, 0.38]
-
         c_er = QColor(SUITE_PALETTE["er"])
         c_er.setAlphaF(0.90 * alpha_scale)
         p.setPen(QPen(c_er, 1.7))
 
-        for i, w in enumerate(er_weights):
-            t_ms = er_start_ms + (i / len(er_weights)) * er_span_ms
+        for t_ms, gain in self._reflections:
             if min_ms <= t_ms <= max_ms and er_amp > 0.01:
                 rx = ms_to_x(t_ms)
-                amp = er_amp * w * max(0.25, er_tone_boost)
+                amp = er_amp * gain
                 bar_h = plot.height() * 0.75 * min(1.0, amp)
                 p.drawLine(QPointF(rx, plot.bottom()), QPointF(rx, plot.bottom() - bar_h))
 
         # 6. 晚期混响尾音包络与密度柱 (Late Reverb Tail - 冰晶青 #28D8F0)
-        tail_start_ms = min(max_ms - 50.0, er_start_ms + er_span_ms * 0.88)
+        tail_start_ms = self._late_onset
         rev_tone_factor = 1.0 + (self.params["rev_hi_gain"] * 0.015) + (brightness - 0.5) * 0.25
 
         if rev_amp > 0.01 and rt60 > 10.0:
@@ -1099,7 +1110,8 @@ class ImpulseResponseGraphWidget(QWidget):
             hud_str = f"Time {cur_ms:+.0f} ms  ·  Level {amp_db:.1f} dB"
             hud_col = QColor("#28D8F0")
         else:
-            hud_str = f"RT60 {rt60 / 1000.0:.2f}s  ·  Pre {pre_delay:+.0f}ms  ·  Dist {dist_delay_ms:.1f}ms"
+            model = I18N.tr("mixer.effect_panel.reverb_prediction", "Predicted")
+            hud_str = f"{model}  ·  RT60 {rt60 / 1000.0:.2f}s  ·  Pre {pre_delay:+.0f}ms  ·  Dist {dist_delay_ms:.1f}ms"
             hud_col = QColor("#B4B4BE")
 
         p.setFont(QFont(MONO_FONT_FAM, 8))
@@ -1125,11 +1137,13 @@ class ReverbOutputMeter(QWidget):
         self.setFixedWidth(26)
         self.setToolTip("输出峰值电平表（点击顶部红灯清除削波）")
 
-    def setMeterLevel(self, level_db: float):
-        self._meter_db = max(-60.0, min(0.0, level_db))
-        if level_db >= -0.1:
-            self._clipped = True
-        self.update()
+    def setMeterLevel(self, level_db: float) -> None:
+        level = max(-60.0, min(0.0, level_db))
+        clipped = self._clipped or level_db >= -0.1
+        if level != self._meter_db or clipped != self._clipped:
+            self._meter_db = level
+            self._clipped = clipped
+            self.update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton and event.position().y() <= 16.0:
@@ -1708,6 +1722,9 @@ class StudioAcousticReverbWidget(QWidget):
 
     def get_state(self) -> dict:
         return copy.deepcopy(self._current_state())
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        self.ir_graph.set_sample_rate(sample_rate)
 
     def set_state(self, state: dict):
         merged = copy.deepcopy(self._current_state())

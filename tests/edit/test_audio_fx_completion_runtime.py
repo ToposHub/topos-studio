@@ -283,7 +283,7 @@ def test_freeze_rate_conversion_preserves_chronological_ring_content() -> None:
     source = _GrainModule(8000)
     anchor = source._cap + 113
     chronological = np.linspace(-.8, .8, source._cap)
-    history = np.zeros_like(source._hist)
+    history = np.zeros((2, source._cap), dtype=np.float64)
     positions = np.arange(anchor-source._cap, anchor) % source._cap
     history[:, positions] = chronological
     target = _GrainModule(16000)

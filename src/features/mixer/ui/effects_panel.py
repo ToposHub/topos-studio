@@ -12,9 +12,8 @@ from PyQt6.QtWidgets import (
 )
 
 from src.features.edit.ui.edit_effects_panel import MIME_TYPE_EFFECT
-from src.features.mixer.effects import EffectInstance, EffectWindowManager, effect_catalog
+from src.features.mixer.effects.catalog import get_effect
 from src.features.mixer.effects.browser_catalog import audio_effect_groups, audio_effect_name
-from src.features.mixer.effects.production_dialog import PRODUCTION_BINDINGS
 from src.shared.assets.icon_manager import icon_search
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
@@ -22,6 +21,7 @@ from src.shared.ui.effect_icons import audio_effect_icon
 from src.shared.ui.style_sheet import C
 from src.shared.ui.widgets.compact_scrollbar import CompactVerticalScrollBar
 
+from .selection_effect_dialog import SELECTION_EFFECTS, selection_effect_name
 
 _EFFECT_ROLE = Qt.ItemDataRole.UserRole
 _SEARCH_ROLE = Qt.ItemDataRole.UserRole + 1
@@ -72,7 +72,7 @@ class _MixerEffectsTree(QTreeWidget):
 
 
 class MixerEffectsPanel(QWidget):
-    """Browse project effects and open panels whose processors are pending."""
+    """Browse Mixer inserts and clip processors."""
 
     effect_activated = pyqtSignal(str)
 
@@ -84,8 +84,6 @@ class MixerEffectsPanel(QWidget):
         self._catalog_loaded = False
         self._search_expansion: tuple[bool, ...] | None = None
         self._groups: list[QTreeWidgetItem] = []
-        self._panel_windows = EffectWindowManager(self)
-        self._panel_instances: dict[str, EffectInstance] = {}
 
         self.search = QLineEdit(self)
         self.search.setObjectName("MixerEffectsSearch")
@@ -157,28 +155,24 @@ class MixerEffectsPanel(QWidget):
                 item.setIcon(0, audio_effect_icon(effect_type))
                 item.setToolTip(0, f"{name}\n{self._target_hint(effect_type)}")
 
-        live_panels = {panel_id for panel_id, _fields in PRODUCTION_BINDINGS.values()}
         tools = self._add_group(_tr("group.tools", "Clip Tools"))
-        pending = self._add_group(_tr("group.pending", "Panels awaiting audio processing"))
-        for descriptor in effect_catalog():
-            if descriptor.effect_id in live_panels:
-                continue
-            clip_tool = descriptor.effect_id == "clip_editor"
-            heading = tools if clip_tool else pending
-            name = I18N.tr(f"mixer.effect_panel.name.{descriptor.effect_id}", descriptor.name_en)
+        selection = self._add_group(_tr("group.selection", "Clip Processing"))
+        for effect_id in ("clip_editor", *SELECTION_EFFECTS):
+            descriptor = get_effect(effect_id)
+            clip_tool = effect_id == "clip_editor"
+            heading = tools if clip_tool else selection
+            name = selection_effect_name(effect_id)
             item = QTreeWidgetItem(heading, [name])
             item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-            item.setData(0, _PANEL_ROLE, descriptor.effect_id)
+            item.setData(0, _PANEL_ROLE, effect_id)
             item.setData(0, _SEARCH_ROLE, " ".join((
-                descriptor.name_en, descriptor.name_zh, descriptor.effect_id, heading.text(0),
+                name, descriptor.name_en, descriptor.name_zh, effect_id, heading.text(0),
             )).casefold())
-            item.setIcon(0, audio_effect_icon(descriptor.effect_id))
-            if not clip_tool:
-                item.setForeground(0, QColor(C.TEXT_DIM))
+            item.setIcon(0, audio_effect_icon(effect_id))
             item.setToolTip(0, _tr(
                 "open_clip_tool", "Double-click to open the selected audio clip in the editor.",
             ) if clip_tool else _tr(
-                "open_pending_panel", "Double-click to open the panel and try its controls.",
+                "open_selection_effect", "Double-click with an unlocked audio clip selected to configure processing.",
             ))
 
     def _add_group(self, label: str) -> QTreeWidgetItem:
@@ -192,9 +186,6 @@ class MixerEffectsPanel(QWidget):
         heading.setExpanded(True)
         self._groups.append(heading)
         return heading
-
-    def pause_panel_windows(self) -> None:
-        self._panel_windows.pause_all()
 
     @staticmethod
     def _target_hint(effect_type: str) -> str:
@@ -255,11 +246,5 @@ class MixerEffectsPanel(QWidget):
             self.effect_activated.emit(effect_type)
             return
         panel_id = item.data(0, _PANEL_ROLE)
-        if panel_id == "clip_editor":
+        if isinstance(panel_id, str):
             self.effect_activated.emit(panel_id)
-        elif isinstance(panel_id, str):
-            instance = self._panel_instances.get(panel_id)
-            if instance is None:
-                instance = EffectInstance.create(panel_id, "effect-library")
-                self._panel_instances[panel_id] = instance
-            self._panel_windows.open(instance, _tr("library", "Audio Effects"))

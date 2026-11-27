@@ -420,14 +420,16 @@ class TestProjectClipEditorPcm:
         editor.show()
         editor.open_source(asset, project=project)
         panel = editor._panel
-        qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=15000)
+        qtbot.waitUntil(lambda: panel._last_preview is not None, timeout=15000)
         assert panel._pcm.shape == (2, 48000)
         # 播放/循环/频谱/FFT/过零吸附控件随 PCM 可用而启用。
         for widget in (panel.btn_play, panel.btn_loop, panel.btn_snap_zero,
                        panel.btn_spectral, panel.fft_combo):
             assert widget.isEnabled()
-        # RMS 真实读数 + 频谱矩阵已装载。
+        assert panel.canvas._spectrogram is None
         assert panel.rms_val_lbl.text() not in ("—", "")
+        panel.btn_spectral.setChecked(True)
+        qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=15000)
         pixels = panel.canvas._spectrogram.pixels
         assert pixels.shape[0] == 2
         assert pixels.max() > 0.3 * 255
@@ -528,3 +530,13 @@ class TestProjectClipEditorPcm:
                         np.full(4800, -0.1, dtype=np.float32)))
         report = ProjectClipEditor._measure_cleanliness(pcm, 48000)
         assert report["noise_floor_db"] == pytest.approx(-20.0, abs=0.01)
+
+
+def test_waveform_stats_preserve_sample_positions_in_empty_bins() -> None:
+    pcm = np.array([[-0.4, 0.6, -0.2], [0.09, -0.7, 0.4]], dtype=np.float32)
+    mins, maxs, rms = compute_waveform_stats(pcm, 6)
+    expected = np.zeros((2, 6), dtype=np.float32)
+    expected[:, 1::2] = pcm
+    np.testing.assert_array_equal(mins, expected)
+    np.testing.assert_array_equal(maxs, expected)
+    np.testing.assert_array_equal(rms, np.abs(expected))

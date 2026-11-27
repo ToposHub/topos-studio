@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Literal
 
-from PyQt6.QtCore import Qt, QByteArray, QRect, QTimer
+from PyQt6.QtCore import Qt, QByteArray, QRect, QSignalBlocker, QTimer
 from PyQt6.QtGui import QAction, QFontMetrics
 from PyQt6.QtWidgets import (QDockWidget, QFrame, QHBoxLayout, QInputDialog, QLabel, QMainWindow,
                              QListView, QMenu, QMessageBox, QScrollArea, QSizePolicy, QTabWidget,
@@ -1548,6 +1548,8 @@ class DockLayoutMixin:
         """Apply the library effect through the regular timeline command path."""
         if self.current_page != "Mixer":
             return
+        from src.features.mixer.ui.selection_effect_dialog import SELECTION_EFFECTS
+
         view = self.timeline_panel.get_timeline_view()
         timeline = view.get_timeline()
         clip_id = view.selected_audio_clip_id()
@@ -1555,6 +1557,15 @@ class DockLayoutMixin:
         track = timeline.get_track_by_id(clip.track_id) if clip is not None else None
         if effect_type == "clip_editor" and clip_id and track is not None:
             self._open_project_audio_clip_editor(clip_id)
+            return
+        if effect_type in SELECTION_EFFECTS:
+            if not clip_id or track is None or track.track_type != "audio" or track.is_locked:
+                self.statusBar().showMessage(I18N.tr(
+                    "mixer.selection_effect.select_clip", "Select an unlocked audio clip first."),
+                    4500)
+            elif self._load_project_audio_clip_editor(clip_id, activate_workspace=True):
+                self._show_project_audio_clip_editor("clip")
+                self.dock_audio_clip_editor.widget().open_selection_effect(effect_type)
             return
         if not clip_id or track is None or track.is_locked:
             self.statusBar().showMessage(I18N.tr(
@@ -1677,6 +1688,9 @@ class DockLayoutMixin:
 
     def _on_project_audio_clip_editor_visibility_changed(self, visible: bool) -> None:
         dock = self.dock_audio_clip_editor
+        editor = dock.widget()
+        if editor is not None:
+            editor.set_dock_active(visible)
         if visible and self.current_page == "Mixer" and not self.tabifiedDockWidgets(dock):
             self._load_selected_audio_clip_for_editor()
 
@@ -1693,6 +1707,18 @@ class DockLayoutMixin:
     def _sync_mixer_clip_editor_dock_mode(self, _floating: bool = False) -> None:
         dock = self.dock_audio_clip_editor
         floating = dock.isFloating()
+        if floating:
+            was_visible = dock.isVisible()
+            # Qt recomputes the dock's window flags when its title bar changes.
+            # Suppress selection reloads during the internal hide/show transition.
+            with QSignalBlocker(dock):
+                if not isinstance(dock.titleBarWidget(), FloatingDockTitleBar):
+                    dock.setTitleBarWidget(FloatingDockTitleBar(dock))
+                top_hint = Qt.WindowType.WindowStaysOnTopHint
+                if not dock.windowFlags() & top_hint:
+                    dock.setWindowFlag(top_hint)
+                if was_visible and not dock.isVisible():
+                    dock.show()
         tabbed = not floating and self.dock_audio_timeline in self.tabifiedDockWidgets(dock)
         dock.widget().set_dock_mode(tabbed=tabbed)
 
@@ -1744,8 +1770,8 @@ class DockLayoutMixin:
         dock.widget().focus_waveform()
 
     def _refocus_floating_audio_clip_editor(self) -> None:
-        dock = self.dock_audio_clip_editor
-        if self.current_page == "Mixer" and dock.isFloating() and dock.isVisible():
+        dock = getattr(self, "dock_audio_clip_editor", None)
+        if dock is not None and self.current_page == "Mixer" and dock.isFloating() and dock.isVisible():
             self._focus_project_audio_clip_editor()
 
     def _clear_project_audio_clip_editor(self) -> None:
@@ -1863,9 +1889,6 @@ class DockLayoutMixin:
         clip_effect_dialogs = getattr(self, "_clip_audio_fx_dialog_mgr", None)
         if clip_effect_dialogs is not None:
             clip_effect_dialogs.close_all()
-        effects_dock = getattr(self, "dock_audio_effects", None)
-        if effects_dock is not None:
-            effects_dock.widget().pause_panel_windows()
         self.dock_audio_clip_editor.widget().reset()
         audio_inspector = getattr(self.edit_properties_panel, "set_audio_workspace", None)
         if callable(audio_inspector):
@@ -3720,7 +3743,10 @@ class DockLayoutMixin:
                     # 边缘重新停靠判定。
                     current_tw = dock.titleBarWidget()
                     if not isinstance(current_tw, FloatingDockTitleBar):
-                        dock.setTitleBarWidget(FloatingDockTitleBar(dock))
+                        if dock is getattr(self, "dock_audio_clip_editor", None):
+                            self._sync_mixer_clip_editor_dock_mode()
+                        else:
+                            dock.setTitleBarWidget(FloatingDockTitleBar(dock))
                 else:
                     # Docked/tabified: use minimal height titlebar for dragging (1px)
                     current_tw = dock.titleBarWidget()
@@ -5973,7 +5999,9 @@ class DockLayoutMixin:
             if dock.isFloating():
                 self._floating_docks.add(dock)
                 # 浮动 dock 用有真实高度的 FloatingDockTitleBar（可拖拽移动/停靠）
-                if not isinstance(dock.titleBarWidget(), FloatingDockTitleBar):
+                if dock is getattr(self, "dock_audio_clip_editor", None):
+                    self._sync_mixer_clip_editor_dock_mode()
+                elif not isinstance(dock.titleBarWidget(), FloatingDockTitleBar):
                     dock.setTitleBarWidget(FloatingDockTitleBar(dock))
             else:
                 # Ensure docked docks have minimal height titlebar (1px for dragging)

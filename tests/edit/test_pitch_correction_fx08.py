@@ -47,6 +47,14 @@ class TestTracking:
         frames = track_f0(np.zeros((1, RATE), np.float32), RATE)
         assert all(not f.voiced for f in frames)
 
+    def test_dc_does_not_hide_low_voice_in_another_channel(self) -> None:
+        tone = _tone(65.0, 0.5)[0]
+        dc = np.full_like(tone, 0.8)
+        assert not any(frame.voiced for frame in track_f0(dc, RATE))
+        frames = track_f0(np.stack([dc, tone]), RATE)
+        assert frames and all(frame.voiced for frame in frames)
+        assert float(np.median([frame.f0_hz for frame in frames])) == pytest.approx(65.0, abs=0.2)
+
     def test_vibrato_converges_to_one_target(self) -> None:
         """±40 cents 颤音：帧目标收敛到同一音名。"""
         t = np.arange(2 * RATE) / RATE
@@ -105,6 +113,38 @@ class TestRender:
                                       bypass_notes=("A",))
         assert _peak_hz(out, RATE // 2, RATE // 2 + RATE) == pytest.approx(
             443.0, abs=2.0)
+
+    def test_bypass_note_is_preserved_next_to_the_same_quantized_target(self) -> None:
+        source = np.concatenate([_tone(415.3, 1.0), _tone(443.0, 1.0)], axis=-1)
+        fixed = render_pitch_correction(source, RATE, scale_notes=(9,), bypass_notes=("A",))
+        assert _peak_hz(fixed, RATE // 4, RATE * 3 // 4) == pytest.approx(440.0, abs=2.0)
+        np.testing.assert_array_equal(fixed[:, RATE + RATE // 10:], source[:, RATE + RATE // 10:])
+
+    def test_cancellation_during_final_shift_preserves_source(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.features.edit.core.audio_effects import pitch_correction
+
+        shifting = pitch_correction.pitch_shift_fixed_length
+        cancelled = False
+
+        def shift_and_cancel(pcm: np.ndarray, sample_rate: int, semitones: float) -> np.ndarray:
+            nonlocal cancelled
+            output = shifting(pcm, sample_rate, semitones)
+            cancelled = True
+            return output
+
+        monkeypatch.setattr(pitch_correction, "pitch_shift_fixed_length", shift_and_cancel)
+        source = _tone(443.0)
+        output = render_pitch_correction(source, RATE, cancel_check=lambda: cancelled)
+        assert cancelled and output is source
+
+    def test_short_voiced_run_retains_shifted_audio_until_its_end(self) -> None:
+        source = _tone(293.665, 0.07)
+        fixed = render_pitch_correction(source, RATE, scale_notes=(7,), retune_ms=0.0)
+        lo, hi = RATE // 50, RATE // 20
+        tail = fixed[0, hi - RATE // 200:hi]
+        assert np.sqrt(np.mean(tail * tail)) >= 0.10
+        np.testing.assert_array_equal(fixed[:, :lo], source[:, :lo])
+        np.testing.assert_array_equal(fixed[:, hi:], source[:, hi:])
 
     def test_silent_stays_silent(self) -> None:
         out = render_pitch_correction(np.zeros((1, RATE), np.float32), RATE)

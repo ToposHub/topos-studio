@@ -117,8 +117,7 @@ class TestPreviewGenerationGuard:
         panel._preview_generation += 1  # 模拟切换到新片段
         stale = ClipPreviewResult(
             key=stale_key, edited=_pcm(0.9), sample_rate=RATE, duration=1.0,
-            mins=np.zeros(8), maxs=np.zeros(8), rmss=np.zeros(8),
-            spectrogram=[], report={})
+            mins=[], maxs=[], rmss=[], report={})
         panel._on_preview_ready(stale)
         # 旧结果不误写：装载内容不是 0.9 的陈旧数据。
         assert panel._pcm is None or np.max(np.abs(panel._pcm)) != pytest.approx(0.9)
@@ -151,8 +150,7 @@ class TestPreviewWorker:
             return ClipPreviewResult(
                 key=("k", (), None, 2048, 1, False), edited=_pcm(),
                 sample_rate=RATE, duration=1.0,
-                mins=np.zeros(8), maxs=np.zeros(8), rmss=np.zeros(8),
-                spectrogram=[], report={})
+                mins=[], maxs=[], rmss=[], report={})
 
         key = ("k", (), None, 2048, 1, False)
         worker.submit(key, job)
@@ -198,7 +196,7 @@ class TestPreviewWorker:
         worker.preview_ready.connect(lambda result: results.append(result.key))
 
         def result(key: tuple) -> ClipPreviewResult:
-            return ClipPreviewResult(key, _pcm(), RATE, 1.0, [], [], [], [])
+            return ClipPreviewResult(key, _pcm(), RATE, 1.0, [], [], [])
 
         def old_job() -> ClipPreviewResult:
             calls.append("old")
@@ -283,3 +281,272 @@ def test_timeline_custom_fade_is_displayed_in_clip_editor(qapp) -> None:
     assert panel.canvas._fade_out_curve_type == "Linear"
     assert _display_fade_factor(shape, 0.5) == pytest.approx(0.25)
     editor.close()
+
+
+def test_hidden_spectrum_skips_fft_and_reuses_the_published_audition(qtbot, monkeypatch) -> None:
+    from src.features.mixer.ui import project_clip_editor
+
+    panel = project_clip_editor._TimelineClipPanel()
+    qtbot.addWidget(panel)
+    panel.resize(1100, 600)
+    panel.show()
+    real_analyze = project_clip_editor.analyze_spectrogram
+    analyses = []
+
+    def analyze(*args, **kwargs):
+        analyses.append(args[0])
+        return real_analyze(*args, **kwargs)
+
+    monkeypatch.setattr(project_clip_editor, "analyze_spectrogram", analyze)
+    panel._duration = 1.0
+    panel.sync_audio_edit(_mute_edit(RATE))
+    panel.attach_pcm(_pcm(), RATE)
+    panel._refresh_stack_preview()
+    try:
+        qtbot.waitUntil(lambda: panel._last_preview is not None, timeout=4000)
+        audition = panel._pcm
+        assert np.max(np.abs(audition[:, 500:-500])) == 0.0
+        assert panel.btn_play.isEnabled()
+        assert panel.canvas._spectrogram is None and not analyses
+
+        panel.btn_spectral.setChecked(True)
+        qtbot.waitUntil(lambda: panel.canvas._spectrogram is not None, timeout=4000)
+        overview = panel.canvas._spectrogram
+        assert len(analyses) == 1 and analyses[0] is audition
+        panel.btn_spectral.setChecked(False)
+        panel.btn_spectral.setChecked(True)
+        panel._request_spectrum()
+        assert panel.canvas._spectrogram is overview
+        assert len(analyses) == 1
+        assert panel._pcm is audition
+
+        panel.btn_spectral.setChecked(False)
+        panel.btn_bypass.setChecked(True)
+        qtbot.waitUntil(lambda: panel._last_preview.key == panel._preview_request_key, timeout=4000)
+        assert panel.canvas._spectrogram is None and len(analyses) == 1
+        np.testing.assert_array_equal(panel._pcm, _pcm())
+    finally:
+        panel.shutdown_preview()
+
+
+@pytest.mark.parametrize("rate", [44100, 48000])
+def test_selection_processor_auditions_only_the_selected_range(qapp, monkeypatch, rate: int) -> None:
+    from src.features.edit.core.effect_registry import create_effect_instance
+    from src.features.edit.core.timeline_v2 import ClipInstance
+    from src.features.mixer.ui import project_clip_editor
+
+    editor, panel = _panel(qapp)
+    saturation = create_effect_instance("saturation").with_params({"drive": 36.0})
+    editor._clip = ClipInstance(clip_id="selection", asset_id="audio", track_id="track",
+                                timeline_duration=24, source_duration=24, effects=(saturation,))
+    t = np.arange(rate) / rate
+    pcm = np.asarray([.2 * np.sin(2 * np.pi * 200 * t), .12 * np.sin(2 * np.pi * 720 * t)], dtype=np.float32)
+    panel.load_audio_data(rate, 1., [], [], [])
+    panel.set_clip_gain_fade((-12.0, 0, 0, 24000, None, "linear", "linear", 24.0, 24))
+    panel.set_clip_effects(editor._clip, 24.0)
+    panel.attach_pcm(pcm, rate)
+    panel._refresh_stack_preview()
+    dry = panel._pcm
+    panel.canvas.setSelection(.25, .625)
+    heard: list[tuple[int, np.ndarray]] = []
+    committed = []
+
+    def audition(start: int, buffer: np.ndarray) -> bool:
+        heard.append((start, buffer))
+        return True
+
+    monkeypatch.setattr(panel, "start_band_preview", audition)
+    actual_render = project_clip_editor.render_pre_render_steps
+    rendered = []
+
+    def render(*args, **kwargs):
+        rendered.append(args[1])
+        return actual_render(*args, **kwargs)
+
+    monkeypatch.setattr(project_clip_editor, "render_pre_render_steps", render)
+    editor.audio_edit_committed.connect(lambda *args: committed.append(args))
+    editor.open_selection_effect("doubler")
+    dialog = editor._selection_effect_dialog
+    assert dialog.preview.isEnabled()
+    dialog.preview.click()
+    assert dialog.status.text() == ""
+    dialog.delta.click()
+    assert len(heard) == 2 and not committed
+    dialog.apply.click()
+    assert len(committed) == 1 and committed[0][0] == "selection"
+    assert len(rendered) == 1  # a single candidate render across all three actions
+    assert editor._selection_effect_dialog is None
+    panel.sync_audio_edit(committed[0][1], RATE)
+    wet = panel._pcm
+    start, stop = round(rate * .25), round(rate * .625)
+    assert heard[0][0] == heard[1][0] == start
+    assert heard[0][1].flags.c_contiguous
+    np.testing.assert_array_equal(heard[0][1], wet[:, start:stop])
+    np.testing.assert_array_equal(heard[1][1], dry[:, start:stop] - wet[:, start:stop])
+    assert np.max(np.abs(heard[1][1])) > .001
+    editor.close()
+
+
+@pytest.mark.parametrize("change", ["parameter", "range", "close"])
+def test_selection_effect_cancels_stale_apply(qtbot, monkeypatch, change: str) -> None:
+    from threading import Event
+
+    from src.features.edit.core.timeline_v2 import ClipInstance
+    from src.features.mixer.ui import project_clip_editor
+
+    editor, panel = _panel(qtbot)
+    editor._clip = ClipInstance(clip_id="selection", asset_id="audio", track_id="track",
+                                timeline_duration=24, source_duration=24)
+    panel.load_audio_data(RATE, 1., [], [], [])
+    panel.attach_pcm(_pcm(), RATE)
+    panel._preview_offline = False
+    started, cancelled_in_worker, release = Event(), Event(), Event()
+
+    def render(pcm, _candidate, *, sample_rate, cancel_check):
+        started.set()
+        while not release.wait(.01):
+            if cancel_check():
+                cancelled_in_worker.set()
+                break
+        return pcm
+
+    monkeypatch.setattr(project_clip_editor, "render_pre_render_steps", render)
+    committed = []
+    editor.audio_edit_committed.connect(lambda *args: committed.append(args))
+    editor.open_selection_effect("pitch_correction")
+    dialog = editor._selection_effect_dialog
+    try:
+        dialog.apply.click()
+        qtbot.waitUntil(started.is_set, timeout=4000)
+        assert dialog.stop.isEnabled()
+        if change == "parameter":
+            edit = dialog.retune.lineEdit()
+            edit.setFocus()
+            edit.selectAll()
+            qtbot.keyClicks(edit, "125")
+            assert dialog.retune.value() == 45.0  # the draft changes before the spin value settles
+        elif change == "range":
+            panel.canvas.setSelection(.2, .6)
+        else:
+            dialog.close()
+        qtbot.waitUntil(cancelled_in_worker.is_set, timeout=4000)
+        assert not committed
+    finally:
+        release.set()
+        editor.close()
+
+
+def test_frequency_band_audition_handles_audio_shorter_than_filter_padding() -> None:
+    from src.features.mixer.ui.clip_analysis import build_band_preview
+
+    pcm = _pcm(samples=16)
+    output = build_band_preview(pcm, RATE, 1, 15, 300., 1000.)
+    assert output.shape == (2, 14)
+    assert np.isfinite(output).all()
+
+
+def test_loudness_fields_clear_when_the_new_preview_has_no_measurement(qapp, monkeypatch) -> None:
+    editor, panel = _panel(qapp)
+    report = {"integrated_lufs": -22.0, "true_peak_dbtp": -1.5}
+    monkeypatch.setattr(panel, "_measure_loudness", lambda *args: dict(report))
+    panel._duration = 1.0
+    panel.attach_pcm(_pcm(), RATE)
+    panel._refresh_stack_preview()
+    assert panel.lufs_val_lbl.text() == "-22.0 LUFS"
+    assert panel.true_peak_lbl.text() == "-1.5 dBTP"
+
+    report.clear()
+    panel.attach_pcm(_pcm(.12), RATE)
+    panel._refresh_stack_preview()
+    panel._set_target_lufs(-18)
+    assert panel.lufs_val_lbl.text() == panel.true_peak_lbl.text() == "—"
+    editor.close()
+
+
+def test_audition_is_ready_before_background_loudness_scan(qtbot, monkeypatch) -> None:
+    import threading
+
+    from src.features.mixer.ui.project_clip_editor import _TimelineClipPanel
+
+    panel = _TimelineClipPanel()
+    qtbot.addWidget(panel)
+    panel.resize(1100, 600)
+    panel.show()
+    started, finish = threading.Event(), threading.Event()
+
+    def measure(pcm: np.ndarray, _rate: int, _cancelled) -> dict:
+        assert np.max(np.abs(pcm[:, 500:-500])) == 0.0
+        started.set()
+        assert finish.wait(3)
+        return {"integrated_lufs": -31.0, "true_peak_dbtp": -13.0}
+
+    monkeypatch.setattr(panel, "_measure_loudness", measure)
+    panel._duration = 1.0
+    panel.sync_audio_edit(_mute_edit(RATE))
+    panel.attach_pcm(_pcm(), RATE)
+    panel._refresh_stack_preview()
+    try:
+        qtbot.waitUntil(started.is_set, timeout=3000)
+        assert panel.btn_play.isEnabled()
+        assert panel.canvas._waveform_samples is panel._pcm
+        assert panel.lufs_val_lbl.text() == "—"
+        finish.set()
+        qtbot.waitUntil(lambda: panel.lufs_val_lbl.text() == "-31.0 LUFS", timeout=3000)
+        assert panel.true_peak_lbl.text() == "-13.0 dBTP"
+    finally:
+        finish.set()
+        panel.shutdown_preview()
+
+
+def test_switching_back_to_cached_audition_clears_preview_failure(qapp, monkeypatch) -> None:
+    editor, panel = _panel(qapp)
+    panel._duration = 1.0
+    panel.sync_audio_edit(_mute_edit(RATE))
+    panel.attach_pcm(_pcm(), RATE)
+    panel._refresh_stack_preview()
+    good = panel._pcm
+
+    def fail(_inputs: dict) -> None:
+        raise RuntimeError("preview processing failed")
+
+    monkeypatch.setattr(panel, "_compute_preview", fail)
+    panel.btn_bypass.setChecked(True)
+    assert panel._preview_failure_note and editor._status.text()
+    panel.btn_bypass.setChecked(False)
+    assert panel._pcm is good
+    assert panel._preview_failure_note == editor._status.text() == ""
+    editor.close()
+
+
+def test_failed_analysis_for_a_stale_selection_leaves_current_status(qtbot, monkeypatch) -> None:
+    import threading
+
+    from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
+
+    editor = ProjectClipEditor()
+    qtbot.addWidget(editor)
+    editor._ensure_panel()
+    started, finish = threading.Event(), threading.Event()
+    still_current = True
+    messages: list[str] = []
+    monkeypatch.setattr(editor, "_report_analysis_failure", messages.append)
+
+    def fail(_cancelled) -> None:
+        started.set()
+        assert finish.wait(3)
+        raise RuntimeError("failed after selection changed")
+
+    try:
+        editor._submit_analysis(
+            fail, lambda _result: None, current=lambda: still_current, busy_message="Processing selection…",
+        )
+        qtbot.waitUntil(started.is_set, timeout=3000)
+        assert editor._status.accessibleName() == "Processing selection…"
+        still_current = False
+        finish.set()
+        qtbot.waitUntil(lambda: editor._analysis_callback is None, timeout=3000)
+        assert messages == []
+        assert editor._status.accessibleName() == ""
+    finally:
+        finish.set()
+        editor.close()

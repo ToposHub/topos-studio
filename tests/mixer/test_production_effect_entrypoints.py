@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import pytest
 from PyQt6 import sip
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMenu
 from pytestqt.qtbot import QtBot
 
@@ -33,6 +34,8 @@ def test_rack_row_opens_production_panel_and_removal_closes_it(qtbot: QtBot, kin
     dialog = dialogs[0]
     assert isinstance(dialog, ProductionEffectDialog)
     assert dialog.isVisible()
+    assert dialog.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+    assert not dialog.isModal()
     assert dialog.fx_effect_type == kind
     assert dialog._instance_id == instance.instance_id
     assert dialog.current_params() == instance.params
@@ -43,6 +46,7 @@ def test_rack_row_opens_production_panel_and_removal_closes_it(qtbot: QtBot, kin
     strip._effect_bypass(instance)
     assert dialog.panel.get_state()["enabled"] is False
     strip._effect_remove(strip._effect_chain.effects[0])
+    assert not dialog.isVisible()
     qtbot.waitUntil(lambda: sip.isdeleted(dialog))
     assert strip._effect_chain is None
     assert all(not getattr(strip, name, {}) for name in strip._EFFECT_DIALOG_ATTRS)

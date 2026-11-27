@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import numpy as np
+from PyQt6.QtWidgets import QApplication, QMenu
 
 from src.features.edit.core.audio_edit import render_audio_edit_full
 from src.features.edit.core.timeline_v2 import ClipInstance
-from src.features.mixer.ui.project_clip_editor import ProjectClipEditor
+from src.features.mixer.ui.project_clip_editor import ProjectClipEditor, _TimelineClipPanel
+from src.features.mixer.ui.selection_effect_dialog import selection_effect_name
 
 RATE = 48000
 
 
-def setup_editor(qapp):
+def setup_editor(qapp: QApplication) -> tuple[ProjectClipEditor, _TimelineClipPanel, np.ndarray]:
     editor = ProjectClipEditor()
     panel = editor._ensure_panel()
     panel._preview_offline = True
@@ -23,7 +25,7 @@ def setup_editor(qapp):
     panel.attach_pcm(pcm, RATE)
     panel.set_stack_editable_hint(True)
     panel.canvas.setSelection(0.5, 1.5)
-    panel.canvas._edit_channel = 0
+    panel.canvas.setEditChannel(0)
     return editor, panel, pcm
 
 
@@ -33,32 +35,42 @@ def test_apply_commits_once_and_preview_delta_are_temporary(qapp) -> None:
     editor.audio_edit_committed.connect(lambda *args: committed.append(args))
     auditioned = []
     panel.start_band_preview = lambda start, samples: auditioned.append(samples) or True
-    editor._on_offline_processor_requested("de_hum", "preview")
-    editor._on_offline_processor_requested("de_hum", "delta")
+    menu = QMenu(editor)
+    editor._append_offline_processor_actions(menu)
+    actions = menu.actions()[0].menu().actions()
+    next(action for action in actions if action.text() == selection_effect_name("declick_dehum")).trigger()
+    dialog = editor._selection_effect_dialog
+    dialog.click_enabled.setChecked(False)
+    dialog.hum_enabled.setChecked(True)
+    dialog.preview.click()
+    dialog.delta.click()
     assert len(auditioned) == 2
     assert not committed
-    np.testing.assert_allclose(auditioned[0] + auditioned[1], pcm, atol=1e-7)
-    editor._on_offline_processor_requested("de_hum", "apply")
+    start, end = RATE // 2, 3 * RATE // 2
+    np.testing.assert_allclose(auditioned[0] + auditioned[1], pcm[:, start:end], atol=1e-7)
+    dialog.apply.click()
     assert len(committed) == 1
     clip_id, edit, _label = committed[0]
     assert clip_id == "c1"
     assert edit["steps"][0]["params"]["channels"] == [0]
     out = render_audio_edit_full(pcm, edit)
-    np.testing.assert_array_equal(out, auditioned[0])
+    np.testing.assert_array_equal(out[:, start:end], auditioned[0])
     np.testing.assert_array_equal(out[1], pcm[1])
     np.testing.assert_array_equal(out[:, :RATE // 2], pcm[:, :RATE // 2])
-    editor.deleteLater()
+    editor.close()
 
 
-def test_locked_or_changed_selection_cannot_commit(qapp) -> None:
+def test_locked_or_draft_speed_selection_cannot_commit(qapp) -> None:
     editor, panel, _pcm = setup_editor(qapp)
-    queued = []
-    editor._submit_analysis = lambda job, publish, **kwargs: queued.append(kwargs["current"])
-    editor._on_offline_processor_requested("de_click", "apply")
-    assert len(queued) == 1 and queued[0]()
-    panel.canvas.setSelection(0.2, 0.8)
-    assert not queued[0]()
     editor._locked = True
-    editor._on_offline_processor_requested("de_click", "apply")
-    assert len(queued) == 1
-    editor.deleteLater()
+    editor.open_selection_effect("declick_dehum")
+    assert editor._selection_effect_dialog is None
+    editor._locked = False
+    editor.open_selection_effect("declick_dehum")
+    dialog = editor._selection_effect_dialog
+    assert dialog.apply.isEnabled()
+    panel.set_pending_timepitch((0, RATE, 125.0, 0.0, True))
+    assert not dialog.apply.isEnabled()
+    panel.set_pending_timepitch(None)
+    assert dialog.apply.isEnabled()
+    editor.close()

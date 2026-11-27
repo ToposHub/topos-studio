@@ -32,15 +32,16 @@ BUS_COMP_TEMPLATES: Dict[str, dict] = {
         "release_ms": 260.0, "knee": 22.0, "mix": 100.0, "makeup_db": 1.0,
     },
 }
+_BUS_DEFAULTS = {"enabled": True, "template": "dx_glue", "sc_hpf_hz": 120.0}
 
 
 class BusCompEffect(AudioEffect):
     """Bus 压缩（CompressorEffect 核心 + 胶合模板 + 检源高通）。"""
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    def __init__(self, sample_rate: float = 48000.0, *, params_are_snapshots: bool = False) -> None:
         super().__init__(sample_rate)
-        self._params: dict = {"enabled": True, "template": "dx_glue",
-                              "sc_hpf_hz": 120.0}
+        self._params_are_snapshots = params_are_snapshots
+        self._params: dict = dict(_BUS_DEFAULTS)
         self._comp = CompressorEffect(sample_rate)
         self._apply_template()
         self._hpf_sos = None
@@ -68,12 +69,15 @@ class BusCompEffect(AudioEffect):
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
-        if sample_rate is not None and sample_rate != self._sample_rate:
+        rate_changed = sample_rate is not None and sample_rate != self._sample_rate
+        if rate_changed:
             self._sample_rate = float(sample_rate)
             self._comp = CompressorEffect(self._sample_rate)
-        merged = dict(self._params)
+        merged = dict(_BUS_DEFAULTS if self._params_are_snapshots else self._params)
         if isinstance(params, dict):
             merged.update(params)
+        if not rate_changed and merged == self._params and self._hpf_key is not None:
+            return
         self._params = merged
         # FX-05：模板与旋钮都重算有效参数（连续字段覆盖模板值）；
         # CompressorEffect.set_params 保持包络状态（FX-04 同合同）。
@@ -118,6 +122,9 @@ class BusCompEffect(AudioEffect):
     def latency_samples(self) -> int:
         return 0
 
+    def collect_telemetry(self) -> dict[str, float]:
+        return {"gain_reduction_db": self._comp.last_gr_db,
+                "detector_dbfs": self._comp.last_detector_db}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 多段：LR4 相位对齐互补分频
@@ -194,17 +201,21 @@ class MultibandCompressorEffect(AudioEffect):
          "makeup_db": 0.0},
     )
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    def __init__(self, sample_rate: float = 48000.0, *, params_are_snapshots: bool = False) -> None:
         super().__init__(sample_rate)
-        self._params: dict = {
+        self._params_are_snapshots = params_are_snapshots
+        self._default_params: dict = {
             "enabled": True,
             "crossovers": [180.0, 4200.0],
             "bands": [dict(b) for b in self._DEFAULT_BANDS[:3]],
         }
+        self._params = dict(self._default_params)
         self._sections: list = []
         self._band_comps: list = []
         self._topology: Optional[tuple] = None
         self._last_channels = 0
+        self._crossovers = self._crossovers_of(self._params)
+        self._bands = self._bands_of(self._params, len(self._crossovers) + 1)
         self._ensure_topology(0)
 
     # ── 参数归一 ────────────────────────────────────────────────
@@ -214,13 +225,17 @@ class MultibandCompressorEffect(AudioEffect):
             raw = [180.0, 4200.0]
         values = [float(freq) for freq in raw[:self._BANDS_MAX - 1]]
         ceiling = 0.45 * float(self._sample_rate)
-        values = [min(max(freq, 20.0), ceiling) for freq in values]
-        for lo, hi in zip(values, values[1:]):
-            if hi <= lo:
-                # 非法交叉点：回退默认并报错（计划合同）。
-                raise ValueError(
-                    f"multiband crossovers must strictly ascend: {values}")
-        return tuple(values)
+        if not np.isfinite(values).all() or any(hi <= lo for lo, hi in zip(values, values[1:])):
+            raise ValueError(f"multiband crossovers must strictly ascend: {values}")
+        # Leave room for each remaining crossover when a saved frequency is
+        # above the current device's range. The band topology stays intact.
+        bounded: list[float] = []
+        lower = 20.0
+        for index, frequency in enumerate(values):
+            upper = ceiling - (len(values) - 1 - index)
+            bounded.append(min(max(frequency, lower), upper))
+            lower = bounded[-1] + 1.0
+        return tuple(bounded)
 
     def _bands_of(self, params: dict, count: int) -> list:
         raw = params.get("bands")
@@ -237,21 +252,15 @@ class MultibandCompressorEffect(AudioEffect):
 
     # ── 拓扑 ────────────────────────────────────────────────────
     def _ensure_topology(self, channels: int) -> None:
-        try:
-            crossovers = self._crossovers_of(self._params)
-        except ValueError:
-            self._params["crossovers"] = [180.0, 4200.0]
-            crossovers = self._crossovers_of(self._params)
-        key = (channels, crossovers, round(float(self._sample_rate), 3))
+        key = (channels, self._crossovers, self._sample_rate)
         if key == self._topology:
             return
         self._topology = key
-        count = len(crossovers) + 1
         if channels > 0:
             self._sections = [_LR4Section(freq, self._sample_rate)
-                              for freq in crossovers]
+                              for freq in self._crossovers]
         self._band_comps = []
-        for band in self._bands_of(self._params, count):
+        for band in self._bands:
             comp = CompressorEffect(self._sample_rate)
             comp.set_params(dict(band), sample_rate=self._sample_rate)
             self._band_comps.append(comp)
@@ -259,12 +268,15 @@ class MultibandCompressorEffect(AudioEffect):
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
-        if sample_rate is not None and sample_rate != self._sample_rate:
+        rate_changed = sample_rate is not None and sample_rate != self._sample_rate
+        if rate_changed:
             self._sample_rate = float(sample_rate)
             self._topology = None
-        merged = dict(self._params)
+        merged = dict(self._default_params if self._params_are_snapshots else self._params)
         if isinstance(params, dict):
             merged.update(params)
+        if not rate_changed and merged == self._params:
+            return
         self._params = merged
         # 旋钮提交：拓扑不变时仅更新各段 CompressorEffect 参数（复用
         # 已有包络状态）；分频点变化才重建 sections（清分频历史）。
@@ -273,16 +285,13 @@ class MultibandCompressorEffect(AudioEffect):
         except ValueError:
             self._params["crossovers"] = [180.0, 4200.0]
             crossovers = self._crossovers_of(self._params)
-        count = len(crossovers) + 1
-        bands = self._bands_of(self._params, count)
-        # 旋钮提交：段数一致且分频 sections 已建 → 仅更新各段压缩参数
-        # （复用已有包络状态）；否则整体重建（首块前或拓扑变化）。
-        if (len(self._band_comps) == count
-                and len(self._sections) == len(crossovers)):
-            for comp, band in zip(self._band_comps, bands):
+        self._crossovers = crossovers
+        self._bands = self._bands_of(self._params, len(crossovers) + 1)
+        previous_topology = self._topology
+        self._ensure_topology(self._last_channels)
+        if self._topology == previous_topology:
+            for comp, band in zip(self._band_comps, self._bands):
                 comp.set_params(dict(band), sample_rate=self._sample_rate)
-        else:
-            self._ensure_topology(self._last_channels)
 
     def reset_state(self) -> None:
         for section in self._sections:
@@ -301,7 +310,6 @@ class MultibandCompressorEffect(AudioEffect):
             return samples
         self._last_channels = samples.shape[0]
         self._ensure_topology(samples.shape[0])
-        bands = self._bands_of(self._params, len(self._band_comps))
         # 递归分频：split_i → (band_i, rest)；最后一段 = 剩余。
         pieces = []
         rest = samples
@@ -310,7 +318,7 @@ class MultibandCompressorEffect(AudioEffect):
             pieces.append(np.ascontiguousarray(low))
         pieces.append(np.ascontiguousarray(rest))
         out = np.zeros_like(samples, dtype=np.float64)
-        for band, comp, piece in zip(bands, self._band_comps, pieces):
+        for band, comp, piece in zip(self._bands, self._band_comps, pieces):
             if bool(band.get("mute", False)):
                 continue  # mute：该段归零（其余段照常重构）
             if bool(band.get("enabled", True)):
@@ -329,8 +337,8 @@ class MultibandCompressorEffect(AudioEffect):
 
     def collect_telemetry(self) -> dict:
         data = {
-            f"band_{index}_gr_db": getattr(comp, "last_gr_db", 0.0)
-            for index, comp in enumerate(self._band_comps)
+            f"band_{index}_gr_db": comp.last_gr_db if band["enabled"] and not band["mute"] else 0.0
+            for index, (band, comp) in enumerate(zip(self._bands, self._band_comps))
         }
         data["band_count"] = len(self._band_comps)
         return data

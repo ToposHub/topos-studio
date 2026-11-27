@@ -1276,7 +1276,7 @@ class SidechainMiniResponseWidget(QWidget):
             x = rect.left() + norm * rect.width()
 
             hp_sq = 1.0 / (1.0 + ((self._hpf / max(1.0, f)) ** (2 * order)))
-            lp_sq = 1.0 / (1.0 + ((f / max(1.0, self._lpf)) ** (2 * order)))
+            lp_sq = 1.0 / (1.0 + ((f / self._lpf) ** (2 * order))) if self._lpf > 0.0 else 1.0
             db = max(-36.0, 10.0 * math.log10(max(1e-9, hp_sq * lp_sq)))
 
             ny = (-db) / 36.0
@@ -1586,6 +1586,7 @@ class SidechainFilterCard(QFrame):
 
         knobs_row = QHBoxLayout()
         knobs_row.setSpacing(4)
+        self._knobs_row = knobs_row
         self.c_hpf = KnobParameterCell(
             "SC HPF", 20.0, 2000.0, 95.0, self._accent,
             "20", "Hz", "2K",
@@ -1612,6 +1613,23 @@ class SidechainFilterCard(QFrame):
         self.c_q.valueChanged.connect(lambda v: self._set_field("focus_q", round(v, 2)))
 
         self.syncFromData(self._data)
+
+    def use_processor_controls(self) -> None:
+        self.c_q.hide()
+        for attribute, field, label, maximum, hint in (
+            ("c_hpf", "hpf_freq", "SC HPF", 2000.0, "2K"),
+            ("c_lpf", "lpf_freq", "SC LPF", 20000.0, "20K"),
+        ):
+            previous = getattr(self, attribute)
+            cell = KnobParameterCell(
+                label, 0.0, maximum, 0.0, self._accent, "0", "Hz", hint,
+                format_freq, parse_numeric, mode="power",
+            )
+            self._knobs_row.replaceWidget(previous, cell)
+            previous.hide()
+            previous.deleteLater()
+            setattr(self, attribute, cell)
+            cell.valueChanged.connect(lambda value, key=field: self._set_field(key, round(value, 1)))
 
     def syncFromData(self, data: dict):
         self._updating = True
@@ -2624,6 +2642,7 @@ class StudioTransientDesignerWidget(QWidget):
 
     def use_processor_controls(self) -> None:
         self.transient_card.use_processor_controls()
+        self.sidechain_card.use_processor_controls()
         self.visualizer.use_processor_controls()
         self.output_card.hide()
         self.auto_gain_btn.hide()

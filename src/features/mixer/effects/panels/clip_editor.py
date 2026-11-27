@@ -410,6 +410,10 @@ class AudioOverviewMinimap(QWidget):
         # 左右内边距：视口框与抓手永远离开窗口边缘，避免想抓抓手时误触 macOS 的窗口缩放热区
         self._edge_pad = 8.0
 
+    def cancel_gesture(self) -> None:
+        self._drag_mode = ""
+        self.unsetCursor()
+
     def setAudioSummary(self, duration: float, peaks_max_mono: list[float]):
         self._duration = max(0.01, duration)
         self._peaks_max = peaks_max_mono
@@ -662,6 +666,7 @@ class WaveformSpectralCanvas(QWidget):
     spectralBrushApplied = pyqtSignal(list, float)        # [(t, freq), ...], radius_px 修复笔涂抹轨迹（已做本地视觉平滑）
     channelStateChanged = pyqtSignal(int, bool, bool)     # ch_idx, muted, phase_inverted
     populateContextMenu = pyqtSignal(QMenu)
+    editChannelChanged = pyqtSignal(int)
     markersChanged = pyqtSignal(list)                     # [{"time": float, "label": str}, ...]
     envelopeChanged = pyqtSignal(list)                    # [{"t": float, "db": float}, ...] 音量包络关键帧（按 t 升序）
 
@@ -744,6 +749,7 @@ class WaveformSpectralCanvas(QWidget):
         # 声道开关 / 标记点 / 修复画笔 / 标尺导航状态
         self._ch_muted: list[bool] = [False, False]
         self._ch_phase_inv: list[bool] = [False, False]
+        self.polarity_channel_count: int | None = None
         self._markers: list[dict] = []
         self._brush_stroke: list[tuple[float, float]] = []
         self._brush_radius_px = 14.0
@@ -919,11 +925,12 @@ class WaveformSpectralCanvas(QWidget):
             self._gain_wave_cache = None
             self.update(self._wave_and_spec_rects()[0].toAlignedRect())
 
-    def setEditChannel(self, ch: int):
+    def setEditChannel(self, ch: int) -> None:
         """设置增益编辑目标声道：-1=全部(L+R)，0=左声道，1=右声道"""
         if ch != self._edit_channel:
             self._edit_channel = ch
             self._invalidate_cache()
+            self.editChannelChanged.emit(ch)
 
     def setFadeCurveType(self, curve_type: str) -> None:
         self.setFadeCurves(curve_type, curve_type)
@@ -969,6 +976,20 @@ class WaveformSpectralCanvas(QWidget):
         self.unsetCursor()
         self._refresh_processing_overlay()
         return True
+
+    def cancel_gesture(self) -> None:
+        self.cancel_envelope_drag()
+        self.cancel_fade_drag()
+        if self._drag_mode == "gain_hud":
+            self.setPreviewGain(self._drag_start_gain)
+            self.previewGainChanged.emit(self._preview_gain_db)
+        self._drag_mode = ""
+        self._brush_stroke.clear()
+        self._pan_vel_sec = 0.0
+        self._snap_flash_alpha = 0
+        self._physics_timer.stop()
+        self.unsetCursor()
+        self.update()
 
     def setStretchPreviewRatio(self, ratio_pct: float):
         """时间伸缩速率预览（拧动右侧"伸缩速率"旋钮时实时更新画布落点投射）"""
@@ -2011,13 +2032,20 @@ class WaveformSpectralCanvas(QWidget):
         menu.setStyleSheet("QMenu{background:#1B1C20;border:1px solid #383A44;color:#E2E4EC;font-size:11px;padding:4px;}QMenu::item{padding:5px 14px;}QMenu::item:selected{background:#2A2E3A;color:#28D8F0;}")
         inv_act = menu.addAction(f"{'✓ ' if self._ch_phase_inv[ch] else ''}相位反转 (Ø Invert Phase)")
         inv_act.triggered.connect(lambda: self._toggle_ch_phase(ch))
-        inv_act.setEnabled(self.project_edits_enabled)
+        inv_act.setEnabled(self._can_edit_channel_polarity(ch))
         if len(self._peaks_max) > 1:
             solo_act = menu.addAction(f"仅独奏 CH{ch+1} (静音其他声道)")
             solo_act.triggered.connect(lambda: self._solo_channel(ch))
         self._open_context_menu(menu, global_pos)
 
-    def _toggle_ch_phase(self, ch: int):
+    def _can_edit_channel_polarity(self, ch: int) -> bool:
+        count = self.polarity_channel_count
+        return (self.project_edits_enabled and 0 <= ch < len(self._ch_phase_inv)
+                and (count is None or ch < count))
+
+    def _toggle_ch_phase(self, ch: int) -> None:
+        if not self._can_edit_channel_polarity(ch):
+            return
         self._ch_phase_inv[ch] = not self._ch_phase_inv[ch]
         self.channelStateChanged.emit(ch, self._ch_muted[ch], self._ch_phase_inv[ch])
         self._invalidate_cache()

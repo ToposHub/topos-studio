@@ -19,6 +19,7 @@ Audio DSP utilities — 参数化 EQ / 动态 / 声学混响 / 立体声延迟 /
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from collections import OrderedDict
 from typing import Any, Dict, Optional, Tuple
@@ -1773,6 +1774,7 @@ class CompressorEffect(AudioEffect):
             压缩后的 samples，同 shape（旁路时原样返回）。
         """
         self.last_gr_db = 0.0
+        self.last_detector_db = -100.0
         if not self._enabled or samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
 
@@ -1875,6 +1877,50 @@ def _db_to_lin_gain(db: float) -> float:
     return float(10.0 ** (db / 20.0))
 
 
+def _read_audio_ring(ring: np.ndarray, start: int, count: int) -> np.ndarray:
+    """Read a contiguous interval of at most one ring, including wraparound."""
+    start %= ring.size
+    end = start + count
+    if end <= ring.size:
+        return ring[start:end]
+    return np.concatenate((ring[start:], ring[:end - ring.size]))
+
+
+def _write_audio_ring(ring: np.ndarray, start: int, samples: np.ndarray) -> int:
+    end = (start + samples.size) % ring.size
+    if samples.size > ring.size:
+        samples = samples[-ring.size:]
+        start = end
+    first = min(samples.size, ring.size - start)
+    ring[start:start + first] = samples[:first]
+    ring[:samples.size - first] = samples[first:]
+    return end
+
+
+def _delay_tap_source(ring: np.ndarray, index: int, offset: int, count: int,
+                      current_input: Optional[np.ndarray]) -> np.ndarray:
+    if current_input is None or offset >= count:
+        return _read_audio_ring(ring, index - offset, count)
+    if offset == 0:
+        return current_input[:count]
+    return np.concatenate((_read_audio_ring(ring, index - offset, offset),
+                           current_input[:count - offset]))
+
+
+def _read_fractional_audio_ring(
+    ring: np.ndarray, index: int, delay: float, count: int,
+    current_input: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Read a fixed fractional tap from history and optionally current input."""
+    lag = math.ceil(delay)
+    fraction = lag - delay
+    first = _delay_tap_source(ring, index, lag, count, current_input)
+    if fraction == 0.0:
+        return first
+    second = _delay_tap_source(ring, index, lag - 1, count, current_input)
+    return first * (1.0 - fraction) + second * fraction
+
+
 class ReverbEffect(AudioEffect):
     """声学房间混响器（直达 / 早反射簇 / 晚期 FDN + 双级音色 + 微调制）。
 
@@ -1889,8 +1935,7 @@ class ReverbEffect(AudioEffect):
     dry_wet 是直达声 vs (ER+Late) 的交叉淡化。负 pre_delay 有效值钳为 0
     （物理上早反射不可能先于直达声；UI 双极旋钮保留自由度）。
 
-    性能：梳/全通按块向量化（复用 _CombFilter/_AllpassFilter），环形缓冲
-    读取用 np.take 整数索引一次完成，音色 shelf 每声道一次 lfilter。
+    ER 抽头读取连续的环形缓冲片段，FDN 阻尼与音色按总线进行块滤波。
 
     线程安全：实例不共享。
     """
@@ -1958,6 +2003,8 @@ class ReverbEffect(AudioEffect):
 
         if params is None:
             self._enabled = False
+            if sr_changed:
+                self._rebuild(self._params, reset_network=True)
             return
 
         # AUD-15304: 按 ReverbParams 声明范围钳位（裸 dict 外部数据防护）
@@ -2025,7 +2072,7 @@ class ReverbEffect(AudioEffect):
             self._rev_shelf_zi = None
         (self._er_taps_l, self._er_taps_r,
          self._er_weights_l, self._er_weights_r,
-         self._late_offset_l, self._late_offset_r) = self._compute_taps(p)
+         self._late_offset_l, self._late_offset_r) = self.predict_geometry(p, sr)
         # Image-source paths can exceed the old room-mean estimate. Size the
         # history from the actual taps, including fractional-read interpolation
         # and the full modulation range (modulation may change without rebuild).
@@ -2065,7 +2112,8 @@ class ReverbEffect(AudioEffect):
         if reset_history:
             self._mod_phase = 0.0
 
-    def _compute_taps(self, p: dict) -> tuple:
+    @staticmethod
+    def predict_geometry(p: dict, sample_rate: float) -> tuple:
         """RV-02：矩形房间 image-source ER + 正负 Pre Delay 传播模型。
 
         - 一阶镜像（每维近/远墙，6 个）+ 有限阶角镜像（xy/xz/yz/xyz，4 个）
@@ -2084,7 +2132,7 @@ class ReverbEffect(AudioEffect):
         Returns:
             (taps_l, taps_r, weights_l, weights_r, late_offset_l, late_offset_r)
         """
-        sr = self._sample_rate
+        sr = sample_rate
         h, l, w = float(p["height"]), float(p["length"]), float(p["width"])
         room = np.array([l, w, h])
         src = np.array([l * 0.4, w * 0.5, h * 0.5])
@@ -2151,18 +2199,15 @@ class ReverbEffect(AudioEffect):
 
     def _rebuild_tone(self, p: dict) -> None:
         """重建 ER/Rev 音色 shelf（lo+hi 各两段，SOS）。"""
-        def _sos(lo_f: float, hi_f: float, lo_g: float, hi_g: float) -> np.ndarray:
+        def _sos(lo_f: float, hi_f: float, lo_g: float,
+                 hi_g: float) -> Optional[np.ndarray]:
             rows = []
-            for f, g in ((lo_f, lo_g), (hi_f, hi_g)):
+            for f, g, design in ((lo_f, lo_g, _biquad_lowshelf),
+                                 (hi_f, hi_g, _biquad_highshelf)):
                 if abs(g) < 0.05:
                     continue
                 f_clamped = min(max(10.0, f), self._sample_rate * 0.45)
-                if g >= 0 or lo_f == f:
-                    b, a = _biquad_lowshelf(f_clamped, g, self._sample_rate)
-                else:
-                    b, a = _biquad_lowshelf(f_clamped, g, self._sample_rate)
-                if f == hi_f:
-                    b, a = _biquad_highshelf(f_clamped, g, self._sample_rate)
+                b, a = design(f_clamped, g, self._sample_rate)
                 rows.append([b[0], b[1], b[2], 1.0, a[1], a[2]])
             return np.array(rows, dtype=np.float64) if rows else None
 
@@ -2171,29 +2216,23 @@ class ReverbEffect(AudioEffect):
 
     # ── 块处理 ───────────────────────────────────────────────────
 
-    def _ring_read_fixed(self, offsets: np.ndarray, n: int) -> np.ndarray:
-        """按每样本递进的固定整数偏移读环形缓冲。
+    def _sum_reflections(self, offsets: np.ndarray, weights: np.ndarray,
+                         block_start: int, out: np.ndarray) -> None:
+        for offset, gain in zip(offsets, weights):
+            out += gain * _read_audio_ring(
+                self._ring, block_start - int(offset), out.size)
 
-        offsets: 抽头延迟样本数（int64）。返回 (taps, n)。
-        读位 = (块起始写位 + i - offset) mod size；块起始写位 =
-        块末写位 - n（self._ring_write 已在读取前更新为块末值）。
-        """
-        block_start = (self._ring_write - n) % self._ring_size
-        idx = (block_start + np.arange(n, dtype=np.int64)[np.newaxis, :]
-               - offsets[:, np.newaxis]) % self._ring_size
-        return self._ring[idx]
-
-    def _ring_read_frac_single(self, offset_samples: float, frac: np.ndarray, n: int) -> np.ndarray:
+    def _ring_read_frac_single(self, offset_samples: float,
+                               positions: np.ndarray, modulation: np.ndarray) -> np.ndarray:
         """按随样本变化的小数偏移读环形缓冲（chorus 微调制）。
 
-        offset_samples: 基础延迟（样本）；frac: 每样本附加小数偏移（样本）。
-        线性插值读取。读位基准同 _ring_read_fixed（块起始写位）。
+        positions 含块起始写位。
         """
-        block_start = (self._ring_write - n) % self._ring_size
-        base = block_start + np.arange(n, dtype=np.float64) - offset_samples - frac
-        i0 = np.floor(base).astype(np.int64) % self._ring_size
+        base = positions - offset_samples - modulation
+        floored = np.floor(base)
+        i0 = floored.astype(np.int64) % self._ring_size
         i1 = (i0 + 1) % self._ring_size
-        w = base - np.floor(base)
+        w = base - floored
         return self._ring[i0] * (1.0 - w) + self._ring[i1] * w
 
     def _apply_tone(self, sos: Optional[np.ndarray], zi_store: str, x: np.ndarray) -> np.ndarray:
@@ -2225,58 +2264,46 @@ class ReverbEffect(AudioEffect):
             return samples
 
         p = self._params
-        out = samples.astype(np.float64, copy=True)
-        channels, n = out.shape
-
-        # Preserve all requested past samples while writing this complete block.
-        # Growing also preserves history when playback/export block sizes differ.
-        self._ensure_ring_capacity(self._ring_history_samples + n + 8)
-
         wet_w = p["dry_wet"] / 100.0
         dry_w = 1.0 - wet_w
         direct_gain = _db_to_lin_gain(p["direct_db"])
-        er_gain = _db_to_lin_gain(p["er_db"])
-        rev_gain = _db_to_lin_gain(p["reverb_db"])
-
-        # 快路径：全干且直达 0dB → 直通
         if wet_w <= 1e-6 and abs(direct_gain - 1.0) < 1e-9:
             return samples
 
-        # 1) mono 求和写入环形缓冲（分段写，含块内回绕）
-        mono = np.mean(out, axis=0) if channels > 1 else out[0]
-        ring = self._ring
-        size = self._ring_size
-        pos = 0
-        write = self._ring_write
-        while pos < n:
-            m = min(n - pos, size)
-            end = write + m
-            if end <= size:
-                ring[write:end] = mono[pos:pos + m]
-            else:
-                k = size - write
-                ring[write:] = mono[pos:pos + k]
-                ring[:m - k] = mono[pos + k:pos + m]
-            pos += m
-            write = end % size
+        channels, n = samples.shape
+        # Keep all requested past samples while writing this complete block.
+        self._ensure_ring_capacity(self._ring_history_samples + n + 8)
+        er_gain = _db_to_lin_gain(p["er_db"])
+        rev_gain = _db_to_lin_gain(p["reverb_db"])
 
-        # 2) ER 总线：抽头读取（块末写位先行更新，读取以块起始为基准回溯）
-        self._ring_write = write
-        er_l = (self._ring_read_fixed(self._er_taps_l, n) * self._er_weights_l[:, np.newaxis]).sum(axis=0)
-        er_r = (self._ring_read_fixed(self._er_taps_r, n) * self._er_weights_r[:, np.newaxis]).sum(axis=0)
-        er_bus = np.stack((er_l, er_r)) * (1.0 / 6.0)
+        # 1) mono 求和写入环形缓冲（分段写，含块内回绕）
+        mono = np.mean(samples, axis=0, dtype=np.float64) if channels > 1 else samples[0]
+        block_start = self._ring_write
+        self._ring_write = _write_audio_ring(self._ring, block_start, mono)
+
+        # 2) ER 总线：按连续区间累加抽头，无需每样本计算索引。
+        er_bus = np.zeros((2, n), dtype=np.float64)
+        self._sum_reflections(self._er_taps_l, self._er_weights_l, block_start, er_bus[0])
+        self._sum_reflections(self._er_taps_r, self._er_weights_r, block_start, er_bus[1])
+        er_bus *= 1.0 / 6.0
         er_bus = self._apply_tone(self._er_sos, "_er_shelf_zi", er_bus)
 
         # 3) 晚期总线：微调制小数偏移读取 → 双 FDN
         mod_depth = p["modulation"] / 100.0 * _MOD_MAX_DEPTH_SAMPLES
         # LFO 相位 = 块首绝对时间（先取 t 再推进相位——先推进会让整块 t
         # 偏移一个块长，跨块分割时 LFO 相位与整块不一致产生可闻跳变）
-        t = np.arange(n, dtype=np.float64) / self._sample_rate + self._mod_phase
+        if mod_depth > 0.0:
+            positions = np.arange(n, dtype=np.float64)
+            t = positions / self._sample_rate + self._mod_phase
+            positions += block_start
+            frac_l = mod_depth * (0.5 + 0.5 * np.sin(2.0 * np.pi * _MOD_LFO_HZ[0] * t))
+            frac_r = mod_depth * (0.5 + 0.5 * np.sin(2.0 * np.pi * _MOD_LFO_HZ[1] * t + 1.3))
+            late_in_l = self._ring_read_frac_single(self._late_offset_l, positions, frac_l)
+            late_in_r = self._ring_read_frac_single(self._late_offset_r, positions, frac_r)
+        else:
+            late_in_l = _read_fractional_audio_ring(self._ring, block_start, self._late_offset_l, n)
+            late_in_r = _read_fractional_audio_ring(self._ring, block_start, self._late_offset_r, n)
         self._mod_phase += n / self._sample_rate
-        frac_l = mod_depth * (0.5 + 0.5 * np.sin(2.0 * np.pi * _MOD_LFO_HZ[0] * t))
-        frac_r = mod_depth * (0.5 + 0.5 * np.sin(2.0 * np.pi * _MOD_LFO_HZ[1] * t + 1.3))
-        late_in_l = self._ring_read_frac_single(self._late_offset_l, frac_l, n)
-        late_in_r = self._ring_read_frac_single(self._late_offset_r, frac_r, n)
         # RV-03: 单一 8 线正交 FDN；L/R 从互补线组去相关读出
         # （非交替复制）。调制读头两条仍提供（左右相位差 → 注入相关）。
         late_mono = 0.5 * (late_in_l + late_in_r)
@@ -2286,12 +2313,14 @@ class ReverbEffect(AudioEffect):
 
         # 4) 输出：直达 ×dry + (ER+Late) ×wet
         wet_bus = (er_bus * er_gain + late_bus * rev_gain) * wet_w
-        for ch in range(channels):
-            if channels == 1:
-                wet_ch = 0.5 * (wet_bus[0] + wet_bus[1])
-            else:
-                wet_ch = wet_bus[ch % 2]
-            out[ch] = out[ch] * direct_gain * dry_w + wet_ch
+        out = samples.astype(np.float64, copy=True)
+        out *= direct_gain
+        out *= dry_w
+        if channels == 1:
+            out[0] += 0.5 * (wet_bus[0] + wet_bus[1])
+        else:
+            out[::2] += wet_bus[0]
+            out[1::2] += wet_bus[1]
 
         return out.astype(samples.dtype, copy=False)
 
@@ -2307,13 +2336,23 @@ class ReverbEffect(AudioEffect):
         self._rev_shelf_zi = None
 
     def tail_estimate_samples(self) -> int:
-        """MX-07：混响尾音估计 = 2×RT60（-60dB 后自然不可闻），上限 8s。"""
+        """Allow the reflections and late decay to reach the output, up to 8s."""
         sr = self._sample_rate
-        p = self._params or {}
-        rt60_s = float(p.get("reverb_time", 2000.0)) * 0.001
-        if sr <= 0 or rt60_s <= 0:
+        p = self._params
+        if not self._enabled or sr <= 0.0 or p["dry_wet"] == 0.0:
             return 0
-        return int(min(rt60_s * 2.0, 8.0) * sr) + 1
+        early_end = 0
+        if _db_to_lin_gain(p["er_db"]):
+            early_end = max(int(self._er_taps_l.max()), int(self._er_taps_r.max())) + 1
+            if self._er_sos is not None:
+                early_end += math.ceil(0.05 * sr)
+        late_end = 0
+        if _db_to_lin_gain(p["reverb_db"]):
+            offset = max(self._late_offset_l, self._late_offset_r)
+            offset += p["modulation"] / 100.0 * _MOD_MAX_DEPTH_SAMPLES
+            late_end = math.ceil(offset + 0.002 * p["reverb_time"] * sr)
+            late_end += max(self._fdn8._delays) + 1
+        return min(max(early_end, late_end), int(8.0 * sr) + 1)
 
     @property
     def is_active(self) -> bool:
@@ -2502,8 +2541,8 @@ class _FDNNetwork8:
                         for d in _FDN8_DELAY_MS]
         self._bufs = [np.zeros(D, dtype=np.float64) for D in self._delays]
         self._idx = [0] * 8
-        self._g = [0.5] * 8
-        self._filt = [0.0] * 8
+        self._g = np.full(8, 0.5, dtype=np.float64)
+        self._filt = np.zeros((8, 1), dtype=np.float64)
         self._damp1 = 1.0
         self._damp2 = 0.0
         self._b = np.array([0.0], dtype=np.float64)
@@ -2524,9 +2563,9 @@ class _FDNNetwork8:
         self._b = np.array([self._damp2], dtype=np.float64)
         self._a = np.array([1.0, -self._damp1], dtype=np.float64)
         if rt60_s <= 0.0 or sample_rate <= 0.0:
-            self._g = [0.0] * 8
+            self._g.fill(0.0)
             return
-        self._g = [
+        self._g[:] = [
             min(0.99995,
                 float(10.0 ** (-3.0 * D / (rt60_s * sample_rate))))
             for D in self._delays]
@@ -2536,44 +2575,29 @@ class _FDNNetwork8:
         n = int(x.shape[-1])
         out_l = np.empty(n, dtype=np.float64)
         out_r = np.empty(n, dtype=np.float64)
-        g = self._g
+        g = self._g[:, np.newaxis]
         binj = 1.0 / np.sqrt(8.0)
+        reads = np.empty((8, min(n, self._min_delay)), dtype=np.float64)
+        damped = self._damp2 > 1e-12 and lfilter is not None
+        zi = self._filt * self._damp1 if damped else None
         pos = 0
         while pos < n:
             m = min(n - pos, self._min_delay)
             xs = x[pos:pos + m].astype(np.float64, copy=False)
             # 1) 读各线本子块的延迟值（读区=即将被写的旧内容）
-            reads = []
             for i in range(8):
-                buf = self._bufs[i]
-                D = self._delays[i]
-                idx = self._idx[i]
-                end = idx + m
-                if end <= D:
-                    reads.append(buf[idx:end].copy())
-                else:
-                    k = D - idx
-                    reads.append(np.concatenate((buf[idx:], buf[:m - k])))
-            # 2) 反馈回路阻尼（每线 lfilter，zi 交接）
-            damped = []
-            for i in range(8):
-                if self._damp2 > 1e-12 and lfilter is not None:
-                    y, zf = lfilter(self._b, self._a, reads[i],
-                                    zi=np.array([self._filt[i] * self._damp1]))
-                    self._filt[i] = float(zf[0]) / self._damp1 \
-                        if self._damp1 > 0.0 else 0.0
-                    damped.append(y)
-                else:
-                    damped.append(reads[i])
-                    self._filt[i] = 0.0
-            R = np.stack(damped)  # (8, m)
+                reads[i, :m] = _read_audio_ring(self._bufs[i], self._idx[i], m)
+            # 2) 同一组阻尼系数，批量滤波，各线 zi 独立。
+            R = reads[:, :m]
+            if damped:
+                R, zi = lfilter(self._b, self._a, R, axis=-1, zi=zi)
             # 3) 输出 tap（去相关：前 4 线 → L，后 4 线 → R）
             out_l[pos:pos + m] = 0.5 * R[:4].sum(axis=0)
             out_r[pos:pos + m] = 0.5 * R[4:].sum(axis=0)
             # 4) Householder 正交混合 + 每线增益 + 输入注入 → 写回
-            mixed = R - 0.25 * R.sum(axis=0, keepdims=True)  # Q @ R
+            writes = g * (R - 0.25 * R.sum(axis=0, keepdims=True)) + binj * xs
             for i in range(8):
-                newv = g[i] * mixed[i] + binj * xs
+                newv = writes[i]
                 buf = self._bufs[i]
                 D = self._delays[i]
                 idx = self._idx[i]
@@ -2586,13 +2610,19 @@ class _FDNNetwork8:
                     buf[:m - k] = newv[k:]
                 self._idx[i] = end % D
             pos += m
+        if damped and self._damp1 > 0.0:
+            # Store the last output rather than the coefficient-scaled state so
+            # a brightness change can continue the same filter history.
+            self._filt = zi / self._damp1
+        else:
+            self._filt.fill(0.0)
         return out_l, out_r
 
     def reset(self) -> None:
         for buf in self._bufs:
             buf.fill(0.0)
         self._idx = [0] * 8
-        self._filt = [0.0] * 8
+        self._filt.fill(0.0)
 
 
 def _decay_to_feedback(decay_s: float, delay_ms: float, sample_rate: float) -> float:
@@ -2731,6 +2761,8 @@ class DelayEffect(AudioEffect):
         self._buf_r = np.zeros(self._delay_size, dtype=np.float64)
         self._delay_idx = 0
         self._damp_prev = np.zeros(2, dtype=np.float64)
+        self._cur_delay_l = self._cur_delay_r = None
+        self._fade_l_remaining = self._fade_r_remaining = 0
 
     def _rebuild_input_filters(self) -> None:
         """重建输入 low_cut/high_cut 滤波 SOS。"""
@@ -2775,6 +2807,10 @@ class DelayEffect(AudioEffect):
 
         if params is None:
             self._enabled = False
+            if sr_changed:
+                self._rebuild_delay_line()
+                self._rebuild_input_filters()
+                self._recompute_damp_coeff()
             return
 
         # AUD-15304: dict 参数按 DelayParams 声明范围钳位
@@ -2841,6 +2877,79 @@ class DelayEffect(AudioEffect):
         self._in_zi = zf
         return out
 
+    def _process_one_sample_feedback(
+        self, input_l: np.ndarray, input_r: np.ndarray, feedback: np.ndarray,
+        wet_l: np.ndarray, wet_r: np.ndarray, damp_passthrough: bool,
+    ) -> int:
+        """Solve the stereo recurrence in one compiled filter call at 0 ms."""
+        index = self._delay_idx
+        previous = np.array([self._buf_l[index - 1], self._buf_r[index - 1]])
+        wet_l[0], wet_r[0] = previous
+        pole = 0.0 if damp_passthrough else -self._damp_a[1]
+        drive_matrix = feedback * (1.0 - pole)
+        transition = drive_matrix + pole * np.eye(2)
+        trace = float(np.trace(transition))
+        determinant = (transition[0, 0] * transition[1, 1]
+                       - transition[1, 0] * transition[0, 1])
+        inputs = np.stack((input_l, input_r))
+        drive = np.empty_like(inputs)
+        drive[:, 0] = drive_matrix @ previous
+        if not damp_passthrough:
+            drive[:, 0] += self._damp_prev
+        drive[:, 1:] = drive_matrix @ inputs[:, :-1]
+        # Cayley–Hamilton: d[n] = trace(A)d[n−1] − det(A)d[n−2]
+        #                         + q[n] + (A − trace(A)I)q[n−1].
+        drive[:, 1:] += (transition - trace * np.eye(2)) @ drive[:, :-1]
+        damped = lfilter([1.0], [1.0, -trace, determinant], drive, axis=-1)
+        if not damp_passthrough:
+            self._damp_prev = pole * damped[:, -1]
+        writes = inputs + damped
+        wet_l[1:], wet_r[1:] = writes[:, :-1]
+        _write_audio_ring(self._buf_l, index, writes[0])
+        return _write_audio_ring(self._buf_r, index, writes[1])
+
+    def _process_one_short_tap(
+        self, inputs: tuple[np.ndarray, np.ndarray],
+        wet: tuple[np.ndarray, np.ndarray], feedback: np.ndarray,
+        damp_passthrough: bool,
+    ) -> int:
+        """Resolve the one-sample line while the other line reads past blocks."""
+        short = 0 if self._cur_delay_l == 1.0 else 1
+        other = 1 - short
+        other_delay = (self._cur_delay_l, self._cur_delay_r)[other]
+        rings = (self._buf_l, self._buf_r)
+        pole = 0.0 if damp_passthrough else -self._damp_a[1]
+        short_gain = feedback[short, short] * (1.0 - pole)
+        cross_gain = feedback[short, other] * (1.0 - pole)
+        index = self._delay_idx
+        max_segment = int(other_delay)
+        for pos in range(0, inputs[0].size, max_segment):
+            end = min(pos + max_segment, inputs[0].size)
+            segment = slice(pos, end)
+            short_input = inputs[short][segment]
+            short_wet = wet[short][segment]
+            other_wet = wet[other][segment]
+            other_wet[:] = _read_fractional_audio_ring(
+                rings[other], index, other_delay, end - pos)
+            short_wet[0] = rings[short][index - 1]
+            drive = cross_gain * other_wet
+            drive[0] += short_gain * short_wet[0]
+            if not damp_passthrough:
+                drive[0] += self._damp_prev[short]
+            drive[1:] += short_gain * short_input[:-1]
+            short_damped = lfilter([1.0], [1.0, -(pole + short_gain)], drive)
+            short_writes = short_input + short_damped
+            short_wet[1:] = short_writes[:-1]
+            other_damped = feedback[other, short] * short_wet + feedback[other, other] * other_wet
+            if not damp_passthrough:
+                other_damped, state = lfilter(
+                    self._damp_b, self._damp_a, other_damped, zi=self._damp_prev[other:other + 1])
+                self._damp_prev[short] = pole * short_damped[-1]
+                self._damp_prev[other] = state[0]
+            _write_audio_ring(rings[short], index, short_writes)
+            index = _write_audio_ring(rings[other], index, inputs[other][segment] + other_damped)
+        return index
+
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用立体声延迟（分段向量化）。
 
@@ -2857,17 +2966,17 @@ class DelayEffect(AudioEffect):
         if not self._enabled or samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
 
-        out = samples.astype(np.float64, copy=True)
-        channels, n = out.shape
+        channels, n = samples.shape
+        source = samples[:2].astype(np.float64, copy=False)
 
         # 声道规整：取 L/R 两路（Mono 求平均、Left/Right 单声道驱动双线），
         # 其余声道用 L 湿声
         if channels == 1:
-            in_l = out[0]
-            in_r = out[0]
+            in_l = source[0]
+            in_r = source[0]
         else:
-            in_l = out[0]
-            in_r = out[1]
+            in_l = source[0]
+            in_r = source[1]
         if self._mono_input:
             mono = 0.5 * (in_l + in_r)
             in_l = mono
@@ -2921,46 +3030,36 @@ class DelayEffect(AudioEffect):
         wet_l = np.empty(n, dtype=np.float64)
         wet_r = np.empty(n, dtype=np.float64)
 
-        def _read_head(buf: np.ndarray, base_idx: np.ndarray,
-                       delay: float, m: int) -> np.ndarray:
-            """分数读头：读位 = (段起始写位 + j - delay) mod size，
-            i0/i0+1 线性插值（i0+1 ≤ 段起始，读先于写）。"""
-            rpos = (base_idx - delay).astype(np.float64)
-            i0 = np.floor(rpos).astype(np.int64) % size
-            i1 = (i0 + 1) % size
-            w = rpos - np.floor(rpos)
-            return buf[i0] * (1.0 - w) + buf[i1] * w
-
-        def _read_head_nofb(in_seg: np.ndarray, buf: np.ndarray,
-                            idx: int, delay: float, m: int) -> np.ndarray:
-            """R08: 无反馈整段读头——块内历史直接取本块输入（无反馈时
-            slot j-delay 的值 = 滤波输入 j-delay，与旧按 int(delay) 分段
-            的"读上一段写入"逐位等价），块外取 ring 历史。近零延迟不再
-            每样本一次 Python 循环。"""
-            rpos = np.arange(m, dtype=np.float64) - delay
-            i0 = np.floor(rpos).astype(np.int64)
-            w = rpos - i0
-
-            def _src(k: np.ndarray) -> np.ndarray:
-                out = np.empty(m, dtype=np.float64)
-                neg = k < 0
-                if neg.any():
-                    out[neg] = buf[(idx + k[neg]) % size]
-                pos_k = ~neg
-                if pos_k.any():
-                    out[pos_k] = in_seg[k[pos_k]]
-                return out
-
-            return (1.0 - w) * _src(i0) + w * _src(i0 + 1)
-
         pos = 0
         idx = self._delay_idx
         size = self._delay_size
         # R08: 无反馈快速路径——写值不依赖读值，整块单段向量化；
         # 反馈非零时保持原按延迟切段语义（块内读自身先前写入）。
-        _no_feedback = (fb_l == 0.0 and fb_r == 0.0)
+        no_feedback = fb_l == 0.0 and fb_r == 0.0
+        if (no_feedback and not damp_passthrough and lfilter is not None
+                and np.any(self._damp_prev)):
+            # The damping filter still releases its previous state when the
+            # feedback knobs reach zero. Feed that release to the in-block taps.
+            residual, zf = lfilter(
+                self._damp_b, self._damp_a, np.zeros((2, n), dtype=np.float64),
+                axis=1, zi=self._damp_prev[:, np.newaxis])
+            in_l, in_r = in_l + residual[0], in_r + residual[1]
+            self._damp_prev = zf[:, 0]
+        own_l, own_r = (1.0 - blend) * fb_l, (1.0 - blend) * fb_r
+        cross_l, cross_r = blend * fb_l, blend * fb_r
+        if (lfilter is not None and not no_feedback
+                and min(self._cur_delay_l, self._cur_delay_r) == 1.0
+                and not (self._fade_l_remaining or self._fade_r_remaining)):
+            feedback = np.array([[own_l, cross_r], [cross_l, own_r]], dtype=np.float64)
+            if self._cur_delay_l == self._cur_delay_r:
+                idx = self._process_one_sample_feedback(
+                    in_l, in_r, feedback, wet_l, wet_r, damp_passthrough)
+            else:
+                idx = self._process_one_short_tap(
+                    (in_l, in_r), (wet_l, wet_r), feedback, damp_passthrough)
+            pos = n
         while pos < n:
-            if _no_feedback:
+            if no_feedback:
                 m = min(n - pos, size)
             else:
                 # 段长不得超过"两声道新旧读位"的最小整数延迟：保证段内
@@ -2976,75 +3075,46 @@ class DelayEffect(AudioEffect):
                 m = max(1, m)
             end = idx + m
             # 1) 分数读头（R07 淡化 + R08 无反馈快速路径）
-            _read = _read_head_nofb if _no_feedback else _read_head
-            _read_args_nofb = _no_feedback
-            if self._fade_l_remaining > 0:
-                _g = np.clip(
-                    1.0 - (self._fade_l_remaining - np.arange(m))
-                    / float(self._fade_l_total), 0.0, 1.0)
-                if _read_args_nofb:
-                    _seg = in_l[pos:pos + m]
-                    _b = self._buf_l
-                    _ro = _read(_seg, _b, idx, self._old_delay_l, m)
-                    _rn = _read(_seg, _b, idx, self._cur_delay_l, m)
-                else:
-                    base_idx = (idx + np.arange(m)) % size
-                    _ro = _read(self._buf_l, base_idx, self._old_delay_l, m)
-                    _rn = _read(self._buf_l, base_idx, self._cur_delay_l, m)
-                wet_l[pos:pos + m] = (1.0 - _g) * _ro + _g * _rn
-                self._fade_l_remaining = max(0, self._fade_l_remaining - m)
-            else:
-                if _read_args_nofb:
-                    wet_l[pos:pos + m] = _read(
-                        in_l[pos:pos + m], self._buf_l, idx,
-                        self._cur_delay_l, m)
-                else:
-                    base_idx = (idx + np.arange(m)) % size
-                    wet_l[pos:pos + m] = _read(
-                        self._buf_l, base_idx, self._cur_delay_l, m)
-            if self._fade_r_remaining > 0:
-                _g = np.clip(
-                    1.0 - (self._fade_r_remaining - np.arange(m))
-                    / float(self._fade_r_total), 0.0, 1.0)
-                if _read_args_nofb:
-                    _seg = in_r[pos:pos + m]
-                    _b = self._buf_r
-                    _ro = _read(_seg, _b, idx, self._old_delay_r, m)
-                    _rn = _read(_seg, _b, idx, self._cur_delay_r, m)
-                else:
-                    base_idx = (idx + np.arange(m)) % size
-                    _ro = _read(self._buf_r, base_idx, self._old_delay_r, m)
-                    _rn = _read(self._buf_r, base_idx, self._cur_delay_r, m)
-                wet_r[pos:pos + m] = (1.0 - _g) * _ro + _g * _rn
-                self._fade_r_remaining = max(0, self._fade_r_remaining - m)
-            else:
-                if _read_args_nofb:
-                    wet_r[pos:pos + m] = _read(
-                        in_r[pos:pos + m], self._buf_r, idx,
-                        self._cur_delay_r, m)
-                else:
-                    base_idx = (idx + np.arange(m)) % size
-                    wet_r[pos:pos + m] = _read(
-                        self._buf_r, base_idx, self._cur_delay_r, m)
+            input_l = in_l[pos:pos + m]
+            input_r = in_r[pos:pos + m]
+            head_input_l = input_l if no_feedback else None
+            head_input_r = input_r if no_feedback else None
             seg_l = wet_l[pos:pos + m]
             seg_r = wet_r[pos:pos + m]
+            new_l = _read_fractional_audio_ring(self._buf_l, idx, self._cur_delay_l, m, head_input_l)
+            new_r = _read_fractional_audio_ring(self._buf_r, idx, self._cur_delay_r, m, head_input_r)
+            if self._fade_l_remaining > 0:
+                gain = np.clip(
+                    1.0 - (self._fade_l_remaining - np.arange(m))
+                    / float(self._fade_l_total), 0.0, 1.0)
+                old = _read_fractional_audio_ring(self._buf_l, idx, self._old_delay_l, m, head_input_l)
+                seg_l[:] = (1.0 - gain) * old + gain * new_l
+                self._fade_l_remaining = max(0, self._fade_l_remaining - m)
+            else:
+                seg_l[:] = new_l
+            if self._fade_r_remaining > 0:
+                gain = np.clip(
+                    1.0 - (self._fade_r_remaining - np.arange(m))
+                    / float(self._fade_r_total), 0.0, 1.0)
+                old = _read_fractional_audio_ring(self._buf_r, idx, self._old_delay_r, m, head_input_r)
+                seg_r[:] = (1.0 - gain) * old + gain * new_r
+                self._fade_r_remaining = max(0, self._fade_r_remaining - m)
+            else:
+                seg_r[:] = new_r
 
-            # 2) 反馈矩阵：own×(1-blend) + cross×blend（负号=相位反转）
-            fb_src_l = seg_l * (1.0 - blend) * fb_l + seg_r * blend * fb_r
-            fb_src_r = seg_r * (1.0 - blend) * fb_r + seg_l * blend * fb_l
-            # 3) 反馈阻尼（单极点低通，lfilter 精确；无 scipy 时直通）
-            if not damp_passthrough and lfilter is not None:
-                src = np.stack((fb_src_l, fb_src_r))
-                # scipy lfilter 的 zf 即下一块的精确 zi（一阶 IIR 状态直接
-                # 透传，无需除以/乘回系数——`a[1]` 为负值，经 max() 钳位
-                # 会把状态放大 1e12 倍导致反馈爆炸）
-                fb_sig, zf = lfilter(self._damp_b, self._damp_a, src, axis=1,
-                                     zi=self._damp_prev[:, np.newaxis])
-                fb_src_l, fb_src_r = fb_sig[0], fb_sig[1]
-                self._damp_prev = np.array(zf[:, 0], dtype=np.float64)
-            # 4) 写回：滤波输入 + 阻尼反馈
-            newv_l = in_l[pos:pos + m] + fb_src_l
-            newv_r = in_r[pos:pos + m] + fb_src_r
+            # 2–4) 无反馈且阻尼已静止时直接写入；否则混合并滤波反馈。
+            newv_l, newv_r = input_l, input_r
+            if not no_feedback:
+                fb_src_l = seg_l * own_l + seg_r * cross_r
+                fb_src_r = seg_r * own_r + seg_l * cross_l
+                if not damp_passthrough and lfilter is not None:
+                    fb_sig, zf = lfilter(
+                        self._damp_b, self._damp_a, np.stack((fb_src_l, fb_src_r)),
+                        axis=1, zi=self._damp_prev[:, np.newaxis])
+                    fb_src_l, fb_src_r = fb_sig
+                    self._damp_prev = zf[:, 0]
+                newv_l = input_l + fb_src_l
+                newv_r = input_r + fb_src_r
             if end <= size:
                 self._buf_l[idx:end] = newv_l
                 self._buf_r[idx:end] = newv_r
@@ -3062,10 +3132,13 @@ class DelayEffect(AudioEffect):
         wet_gain = self._dry_wet / 100.0
         dry_gain = 1.0 - wet_gain
         level = float(10.0 ** (self._level_db / 20.0))
+        out = samples.astype(np.float64, copy=True)
         out *= dry_gain * level
-        for ch in range(channels):
-            wet_ch = wet_l if (self._mono_input or ch % 2 == 0) else wet_r
-            out[ch] += wet_ch * wet_gain * level
+        if self._mono_input:
+            out += wet_l * (wet_gain * level)
+        else:
+            out[::2] += wet_l * (wet_gain * level)
+            out[1::2] += wet_r * (wet_gain * level)
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
@@ -3093,14 +3166,14 @@ class DelayEffect(AudioEffect):
         1000·delay_samples/sample_rate。旁路时读头仍反映参数目标。
         """
         sr = float(self._sample_rate)
-        left_ms = float(self._left_delay)
-        right_ms = float(self._right_delay)
+        left_samples = max(1.0, self._left_delay * sr / 1000.0)
+        right_samples = max(1.0, self._right_delay * sr / 1000.0)
         return {
             "sample_rate": sr,
-            "read_head_left_samples": round(left_ms * sr / 1000.0, 2),
-            "read_head_right_samples": round(right_ms * sr / 1000.0, 2),
-            "read_head_left_ms": left_ms,
-            "read_head_right_ms": right_ms,
+            "read_head_left_samples": round(left_samples, 2),
+            "read_head_right_samples": round(right_samples, 2),
+            "read_head_left_ms": max(1000.0 / sr, self._left_delay),
+            "read_head_right_ms": max(1000.0 / sr, self._right_delay),
             "feedback_left": float(self._left_fb),
             "feedback_right": float(self._right_fb),
             "blend": float(self._blend),
@@ -3120,14 +3193,16 @@ class DelayEffect(AudioEffect):
         sr = self._sample_rate
         if sr <= 0:
             return 0
-        delay = max(self._left_delay, self._right_delay) * 0.001 * sr
-        if delay <= 0.0:
-            return 0
+        delay = max(1.0, max(self._left_delay, self._right_delay) * 0.001 * sr)
         fb = max(abs(self._left_fb), abs(self._right_fb)) / 100.0
         if fb < 0.01:
             return int(delay) + 1
-        n_circles = 3.0 / max(0.0044, abs(float(np.log10(max(fb, 1e-4)))))
-        return int(min(delay * n_circles, 4.0 * sr)) + 1
+        n_circles = 3.0 / abs(math.log10(fb))
+        # The feedback one-pole adds low-frequency group delay on every pass,
+        # which dominates the decay time when the tap is only one sample long.
+        pole = -self._damp_a[1] if lfilter is not None else 0.0
+        loop_delay = delay + pole / (1.0 - pole)
+        return int(min(loop_delay * n_circles, 4.0 * sr)) + 1
 
     @property
     def is_active(self) -> bool:
@@ -3169,6 +3244,7 @@ class SaturationEffect(AudioEffect):
         self._recompute_k()
         # FX-14：版本化模型分支（缺键 → legacy；multiband 委托新单元）。
         self._multiband: Optional["object"] = None
+        self._use_multiband = False
 
     def _recompute_k(self) -> None:
         """由 drive（0..100）计算实际 k 系数。"""
@@ -3195,16 +3271,18 @@ class SaturationEffect(AudioEffect):
         self._enabled = bool(params.get("enabled", True))
         self._recompute_k()
         # FX-14：multiband 模型按需实例化并转发参数（legacy 不触碰）。
-        if str(params.get("model_profile", "legacy") or "legacy") == \
-                "multiband":
+        use_multiband = params.get("model_profile") == "multiband"
+        if use_multiband != self._use_multiband and self._multiband is not None:
+            self._multiband.reset_state()
+        self._use_multiband = use_multiband
+        if use_multiband:
             if self._multiband is None:
                 from src.features.edit.core.audio_effects.saturation import (
                     MultibandSaturationEffect,
                 )
-                self._multiband = MultibandSaturationEffect(self._sample_rate)
+                self._multiband = MultibandSaturationEffect(
+                    self._sample_rate, params_are_snapshots=True)
             self._multiband.set_params(params, sample_rate=sample_rate)
-        elif self._multiband is not None:
-            self._multiband.set_params({"enabled": False})
 
     def process(self, samples: np.ndarray) -> np.ndarray:
         """对一块样本应用 sigmoid 谐波失真。
@@ -3215,7 +3293,7 @@ class SaturationEffect(AudioEffect):
         Returns:
             失真后的 samples，同 shape（旁路或 drive=0 时原样返回）。
         """
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.process(samples)
         if not self._enabled or self._k <= 1e-9 or \
                 samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
@@ -3224,11 +3302,11 @@ class SaturationEffect(AudioEffect):
         out = samples.astype(np.float64, copy=True)
         k = self._k
         # sigmoid: y = (1+k)*x / (1 + k*|x|)，向量化
-        np.divide(
-            (1.0 + k) * out,
-            (1.0 + k * np.abs(out)),
-            out=out,
-        )
+        divisor = np.abs(out)
+        divisor *= k
+        divisor += 1.0
+        out *= 1.0 + k
+        np.divide(out, divisor, out=out)
         return out.astype(samples.dtype, copy=False)
 
     def reset_state(self) -> None:
@@ -3237,20 +3315,25 @@ class SaturationEffect(AudioEffect):
             self._multiband.reset_state()
 
     def latency_samples(self) -> int:
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.latency_samples()
         return 0
 
     def tail_estimate_samples(self) -> int:
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.tail_estimate_samples()
         return 0
 
     @property
     def is_active(self) -> bool:
-        if self._multiband is not None and self._enabled:
+        if self._use_multiband and self._enabled:
             return self._multiband.is_active
         return self._enabled and self._k > 1e-9
+
+    @property
+    def monitoring_active(self) -> bool:
+        """Allow analysis of the dry signal at zero Drive while the window is open."""
+        return self._enabled and not self._use_multiband
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3304,6 +3387,7 @@ class ImagerEffect(AudioEffect):
         self._output_gain: float = 1.0
         self._mono_maker: Optional[dict] = None  # {'sos':…, 'zi':…}
         self._mono_maker_key: Optional[tuple] = None
+        self._audition = "None"
         self._recompute_gains()
 
     def _recompute_gains(self) -> None:
@@ -3334,6 +3418,7 @@ class ImagerEffect(AudioEffect):
 
         if params is None:
             self._enabled = False
+            self._audition = "None"
             return
 
         # AUD-15304: 按 ImagerParams 声明范围钳位（|pan|>100/width<0 会产生
@@ -3343,6 +3428,8 @@ class ImagerEffect(AudioEffect):
         self._width = _clamp_finite(params.get("width", _IMAGER_DEFAULT_WIDTH),
                                     0.0, 200.0, _IMAGER_DEFAULT_WIDTH)
         self._enabled = bool(params.get("enabled", True))
+        audition = params.get("_imager_audition")
+        self._audition = audition if isinstance(audition, str) and audition in {"Mid", "Side", "Mono"} else "None"
         self._mid_gain = 10.0 ** (_clamp_finite(
             params.get("mid_gain_db", 0.0), -24.0, 24.0, 0.0) / 20.0)
         self._side_gain_db = 10.0 ** (_clamp_finite(
@@ -3383,33 +3470,53 @@ class ImagerEffect(AudioEffect):
         """
         if not self._enabled or samples.ndim != 2 or samples.shape[0] < 1 or samples.shape[1] < 1:
             return samples
-        if not self._legacy_fast_path():
-            return self._process_extended(samples)
-
-        out = samples.astype(np.float64, copy=True)
-        channels, n = out.shape
-
-        # 单声道：width 无效（无 Side 信号），仅 pan
+        channels = samples.shape[0]
         if channels == 1:
-            out[0] *= (self._pan_l + self._pan_r) * 0.5  # 单声道 pan = 平均
-            return out.astype(samples.dtype, copy=False)
+            gain = (self._pan_l + self._pan_r) * 0.5 * self._output_gain
+            if self._audition == "Side":
+                gain = 0.0
+            return (samples.astype(np.float64) * gain).astype(samples.dtype, copy=False)
 
-        # 多声道：默认处理前两声道（L/R），其余声道原样
-        L = out[0]
-        R = out[1]
-        # Mid/Side 分解
-        M = (L + R) * 0.5
-        S = (L - R) * 0.5
-        # 应用 width（Side 增益）
-        S_scaled = S * self._side_gain
-        # Mid/Side 重构
-        new_L = M + S_scaled
-        new_R = M - S_scaled
-        # 应用 pan
-        out[0] = new_L * self._pan_l
-        out[1] = new_R * self._pan_r
+        # Only the front pair needs double-precision intermediates.
+        left, right = samples[:2].astype(np.float64, copy=False)
+        mid = (left + right) * 0.5
+        side = left - right
+        side_gain = self._side_gain * self._side_gain_db
+        if self._mono_maker is not None:
+            side *= 0.5
+            sos = self._mono_maker["sos"]
+            zi = self._mono_maker["zi"]
+            if zi is None:
+                zi = np.zeros((sos.shape[0], 2), dtype=np.float64)
+            low, self._mono_maker["zi"] = sosfilt(sos, side, zi=zi)
+            side -= low
+            side *= side_gain
+        else:
+            side *= 0.5 * side_gain
+        if self._mid_gain != 1.0:
+            mid *= self._mid_gain
+        out_left = mid + side
+        mid -= side
+        out_right = mid
+        if self._pan_l != 1.0:
+            out_left *= self._pan_l
+        if self._pan_r != 1.0:
+            out_right *= self._pan_r
+        if self._output_gain != 1.0:
+            out_left *= self._output_gain
+            out_right *= self._output_gain
+        if self._audition == "Mid" or self._audition == "Mono":
+            out_left = out_right = (out_left + out_right) * 0.5
+        elif self._audition == "Side":
+            out_left = (out_left - out_right) * 0.5
+            out_right = -out_left
 
-        return out.astype(samples.dtype, copy=False)
+        out = np.empty(samples.shape, dtype=samples.dtype)
+        out[0] = out_left
+        out[1] = out_right
+        if channels > 2:
+            out[2:] = samples[2:]
+        return out
 
     def reset_state(self) -> None:
         """Mono Maker 滤波状态清零（seek 语义）；其余无状态。"""
@@ -3421,34 +3528,29 @@ class ImagerEffect(AudioEffect):
         return (self._mid_gain == 1.0 and self._side_gain_db == 1.0
                 and self._output_gain == 1.0 and self._mono_maker is None)
 
-    def _process_extended(self, samples: np.ndarray) -> np.ndarray:
-        """FX-13 新路径：M/S 分解 → Mono Maker（衰减低频 Side）→
-        Width×Side 增益 / Mid 增益 → 逆矩阵 → Pan → 输出增益。"""
-        from scipy.signal import sosfilt
-        out = samples.astype(np.float64, copy=True)
-        channels, n = out.shape
-        if channels == 1:
-            out[0] *= (self._pan_l + self._pan_r) * 0.5 * self._output_gain
-            return out.astype(samples.dtype, copy=False)
-        mid = (out[0] + out[1]) * 0.5
-        side = (out[0] - out[1]) * 0.5
-        if self._mono_maker is not None:
-            sos = self._mono_maker["sos"]
-            zi = self._mono_maker.get("zi")
-            expected = (sos.shape[0], 1, 2)
-            if zi is None or zi.shape != expected:
-                zi = np.zeros(expected, dtype=np.float64)
-            low, zi = sosfilt(sos, side[None, :], axis=-1, zi=zi)
-            self._mono_maker["zi"] = zi
-            side = side - low[0]  # 低频 Side 衰减 → 低频 mono
-        mid = mid * self._mid_gain
-        side = side * (self._side_gain * self._side_gain_db)
-        new_l = mid + side
-        new_r = mid - side
-        out[0] = new_l * self._pan_l
-        out[1] = new_r * self._pan_r
-        out[:2] *= self._output_gain
-        return out.astype(samples.dtype, copy=False)
+    def measure_output(self, samples: np.ndarray) -> dict:
+        """Measure the front pair only while an analyzer is subscribed."""
+        if not self._enabled or samples.ndim != 2 or not samples.size:
+            return {}
+        left = samples[0].astype(np.float64, copy=False)
+        right = samples[1].astype(np.float64, copy=False) if samples.shape[0] > 1 else left
+        left_power = float(np.dot(left, left))
+        right_power = float(np.dot(right, right))
+        if max(left_power, right_power) <= 1e-10 * left.size:
+            return {}
+        cross_power = float(np.dot(left, right))
+        correlation = (cross_power / math.sqrt(left_power * right_power)
+                       if min(left_power, right_power) > 0.0 else None)
+        normalizer = 4.0 * left.size
+        mid_power = (left_power + right_power + 2.0 * cross_power) / normalizer
+        side_power = (left_power + right_power - 2.0 * cross_power) / normalizer
+        step = (left.size + 63) // 64
+        return {
+            "samples_l": left[::step].tolist(), "samples_r": right[::step].tolist(),
+            "mid_db": 10.0 * math.log10(max(1e-10, mid_power)),
+            "side_db": 10.0 * math.log10(max(1e-10, side_power)),
+            "correlation": correlation,
+        }
 
     @property
     def is_active(self) -> bool:
@@ -3457,6 +3559,7 @@ class ImagerEffect(AudioEffect):
             abs(self._pan) > 0.1 or abs(self._width - 100.0) > 0.1
             or self._mid_gain != 1.0 or self._side_gain_db != 1.0
             or self._output_gain != 1.0 or self._mono_maker is not None
+            or self._audition in {"Mid", "Side", "Mono"}
         )
 
 
@@ -3765,7 +3868,7 @@ class DynamicsEffect(AudioEffect):
         Returns:
             处理后的 (channels, n)（旁路时原样返回）。
         """
-        if not self._enabled:
+        if not self._enabled or not samples.size:
             self._reset_telemetry()
             return samples
         out = self._eg.process(samples)
@@ -3813,9 +3916,7 @@ class DynamicsEffect(AudioEffect):
                                                  0.0) or 0.0)),
             "lim_gr_db": max(0.0, float(getattr(self._lim, "last_gr_db",
                                                 0.0) or 0.0)),
-            "detector_dbfs": round(float(getattr(self._comp,
-                                                 "last_detector_db", -120.0)
-                                         or -120.0), 3),
+            "detector_dbfs": round(self._comp.last_detector_db, 3),
             "limiter_overshoot_dbfs": round(self._last_overshoot_db, 3),
             "makeup_db": float(self._makeup),
         }
@@ -4047,6 +4148,19 @@ def plan_edge_pdc(
     return edge_delay, arrival, total
 
 
+def _effect_peak_db(samples: np.ndarray) -> float:
+    peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+    return max(-100.0, 20.0 * float(np.log10(max(peak, 1e-9))))
+
+
+def _effect_stereo_peak_db(samples: np.ndarray) -> tuple[float, tuple[float, float]]:
+    if not samples.size:
+        return -100.0, (-100.0, -100.0)
+    peaks = np.max(np.abs(samples), axis=1).astype(np.float64, copy=False)
+    levels = 20.0 * np.log10(np.maximum(peaks, 1e-5))
+    return float(levels.max()), (float(levels[0]), float(levels[min(1, levels.size - 1)]))
+
+
 class EffectChain:
     """有序效果器链。
 
@@ -4075,22 +4189,67 @@ class EffectChain:
         # MX-02: 本块按实例 tap（process 时采样；tap_levels() 读取）
         self._tap_levels: dict = {}
         self._spectrum_taps: dict = {}
+        self._spectrum_instances: frozenset[str] | None = frozenset()
+        self._imager_analyzers: frozenset[str] = frozenset()
         self._group_post_gain_db: dict = {}
+        self._dynamics_meter_positions: frozenset[int] = frozenset()
 
     def set_spectrum_metering(self, enabled: bool) -> None:
-        """Subscribe to bounded per-instance PCM windows only while requested."""
-        if not enabled:
-            for tap in self._spectrum_taps.values():
-                tap.clear()
-            self._spectrum_taps.clear()
+        """Enable or disable spectrum analysis for the entire chain."""
+        self.set_spectrum_instances(None if enabled else frozenset())
+
+    def set_spectrum_instances(self, instances: frozenset[str] | None) -> None:
+        """Subscribe to selected IDs. None subscribes to every named instance."""
+        if instances == self._spectrum_instances:
+            return
+        self._spectrum_instances = instances
+        self._sync_spectrum_taps()
+
+    def _clear_spectrum_taps(self) -> None:
+        for tap in self._spectrum_taps.values():
+            tap.clear()
+        self._spectrum_taps.clear()
+        self._imager_analyzers = frozenset()
+        if self._realtime_resources:
+            for instance in self._effects:
+                if instance.effect_type in {"voice_changer", "subharmonic"}:
+                    instance.set_monitoring(False)
+
+    def _sync_spectrum_taps(self) -> None:
+        requested = self._spectrum_instances
+        if requested is not None and not requested:
+            self._clear_spectrum_taps()
+            return
+        active = set(filter(None, self._instance_ids))
+        if requested is not None:
+            active.intersection_update(requested)
+        if self._realtime_resources:
+            for iid, instance in zip(self._instance_ids, self._effects):
+                if instance.effect_type in {"voice_changer", "subharmonic"}:
+                    instance.set_monitoring(iid in active)
+        self._imager_analyzers = frozenset(
+            iid for iid, effect in zip(self._instance_ids, self._effects)
+            if iid in active and isinstance(effect, ImagerEffect)
+        )
+        if requested is not None:
+            # These windows consume PCM measurements instead of an FFT.
+            active.difference_update(self._imager_analyzers)
+            active.difference_update(
+                iid for iid, instance in zip(self._instance_ids, self._effects)
+                if instance.effect_type == "spectral_mangler"
+            )
+        active.difference_update(
+            iid for iid, instance in zip(self._instance_ids, self._effects)
+            if instance.effect_type == "subharmonic"
+        )
+        for iid in self._spectrum_taps.keys() - active:
+            self._spectrum_taps.pop(iid).clear()
+        missing = active - self._spectrum_taps.keys()
+        if not missing:
             return
         from src.features.edit.core.audio_effects.spectrum_tap import InstanceSpectrumTap
-        active = set(self._instance_ids) - {""}
-        for iid in set(self._spectrum_taps) - active:
-            self._spectrum_taps.pop(iid).clear()
-        for iid in active:
-            if iid not in self._spectrum_taps:
-                self._spectrum_taps[iid] = InstanceSpectrumTap(self._sample_rate)
+        for iid in missing:
+            self._spectrum_taps[iid] = InstanceSpectrumTap(self._sample_rate)
 
     def set_params(self, entries: Optional[list], sample_rate: Optional[float] = None) -> None:
         """更新效果器链。
@@ -4101,14 +4260,17 @@ class EffectChain:
                      None 或空列表表示清空（链不生效）。
             sample_rate: 可选新采样率，变化时重置所有效果器状态。
         """
-        if sample_rate is not None and sample_rate != self._sample_rate:
-            self.set_spectrum_metering(False)
+        rate_changed = sample_rate is not None and sample_rate != self._sample_rate
+        if rate_changed:
+            self._clear_spectrum_taps()
             self._sample_rate = float(sample_rate)
 
         self._last_entries = list(entries) if entries else None
 
         if not entries:
-            self.set_spectrum_metering(False)
+            self._clear_spectrum_taps()
+            self._group_post_gain_db.clear()
+            self._dynamics_meter_positions = frozenset()
             for instance in self._effects:
                 release = getattr(instance, "release_resources", None)
                 if callable(release):
@@ -4155,41 +4317,49 @@ class EffectChain:
                 continue
             instance_id = str(instance_id)
             instance = None
+            was_enabled = False
             if instance_id:
                 # 精确身份匹配：同类型 + 同 instance_id
-                for j, (old_inst, _old_en, old_id) in enumerate(old_pool):
+                for j, (old_inst, old_enabled, old_id) in enumerate(old_pool):
                     if not used[j] and type(old_inst) is cls and old_id == instance_id:
                         instance = old_inst
+                        was_enabled = old_enabled
                         used[j] = True
                         break
             if instance is None and not instance_id:
                 # legacy（无 id）：按类型匹配未使用的旧实例（保持拖动参数
                 # 不重建的旧行为）
-                for j, (old_inst, _old_en, _old_id) in enumerate(old_pool):
+                for j, (old_inst, old_enabled, _old_id) in enumerate(old_pool):
                     if not used[j] and type(old_inst) is cls:
                         instance = old_inst
+                        was_enabled = old_enabled
                         used[j] = True
                         break
             if instance is None:
                 instance = cls(self._sample_rate)
                 if self._realtime_resources:
+                    if effect_type in {"voice_changer", "subharmonic"}:
+                        requested = self._spectrum_instances
+                        instance.set_monitoring(bool(instance_id) and (requested is None or instance_id in requested))
                     prepare_async = getattr(instance, "enable_async_resources", None)
                     if callable(prepare_async):
                         prepare_async()
             inst_params = params
+            if (effect_type == "imager" and not self._realtime_resources
+                    and isinstance(params, dict) and "_imager_audition" in params):
+                inst_params = {key: value for key, value in params.items() if key != "_imager_audition"}
             _post_makeup_db = 0.0
             if (panel == "dynamics" and effect_type == "compressor"
                     and isinstance(params, dict)
                     and params.get("makeup_post")):
-                try:
-                    _post_makeup_db = float(params.get("makeup_gain", 0.0) or 0.0)
-                except (TypeError, ValueError):
-                    _post_makeup_db = 0.0
+                _post_makeup_db = _clamp_finite(params.get("makeup_gain", 0.0), 0.0, 24.0, 0.0)
                 if _post_makeup_db:
                     inst_params = dict(params)
                     inst_params["makeup_gain"] = 0.0
             _apply_params_with_version(instance, inst_params, self._sample_rate,
                                        algorithm_version)
+            if was_enabled and not enabled and effect_type in {"exciter", "subharmonic"}:
+                instance.reset_state()
             if effect_type == "vst3_hosted":
                 enabled = bool(enabled and (params or {}).get("enabled", True))
                 if enabled:
@@ -4222,7 +4392,15 @@ class EffectChain:
                     release()
         self._effects = new_effects
         self._enabled_flags = new_flags
+        dynamics_positions = [i for i, panel in enumerate(new_panels) if panel == "dynamics"]
+        self._dynamics_meter_positions = (
+            frozenset((dynamics_positions[0], dynamics_positions[-1]))
+            if any(new_flags[i] for i in dynamics_positions) else frozenset()
+        )
+        spectrum_changed = rate_changed or new_ids != self._instance_ids
         self._instance_ids = new_ids
+        if spectrum_changed and (self._spectrum_instances is None or self._spectrum_instances):
+            self._sync_spectrum_taps()
 
     def install_freeze_capture_by_id(self, instance_id: str,
                                      capture: dict) -> bool:
@@ -4264,62 +4442,86 @@ class EffectChain:
         for i, (inst, enabled) in enumerate(zip(self._effects, self._enabled_flags)):
             iid = self._instance_ids[i] if i < len(self._instance_ids) else ""
             etype = getattr(inst, "effect_type", "")
-            if not (enabled and inst.is_active):
+            voice_monitor = etype == "voice_changer" and iid in self._spectrum_taps and inst.monitoring_active
+            saturation_monitor = (etype == "saturation" and iid in self._spectrum_taps
+                                  and inst.monitoring_active)
+            exciter_monitor = etype == "exciter" and iid in self._spectrum_taps and inst.monitoring_active
+            bypassed = not (enabled and (inst.is_active or voice_monitor
+                                         or saturation_monitor or exciter_monitor))
+            spectrum_input = out
+            tap = None
+            if bypassed:
                 if iid in self._spectrum_taps:
                     self._spectrum_taps[iid].clear()
+                    if voice_monitor:
+                        inst.clear_monitoring()
+                # Standalone meters are cleared on bypass. A Dynamics group still
+                # passes through its muted stages and may have an audible makeup.
                 if iid:
-                    # MX-02: 旁路实例直通语义（无过期 GR，UI 表归零）
-                    self._tap_levels[iid] = {
-                        "effect_type": etype, "in_db": -100.0,
-                        "out_db": -100.0, "gr_db": 0.0, "sc_db": -100.0,
-                        "bypassed": True,
+                    tap = {
+                        "effect_type": etype, "in_db": -100.0, "out_db": -100.0,
+                        "gr_db": 0.0, "sc_db": -100.0, "bypassed": True,
                     }
                     if etype == "convolution_reverb":
-                        self._tap_levels[iid]["analysis"] = inst.collect_telemetry()
-                continue
-            spectrum_input = out
-            in_peak = float(np.max(np.abs(out))) if out.size else 0.0
-            in_db = max(-100.0, 20.0 * float(np.log10(max(in_peak, 1e-9))))
-            sc_buf = None
-            # DynamicsEffect 内部含压缩器：侧链缓冲透传给其内部 comp
-            if (isinstance(inst, (CompressorEffect, DynamicsEffect))
-                    or etype in {"dynamic_eq", "transient_designer"}):
-                sc = sidechain_by_id.get(iid) if iid and sidechain_by_id else None
-                if sc is not None and isinstance(sc, np.ndarray) and sc.size:
-                    sc_buf = sc
-                out = inst.process(out, sidechain=sc)
+                        tap["analysis"] = inst.collect_telemetry()
             else:
-                out = inst.process(out)
-            if iid in self._spectrum_taps:
-                self._spectrum_taps[iid].push(spectrum_input, out)
-            out_peak = float(np.max(np.abs(out))) if out.size else 0.0
-            out_db = max(-100.0, 20.0 * float(np.log10(max(out_peak, 1e-9))))
-            if iid:
-                tap = {
-                    "effect_type": etype,
-                    "in_db": in_db, "out_db": out_db,
-                    "gr_db": float(getattr(inst, "last_gr_db", 0.0) or 0.0),
-                    "sc_db": float(getattr(inst, "last_detector_db", -100.0)
-                                   if sc_buf is not None else -100.0),
-                    "bypassed": False,
-                }
-                # DY-03: Limiter 过冲报告（有该遥测的实例才出键）
-                overshoot = getattr(inst, "last_overshoot_db", None)
-                if overshoot is not None:
-                    tap["overshoot_db"] = float(overshoot)
-                collect_analysis = getattr(inst, "collect_telemetry", None)
-                if callable(collect_analysis):
-                    # Processor snapshots contain measured scalar analysis;
-                    # keep them tied to this instance instead of inventing
-                    # module activity from the track's final output meter.
-                    tap["analysis"] = dict(collect_analysis())
+                meter_stereo = iid and etype in {"delay", "convolution_reverb"}
+                if meter_stereo:
+                    in_db, in_db_lr = _effect_stereo_peak_db(out)
+                else:
+                    in_db = _effect_peak_db(out) if iid else -100.0
+                sc_buf = None
+                if (isinstance(inst, (CompressorEffect, DynamicsEffect))
+                        or etype in {"dynamic_eq", "transient_designer"}):
+                    sc = sidechain_by_id.get(iid) if iid and sidechain_by_id else None
+                    if sc is not None and isinstance(sc, np.ndarray) and sc.size:
+                        sc_buf = sc
+                    out = inst.process(out, sidechain=sc)
+                else:
+                    out = inst.process(out)
+                if iid in self._spectrum_taps:
+                    self._spectrum_taps[iid].push(spectrum_input, out)
+                if iid:
+                    if meter_stereo:
+                        out_db, out_db_lr = _effect_stereo_peak_db(out)
+                    else:
+                        out_db = _effect_peak_db(out)
+                    tap = {
+                        "effect_type": etype, "in_db": in_db, "out_db": out_db,
+                        "gr_db": float(getattr(inst, "last_gr_db", 0.0) or 0.0),
+                        "sc_db": float(getattr(inst, "last_detector_db", -100.0)
+                                       if sc_buf is not None else -100.0),
+                        "bypassed": False,
+                    }
+                    if meter_stereo:
+                        tap.update(in_db_lr=in_db_lr, out_db_lr=out_db_lr)
+                    overshoot = getattr(inst, "last_overshoot_db", None)
+                    if overshoot is not None:
+                        tap["overshoot_db"] = float(overshoot)
+                    collect_analysis = getattr(inst, "collect_telemetry", None)
+                    if etype == "spectral_mangler" and (
+                        self._spectrum_instances is None or iid in self._spectrum_instances
+                    ):
+                        tap["analysis"] = inst.measure_output(out)
+                    elif callable(collect_analysis) and (
+                        etype not in {"voice_changer", "subharmonic"} or inst.monitoring_active
+                    ):
+                        tap["analysis"] = dict(collect_analysis())
+
+            # The group's output gain follows its last stage even when that stage
+            # is bypassed. A bypassed group has no gain registered in set_params.
+            group_gain = self._group_post_gain_db.get(i)
+            if group_gain:
+                out = out * float(10.0 ** (group_gain / 20.0))
+            if tap is not None:
+                if enabled and iid in self._imager_analyzers and isinstance(inst, ImagerEffect):
+                    tap["analysis"] = inst.measure_output(out)
+                if i in self._dynamics_meter_positions:
+                    group_input_db = _effect_peak_db(spectrum_input) if bypassed else tap["in_db"]
+                    group_output_db = group_input_db if bypassed else tap["out_db"]
+                    tap["group_input_db"] = group_input_db
+                    tap["group_output_db"] = _effect_peak_db(out) if group_gain else group_output_db
                 self._tap_levels[iid] = tap
-            # R09: Dynamics 组组后 Make Up——组末成员处理完后统一施加
-            # （旁路的组不计：其压缩器的 enabled=False 时 set_params 已
-            # 不登记该增益；仍登记的是组内其他启用压缩器）
-            _gdb = self._group_post_gain_db.get(i)
-            if _gdb:
-                out = out * float(10.0 ** (_gdb / 20.0))
         return out
 
     def tap_levels(self) -> dict:
@@ -4448,7 +4650,9 @@ class EffectChain:
 
     @property
     def is_active(self) -> bool:
-        """链中是否至少有一个启用的效果器。"""
+        """Whether an active processor or a Dynamics group's makeup is present."""
+        if self._group_post_gain_db:
+            return True
         for inst, enabled in zip(self._effects, self._enabled_flags):
             if enabled and inst.is_active:
                 return True
@@ -4542,6 +4746,8 @@ class SpatialPanner:
         self._boom_gain: float = 0.0
         self._boom_on: bool = False
         self._boom_route: str = "Pre"
+        self._matrix_pan: float | None = None
+        self._matrix: np.ndarray | None = None
         self._rebuild_boom_filter()
 
     def set_params(self, panner: Optional[dict], sample_rate: Optional[float] = None) -> None:
@@ -4550,16 +4756,19 @@ class SpatialPanner:
             self._sample_rate = float(sample_rate)
             self._boom_zi = None
             self._rebuild_boom_filter()
-        self._panner = panner if isinstance(panner, dict) and panner else None
-        if self._panner is None:
-            self._boom_on = False
+        snapshot = dict(panner) if isinstance(panner, dict) and panner else None
+        if self._panner == snapshot:
             return
-        self._boom_on = bool(self._panner.get("boom_on", False))
-        self._boom_route = str(self._panner.get("boom_route", "Pre") or "Pre")
-        try:
-            self._boom_gain = _db_to_lin_gain(float(self._panner.get("boom_gain", -60.0)))
-        except (TypeError, ValueError):
-            self._boom_gain = 0.0
+        self._panner = snapshot
+        self._matrix_pan = None
+        self._matrix = None
+        params = snapshot or {}
+        boom_on = bool(params.get("enabled", True) and params.get("boom_on", False))
+        boom_route = str(params.get("boom_route", "Pre") or "Pre")
+        if self._boom_on != boom_on or self._boom_route != boom_route:
+            self._boom_zi = None
+        self._boom_on, self._boom_route = boom_on, boom_route
+        self._boom_gain = _db_to_lin_gain(_clamp_finite(params.get("boom_gain", -60.0), -60.0, 10.0, -60.0))
 
     def _rebuild_boom_filter(self) -> None:
         fc = min(self.BOOM_CUTOFF_HZ, self._sample_rate * 0.45)
@@ -4567,25 +4776,25 @@ class SpatialPanner:
         self._boom_sos = np.array([[b[0], b[1], b[2], 1.0, a[1], a[2]]], dtype=np.float64)
         self._boom_zi = None
 
-    def _boom_bass(self, samples: np.ndarray) -> np.ndarray:
-        """mono 求和 → 120Hz 低通 → boom 增益。返回 (n,)。"""
-        mono = np.mean(samples, axis=0) if samples.shape[0] > 1 else samples[0]
+    def _boom_bass(self, mono: np.ndarray) -> np.ndarray:
+        """Apply the 120 Hz low-pass and gain to the mono boom feed."""
         if self._boom_gain <= 0.0:
             return np.zeros_like(mono)
         if sosfilt is None or self._boom_sos is None:
             return mono * self._boom_gain
         if self._boom_zi is None:
-            self._boom_zi = np.zeros((1, 1, 2), dtype=np.float64)
-        out, zf = sosfilt(self._boom_sos, mono[np.newaxis, :], axis=-1, zi=self._boom_zi)
+            self._boom_zi = np.zeros((1, 2), dtype=np.float64)
+        out, zf = sosfilt(self._boom_sos, mono, zi=self._boom_zi)
         self._boom_zi = zf
-        return out[0] * self._boom_gain
+        return out * self._boom_gain
 
-    def process(self, samples: np.ndarray, pan: float) -> np.ndarray:
+    def process(self, samples: np.ndarray, pan: float, *, pan_ramp: np.ndarray | None = None) -> np.ndarray:
         """应用空间声像（矩阵 + boom）。pan 的逐样本增益由引擎叠加。
 
         Args:
             samples: (channels, n)；≥2 声道取前两路处理，其余声道直通
             pan: 块内声像位置 [-1, 1]（lr 真源）
+            pan_ramp: when provided, sample the spatial position at the block center
 
         Returns:
             处理后的 samples（未启用时原样返回）。
@@ -4594,36 +4803,27 @@ class SpatialPanner:
             return samples
         if samples.ndim != 2 or samples.shape[0] < 2 or samples.shape[1] < 1:
             return samples
-        out = samples.astype(np.float64, copy=True)
-        n = out.shape[1]
-
-        boom_only = self._boom_on and self._boom_route == "Only"
-        if boom_only:
-            bass = self._boom_bass(out[:2])
-            out[0] = bass
-            out[1] = bass
-            return out.astype(samples.dtype, copy=False)
-
-        pre_bass = self._boom_bass(out[:2]) if (self._boom_on and self._boom_route == "Pre") else None
-
-        m = spatial_panner_matrix(pan, self._panner)
-        l = out[0]
-        r = out[1]
-        # PAN-01：两行输出都读取未污染的原输入（out[0] 先覆写会让 out[1]
-        # 读到已混合的 L，产生 0.1465 量级的矩阵偏差）。
-        new_l = m[0, 0] * l + m[0, 1] * r
-        new_r = m[1, 0] * l + m[1, 1] * r
-        out[0] = new_l
-        out[1] = new_r
-
-        if pre_bass is not None:
-            out[0] += pre_bass
-            out[1] += pre_bass
-        if self._boom_on and self._boom_route == "Post":
-            post_bass = self._boom_bass(out[:2])
-            out[0] += post_bass
-            out[1] += post_bass
-        return out.astype(samples.dtype, copy=False)
+        left, right = samples[:2].astype(np.float64, copy=False)
+        if self._boom_on and self._boom_route == "Only":
+            out_left = out_right = self._boom_bass((left + right) * 0.5)
+        else:
+            if pan_ramp is not None and pan_ramp.size:
+                pan = float(pan_ramp[min(pan_ramp.size - 1, samples.shape[-1] // 2)])
+            if self._matrix is None or self._matrix_pan != pan:
+                self._matrix = spatial_panner_matrix(pan, self._panner)
+                self._matrix_pan = pan
+            m = self._matrix
+            out_left = m[0, 0] * left + m[0, 1] * right
+            out_right = m[1, 0] * left + m[1, 1] * right
+            if self._boom_on and self._boom_route in {"Pre", "Post"}:
+                mono = (left + right) * 0.5 if self._boom_route == "Pre" else (out_left + out_right) * 0.5
+                bass = self._boom_bass(mono)
+                out_left += bass
+                out_right += bass
+        out = np.empty_like(samples)
+        out[0], out[1] = out_left, out_right
+        out[2:] = samples[2:]
+        return out
 
     def reset_state(self) -> None:
         """重置 boom 滤波状态。"""

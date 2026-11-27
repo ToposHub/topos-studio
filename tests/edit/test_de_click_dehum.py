@@ -14,6 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from src.features.edit.core.de_click_dehum import (
+    ClickCandidate,
     detect_clicks,
     detect_hum_base,
     remove_clicks,
@@ -77,6 +78,61 @@ class TestDeHum:
         after = _band_energy(cleaned, 50.02, bw=0.5)
         assert 20.0 * np.log10(before / max(after, 1e-9)) >= 12.0
 
+    @pytest.mark.parametrize("freq", [55.0, 58.0])
+    def test_auto_hum_preserves_nearby_bass_tones(self, freq: float) -> None:
+        t = np.arange(RATE * 2 // 5) / RATE
+        pcm = np.sin(2 * np.pi * freq * t).astype(np.float32)[None]
+        assert detect_hum_base(pcm, RATE) is None
+        assert remove_hum(pcm, RATE) is pcm
+
+    def test_single_window_noise_does_not_look_like_a_mains_tone(self) -> None:
+        pcm = np.random.default_rng(11).normal(0.0, 0.04, (2, RATE)).astype(np.float32)
+        assert remove_hum(pcm, RATE) is pcm
+
+    def test_high_q_notches_follow_one_grid_clock(self) -> None:
+        t = np.arange(RATE * 8) / RATE
+        base = 59.72
+        clean = 0.2 * np.sin(2 * np.pi * 437.0 * t)
+        hum = 0.05 * np.sin(2 * np.pi * base * t) + 0.07 * np.sin(2 * np.pi * (3 * base) * t)
+        pcm = np.stack([clean, clean + hum]).astype(np.float32)
+        assert detect_hum_base(pcm, RATE) == 60.0
+        fixed = remove_hum(pcm, RATE, harmonics=(1, 3), q=120.0)
+        for freq in (base, 3 * base):
+            before = _band_energy(pcm[1:, RATE:-RATE], freq, bw=0.2)
+            after = _band_energy(fixed[1:, RATE:-RATE], freq, bw=0.2)
+            assert 20.0 * np.log10(before / after) >= 24.0
+        original_tone = _band_energy(pcm[1:], 437.0, bw=0.5)
+        result_tone = _band_energy(fixed[1:], 437.0, bw=0.5)
+        assert abs(20.0 * np.log10(original_tone / result_tone)) < 0.1
+
+    def test_identity_paths_preserve_double_precision_samples(self) -> None:
+        data = np.random.default_rng(31).normal(0.0, 0.01, (2, RATE))
+        assert remove_hum(data, RATE, base_hz=50.0, reduction_db=0.0) is data
+        assert remove_hum(data, RATE, base_hz=50.0, harmonics=()) is data
+        assert remove_hum(data, RATE, base_hz=50.0, region=(100, 100)) is data
+        fixed = remove_hum(data, RATE, base_hz=50.0, region=(1000, 2000))
+        assert fixed.dtype == data.dtype
+        np.testing.assert_array_equal(fixed[:, :1000], data[:, :1000])
+        np.testing.assert_array_equal(fixed[:, 2000:], data[:, 2000:])
+
+    def test_cancelled_after_final_filter_returns_original(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.features.edit.core import de_click_dehum
+
+        original_filter = de_click_dehum.sosfiltfilt
+        cancelled = False
+
+        def filter_and_cancel(sos: np.ndarray, signal: np.ndarray, *, padlen: int) -> np.ndarray:
+            nonlocal cancelled
+            filtered = original_filter(sos, signal, padlen=padlen)
+            cancelled = True
+            return filtered
+
+        monkeypatch.setattr(de_click_dehum, "sosfiltfilt", filter_and_cancel)
+        pcm = _hum_tone()[:1]
+        fixed = remove_hum(pcm, RATE, base_hz=50.0, harmonics=(1,), cancel_check=lambda: cancelled)
+        assert cancelled
+        assert fixed is pcm
+
 
 class TestDeClick:
     def _clean_with_clicks(self, positions):
@@ -123,6 +179,72 @@ class TestDeClick:
         assert handled == []
         np.testing.assert_array_equal(cleaned, pcm)
 
+    def test_broadband_noise_is_preserved_but_an_injected_click_is_repaired(self) -> None:
+        noise = np.random.default_rng(778).normal(0.0, 0.03, (2, 4 * RATE)).astype(np.float32)
+        assert not detect_clicks(noise, RATE)
+        clean, handled = remove_clicks(noise, RATE)
+        assert clean is noise and not handled
+
+        dirty = noise.copy()
+        dirty[1, RATE:RATE + 6] += .45
+        fixed, handled = remove_clicks(dirty, RATE)
+        assert [candidate.position for candidate in handled] == [RATE]
+        assert handled[0].confidence == pytest.approx(.75)
+        assert np.max(np.abs(fixed[1, RATE:RATE + 6] - noise[1, RATE:RATE + 6])) < .09
+        np.testing.assert_array_equal(fixed[0], noise[0])
+        np.testing.assert_array_equal(fixed[:, :RATE - 128], noise[:, :RATE - 128])
+        np.testing.assert_array_equal(fixed[:, RATE + 128:], noise[:, RATE + 128:])
+
+    def test_isolated_click_in_digital_silence(self) -> None:
+        pcm = np.zeros((2, RATE), dtype=np.float32)
+        pcm[0, 20000:20006] = 0.8
+        fixed, handled = remove_clicks(pcm, RATE)
+        assert [candidate.position for candidate in handled] == [20000]
+        assert handled[0].confidence == pytest.approx(0.75)
+        assert not np.any(fixed)
+        np.testing.assert_array_equal(pcm[0, 20000:20006], np.full(6, 0.8, dtype=np.float32))
+
+    def test_long_repair_reuses_spectral_context_locally(self) -> None:
+        from src.features.edit.core.audio_repair import repair_spectral
+
+        pcm = self._clean_with_clicks([])
+        position, width = 1720, 700
+        lo, hi = position - width, position + width
+        pcm[0, lo:hi] *= 0.2
+        candidate = ClickCandidate(position, width, 1.0)
+        fixed, handled = remove_clicks(pcm, RATE, candidates=[candidate])
+        low_hz, high_hz = 20.0, RATE * 0.45
+        expected = repair_spectral(
+            pcm, RATE,
+            [{"sample": position, "hz": np.sqrt(low_hz * high_hz), "time_radius": width,
+              "bandwidth_oct": np.log2(high_hz / low_hz)}],
+            (lo, hi), amount_db=24.0, mode="heal")
+        assert handled == [candidate]
+        np.testing.assert_array_equal(fixed, expected)
+
+    def test_cancellation_rolls_back_short_repair(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.features.edit.core import de_click_dehum
+
+        original_repair = de_click_dehum._interpolate_repair
+        cancelled = False
+
+        def repair_and_cancel(
+            signal: np.ndarray, lo: int, hi: int, *, out: np.ndarray | None = None,
+            channels: tuple[int, ...] | None = None,
+        ) -> np.ndarray:
+            nonlocal cancelled
+            repaired = original_repair(signal, lo, hi, out=out, channels=channels)
+            cancelled = True
+            return repaired
+
+        monkeypatch.setattr(de_click_dehum, "_interpolate_repair", repair_and_cancel)
+        pcm = self._clean_with_clicks([20000])
+        fixed, handled = remove_clicks(
+            pcm, RATE, candidates=[ClickCandidate(20000, 16, 1.0)], cancel_check=lambda: cancelled)
+        assert cancelled
+        assert fixed is pcm
+        assert handled == []
+
 
 class TestFX07:
     """FX-07（2026-11-21 计划）：衰减受限 hum、region 写回、坐标修复。"""
@@ -136,9 +258,11 @@ class TestFX07:
             0.08 * np.sin(2 * np.pi * 100.0 * t)
         dirty = (clean + hum)[None, :].astype(np.float32)
 
-        def amp(pcm, hz):
-            w = pcm[0, RATE // 4:] * np.hanning(pcm.shape[-1] - RATE // 4)
-            return 2 * abs(np.fft.rfft(w)[hz]) / w.size
+        def amp(pcm: np.ndarray, hz: float) -> float:
+            steady = pcm[0, RATE // 4:]
+            window = np.hanning(steady.size)
+            phase = np.exp(-2j * np.pi * hz * np.arange(steady.size) / RATE)
+            return float(2 * abs(np.sum(steady * window * phase)) / window.sum())
 
         out = remove_hum(dirty, RATE, base_hz=50.0, reduction_db=48.0)
         reduction = 20 * np.log10(amp(dirty, 50) / max(amp(out, 50), 1e-12))

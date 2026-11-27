@@ -177,10 +177,17 @@
       "effect_type": "chorus_flanger",
       "name": "Chorus / Flanger",
       "params": {
+        "base_ms": {
+          "default": 18.0,
+          "label": "Delay",
+          "max": 100.0,
+          "min": 0.5,
+          "type": "float"
+        },
         "depth_ms": {
           "default": 3.0,
           "label": "Depth",
-          "max": 10.0,
+          "max": 50.0,
           "min": 0.0,
           "type": "float"
         },
@@ -188,7 +195,7 @@
           "default": 0.0,
           "label": "Feedback",
           "max": 0.95,
-          "min": 0.0,
+          "min": -0.95,
           "type": "float"
         },
         "mix": {
@@ -248,6 +255,13 @@
           "max": 1.0,
           "min": 0.0,
           "type": "float"
+        },
+        "true_stereo": {
+          "default": false,
+          "label": "True Stereo",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "bool"
         },
         "wet": {
           "default": 0.35,
@@ -611,7 +625,7 @@
         "ex_crossover_hz": {
           "default": 2000.0,
           "label": "Crossover",
-          "max": 8000.0,
+          "max": 16000.0,
           "min": 100.0,
           "type": "float"
         },
@@ -628,6 +642,13 @@
           "max": 2.0,
           "min": 1.0,
           "type": "float"
+        },
+        "ex_quality": {
+          "default": "clean",
+          "label": "Oversampling Path",
+          "max": 100.0,
+          "min": 0.0,
+          "type": "choice"
         },
         "ex_wet": {
           "default": 1.0,
@@ -871,8 +892,8 @@
         "base_hz": {
           "default": 600.0,
           "label": "Base Frequency",
-          "max": 4000.0,
-          "min": 100.0,
+          "max": 20000.0,
+          "min": 10.0,
           "type": "float"
         },
         "mix": {
@@ -1057,7 +1078,7 @@
     },
     {
       "category": "audio",
-      "description": "Confidence-gated octave-down generator for bass sources",
+      "description": "Source-range tracking octave-down synthesis with confidence gating",
       "effect_type": "subharmonic",
       "name": "Subharmonic",
       "params": {
@@ -1080,6 +1101,13 @@
           "label": "Oct 2",
           "max": 0.0,
           "min": -36.0,
+          "type": "float"
+        },
+        "sh_source_bandwidth_hz": {
+          "default": 60.0,
+          "label": "Source Bandwidth",
+          "max": 270.0,
+          "min": 5.0,
           "type": "float"
         },
         "sh_source_center_hz": {
@@ -1140,11 +1168,18 @@
           "min": 0.0,
           "type": "float"
         },
+        "phase_offset_deg": {
+          "default": 0.0,
+          "label": "Stereo Phase",
+          "max": 360.0,
+          "min": 0.0,
+          "type": "float"
+        },
         "rate_hz": {
           "default": 4.0,
           "label": "Rate",
-          "max": 20.0,
-          "min": 0.05,
+          "max": 50.0,
+          "min": 0.01,
           "type": "float"
         }
       }
@@ -1213,6 +1248,13 @@
           "type": "choice"
         }
       }
+    },
+    {
+      "category": "audio_hosted",
+      "description": "Locally registered third-party stereo, zero-latency track insert",
+      "effect_type": "vst3_hosted",
+      "name": "VST3 plug-in",
+      "params": {}
     }
   ],
   "evolution": "append-only; semantic param changes require a new type id",

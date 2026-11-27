@@ -133,6 +133,7 @@ PROCESSORS: dict[str, dict[str, Any]] = {
         "algorithm_version": 1,
         "length_preserving": True,
         "pre_render": True,
+        "render_revision": 2,
         "description": (
             "Fixed-interval doubled voices (pitch/detune/delay/pan/gain "
             "per voice, length preserving, pre-rendered)."
@@ -143,6 +144,7 @@ PROCESSORS: dict[str, dict[str, Any]] = {
         "algorithm_version": 1,
         "length_preserving": True,
         "pre_render": True,
+        "render_revision": 2,
         "description": (
             "Monophonic automatic pitch correction: F0 tracking, scale "
             "quantization, stable-note time-preserving rendering."
@@ -150,10 +152,12 @@ PROCESSORS: dict[str, dict[str, Any]] = {
     },
     "de_click": {
         "algorithm_version": 1, "length_preserving": True, "pre_render": True,
+        "render_revision": 3,
         "description": "Offline click repair in a selected sample range and channels.",
     },
     "de_hum": {
         "algorithm_version": 1, "length_preserving": True, "pre_render": True,
+        "render_revision": 2,
         "description": "Offline zero-phase hum removal in a selected range and channels.",
     },
 }
@@ -1067,12 +1071,11 @@ def _render_selected_offline_step(
         return pcm
     if any(not isinstance(ch, int) or not 0 <= ch < pcm.shape[0] for ch in channels):
         raise ValueError("offline processor channel index out of range")
-    original = pcm[channels].copy()
+    all_channels = channels == list(range(pcm.shape[0]))
     if processor_id == "pitch_correction":
         from src.features.edit.core.audio_effects.pitch_correction import render_pitch_correction
-        wet = original.copy()
-        wet[:, start:end] = render_pitch_correction(
-            original[:, start:end], sample_rate,
+        wet = render_pitch_correction(
+            pcm[channels, start:end], sample_rate,
             ref_a4_hz=float(params.get("ref_a4_hz", 440.0)),
             strength=float(params.get("strength", 100.0)),
             retune_ms=float(params.get("retune_ms", 45.0)),
@@ -1080,33 +1083,43 @@ def _render_selected_offline_step(
             bypass_notes=tuple(params.get("bypass_notes") or ()), cancel_check=cancel_check)
     elif processor_id == "doubler":
         from src.features.edit.core.audio_effects.doubler import doubles_from_params, render_doubler
-        wet = original.copy()
-        wet[:, start:end] = render_doubler(
-            original[:, start:end], sample_rate, doubles_from_params(params),
+        wet = render_doubler(
+            pcm[channels, start:end], sample_rate, doubles_from_params(params),
             dry_gain_db=float(params.get("dry_gain_db", 0.0)),
             wet_mix_pct=float(params.get("wet_mix_pct", 100.0)),
             output_gain_db=float(params.get("output_gain_db", 0.0)), cancel_check=cancel_check)
     elif processor_id == "de_hum":
         from src.features.edit.core.de_click_dehum import remove_hum
         mode = params.get("hum_base_mode", "auto")
-        wet = remove_hum(
+        original = pcm if all_channels else pcm[channels]
+        repaired = remove_hum(
             original, sample_rate, base_hz=None if mode == "auto" else float(mode),
             auto_detect=mode == "auto", harmonics=params.get("hum_harmonics", tuple(range(1, 9))),
             q=float(params.get("hum_q", 30.0)), drift_hz=float(params.get("hum_drift_hz", 0.6)),
             reduction_db=float(params.get("hum_reduction_db", 48.0)), region=(start, end),
             cancel_check=cancel_check)
+        if repaired is original:
+            return pcm
+        wet = repaired[:, start:end]
     else:
         from src.features.edit.core.de_click_dehum import detect_clicks, remove_clicks
+        original = pcm if all_channels else pcm[channels]
         candidates = detect_clicks(
             original, sample_rate, threshold_sigma=float(params.get("click_threshold_sigma", 8.0)),
-            max_width=max(4, round(float(params.get("click_max_width_ms", 2.5)) * sample_rate / 2000.0)))
-        wet, _ = remove_clicks(
+            max_width=max(4, round(float(params.get("click_max_width_ms", 2.5)) * sample_rate / 2000.0)),
+            cancel_check=cancel_check)
+        repaired, handled = remove_clicks(
             original, sample_rate, candidates=[c for c in candidates if start <= c.position < end],
             cancel_check=cancel_check)
+        if not handled:
+            return pcm
+        wet = repaired[:, start:end]
     if cancel_check is not None and cancel_check():
         return pcm
+    if all_channels and start == 0 and end == pcm.shape[-1]:
+        return np.ascontiguousarray(wet, dtype=np.float32)
     result = pcm.copy()
-    result[channels, start:end] = wet[:, start:end]
+    result[channels, start:end] = wet
     return np.ascontiguousarray(result, dtype=np.float32)
 
 
@@ -1514,9 +1527,14 @@ def steps_signature(audio_edit: Any) -> tuple:
         if not isinstance(step, dict) or not step.get("enabled", True):
             continue
         params = step.get("params", {}) if isinstance(step.get("params"), dict) else {}
+        processor = step.get("processor_id")
+        version = step.get("algorithm_version")
+        revision = PROCESSORS.get(processor, {}).get("render_revision") if isinstance(processor, str) else None
+        # Invalidate generated PCM after an engine fix without rewriting the saved recipe.
+        if revision is not None:
+            version = (version, revision)
         signature.append((
-            step.get("step_id"), step.get("processor_id"),
-            step.get("algorithm_version"),
+            step.get("step_id"), processor, version,
             params.get("start"), params.get("end"),
             tuple(params.get("channels", ())),
             params.get("gain_db"),

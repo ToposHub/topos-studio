@@ -918,9 +918,10 @@ class BusTransferGraphWidget(QWidget):
         self._state = state
         self.update()
 
-    def pushSample(self, input_db: float):
+    def pushSample(self, input_db: float, output_db: float | None = None) -> None:
         in_c = max(-48.0, min(12.0, input_db))
-        out_c = self.evaluate_transfer(in_c)
+        out_c = (self.evaluate_transfer(in_c) if output_db is None
+                 else max(-48.0, min(12.0, output_db)))
         # 计算未压缩但含 Make-Up 的参考输出电平，用于绘制实时 GR 落差条
         uncomp_c = max(-48.0, min(12.0, in_c + (self._state["makeup"] if self._state["enabled"] else 0.0)))
         self._trail_points.append((in_c, out_c, uncomp_c))
@@ -960,16 +961,16 @@ class BusTransferGraphWidget(QWidget):
         d = in_db - thresh
         if 2.0 * d < -knee_db:
             y_comp = in_db
-        elif 2.0 * abs(d) <= knee_db:
+        elif knee_db > 0.0 and 2.0 * abs(d) <= knee_db:
             y_comp = in_db + (1.0 / ratio - 1.0) * ((d + knee_db / 2.0) ** 2) / (2.0 * knee_db)
         else:
             y_comp = thresh + d / ratio
 
-        y_wet = y_comp + st["makeup"]
         if "processor_knee" in st:
-            y = 20.0 * math.log10((1.0 - mix) * 10.0 ** (in_db / 20.0) + mix * 10.0 ** (y_wet / 20.0))
+            gain = (1.0 - mix) + mix * 10.0 ** ((y_comp - in_db) / 20.0)
+            y = in_db + 20.0 * math.log10(gain) + st["makeup"]
         else:
-            y = (1.0 - mix) * in_db + mix * y_wet
+            y = (1.0 - mix) * in_db + mix * (y_comp + st["makeup"])
         return max(-48.0, min(12.0, y))
 
     def _hit_test(self, pos: QPointF, plot: QRectF) -> str:
@@ -1835,21 +1836,43 @@ class StudioBusCompWidget(QWidget):
         from src.features.edit.core.audio_effects.bus_multiband import BUS_COMP_TEMPLATES
 
         self._processor_templates = BUS_COMP_TEMPLATES
+        for state in (*self._banks.values(), *self._presets.values()):
+            key = "mx_glue" if state["topology"] == "API 2500" else "dx_glue"
+            template = BUS_COMP_TEMPLATES[key]
+            if state["release"] < 0:
+                state["release"] = template["release_ms"] / 1000.0
+            state.setdefault("processor_knee", template["knee"] * 0.24)
         self.btn_ssl.setText("DX Glue")
         self.btn_api.setText("MX Glue")
-        sidechain_hpf = ContinuousKnobCell(
-            I18N.tr("audio.fx.sc_hpf_hz", "SC HPF"), 0.0, 500.0, 120.0, COLORS["sc"],
-            "Off", "Hz", "500", lambda v: f"{v:.1f} Hz", parse_float_safe,
-        )
-        old = self.c_sc_hpf
-        self._knob_row.replaceWidget(old, sidechain_hpf)
-        old.hide()
-        old.deleteLater()
-        self.c_sc_hpf = sidechain_hpf
-        self.c_sc_hpf.setMaximumWidth(135)
+        for attribute, field, label, lower, upper, default, color, unit in (
+            ("c_thresh", "threshold", "Threshold", -60.0, 0.0, -22.0, "cyan", "dB"),
+            ("c_ratio", "ratio", "Ratio", 1.2, 20.0, 2.5, "cyan", ":1"),
+            ("c_attack", "attack", "Attack", 0.7, 1000.0, 12.0, "cyan", "ms"),
+            ("c_release", "release", "Release", 0.05, 5.0, 0.14, "amber", "s"),
+            ("c_makeup", "makeup", "Make-Up", 0.0, 24.0, 1.5, "cyan", "dB"),
+            ("c_sc_hpf", "sc_hpf", I18N.tr("audio.fx.sc_hpf_hz", "SC HPF"), 0.0, 500.0, 120.0, "sc", "Hz"),
+        ):
+            old = getattr(self, attribute)
+            cell = ContinuousKnobCell(
+                label, lower, upper, default, COLORS[color], f"{lower:g}", unit, f"{upper:g}",
+                lambda value, suffix=unit: f"{value:.3f}".rstrip("0").rstrip(".") + f" {suffix}",
+                parse_float_safe,
+            )
+            cell.setMaximumWidth(135)
+            self._knob_row.replaceWidget(old, cell)
+            old.hide()
+            old.deleteLater()
+            setattr(self, attribute, cell)
+            cell.valueChanged.connect(lambda value, key=field: self._set_param(key, round(value, 3)))
         self._knob_row.insertStretch(0)
         self._knob_row.addStretch()
-        self.c_sc_hpf.valueChanged.connect(lambda v: self._set_param("sc_hpf", round(v, 1)))
+        self.c_knee = ContinuousKnobCell(
+            I18N.tr("audio.fx.knee", "Knee"), 0.0, 24.0, 4.32, COLORS["sc"],
+            "0", "dB", "24", lambda v: f"{v:.1f} dB", parse_float_safe,
+        )
+        self.c_knee.setMaximumWidth(135)
+        self._knob_row.insertWidget(self._knob_row.count() - 1, self.c_knee)
+        self.c_knee.valueChanged.connect(lambda v: self._set_param("processor_knee", round(v, 1)))
         for button in (self.btn_auto_rel, self.btn_ext_sc, self.btn_sc_listen, self.btn_auto_gain):
             button.hide()
         self.bus_graph.setEnabled(False)
@@ -1942,6 +1965,10 @@ class StudioBusCompWidget(QWidget):
         self.c_makeup.setValue(st["makeup"])
         self.c_mix.setValue(st["mix"])
         self.c_sc_hpf.setValue(st["sc_hpf"])
+        if templates is not None:
+            template = templates["mx_glue" if is_api else "dx_glue"]
+            self.c_knee.setValue(st.get("processor_knee", template["knee"] * 0.24))
+            self.c_knee.setModuleActive(en)
 
         for cell in (
             self.c_thresh, self.c_ratio, self.c_attack,
@@ -2191,7 +2218,7 @@ class StudioBusCompWidget(QWidget):
         self.meter_input.setValue(input_db)
         self.vu_meter.setGainReduction(gr_db)
         self.meter_output.setValue(output_db)
-        self.bus_graph.pushSample(input_db)
+        self.bus_graph.pushSample(input_db, output_db)
         self._update_io_badge(input_db, output_db)
 
 

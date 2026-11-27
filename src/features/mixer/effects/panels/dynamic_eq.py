@@ -8,12 +8,13 @@ from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QLineEdit, QSizePolicy, QInputDialog, QMenu
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QPoint, QPointF, QRectF, QSignalBlocker, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
     QPainterPath, QFont, QPolygonF
 )
 
+from src.features.mixer.spectrogram import hold_spectrum_peaks
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
@@ -619,6 +620,7 @@ class CompactKnobCell(QWidget):
 # 5. 控件：交互式动态均衡器频响图 (静态曲线 + 动态包络扇区 + 实时调制曲线 + 侧链频谱)
 # =====================================================================
 class ProDynamicEQGraphWidget(QWidget):
+    spectrumVisibilityChanged = pyqtSignal(bool)
     nodeDragged = pyqtSignal(int, float, float)          # band_idx, freq, static_gain
     nodeDynRangeDragged = pyqtSignal(int, float)         # band_idx, dyn_range_db
     nodeQScrolled = pyqtSignal(int, float)               # band_idx, new_q
@@ -636,7 +638,9 @@ class ProDynamicEQGraphWidget(QWidget):
 
         self._bands = default_dynamic_eq_demo()["bands"]
         self._processor_controls = False
+        self._processor_band_count = 0
         self._eq_enabled = True
+        self._sample_rate = 48000.0
         self._ext_sc_enabled = True
         self._master_gain = 0.0
 
@@ -687,6 +691,13 @@ class ProDynamicEQGraphWidget(QWidget):
             self._selected_node = idx
             self.update()
 
+    def spectrum_visible(self) -> bool:
+        return self._show_spectrum
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        self._sample_rate = sample_rate
+        self.update()
+
     def update_spectrum(
         self,
         freqs_hz: list[float],
@@ -694,9 +705,10 @@ class ProDynamicEQGraphWidget(QWidget):
         peak_db: list[float] | None = None,
         sc_db: list[float] | None = None,
     ):
+        previous_peaks = self._spec_peak if self._show_peak_hold and freqs_hz == self._spec_freqs else []
         self._spec_freqs = freqs_hz
         self._spec_post = post_db
-        self._spec_peak = peak_db if peak_db is not None else post_db
+        self._spec_peak = peak_db if peak_db is not None else hold_spectrum_peaks(post_db, previous_peaks)
         if sc_db is not None:
             self._spec_sc = sc_db
         self.update()
@@ -760,7 +772,10 @@ class ProDynamicEQGraphWidget(QWidget):
             mag_sq = 1.0 / (1.0 + (ratio ** (2 * order)))
             return 10.0 * math.log10(max(1e-12, mag_sq))
 
-        fs = 48000.0
+        fs = self._sample_rate
+        if self._processor_controls:
+            f0 = min(f0, fs * 0.45)
+            q = min(q, 20.0)
         w0 = 2.0 * math.pi * f0 / fs
         cos_w0 = math.cos(w0)
         sin_w0 = math.sin(w0)
@@ -884,14 +899,16 @@ class ProDynamicEQGraphWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._btn_spec_rect.contains(pos):
                 self._show_spectrum = not self._show_spectrum
+                self.spectrumVisibilityChanged.emit(self._show_spectrum)
                 self.update()
                 return
-            if self._btn_sc_rect.contains(pos):
+            if not self._processor_controls and self._btn_sc_rect.contains(pos):
                 self._show_sc_spectrum = not self._show_sc_spectrum
                 self.update()
                 return
             if self._btn_peak_rect.contains(pos):
                 self._show_peak_hold = not self._show_peak_hold
+                self._spec_peak = self._spec_post
                 self.update()
                 return
 
@@ -910,8 +927,8 @@ class ProDynamicEQGraphWidget(QWidget):
 
         elif event.button() == Qt.MouseButton.RightButton:
             _, idx = self._hit_test(pos)
-            if idx >= 0:
-                self._show_node_context_menu(idx, event.globalPosition().toPoint())
+            if idx >= 0 or (self._processor_controls and self._plot_rect().contains(pos)):
+                self._show_context_menu(idx, event.globalPosition().toPoint(), pos)
 
     def mouseDoubleClickEvent(self, event):
         if event.button() != Qt.MouseButton.LeftButton:
@@ -929,23 +946,43 @@ class ProDynamicEQGraphWidget(QWidget):
             g = max(-20.0, min(20.0, round(self._y_to_gain(pos.y(), plot) - self._master_gain, 1)))
             self.bandSpawnRequested.emit(round(f, 1), g)
 
-    def _show_node_context_menu(self, idx: int, global_pos):
-        b = self._bands[idx]
-        if idx == 0:
-            opts = ["HPF", "Low Shelf", "Bell"]
-        elif idx == 5:
-            opts = ["LPF", "High Shelf", "Bell"]
-        else:
-            opts = ["Low Shelf", "Bell", "High Shelf", "Notch"]
-        if self._processor_controls:
-            opts = []
-
-        menu = QMenu(self)
+    def _show_context_menu(self, idx: int, global_pos: QPoint, pos: QPointF) -> None:
+        menu = QMenu()
         menu.setStyleSheet("""
             QMenu { background-color: #1D1D21; border: 1px solid #141416; color: #DCDCE2; font-size: 11px; }
             QMenu::item { padding: 5px 16px; }
             QMenu::item:selected { background-color: #35353D; color: #FFFFFF; }
         """)
+        if idx < 0:
+            for index, band in enumerate(self._bands[:self._processor_band_count]):
+                if not band["enabled"]:
+                    action = menu.addAction(I18N.tr(
+                        "mixer.effect_panel.dynamic_eq_enable_band", "Enable Band {band} ({frequency} Hz)",
+                        band=index + 1, frequency=format_freq(band["freq"]),
+                    ))
+                    action.triggered.connect(lambda checked=False, i=index: self.nodeToggleRequested.emit(i))
+            if self._processor_band_count < len(self._bands):
+                plot = self._plot_rect()
+                freq = round(self._x_to_freq(pos.x(), plot), 1)
+                gain = round(max(-20.0, min(20.0, self._y_to_gain(pos.y(), plot))), 1)
+                action = menu.addAction(I18N.tr("mixer.effect_panel.dynamic_eq_add_band", "Add Band"))
+                action.triggered.connect(lambda _checked=False: self.bandSpawnRequested.emit(freq, gain))
+            if not menu.isEmpty():
+                menu.exec(global_pos)
+            return
+
+        b = self._bands[idx]
+        if self._processor_controls:
+            opts = []
+        elif idx == 0:
+            opts = ["HPF", "Low Shelf", "Bell"]
+        elif idx == 5:
+            opts = ["LPF", "High Shelf", "Bell"]
+        else:
+            opts = ["Low Shelf", "Bell", "High Shelf", "Notch"]
+        if self._processor_band_count:
+            action = menu.addAction(I18N.tr("mixer.effect_panel.dynamic_eq_disable_band", "Disable Band"))
+            action.triggered.connect(lambda checked=False: self.nodeToggleRequested.emit(idx))
         for opt in opts:
             act = menu.addAction(f"Filter: {opt}")
             act.triggered.connect(lambda checked=False, o=opt: self.nodeShapeRequested.emit(idx, o))
@@ -1323,14 +1360,18 @@ class ProDynamicEQGraphWidget(QWidget):
 
         # 8. 右上角悬浮频谱控制胶囊 (SPEC / SC / PEAK)
         self._btn_spec_rect = QRectF(plot.right() - 122, plot.top() + 8, 36, 18)
+        if self._processor_controls:
+            self._btn_spec_rect.translate(40, 0)
         self._btn_sc_rect = QRectF(plot.right() - 82, plot.top() + 8, 32, 18)
         self._btn_peak_rect = QRectF(plot.right() - 46, plot.top() + 8, 38, 18)
 
         pills = [
             (self._btn_spec_rect, "SPEC", self._show_spectrum, "#28D8F0", "#24788C"),
-            (self._btn_sc_rect,   "SC",   self._show_sc_spectrum and self._ext_sc_enabled, "#F0A848", "#8C6224"),
             (self._btn_peak_rect, "PEAK", self._show_peak_hold and self._show_spectrum, "#28D8F0", "#24788C"),
         ]
+        if not self._processor_controls:
+            pills.insert(1, (self._btn_sc_rect, "SC", self._show_sc_spectrum and self._ext_sc_enabled,
+                             "#F0A848", "#8C6224"))
         for rect, label, active, fg_hex, bd_hex in pills:
             p.setPen(QPen(QColor(bd_hex) if active else QColor("#141416"), 1.0))
             p.setBrush(QColor(24, 34, 42, 215) if active else QColor(21, 21, 24, 185))
@@ -2263,6 +2304,7 @@ class StudioDynamicEQWidget(QWidget):
     bandChanged = pyqtSignal(int, dict)
     bandSoloChanged = pyqtSignal(int, bool)
     stateChanged = pyqtSignal(dict)
+    processorBandRequested = pyqtSignal(float, float)
 
     def __init__(self, track_name: str = "Backing Bus", parent=None):
         super().__init__(parent)
@@ -2273,6 +2315,7 @@ class StudioDynamicEQWidget(QWidget):
         self._active_bank = "A"
         self._selected_band = 3
         self._processor_mode = False
+        self._processor_band_count = 0
         self._banks = {
             "A": default_dynamic_eq_demo(),
             "B": default_dynamic_eq_flat(),
@@ -2486,7 +2529,7 @@ class StudioDynamicEQWidget(QWidget):
             "Sidechain In 1/2",
         ])
         self.sc_source_combo.setToolTip("选择外部侧链触发输入总线")
-        self.sc_source_combo.currentTextChanged.connect(self._on_sc_source_changed)
+        self.sc_source_combo.currentIndexChanged.connect(self._on_sc_source_changed)
         tb_lay.addWidget(self.sc_source_combo)
 
         self.sc_listen_btn = QPushButton("SC Listen")
@@ -2545,7 +2588,7 @@ class StudioDynamicEQWidget(QWidget):
         self.eq_graph.nodeShapeRequested.connect(self._on_graph_node_shape)
         self.eq_graph.nodeDynToggled.connect(self._on_graph_node_dyn_toggled)
         self.eq_graph.nodeTriggerToggled.connect(self._on_graph_node_trigger_toggled)
-        self.eq_graph.nodeClicked.connect(self._select_band_card)
+        self.eq_graph.nodeClicked.connect(self.select_band)
         self.eq_graph.nodeToggleRequested.connect(self._on_graph_node_toggled)
         self.eq_graph.bandSpawnRequested.connect(self._on_graph_band_spawn)
         graph_row.addWidget(self.eq_graph, 1)
@@ -2581,7 +2624,7 @@ class StudioDynamicEQWidget(QWidget):
             card = DynamicBandCard(b)
             card.bandChanged.connect(self._on_band_card_changed)
             card.soloToggled.connect(self._on_band_solo_toggled)
-            card.selected.connect(self._select_band_card)
+            card.selected.connect(self.select_band)
             cards_row.addWidget(card, 1)
             self.band_cards.append(card)
 
@@ -2640,7 +2683,7 @@ class StudioDynamicEQWidget(QWidget):
                 border: 1px solid #F0A848;
             }
         """)
-        self.sc_source_combo.setEnabled(ext_on)
+        self.sc_source_combo.setEnabled(self._processor_mode or ext_on)
 
         sc_aud = bool(st["sc_audition"])
         self.sc_listen_btn.setChecked(sc_aud)
@@ -2670,30 +2713,51 @@ class StudioDynamicEQWidget(QWidget):
         self.sc_listen_btn.hide()
         self.phase_combo.hide()
         self.master_strip.setEnabled(False)
+        for state in (*self._banks.values(), *self._presets.values()):
+            state.update(ext_sc_source="internal", ext_sc_enabled=False)
         for index, card in enumerate(self.band_cards):
             if index != 3:
                 card.hide()
         self._refresh_all_views()
 
+    def set_processor_band_count(self, band_count: int) -> None:
+        self._processor_band_count = min(band_count, len(self.band_cards))
+        self.eq_graph._processor_band_count = self._processor_band_count
+
     def _refresh_all_views(self):
         st = self._current_state()
-        if self._processor_mode and not getattr(self, "_processor_multiband", False):
+        if self._processor_mode:
+            st["master_gain"] = 0.0
+            for band in st["bands"]:
+                band.update(filter_type="Bell", range_key="All", auto_timing=False, trigger_mode="INT")
+        if self._processor_mode and not self._processor_band_count:
             for index, band in enumerate(st["bands"]):
                 band["enabled"] = index == 3
             band = st["bands"][3]
-            band.update(filter_type="Bell", range_key="All", auto_timing=False, trigger_mode="INT")
             band.setdefault("max_boost", 0.0)
             band.setdefault("threshold_slope", 0.5)
             self._selected_band = 3
+        elif self._processor_mode:
+            for band in st["bands"][self._processor_band_count:]:
+                band["enabled"] = False
+            enabled = [i for i, band in enumerate(st["bands"]) if band["enabled"]]
+            if self._selected_band >= self._processor_band_count or (enabled and self._selected_band not in enabled):
+                self._selected_band = next(iter(enabled), 0)
         if self._processor_mode:
             for i, card in enumerate(self.band_cards):
                 card.setVisible(i == self._selected_band)
         self._update_top_bar_styles()
         self.power_switch.setChecked(st["enabled"])
 
-        self.sc_source_combo.blockSignals(True)
-        self.sc_source_combo.setCurrentText(st["ext_sc_source"])
-        self.sc_source_combo.blockSignals(False)
+        combo = self.sc_source_combo
+        with QSignalBlocker(combo):
+            if self._processor_mode:
+                source = st["ext_sc_source"]
+                if combo.count() and combo.itemData(0) is not None and combo.findData(source) < 0:
+                    combo.addItem(source, source)
+                combo.setCurrentIndex(combo.findData(source))
+            else:
+                combo.setCurrentText(st["ext_sc_source"])
 
         self.phase_combo.blockSignals(True)
         self.phase_combo.setCurrentText(st["phase_mode"])
@@ -2733,7 +2797,13 @@ class StudioDynamicEQWidget(QWidget):
         self.sidechainConfigChanged.emit(checked, st["ext_sc_source"], st["sc_audition"])
         self.stateChanged.emit(self.get_state())
 
-    def _on_sc_source_changed(self, source: str):
+    def _on_sc_source_changed(self, index: int) -> None:
+        if index < 0:
+            return
+        combo = self.sc_source_combo
+        source = combo.itemData(index) if self._processor_mode else combo.itemText(index)
+        if not isinstance(source, str):
+            return
         st = self._current_state()
         st["ext_sc_source"] = source
         self.sidechainConfigChanged.emit(st["ext_sc_enabled"], source, st["sc_audition"])
@@ -2759,7 +2829,7 @@ class StudioDynamicEQWidget(QWidget):
         self.masterGainChanged.emit(gain)
         self.stateChanged.emit(self.get_state())
 
-    def _select_band_card(self, idx: int):
+    def select_band(self, idx: int) -> None:
         self._selected_band = idx
         for i, card in enumerate(self.band_cards):
             card.setSelected(i == idx)
@@ -2770,7 +2840,7 @@ class StudioDynamicEQWidget(QWidget):
     def _on_band_card_changed(self, band_index: int, band_data: dict):
         st = self._current_state()
         st["bands"][band_index - 1] = band_data
-        self._select_band_card(band_index - 1)
+        self.select_band(band_index - 1)
         self.eq_graph.setState(st["bands"], st["enabled"], st["ext_sc_enabled"], st["master_gain"])
         self.bandChanged.emit(band_index, band_data)
         self.stateChanged.emit(self.get_state())
@@ -2784,19 +2854,21 @@ class StudioDynamicEQWidget(QWidget):
         self.bandSoloChanged.emit(band_index, is_solo)
 
     def _on_graph_node_toggled(self, idx: int):
-        if self._processor_mode:
+        if self._processor_mode and not 0 <= idx < self._processor_band_count:
             return
         st = self._current_state()
         b = st["bands"][idx]
         b["enabled"] = not b["enabled"]
         self.band_cards[idx].syncFromData(b)
-        self._select_band_card(idx)
+        self.select_band(idx)
         self.eq_graph.setState(st["bands"], st["enabled"], st["ext_sc_enabled"], st["master_gain"])
         self.bandChanged.emit(b["index"], copy.deepcopy(b))
         self.stateChanged.emit(self.get_state())
 
     def _on_graph_band_spawn(self, freq: float, gain: float):
         if self._processor_mode:
+            if self._processor_band_count < len(self.band_cards):
+                self.processorBandRequested.emit(freq, gain)
             return
         st = self._current_state()
         disabled = [i for i, b in enumerate(st["bands"]) if not b["enabled"] and i in (1, 2, 3, 4)]
@@ -2817,7 +2889,7 @@ class StudioDynamicEQWidget(QWidget):
             if abs(b["dyn_range"]) < 0.1:
                 b["dyn_range"] = -4.5
         self.band_cards[target_idx].syncFromData(b)
-        self._select_band_card(target_idx)
+        self.select_band(target_idx)
         self.eq_graph.setState(st["bands"], st["enabled"], st["ext_sc_enabled"], st["master_gain"])
         self.bandChanged.emit(b["index"], copy.deepcopy(b))
         self.stateChanged.emit(self.get_state())
@@ -2829,7 +2901,7 @@ class StudioDynamicEQWidget(QWidget):
         b["gain"] = round(gain, 1)
         b["range_key"] = "All" if self._processor_mode else auto_range_key(b["freq"])
         self.band_cards[idx].syncFromData(b)
-        self._select_band_card(idx)
+        self.select_band(idx)
         self.eq_graph.setState(st["bands"], st["enabled"], st["ext_sc_enabled"], st["master_gain"])
         self.bandChanged.emit(b["index"], copy.deepcopy(b))
         self.stateChanged.emit(self.get_state())
@@ -2840,7 +2912,7 @@ class StudioDynamicEQWidget(QWidget):
         b["dyn_enabled"] = True
         b["dyn_range"] = round(min(0.0, dyn_range) if self._processor_mode else dyn_range, 1)
         self.band_cards[idx].syncFromData(b)
-        self._select_band_card(idx)
+        self.select_band(idx)
         self.eq_graph.setState(st["bands"], st["enabled"], st["ext_sc_enabled"], st["master_gain"])
         self.bandChanged.emit(b["index"], copy.deepcopy(b))
         self.stateChanged.emit(self.get_state())
@@ -2979,6 +3051,8 @@ class StudioDynamicEQWidget(QWidget):
     # -----------------------------------------------------------------
     def reset_eq(self):
         self._banks[self._active_bank] = default_dynamic_eq_flat()
+        if self._processor_mode:
+            self._current_state().update(ext_sc_source="internal", ext_sc_enabled=False)
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
 

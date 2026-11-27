@@ -418,6 +418,7 @@ def clip_fx_entries(
     音频 mixer 效果（实时路径与导出路径同一过滤口径）。
     """
     from src.features.edit.core.effect_registry import AUDIO_MIXER_EFFECT_TYPES
+    from src.features.edit.core.timeline_v2 import set_automated_effect_param
 
     allowed = audio_types if audio_types is not None else AUDIO_MIXER_EFFECT_TYPES
     entries: list = []
@@ -433,7 +434,7 @@ def clip_fx_entries(
                 for name, param in animated.items():
                     if hasattr(param, "is_animated") and param.is_animated():
                         try:
-                            params[name] = get_at(name, frame)
+                            set_automated_effect_param(effect_type, params, name, get_at(name, frame))
                         except Exception:  # noqa: BLE001 — 单参数失败不阻断链
                             logger.debug(
                                 "animated fx param %s evaluate failed", name,

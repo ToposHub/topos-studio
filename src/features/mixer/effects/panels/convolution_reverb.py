@@ -5,6 +5,9 @@ import sys
 import math
 import copy
 import random
+import threading
+import wave
+from concurrent.futures import CancelledError, Future
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QLineEdit, QFileDialog,
@@ -14,9 +17,10 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer, QSignalBlocker
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QBrush, QLinearGradient,
-    QPainterPath, QFont, QPolygonF
+    QPainterPath, QFont, QPolygonF, QShowEvent, QHideEvent
 )
 
+from src.features.edit.core.audio_effects.convolution_reverb import IrWaveform, prepare_ir_waveform
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
@@ -881,12 +885,19 @@ class StereoLevelMeter(QWidget):
         self.setFixedWidth(36)
 
     def setLevels(self, db_l: float, db_r: float):
+        previous = (self._db_l, self._db_r, self._peak_l, self._peak_r, self._clipped)
         self._db_l = max(-60.0, min(0.0, db_l))
         self._db_r = max(-60.0, min(0.0, db_r))
         self._peak_l = self._db_l if self._db_l >= self._peak_l else max(self._db_l, self._peak_l - 0.35)
         self._peak_r = self._db_r if self._db_r >= self._peak_r else max(self._db_r, self._peak_r - 0.35)
         if db_l >= -0.1 or db_r >= -0.1:
             self._clipped = True
+        if previous != (self._db_l, self._db_r, self._peak_l, self._peak_r, self._clipped):
+            self.update()
+
+    def clear(self) -> None:
+        self._db_l = self._db_r = self._peak_l = self._peak_r = -60.0
+        self._clipped = False
         self.update()
 
     def mousePressEvent(self, event):
@@ -961,6 +972,8 @@ class ConvolutionIRGraphWidget(QWidget):
         self._view_mode = "WAVE"      # "WAVE" (双声道脉冲波形) | "SPEC" (IR 频谱特征)
         self._capture_mode = False    # False = 卷积响应视图, True = 扫频录制视图
         self._processor_controls = False
+        self._ir_waveform: IrWaveform | None = None
+        self._ir_error = ""
 
         # 扫频录制状态
         self._sweep_recording = False
@@ -994,6 +1007,58 @@ class ConvolutionIRGraphWidget(QWidget):
         self._peaks_l = peaks_l
         self._peaks_r = peaks_r
         self.update()
+
+    def set_processor_waveform(self, waveform: IrWaveform | None, error: str = "") -> None:
+        self._ir_waveform = waveform
+        self._ir_error = error
+        self.update()
+
+    def _paint_processor_response(self, p: QPainter, plot: QRectF) -> None:
+        p.setFont(QFont(MONO_FONT_FAM, 8))
+        p.setPen(QColor("#AEB0B9"))
+        name = os.path.basename(self._params.get("file_path", ""))
+        waveform = self._ir_waveform
+        if waveform is None:
+            if self._ir_error:
+                message = self._ir_error
+            elif name:
+                message = I18N.tr("audio.fx.ir_preparing", "Preparing impulse response…")
+            else:
+                message = I18N.tr("audio.fx.no_ir", "No impulse response")
+            message = p.fontMetrics().elidedText(
+                message, Qt.TextElideMode.ElideRight, int(plot.width()) - 20)
+            p.drawText(plot, Qt.AlignmentFlag.AlignCenter, message)
+            return
+
+        resource = waveform.resource
+        seconds = resource.samples / resource.sample_rate
+        for step in range(9):
+            t = step / 8
+            x = plot.left() + t * plot.width()
+            p.setPen(QPen(QColor("#303037"), 1))
+            p.drawLine(QPointF(x, plot.top()), QPointF(x, plot.bottom()))
+            p.setPen(QColor("#AEB0B9"))
+            tick = f"{seconds * t:.2f}s" if seconds >= 1.0 else f"{seconds * t * 1000:.0f}ms"
+            p.drawText(QRectF(x - 24, plot.bottom() + 5, 48, 16),
+                       Qt.AlignmentFlag.AlignCenter, tick)
+
+        p.setPen(QColor("#AEB0B9"))
+        label = f"{name} · {resource.channels}ch · {resource.sample_rate / 1000:g} kHz"
+        p.drawText(QRectF(plot.left() + 8, plot.top() + 5, plot.width() - 16, 16),
+                   Qt.AlignmentFlag.AlignLeft,
+                   p.fontMetrics().elidedText(label, Qt.TextElideMode.ElideMiddle, int(plot.width()) - 16))
+        color = QColor(SUITE_PALETTE["reverb"])
+        color.setAlpha(220 if self._params.get("enabled", True) else 60)
+        scale = plot.height() * 0.18
+        for title, peaks, fraction in (("L", waveform.left, 0.38), ("R", waveform.right, 0.77)):
+            y = plot.top() + fraction * plot.height()
+            p.setPen(QColor("#AEB0B9"))
+            p.drawText(QPointF(plot.left() - 18, y + 4), title)
+            p.setPen(QPen(color, 1.15))
+            for index, peak in enumerate(peaks):
+                x = plot.left() + index * plot.width() / max(1, len(peaks) - 1)
+                amplitude = peak * scale
+                p.drawLine(QPointF(x, y - amplitude), QPointF(x, y + amplitude))
 
     def setCaptureMode(self, enabled: bool):
         self._capture_mode = enabled
@@ -1149,13 +1214,8 @@ class ConvolutionIRGraphWidget(QWidget):
 
         p.fillRect(plot, QColor("#1D1D20"))
 
-        if self._processor_controls and not self._peaks_l:
-            name = os.path.basename(self._params.get("file_path", ""))
-            message = name or I18N.tr("audio.fx.no_ir", "No impulse response")
-            p.setPen(QColor("#AEB0B9"))
-            p.setFont(QFont(MONO_FONT_FAM, 10))
-            message = p.fontMetrics().elidedText(message, Qt.TextElideMode.ElideMiddle, int(plot.width()) - 20)
-            p.drawText(plot, Qt.AlignmentFlag.AlignCenter, message)
+        if self._processor_controls:
+            self._paint_processor_response(p, plot)
             return
 
         if self._capture_mode:
@@ -2078,6 +2138,15 @@ class StudioConvolutionReverbWidget(QWidget):
 
     def use_processor_controls(self) -> None:
         self._processor_mode = True
+        self._demo_timer.stop()
+        self._ir_preview_timer = QTimer(self)
+        self._ir_preview_timer.setInterval(35)
+        self._ir_preview_timer.timeout.connect(self._poll_ir_preview)
+        self._ir_preview_key: tuple[str, int, bool] | None = None
+        self._ir_preview_future: Future[IrWaveform] | None = None
+        self._ir_preview_cancel = threading.Event()
+        self._processor_sample_rate = 48000
+        self._supports_true_stereo = True
         self.ir_browser.hide()
         self.sweep_mode_btn.hide()
         self._presets.clear()
@@ -2085,12 +2154,25 @@ class StudioConvolutionReverbWidget(QWidget):
             self.preset_combo.clear()
         for state in self._banks.values():
             state["file_path"] = ""
+            state["dry_wet"] = 35.0
             state["dry_level"] = 100.0
+            state["true_stereo"] = False
         load_button = QPushButton(I18N.tr("audio.fx.choose_ir", "Load WAV"), self)
         load_button.setObjectName("ToolBtn")
         load_button.setCursor(Qt.CursorShape.PointingHandCursor)
         load_button.clicked.connect(self._open_ir_file_dialog)
         self._ir_toolbar.insertWidget(self._ir_toolbar.count() - 2, load_button)
+        self.clear_ir_button = QPushButton(I18N.tr("audio.fx.clear_ir", "Clear IR"), self)
+        self.clear_ir_button.setObjectName("ToolBtn")
+        self.clear_ir_button.clicked.connect(self._clear_ir)
+        self._ir_toolbar.insertWidget(self._ir_toolbar.count() - 2, self.clear_ir_button)
+        self.true_stereo_button = QPushButton(I18N.tr("audio.fx.true_stereo", "True Stereo"), self)
+        self.true_stereo_button.setObjectName("ToolBtn")
+        self.true_stereo_button.setCheckable(True)
+        self.true_stereo_button.setToolTip(
+            I18N.tr("audio.fx.true_stereo_hint", "Use the LL/LR/RL/RR paths of a four-channel WAV"))
+        self.true_stereo_button.clicked.connect(self._on_true_stereo_toggled)
+        self._ir_toolbar.insertWidget(self._ir_toolbar.count() - 2, self.true_stereo_button)
         self._controls["dry_wet"].title_lbl.setText(I18N.tr("audio.fx.wet", "Wet"))
         dry = self._add_ctrl(
             "dry_level", I18N.tr("audio.fx.dry", "Dry"), 0.0, 100.0, 100.0, "%",
@@ -2104,10 +2186,90 @@ class StudioConvolutionReverbWidget(QWidget):
         self.wet_lock_btn.hide()
         self.ir_graph._processor_controls = True
         self.ir_graph.setMinimumSize(440, 168)
-        self.ir_graph.setToolTip("Load or drop an impulse response WAV file")
-        self.in_meter.setLevels(-60.0, -60.0)
-        self.out_meter.setLevels(-60.0, -60.0)
+        self.ir_graph.setToolTip(I18N.tr("audio.fx.ir_drop_hint", "Load or drop an impulse response WAV file"))
+        self.in_meter.clear()
+        self.out_meter.clear()
         self._refresh_all_views()
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        self._processor_sample_rate = int(sample_rate)
+        self._sync_ir_preview()
+
+    @property
+    def current_ir_path(self) -> str:
+        return self._current_state()["file_path"]
+
+    def refresh_ir_if_changed(self, sha256: str) -> None:
+        current = self.ir_graph._ir_waveform
+        if current is not None and sha256 and current.resource.sha256 != sha256:
+            self._ir_preview_key = None
+            self._sync_ir_preview()
+
+    def set_true_stereo_available(self, available: bool) -> None:
+        self._supports_true_stereo = available
+        self.true_stereo_button.setEnabled(available)
+        if not available:
+            self.true_stereo_button.setToolTip(I18N.tr(
+                "audio.fx.true_stereo_legacy", "Four-path routing requires the current convolution algorithm"))
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        if self._processor_mode:
+            self._sync_ir_preview()
+
+    def hideEvent(self, event: QHideEvent) -> None:
+        if self._processor_mode:
+            self._cancel_ir_preview()
+        super().hideEvent(event)
+
+    def _cancel_ir_preview(self) -> None:
+        self._ir_preview_timer.stop()
+        if self._ir_preview_future is not None:
+            self._ir_preview_cancel.set()
+            self._ir_preview_future.cancel()
+            self._ir_preview_future = None
+            self._ir_preview_key = None
+
+    def _sync_ir_preview(self) -> None:
+        state = self._current_state()
+        key = (state["file_path"], self._processor_sample_rate,
+               self._supports_true_stereo and state["true_stereo"])
+        if self._ir_preview_key == key:
+            return
+        self._cancel_ir_preview()
+        self.ir_graph.set_processor_waveform(None)
+        if not key[0]:
+            self._ir_preview_key = key
+        if key[0] and self.isVisible():
+            self._ir_preview_key = key
+            self._ir_preview_cancel = threading.Event()
+            self._ir_preview_future = prepare_ir_waveform(*key, self._ir_preview_cancel)
+            self._ir_preview_timer.start()
+
+    def _poll_ir_preview(self) -> None:
+        future = self._ir_preview_future
+        if future is None or not future.done():
+            return
+        self._ir_preview_timer.stop()
+        self._ir_preview_future = None
+        try:
+            self.ir_graph.set_processor_waveform(future.result())
+        except CancelledError:
+            self._ir_preview_key = None
+        except (OSError, ValueError, EOFError, wave.Error) as exc:
+            error = I18N.tr("audio.fx.ir_failed", "Unable to load impulse response")
+            self.ir_graph.set_processor_waveform(None, f"{error} · {exc}")
+
+    def _clear_ir(self) -> None:
+        self._current_state()["file_path"] = ""
+        self._refresh_all_views()
+        self.irFileLoadRequested.emit("")
+        self.stateChanged.emit(self.get_state())
+
+    def _on_true_stereo_toggled(self, checked: bool) -> None:
+        self._current_state()["true_stereo"] = checked
+        self._sync_ir_preview()
+        self.stateChanged.emit(self.get_state())
 
     def _add_ctrl(self, key: str, title: str, min_v: float, max_v: float, def_v: float, unit: str, **kwargs) -> KnobControlUnit:
         ctrl = KnobControlUnit(key, title, min_v, max_v, def_v, unit, **kwargs)
@@ -2208,6 +2370,9 @@ class StudioConvolutionReverbWidget(QWidget):
         self._update_top_and_toggle_styles()
         if self._processor_mode:
             st.setdefault("dry_level", 100.0)
+            st.setdefault("true_stereo", False)
+            self.true_stereo_button.setChecked(bool(st["true_stereo"]))
+            self.clear_ir_button.setEnabled(bool(st["file_path"]))
 
         self.power_switch.setChecked(en)
 
@@ -2225,7 +2390,7 @@ class StudioConvolutionReverbWidget(QWidget):
             card.setBandActive(en)
 
         if self._processor_mode:
-            self.ir_graph.setWaveformPeaks([], [])
+            self._sync_ir_preview()
         else:
             peaks_l, peaks_r = generate_synthetic_ir_peaks(st.get("seed", 101), st.get("native_ms", 400.0))
             self.ir_graph.setWaveformPeaks(peaks_l, peaks_r)
@@ -2233,8 +2398,6 @@ class StudioConvolutionReverbWidget(QWidget):
 
     def _switch_bank(self, bank: str):
         if bank != self._active_bank:
-            if self._processor_mode and not self._banks[bank]["file_path"]:
-                self._banks[bank]["file_path"] = self._current_state()["file_path"]
             self._active_bank = bank
             self._refresh_all_views()
             self.stateChanged.emit(self.get_state())
@@ -2402,7 +2565,7 @@ class StudioConvolutionReverbWidget(QWidget):
     # -----------------------------------------------------------------
     def reset_reverb(self):
         if self._processor_mode:
-            self._current_state().update(dry_wet=35.0, dry_level=100.0)
+            self._current_state().update(dry_wet=35.0, dry_level=100.0, true_stereo=False)
             with QSignalBlocker(self.preset_combo):
                 self.preset_combo.setCurrentIndex(-1)
         else:

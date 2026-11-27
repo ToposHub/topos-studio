@@ -18,6 +18,13 @@ class InstanceSpectrumTap:
         self._size = size
         self._input = np.zeros((channels, size), np.float32)
         self._output = np.zeros_like(self._input)
+        self._window = np.hanning(size)
+        self._amplitude_scale = 2.0 / max(float(self._window.sum()), 1.0)
+        bins = np.fft.rfftfreq(size, 1 / self._rate)
+        freqs = np.geomspace(20, min(20000, self._rate * .49), 96)
+        centers = np.searchsorted(bins, freqs).clip(0, bins.size - 1)
+        self._bins = (centers + np.array([[-1], [0], [1]])).clip(0, bins.size - 1)
+        self._freqs = freqs.tolist()
         self._position = 0
         self._channels = 0
         self._lock = threading.Lock()
@@ -28,9 +35,10 @@ class InstanceSpectrumTap:
 
     def clear(self) -> None:
         with self._lock:
+            if not self._channels:
+                return
             self._generation += 1
-            self._input.fill(0)
-            self._output.fill(0)
+            self._channels = 0
             self._position = 0
             self._snapshot = {}
 
@@ -71,18 +79,13 @@ class InstanceSpectrumTap:
                     return
                 before = np.roll(self._input[:self._channels], -self._position, axis=-1)
                 after = np.roll(self._output[:self._channels], -self._position, axis=-1)
-            window = np.hanning(self._size)
-            bins = np.fft.rfftfreq(self._size, 1 / self._rate)
-            freqs = np.geomspace(20, min(20000, self._rate * .49), 96)
-            indices = np.searchsorted(bins, freqs).clip(0, bins.size - 1)
-            snapshot = {'freqs': freqs.tolist(), 'sample_rate': self._rate,
+            snapshot = {'freqs': self._freqs, 'sample_rate': self._rate,
                         'generation': generation}
             for name, samples in (('input_db', before), ('output_db', after)):
-                power = np.mean(np.abs(np.fft.rfft(samples * window)) ** 2, axis=0)
-                magnitude = np.sqrt(power) * 2 / max(window.sum(), 1)
-                values = [float(20 * np.log10(max(float(magnitude[max(0, i-1):i+2].max()), 1e-6)))
-                          for i in indices]
-                snapshot[name] = values
+                power = np.mean(np.abs(np.fft.rfft(samples * self._window)) ** 2, axis=0)
+                magnitude = np.sqrt(power) * self._amplitude_scale
+                peaks = magnitude[self._bins].max(axis=0)
+                snapshot[name] = (20 * np.log10(np.maximum(peaks, 1e-6))).tolist()
             with self._lock:
                 if generation == self._generation:
                     self._snapshot = snapshot

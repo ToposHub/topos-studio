@@ -276,3 +276,42 @@ class TestMixerPdcAlignment:
         mixer.set_track_routing("dry", None, [], is_bus=False)  # 触发重算
         assert mixer._pdc_delay == {"dry": 600}
         assert mixer.pdc_total_samples() == 1200
+
+
+def test_exciter_wet_automation_keeps_live_and_export_tracks_aligned() -> None:
+    from src.features.edit.core.timeline_v2 import (
+        EditTrack, EffectChainParams, Keyframe, KeyframeTrack, TimelineSequence,
+        TrackEffectInstance, build_track_fx_sampler,
+    )
+
+    chain = EffectChainParams((TrackEffectInstance("exciter", {
+        "ex_quality": "clean", "ex_oversampling": 2, "ex_wet": 0.0,
+        "ex_bands": [{"enabled": True, "amount": .5}],
+    }, instance_id="exciter"),))
+    param = "fx/exciter/ex_wet"
+    wet = KeyframeTrack(param_name=param, min_val=0.0, max_val=1.0)
+    wet.add_keyframe(Keyframe(0, 0.0))
+    wet.add_keyframe(Keyframe(1, 1.0))
+    tracks = (
+        EditTrack(track_id="dry", track_type="audio", index=0),
+        EditTrack(track_id="fx", track_type="audio", index=1, effect_chain=chain,
+                  automation_mode="read", automation={param: wet}),
+    )
+    renderer = AudioGraphRenderer(SR)
+    renderer.configure_from_sequence(TimelineSequence(audio_tracks=tracks))
+    position = BLOCK + 100
+    mixer = _mixer(("dry", position), ("fx", position), amp=.2)
+    mixer.set_track_effect_chain("fx", chain, build_track_fx_sampler(tracks[1]))
+    assert mixer.pdc_total_samples() == 20
+
+    live = _run_realtime(mixer, 2 * BLOCK, BLOCK)
+    offline = np.zeros_like(live)
+    for frame, output in enumerate(np.split(offline, 2, axis=1)):
+        pcm = np.zeros_like(output)
+        if frame == 1:
+            pcm[:, 100] = .2
+        for track in tracks:
+            block = renderer.render_track_block(track.track_id, pcm.copy(), frame)
+            renderer.route_track_output(track.track_id, block, output, {})
+    np.testing.assert_array_equal(live, offline)
+    assert [index for index, _ in _pulse_peaks(live)] == [position + 20]

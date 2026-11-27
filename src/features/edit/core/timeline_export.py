@@ -4607,24 +4607,21 @@ class TimelineExporter:
 
         # H09：Freeze 捕获资产装载（项目注册表 → 各节点 DSP 链；缺资产
         # 逐条诊断，重放退化为当前历史——不静默伪造）
+        from src.features.edit.core.freeze_capture_store import (
+            apply_freeze_entries,
+            apply_freeze_registry,
+            freeze_registry_from_project,
+        )
+        _freeze_reg = {}
         try:
-            from src.features.edit.core.freeze_capture_store import (
-                apply_freeze_registry,
-                freeze_registry_from_project,
-            )
             _freeze_reg = freeze_registry_from_project(self._project)
-            if _freeze_reg:
-                for _t in audio_sequence.audio_tracks:
-                    _tn = renderer.get_node(_t.track_id)
-                    if _tn is not None and _tn.effect_chain is not None:
-                        apply_freeze_registry(_tn.effect_chain,
-                                              getattr(_t, "effect_chain", None),
-                                              _freeze_reg)
-                if renderer._master_chain is not None:
-                    apply_freeze_registry(
-                        renderer._master_chain,
-                        getattr(audio_sequence, "master_effect_chain", None),
-                        _freeze_reg)
+            for _t in audio_sequence.audio_tracks:
+                _tn = renderer.get_node(_t.track_id)
+                if _tn is not None and _tn.effect_chain is not None:
+                    apply_freeze_registry(_tn.effect_chain, getattr(_t, "effect_chain", None), _freeze_reg)
+            if renderer._master_chain is not None:
+                apply_freeze_registry(renderer._master_chain,
+                                      getattr(audio_sequence, "master_effect_chain", None), _freeze_reg)
         except Exception:  # pragma: no cover — 资产装载不阻断导出
             logger.debug("freeze capture registry apply failed",
                          exc_info=True)
@@ -4867,6 +4864,7 @@ class TimelineExporter:
                     _pc_chain = EffectChain(float(sample_rate))
                     _pc_chain.set_params(
                         _pc_entries, sample_rate=float(sample_rate))
+                    apply_freeze_entries(_pc_chain, _pc_entries, _freeze_reg)
                     clip_fx_cache[_pc.clip_id] = _pc_chain
                     try:
                         _pc_lat = max(0, int(_pc_chain.latency_samples()))
@@ -5174,6 +5172,7 @@ class TimelineExporter:
                                 chain = EffectChain(float(sample_rate))
                                 chain.set_params(
                                     static_entries, sample_rate=float(sample_rate))
+                                apply_freeze_entries(chain, static_entries, _freeze_reg)
                                 clip_fx_cache[clip.clip_id] = chain
                                 clip_chain = chain
                         fx_sampler = _clip_fx_cache_fx.get(clip.clip_id)

@@ -33,7 +33,7 @@ from PyQt6.QtGui import (
     QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen,
     QPixmap, QRadialGradient,
 )
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -58,14 +58,22 @@ def pro_font(size: int, weight: int = -1) -> QFont:
     return f
 
 
-def apply_float_panel(dialog) -> None:
+def apply_float_panel(dialog: QDialog) -> None:
     """效果器对话框置顶：始终保持在主窗口（含全屏视频窗口）最前面。
 
     Da Vinci Fairlight 风格——效果器是浮动面板，播放/编辑期间不会被
     主窗口或全屏监视器压底。
     """
-    dialog.setWindowFlags(
-        dialog.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+    dialog.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint)
+
+
+def present_effect_window(dialog: QDialog) -> None:
+    if dialog.isMinimized():
+        dialog.showNormal()
+    else:
+        dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
 
 
 def glyph_icon(kind: str, color: str = "#B9BFCE", size: int = 14) -> QIcon:

@@ -4,12 +4,20 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 
 import numpy as np
 
 FREQUENCY_MIN = 20.0
 FREQUENCY_KNEE = 500.0
 DB_FLOOR = -96.0
+
+
+def hold_spectrum_peaks(current: list[float], previous: list[float]) -> list[float]:
+    """Track per-bin maxima until the display is cleared or its bins change."""
+    if len(current) != len(previous) or not previous:
+        return current
+    return list(map(max, current, previous))
 
 
 def frequency_fraction(frequency: float, nyquist: float) -> float:
@@ -40,6 +48,24 @@ class Spectrogram:
         return (self.end_sample - self.start_sample) / self.pixels.shape[2]
 
 
+@lru_cache(maxsize=16)
+def _spectrogram_basis(sample_rate: int, nfft: int, rows: int) -> tuple[np.ndarray, ...]:
+    window = np.hanning(nfft).astype(np.float32)
+    amplitude_scale = np.full(nfft // 2 + 1, 2.0 / window.sum(), dtype=np.float32)
+    amplitude_scale[[0, -1]] *= 0.5
+    span = _frequency_span(sample_rate * 0.5)
+    row_freq = FREQUENCY_MIN + FREQUENCY_KNEE * np.expm1((np.arange(rows) + 0.5) / rows * span)
+    row_bins = row_freq * (nfft / sample_rate)
+    lower = row_bins.astype(np.intp)
+    weight = (row_bins - lower).astype(np.float32)
+    fft_freq = np.fft.rfftfreq(nfft, 1.0 / sample_rate)
+    fft_rows = np.minimum(rows - 1, (np.log1p(
+        np.maximum(0, fft_freq - FREQUENCY_MIN) / FREQUENCY_KNEE
+    ) / span * rows).astype(np.intp))
+    peak_rows, peak_starts = np.unique(fft_rows, return_index=True)
+    return window, amplitude_scale, lower, weight, peak_rows, peak_starts
+
+
 def analyze_spectrogram(
     pcm: np.ndarray, sample_rate: int, *, nfft: int, columns: int,
     start: int = 0, end: int | None = None, rows: int = 320,
@@ -63,40 +89,29 @@ def analyze_spectrogram(
     width = min(frames, columns)
     frame_edges = np.ceil(np.arange(width + 1) * (frames / width) - 0.5).astype(np.intp)
     pixels = np.empty((channels, rows, width), dtype=np.uint8)
-    window = np.hanning(nfft).astype(np.float32)
-    amplitude_scale = np.full(nfft // 2 + 1, 2.0 / window.sum(), dtype=np.float32)
-    amplitude_scale[[0, -1]] *= 0.5
-
-    nyquist = sample_rate * 0.5
-    row_freq = FREQUENCY_MIN + FREQUENCY_KNEE * np.expm1(
-        (np.arange(rows) + 0.5) / rows * _frequency_span(nyquist))
-    row_bins = row_freq * (nfft / sample_rate)
-    lower = row_bins.astype(np.intp)
-    weight = (row_bins - lower).astype(np.float32)
-    fft_freq = np.fft.rfftfreq(nfft, 1.0 / sample_rate)
-    fft_rows = np.minimum(rows - 1, (np.log1p(
-        np.maximum(0, fft_freq - FREQUENCY_MIN) / FREQUENCY_KNEE
-    ) / _frequency_span(nyquist) * rows).astype(np.intp))
-    peak_rows, peak_starts = np.unique(fft_rows, return_index=True)
-
-    # The padding is local to the requested range. Windows in the detail
-    # view still read their real neighbors outside the visible viewport.
+    window, amplitude_scale, lower, weight, peak_rows, peak_starts = _spectrogram_basis(
+        sample_rate, nfft, rows)
     half = nfft // 2
-    base = max(0, start - half)
-    data = pcm[:, base:min(total, end + half)]
-    pad_left, pad_right = max(0, half - start), max(0, end + half - total)
-    if pad_left or pad_right:
-        data = np.pad(data, ((0, 0), (pad_left, pad_right)))
-    windows = np.lib.stride_tricks.sliding_window_view(data, nfft, axis=1)
-    origin = start - half - base + pad_left
+    windows = np.lib.stride_tricks.sliding_window_view(pcm, nfft, axis=1) if total >= nfft else None
     block_columns = max(1, 64 // math.ceil(frames / width))
     for first in range(0, width, block_columns):
         if cancelled():
             return None
         last = min(width, first + block_columns)
         frame_first, frame_last = frame_edges[first], frame_edges[last]
-        centers = ((np.arange(frame_first, frame_last) + 0.5) * ((end - start) / frames)).astype(np.intp)
-        amplitude = np.abs(np.fft.rfft(windows[:, origin + centers] * window, axis=-1))
+        centers = start + ((np.arange(frame_first, frame_last) + 0.5)
+                           * ((end - start) / frames)).astype(np.intp)
+        # Only the batches touching the clip boundary need padding. Detail
+        # windows can still use real samples outside the current viewport.
+        left, right = int(centers[0]) - half, int(centers[-1]) - half + nfft
+        if windows is not None and left >= 0 and right <= total:
+            batch = windows[:, centers - half]
+        else:
+            data = pcm[:, max(0, left):min(total, right)]
+            data = np.pad(data, ((0, 0), (max(0, -left), max(0, right - total))))
+            padded = np.lib.stride_tricks.sliding_window_view(data, nfft, axis=1)
+            batch = padded[:, centers - centers[0]]
+        amplitude = np.abs(np.fft.rfft(batch * window, axis=-1))
         amplitude *= amplitude_scale
         peaks = np.maximum.reduceat(amplitude, frame_edges[first:last] - frame_first, axis=1)
         # Interpolate sparse low-frequency bins, and retain peaks in rows

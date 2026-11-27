@@ -4,11 +4,12 @@ import sys
 import math
 import copy
 import random
+import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QLineEdit, QSizePolicy, QInputDialog, QMenu
 )
-from PyQt6.QtCore import Qt, QRectF, QPointF, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QRectF, QPointF, QSignalBlocker, pyqtSignal, QTimer
 from PyQt6.QtGui import (
     QPainter, QColor, QPen, QLinearGradient,
     QPainterPath, QFont, QPolygonF
@@ -17,6 +18,9 @@ from PyQt6.QtGui import (
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 from src.features.mixer.effects.panel_glyphs import GlyphComboBox
+from src.features.edit.core.audio_effects.saturation import (
+    PANEL_DRIVE_TO_DB, shape_tape, shape_transistor, shape_tube,
+)
 from src.shared.i18n.i18n import I18N
 
 
@@ -491,6 +495,7 @@ class ProSaturationGraphWidget(QWidget):
     bandNodeClicked = pyqtSignal(int)                # band_idx
     bandToggleRequested = pyqtSignal(int)            # band_idx
     bandModelRequested = pyqtSignal(int, str)        # band_idx, new_model
+    spectrumVisibilityChanged = pyqtSignal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -501,6 +506,8 @@ class ProSaturationGraphWidget(QWidget):
         self._enabled = True
         self._global_drive = 0.0
         self._wave_shaper_drive: float | None = None
+        self._processor_controls = False
+        self._max_band_drive = 24.0
         self._mix = 100.0
         self._xover_low = 210.0
         self._xover_high = 3200.0
@@ -555,9 +562,14 @@ class ProSaturationGraphWidget(QWidget):
         self._spec_peak = peak
 
     def update_spectrum(self, freqs_hz: list[float], post_db: list[float], peak_db: list[float] | None = None):
+        if peak_db is None:
+            if self._show_peak_hold and self._spec_freqs == freqs_hz and len(self._spec_peak) == len(post_db):
+                peak_db = [max(current, previous) for current, previous in zip(post_db, self._spec_peak)]
+            else:
+                peak_db = list(post_db)
         self._spec_freqs = freqs_hz
         self._spec_post = post_db
-        self._spec_peak = peak_db if peak_db is not None else post_db
+        self._spec_peak = peak_db
         self.update()
 
     def setState(
@@ -585,9 +597,12 @@ class ProSaturationGraphWidget(QWidget):
         self._flutter_depth = flutter_depth
         self.update()
 
-    def setWaveShaperDrive(self, drive: float) -> None:
+    def setWaveShaperDrive(self, drive: float | None) -> None:
         self._wave_shaper_drive = drive
         self.update()
+
+    def spectrum_visible(self) -> bool:
+        return self._show_spectrum
 
     def _plot_rect(self) -> QRectF:
         return QRectF(
@@ -608,8 +623,8 @@ class ProSaturationGraphWidget(QWidget):
 
     def _drive_to_y(self, drive_db: float, plot: QRectF) -> float:
         # 0 dB 在底部 82% 处，24 dB 在顶部 14% 处
-        d = max(0.0, min(24.0, drive_db))
-        norm = d / 24.0
+        d = max(0.0, min(self._max_band_drive, drive_db))
+        norm = d / self._max_band_drive
         bottom_y = plot.top() + plot.height() * 0.84
         top_y = plot.top() + plot.height() * 0.14
         return bottom_y - norm * (bottom_y - top_y)
@@ -618,7 +633,7 @@ class ProSaturationGraphWidget(QWidget):
         bottom_y = plot.top() + plot.height() * 0.84
         top_y = plot.top() + plot.height() * 0.14
         norm = max(0.0, min(1.0, (bottom_y - y) / max(1.0, bottom_y - top_y)))
-        return norm * 24.0
+        return norm * self._max_band_drive
 
     def _spec_db_to_y(self, spec_db: float, plot: QRectF) -> float:
         norm = (0.0 - spec_db) / 80.0
@@ -641,6 +656,8 @@ class ProSaturationGraphWidget(QWidget):
     # 交互命中检测
     # -----------------------------------------------------------------
     def _hit_test(self, pos: QPointF) -> tuple[str, int] | None:
+        if self._wave_shaper_drive is not None:
+            return None
         plot = self._plot_rect()
         # 1. 优先检测频段 Drive 节点
         for idx in range(3):
@@ -669,10 +686,13 @@ class ProSaturationGraphWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._btn_spec_rect.contains(pos):
                 self._show_spectrum = not self._show_spectrum
+                self.update_spectrum([], [])
+                self.spectrumVisibilityChanged.emit(self._show_spectrum)
                 self.update()
                 return
             if self._btn_peak_rect.contains(pos):
                 self._show_peak_hold = not self._show_peak_hold
+                self._spec_peak = list(self._spec_post)
                 self.update()
                 return
             if self._btn_curve_rect.contains(pos):
@@ -695,7 +715,7 @@ class ProSaturationGraphWidget(QWidget):
 
             # 点击频段区域内部也自动选中对应频段卡片
             plot = self._plot_rect()
-            if plot.contains(pos):
+            if plot.contains(pos) and self._wave_shaper_drive is None:
                 f = self._x_to_freq(pos.x(), plot)
                 idx = 0 if f < self._xover_low else (1 if f < self._xover_high else 2)
                 self.bandNodeClicked.emit(idx)
@@ -800,7 +820,7 @@ class ProSaturationGraphWidget(QWidget):
         # 2. 三频段背景染色分区 (根据 Drive 强度与 Solo 态呈现克制氛围填充)
         p.save()
         p.setClipRect(plot)
-        for idx, (bx1, bx2) in enumerate(band_bounds):
+        for idx, (bx1, bx2) in enumerate(band_bounds if self._wave_shaper_drive is None else ()):
             b = self._bands[idx]
             b_col = QColor(BAND_PALETTE[idx])
             is_solo = (idx == solo_idx)
@@ -834,7 +854,8 @@ class ProSaturationGraphWidget(QWidget):
         p.setFont(QFont(MONO_FONT_FAM, 8))
 
         left_ticks = [0, -10, -20, -30, -40, -50, -60, -70, -80]
-        right_ticks = ["24dB", "", "18", "", "12", "", "6", "", "0dB"]
+        right_ticks = ([""] * len(left_ticks) if self._processor_controls else
+                       ["24dB", "", "18", "", "12", "", "6", "", "0dB"])
 
         for i, l_val in enumerate(left_ticks):
             y = plot.top() + (i / (len(left_ticks) - 1)) * plot.height()
@@ -853,6 +874,11 @@ class ProSaturationGraphWidget(QWidget):
                     Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                     right_ticks[i],
                 )
+        if self._processor_controls and self._wave_shaper_drive is None:
+            for drive in (0, 9, 18, 27, 36):
+                y = self._drive_to_y(drive / PANEL_DRIVE_TO_DB, plot)
+                p.drawText(QRectF(plot.right() + 7, y - 8, self._mr - 7, 16),
+                           Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, str(drive))
 
         freq_ticks = [
             (31.25, "31"), (62.5, "62"), (125.0, "125"), (250.0, "250"),
@@ -913,103 +939,105 @@ class ProSaturationGraphWidget(QWidget):
             p.setPen(QPen(QColor(82, 154, 235, 190), 1.15))
             p.drawPath(post_path)
 
-        # 5. 多段饱和能量包络曲线 (平滑插值展示各频段 Drive + Tone 分布)
-        steps = 280
-        sat_path = QPainterPath()
-        for i in range(steps + 1):
-            norm = i / steps
-            f = FREQ_MIN * ((FREQ_MAX / FREQ_MIN) ** norm)
-            x = plot.left() + norm * plot.width()
+        if not self._processor_controls:
+            # 5. 多段饱和能量包络曲线 (平滑插值展示各频段 Drive + Tone 分布)
+            steps = 280
+            sat_path = QPainterPath()
+            for i in range(steps + 1):
+                norm = i / steps
+                f = FREQ_MIN * ((FREQ_MAX / FREQ_MIN) ** norm)
+                x = plot.left() + norm * plot.width()
 
-            # 平滑分频权重 (Linkwitz-Riley 过渡近似)
-            w_low = 1.0 / (1.0 + (f / max(20.0, self._xover_low)) ** 4)
-            w_high = 1.0 / (1.0 + (max(20.0, self._xover_high) / f) ** 4)
-            w_mid = max(0.0, 1.0 - w_low - w_high)
+                # 平滑分频权重 (Linkwitz-Riley 过渡近似)
+                w_low = 1.0 / (1.0 + (f / max(20.0, self._xover_low)) ** 4)
+                w_high = 1.0 / (1.0 + (max(20.0, self._xover_high) / f) ** 4)
+                w_mid = max(0.0, 1.0 - w_low - w_high)
 
-            eff_drives = []
-            for idx_b, b in enumerate(self._bands):
-                if not self._enabled or not b["enabled"]:
-                    eff_drives.append(0.0)
+                eff_drives = []
+                for idx_b, b in enumerate(self._bands):
+                    if not self._enabled or not b["enabled"]:
+                        eff_drives.append(0.0)
+                    else:
+                        # Tone 倾斜影响该频段内部高低端谐波能量
+                        c_f = self._band_center_freq(idx_b)
+                        tilt = (b["tone"] / 100.0) * 3.2 * math.tanh(math.log2(max(1e-3, f / c_f)))
+                        eff_drives.append(max(0.0, b["drive"] + tilt))
+
+                blended_drive = w_low * eff_drives[0] + w_mid * eff_drives[1] + w_high * eff_drives[2]
+                y = self._drive_to_y(blended_drive, plot)
+                if i == 0:
+                    sat_path.moveTo(x, y)
                 else:
-                    # Tone 倾斜影响该频段内部高低端谐波能量
-                    c_f = self._band_center_freq(idx_b)
-                    tilt = (b["tone"] / 100.0) * 3.2 * math.tanh(math.log2(max(1e-3, f / c_f)))
-                    eff_drives.append(max(0.0, b["drive"] + tilt))
+                    sat_path.lineTo(x, y)
 
-            blended_drive = w_low * eff_drives[0] + w_mid * eff_drives[1] + w_high * eff_drives[2]
-            y = self._drive_to_y(blended_drive, plot)
-            if i == 0:
-                sat_path.moveTo(x, y)
+            if self._enabled:
+                p.setPen(QPen(QColor(235, 248, 255, 42), 4.2))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawPath(sat_path)
+                p.setPen(QPen(QColor("#F2F8FC"), 1.85))
+                p.drawPath(sat_path)
             else:
-                sat_path.lineTo(x, y)
+                p.setPen(QPen(QColor("#686C78"), 1.5))
+                p.drawPath(sat_path)
 
-        if self._enabled:
-            p.setPen(QPen(QColor(235, 248, 255, 42), 4.2))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawPath(sat_path)
-            p.setPen(QPen(QColor("#F2F8FC"), 1.85))
-            p.drawPath(sat_path)
-        else:
-            p.setPen(QPen(QColor("#686C78"), 1.5))
-            p.drawPath(sat_path)
+        if self._wave_shaper_drive is None:
+            # 6. 可拖拽分频点垂直分割线 (X-Over Low/Mid & Mid/High)
+            for xo_idx, (xo_x, xo_hz) in enumerate(((x_low, self._xover_low), (x_high, self._xover_high))):
+                is_xo_hi = (
+                    (self._hover_target == ("xover", xo_idx))
+                    or (self._dragging_target == ("xover", xo_idx))
+                )
+                line_col = QColor("#28D8F0") if is_xo_hi else QColor("#565864")
+                p.setPen(QPen(line_col, 1.6 if is_xo_hi else 1.1, Qt.PenStyle.DashLine))
+                p.drawLine(QPointF(xo_x, plot.top()), QPointF(xo_x, plot.bottom()))
 
-        # 6. 可拖拽分频点垂直分割线 (X-Over Low/Mid & Mid/High)
-        for xo_idx, (xo_x, xo_hz) in enumerate(((x_low, self._xover_low), (x_high, self._xover_high))):
-            is_xo_hi = (
-                (self._hover_target == ("xover", xo_idx))
-                or (self._dragging_target == ("xover", xo_idx))
-            )
-            line_col = QColor("#28D8F0") if is_xo_hi else QColor("#565864")
-            p.setPen(QPen(line_col, 1.6 if is_xo_hi else 1.1, Qt.PenStyle.DashLine))
-            p.drawLine(QPointF(xo_x, plot.top()), QPointF(xo_x, plot.bottom()))
+                # 分频点顶部小胶囊手柄
+                pill_r = QRectF(xo_x - 24, plot.bottom() - 44, 48, 16)
+                p.setPen(QPen(line_col, 1.0))
+                p.setBrush(QColor("#151518"))
+                p.drawRoundedRect(pill_r, 3.0, 3.0)
+                p.setPen(QColor("#ECECF0") if is_xo_hi else QColor("#9A9AA2"))
+                p.setFont(QFont(MONO_FONT_FAM, 7))
+                p.drawText(pill_r, Qt.AlignmentFlag.AlignCenter, f"{format_freq(xo_hz)}")
 
-            # 分频点顶部小胶囊手柄
-            pill_r = QRectF(xo_x - 24, plot.bottom() - 44, 48, 16)
-            p.setPen(QPen(line_col, 1.0))
-            p.setBrush(QColor("#151518"))
-            p.drawRoundedRect(pill_r, 3.0, 3.0)
-            p.setPen(QColor("#ECECF0") if is_xo_hi else QColor("#9A9AA2"))
-            p.setFont(QFont(MONO_FONT_FAM, 7))
-            p.drawText(pill_r, Qt.AlignmentFlag.AlignCenter, f"{format_freq(xo_hz)}")
+            # 7. 三频段 Drive 控制节点
+            node_font = QFont(MONO_FONT_FAM, 8)
+            node_font.setWeight(QFont.Weight.Bold)
+            p.setFont(node_font)
+            short_names = ["L", "M", "H"]
 
-        # 7. 三频段 Drive 控制节点
-        node_font = QFont(MONO_FONT_FAM, 8)
-        node_font.setWeight(QFont.Weight.Bold)
-        p.setFont(node_font)
-        short_names = ["L", "M", "H"]
+            for idx, b in enumerate(self._bands):
+                pt = self._node_pos(idx, plot)
+                is_solo = (idx == solo_idx)
+                dimmed = (solo_idx >= 0 and not is_solo) or (not b["enabled"]) or (not self._enabled)
+                b_col = QColor(BAND_PALETTE[idx]) if not dimmed else QColor("#565A66")
+                is_hi = (
+                    self._hover_target == ("node", idx)
+                    or self._dragging_target == ("node", idx)
+                    or is_solo
+                    or idx == self._selected_band
+                )
+                radius = 10.5 if is_hi else 8.8
 
-        for idx, b in enumerate(self._bands):
-            pt = self._node_pos(idx, plot)
-            is_solo = (idx == solo_idx)
-            dimmed = (solo_idx >= 0 and not is_solo) or (not b["enabled"]) or (not self._enabled)
-            b_col = QColor(BAND_PALETTE[idx]) if not dimmed else QColor("#565A66")
-            is_hi = (
-                self._hover_target == ("node", idx)
-                or self._dragging_target == ("node", idx)
-                or is_solo
-                or idx == self._selected_band
-            )
-            radius = 10.5 if is_hi else 8.8
+                if is_solo and self._enabled:
+                    p.setPen(QPen(QColor("#F6CE58"), 1.4))
+                    p.setBrush(QColor(232, 184, 56, 55))
+                    p.drawEllipse(pt, radius + 5.5, radius + 5.5)
+                elif is_hi and not dimmed:
+                    p.setPen(Qt.PenStyle.NoPen)
+                    p.setBrush(QColor(b_col.red(), b_col.green(), b_col.blue(), 60))
+                    p.drawEllipse(pt, radius + 4.5, radius + 4.5)
 
-            if is_solo and self._enabled:
-                p.setPen(QPen(QColor("#F6CE58"), 1.4))
-                p.setBrush(QColor(232, 184, 56, 55))
-                p.drawEllipse(pt, radius + 5.5, radius + 5.5)
-            elif is_hi and not dimmed:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(QColor(b_col.red(), b_col.green(), b_col.blue(), 60))
-                p.drawEllipse(pt, radius + 4.5, radius + 4.5)
+                p.setPen(QPen(b_col, 1.8))
+                p.setBrush(QColor("#151518"))
+                p.drawEllipse(pt, radius, radius)
 
-            p.setPen(QPen(b_col, 1.8))
-            p.setBrush(QColor("#151518"))
-            p.drawEllipse(pt, radius, radius)
-
-            p.setPen(QColor("#ECECF0") if not dimmed else QColor("#8A8A92"))
-            p.drawText(
-                QRectF(pt.x() - radius, pt.y() - radius, radius * 2, radius * 2),
-                Qt.AlignmentFlag.AlignCenter,
-                short_names[idx],
-            )
+                p.setPen(QColor("#ECECF0") if not dimmed else QColor("#8A8A92"))
+                p.drawText(
+                    QRectF(pt.x() - radius, pt.y() - radius, radius * 2, radius * 2),
+                    Qt.AlignmentFlag.AlignCenter,
+                    short_names[idx],
+                )
 
         # 8. 右上角悬浮视图开关胶囊 (CURVE / SPEC / PEAK)
         self._btn_curve_rect = QRectF(plot.right() - 134, plot.top() + 8, 42, 18)
@@ -1053,12 +1081,31 @@ class ProSaturationGraphWidget(QWidget):
 
             gain_factor = 1.0 + (sel_b["drive"] / 24.0) * 4.5
             bias_shift = (sel_b["bias"] / 100.0) * 0.35
+            measured_shape = None
+            scale_y = 1.0
+            if self._processor_controls and wave_shaper_drive is None:
+                u_values = np.linspace(-1.0, 1.0, 33)
+                drive_db = sel_b["drive"] * PANEL_DRIVE_TO_DB
+                x_values = u_values * 10.0 ** (drive_db / 20.0)
+                offset = sel_b["bias"] / 100.0
+                model = sel_b["model"]
+                if not curve_active:
+                    measured_shape = u_values
+                elif model == "Tube":
+                    measured_shape = shape_tube(x_values, offset)
+                elif model == "Transistor":
+                    measured_shape = shape_transistor(x_values + offset)
+                else:
+                    measured_shape = shape_tape(x_values + offset)
+                scale_y = max(1.0, float(np.max(np.abs(measured_shape))))
             t_path = QPainterPath()
             for s_i in range(33):
                 u = -1.0 + 2.0 * (s_i / 32.0)
                 ub = u + bias_shift
                 if wave_shaper_drive is not None:
                     yv = (1.0 + shape) * u / (1.0 + shape * abs(u))
+                elif measured_shape is not None:
+                    yv = measured_shape[s_i] / scale_y
                 elif sel_b["model"] == "Tape":
                     yv = math.tanh(gain_factor * ub)
                 elif sel_b["model"] == "Tube":
@@ -1092,6 +1139,10 @@ class ProSaturationGraphWidget(QWidget):
                     Qt.AlignmentFlag.AlignCenter,
                     f"{wave_shaper_drive:.1f}%",
                 )
+            elif self._processor_controls:
+                drive_db = sel_b["drive"] * PANEL_DRIVE_TO_DB
+                p.drawText(QRectF(scope_r.right() + 6, scope_r.top(), 68, scope_r.height()),
+                           Qt.AlignmentFlag.AlignCenter, f"{drive_db:.1f} dB")
             else:
                 drv_n = sel_b["drive"] / 24.0
                 if sel_b["model"] == "Tape":
@@ -1144,12 +1195,16 @@ class ProSaturationGraphWidget(QWidget):
                     hud_col = QColor("#28D8F0")
                 else:
                     b = self._bands[idx]
-                    hud_str = f"{b['name']} ({b['model']})  •  Drive {b['drive']:.1f} dB  •  Tone {b['tone']:+.0f}%"
+                    drive = b["drive"] * (PANEL_DRIVE_TO_DB if self._processor_controls else 1.0)
+                    tone = f"{b['tone'] * 0.12:+.1f} dB" if self._processor_controls else f"{b['tone']:+.0f}%"
+                    hud_str = f"{b['name']} ({b['model']})  •  Drive {drive:.1f} dB  •  Tone {tone}"
                     hud_col = QColor(BAND_PALETTE[idx])
             else:
                 cur_f = self._x_to_freq(mx, plot)
-                cur_d = self._y_to_drive(my, plot)
-                hud_str = f"{format_freq(cur_f)}Hz ({freq_to_note(cur_f)})   Drive {cur_d:.1f} dB"
+                cur_d = self._y_to_drive(my, plot) * (PANEL_DRIVE_TO_DB if self._processor_controls else 1.0)
+                hud_str = f"{format_freq(cur_f)}Hz ({freq_to_note(cur_f)})"
+                if self._wave_shaper_drive is None:
+                    hud_str += f"   Drive {cur_d:.1f} dB"
                 hud_col = QColor("#B4B4BE")
 
             hud_w = 248 if self._dragging_target is not None else 178
@@ -1369,14 +1424,14 @@ class GlobalAndTapePanel(QFrame):
         # Parallel Mix (Dry/Wet)
         mix_col = QVBoxLayout()
         mix_col.setSpacing(4)
-        mix_lbl = QLabel("Parallel Mix")
-        mix_lbl.setObjectName("MiniTitle")
-        mix_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mix_label = QLabel("Parallel Mix")
+        self.mix_label.setObjectName("MiniTitle")
+        self.mix_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.mix_knob = ProRotaryKnob(0.0, 100.0, 100.0, 100.0, "#4CD490", mode="linear", size=38)
         self.mix_knob.valueChanged.connect(self._on_mix_knob)
         self.mix_pill = EditableValuePill("100%", "#4CD490", width=62)
         self.mix_pill.valueEdited.connect(self._on_mix_text)
-        mix_col.addWidget(mix_lbl)
+        mix_col.addWidget(self.mix_label)
         mix_col.addWidget(self.mix_knob, 0, Qt.AlignmentFlag.AlignCenter)
         mix_col.addWidget(self.mix_pill, 0, Qt.AlignmentFlag.AlignCenter)
 
@@ -1499,6 +1554,13 @@ class GlobalAndTapePanel(QFrame):
         self._drive_in_percent = True
         self.drive_label.setText(I18N.tr("audio.fx.drive", "Drive (%)"))
         self.g_drive_knob.setScale(0.0, 100.0, "linear")
+
+    def set_processor_profile(self, multiband: bool) -> None:
+        self.tape_sec.hide()
+        for widget in (self.drive_label, self.g_drive_knob, self.g_drive_pill):
+            widget.setVisible(not multiband)
+        for widget in (self.mix_label, self.mix_knob, self.mix_pill):
+            widget.setVisible(multiband)
 
     def _drive_text(self, value: float) -> str:
         if self._drive_in_percent:
@@ -1650,6 +1712,7 @@ class ProSatBandCard(QFrame):
         self._accent = BAND_PALETTE[self._idx]
         self._updating = False
         self._selected = False
+        self._processor_controls = False
 
         self.setObjectName("BandCard")
 
@@ -1738,6 +1801,18 @@ class ProSatBandCard(QFrame):
 
         self.syncFromData(self._data)
 
+    def use_processor_controls(self) -> None:
+        self._processor_controls = True
+        self.solo_btn.hide()
+        self.drive_knob.setScale(0.0, 36.0, "linear")
+        self.tone_knob.setScale(-12.0, 12.0, "bipolar")
+        self.level_knob.setScale(-24.0, 12.0, "linear")
+        self.drive_knob.parentWidget().findChildren(QLabel, "RangeHint")[-1].setText("36")
+        hints = self.tone_knob.parentWidget().findChildren(QLabel, "RangeHint")
+        hints[0].setText("-12")
+        hints[-1].setText("+12")
+        self.level_knob.parentWidget().findChildren(QLabel, "RangeHint")[0].setText("-24")
+
     def mousePressEvent(self, event):
         self.cardSelected.emit(self._idx)
         super().mousePressEvent(event)
@@ -1814,16 +1889,17 @@ class ProSatBandCard(QFrame):
         self.model_selector.setCurrentModel(self._data["model"])
         self.model_selector.setBandActive(en)
 
-        d = self._data["drive"]
+        d = self._data["drive"] * (PANEL_DRIVE_TO_DB if self._processor_controls else 1.0)
         self.drive_knob.setValue(d)
         self.drive_knob.setBandActive(en)
         self.drive_pill.setText(f"{d:.1f} dB")
         self.drive_pill.setBandActive(en)
 
-        t = self._data["tone"]
+        t = self._data["tone"] * (0.12 if self._processor_controls else 1.0)
         self.tone_knob.setValue(t)
         self.tone_knob.setBandActive(en)
-        self.tone_pill.setText(f"{t:+.0f}%" if abs(t) >= 0.5 else "0%")
+        self.tone_pill.setText(f"{t:+.1f} dB" if self._processor_controls else
+                               (f"{t:+.0f}%" if abs(t) >= 0.5 else "0%"))
         self.tone_pill.setBandActive(en)
 
         b_val = self._data["bias"]
@@ -1861,22 +1937,25 @@ class ProSatBandCard(QFrame):
         self._emit_change()
 
     def _on_drive_knob(self, val: float):
-        self._data["drive"] = round(val, 1)
+        self._data["drive"] = (round(val, 1) / PANEL_DRIVE_TO_DB
+                               if self._processor_controls else round(val, 1))
         self._emit_change()
 
     def _on_drive_text(self, text: str):
-        val = max(0.0, min(24.0, round(parse_number(text, self._data["drive"]), 1)))
-        self._data["drive"] = val
-        self._emit_change()
+        scale = PANEL_DRIVE_TO_DB if self._processor_controls else 1.0
+        limit = 36.0 if self._processor_controls else 24.0
+        val = parse_number(text, self._data["drive"] * scale)
+        self._on_drive_knob(max(0.0, min(limit, val)))
 
     def _on_tone_knob(self, val: float):
-        self._data["tone"] = round(val, 0)
+        self._data["tone"] = round(val, 1) / 0.12 if self._processor_controls else round(val, 0)
         self._emit_change()
 
     def _on_tone_text(self, text: str):
-        val = max(-100.0, min(100.0, round(parse_number(text, self._data["tone"]), 0)))
-        self._data["tone"] = val
-        self._emit_change()
+        scale = 0.12 if self._processor_controls else 1.0
+        limit = 12.0 if self._processor_controls else 100.0
+        val = parse_number(text, self._data["tone"] * scale)
+        self._on_tone_knob(max(-limit, min(limit, val)))
 
     def _on_bias_knob(self, val: float):
         self._data["bias"] = round(val, 0)
@@ -1892,7 +1971,8 @@ class ProSatBandCard(QFrame):
         self._emit_change()
 
     def _on_level_text(self, text: str):
-        val = max(-12.0, min(12.0, round(parse_number(text, self._data["level"]), 1)))
+        lower = -24.0 if self._processor_controls else -12.0
+        val = max(lower, min(12.0, round(parse_number(text, self._data["level"]), 1)))
         self._data["level"] = val
         self._emit_change()
 
@@ -2096,6 +2176,7 @@ class StudioSaturationWidget(QWidget):
         top_bar.setFixedHeight(38)
         top_bar.setStyleSheet("QFrame#TopBar { background-color: #27272B; border-bottom: 1px solid #141416; }")
         tb_lay = QHBoxLayout(top_bar)
+        self._top_controls = tb_lay
         tb_lay.setContentsMargins(10, 6, 10, 6)
         tb_lay.setSpacing(6)
 
@@ -2271,9 +2352,48 @@ class StudioSaturationWidget(QWidget):
         """Expose the existing full-band DSP drive in the native input-drive control."""
         self._drive_key = "drive"
         for state in self._banks.values():
-            state.setdefault("drive", 0.0)
+            state.update(drive=0.0, model_profile="legacy", crossover_mode="legacy")
+        for name, state in self._presets.items():
+            legacy = name == "Clean Init"
+            state.update(drive=0.0, model_profile="legacy" if legacy else "multiband",
+                         crossover_mode="legacy" if legacy else "dual")
+        self.profile_combo = ChevronComboBox(self)
+        self.profile_combo.addItem(I18N.tr("mixer.effect_panel.saturation_wave", "WaveShaper"), "legacy")
+        self.profile_combo.addItem(I18N.tr("mixer.effect_panel.saturation_multi", "Multiband"), "multiband")
+        self.profile_combo.currentIndexChanged.connect(self._change_profile)
+        self._top_controls.insertWidget(self._top_controls.indexOf(self.os_combo), self.profile_combo)
+        self.crossover_upgrade = QPushButton(
+            I18N.tr("mixer.effect_panel.saturation_upgrade", "Separate crossovers"), self)
+        self.crossover_upgrade.setObjectName("ToolBtn")
+        self.crossover_upgrade.setToolTip(I18N.tr(
+            "mixer.effect_panel.saturation_upgrade_hint",
+            "Enable independent low and high crossovers for this saved effect"))
+        self.crossover_upgrade.clicked.connect(self._enable_dual_crossovers)
+        self._top_controls.insertWidget(self._top_controls.indexOf(self.os_combo), self.crossover_upgrade)
         self.global_tape_panel.use_wave_shaper_drive()
+        self.auto_gain_btn.hide()
+        self.sat_graph._processor_controls = True
+        self.sat_graph._max_band_drive = 36.0 / PANEL_DRIVE_TO_DB
+        for card in self.band_cards:
+            card.use_processor_controls()
         self._refresh_all_views()
+
+    def _change_profile(self, index: int) -> None:
+        profile = self.profile_combo.itemData(index)
+        state = self._current_state()
+        if not profile or state["model_profile"] == profile:
+            return
+        state["model_profile"] = profile
+        if profile == "multiband" and not state.get("_configured_multiband"):
+            state["crossover_mode"] = "dual"
+            state["_configured_multiband"] = True
+        self._refresh_all_views()
+        self.stateChanged.emit(self.get_state())
+
+    def _enable_dual_crossovers(self) -> None:
+        self._current_state()["crossover_mode"] = "dual"
+        self._refresh_all_views()
+        self.stateChanged.emit(self.get_state())
 
     def _update_ab_styles(self):
         active_css = """
@@ -2345,10 +2465,20 @@ class StudioSaturationWidget(QWidget):
             st["stop_time_ms"],
         )
         if self._drive_key == "drive":
-            self.sat_graph.setWaveShaperDrive(None if getattr(self, "_production_multiband", False)
-                                              else st.get("drive", 0.0))
+            multiband = st.get("model_profile") == "multiband"
+            with QSignalBlocker(self.profile_combo):
+                self.profile_combo.setCurrentIndex(1 if multiband else 0)
+            self._production_multiband = multiband
+            self.crossover_upgrade.setVisible(multiband and st.get("crossover_mode") != "dual")
+            self.os_combo.setVisible(multiband)
+            self.global_model_combo.setVisible(multiband)
+            self.master_strip.setEnabled(multiband)
+            self.global_tape_panel.set_processor_profile(multiband)
+            self.sat_graph.setWaveShaperDrive(None if multiband else st.get("drive", 0.0))
 
         for i, card in enumerate(self.band_cards):
+            if self._drive_key == "drive":
+                card.setVisible(self._production_multiband)
             card.syncFromData(st["bands"][i])
             card.setSelected(i == self._selected_band)
 
@@ -2477,6 +2607,9 @@ class StudioSaturationWidget(QWidget):
         st = self._current_state()
         st["xover_low"] = low_hz
         st["xover_high"] = high_hz
+        if self._drive_key == "drive":
+            st["crossover_mode"] = "dual"
+            self.crossover_upgrade.hide()
         self.sat_graph.setState(
             st["bands"], st["enabled"], st["global_drive"], st["mix"],
             st["xover_low"], st["xover_high"], self._selected_band
@@ -2622,6 +2755,8 @@ class StudioSaturationWidget(QWidget):
 
     def set_state(self, state: dict):
         self._banks[self._active_bank] = copy.deepcopy(state)
+        if state.get("model_profile") == "multiband":
+            self._current_state()["_configured_multiband"] = True
         self._refresh_all_views()
 
     def update_spectrum(self, freqs_hz: list[float], post_db: list[float], peak_db: list[float] | None = None):

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from src.app.controllers.composite_controller import CompositeControllerMixin
 from src.app.controllers.page_controller import PageManagementMixin
 from src.app.main_window import PageContextManager
@@ -13,32 +15,13 @@ from tests.app.test_composite_graph_open_context import _project_with_timeline_c
 
 
 class _FakeCompositePage:
-    def __init__(self, has_timeline: bool = False) -> None:
-        self._has_timeline = has_timeline
-        self.timeline_switches = []
-        self.ensure_calls = []
-        self.context_calls = []
+    def __init__(self) -> None:
         self.project_calls = []
         self.color_output_switches = 0
         self._node_graph = SimpleNamespace(nodes={})
 
     def requires_color_output_input(self) -> bool:
         return False
-
-    def has_timeline_clip_input(self) -> bool:
-        return self._has_timeline
-
-    def switch_to_timeline_input_graph(self, color_stack_id: str = "") -> bool:
-        self._has_timeline = True
-        self.timeline_switches.append(color_stack_id)
-        return True
-
-    def ensure_topos_color_node(self, color_stack_id: str = "") -> bool:
-        self.ensure_calls.append(color_stack_id)
-        return True
-
-    def set_timeline_clip_context(self, runtime_context=None, gpu_provider=None) -> None:
-        self.context_calls.append((runtime_context, gpu_provider))
 
     def set_edit_project(self, project=None) -> None:
         self.project_calls.append(project)
@@ -218,7 +201,7 @@ class _StandaloneImageController(PageManagementMixin):
 
 
 class _TimelineContextController(CompositeControllerMixin):
-    def __init__(self) -> None:
+    def __init__(self, page: CompositePage) -> None:
         project, timeline, clip = _project_with_timeline_clip()
         self._current_edit_project = project
         self._current_timeline_sequences = {timeline.timeline_id: timeline}
@@ -226,7 +209,7 @@ class _TimelineContextController(CompositeControllerMixin):
         self._current_composite_id = ""
         self._current_project_id = project.project_id
         self.edit_page = SimpleNamespace(_current_timeline=timeline)
-        self.composite_page = _FakeCompositePage(has_timeline=False)
+        self.composite_page = page
         self.engine = SimpleNamespace()
         self._timeline_clip_frame_provider = None
         self.timeline = timeline
@@ -234,11 +217,14 @@ class _TimelineContextController(CompositeControllerMixin):
 
 
 class _ColorSessionCompositeController(PageManagementMixin, CompositeControllerMixin):
-    def __init__(self) -> None:
+    def __init__(self, page: CompositePage) -> None:
         project, timeline, clip = _project_with_timeline_clip()
         # Color → Composite is allowed here because this fixture represents
         # the explicit "Create Comp Clip" path and already has a graph id.
-        clip = clip.with_composite_id("graph-1")
+        project, _, _, graph_id = project.create_comp_clip_from_timeline_clip(
+            timeline_id=timeline.timeline_id, clip_id=clip.clip_id, timeline=timeline,
+        )
+        clip = clip.with_composite_id(graph_id)
         timeline = timeline.with_clip_updated(clip)
         self._current_edit_project = project
         self._current_timeline_sequences = {timeline.timeline_id: timeline}
@@ -247,7 +233,7 @@ class _ColorSessionCompositeController(PageManagementMixin, CompositeControllerM
         self._current_project_id = project.project_id
         self.edit_page = SimpleNamespace(_current_timeline=timeline)
         self.timeline_panel = None
-        self.composite_page = _FakeCompositePage(has_timeline=False)
+        self.composite_page = page
         self.engine = SimpleNamespace()
         self._timeline_clip_frame_provider = None
         self.current_file_is_video = True
@@ -288,11 +274,16 @@ def test_standalone_image_uses_color_output_graph() -> None:
     assert controller.composite_page.color_output_switches == 1
 
 
-def test_edit_context_replaces_stale_image_graph_with_timeline_graph() -> None:
-    controller = _TimelineContextController()
+@pytest.mark.parametrize("composite_id", ["", "missing-graph"])
+def test_edit_context_without_composition_clears_canvas(qtbot, composite_id: str) -> None:
+    page = CompositePage()
+    qtbot.addWidget(page)
+    controller = _TimelineContextController(page)
+    page.switch_to_color_output_graph()
+    assert page._node_editor._node_items
     context = controller._page_context_manager.create_context_for_edit_to_composite(
         clip_id=controller.clip.clip_id,
-        composite_id="",
+        composite_id=composite_id,
         asset_id=controller.clip.asset_id,
         timeline_id=controller.timeline.timeline_id,
         timeline_frame=controller.clip.timeline_start,
@@ -303,18 +294,29 @@ def test_edit_context_replaces_stale_image_graph_with_timeline_graph() -> None:
 
     controller._handle_enter_composite_with_context(context)
 
-    assert controller.composite_page.timeline_switches == [controller.clip.color_stack_id]
-    assert controller.composite_page.context_calls
-    assert controller.composite_page.project_calls == [controller._current_edit_project]
+    if composite_id:
+        assert not page.node_graph.nodes
+        assert page._runtime_context is None
+    else:
+        assert page.has_timeline_clip_input()
+        assert page._runtime_context.clip_id == controller.clip.clip_id
+    assert not page.has_active_composition()
+    assert not page._node_editor._node_items
+    assert not controller._current_composite_id
+    assert not controller._current_edit_project.compositions
 
 
-def test_color_timeline_session_binds_video_composite_context() -> None:
-    controller = _ColorSessionCompositeController()
+def test_color_timeline_session_binds_video_composite_context(qtbot) -> None:
+    page = CompositePage()
+    qtbot.addWidget(page)
+    controller = _ColorSessionCompositeController(page)
 
     assert controller._auto_bind_composite_to_color_session() is True
 
-    runtime_context = controller.composite_page.context_calls[-1][0]
-    assert controller.composite_page.timeline_switches == [controller.clip.color_stack_id]
+    runtime_context = page._runtime_context
+    assert page.has_active_composition()
+    assert page._node_editor._node_items
+    assert runtime_context.graph_id == controller.clip.composite_id
     assert runtime_context.clip_id == controller.clip.clip_id
     assert runtime_context.timeline_id == controller.timeline.timeline_id
     assert runtime_context.source_frame == 65

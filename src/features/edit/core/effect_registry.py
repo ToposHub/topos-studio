@@ -253,6 +253,7 @@ CONVOLUTION_REVERB_EFFECT = EffectDefinition(
     params_schema={
         "wet": _float_schema(0.35, 0.0, 1.0, 0.01, "Wet", ""),
         "dry": _float_schema(1.0, 0.0, 1.0, 0.01, "Dry", ""),
+        "true_stereo": _bool_schema(False, "True Stereo"),
     },
     icon="audio_track",
 )
@@ -278,8 +279,9 @@ TREMOLO_AUTO_PAN_EFFECT = EffectDefinition(
     category="audio",
     description="Phase-continuous LFO tremolo or equal-power auto pan",
     params_schema={
-        "rate_hz": _float_schema(4.0, 0.05, 20.0, 0.05, "Rate", "Hz"),
+        "rate_hz": _float_schema(4.0, 0.01, 50.0, 0.01, "Rate", "Hz"),
         "depth": _float_schema(0.7, 0.0, 1.0, 0.01, "Depth", ""),
+        "phase_offset_deg": _float_schema(0.0, 0.0, 360.0, 1.0, "Stereo Phase", "°"),
     },
     icon="audio_track",
 )
@@ -291,8 +293,9 @@ CHORUS_FLANGER_EFFECT = EffectDefinition(
     description="Modulated delay line with feedback tail budget",
     params_schema={
         "rate_hz": _float_schema(0.6, 0.01, 20.0, 0.01, "Rate", "Hz"),
-        "depth_ms": _float_schema(3.0, 0.0, 10.0, 0.05, "Depth", "ms"),
-        "feedback": _float_schema(0.0, 0.0, 0.95, 0.01, "Feedback", ""),
+        "depth_ms": _float_schema(3.0, 0.0, 50.0, 0.1, "Depth", "ms"),
+        "base_ms": _float_schema(18.0, 0.5, 100.0, 0.1, "Delay", "ms"),
+        "feedback": _float_schema(0.0, -0.95, 0.95, 0.01, "Feedback", ""),
         "mix": _float_schema(0.5, 0.0, 1.0, 0.01, "Mix", ""),
     },
     icon="audio_track",
@@ -302,10 +305,12 @@ SUBHARMONIC_EFFECT = EffectDefinition(
     effect_type="subharmonic",
     name="Subharmonic",
     category="audio",
-    description="Confidence-gated octave-down generator for bass sources",
+    description="Source-range tracking octave-down synthesis with confidence gating",
     params_schema={
         "sh_source_center_hz": _float_schema(90.0, 45.0, 180.0, 1.0,
                                              "Source Center", "Hz"),
+        "sh_source_bandwidth_hz": _float_schema(60.0, 5.0, 270.0, 1.0,
+                                                "Source Bandwidth", "Hz"),
         "sh_octave1_gain_db": _float_schema(-6.0, -36.0, 0.0, 0.5,
                                             "Oct 1", "dB"),
         "sh_octave2_gain_db": _float_schema(-12.0, -36.0, 0.0, 0.5,
@@ -322,8 +327,9 @@ EXCITER_EFFECT = EffectDefinition(
     description="Two-band harmonic exciter (even/odd branches mixed "
                 "back into dry)",
     params_schema={
-        "ex_crossover_hz": _float_schema(2000.0, 100.0, 8000.0, 10.0,
+        "ex_crossover_hz": _float_schema(2000.0, 100.0, 16000.0, 10.0,
                                          "Crossover", "Hz"),
+        "ex_quality": _choice_schema("clean", ("legacy", "clean"), "Oversampling Path"),
         "ex_oversampling": _float_schema(1.0, 1.0, 2.0, 1.0,
                                          "Oversampling", "x"),
         "ex_wet": _float_schema(1.0, 0.0, 1.0, 0.01, "Wet", ""),
@@ -341,7 +347,7 @@ PHASER_EFFECT = EffectDefinition(
     params_schema={
         "rate_hz": _float_schema(0.5, 0.01, 20.0, 0.01, "Rate", "Hz"),
         "stages": _float_schema(4.0, 1.0, 12.0, 1.0, "Stages", ""),
-        "base_hz": _float_schema(600.0, 100.0, 4000.0, 10.0,
+        "base_hz": _float_schema(600.0, 10.0, 20000.0, 10.0,
                                  "Base Frequency", "Hz"),
         "sweep_octaves": _float_schema(2.5, 0.5, 5.0, 0.1,
                                        "Sweep", "oct"),

@@ -182,11 +182,16 @@ class PartitionedConvolver:
             self._history = np.zeros((channels, 0), dtype=np.float32)
             return x * gain
 
-        kernels = (np.repeat(self._irs, channels, axis=0)
-                   if self._irs.shape[0] == 1 else self._irs)
-        if kernels.shape[0] < channels:
-            kernels = np.repeat(
-                kernels, channels // kernels.shape[0], axis=0)
+        kernel_channels = self._irs.shape[0]
+        if kernel_channels > channels:
+            kernels = self._irs[:channels]
+        elif kernel_channels < channels:
+            # Matches the historical repeat when channel counts divide evenly
+            # and fills the odd-layout cases that previously failed to broadcast.
+            indices = np.arange(channels) * kernel_channels // channels
+            kernels = self._irs[indices]
+        else:
+            kernels = self._irs
         hist_len = max(0, self._fft - self._block)
         hist = (self._history
                 if self._history.shape == (channels, hist_len)

@@ -4,6 +4,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from src.features.edit.core.audio_effects.sidechain import detector_source_id
+
 from .bindings_core import Field, collect_fields, project_fields
 
 DYNAMIC_FIELDS = (
@@ -15,17 +17,20 @@ DYNAMIC_FIELDS = (
 SAT_FIELDS = (
     ("enabled", "enabled"), ("bias", "bias_pct"), ("level", "level_db"),
 )
+DE_ESSER_CONTROL_DEFAULTS = {"detector_shape": "bandpass", "lookahead_ms": 0.0, "output_gain_db": 0.0}
+BUS_TEMPLATE_OVERRIDES = ("threshold_db", "ratio", "attack_ms", "release_ms", "knee", "mix", "makeup_gain")
 
 
 def sidechain_fields() -> tuple[Field, ...]:
     return (
         Field("sidechain.hpf_freq", "sc_hpf_hz"), Field("sidechain.lpf_freq", "sc_lpf_hz"),
         Field("sidechain.slope", "sc_filter_slope_db_oct"), Field("sidechain.listen", "sc_listen"),
+        Field("sidechain.enabled", "sc_filter_enabled"),
     )
 
 
 def extended_fields(effect_type: str, params: dict[str, Any]) -> tuple[Field, ...] | None:
-    if effect_type == "transient_designer" and ("attack_pct" in params or "sustain_pct" in params):
+    if effect_type == "transient_designer" and any(params.get(key) is not None for key in ("attack_pct", "sustain_pct")):
         return (
             Field("transient.attack", "attack_pct"), Field("transient.sustain", "sustain_pct"),
             Field("transient.attack_ms", "attack_ms"), Field("transient.release", "sustain_ms"),
@@ -45,8 +50,10 @@ def extended_fields(effect_type: str, params: dict[str, Any]) -> tuple[Field, ..
                  ("release", "release_ms"), ("makeup", "makeup_gain"))
         return tuple(Field(f"crossovers.{i}", f"crossovers.{i}") for i in range(count - 1)) + tuple(
             Field(f"bands.{i}.{ui}", f"bands.{i}.{engine}") for i in range(count) for ui, engine in names)
-    if effect_type == "saturation" and params.get("model_profile") == "multiband":
+    if effect_type == "saturation":
         return (
+            Field("model_profile", "model_profile"), Field("crossover_mode", "mb_crossover_mode"),
+            Field("drive", "drive"),
             Field("xover_low", "mb_xover_low_hz"), Field("xover_high", "mb_xover_high_hz"),
             Field("oversampling", "mb_oversampling", lambda v: f"{v}x", lambda v: int(v[:-1])),
             Field("mix", "mb_mix", lambda v: v * 100.0, lambda v: v / 100.0),
@@ -63,18 +70,25 @@ def extended_fields(effect_type: str, params: dict[str, Any]) -> tuple[Field, ..
 
 def display_projection(effect_type: str, params: dict[str, Any]) -> dict[str, Any]:
     if effect_type == "transient_designer":
-        return {"sc_hpf_hz": 0.0, "sc_lpf_hz": 0.0, "sc_filter_slope_db_oct": 12,
-                "sc_listen": False, "sidechain_source_id": "internal", "attack_pct": 0.0,
-                "sustain_pct": 0.0} | params if ("attack_pct" in params or "sustain_pct" in params) else params
+        projected = {"sc_hpf_hz": 0.0, "sc_lpf_hz": 0.0, "sc_filter_slope_db_oct": 12, "sc_listen": False}
+        projected.update(params)
+        if any(params.get(key) is not None for key in ("attack_pct", "sustain_pct")):
+            for key in ("attack_pct", "sustain_pct"):
+                if projected.get(key) is None:
+                    projected[key] = 0.0
+        projected.setdefault("sc_filter_enabled", bool(projected["sc_hpf_hz"] or projected["sc_lpf_hz"]))
+        projected["sidechain_source_id"] = detector_source_id(params)
+        return projected
     if effect_type == "dynamic_eq":
-        return {"sidechain_source_id": "internal"} | params
+        return params | {"sidechain_source_id": detector_source_id(params)}
     if effect_type == "bus_comp":
         from src.features.edit.core.audio_effects.bus_multiband import BUS_COMP_TEMPLATES
         defaults = deepcopy(BUS_COMP_TEMPLATES[params["template"]])
         defaults["makeup_gain"] = defaults.pop("makeup_db", 0.0)
-        return defaults | params
+        return params | {key: value for key, value in defaults.items() if params.get(key) is None}
     if effect_type == "de_esser":
-        return {"detector_shape": "bandpass", "lookahead_ms": 0.0, "output_gain_db": 0.0} | params
+        return params | {key: default for key, default in DE_ESSER_CONTROL_DEFAULTS.items()
+                         if params.get(key) is None}
     return params
 
 
@@ -85,11 +99,6 @@ def project_extended(effect_type: str, state: dict[str, Any], params: dict[str, 
     project_fields(state, params, fields)
     if effect_type == "multiband_comp":
         state["band_count"] = len(params["crossovers"]) + 1
-    elif effect_type == "dynamic_eq":
-        for i, band in enumerate(state["bands"]):
-            band.update(filter_type="Bell", range_key="All", auto_timing=False, trigger_mode="INT")
-            if i >= len(params["bands"]):
-                band["enabled"] = False
     return True
 
 
@@ -98,6 +107,8 @@ def collect_extended(effect_type: str, state: dict[str, Any], baseline: dict[str
     fields = extended_fields(effect_type, params)
     if fields is None:
         return None
+    if effect_type == "saturation" and state["model_profile"] == "legacy":
+        fields = tuple(field for field in fields if field.ui in {"model_profile", "drive"})
     if effect_type == "multiband_comp" and state["band_count"] != baseline["band_count"]:
         count = state["band_count"]
         params["crossovers"] = list(state["crossovers"][:count - 1])

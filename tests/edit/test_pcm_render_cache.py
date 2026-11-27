@@ -648,3 +648,20 @@ def test_playback_mix_uses_pre_render_base(qapp):
     out_fallback, _ = fallback_mixer.mix_samples(24, 24.0, RATE, 2)
     np.testing.assert_allclose(out_fallback, pcm[:, RATE:2 * RATE], atol=1e-6)
     assert not np.allclose(out_fallback, base[:, RATE:2 * RATE])
+
+
+@pytest.mark.parametrize("processor", ["de_click", "de_hum"])
+def test_updated_restoration_rebuilds_pre_render_data_for_saved_recipes(processor: str) -> None:
+    from dataclasses import replace
+
+    from src.features.edit.core.audio_edit import make_step
+    from src.features.edit.core.pcm_render_cache import PreRenderBuildPlan
+
+    step = make_step(processor, 0, 4800, (0,))
+    plan = PreRenderBuildPlan("source.wav", 0, 4800, 48000, "source", (step,), expected_channels=1)
+    current = plan.spec()
+    signature = current.steps_signature[0]
+    old = replace(current, steps_signature=((signature[0], signature[1],
+                                            step["algorithm_version"], *signature[3:]),))
+    assert current.key != old.key
+    assert step["algorithm_version"] == 1

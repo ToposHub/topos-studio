@@ -89,6 +89,9 @@ class _CompositeAdapterBase(AudioEffect):
 class SpectralManglerAdapter(_CompositeAdapterBase):
     effect_type = "spectral_mangler"
 
+    def measure_output(self, samples: np.ndarray) -> dict:
+        return self._impl.measure_output(samples)
+
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.spectral_mangler import (
             SpectralManglerEffect,
@@ -105,13 +108,21 @@ class DeEsserAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.de_esser import (
             DeEsserEffect,
         )
-        return DeEsserEffect(sr)
+        return DeEsserEffect(sr, params_are_snapshots=True)
 
 
 class TruePeakLimiterAdapter(_CompositeAdapterBase):
     """P1 · True Peak Limiter（Master/交付；旧 Limiter 语义不变）。"""
 
     effect_type = "true_peak_limiter"
+
+    def set_params(
+        self, params: object, sample_rate: float | None = None, algorithm_version: int | None = None,
+    ) -> None:
+        from src.features.edit.core.audio_effects.true_peak_limiter import DEFAULTS
+
+        snapshot = DEFAULTS | params if isinstance(params, dict) else DEFAULTS
+        super().set_params(snapshot, sample_rate=sample_rate, algorithm_version=algorithm_version)
 
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.true_peak_limiter import (
@@ -143,7 +154,7 @@ class DynamicEqAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.dynamic_eq import (
             DynamicEqEffect,
         )
-        return DynamicEqEffect(sr)
+        return DynamicEqEffect(sr, params_are_snapshots=True)
 
 
 class BusCompAdapter(_CompositeAdapterBase):
@@ -155,7 +166,7 @@ class BusCompAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.bus_multiband import (
             BusCompEffect,
         )
-        return BusCompEffect(sr)
+        return BusCompEffect(sr, params_are_snapshots=True)
 
 
 class MultibandCompAdapter(_CompositeAdapterBase):
@@ -167,7 +178,7 @@ class MultibandCompAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.bus_multiband import (
             MultibandCompressorEffect,
         )
-        return MultibandCompressorEffect(sr)
+        return MultibandCompressorEffect(sr, params_are_snapshots=True)
 
 
 class ConvolutionReverbAdapter(_CompositeAdapterBase):
@@ -179,7 +190,7 @@ class ConvolutionReverbAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.convolution_reverb import (
             ConvolutionReverbEffect,
         )
-        return ConvolutionReverbEffect(sr)
+        return ConvolutionReverbEffect(sr, params_are_snapshots=True)
 
 
 class ModulationAdapterBase(_CompositeAdapterBase):
@@ -207,7 +218,7 @@ class TransientDesignerAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.modulation_tools import (
             TransientDesignerEffect,
         )
-        return TransientDesignerEffect(sr)
+        return TransientDesignerEffect(sr, params_are_snapshots=True)
 
 
 class TremoloAutoPanAdapter(_CompositeAdapterBase):
@@ -217,11 +228,19 @@ class TremoloAutoPanAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.modulation_tools import (
             TremoloAutoPanEffect,
         )
-        return TremoloAutoPanEffect(sr)
+        return TremoloAutoPanEffect(sr, params_are_snapshots=True)
 
 
 class ChorusFlangerAdapter(_CompositeAdapterBase):
     effect_type = "chorus_flanger"
+
+    def set_params(self, params: object, sample_rate: Optional[float] = None,
+                   algorithm_version: Optional[int] = None) -> None:
+        from src.features.edit.core.timeline_v2 import ChorusFlangerParams
+        snapshot = ChorusFlangerParams.default().to_dict()
+        if isinstance(params, dict):
+            snapshot.update(params)
+        super().set_params(snapshot, sample_rate, algorithm_version)
 
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.modulation_tools import (
@@ -239,11 +258,20 @@ class ChorusFlangerAdapter(_CompositeAdapterBase):
 class PhaserAdapter(_CompositeAdapterBase):
     effect_type = "phaser"
 
+    def set_params(self, params: object, sample_rate: Optional[float] = None,
+                   algorithm_version: Optional[int] = None) -> None:
+        if algorithm_version is not None and algorithm_version <= 4:
+            from src.features.edit.core.timeline_v2 import PhaserParams
+            # The legacy implementation accepts partial updates, while a chain
+            # installs complete snapshots, including after preview is cancelled.
+            params = PhaserParams.from_dict(params if isinstance(params, dict) else {}).to_dict()
+        super().set_params(params, sample_rate, algorithm_version)
+
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.modulation_tools import (
             PhaserEffect,
         )
-        return PhaserEffect(sr)
+        return PhaserEffect(sr, params_are_snapshots=True)
 
     def _legacy_impl_factory(self, sr: float) -> AudioEffect:
         from src.features.edit.core.audio_effects.legacy_v4.modulation_tools import (
@@ -254,6 +282,16 @@ class PhaserAdapter(_CompositeAdapterBase):
 
 class VoiceChangerAdapter(_CompositeAdapterBase):
     effect_type = "voice_changer"
+
+    def set_monitoring(self, enabled: bool) -> None:
+        self._impl.set_monitoring(enabled, realtime=True)
+
+    @property
+    def monitoring_active(self) -> bool:
+        return self._impl.monitoring_active
+
+    def clear_monitoring(self) -> None:
+        self._impl.clear_monitoring()
 
     def _impl_factory(self, sr):  # noqa: N802
         from src.features.edit.core.audio_effects.voice_changer import (

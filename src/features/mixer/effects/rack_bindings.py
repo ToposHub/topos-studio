@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .bindings_core import Field, SKIP
+from .production_extensions import sidechain_fields
 
 
 def _percent(fraction: float) -> float:
@@ -116,6 +117,7 @@ _MULTIBAND_FIELDS = (
 
 RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
     "exciter": ("exciter", (
+        Field("quality", "ex_quality"),
         Field("crossovers.0", "ex_crossover_hz"),
         Field("global_mix", "ex_wet", _percent, _fraction),
         Field("output_gain", "ex_output_gain_db"),
@@ -129,7 +131,9 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         )),
     )),
     "subharmonic": ("subharmonic", (
+        Field("detection_mode", "sh_detection_mode"),
         Field("source.freq", "sh_source_center_hz"),
+        Field("source.bandwidth", "sh_source_bandwidth_hz"),
         Field("source.oct1_level", "sh_octave1_gain_db", lambda v: 100.0 * 10.0 ** (v / 20.0),
               lambda v: 20.0 * log10(max(v / 100.0, 1e-6))),
         Field("source.oct2_level", "sh_octave2_gain_db", lambda v: 100.0 * 10.0 ** (v / 20.0),
@@ -197,6 +201,7 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("file_path", "ir_path", write=_select_wave_file),
         Field("dry_wet", "wet", _percent, _fraction),
         Field("dry_level", "dry", _percent, _fraction),
+        Field("true_stereo", "true_stereo"),
     )),
     "transient_designer": ("transient_designer", (
         Field("transient.attack", "attack_db", _attack_percent, _attack_db),
@@ -204,8 +209,7 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("transient.attack_ms", "attack_ms"),
         Field("transient.release", "sustain_ms"),
         Field("transient.mix", "mix", _percent, _fraction), Field("output_gain", "output_gain_db"),
-        Field("sidechain.hpf_freq", "sc_hpf_hz"), Field("sidechain.lpf_freq", "sc_lpf_hz"),
-        Field("sidechain.slope", "sc_filter_slope_db_oct"), Field("sidechain.listen", "sc_listen"),
+        *sidechain_fields(),
     )),
     "tremolo_auto_pan": ("tremolo_autopan", (
         Field("mode", "mode", _tremolo_mode_to_panel, _tremolo_mode_to_engine),
@@ -214,10 +218,12 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("sync", "sync"), Field("bpm", "bpm"), Field("sync_div", "sync_div"),
         Field("shape", "duty_cycle_pct"), Field("smooth", "smooth_ms"),
         Field("pan_center", "pan_center_pct"), Field("pan_width", "pan_width_pct"),
-        Field("waveform", "waveform", lambda v: v.replace("_", " ").title(),
+        Field("phase_offset", "phase_offset_deg"),
+        Field("waveform", "waveform", lambda v: v.replace("_", " ").title() or "Sine",
               lambda v: v.lower().replace(" ", "_")),
     )),
     "chorus_flanger": ("modulation", (
+        Field("mode", "mode"),
         Field("chorus.rate", "rate_hz", when=_is_chorus),
         Field("chorus.depth", "depth_ms", _percent_depth, _depth_ms, when=_is_chorus),
         Field("chorus.delay_ms", "base_ms", when=_is_chorus),
@@ -238,5 +244,6 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("phaser.center_hz", "base_hz"),
         Field("phaser.feedback", "feedback", _percent, _feedback_fraction),
         Field("phaser.mix", "mix", _percent, _fraction),
+        Field("phaser.stereo_processing", "stereo_processing"),
     )),
 }

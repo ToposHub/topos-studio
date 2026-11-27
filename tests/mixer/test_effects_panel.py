@@ -11,7 +11,8 @@ from pytestqt.qtbot import QtBot
 
 from src.features.edit.core.effect_registry import get_effect_registry_health
 from src.features.edit.ui.edit_effects_panel import MIME_TYPE_EFFECT
-from src.features.mixer.effects.panels.doubler import StudioDoublerWidget
+from src.features.mixer.effects import effect_catalog
+from src.features.mixer.effects.production_dialog import PRODUCTION_BINDINGS
 from src.features.mixer.ui.effects_panel import MixerEffectsPanel, _PANEL_ROLE
 from src.shared.ui.audio_mixer.track_mixer_widget import TrackMixerWidget
 from src.shared.ui.effect_icons import AUDIO_EFFECT_ICON_DIR
@@ -75,7 +76,9 @@ def test_effect_group_titles_are_brighter_than_effect_names(browser: MixerEffect
     assert browser.tree.palette().color(QPalette.ColorRole.Text) == QColor(C.TEXT_LABEL)
 
 
-def test_pending_panels_open_locally_without_inserting_audio(browser: MixerEffectsPanel, qtbot: QtBot) -> None:
+def test_all_clip_tools_route_to_the_project_without_insert_payloads(
+    browser: MixerEffectsPanel, qtbot: QtBot,
+) -> None:
     panels = {
         item.data(0, _PANEL_ROLE): item
         for index in range(browser.tree.topLevelItemCount())
@@ -84,18 +87,13 @@ def test_pending_panels_open_locally_without_inserting_audio(browser: MixerEffec
         if (item := group.child(row)).data(0, _PANEL_ROLE)
     }
     assert set(panels) == {"clip_editor", "declick_dehum", "pitch_correction", "doubler"}
-    for item in panels.values():
+    live = {panel_id for panel_id, _fields in PRODUCTION_BINDINGS.values()}
+    assert live | panels.keys() == {entry.effect_id for entry in effect_catalog()}
+    for effect_id, item in panels.items():
         assert not browser.tree.mimeData([item]).hasFormat(MIME_TYPE_EFFECT)
-    with qtbot.assertNotEmitted(browser.effect_activated):
-        browser._activate(panels["doubler"], 0)
-    instance = browser._panel_instances["doubler"]
-    dialog = browser._panel_windows.window_for(instance)
-    assert dialog is not None and isinstance(dialog.panel, StudioDoublerWidget)
-    browser.pause_panel_windows()
-    assert not dialog.isVisible()
-    with qtbot.waitSignal(browser.effect_activated) as tool:
-        browser._activate(panels["clip_editor"], 0)
-    assert tool.args == ["clip_editor"]
+        with qtbot.waitSignal(browser.effect_activated) as tool:
+            browser._activate(item, 0)
+        assert tool.args == [effect_id]
 
 
 def test_search_hides_unmatched_effects_and_restores_collapsed_groups(browser: MixerEffectsPanel) -> None:

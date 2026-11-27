@@ -634,7 +634,7 @@ class CompositeControllerMixin:
 
         功能：
         1. 如果来自 Edit 且有 composite_id，加载对应合成
-        2. 如果无 composite_id，可选创建新合成
+        2. 如果无 composite_id，只为预览准备时间线输入
         3. 将 Color 输出作为合成输入
 
         Args:
@@ -672,47 +672,32 @@ class CompositeControllerMixin:
                 composite_id = clip.composite_id
                 color_stack_id = color_stack_id or getattr(clip, 'color_stack_id', None)
 
-        # 如果有 composite_id，从 EditProject 加载合成数据到 CompositePage
-        # 注意：页面已经通过 switch_to_page_with_context 切换，无需再次切换
+        page = self.composite_page
+        if page is None:
+            return
+
         if composite_id:
-            # Set _current_composite_id so SaveRouter can use it
-            self._current_composite_id = composite_id
-
-        loaded_composite_data = False
-        if composite_id and self._current_edit_project:
-            composite_data = self._current_edit_project.get_composition_by_id(composite_id)
-            if composite_data and self.composite_page:
-                composite_data = self._prepare_composite_data_for_open(
-                    composite_id, composite_data)
-                self.composite_page.load_composite_data(composite_data)
-                loaded_composite_data = True
-                # Always ensure Topos Color node exists in the graph
-                self.composite_page.ensure_topos_color_node(color_stack_id or "")
-                logger.info(f"[P9.2] Loaded composite {composite_id} for clip {clip_id}")
-            elif not composite_data:
-                logger.warning(f"Composite data not found: {composite_id}")
-
-        if not loaded_composite_data:
-            logger.debug(f"No composite_id for clip: {clip_id}")
-            if self.composite_page:
-                # A timeline clip without a Comp Clip is not an active
-                # composition.  Keep the page available, but leave its node
-                # workspace in the disabled empty state until a composition is
-                # explicitly created or opened.
-                if not composite_id and hasattr(
-                    self.composite_page, "set_composition_active"
-                ):
-                    self.composite_page.set_composition_active(False)
-                if not self.composite_page.has_timeline_clip_input():
-                    self.composite_page.switch_to_timeline_input_graph(color_stack_id or "")
-                else:
-                    # Always ensure Topos Color node exists in the graph
-                    self.composite_page.ensure_topos_color_node(color_stack_id or "")
+            project = self._current_edit_project
+            composite_data = project.get_composition_by_id(composite_id) if project else None
+            if not composite_data:
+                self._current_composite_id = ""
+                page.reset_to_empty_workspace(reuse_clean_graph=True)
+                logger.warning("Composite data not found: %s", composite_id)
+                return
+            self._current_composite_id = composite_id  # SaveRouter uses this identity.
+            page.load_composite_data(self._prepare_composite_data_for_open(
+                composite_id, composite_data))
+            page.ensure_topos_color_node(color_stack_id or "")
+            logger.info(f"[P9.2] Loaded composite {composite_id} for clip {clip_id}")
+        else:
+            self._current_composite_id = ""
+            page.reset_to_empty_workspace(reuse_clean_graph=True)
+            page.switch_to_timeline_input_graph(color_stack_id or "")
 
         # 确保 Color 输出有效，作为 Composite 的输入
         # 仅当图中包含旧版 COLOR 节点时才需要 ColorOutput；
         # ToposColor 图直接读取 ColorStackData，不依赖 ColorOutput。
-        if self.composite_page and self.composite_page.requires_color_output_input():
+        if page.requires_color_output_input():
             if not self.engine.color_output.is_valid:
                 self.engine.request_color_output()
 

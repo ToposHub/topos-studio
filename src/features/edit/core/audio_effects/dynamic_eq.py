@@ -19,6 +19,7 @@ from typing import Optional
 import numpy as np
 
 from src.features.edit.core.audio_dsp import AudioEffect
+from src.features.edit.core.audio_effects.base import moving_mean_power
 from src.features.edit.core.audio_effects.sidechain import (
     detector_input, detector_source_id,
 )
@@ -66,8 +67,9 @@ def rbj_bell_sos(freq: float, q: float, gain_db: float,
 class DynamicEqEffect(AudioEffect):
     """单段动态 EQ（Bell 形状复用 StripEQ；内检源，最小相位）。"""
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    def __init__(self, sample_rate: float = 48000.0, *, params_are_snapshots: bool = False) -> None:
         super().__init__(sample_rate)
+        self._params_are_snapshots = params_are_snapshots
         self._params: dict = dict(DEFAULTS)
         self._bp_ba: Optional[tuple] = None
         self._bp_state: Optional[np.ndarray] = None
@@ -84,12 +86,17 @@ class DynamicEqEffect(AudioEffect):
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
                    algorithm_version: Optional[int] = None) -> None:
-        if sample_rate is not None and sample_rate != self._sample_rate:
+        rate_changed = sample_rate is not None and sample_rate != self._sample_rate
+        if rate_changed:
             self._sample_rate = float(sample_rate)
             self.reset_state()
-        merged = dict(self._params)
+        merged = dict(DEFAULTS if self._params_are_snapshots else self._params)
         if isinstance(params, dict):
             merged.update(params)
+        if not rate_changed and merged == self._params and self._bp_ba is not None:
+            return
+        if bool(self._bands_of(merged)) != bool(self._bands_of(self._params)):
+            self.reset_state()
         self._params = merged
         # 段身份不变——滤波器状态保留（自动化区间可重开/参数微调无跳变）。
         self._rebuild_detector()
@@ -99,6 +106,8 @@ class DynamicEqEffect(AudioEffect):
         self._rms_state = None
         self._sos_state = None
         self._gain_state = 0.0
+        self._last_detector_db = -120.0
+        self._last_dyn_db = 0.0
         for state in self._mb_states:
             state.reset()
         self._mb_states = []
@@ -118,7 +127,6 @@ class DynamicEqEffect(AudioEffect):
         if self._bands_of(p):
             return bool(p.get("enabled", True)) and _SCIPY and any(
                 bool(band.get("enabled", True))
-                or abs(float(band.get("static_gain_db", 0.0))) > 1e-6
                 for band in p["bands"])
         return (bool(p.get("enabled", True)) and _SCIPY
                 and (bool(p.get("dynamic_enabled", True))
@@ -242,7 +250,7 @@ class DynamicEqEffect(AudioEffect):
             "sidechain_status": self._sidechain_status,
             "bands": [{"band_id": band.get("id", index),
                        "detector_dbfs": state.detector_db,
-                       "dynamic_gain_db": state.gain_state}
+                       "dynamic_gain_db": state.gain_state if band.get("enabled", True) else 0.0}
                       for index, (band, state) in enumerate(
                           zip(self._bands_of(self._params), self._mb_states))],
         }
@@ -256,8 +264,7 @@ class _BandState:
         self.bp_ba: Optional[tuple] = None
         self.coeff_key: Optional[tuple] = None
         self.bp_state: Optional[np.ndarray] = None
-        self.rms_b: Optional[np.ndarray] = None
-        self.rms_state: Optional[np.ndarray] = None
+        self.power_history: Optional[np.ndarray] = None
         self.sos_state: Optional[np.ndarray] = None  # (1, ch, 2)
         self.gain_state = 0.0
         self.sample_pos = 0  # 绝对样本时钟（增益网格对齐）
@@ -266,7 +273,7 @@ class _BandState:
 
     def reset(self) -> None:
         self.bp_state = None
-        self.rms_state = None
+        self.power_history = None
         self.sos_state = None
         self.gain_state = 0.0
         self.sample_pos = 0
@@ -309,8 +316,7 @@ def _mb_process_band(band: dict, state: _BandState, samples: np.ndarray,
         state.bp_ba = _band_detector_coeffs(band, sample_rate)
         state.coeff_key = coeff_key
         state.bp_state = None
-        state.rms_state = None
-        state.rms_b = None
+        state.power_history = None
     if state.bp_ba is None:
         return samples.astype(np.float32)
     order = max(len(state.bp_ba[0]), len(state.bp_ba[1])) - 1
@@ -321,20 +327,14 @@ def _mb_process_band(band: dict, state: _BandState, samples: np.ndarray,
             or state.bp_state.shape != (detector_channels, order)):
         state.bp_state = np.zeros((detector_channels, order),
                                   dtype=np.float64)
-    _rms_expected = ((state.rms_b.shape[0] - 1,)
-                     if state.rms_b is not None else ())
-    if state.rms_state is None or state.rms_state.shape != _rms_expected:
-        win = max(1, int(0.05 * sample_rate))
-        state.rms_b = np.full(win, 1.0 / win, dtype=np.float64)
-        state.rms_state = np.zeros(win - 1, dtype=np.float64)
     # 逐声道带通 + 功率聚合（同声道功率平均——反相不抵消）。
     detector_input = samples if detector_samples is None else detector_samples
     band_sig, state.bp_state = lfilter(
         state.bp_ba[0], state.bp_ba[1], detector_input.astype(np.float64),
         axis=-1, zi=state.bp_state)
     mean_power = np.mean(band_sig ** 2, axis=0)
-    ms, state.rms_state = lfilter(state.rms_b, [1.0], mean_power,
-                                  zi=state.rms_state)
+    ms, state.power_history = moving_mean_power(
+        mean_power, state.power_history, max(1, int(0.05 * sample_rate)))
     detector_db = 20.0 * np.log10(np.sqrt(np.maximum(ms, 1e-16)) + 1e-12)
     if n:
         state.detector_db = float(detector_db[-1])

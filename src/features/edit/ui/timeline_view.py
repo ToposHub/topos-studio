@@ -16588,14 +16588,15 @@ class TimelineView(QGraphicsView):
             event.ignore()
             return
 
-        _target_track, target_clip = self._resolve_effect_drop_target(
+        target_track, target_clip = self._resolve_effect_drop_target(
             track_index, frame, is_audio_effect
         )
 
-        if target_clip is not None:
-            event.acceptProposedAction()
-        else:
+        if (target_track is None or target_clip is None
+                or (effect_type == "spatial_panner" and target_track.is_locked)):
             event.ignore()
+            return
+        event.acceptProposedAction()
 
     def _get_cut_points_for_track(self, track_id: str) -> tuple[int, ...]:
         """Get cut points plus clip edges accepted by transition drops."""
@@ -17751,8 +17752,7 @@ class TimelineView(QGraphicsView):
         # spatial_panner 是轨级声像器（非链效果），写入轨的 panner 字段；
         # dynamics 已是常规单实例复合效果器，走通用 AddEffectCommand。
         if effect_type == "spatial_panner":
-            self._handle_unit_effect_drop(
-                event, effect_type, target_track, target_clip)
+            self._handle_spatial_panner_drop(event, target_track)
             return
 
         # Import AddEffectCommand
@@ -17791,33 +17791,21 @@ class TimelineView(QGraphicsView):
         # effect_type) so the controller can scroll_to_effect(id).
         self.effect_added.emit(target_clip.clip_id, new_effect_id)
 
-    def _handle_unit_effect_drop(
-        self,
-        event: QDropEvent,
-        effect_type: str,
-        target_track: EditTrack,
-        target_clip: ClipInstance,
-    ) -> None:
-        """CW-A1: Spatial Panner 完整单元的拖放落地。
-
-        spatial_panner 是轨级声像器（非链效果）——对目标轨提交
-        SetTrackPannerCommand（默认启用参数），混音条随后显示声像器激活。
-        dynamics 已注册为常规单实例复合效果器（DynamicsEffect，EG→Comp→Lim
-        单实例），走通用 AddEffectCommand 路径，不再需要特殊路由。
-        """
+    def _handle_spatial_panner_drop(self, event: QDropEvent, target_track: EditTrack) -> None:
+        """Enable the target track's panner while preserving its saved settings."""
         self._drag_effect_type = None
-        from src.features.edit.core.commands import SetTrackPannerCommand
-        from src.features.edit.core.timeline_v2 import SpatialPannerParams
-        cmd = SetTrackPannerCommand.create(
-            target_track.track_id,
-            SpatialPannerParams.default().to_dict(),
-        )
-        self._execute_command(cmd)
-        self.status_message_requested.emit(
-            "Spatial Panner enabled — adjust in Mixer (⤢ next to Pan)")
-        logger.info(
-            "Spatial Panner enabled on track %s", target_track.track_id,
-        )
+        if target_track.is_locked:
+            event.ignore()
+            return
+        panner = target_track.panner
+        if not panner or not panner.get("enabled", True):
+            from src.features.edit.core.commands import SetTrackPannerCommand
+            from src.features.edit.core.timeline_v2 import SpatialPannerParams
+
+            enabled = {**(panner or SpatialPannerParams.default().to_dict()), "enabled": True}
+            self._execute_command(SetTrackPannerCommand.create(target_track.track_id, enabled))
+        self.status_message_requested.emit(I18N.tr(
+            "edit.effects.adjust_track_panner", "Adjust Spatial Panner in the Audio Mixer track strip."))
         event.acceptProposedAction()
 
     def _resolve_effect_drop_target(

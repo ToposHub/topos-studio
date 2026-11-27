@@ -49,8 +49,8 @@ class TestCatalogFreshness:
         #（de_esser/true_peak_limiter/dynamic_eq/bus_comp/multiband_comp/
         # convolution_reverb/transient_designer/tremolo_auto_pan/
         # chorus_flanger/phaser）入库后重冻结。
-        # FX-15 exciter 注册后重建（2026-11-21 计划公用合同第 5 步）。
-        assert digest.startswith("fab53f71c1319944")
+        # 激励器路径与次谐波检测参数更新后，从生产注册表重建目录。
+        assert digest.startswith("dc44ac58800488dc")
 
 
 class TestCatalogIntegrity:

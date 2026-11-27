@@ -137,3 +137,78 @@ class TestDoubler:
         assert before < after * 0.1
         dry_present = band_amp(0, 90000, 220.0)
         assert dry_present > 0.05               # 干声未被延迟/衰减
+
+    def test_equal_intervals_share_shift_without_sharing_voice_controls(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from src.features.edit.core.audio_effects import doubler
+
+        phase = 2.0 * np.pi * 220.0 * np.arange(RATE) / RATE
+        source = np.stack([np.sin(phase), 0.5 * np.cos(phase)]).astype(np.float32)
+        voices = [
+            DoublerVoice(interval_st=3.0, detune_cents=6.0, pan_pct=-75.0, gain_db=-8.0),
+            DoublerVoice(interval_st=3.06, delay_ms=20.0, pan_pct=35.0, gain_db=-4.0),
+        ]
+        bypass = render_doubler(source, RATE, [], dry_gain_db=-8.0)
+        isolated = [render_doubler(source, RATE, [voice], dry_gain_db=-8.0) for voice in voices]
+        actual_shift = doubler.pitch_shift_fixed_length
+        calls: list[float] = []
+
+        def count_shift(pcm: np.ndarray, sample_rate: int, semitones: float) -> np.ndarray:
+            calls.append(semitones)
+            return actual_shift(pcm, sample_rate, semitones)
+
+        monkeypatch.setattr(doubler, "pitch_shift_fixed_length", count_shift)
+        result = render_doubler(source, RATE, voices, dry_gain_db=-8.0)
+        assert calls == [3.06]
+        np.testing.assert_allclose(result, isolated[0] + isolated[1] - bypass, atol=2e-7)
+
+    @pytest.mark.parametrize(("wet_mix_pct", "delay_ms"), [(0.0, 0.0), (100.0, 100.0)])
+    def test_inaudible_voice_skips_shift(
+        self, monkeypatch: pytest.MonkeyPatch, wet_mix_pct: float, delay_ms: float,
+    ) -> None:
+        from src.features.edit.core.audio_effects import doubler
+
+        def unexpected_shift(pcm: np.ndarray, sample_rate: int, semitones: float) -> np.ndarray:
+            pytest.fail("Inaudible voice reached the pitch shifter")
+
+        monkeypatch.setattr(doubler, "pitch_shift_fixed_length", unexpected_shift)
+        source = np.ones((2, RATE // 20), dtype=np.float32)
+        voice = DoublerVoice(interval_st=12.0, delay_ms=delay_ms)
+        out = render_doubler(source, RATE, [voice], wet_mix_pct=wet_mix_pct)
+        np.testing.assert_array_equal(out, source)
+        with pytest.raises(ValueError, match="voice interval"):
+            render_doubler(source, RATE, [DoublerVoice(interval_st=25.0)], wet_mix_pct=0.0)
+
+    def test_cancellation_during_final_voice_returns_source(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.features.edit.core.audio_effects import doubler
+
+        actual_shift = doubler.pitch_shift_fixed_length
+        cancelled = False
+
+        def shift_and_cancel(pcm: np.ndarray, sample_rate: int, semitones: float) -> np.ndarray:
+            nonlocal cancelled
+            result = actual_shift(pcm, sample_rate, semitones)
+            cancelled = True
+            return result
+
+        monkeypatch.setattr(doubler, "pitch_shift_fixed_length", shift_and_cancel)
+        source = np.ones((2, RATE // 2), dtype=np.float32)
+        out = render_doubler(source, RATE, [DoublerVoice(interval_st=3.0)], cancel_check=lambda: cancelled)
+        assert cancelled and out is source
+
+    @pytest.mark.parametrize(("duration_ms", "tolerance_hz"), [(25, 25.0), (40, 8.0), (60, 8.0)])
+    def test_short_octave_voice_has_wet_audio_at_both_ends(
+        self, duration_ms: int, tolerance_hz: float,
+    ) -> None:
+        phase = 2.0 * np.pi * 220.0 * np.arange(RATE * duration_ms // 1000) / RATE + 0.3
+        source = (0.2 * np.sin(phase)).astype(np.float32)[None]
+        out = render_doubler(source, RATE, [DoublerVoice(interval_st=12.0)], dry_gain_db=-120.0)
+        assert out.shape == source.shape
+        quarter = out.shape[-1] // 4
+        level_start = np.sqrt(np.mean(out[0, :quarter] ** 2))
+        level_end = np.sqrt(np.mean(out[0, -quarter:] ** 2))
+        assert level_end == pytest.approx(level_start, rel=0.2)
+        spectrum = np.abs(np.fft.rfft(out[0] * np.hanning(out.shape[-1]), n=16384))
+        peak = spectrum.argmax() * RATE / 16384
+        assert peak == pytest.approx(440.0, abs=tolerance_hz)

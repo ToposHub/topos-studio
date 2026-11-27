@@ -30,6 +30,31 @@ if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import ClipInstance
 
 
+def render_audition_output(
+    pcm: np.ndarray, sample_rate: int, duration: float, gain_fade: tuple | None,
+    clip_fx: tuple[tuple[EffectInstance, ...], int, float] | None,
+    cancelled: Callable[[], bool], *, time_pitch_draft: bool = False,
+) -> np.ndarray:
+    """Apply the clip fade, gain and inserts after the audio edit stack."""
+    if gain_fade is not None:
+        from src.features.edit.core.audio_dsp import apply_clip_fade
+
+        (gain_db, fin_frames, fout_frames, fin_samples, fout_samples,
+         curve_in, curve_out, fps, duration_frames) = gain_fade
+        if time_pitch_draft or not math.isclose(duration, duration_frames / fps):
+            duration_frames = duration * fps
+        pcm = apply_clip_fade(
+            pcm, 0, duration_frames, 0, fin_frames, fout_frames, fps, sample_rate,
+            fade_in_samples_override=fin_samples, fade_out_samples_override=fout_samples,
+            fade_curve_in=curve_in, fade_curve_out=curve_out)
+        if abs(gain_db) > 1e-9:
+            pcm = pcm * (10.0 ** (gain_db / 20.0))
+    if clip_fx is not None and not cancelled():
+        effects, first_frame, fps = clip_fx
+        pcm = render_clip_effects(pcm, sample_rate, effects, first_frame, fps, cancelled)
+    return pcm
+
+
 def render_clip_effects(
     pcm: np.ndarray, sample_rate: int, effects: tuple[EffectInstance, ...],
     first_frame: int, fps: float, cancelled: Callable[[], bool],
@@ -212,7 +237,11 @@ def build_band_preview(pcm: np.ndarray, rate: int, start: int, end: int,
     context = round(rate * 0.1)
     lo, hi = max(0, start - context), min(pcm.shape[1], end + context)
     sos = butter(4, [low, high], btype="band", fs=rate, output="sos")
-    filtered = sosfiltfilt(sos, pcm[:, lo:hi].astype(np.float64), axis=1)
+    segment = pcm[:, lo:hi].astype(np.float64)
+    if segment.shape[1] <= 3 * (2 * len(sos) + 1):
+        filtered = sosfiltfilt(sos, segment, axis=1, padlen=segment.shape[1] - 1)
+    else:
+        filtered = sosfiltfilt(sos, segment, axis=1)
     output = np.ascontiguousarray(filtered[:, start - lo:end - lo], dtype=np.float32)
     edge = min(round(rate * 0.01), output.shape[1] // 2)
     if edge > 0:
