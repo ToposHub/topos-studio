@@ -669,17 +669,28 @@ def test_hover_preview_coalesces_mouse_motion_and_holds_the_previous_frame(pool,
     assert not grid._hover_frames
 
 
-def test_slider_surface_blends_into_toolbar_with_global_theme(pool, qapp) -> None:
+def test_media_pool_header_and_body_surfaces_with_global_theme(pool, qapp) -> None:
     from PyQt6.QtCore import QPoint
     from src.shared.ui.style_sheet import DARK_THEME
     panel, *_ = pool
     old_style = qapp.styleSheet()
     try:
         qapp.setStyleSheet(DARK_THEME)
-        qapp.processEvents()
-        image = panel.grab().toImage()
-        corner = panel.thumb_slider.mapTo(panel, QPoint(2, 2))
-        assert image.pixelColor(corner).name() == get_color("timeline_toolbar_bg")
+        header = get_color("timeline_toolbar_bg")
+        for mode in (ViewMode.GRID, ViewMode.LIST, ViewMode.METADATA):
+            panel.set_view_mode(mode)
+            qapp.processEvents()
+            image = panel.grab().toImage()
+            assert image.pixelColor(panel.thumb_slider.mapTo(panel, QPoint(2, 2))).name() == header
+            assert panel.breadcrumb_widget.grab().toImage().pixelColor(210, 5).name() == header
+            bins = panel.bin_tree.viewport().grab().toImage()
+            master_y = panel.bin_tree.visualItemRect(panel.bin_tree.topLevelItem(0)).center().y()
+            assert bins.pixelColor(2, master_y).name() == header
+            assert bins.pixelColor(bins.width() - 5, master_y).name() == header
+            assert bins.pixelColor(5, bins.height() - 8).name() == C.BG_PANEL
+            view = panel.tree if mode == ViewMode.LIST else panel.grid_view
+            body = view.viewport().grab().toImage()
+            assert body.pixelColor(10, body.height() - 8).name() == C.BG_PANEL
     finally:
         qapp.setStyleSheet(old_style)
 

@@ -79,7 +79,7 @@ class ProjectSettingsSection(QFrame):
         header.setFixedHeight(28)
         header.setStyleSheet(SETTINGS_SECTION_HEADER_STYLE)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(6, 0, 2, 0)
+        header_layout.setContentsMargins(8, 0, 8, 0)
         header_layout.setSpacing(2)
 
         # Collapse button

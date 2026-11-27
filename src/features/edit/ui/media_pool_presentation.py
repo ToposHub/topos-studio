@@ -10,16 +10,16 @@ from PyQt6.QtWidgets import QAbstractItemView, QLineEdit, QListView, QStyle, QSt
 
 from .media_pool_panel import AssetListModel, GridDelegate
 from .media_pool_icons import draw_timeline_glyph, pool_icon
-from .edit_style import get_color
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C
 
 
 def pool_tree_style(row_height: int, *, sidebar: bool = False) -> str:
-    surface = get_color("timeline_toolbar_bg")
-    selection = surface if sidebar else C.BG_DARKEST
+    surface = C.BG_PANEL
+    selection = "transparent" if sidebar else C.BG_DARKEST
     return f"""
         QTreeWidget {{ background: {surface}; alternate-background-color: {surface};
+            selection-background-color: {selection};
             color: {C.TEXT_SECONDARY}; border: none; font-size: 11px; }}
         QTreeWidget::item {{ height: {row_height}px; padding: 0 4px; border: none; }}
         QTreeWidget::item:selected {{ background: {selection}; color: {C.TEXT_PRIMARY}; }}

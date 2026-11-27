@@ -13,13 +13,16 @@ from typing import Any, Optional
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 )
 
+from .inspector_layout import (
+    MULTI_AXIS_VALUE_WIDTH, PARAM_LABEL_STYLE, PARAM_LABEL_WIDTH,
+    SECTION_CONTENT_MARGINS, InspectorComboBox,
+)
 from src.shared.i18n.i18n import I18N
 from src.shared.assets.icon_manager import make_link_button
 from src.shared.ui.widgets.drag_value import DragValue
-from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 from src.shared.ui.widgets.color_picker_control import ColorPickerControl
 from src.features.edit.ui.comp_clip_settings_dialog import (
     _RESOLUTION_PRESETS,
@@ -64,7 +67,7 @@ class ProjectSettingsWidget(QWidget):
         # 同风格：左侧固定宽度标签 + 右侧控件，行间距 4px）。外层边距与
         # NodeSectionWidget 内容区（8,6,8,6）对齐，视觉上无缝融入参数面板。
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setContentsMargins(*SECTION_CONTENT_MARGINS)
         layout.setSpacing(4)
 
         layout.addWidget(self._build_preset_row())
@@ -78,16 +81,11 @@ class ProjectSettingsWidget(QWidget):
     # 行容器 / 标签工厂（与 NodeSectionWidget 参数行规范一致）
     # ------------------------------------------------------------------
 
-    # 标签固定宽度：让所有行左侧对齐，右侧控件左边缘齐整。
-    _LABEL_MIN_WIDTH = 80
-
     def _make_label(self, text: str) -> QLabel:
-        """参数行标签：10px / #bbb / 固定最小宽度 + Maximum 尺寸策略，
-        与 NodeSectionWidget._make_param_label 规范一致。"""
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #bbb; font-size: 10px;")
-        lbl.setMinimumWidth(self._LABEL_MIN_WIDTH)
-        lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        lbl.setStyleSheet(PARAM_LABEL_STYLE)
+        lbl.setWordWrap(True)
+        lbl.setFixedWidth(PARAM_LABEL_WIDTH)
         return lbl
 
     def _make_row(self) -> tuple[QWidget, QHBoxLayout]:
@@ -104,9 +102,9 @@ class ProjectSettingsWidget(QWidget):
 
     def _build_preset_row(self) -> QWidget:
         row, h = self._make_row()
-        h.addWidget(self._make_label(
-            I18N.tr("composite.project_settings.preset", "Preset")))
-        self._resolution_combo = ChevronComboBox()
+        label = self._make_label(I18N.tr("composite.project_settings.preset", "Preset"))
+        h.addWidget(label)
+        self._resolution_combo = InspectorComboBox(label)
         for name, w, hh in _RESOLUTION_PRESETS:
             self._resolution_combo.addItem(f"{name}  ({w}x{hh})", (w, hh))
         self._resolution_combo.addItem(
@@ -119,14 +117,16 @@ class ProjectSettingsWidget(QWidget):
     def _build_size_row(self) -> QWidget:
         # W [width] [锁] H [height] —— 宽高合并到同一行，更省空间。
         row, h = self._make_row()
-        h.addWidget(self._make_label(
-            I18N.tr("composite.project_settings.size", "Size")))
+        label = self._make_label(I18N.tr("composite.project_settings.size", "Size"))
+        h.addWidget(label)
 
         wh_w = QLabel(I18N.tr("composite.project_settings.w_label", "W"))
         wh_w.setStyleSheet("color: #888; font-size: 10px;")
+        wh_w.setFixedWidth(10)
+        label.setFixedWidth(PARAM_LABEL_WIDTH - wh_w.width() - h.spacing())
         h.addWidget(wh_w)
         self._width_drag = DragValue("", 64, 16384, 1920.0, decimals=0)
-        self._width_drag.setFixedValueWidth(64)
+        self._width_drag.setFixedValueWidth(MULTI_AXIS_VALUE_WIDTH)
         h.addWidget(self._width_drag)
 
         # 统一小锁图标（锁定=橙 / 解锁=灰），与全项目绑定图标一致。
@@ -142,7 +142,7 @@ class ProjectSettingsWidget(QWidget):
         wh_h.setStyleSheet("color: #888; font-size: 10px;")
         h.addWidget(wh_h)
         self._height_drag = DragValue("", 64, 16384, 1080.0, decimals=0)
-        self._height_drag.setFixedValueWidth(64)
+        self._height_drag.setFixedValueWidth(MULTI_AXIS_VALUE_WIDTH)
         h.addWidget(self._height_drag)
 
         h.addStretch(1)
@@ -152,9 +152,9 @@ class ProjectSettingsWidget(QWidget):
 
     def _build_fps_row(self) -> QWidget:
         row, h = self._make_row()
-        h.addWidget(self._make_label(
-            I18N.tr("composite.project_settings.fps", "Frame Rate")))
-        self._fps_combo = ChevronComboBox()
+        label = self._make_label(I18N.tr("composite.project_settings.fps", "Frame Rate"))
+        h.addWidget(label)
+        self._fps_combo = InspectorComboBox(label)
         for label, fps in _FPS_PRESETS:
             self._fps_combo.addItem(f"{label} fps", fps)
         self._fps_combo.addItem(

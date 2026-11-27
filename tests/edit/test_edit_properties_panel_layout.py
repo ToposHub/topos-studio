@@ -21,6 +21,7 @@ from src.app.controllers.dock_layout_controller import (
 )
 from src.features.edit.ui.edit_properties_panel import (
     EditPropertiesPanel,
+    KeyframeIndicatorButton,
     _VALUE_FIXED_WIDTH,
 )
 from src.features.edit.core.timeline_v2 import TransitionInstance
@@ -414,47 +415,93 @@ def test_color_wheel_release_without_press_is_safe(qapp) -> None:
     wheel._wheel_canvas.mouseReleaseEvent(None)
 
 
-def test_numeric_sliders_always_visible_between_label_and_dragvalue(qapp) -> None:
-    """Numeric rows must be ``[label][slider stretch][DragValue fixed]``.
+def test_inspector_controls_fit_between_equal_side_margins(qapp) -> None:
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtWidgets import QCheckBox, QComboBox, QPushButton
+    from src.features.composite.nodes.base_node import ParamDef
+    from src.features.edit.core.effect_instance import ParamSchema
+    from src.features.edit.core.timeline_v2 import EditTrack
+    from src.shared.ui.style_sheet import C, DARK_THEME
+    from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+    from src.shared.ui.widgets.topos_controls import ToposClickableSlider
 
-    Sliders stay visible at every panel width — they stretch to fill the row's
-    middle so the DragValue pins to the right edge.  Hiding them (an earlier
-    attempt) collapsed every row to ``[label][DragValue] + whitespace``, which
-    is the "everything left-aligned" look the Composite page does not have.
-    """
-    from PyQt6.QtWidgets import QMainWindow, QDockWidget, QWidget
-    from PyQt6.QtCore import Qt
-
-    mw = QMainWindow()
-    mw.setCentralWidget(QWidget())
     panel = EditPropertiesPanel()
-    dock = QDockWidget("Properties", mw)
-    dock.setWidget(panel)
-    mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-    mw.resize(1200, 800)
-    mw.show()
-    panel.set_clip(_make_mock_clip())
-    _expand_transform_section(panel)
-    for _ in range(5):
-        qapp.processEvents()
+    old_style = qapp.styleSheet()
+    try:
+        qapp.setStyleSheet(DARK_THEME)
+        panel.set_clip(_make_mock_clip(), media_type="video")
+        extra = panel._add_section("controls", "Extra controls", {}, {})
+        definition = ParamDef(name="exposure_compensation", ptype="float", min_val=0.0,
+                              max_val=8.0, step=0.1, default=1.0)
+        track = EditTrack(track_id="audio", name="Audio 1", track_type="audio", index=0)
+        for extra_row in (
+            panel._create_effect_param_widget_from_pdef(definition, 1.0, "fx"),
+            panel._create_effect_param_widget("gain", ParamSchema(label="Gain"), 1.0, "fx"),
+            panel._build_transition_int_row(extra, "duration", 4, definition, "transition"),
+            panel._build_transition_float_row(extra, "softness", 1.0, definition, "transition"),
+            panel._build_track_volume_row(track, definition),
+            panel._build_track_pan_row(track, definition),
+        ):
+            extra.content_layout().addWidget(extra_row)
+        button_row = panel._create_effect_channel_group(None, "fx", {})
+        extra.content_layout().addWidget(button_row)
+        first_button = button_row.findChildren(QPushButton)[0]
+        path_row = panel._build_info_row(
+            "Path", "Project Library / Media References / Footage Review / Timeline Stills"
+        )
+        extra.content_layout().addWidget(path_row)
+        path_value = path_row.layout().itemAt(1).widget()
+        for section in panel._sections.values():
+            if section._is_collapsed:
+                section.toggle_collapse()
+        panel.show()
 
-    transform = panel._sections["clip:test-clip:transform"]
-    assert transform._slidable_sliders, "Transform section should own sliders"
+        raw = panel._sections["clip:test-clip:raw"]._param_widgets["wb_gain_r"]["slider"]
+        for width, height in ((280, 350), (330, 900), (400, 900), (520, 900)):
+            panel.resize(width, height)
+            qapp.processEvents()
+            raw_x = raw.mapTo(panel, QPoint()).x()
+            row = raw.parentWidget()
+            label = row.layout().itemAt(0).widget()
+            expected_width = row.width() - label.width() - _VALUE_FIXED_WIDTH - 12 - KeyframeIndicatorButton.BUTTON_SIZE
+            assert raw.width() == expected_width
+            for slider in panel.findChildren(ToposClickableSlider):
+                assert (slider.mapTo(panel, QPoint()).x(), slider.width()) == (raw_x, raw.width())
+                assert slider.isVisible()
+            assert first_button.mapTo(panel, QPoint()).x() == raw_x
+            assert C.TEXT_DIM in label.styleSheet() and "10px" in label.styleSheet()
+            combos = panel.findChildren(QComboBox)
+            assert len(combos) >= 5
+            assert len({(combo.mapTo(panel, QPoint()).x(), combo.width()) for combo in combos}) == 1
+            assert all(isinstance(combo, ChevronComboBox) for combo in combos)
+            assert all(combo.mapTo(panel, QPoint()).x() == raw_x for combo in combos)
+            keyframe = panel._keyframe_buttons["transform.rotation"]
+            right = keyframe.mapTo(panel, QPoint(keyframe.width(), 0)).x()
+            assert all(combo.mapTo(panel, QPoint(combo.width(), 0)).x() == right for combo in combos)
+            for section in panel._sections.values():
+                reset = section._reset_btn
+                if reset.isVisible():
+                    assert reset.mapTo(panel, QPoint(reset.width(), 0)).x() == right
+            assert right == row.mapTo(panel, QPoint(row.width(), 0)).x()
+            viewport = panel._scroll.viewport()
+            viewport_left = viewport.mapTo(panel, QPoint()).x()
+            row_left = row.mapTo(panel, QPoint()).x()
+            assert viewport_left + viewport.width() - right == row_left - viewport_left
+            assert path_value.height() >= path_value.heightForWidth(path_value.width())
+            checkboxes = [box for box in panel.findChildren(QCheckBox)
+                          if box.parentWidget().objectName() == "editPropertiesRow"]
+            assert checkboxes and all(box.mapTo(panel, QPoint()).x() == raw_x for box in checkboxes)
 
-    # Every numeric-row slider must be visible regardless of width.
-    assert all(s.isVisible() for s in transform._slidable_sliders)
-
-    # Row 0 is now the Translate X/Y pair (composite TransformNode parity):
-    # [label] [x-slider stretch=1] [x] [x-DragValue] [y-slider] [y] [y-DragValue]
-    content = transform._content_widget
-    row0 = content.layout().itemAt(0).widget().layout()
-    types = [type(row0.itemAt(j).widget()).__name__ for j in range(row0.count())
-             if row0.itemAt(j) and row0.itemAt(j).widget()]
-    # The first slider (x axis) sits right after the label and takes the slack.
-    assert types[0] == "QLabel", "row must start with the param label"
-    assert types[1] == "ToposClickableSlider", "x-axis slider must follow the label"
-    assert "DragValue" in types, "row must contain DragValue boxes"
-    assert row0.stretch(1) == 1, "x-slider must take the slack via stretch=1"
+        transform = panel._sections["clip:test-clip:transform"]
+        for key in ("translate_x", "translate_y", "scale_x", "scale_y", "pivot_x", "pivot_y"):
+            assert transform._param_widgets[key].get("slider") is None
+        assert {"transform.translate_x", "transform.translate_y", "transform.scale_x",
+                "transform.scale_y", "transform.rotation"} <= panel._keyframe_buttons.keys()
+        for combo in panel.findChildren(QComboBox):
+            assert combo.sizeAdjustPolicy() == QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    finally:
+        panel.close()
+        qapp.setStyleSheet(old_style)
 
 
 def test_dragvalue_stays_fixed_width_regardless_of_panel_width(qapp) -> None:
@@ -481,13 +528,8 @@ def test_dragvalue_stays_fixed_width_regardless_of_panel_width(qapp) -> None:
         mw.resizeDocks([dock], [dock_w], Qt.Orientation.Horizontal)
         for _ in range(5):
             qapp.processEvents()
-        content = panel._sections["clip:test-clip:transform"]._content_widget
-        # Row 0 is the Translate X/Y pair; find its first DragValue (x axis).
-        row0 = content.layout().itemAt(0).widget().layout()
-        drag = next(row0.itemAt(j).widget() for j in range(row0.count())
-                    if row0.itemAt(j) and row0.itemAt(j).widget()
-                    and type(row0.itemAt(j).widget()).__name__ == "DragValue")
-        w = drag.width()
+        section = panel._sections["clip:test-clip:transform"]
+        w = section._param_widgets["rotation"]["widget"].width()
         mw.close()
         return w
 
@@ -499,65 +541,24 @@ def test_dragvalue_stays_fixed_width_regardless_of_panel_width(qapp) -> None:
     )
 
 
-def test_no_right_gap_dragvalue_reaches_panel_edge(qapp) -> None:
-    """DragValue's right edge must align with the row's right edge (no gap).
+def test_paired_controls_start_at_the_same_left_edge_as_single_controls(qapp) -> None:
+    from PyQt6.QtCore import QPoint
 
-    Regression for the 'large empty area on the right' bug: an earlier version
-    pinned the scroll area's inner content widget to ``QSizePolicy.Maximum``
-    horizontally, which froze the content at its natural sizeHint and left the
-    section narrower than the dock — so the value box never reached the right
-    edge. With a resizable content widget (composite parity) the gap is 0.
-    """
-    from PyQt6.QtWidgets import QMainWindow, QDockWidget, QWidget
-    from PyQt6.QtCore import Qt
-
-    for dock_w in (350, 500):
-        mw = QMainWindow()
-        mw.setCentralWidget(QWidget())
-        panel = EditPropertiesPanel()
-        dock = QDockWidget("Properties", mw)
-        dock.setWidget(panel)
-        mw.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-        mw.resize(1400, 800)
-        mw.show()
-        panel.set_clip(_make_mock_clip())
-        # Native sections (incl. Transform) default to collapsed; expand the
-        # Transform section so layout-dependent assertions measure the real
-        # laid-out widget tree, not a hidden collapsed stub.
-        _expand_transform_section(panel)
-        for _ in range(5):
-            qapp.processEvents()
-        mw.resizeDocks([dock], [dock_w], Qt.Orientation.Horizontal)
-        for _ in range(5):
-            qapp.processEvents()
-
-        content = panel._sections["clip:test-clip:transform"]._content_widget
-        row0 = content.layout().itemAt(0).widget()
-        rl = row0.layout()
-        # Row 0 is the Translate X/Y pair; the LAST DragValue (y axis) sits at
-        # the row's right edge (the pair fills the row like composite).
-        drags = [rl.itemAt(j).widget() for j in range(rl.count())
-                 if rl.itemAt(j) and rl.itemAt(j).widget()
-                 and type(rl.itemAt(j).widget()).__name__ == "DragValue"]
-        assert drags, "Translate row must contain DragValue boxes"
-        # G16（第六轮审计）：Translate/Scale 每轴现在带 ◆ 关键帧按钮——
-        # 行尾可能是 y 轴 ◆ 而不是 DragValue。"无右侧死空白"的语义是
-        # 行内最后一个控件到达右缘（DragValue 或 KeyframeIndicatorButton）。
-        widgets = [rl.itemAt(j).widget() for j in range(rl.count())
-                   if rl.itemAt(j) and rl.itemAt(j).widget()]
-        assert widgets, "Translate row must have widgets"
-        last = widgets[-1]
-        assert type(last).__name__ in ("DragValue", "KeyframeIndicatorButton"), (
-            f"row-right widget should be a DragValue or its ◆ button, "
-            f"got {type(last).__name__}"
-        )
-        gap = row0.width() - (last.pos().x() + last.width())
-        assert gap <= 2, (
-            f"Row-right control must reach the right edge at dock_w={dock_w}, "
-            f"but had a {gap}px gap (row={row0.width()}, last_right="
-            f"{last.pos().x() + last.width()})"
-        )
-        mw.close()
+    panel = EditPropertiesPanel()
+    panel.set_clip(_make_mock_clip())
+    _expand_transform_section(panel)
+    panel.show()
+    for width in (280, 350, 500):
+        panel.resize(width, 500)
+        qapp.processEvents()
+        params = panel._sections["clip:test-clip:transform"]._param_widgets
+        slider_x = params["rotation"]["slider"].mapTo(panel, QPoint()).x()
+        for axis in ("translate", "scale", "pivot"):
+            first = params[f"{axis}_x"]["widget"]
+            second = params[f"{axis}_y"]["widget"]
+            assert first.mapTo(panel, QPoint()).x() == slider_x
+            assert second.mapTo(panel, QPoint(second.width(), 0)).x() <= panel.width()
+    panel.close()
 
 
 def test_panel_uses_default_size_hint_like_composite(qapp) -> None:

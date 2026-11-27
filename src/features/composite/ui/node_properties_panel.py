@@ -27,12 +27,16 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPointF, QRectF, QSize, QSignalBlocker
 from PyQt6.QtGui import (
-    QColor, QPainter, QPen, QBrush, QPainterPath, QFont, QFontMetrics,
+    QColor, QPainter, QPen, QBrush, QPainterPath, QFont,
     QShortcut, QKeySequence, QLinearGradient, QMouseEvent,
 )
 from typing import Callable, Dict, Any, Optional, List, Tuple
 import os
 
+from .inspector_layout import (
+    MULTI_AXIS_VALUE_WIDTH, PARAM_LABEL_STYLE, PARAM_LABEL_WIDTH,
+    SECTION_CONTENT_MARGINS, InspectorComboBox,
+)
 from .keyframe_editor import KeyframeEditorWidget
 from .scale_link import ScaleLinkState
 from .timeline_icons import PROPERTY_KEYFRAME_GLYPH, PROPERTY_KEYFRAME_STYLE
@@ -72,6 +76,7 @@ _SLIDER_SHOW_WIDTH_TRIPLE = 480
 # Fixed pixel width of the numeric value box — it stays this wide regardless of
 # panel width; the slider (when shown) takes the variable space.
 _VALUE_FIXED_WIDTH = 64
+_KEYFRAME_BUTTON_WIDTH = 20
 
 # Style for the small X/Y "chain" toggle and the keyframe ◆ button on rows.
 _CHAIN_STYLE = """
@@ -813,7 +818,7 @@ class NodeSectionWidget(QFrame):
         self._header = QWidget()
         self._header.setFixedHeight(28)
         header_layout = QHBoxLayout(self._header)
-        header_layout.setContentsMargins(6, 0, 2, 0)
+        header_layout.setContentsMargins(8, 0, 8, 0)
         header_layout.setSpacing(2)
 
         # Collapse toggle
@@ -840,10 +845,10 @@ class NodeSectionWidget(QFrame):
 
         # Title
         self._title_label = QLabel(node_title)
+        self._title_label.setToolTip(node_title)
         self._title_label.setStyleSheet(NODE_TITLE_LABEL_STYLE)
-        header_layout.addWidget(self._title_label)
-
-        header_layout.addStretch()
+        self._title_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        header_layout.addWidget(self._title_label, 1)
 
         # Now that the title/collapse widgets exist, apply the node-color-aware
         # header gradient + adaptive text color in one pass.
@@ -936,7 +941,7 @@ class NodeSectionWidget(QFrame):
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
         self._content_layout = QVBoxLayout(self._content_widget)
-        self._content_layout.setContentsMargins(8, 6, 8, 6)
+        self._content_layout.setContentsMargins(*SECTION_CONTENT_MARGINS)
         self._content_layout.setSpacing(4)
         self._content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -1166,31 +1171,16 @@ class NodeSectionWidget(QFrame):
             else:
                 ungrouped_params.append(key)
 
-        # Compute widest label so every _ParamLabel shares one minimum width,
-        # keeping DragValue / ComboBox left-edges vertically aligned across all
-        # row types (single, XY-pair, combo).
-        all_keys = list(ungrouped_params)
-        for pk in groups.values():
-            all_keys.extend(pk)
-        fm = QFontMetrics(QFont("", 10))
-        widest = 36
-        for directive in group_xy_pairs(all_keys, self.param_defs):
-            if directive[0] == 'pair':
-                name = directive[1].replace("_", " ").title()
-            else:
-                name = directive[1].replace("_", " ").title()
-            widest = max(widest, fm.horizontalAdvance(name) + 12)
-        self._parent_panel._label_min_width = widest
-
         # Ungrouped rows (or all rows when there are no groups).
         self._build_directives_into(self._content_layout, ungrouped_params)
 
         if has_groups:
             for group_name, param_keys in groups.items():
                 group_box = QGroupBox(self._parent_panel._group_display_name(group_name))
-                group_box.setStyleSheet(NODE_GROUP_BOX_STYLE)
+                group_box.setStyleSheet(
+                    NODE_GROUP_BOX_STYLE + "QGroupBox { border-width: 1px 0; }")
                 group_layout = QVBoxLayout(group_box)
-                group_layout.setContentsMargins(6, 4, 6, 4)
+                group_layout.setContentsMargins(0, 4, 0, 4)
                 group_layout.setSpacing(3)
                 self._build_directives_into(group_layout, param_keys)
                 self._content_layout.addWidget(group_box)
@@ -1649,11 +1639,6 @@ class NodePropertiesPanel(QWidget):
         # base names the user has split into two single rows. Empty/absent = the
         # pair stays on one combined row with a single shared keyframe.
         self._split_dims: Dict[str, set] = {}
-
-        # Widest parameter label pixel width for the current node — computed in
-        # _build_parameters before rows are created so every _ParamLabel uses
-        # the same minimum width and input widgets align vertically.
-        self._label_min_width: int = 36
 
         # 按 node_id 缓存当前图像尺寸 (w, h)，供 pivot 行显示真实中心值。
         # 模仿 _split_dims 的存储方式；image_size 不是节点参数，而是 viewer
@@ -2669,19 +2654,17 @@ class NodePropertiesPanel(QWidget):
         row_layout.setContentsMargins(0, 2, 0, 2)
         row_layout.setSpacing(2)
 
-        # Label with reset button
-        label_row = QHBoxLayout()
-        label_row.setSpacing(4)
-        
-        label = QLabel(key.replace("_", " ").title())
-        label.setStyleSheet("color: #bbb; font-size: 10px;")
-        label_row.addWidget(label)
+        controls = QHBoxLayout()
+        controls.setSpacing(4)
+        row_layout.addLayout(controls)
+        label = self._make_param_label(self._param_display_name(key))
+        controls.addWidget(label)
         
         # Reset button
         reset_btn = QToolButton()
         reset_btn.setText("↺")
         reset_btn.setToolTip(f"Reset {key} to default")
-        reset_btn.setFixedSize(16, 16)
+        reset_btn.setFixedSize(_KEYFRAME_BUTTON_WIDTH, _KEYFRAME_BUTTON_WIDTH)
         reset_btn.setStyleSheet("""
             QToolButton {
                 background-color: transparent; border: 1px solid #555;
@@ -2691,7 +2674,6 @@ class NodePropertiesPanel(QWidget):
             QToolButton:hover { background-color: #555; color: #fff; }
         """)
         
-        pdef = self._param_defs.get(key)
         if pdef and pdef.default is not None:
             def reset_param(_checked=False, k=key, d=pdef.default,
                             n=self._current_node_id) -> None:
@@ -2702,43 +2684,28 @@ class NodePropertiesPanel(QWidget):
         else:
             reset_btn.hide()
         
-        label_row.addWidget(reset_btn)
-        row_layout.addLayout(label_row)
-
-        if isinstance(value, bool):
-            # Checkbox for boolean
-            checkbox = QCheckBox(key.replace("_", " ").title())
-            checkbox.setChecked(value)
-            checkbox.toggled.connect(
-                lambda checked, k=key, n=self._current_node_id:
-                self._on_param_changed(k, checked, n)
-            )
-            row_layout.addWidget(checkbox)
-            # 保存控件引用
-            self._param_widgets[key] = {'type': 'bool', 'widget': checkbox}
-
-        elif isinstance(value, str):
+        if isinstance(value, str):
             # Check ptype for specialized controls
             ptype = getattr(pdef, 'ptype', None) if pdef else None
             
             if ptype == 'color':
                 # Color picker
                 color_btn = self._create_color_picker(key, value)
-                row_layout.addWidget(color_btn)
+                controls.addWidget(color_btn, 1)
                 # 保存控件引用
                 self._param_widgets[key] = {'type': 'color', 'widget': color_btn}
 
             elif ptype == 'file':
                 # File picker
                 file_picker = self._create_file_picker(key, value)
-                row_layout.addWidget(file_picker)
+                controls.addWidget(file_picker, 1)
                 # 保存控件引用（file_picker 包含 line_edit）
                 self._param_widgets[key] = {'type': 'file', 'widget': file_picker}
 
             elif ptype == 'hdri':
                 # HDRI preset picker（下拉预置 + 自定义文件按钮）
-                hdri_picker = self._create_hdri_picker(key, str(value))
-                row_layout.addWidget(hdri_picker)
+                hdri_picker = self._create_hdri_picker(key, str(value), label)
+                controls.addWidget(hdri_picker, 1)
                 self._param_widgets[key] = {'type': 'hdri', 'widget': hdri_picker}
 
             else:
@@ -2755,13 +2722,13 @@ class NodePropertiesPanel(QWidget):
                     lambda k=key, le=line_edit, n=self._current_node_id:
                     self._on_param_changed(k, le.text(), n)
                 )
-                row_layout.addWidget(line_edit)
+                controls.addWidget(line_edit, 1)
                 # 保存控件引用
                 self._param_widgets[key] = {'type': 'str', 'widget': line_edit}
                 # C5: ▲▼ version binning for Read/Write path params
                 if key == "file_path":
                     self._attach_version_stepper(
-                        row_layout, key, line_edit,
+                        controls, key, line_edit,
                         node_id=self._current_node_id)
 
         elif isinstance(value, (list, tuple)):
@@ -2771,13 +2738,14 @@ class NodePropertiesPanel(QWidget):
             if ptype == 'curve':
                 # Curve editor
                 curve_widget = self._create_curve_control(key, value)
+                controls.addStretch(1)
                 row_layout.addWidget(curve_widget)
                 # 保存控件引用
                 self._param_widgets[key] = {'type': 'curve', 'widget': curve_widget}
             elif ptype in ('vec2', 'vec3'):
                 dim = 3 if ptype == 'vec3' else 2
                 vec_widget = self._create_vec_control(key, value, dim)
-                row_layout.addWidget(vec_widget)
+                controls.addWidget(vec_widget, 1)
                 # 保存控件引用
                 info: Dict[str, Any] = {
                     'type': ptype, 'widget': vec_widget, 'dim': dim,
@@ -2785,24 +2753,27 @@ class NodePropertiesPanel(QWidget):
                 }
                 if info['animatable']:
                     kf_btn = self._make_keyframe_button(key, pdef)
-                    row_layout.addWidget(kf_btn)
+                    controls.addWidget(kf_btn)
                     info['keyframe_btn'] = kf_btn
                     info['keyframe_btn_keys'] = [key]
                 self._param_widgets[key] = info
             else:
                 val_label = QLabel(str(value))
-                val_label.setStyleSheet("color: #999;")
-                row_layout.addWidget(val_label)
+                val_label.setStyleSheet(PARAM_LABEL_STYLE)
+                val_label.setWordWrap(True)
+                controls.addWidget(val_label, 1)
                 # 保存控件引用（只读显示）
                 self._param_widgets[key] = {'type': 'readonly', 'widget': val_label}
 
         else:
             val_label = QLabel(str(value))
-            val_label.setStyleSheet("color: #999;")
-            row_layout.addWidget(val_label)
+            val_label.setStyleSheet(PARAM_LABEL_STYLE)
+            val_label.setWordWrap(True)
+            controls.addWidget(val_label, 1)
             # 保存控件引用（只读显示）
             self._param_widgets[key] = {'type': 'readonly', 'widget': val_label}
 
+        controls.addWidget(reset_btn)
         return row
 
     # ── Fusion-style numeric rows (drag/typing value box) ────────────────────
@@ -2900,7 +2871,7 @@ class NodePropertiesPanel(QWidget):
         kf_btn.setToolTip(I18N.tr(
             "node_props.kf_btn_tooltip",
             "左键：切换关键帧\nAlt+左键：编辑表达式\n右键：曲线编辑器"))
-        kf_btn.setFixedSize(20, 20)
+        kf_btn.setFixedSize(_KEYFRAME_BUTTON_WIDTH, _KEYFRAME_BUTTON_WIDTH)
         kf_btn.setStyleSheet(PROPERTY_KEYFRAME_STYLE)
         # AE 语义：红色（checked）仅表示**当前播放帧**上有关键帧，而不是
         # 参数存在任意关键帧。无绑定的 NodeGraph 时退回旧行为（任意关键帧）。
@@ -2955,16 +2926,17 @@ class NodePropertiesPanel(QWidget):
 
     def _make_param_label(self, text: str) -> "_ParamLabel":
         label = _ParamLabel(text)
-        label.setStyleSheet("color: #bbb; font-size: 10px;")
-        # Uniform minimum width (computed per-node in _build_parameters) so all
-        # input widgets — DragValue, ComboBox, SpinBox — start at the same
-        # horizontal position regardless of row type.
-        label.setMinimumWidth(self._label_min_width)
-        # Never grow horizontally — the slider/value box absorb extra width, not
-        # the label (keeps labels aligned when the panel is wide or the slider
-        # is hidden).
-        label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        label.setStyleSheet(PARAM_LABEL_STYLE)
+        label.setWordWrap(True)
+        label.setFixedWidth(PARAM_LABEL_WIDTH)
         return label
+
+    def _reserve_keyframe_column(self, layout: QHBoxLayout, info: Dict[str, Any]) -> None:
+        spacer = QWidget()
+        spacer.setFixedWidth(_KEYFRAME_BUTTON_WIDTH)
+        spacer.setVisible(self._keyframe_buttons_visible)
+        layout.addWidget(spacer)
+        info['keyframe_spacer'] = spacer
 
     def _create_combo_row(self, key: str, value: Any, options, pdef) -> QWidget:
         """Horizontal combo row: ``[label] [ComboBox(stretch)]``.
@@ -2986,7 +2958,7 @@ class NodePropertiesPanel(QWidget):
                 self._on_param_changed(k, d, n))
         h.addWidget(label)
 
-        combo = ChevronComboBox()
+        combo = InspectorComboBox(label)
         # Display translated labels but keep `options` (raw keys) as the source
         # of truth for storage/serialization. currentIndexChanged returns us
         # the index, which we map back to the raw key via the options list.
@@ -2996,7 +2968,6 @@ class NodePropertiesPanel(QWidget):
         combo.addItems(display_items)
         if value in options:
             combo.setCurrentIndex(options.index(value))
-        apply_combo_dropdown_style(combo)
         combo.currentIndexChanged.connect(
             lambda idx, k=key, opts=list(options), n=self._current_node_id:
                 self._on_param_changed(k, opts[idx], n) if 0 <= idx < len(opts) else None
@@ -3012,6 +2983,8 @@ class NodePropertiesPanel(QWidget):
             h.addWidget(kf_btn)
             info['keyframe_btn'] = kf_btn
             info['keyframe_btn_keys'] = [key]
+        else:
+            self._reserve_keyframe_column(h, info)
         self._param_widgets[key] = info
         return row
 
@@ -3075,10 +3048,12 @@ class NodePropertiesPanel(QWidget):
                 self._on_param_changed(k, d, n))
         h.addWidget(label)
 
-        combo = self._create_channel_selector(key, value)
+        combo = self._create_channel_selector(key, value, label)
         h.addWidget(combo, 1)
 
-        self._param_widgets[key] = {'type': 'channel', 'widget': combo}
+        info = {'type': 'channel', 'widget': combo}
+        self._reserve_keyframe_column(h, info)
+        self._param_widgets[key] = info
         return row
 
     def _create_numeric_row(self, key: str, value: Any, pdef,
@@ -3179,6 +3154,8 @@ class NodePropertiesPanel(QWidget):
             h.addWidget(kf_btn)
             info['keyframe_btn'] = kf_btn
             info['keyframe_btn_keys'] = [key]
+        else:
+            self._reserve_keyframe_column(h, info)
 
         self._param_widgets[key] = info
         return row
@@ -3368,6 +3345,14 @@ class NodePropertiesPanel(QWidget):
                 'min_val': mn, 'max_val': mx, 'step': step, 'decimals': dec,
                 'animatable': bool(pdef and pdef.is_animatable()),
             }
+            marker = axis_marker(letter)
+            if letter == "x":
+                # Keep the lock and first axis marker inside the label column.
+                accessory_width = marker.width() + h.spacing()
+                if chain is not None:
+                    accessory_width += chain.width() + h.spacing()
+                label.setFixedWidth(PARAM_LABEL_WIDTH - accessory_width)
+                h.addWidget(marker)
             slider = None
             if slider_holder is not None:
                 default_v = pdef.default if (pdef and pdef.default is not None) else None
@@ -3377,10 +3362,11 @@ class NodePropertiesPanel(QWidget):
                 h.addWidget(slider, 1)
                 info['slider'] = slider
                 slider_holder.append(slider)
-            h.addWidget(axis_marker(letter))
+            if letter != "x":
+                h.addWidget(marker)
             drag = DragValue("", mn, mx, float(val), decimals=dec)
             drag.setSingleStep(step)
-            drag.setFixedValueWidth(_VALUE_FIXED_WIDTH)
+            drag.setFixedValueWidth(MULTI_AXIS_VALUE_WIDTH)
             h.addWidget(drag)
             info['widget'] = drag
             # pivot center 模式：drag/slider 置灰只读，避免误写不参与计算的参数。
@@ -3503,6 +3489,8 @@ class NodePropertiesPanel(QWidget):
                     slider.sliderPressed.connect(start_scale_edit)
                 slider.sliderReleased.connect(finish)
 
+        h.addStretch()
+
         # One shared keyframe button for the pair (AE-style). Stored under both
         # axes so the refresh path + state update reach it from either key.
         if info_x['animatable'] or info_y['animatable']:
@@ -3577,6 +3565,14 @@ class NodePropertiesPanel(QWidget):
                 'min_val': mn, 'max_val': mx, 'step': step, 'decimals': dec,
                 'animatable': bool(pdef and pdef.is_animatable()),
             }
+            marker = axis_marker(letter)
+            if letter == "x":
+                # Keep the lock and first axis marker inside the label column.
+                accessory_width = marker.width() + h.spacing()
+                if chain is not None:
+                    accessory_width += chain.width() + h.spacing()
+                label.setFixedWidth(PARAM_LABEL_WIDTH - accessory_width)
+                h.addWidget(marker)
             slider = None
             if slider_holder is not None:
                 default_v = pdef.default if (pdef and pdef.default is not None) else None
@@ -3586,10 +3582,11 @@ class NodePropertiesPanel(QWidget):
                 h.addWidget(slider, 1)
                 info['slider'] = slider
                 slider_holder.append(slider)
-            h.addWidget(axis_marker(letter))
+            if letter != "x":
+                h.addWidget(marker)
             drag = DragValue("", mn, mx, float(val), decimals=dec)
             drag.setSingleStep(step)
-            drag.setFixedValueWidth(_VALUE_FIXED_WIDTH)
+            drag.setFixedValueWidth(MULTI_AXIS_VALUE_WIDTH)
             h.addWidget(drag)
             info['widget'] = drag
             return drag, slider, info
@@ -3624,6 +3621,8 @@ class NodePropertiesPanel(QWidget):
             _d.interaction_ended.connect(
                 lambda k=_k, d=_d, pd=_pd, n=self._current_node_id:
                 self._autokey_if_animated(k, d.value(), pd, n))
+
+        h.addStretch()
 
         # 共享 keyframe 按钮（多轴属性一个 stopwatch）
         if info_x['animatable'] or info_y['animatable'] or info_z['animatable']:
@@ -3743,7 +3742,7 @@ class NodePropertiesPanel(QWidget):
         def build_channel(key, val, pdef, letter):
             drag = DragValue("", 0.0, 1.0, float(val), decimals=3)
             drag.setSingleStep(0.01)
-            drag.setFixedValueWidth(_VALUE_FIXED_WIDTH)
+            drag.setFixedValueWidth(MULTI_AXIS_VALUE_WIDTH)
             h.addWidget(axis_marker_rgb(letter))
             h.addWidget(drag)
             info: Dict[str, Any] = {
@@ -4407,7 +4406,7 @@ class NodePropertiesPanel(QWidget):
 
         return widget
 
-    def _create_hdri_picker(self, key: str, value: str) -> QWidget:
+    def _create_hdri_picker(self, key: str, value: str, label: QLabel) -> QWidget:
         """Create an HDRI preset picker: dropdown (presets) + browse button.
 
         下拉项：
@@ -4422,18 +4421,7 @@ class NodePropertiesPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        combo = QComboBox()
-        combo.setStyleSheet("""
-            QComboBox {
-                background-color: #3a3a3a; border: 1px solid #555;
-                border-radius: 3px; padding: 2px 6px; color: #ccc;
-            }
-            QComboBox:hover { border: 1px solid #666; }
-            QComboBox QAbstractItemView {
-                background-color: #2a2a2a; color: #ccc;
-                selection-background-color: #4a6a8a;
-            }
-        """)
+        combo = InspectorComboBox(label)
 
         # 收集下拉项：(显示文本, 实际值)
         # 顺序：无环境光（默认，稳）→ 默认天空（程序生成，实验性）→ hdri/ 预置
@@ -4535,7 +4523,7 @@ class NodePropertiesPanel(QWidget):
             spinbox.setRange(-99999, 99999)
             spinbox.setDecimals(4)
             spinbox.setValue(values[i])
-            spinbox.setFixedWidth(65)
+            spinbox.setFixedWidth(MULTI_AXIS_VALUE_WIDTH)
 
             def vec_changed(val, k=key, idx=i, d=dim, n=self._current_node_id) -> None:
                 current = list(self._routed_parameters(n).get(k, [0.0] * d))
@@ -4549,11 +4537,12 @@ class NodePropertiesPanel(QWidget):
 
         return widget
 
-    def _create_channel_selector(self, key: str, value: str) -> QComboBox:
+    def _create_channel_selector(self, key: str, value: str,
+                                 label: Optional[QLabel] = None) -> ChevronComboBox:
         """Create a channel selector (R, G, B, A, etc.)."""
         channels = ["R", "G", "B", "A", "RGB", "RGBA"]
         
-        combo = ChevronComboBox()
+        combo = InspectorComboBox(label) if label is not None else ChevronComboBox()
         combo.addItems(channels)
         if value in channels:
             combo.setCurrentIndex(channels.index(value))
@@ -5662,6 +5651,8 @@ class NodePropertiesPanel(QWidget):
                 if not isinstance(info, dict):
                     continue
                 btn = info.get('keyframe_btn')
+                if btn is None:
+                    btn = info.get('keyframe_spacer')
                 if btn is None or id(btn) in seen:
                     continue
                 seen.add(id(btn))
@@ -6280,9 +6271,6 @@ class NodePropertiesPanel(QWidget):
         pdefs = section.param_defs
         popts = section.param_options
 
-        # Compact label widths for blur's short row names.
-        self._label_min_width = 0
-
         # All params are handled here; we explicitly render the ones we want.
         # _skip_params marks every key as "owned by this custom builder" so the
         # generic _build_parameters loop will not also render them. We then
@@ -6457,9 +6445,6 @@ class NodePropertiesPanel(QWidget):
         params = section.parameters
         pdefs = section.param_defs
         popts = section.param_options
-
-        # Compact label widths for keyer's short row names.
-        self._label_min_width = 0
 
         # All params are handled here; we explicitly render the ones we want.
         # _skip_params marks every key as "owned by this custom builder" so the
@@ -6719,8 +6704,6 @@ class NodePropertiesPanel(QWidget):
         pdefs = section.param_defs
         popts = section.param_options
 
-        # Text's labels hug their widgets (see Constant for rationale).
-        self._label_min_width = 0
         section._skip_params = set(params.keys())
 
         # ── Size preset ──
@@ -6735,7 +6718,7 @@ class NodePropertiesPanel(QWidget):
             y_val=int(params.get("height", 1080)),
             param_options=popts, param_defs=pdefs,
             section=section,
-            slider_holder=section._slidable_sliders)
+            slider_holder=section._pair_sliders)
         layout.addWidget(size_row)
         section._skip_params.discard("width")
         section._skip_params.discard("height")
@@ -6747,9 +6730,13 @@ class NodePropertiesPanel(QWidget):
         section._skip_params.discard("text")
 
         # ── Font family + size ──
-        font_row = self._build_text_font_row(section, params, pdefs)
+        font_row = self._build_text_font_row(section, params)
         layout.addWidget(font_row)
         section._skip_params.discard("font_family")
+        font_size_row = self._create_param_row_for_section(
+            section.node_id, "font_size", params.get("font_size", 120),
+            popts, pdefs, section, slider_holder=section._slidable_sliders)
+        layout.addWidget(font_size_row)
         section._skip_params.discard("font_size")
 
         # ── Weight + Italic ──
@@ -6977,7 +6964,7 @@ class NodePropertiesPanel(QWidget):
         label = self._make_param_label("Size")
         h_layout.addWidget(label)
 
-        combo = ChevronComboBox()
+        combo = InspectorComboBox(label)
         for name, pw, ph in TextNode.SIZE_PRESETS:
             combo.addItem(f"{name}  ({pw}×{ph})", (pw, ph))
         combo.addItem("Custom", None)
@@ -6992,7 +6979,6 @@ class NodePropertiesPanel(QWidget):
                 idx = i
                 break
         combo.setCurrentIndex(idx)
-        apply_combo_dropdown_style(combo)
 
         def _on_preset_changed(ci, n=section.node_id) -> None:
             data = combo.itemData(ci)
@@ -7009,9 +6995,10 @@ class NodePropertiesPanel(QWidget):
 
         combo.currentIndexChanged.connect(_on_preset_changed)
         h_layout.addWidget(combo, 1)
+        info = {'type': 'combo', 'widget': combo}
+        self._reserve_keyframe_column(h_layout, info)
+        section._param_widgets["size_preset"] = info
         layout.addWidget(row)
-        section._param_widgets["size_preset"] = {
-            'type': 'combo', 'widget': combo}
 
     def _wire_text_size_combo_sync(self, section: "NodeSectionWidget") -> None:
         """Re-resolve the size combo whenever width or height changes.
@@ -7114,9 +7101,8 @@ class NodePropertiesPanel(QWidget):
         return row
 
     def _build_text_font_row(self, section: "NodeSectionWidget",
-                             params: Dict[str, Any],
-                             pdefs: Dict) -> QWidget:
-        """Build the font family combo + font size drag on one row.
+                             params: Dict[str, Any]) -> QWidget:
+        """Build the editable font family combo.
 
         The family combo is populated from QFontDatabase so the user can
         pick any installed font. A free-text fallback lets them type a
@@ -7132,7 +7118,7 @@ class NodePropertiesPanel(QWidget):
         label = self._make_param_label("Font")
         h.addWidget(label)
 
-        combo = ChevronComboBox()
+        combo = InspectorComboBox(label)
         combo.setEditable(True)
         current_family = str(params.get("font_family", "Arial"))
 
@@ -7155,7 +7141,6 @@ class NodePropertiesPanel(QWidget):
             combo.setCurrentIndex(idx)
         else:
             combo.setEditText(current_family)
-        apply_combo_dropdown_style(combo)
 
         def _on_family_changed(_idx_or_text, n=section.node_id) -> None:
             data = combo.currentData()
@@ -7167,28 +7152,14 @@ class NodePropertiesPanel(QWidget):
         combo.editTextChanged.connect(lambda t: _on_family_changed(None))
         h.addWidget(combo, 1)
 
-        section._param_widgets["font_family"] = {
+        info = {
             'type': 'combo', 'widget': combo,
             'update': lambda fam: (combo.blockSignals(True),
                                    combo.setEditText(str(fam)),
                                    combo.blockSignals(False)),
         }
-
-        # Font size drag (reuse the generic single-row builder so it gets the
-        # slider + numeric editor + keyframe/expression support for free).
-        size_row = self._create_param_row_for_section(
-            section.node_id, "font_size", params.get("font_size", 120),
-            section.param_options, pdefs, section,
-            slider_holder=section._slidable_sliders)
-        # Move the size row's widget out of its own row container into this
-        # row's layout so family + size sit on one line.
-        for i in reversed(range(size_row.layout().count())):
-            item = size_row.layout().itemAt(i)
-            if item and item.widget():
-                w_item = item.widget()
-                size_row.layout().removeWidget(w_item)
-                h.addWidget(w_item)
-        size_row.setParent(None)
+        self._reserve_keyframe_column(h, info)
+        section._param_widgets["font_family"] = info
         return row
 
     # ── Main builder ──
@@ -7210,14 +7181,6 @@ class NodePropertiesPanel(QWidget):
         section._skip_params = set()
         section._hidden_params = set()
 
-        # Compute label min width from this node's param names.
-        from PyQt6.QtGui import QFontMetrics, QFont
-        fm = QFontMetrics(QFont("", 10))
-        widest = 36
-        for key in params.keys():
-            name = key.replace("_", " ").title()
-            widest = max(widest, fm.horizontalAdvance(name) + 12)
-        self._label_min_width = widest
 
         # Build all standard parameter rows into the layout.
         section._build_directives_into(layout, list(params.keys()))
@@ -7263,11 +7226,10 @@ class NodePropertiesPanel(QWidget):
         toggle_row.setFrameShape(QFrame.Shape.NoFrame)
         tr_layout = QHBoxLayout(toggle_row)
         tr_layout.setContentsMargins(0, 2, 0, 6)
-        tr_layout.setSpacing(6)
+        tr_layout.setSpacing(4)
 
-        lbl = QLabel(tr("composite.scene3d.preview_mode",
-                        "预览模式 / Preview"))
-        lbl.setStyleSheet("color:#bbb;font-size:11px;font-weight:bold;")
+        lbl = self._make_param_label(tr("composite.scene3d.preview_mode",
+                                        "预览模式 / Preview"))
         tr_layout.addWidget(lbl)
 
         # 用一个互斥的两按钮组（2D / 3D），高亮当前模式。
@@ -7325,13 +7287,6 @@ class NodePropertiesPanel(QWidget):
         # 几何/材质参数由 Geo3D/Model3D 提供，不再在此面板显示。
         section._skip_params = set()
         section._hidden_params = set()
-        from PyQt6.QtGui import QFontMetrics, QFont
-        fm = QFontMetrics(QFont("", 10))
-        widest = 36
-        for key in params.keys():
-            name = key.replace("_", " ").title()
-            widest = max(widest, fm.horizontalAdvance(name) + 12)
-        self._label_min_width = widest
         section._build_directives_into(layout, list(params.keys()))
 
     def _build_camera3d_ui(self, section: "NodeSectionWidget",
@@ -7346,13 +7301,6 @@ class NodePropertiesPanel(QWidget):
         params = section.parameters
         section._skip_params = set()
         section._hidden_params = set()
-        from PyQt6.QtGui import QFontMetrics, QFont
-        fm = QFontMetrics(QFont("", 10))
-        widest = 36
-        for key in params.keys():
-            name = key.replace("_", " ").title()
-            widest = max(widest, fm.horizontalAdvance(name) + 12)
-        self._label_min_width = widest
         section._build_directives_into(layout, list(params.keys()))
 
     def _build_tracker_ui(self, section: "NodeSectionWidget",
@@ -7545,15 +7493,6 @@ class NodePropertiesPanel(QWidget):
         pdefs = section.param_defs
         popts = section.param_options
 
-        # Constant's labels hug their widgets: each label sizes to its own text
-        # width rather than sharing a uniform minimum width. The generic
-        # _build_parameters path computes a shared _label_min_width so all rows
-        # align; but Constant early-returns before that, and a compact layout
-        # (name directly followed by its control, no vertical column alignment)
-        # reads better for this node's short rows. Setting the minimum to 0 lets
-        # each _ParamLabel shrink to fit via its Maximum size policy.
-        self._label_min_width = 0
-
         # Mark all params as handled by custom builder; we'll explicitly add
         # the ones we want shown.
         section._skip_params = set(params.keys())
@@ -7575,7 +7514,7 @@ class NodePropertiesPanel(QWidget):
             y_val=int(params.get("height", 1080)),
             param_options=popts, param_defs=pdefs,
             section=section,
-            slider_holder=section._slidable_sliders)
+            slider_holder=section._pair_sliders)
         layout.addWidget(size_row)
         section._skip_params.discard("width")
         section._skip_params.discard("height")
@@ -7775,7 +7714,7 @@ class NodePropertiesPanel(QWidget):
         label = self._make_param_label("Size")
         h_layout.addWidget(label)
 
-        combo = ChevronComboBox()
+        combo = InspectorComboBox(label)
         for name, pw, ph in self._SIZE_PRESETS:
             combo.addItem(f"{name}  ({pw}×{ph})", (pw, ph))
         combo.addItem("Custom", None)
@@ -7791,7 +7730,6 @@ class NodePropertiesPanel(QWidget):
                 idx = i
                 break
         combo.setCurrentIndex(idx)
-        apply_combo_dropdown_style(combo)
 
         def _on_preset_changed(ci, n=section.node_id) -> None:
             data = combo.itemData(ci)
@@ -7819,9 +7757,10 @@ class NodePropertiesPanel(QWidget):
         combo.currentIndexChanged.connect(_on_preset_changed)
         h_layout.addWidget(combo, 1)
 
+        info = {'type': 'combo', 'widget': combo}
+        self._reserve_keyframe_column(h_layout, info)
+        section._param_widgets["size_preset"] = info
         layout.addWidget(row)
-        section._param_widgets["size_preset"] = {
-            'type': 'combo', 'widget': combo}
 
     def _wire_constant_size_combo_sync(self, section: "NodeSectionWidget") -> None:
         """Re-resolve the size combo whenever width or height changes.

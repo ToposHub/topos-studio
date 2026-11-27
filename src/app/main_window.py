@@ -2504,6 +2504,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         if self._edit_available and self.edit_properties_panel is not None:
             self.edit_properties_panel.clip_param_changed.connect(self._on_edit_clip_param_changed)
             self.edit_properties_panel.clips_param_batch_changed.connect(self._on_edit_clips_param_batch_changed)
+            self.edit_properties_panel.crop_drag_preview.connect(self._on_edit_crop_drag_preview)
+            self.edit_properties_panel.crop_drag_finished.connect(self._on_edit_crop_drag_finished)
             self.edit_properties_panel.reset_transform_requested.connect(self._on_edit_reset_transform)
             self.edit_properties_panel.effect_param_changed.connect(self._on_edit_effect_param_changed)
             # X/Y chain-linked effect params (e.g. blur radius_x/radius_y) →

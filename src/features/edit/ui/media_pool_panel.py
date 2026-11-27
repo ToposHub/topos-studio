@@ -1234,6 +1234,8 @@ class BinTreeWidget(QTreeWidget):
             self.viewport().update()
 
     def drawRow(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex) -> None:
+        if self._project is not None and index.data(self.BIN_ID_ROLE) == self._project.root_bin_id:
+            painter.fillRect(option.rect, QColor(get_color("timeline_toolbar_bg")))
         super().drawRow(painter, option, index)
         if self._drop_target_item is not None and self.itemFromIndex(index) is self._drop_target_item:
             painter.save()
@@ -5092,11 +5094,11 @@ class MediaPoolPanel(QWidget):
         layout.setSpacing(0)
 
         self.setObjectName("mediaPoolPanel")
-        # Match the timeline toolbar across the media pool's static surfaces.
-        surface = get_color("timeline_toolbar_bg")
+        surface = C.BG_PANEL
+        header = get_color("timeline_toolbar_bg")
         self.setStyleSheet(f"""
             QWidget#mediaPoolPanel, QWidget#mediaPoolContent {{ background: {surface}; }}
-            QWidget#mediaPoolToolbar {{ background: {surface}; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QWidget#mediaPoolToolbar {{ background: {header}; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
             QToolButton {{ border: none; background: transparent; padding: 2px; margin: 0; border-radius: 2px; }}
             QToolButton:hover {{ background: {C.BG_ACTIVE}; }}
             QToolButton:checked {{ background: {C.BG_BUTTON}; }}
@@ -5108,7 +5110,8 @@ class MediaPoolPanel(QWidget):
             QHeaderView::section {{ background: {surface}; color: {C.TEXT_LABEL}; border: none;
                 border-right: 1px solid {C.BORDER}; border-bottom: 1px solid {C.PANEL_DIVIDER}; padding: 3px 6px; }}
             QLabel {{ color: {C.TEXT_LABEL}; background: transparent; }}
-            QFrame#mediaPoolBreadcrumb {{ background: {surface}; border: none; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QFrame#mediaPoolBreadcrumb {{ background: {header}; border: none; border-bottom: 1px solid {C.PANEL_DIVIDER}; }}
+            QWidget#mediaPoolBreadcrumbPath {{ background: {header}; }}
             QFrame#mediaPoolBreadcrumb QPushButton {{ padding: 0; font-size: 12px; }}
             QFrame#mediaPoolBreadcrumb QLabel {{ font-size: 12px; }}
             QToolButton#mediaPoolPathBack {{ border-right: 1px solid {C.PANEL_DIVIDER}; border-radius: 0; padding: 0; }}
@@ -5227,6 +5230,7 @@ class MediaPoolPanel(QWidget):
         self.btn_breadcrumb_back.clicked.connect(self._navigate_up)
         breadcrumb_layout.addWidget(self.btn_breadcrumb_back)
         self.breadcrumb_path_container = QWidget()
+        self.breadcrumb_path_container.setObjectName("mediaPoolBreadcrumbPath")
         self.breadcrumb_path_layout = QHBoxLayout(self.breadcrumb_path_container)
         self.breadcrumb_path_layout.setContentsMargins(0, 0, 0, 0)
         self.breadcrumb_path_layout.setSpacing(3)
