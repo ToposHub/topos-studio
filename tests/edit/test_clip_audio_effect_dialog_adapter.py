@@ -44,7 +44,11 @@ def test_production_effect_window_shows_native_panel_at_its_minimum(
         assert dialog.rect().contains(dialog.panel.geometry())
         assert dialog.panel.width() >= dialog.panel.layout().minimumSize().width()
         assert dialog.panel.height() >= dialog.panel.layout().minimumSize().height()
-        assert dialog.findChild(QDialogButtonBox).parentWidget().objectName() == "EffectWindowToolbar"
+        toolbar = dialog.findChild(QDialogButtonBox).parentWidget()
+        assert toolbar.objectName() == "EffectWindowToolbar"
+        assert [dialog.layout().itemAt(i).widget() for i in range(dialog.layout().count())] == [
+            toolbar, dialog.panel,
+        ]
         assert dialog.current_params() == params
     finally:
         dialog.close()

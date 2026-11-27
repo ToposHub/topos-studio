@@ -7,6 +7,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtWidgets import QWidget
 
 from src.features.mixer.effects.production_dialog import PRODUCTION_BINDINGS, ProductionEffectDialog
+from src.shared.ui.audio_mixer.pro_widgets import present_effect_window
 
 if TYPE_CHECKING:
     from src.features.edit.core.timeline_v2 import TimelineSequence
@@ -34,6 +35,7 @@ class ClipAudioEffectDialogManager(QObject):
         parent: QWidget | None = None,
         *,
         enabled: bool | None = None,
+        algorithm_version: int | None = None,
     ) -> ProductionEffectDialog | None:
         if effect_type not in PRODUCTION_BINDINGS or effect_type == "spatial_panner":
             return None
@@ -45,7 +47,7 @@ class ClipAudioEffectDialogManager(QObject):
         if dialog is None:
             dialog = ProductionEffectDialog(
                 effect_type, clip_name or clip_id, params_dict, parent or self.parent(),
-                enabled=enabled,
+                enabled=enabled, algorithm_version=algorithm_version,
             )
             dialog.committed.connect(
                 lambda params: self.clip_effect_params_committed.emit(
@@ -53,13 +55,13 @@ class ClipAudioEffectDialogManager(QObject):
             dialog.preview.connect(
                 lambda params: self.clip_effect_preview.emit(
                     clip_id, effect_id, params, dialog.power_override))
+            dialog.preview_cleared.connect(lambda: self.clip_effect_preview_finished.emit(clip_id, effect_id))
             dialog.finished.connect(lambda _result: self._finished(key, dialog))
             self._dialogs[key] = dialog
         else:
+            dialog.set_eq_algorithm_version(algorithm_version)
             dialog.set_current_params(params_dict, enabled=enabled)
-        dialog.show()
-        dialog.raise_()
-        dialog.activateWindow()
+        present_effect_window(dialog)
         return dialog
 
     def _finished(self, key: tuple[str, str], dialog: ProductionEffectDialog) -> None:
@@ -89,6 +91,7 @@ class ClipAudioEffectDialogManager(QObject):
             if effect is None or effect.effect_type != dialog.fx_effect_type or track is None or track.is_locked:
                 dialog.close()
             else:
+                dialog.set_eq_algorithm_version(effect.algorithm_version)
                 dialog.set_current_params(dict(effect.params), enabled=effect.is_enabled)
 
     def close_all(self) -> None:

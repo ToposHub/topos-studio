@@ -199,7 +199,13 @@
     "effect_panel": {
       "mapped_parameters": "Some design controls are pending audio support.",
       "ui_only": "Panel controls are available. Audio processing and live meters are pending.",
-      "dynamic_eq_scope": "The current processor uses band 4 as a bell filter.",
+      "dynamic_eq_enable_band": "Enable Band {band} ({frequency} Hz)",
+      "dynamic_eq_add_band": "Add Band",
+      "dynamic_eq_graph_hint": "Double-click empty space to add a band.",
+      "sidechain_internal": "Internal",
+      "sidechain_source": "Sidechain",
+      "reverb_prediction": "Predicted",
+      "dynamic_eq_disable_band": "Disable Band",
       "multiband_comp_scope": "The current processor uses three bands and two crossovers.",
       "name": {
         "declick_dehum": "De-Click / De-Hum",
@@ -212,7 +218,14 @@
       "ok": "OK",
       "cancel": "Cancel",
       "apply": "Apply",
-      "current_settings": "Current settings"
+      "current_settings": "Current settings",
+      "imager_summary": "Solo M/S and Mono apply to playback only.",
+      "panner_summary": "Front stereo pair processing · Speaker layout preview",
+      "panner_scene_format": "Speaker layout preview. The mix layout is set by the project.",
+      "panner_scene_view": "Switch between the 2D and 3D previews.",
+      "panner_front_back": "Front/back changes stereo spread when Auto Spread is enabled.",
+      "panner_scene_elevation": "Elevation sets the position in the 3D preview.",
+      "panner_boom_routing": "Route the low-pass signal before the stereo matrix (Pre), after it (Post), or hear only the low-pass signal (Only)."
     },
     "console": {
       "search": "Find channel",

@@ -253,6 +253,7 @@ CONVOLUTION_REVERB_EFFECT = EffectDefinition(
     params_schema={
         "wet": _float_schema(0.35, 0.0, 1.0, 0.01, "Wet", ""),
         "dry": _float_schema(1.0, 0.0, 1.0, 0.01, "Dry", ""),
+        "true_stereo": _bool_schema(False, "True Stereo"),
     },
     icon="audio_track",
 )

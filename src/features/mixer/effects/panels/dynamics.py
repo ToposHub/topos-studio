@@ -664,6 +664,7 @@ class ProDynamicsGraphWidget(QWidget):
         self.setMouseTracking(True)
 
         self._state = default_dynamics_demo()
+        self.makeup_after_limiter = True
         self._dragging_target = ""   # "eg" | "comp" | "lim" | ""
         self._hover_target = ""
         self._mouse_pos: QPointF | None = None
@@ -680,10 +681,15 @@ class ProDynamicsGraphWidget(QWidget):
         self._state = state
         self.update()
 
-    def pushSample(self, input_db: float):
+    def pushSample(self, input_db: float, output_db: float) -> None:
+        if input_db <= -100.0 and output_db <= -100.0:
+            if self._trail_points:
+                self._trail_points.clear()
+                self.update()
+            return
         in_clamped = max(-80.0, min(0.0, input_db))
-        out_db = self.evaluate_transfer(in_clamped)
-        self._trail_points.append((in_clamped, out_db))
+        out_clamped = max(-80.0, min(0.0, output_db))
+        self._trail_points.append((in_clamped, out_clamped))
         if len(self._trail_points) > 26:
             self._trail_points.pop(0)
         self.update()
@@ -713,7 +719,7 @@ class ProDynamicsGraphWidget(QWidget):
         return -norm * 80.0
 
     # -----------------------------------------------------------------
-    # 完整动态传输函数计算：Expander/Gate -> Compressor -> MakeUp -> Limiter
+    # Steady-state transfer. The measured trail may differ during attack/hold/release.
     # -----------------------------------------------------------------
     def evaluate_transfer(self, in_db: float) -> float:
         st = self._state
@@ -726,12 +732,11 @@ class ProDynamicsGraphWidget(QWidget):
         eg = st["eg"]
         if eg["enabled"]:
             t_eg = eg["threshold"]
-            r_eg = 25.0 if eg["mode"] == "Gate" else max(1.01, eg["ratio"])
-            rng_eg = eg["range"]
             if y < t_eg:
-                atten = (t_eg - y) * (1.0 - 1.0 / r_eg)
-                atten = min(rng_eg, atten)
-                y -= atten
+                if eg["mode"] == "Gate":
+                    y -= eg["range"]
+                else:
+                    y -= min(eg["range"], (t_eg - y) * (eg["ratio"] - 1.0))
 
         # 2. Compressor (含 Soft Knee 与 Dry/Wet Mix)
         comp = st["comp"]
@@ -752,17 +757,17 @@ class ProDynamicsGraphWidget(QWidget):
                 else:
                     y_comp = t_c + d / r_c
 
-            y = (1.0 - mix) * y + mix * y_comp
+            wet_gain = 10.0 ** ((y_comp - y) / 20.0)
+            y += 20.0 * math.log10((1.0 - mix) + mix * wet_gain)
 
-        # 3. Make Up Gain
-        y += st["makeup"]
+        if not self.makeup_after_limiter and comp["enabled"]:
+            y += st["makeup"]
 
-        # 4. Limiter
         lim = st["lim"]
         if lim["enabled"]:
-            t_l = lim["threshold"]
-            if y > t_l:
-                y = t_l
+            y = min(y, lim["threshold"])
+        if self.makeup_after_limiter:
+            y += st["makeup"]
 
         return max(-80.0, min(0.0, y))
 
@@ -811,7 +816,7 @@ class ProDynamicsGraphWidget(QWidget):
             val = max(-50.0, min(0.0, round(self._x_to_db(event.position().x(), plot), 1)))
             self.egThresholdDragged.emit(val)
         elif self._dragging_target == "comp":
-            val = max(-50.0, min(0.0, round(self._x_to_db(event.position().x(), plot), 1)))
+            val = max(-60.0, min(0.0, round(self._x_to_db(event.position().x(), plot), 1)))
             self.compThresholdDragged.emit(val)
         elif self._dragging_target == "lim":
             val = max(-30.0, min(0.0, round(self._y_to_db(event.position().y(), plot), 1)))
@@ -1350,8 +1355,8 @@ class CompressorCard(QFrame):
         row1 = QHBoxLayout()
         row1.setSpacing(4)
         self.c_thresh = KnobParameterCell(
-            "Threshold", -50.0, 0.0, -15.0, self._accent,
-            "-50.0", "dB", "0.0",
+            "Threshold", -60.0, 0.0, -15.0, self._accent,
+            "-60.0", "dB", "0.0",
             lambda v: f"{v:.1f}", lambda s, fb: float(s), mode="linear"
         )
         self.c_ratio = KnobParameterCell(
@@ -1376,8 +1381,8 @@ class CompressorCard(QFrame):
         row2 = QHBoxLayout()
         row2.setSpacing(4)
         self.c_attack = KnobParameterCell(
-            "Attack", 0.70, 100.0, 1.4, self._accent,
-            "0.70", "ms", "100",
+            "Attack", 0.70, 1000.0, 1.4, self._accent,
+            "0.70", "ms", "1000",
             format_ms, lambda s, fb: float(s), mode="log"
         )
         self.c_hold = KnobParameterCell(
@@ -1386,8 +1391,8 @@ class CompressorCard(QFrame):
             format_ms, lambda s, fb: float(s), mode="power"
         )
         self.c_release = KnobParameterCell(
-            "Release", 50.0, 4000.0, 93.0, self._accent,
-            "50", "ms", "4000",
+            "Release", 50.0, 5000.0, 93.0, self._accent,
+            "50", "ms", "5000",
             format_ms, lambda s, fb: float(s), mode="log"
         )
         for c in (self.c_attack, self.c_hold, self.c_release):
@@ -1690,6 +1695,7 @@ class StudioDynamicsWidget(QWidget):
         self.setMinimumSize(900, 620)
 
         self._active_bank = "A"
+        self._single_stage: str | None = None
         self._banks = {
             "A": default_dynamics_demo(),
             "B": default_dynamics_flat(),
@@ -1970,6 +1976,7 @@ class StudioDynamicsWidget(QWidget):
 
     def show_stage(self, stage: str) -> None:
         """Show one processor with its curve, controls and corresponding meters."""
+        self._single_stage = stage
         cards = {"eg": self.eg_card, "comp": self.comp_card, "lim": self.lim_card}
         meters = {"eg": self.meter_gr_eg, "comp": self.meter_gr_comp, "lim": self.meter_gr_lim}
         for name, card in cards.items():
@@ -2029,6 +2036,11 @@ class StudioDynamicsWidget(QWidget):
 
     def _refresh_all_views(self):
         st = self._current_state()
+        if self._single_stage is not None:
+            for stage in ("eg", "comp", "lim"):
+                st[stage]["enabled"] = stage == self._single_stage
+            if self._single_stage != "comp":
+                st["makeup"] = 0.0
         self._update_ab_styles()
         self.power_switch.setChecked(st["enabled"])
         self.makeup_fader.setGain(st["makeup"])
@@ -2157,7 +2169,7 @@ class StudioDynamicsWidget(QWidget):
         self.meter_gr_lim.setValue(gr_lim)
         self.meter_output.setValue(out_db)
         self.meter_sidechain.setValue(sc_db)
-        self.dyn_graph.pushSample(in_db)
+        self.dyn_graph.pushSample(in_db, out_db)
 
     # -----------------------------------------------------------------
     # 公开 API：供外部后端 DSP / 工程文件序列化调用
@@ -2192,7 +2204,7 @@ class StudioDynamicsWidget(QWidget):
         self.meter_gr_lim.setValue(gr_lim_db)
         self.meter_output.setValue(output_db)
         self.meter_sidechain.setValue(sidechain_db)
-        self.dyn_graph.pushSample(input_db)
+        self.dyn_graph.pushSample(input_db, output_db)
 
 
 if __name__ == "__main__":

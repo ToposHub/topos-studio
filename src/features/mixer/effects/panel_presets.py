@@ -16,18 +16,40 @@ from src.shared.i18n.i18n import I18N
 _LIBRARY_KEYS = {
     "delay": "delay",
     "dynamics": "dynamics",
+    "imager": "imager",
     "reverb": "reverb",
     "spatial_panner": "panner",
     "spectral_mangler": "spectral_mangler",
     "strip_eq": "strip_eq",
+    "dynamic_eq": "dynamic_eq",
+    "de_esser": "de_esser",
+    "compressor": "compressor",
+    "limiter": "limiter",
+    "expander": "expander",
+    "noise_gate": "noise_gate",
+    "bus_comp": "bus_comp",
+    "multiband_comp": "multiband_comp",
+    "transient_designer": "transient_designer",
+    "true_peak_limiter": "true_peak_limiter",
     "voice_changer": "voice_changer",
 }
 _PRESERVE_WHEN_LOADING = {
     "delay": ("enabled", "link_lr", "input_format"),
     "dynamics": ("enabled",),
+    "imager": ("enabled",),
     "reverb": ("enabled",),
     "spatial_panner": ("enabled", "boom_on"),
     "strip_eq": ("enabled",),
+    "dynamic_eq": ("enabled",),
+    "de_esser": ("enabled", "listen"),
+    "compressor": ("enabled", "sc_listen"),
+    "limiter": ("enabled",),
+    "expander": ("enabled",),
+    "noise_gate": ("enabled",),
+    "bus_comp": ("enabled",),
+    "multiband_comp": ("enabled",),
+    "transient_designer": ("enabled",),
+    "true_peak_limiter": ("enabled",),
 }
 
 
@@ -122,6 +144,8 @@ class _EffectPresets(QObject):
             self._warn(I18N.tr("audio.fx.preset_factory_name", "Choose a name distinct from the factory presets."))
             return
         params = deepcopy(self._params_reader())
+        if self._effect_type == "transient_designer":
+            params.pop("sc_listen", None)
         if self._effect_type == "spatial_panner" and "pan" in params:
             params["lr"] = float(params.pop("pan")) * 100.0
         # A freeze's asset identity belongs to its source project.

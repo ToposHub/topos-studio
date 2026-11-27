@@ -16,9 +16,10 @@ from typing import Optional
 import numpy as np
 
 from src.features.edit.core.audio_dsp import AudioEffect
+from src.features.edit.core.audio_effects.sidechain import detector_input, detector_source_id
 
 try:  # pragma: no cover - 环境探测
-    from scipy.signal import butter, lfilter  # noqa: F401
+    from scipy.signal import butter, lfilter, sosfilt
     _SCIPY = True
 except ImportError:  # pragma: no cover
     _SCIPY = False
@@ -47,6 +48,20 @@ class _Lfo:
 
 #: 新版百分比 → dB 映射（±100% → ±12 dB；FX-17 计划推荐曲线）。
 PCT_TO_DB = 0.12
+_TRANSIENT_DEFAULTS = {"enabled": True, "attack_db": 6.0, "sustain_db": 0.0,
+                       "attack_ms": 8.0, "sustain_ms": 80.0}
+
+
+def _transient_envelope(values: np.ndarray, coefficient: float, previous: np.ndarray) -> np.ndarray:
+    if _SCIPY:
+        envelope, _ = lfilter([1.0 - coefficient], [1.0, -coefficient], values, axis=-1,
+                              zi=(coefficient * previous)[..., None])
+        return envelope
+    envelope = np.empty_like(values)
+    for index in range(values.shape[-1]):
+        previous = coefficient * previous + (1.0 - coefficient) * values[..., index]
+        envelope[..., index] = previous
+    return envelope
 
 
 def _waveform_values(name: str, frac: np.ndarray, cycle: np.ndarray,
@@ -82,11 +97,10 @@ class TransientDesignerEffect(AudioEffect):
     （声道平均检测语义保持）。
     """
 
-    def __init__(self, sample_rate: float = 48000.0) -> None:
+    def __init__(self, sample_rate: float = 48000.0, *, params_are_snapshots: bool = False) -> None:
         super().__init__(sample_rate)
-        self._params: dict = {"enabled": True, "attack_db": 6.0,
-                              "sustain_db": 0.0, "attack_ms": 8.0,
-                              "sustain_ms": 80.0}
+        self._params_are_snapshots = params_are_snapshots
+        self._params: dict = dict(_TRANSIENT_DEFAULTS)
         self._fast_env = 0.0
         self._slow_env = 0.0
         # 新版支路：每声道快/慢包络状态。
@@ -96,6 +110,8 @@ class TransientDesignerEffect(AudioEffect):
         self._sc_filter_key = None
         self._sc_sos = None
         self._sc_zi = None
+        self._last_attack_db = 0.0
+        self._last_sustain_db = 0.0
 
     def set_params(self, params: object,
                    sample_rate: Optional[float] = None,
@@ -103,9 +119,11 @@ class TransientDesignerEffect(AudioEffect):
         if sample_rate is not None and sample_rate != self._sample_rate:
             self._sample_rate = float(sample_rate)
             self.reset_state()
-        merged = dict(self._params)
+        merged = dict(_TRANSIENT_DEFAULTS if self._params_are_snapshots else self._params)
         if isinstance(params, dict):
             merged.update(params)
+        if detector_source_id(merged) != self.sc_source:
+            self._sc_filter_key = None
         self._params = merged
 
     def reset_state(self) -> None:
@@ -114,6 +132,8 @@ class TransientDesignerEffect(AudioEffect):
         self._fast_env_ch = None
         self._slow_env_ch = None
         self._sc_zi = None
+        self._sc_filter_key = None
+        self._last_attack_db = self._last_sustain_db = 0.0
 
     @property
     def is_active(self) -> bool:
@@ -127,23 +147,22 @@ class TransientDesignerEffect(AudioEffect):
 
     @property
     def sc_source(self) -> str:
-        from .sidechain import detector_source_id
         return detector_source_id(self._params)
 
     def collect_telemetry(self) -> dict:
-        return {"sidechain_source_id": self.sc_source, "sidechain_status": self._sidechain_status}
+        return {"sidechain_source_id": self.sc_source, "sidechain_status": self._sidechain_status,
+                "attack_gain_db": self._last_attack_db, "sustain_gain_db": self._last_sustain_db}
 
     def process(self, samples: np.ndarray,
                 sidechain: Optional[np.ndarray] = None) -> np.ndarray:
         if not self.is_active or samples is None or samples.ndim != 2:
             return samples
         n = samples.shape[-1]
-        if n == 0:
+        if n == 0 or samples.shape[0] == 0:
             return samples
-        from .sidechain import detector_input
         detector, self._sidechain_status = detector_input(samples, sidechain, self.sc_source)
-        if any(key in self._params for key in ("sc_hpf_hz", "sc_lpf_hz", "sc_listen")):
-            from scipy.signal import butter, sosfilt
+        if (_SCIPY and self._params.get("sc_filter_enabled", True)
+                and any(self._params.get(key, 0.0) for key in ("sc_hpf_hz", "sc_lpf_hz"))):
             hpf = float(np.clip(self._params.get("sc_hpf_hz", 0.), 0., self._sample_rate * .45))
             lpf = float(np.clip(self._params.get("sc_lpf_hz", 0.), 0., self._sample_rate * .45))
             order = int(np.clip(self._params.get("sc_filter_slope_db_oct", 12), 6, 24)) // 6
@@ -159,12 +178,16 @@ class TransientDesignerEffect(AudioEffect):
                 self._sc_filter_key = key
             if self._sc_sos is not None:
                 detector, self._sc_zi = sosfilt(self._sc_sos, detector, axis=-1, zi=self._sc_zi)
-            if self._params.get("sc_listen", False):
-                return np.broadcast_to(detector.mean(axis=0), samples.shape).astype(np.float32).copy()
-        if ("attack_pct" in self._params or "sustain_pct" in self._params):
+        else:
+            self._sc_filter_key = None
+        if self._params.get("sc_listen", False):
+            self._last_attack_db = self._last_sustain_db = 0.0
+            monitor = detector if detector.shape[0] == samples.shape[0] else detector.mean(axis=0)
+            return np.array(np.broadcast_to(monitor, samples.shape), dtype=np.float32, order="C")
+        if self._params.get("attack_pct") is not None or self._params.get("sustain_pct") is not None:
             processed = self._process_percent(samples, detector)
         else:
-            processed = self._process_legacy(samples)
+            processed = self._process_legacy(samples, detector)
         mix = float(np.clip(self._params.get("mix", 1.0), 0.0, 1.0))
         out = (samples.astype(np.float64) * (1.0 - mix)
                + processed.astype(np.float64) * mix)
@@ -174,7 +197,6 @@ class TransientDesignerEffect(AudioEffect):
     def _process_percent(self, samples: np.ndarray,
                          detector: Optional[np.ndarray] = None) -> np.ndarray:
         """新版支路：逐声道快/慢包络，聚合取各声道绝对包络最大。"""
-        n = samples.shape[-1]
         detector = samples if detector is None else detector
         channels = detector.shape[0]
         attack_ms = max(0.5, float(self._params.get("attack_ms", 8.0)))
@@ -182,63 +204,46 @@ class TransientDesignerEffect(AudioEffect):
         a_fast = float(np.exp(-1.0 / (attack_ms * self._sample_rate / 1000.0)))
         a_slow = float(np.exp(-1.0 / (sustain_ms * self._sample_rate / 1000.0)))
         attack_db = PCT_TO_DB * float(np.clip(
-            float(self._params.get("attack_pct", 0.0)), -100.0, 100.0))
+            float(self._params.get("attack_pct") or 0.0), -100.0, 100.0))
         sustain_db = PCT_TO_DB * float(np.clip(
-            float(self._params.get("sustain_pct", 0.0)), -100.0, 100.0))
-        attack_gain = 10.0 ** (attack_db / 20.0)
-        sustain_gain = 10.0 ** (sustain_db / 20.0)
+            float(self._params.get("sustain_pct") or 0.0), -100.0, 100.0))
 
         if (self._fast_env_ch is None
                 or self._fast_env_ch.shape != (channels,)):
             self._fast_env_ch = np.zeros(channels, dtype=np.float64)
             self._slow_env_ch = np.zeros(channels, dtype=np.float64)
         abs_in = np.abs(detector.astype(np.float64))
-        gains = np.empty(n, dtype=np.float32)
-        fast_ch = self._fast_env_ch
-        slow_ch = self._slow_env_ch
-        for i in range(n):
-            for ch in range(channels):
-                value = abs_in[ch, i]
-                fast_ch[ch] = (a_fast * fast_ch[ch]
-                               + (1.0 - a_fast) * value)
-                slow_ch[ch] = (a_slow * slow_ch[ch]
-                               + (1.0 - a_slow) * value)
-            # 反相安全聚合：各声道绝对包络取最大。
-            fast = float(np.max(fast_ch))
-            slow = float(np.max(slow_ch))
-            ratio_db = 20.0 * np.log10(max(fast, 1e-9) / max(slow, 1e-9))
-            weight = float(np.clip((ratio_db - 3.0) / 6.0, 0.0, 1.0))
-            gains[i] = (sustain_gain * (1.0 - weight)
-                        + attack_gain * weight)
-        return np.ascontiguousarray(
-            samples * gains[np.newaxis, :], dtype=np.float32)
+        fast = _transient_envelope(abs_in, a_fast, self._fast_env_ch)
+        slow = _transient_envelope(abs_in, a_slow, self._slow_env_ch)
+        self._fast_env_ch = fast[:, -1].copy()
+        self._slow_env_ch = slow[:, -1].copy()
+        return self._apply_envelopes(samples, fast.max(axis=0), slow.max(axis=0), attack_db, sustain_db)
 
-    def _process_legacy(self, samples: np.ndarray) -> np.ndarray:
-        n = samples.shape[-1]
+    def _process_legacy(self, samples: np.ndarray, detector: np.ndarray) -> np.ndarray:
         attack_ms = max(0.5, float(self._params.get("attack_ms", 8.0)))
         sustain_ms = max(10.0, float(self._params.get("sustain_ms", 80.0)))
         a_fast = float(np.exp(-1.0 / (attack_ms * self._sample_rate / 1000.0)))
         a_slow = float(np.exp(-1.0 / (sustain_ms * self._sample_rate / 1000.0)))
-        attack_gain = 10.0 ** (float(self._params.get("attack_db", 6.0)) / 20.0)
-        sustain_gain = 10.0 ** (float(self._params.get("sustain_db", 0.0)) / 20.0)
+        attack_db = float(self._params.get("attack_db", 6.0))
+        sustain_db = float(self._params.get("sustain_db", 0.0))
+        mono = np.abs(detector.mean(axis=0)).astype(np.float64)
+        fast = _transient_envelope(mono, a_fast, np.asarray(self._fast_env))
+        slow = _transient_envelope(mono, a_slow, np.asarray(self._slow_env))
+        self._fast_env = float(fast[-1])
+        self._slow_env = float(slow[-1])
+        return self._apply_envelopes(samples, fast, slow, attack_db, sustain_db)
 
-        mono = np.abs(samples.mean(axis=0)).astype(np.float64)
-        gains = np.empty(n, dtype=np.float32)
-        fast = self._fast_env
-        slow = self._slow_env
-        for i in range(n):
-            fast = a_fast * fast + (1.0 - a_fast) * mono[i]
-            slow = a_slow * slow + (1.0 - a_slow) * mono[i]
-            # dB 域瞬态量（带 3 dB 膝）：稳态包络波动 < 膝 → weight 0，
-            # attack 时 fast 领先 slow ≥9 dB → weight 1。
-            ratio_db = 20.0 * np.log10(max(fast, 1e-9) / max(slow, 1e-9))
-            weight = float(np.clip((ratio_db - 3.0) / 6.0, 0.0, 1.0))
-            gains[i] = (sustain_gain * (1.0 - weight)
-                        + attack_gain * weight)
-        self._fast_env = float(fast)
-        self._slow_env = float(slow)
-        return np.ascontiguousarray(
-            samples * gains[np.newaxis, :], dtype=np.float32)
+    def _apply_envelopes(
+        self, samples: np.ndarray, fast: np.ndarray, slow: np.ndarray, attack_db: float, sustain_db: float,
+    ) -> np.ndarray:
+        ratio = np.maximum(fast, 1e-9) / np.maximum(slow, 1e-9)
+        weight = np.clip((20.0 * np.log10(ratio) - 3.0) / 6.0, 0.0, 1.0)
+        attack_gain = 10.0 ** (attack_db / 20.0)
+        sustain_gain = 10.0 ** (sustain_db / 20.0)
+        gains = (sustain_gain * (1.0 - weight) + attack_gain * weight).astype(np.float32)
+        self._last_attack_db = attack_db * float(weight[-1])
+        self._last_sustain_db = sustain_db * (1.0 - float(weight[-1]))
+        return np.ascontiguousarray(samples * gains, dtype=np.float32)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

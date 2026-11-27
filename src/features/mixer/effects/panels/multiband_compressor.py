@@ -1808,6 +1808,7 @@ class StudioMultibandCompWidget(QWidget):
 
     def use_processor_controls(self) -> None:
         self._processor_controls = True
+        self.set_sample_rate(48000.0)
         self.mb_graph.use_processor_controls()
         for control in (*self._design_toolbar_controls[2:], *self._design_output_controls):
             control.hide()
@@ -1821,6 +1822,9 @@ class StudioMultibandCompWidget(QWidget):
             card.c_release.setRange(50.0, 5000.0, "50", "5000")
             card.c_makeup.setRange(0.0, 24.0, "0", "+24")
         self._refresh_all_views()
+
+    def set_sample_rate(self, sample_rate: float) -> None:
+        self._crossover_ceiling_hz = min(20000.0, sample_rate * 0.45)
 
     def _update_top_bar_styles(self):
         st = self._current_state()
@@ -1949,6 +1953,16 @@ class StudioMultibandCompWidget(QWidget):
     def _on_band_count_changed(self, count: int):
         st = self._current_state()
         if st["band_count"] != count:
+            if self._processor_controls and count > st["band_count"]:
+                crossovers = st["crossovers"]
+                lower = 30.0
+                for index in range(count - 1):
+                    upper = self._crossover_ceiling_hz - (count - 2 - index)
+                    frequency = crossovers[index]
+                    if index >= st["band_count"] - 1 and frequency < lower:
+                        frequency = (lower + upper) / 2.0
+                    crossovers[index] = min(max(frequency, lower), upper)
+                    lower = crossovers[index] + 1.0
             st["band_count"] = count
             if self._selected_band >= count:
                 self._selected_band = count - 1

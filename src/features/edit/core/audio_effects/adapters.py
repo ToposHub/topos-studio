@@ -105,13 +105,21 @@ class DeEsserAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.de_esser import (
             DeEsserEffect,
         )
-        return DeEsserEffect(sr)
+        return DeEsserEffect(sr, params_are_snapshots=True)
 
 
 class TruePeakLimiterAdapter(_CompositeAdapterBase):
     """P1 · True Peak Limiter（Master/交付；旧 Limiter 语义不变）。"""
 
     effect_type = "true_peak_limiter"
+
+    def set_params(
+        self, params: object, sample_rate: float | None = None, algorithm_version: int | None = None,
+    ) -> None:
+        from src.features.edit.core.audio_effects.true_peak_limiter import DEFAULTS
+
+        snapshot = DEFAULTS | params if isinstance(params, dict) else DEFAULTS
+        super().set_params(snapshot, sample_rate=sample_rate, algorithm_version=algorithm_version)
 
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.true_peak_limiter import (
@@ -143,7 +151,7 @@ class DynamicEqAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.dynamic_eq import (
             DynamicEqEffect,
         )
-        return DynamicEqEffect(sr)
+        return DynamicEqEffect(sr, params_are_snapshots=True)
 
 
 class BusCompAdapter(_CompositeAdapterBase):
@@ -155,7 +163,7 @@ class BusCompAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.bus_multiband import (
             BusCompEffect,
         )
-        return BusCompEffect(sr)
+        return BusCompEffect(sr, params_are_snapshots=True)
 
 
 class MultibandCompAdapter(_CompositeAdapterBase):
@@ -167,7 +175,7 @@ class MultibandCompAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.bus_multiband import (
             MultibandCompressorEffect,
         )
-        return MultibandCompressorEffect(sr)
+        return MultibandCompressorEffect(sr, params_are_snapshots=True)
 
 
 class ConvolutionReverbAdapter(_CompositeAdapterBase):
@@ -179,7 +187,7 @@ class ConvolutionReverbAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.convolution_reverb import (
             ConvolutionReverbEffect,
         )
-        return ConvolutionReverbEffect(sr)
+        return ConvolutionReverbEffect(sr, params_are_snapshots=True)
 
 
 class ModulationAdapterBase(_CompositeAdapterBase):
@@ -207,7 +215,7 @@ class TransientDesignerAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.modulation_tools import (
             TransientDesignerEffect,
         )
-        return TransientDesignerEffect(sr)
+        return TransientDesignerEffect(sr, params_are_snapshots=True)
 
 
 class TremoloAutoPanAdapter(_CompositeAdapterBase):

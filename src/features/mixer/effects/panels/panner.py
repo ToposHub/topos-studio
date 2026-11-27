@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QPolygonF
 )
 
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 
@@ -1734,6 +1735,24 @@ class StudioSpatialPannerWidget(QWidget):
         self._banks[self._active_bank]["space_mode"] = keep_mode
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
+
+    def use_processor_controls(self) -> None:
+        self.format_combo.setToolTip(I18N.tr(
+            "mixer.effect_panel.panner_scene_format",
+            "Speaker layout preview. The mix layout is set by the project.",
+        ))
+        self.btn_3d.setToolTip(I18N.tr("mixer.effect_panel.panner_scene_view", "Switch between the 2D and 3D previews."))
+        front_back = I18N.tr("mixer.effect_panel.panner_front_back", "Front/back changes stereo spread when Auto Spread is enabled.")
+        self.knob_fb.setToolTip(front_back)
+        self.pill_fb.setToolTip(front_back)
+        elevation = I18N.tr("mixer.effect_panel.panner_scene_elevation", "Elevation sets the position in the 3D preview.")
+        self.knob_elev.setToolTip(elevation)
+        self.pill_elev.setToolTip(elevation)
+        self.btn_div_mode.hide()
+        self.btn_boom_route.setToolTip(I18N.tr(
+            "mixer.effect_panel.panner_boom_routing",
+            "Route the low-pass signal before the stereo matrix (Pre), after it (Post), or hear only the low-pass signal (Only).",
+        ))
 
     def get_state(self) -> dict:
         return copy.deepcopy(self._st())

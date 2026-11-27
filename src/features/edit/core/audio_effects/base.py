@@ -32,6 +32,25 @@ def mix_aligned(dry: np.ndarray, wet: np.ndarray, mix_pct: float) -> np.ndarray:
     return dry + m * (wet - dry)
 
 
+def moving_mean_power(
+    power: np.ndarray, history: np.ndarray | None, window: int,
+) -> tuple[np.ndarray, np.ndarray | None]:
+    """Causal boxcar with zero prehistory and a finite power history.
+
+    Prefix sums over the retained overlap cost O(block + window). Recomputing
+    the sum from that overlap avoids numerical drift across long streams.
+    """
+    if window == 1:
+        return power, None
+    if history is None or len(history) != window - 1:
+        history = np.zeros(window - 1, dtype=np.float64)
+    samples = np.concatenate((history, power))
+    totals = np.empty(samples.size + 1, dtype=np.float64)
+    totals[0] = 0.0
+    np.cumsum(samples, out=totals[1:])
+    return (totals[window:] - totals[:-window]) / window, samples[1 - window:].copy()
+
+
 class SampleDelayLine:
     """样本时延线（模块 dry 对齐模块算法时延；H07/H10 拓扑对齐用）。"""
 

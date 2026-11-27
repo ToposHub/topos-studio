@@ -93,6 +93,19 @@ class TestNewPath:
         cut = _amp_db(out, 6500) - _amp_db(anti, 6500)
         assert -12.5 <= cut <= -6.0
 
+    @pytest.mark.parametrize("lookahead_ms", [0.0, 5.0])
+    def test_listen_preserves_stereo_and_declared_latency(self, lookahead_ms: float) -> None:
+        fx = DeEsserEffect(RATE)
+        fx.set_params(dict(V2, lookahead_ms=lookahead_ms, listen=True))
+        mono = _sibilance_fixture()[0, :RATE // 4]
+        stereo = np.stack((mono, -mono))
+        output = fx.process(stereo)
+        delay = fx.latency_samples()
+        assert not np.any(output[:, :delay])
+        assert np.max(np.abs(output[:, delay:])) > 0.1
+        np.testing.assert_array_equal(output[0], -output[1])
+        assert fx.collect_telemetry()["detector_dbfs"] > -22.0
+
     def test_output_gain_db(self) -> None:
         sig = _sibilance_fixture()
         fx = DeEsserEffect(RATE)

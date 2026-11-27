@@ -15,6 +15,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QPolygonF
 )
 
+from src.features.mixer.spectrogram import hold_spectrum_peaks
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 from src.features.mixer.effects.panel_glyphs import GlyphComboBox
@@ -477,6 +478,7 @@ class ProRotaryKnob(QWidget):
 # 7. 控件：升级版交互式频响曲线图（单频段彩色包络 + 十字准星 + 频谱控制）
 # =====================================================================
 class ProEQGraphWidget(QWidget):
+    spectrumVisibilityChanged = pyqtSignal(bool)
     nodeDragged = pyqtSignal(int, float, float)       # band_idx, freq, gain
     nodeQScrolled = pyqtSignal(int, float)            # band_idx, new_q
     nodeClicked = pyqtSignal(int)                     # band_idx
@@ -541,10 +543,14 @@ class ProEQGraphWidget(QWidget):
         self._spec_post = post
         self._spec_peak = peak
 
+    def spectrum_visible(self) -> bool:
+        return self._show_spectrum
+
     def update_spectrum(self, freqs_hz: list[float], post_db: list[float], peak_db: list[float] | None = None):
+        previous_peaks = self._spec_peak if self._show_peak_hold and freqs_hz == self._spec_freqs else []
         self._spec_freqs = freqs_hz
         self._spec_post = post_db
-        self._spec_peak = peak_db if peak_db is not None else post_db
+        self._spec_peak = peak_db if peak_db is not None else hold_spectrum_peaks(post_db, previous_peaks)
         self.update()
 
     def has_spectrum(self) -> bool:
@@ -730,10 +736,12 @@ class ProEQGraphWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._btn_spec_rect.contains(pos):
                 self._show_spectrum = not self._show_spectrum
+                self.spectrumVisibilityChanged.emit(self._show_spectrum)
                 self.update()
                 return
             if self._btn_peak_rect.contains(pos):
                 self._show_peak_hold = not self._show_peak_hold
+                self._spec_peak = self._spec_post
                 self.update()
                 return
 
@@ -966,7 +974,9 @@ class ProEQGraphWidget(QWidget):
                 b_fill.lineTo(plot.right(), zero_y)
                 b_fill.closeSubpath()
 
-                p.setPen(QPen(QColor(b_col.red(), b_col.green(), b_col.blue(), stroke_alpha), 1.15 if is_solo else 1.0))
+                band_pen = QPen(QColor(b_col.red(), b_col.green(), b_col.blue(), stroke_alpha))
+                band_pen.setWidthF(1.15 if is_solo else 1.0)
+                p.setPen(band_pen)
                 p.setBrush(QColor(b_col.red(), b_col.green(), b_col.blue(), alpha))
                 p.drawPath(b_fill)
 

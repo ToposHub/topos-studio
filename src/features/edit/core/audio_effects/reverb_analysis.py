@@ -14,6 +14,24 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 
+def predict_reverb_reflections(
+    params: Dict[str, Any], sample_rate: float,
+) -> tuple[tuple[tuple[float, float], ...], float]:
+    """Return unfiltered stereo tap positions/gains and late-network onset in ms."""
+    from src.features.edit.core.audio_dsp import ReverbEffect, _FDN8_DELAY_MS
+
+    left, right, gain_l, gain_r, late_l, late_r = ReverbEffect.predict_geometry(
+        params, sample_rate)
+    ms_per_sample = 1000.0 / sample_rate
+    taps = tuple(
+        (int(offset) * ms_per_sample, float(gain) / 6.0)
+        for offsets, gains in ((left, gain_l), (right, gain_r))
+        for offset, gain in zip(offsets, gains)
+    )
+    first_line = max(2, round(min(_FDN8_DELAY_MS) / ms_per_sample))
+    return taps, (min(late_l, late_r) + first_line) * ms_per_sample
+
+
 def measure_rt60(
     ir: np.ndarray,
     sample_rate: int,
@@ -59,24 +77,27 @@ def measure_t30_band_limited(
     if data.ndim == 1:
         data = data[None, :]
     summed = data.sum(axis=0)[onset_skip:]
+    win = max(1, int(0.05 * sample_rate))
+    if summed.size <= win:
+        return None
     spec = np.fft.rfft(summed)
     freqs = np.fft.rfftfreq(summed.size, 1.0 / sample_rate)
     spec[(freqs < band[0]) | (freqs > band[1])] = 0.0
     filtered = np.abs(np.fft.irfft(spec, summed.size))
-    win = max(1, int(0.05 * sample_rate))
-    env = np.convolve(filtered ** 2, np.ones(win) / win, mode="same")
+    # Centered boxcar with the same zero padding as convolve(mode="same").
+    # Running sums avoid multiplying each sample by the entire 50 ms window.
+    pad = win - 1
+    energy = np.pad(filtered ** 2, (pad - pad // 2, pad // 2))
+    integral = np.cumsum(np.concatenate(([0.0], energy)))
+    env = (integral[win:] - integral[:-win]) / win
     edb = 10.0 * np.log10(np.maximum(env, 1e-16))
     peak = int(np.argmax(edb))
-    t5 = t35 = None
-    for i in range(peak, len(env) - 1):
-        if t5 is None and edb[i] < edb[peak] - 5.0:
-            t5 = i
-        if t5 is not None and edb[i] < edb[peak] - 35.0:
-            t35 = i
-            break
-    if t5 is None or t35 is None:
+    decay = edb[peak:-1] - edb[peak]
+    t5 = np.flatnonzero(decay < -5.0)
+    t35 = np.flatnonzero(decay < -35.0)
+    if not t5.size or not t35.size:
         return None
-    return float((t35 - t5) / sample_rate * 2.0)
+    return float((t35[0] - t5[0]) / sample_rate * 2.0)
 
 
 def analyze_reverb_snapshot(

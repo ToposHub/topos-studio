@@ -6925,6 +6925,7 @@ class EditControllerMixin:
             parent=self if getattr(self, "current_page", None) == "Mixer"
             else self.edit_properties_panel,
             enabled=effect.is_enabled,
+            algorithm_version=effect.algorithm_version,
         )
 
     def _on_edit_clip_effect_params_committed(

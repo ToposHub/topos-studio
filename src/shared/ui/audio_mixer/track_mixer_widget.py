@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from dataclasses import replace
-from functools import partial
 
 import logging
 import math
@@ -36,6 +35,7 @@ from PyQt6.QtGui import QColor, QAction, QIcon, QPainter, QPixmap, QResizeEvent
 
 from src.shared.ui.audio_mixer.audio_fader import AudioFader
 from src.shared.ui.audio_mixer.audio_level_meter import AudioLevelMeter, MeterMode, TickLabelsMode, iec_scale, iec_inverse
+from src.shared.ui.audio_mixer.pro_widgets import present_effect_window
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.style_sheet import C, MIXER_SPIN_STYLE
 from src.shared.track_colors import resolve_track_color
@@ -158,7 +158,7 @@ _FX_PARAM_EFFECT_TYPES = frozenset({
     "tremolo_auto_pan", "chorus_flanger", "phaser",
 })
 _DYNAMICS_STAGES = {"eg": "expander", "comp": "compressor", "lim": "limiter"}
-_SPECTRUM_EFFECT_TYPES = frozenset({"strip_eq", "dynamic_eq", "saturation"})
+_SPECTRUM_EFFECT_TYPES = frozenset({"strip_eq", "dynamic_eq", "de_esser", "saturation", "imager"})
 _ChainEdit = Callable[["EffectChainParams | None"], "EffectChainParams | None"]
 
 
@@ -901,9 +901,8 @@ class TrackMixerWidget(QWidget):
         from src.features.edit.core.timeline_v2 import (
             EffectChainParams, StripEQParams, TrackEffectInstance,
         )
-        if self._eq_dialog is not None and self._eq_dialog.isVisible():
-            self._eq_dialog.raise_()
-            self._eq_dialog.activateWindow()
+        if self._eq_dialog is not None:
+            present_effect_window(self._eq_dialog)
             return
         effects = self._effect_chain.effects if self._effect_chain else ()
         existing = next(
@@ -915,10 +914,11 @@ class TrackMixerWidget(QWidget):
         dialog = ProductionEffectDialog(
             "strip_eq", self._track_name, initial, self.window(),
             enabled=existing.enabled if existing else True,
+            algorithm_version=draft.algorithm_version,
         )
         dialog._instance_id = existing.instance_id if existing else ""
         self._eq_dialog = dialog
-        self._configure_eq_plot(dialog, draft.algorithm_version)
+        dialog.eq_graph.set_sample_rate(self._engine_sample_rate)
 
         def edit(params: dict, commit: bool) -> None:
             if self._eq_dialog is not dialog:
@@ -939,6 +939,8 @@ class TrackMixerWidget(QWidget):
             if commit and can_create:
                 dialog._instance_id = draft.instance_id
             self._apply_effect_window_edit(dialog, change, commit=commit)
+            if commit and can_create:
+                self._update_spectrum_gating()
 
         dialog.preview.connect(lambda params: edit(params, False))
         dialog.committed.connect(lambda params: edit(params, True))
@@ -1044,13 +1046,12 @@ class TrackMixerWidget(QWidget):
         """Open the new Dynamics panel over the existing three-stage channel chain."""
         from src.features.mixer.effects.production_dialog import ProductionEffectDialog
 
-        if self._dynamics_dialog is not None and self._dynamics_dialog.isVisible():
-            self._dynamics_dialog.raise_()
-            self._dynamics_dialog.activateWindow()
+        if self._dynamics_dialog is not None:
+            present_effect_window(self._dynamics_dialog)
             return
         dialog = ProductionEffectDialog(
             "dynamics", self._track_name, self._dynamics_params(self._effect_chain),
-            self.window(), sidechain_sources=self._sidechain_sources,
+            self.window(), sidechain_sources=self._sidechain_sources, grouped_dynamics=True,
         )
         self._dynamics_dialog = dialog
         draft_ids = {key: str(uuid.uuid4()) for key in _DYNAMICS_STAGES}
@@ -1145,7 +1146,13 @@ class TrackMixerWidget(QWidget):
         """关闭时释放效果窗，并在 deferred delete 前清理注册引用。"""
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.finished.connect(self._on_effect_dialog_finished)
-        dialog.show()
+        graph = self._spectrum_graph(dialog)
+        if graph is not None:
+            graph.spectrumVisibilityChanged.connect(self._update_spectrum_gating)
+        present_effect_window(dialog)
+        window = dialog.windowHandle()
+        if window is not None:
+            window.windowStateChanged.connect(self._safe_spectrum_gating)
 
     def _on_effect_dialog_finished(self, _result: int) -> None:
         """只移除本次关闭的窗口，避免旧窗延迟销毁清掉新窗引用。"""
@@ -1209,8 +1216,7 @@ class TrackMixerWidget(QWidget):
         self._effect_previews.pop(dialog, None)
         params = instance.params or _effect_default_params(instance.effect_type)
         if hasattr(dialog, "fx_effect_type"):
-            if dialog.fx_effect_type == "strip_eq" and dialog._effect_version != instance.algorithm_version:
-                self._set_eq_response_calculator(dialog, instance.algorithm_version)
+            dialog.set_eq_algorithm_version(instance.algorithm_version)
             dialog.set_current_params(params, enabled=instance.enabled)
         else:
             dialog.set_current_params(params)
@@ -1586,9 +1592,12 @@ class TrackMixerWidget(QWidget):
         if not has_dynamics:
             new_order = max((e.order for e in existing), default=-1) + 1
             for et in ("expander", "compressor", "limiter"):
+                params = _effect_default_params(et)
+                if et == "compressor":
+                    params["makeup_post"] = True
                 existing.append(TrackEffectInstance(
                     effect_type=et,
-                    params=_effect_default_params(et),
+                    params=params,
                     enabled=True,
                     order=new_order,
                     panel="dynamics",
@@ -1737,6 +1746,7 @@ class TrackMixerWidget(QWidget):
             if dlg is not None:
                 if self._effect_previews.pop(dlg, None) is not None:
                     self._send_effect_preview()
+                dlg.hide()
                 dlg.deleteLater()
         self._safe_spectrum_gating()
 
@@ -1756,6 +1766,7 @@ class TrackMixerWidget(QWidget):
             if dlg is not None:
                 setattr(self, attr, None)
                 try:
+                    dlg.hide()
                     dlg.deleteLater()
                 except RuntimeError:
                     pass  # C++ 对象已销毁
@@ -1765,6 +1776,7 @@ class TrackMixerWidget(QWidget):
                 continue
             for dlg in list(dialogs.values()):
                 try:
+                    dlg.hide()
                     dlg.deleteLater()
                 except RuntimeError:
                     pass
@@ -1778,28 +1790,17 @@ class TrackMixerWidget(QWidget):
     def set_engine_sample_rate(self, sample_rate: float) -> None:
         """MX-09: 引擎采样率下发（记忆 + 推送到已打开的 EQ 曲线/频谱轴）。"""
         self._engine_sample_rate = float(sample_rate)
-        for dialog in self._iter_eq_dialogs():
+        for dialog in self._iter_eq_dialogs(visible_only=False):
             graph = getattr(dialog, "eq_graph", None)
             if graph is not None and hasattr(graph, "set_sample_rate"):
                 graph.set_sample_rate(self._engine_sample_rate)
             elif hasattr(dialog, "update_sample_rate"):
                 dialog.update_sample_rate(self._engine_sample_rate)
-
-    def _configure_eq_plot(self, dialog: ProductionEffectDialog, algorithm_version: int) -> None:
-        dialog.eq_graph = dialog.panel.eq_graph
-        self._set_eq_response_calculator(dialog, algorithm_version)
-        dialog.eq_graph.set_sample_rate(self._engine_sample_rate)
-        dialog.panel.update_spectrum([], [])
-        dialog.panel.update_output_meter(-100.0)
-
-    @staticmethod
-    def _set_eq_response_calculator(dialog: ProductionEffectDialog, algorithm_version: int) -> None:
-        from src.features.edit.core.audio_dsp import strip_eq_band_response_db
-
-        dialog._effect_version = algorithm_version
-        dialog.eq_graph.set_response_calculator(
-            partial(strip_eq_band_response_db, algorithm_version=algorithm_version)
-        )
+        for kind, _, dialog in self._iter_insert_dialogs(visible_only=False):
+            if kind == "dynamic_eq":
+                dialog.panel.eq_graph.set_sample_rate(self._engine_sample_rate)
+            elif kind in ("multiband_comp", "reverb", "delay", "convolution_reverb"):
+                dialog.panel.set_sample_rate(self._engine_sample_rate)
 
     def _instance_in_chain(self, instance_id: str) -> bool:
         """AUD-37902: instance_id 是否仍存在于当前效果器链（删除后的编辑守卫）。"""
@@ -1912,20 +1913,24 @@ class TrackMixerWidget(QWidget):
             dialogs = {}
             setattr(self, attr, dialogs)
         dialog = dialogs.get(instance.instance_id)
-        if dialog is not None and dialog.isVisible():
-            dialog.raise_()
-            dialog.activateWindow()
+        if dialog is not None:
+            present_effect_window(dialog)
             return
 
         dialog = ProductionEffectDialog(
             instance.effect_type, self._track_name,
             instance.params or _effect_default_params(instance.effect_type),
             self.window(), enabled=instance.enabled, sidechain_sources=self._sidechain_sources,
+            algorithm_version=instance.algorithm_version,
         )
         dialog._instance_id = instance.instance_id
         dialogs[instance.instance_id] = dialog
         if instance.effect_type == "strip_eq":
-            self._configure_eq_plot(dialog, instance.algorithm_version)
+            dialog.eq_graph.set_sample_rate(self._engine_sample_rate)
+        elif instance.effect_type == "dynamic_eq":
+            dialog.panel.eq_graph.set_sample_rate(self._engine_sample_rate)
+        elif instance.effect_type in ("multiband_comp", "reverb", "delay", "convolution_reverb"):
+            dialog.panel.set_sample_rate(self._engine_sample_rate)
 
         def edit(params: dict, commit: bool) -> None:
             if dialogs.get(instance.instance_id) is dialog:
@@ -2231,9 +2236,8 @@ class TrackMixerWidget(QWidget):
             return
         from src.features.mixer.effects.production_dialog import ProductionEffectDialog
 
-        if self._panner_dialog is not None and self._panner_dialog.isVisible():
-            self._panner_dialog.raise_()
-            self._panner_dialog.activateWindow()
+        if self._panner_dialog is not None:
+            present_effect_window(self._panner_dialog)
             return
         dialog = ProductionEffectDialog(
             "spatial_panner", self._track_name, {"pan": self._pan, "panner": self._panner},
@@ -2357,16 +2361,17 @@ class TrackMixerWidget(QWidget):
 
         for dialog in self._iter_eq_dialogs():
             panel = getattr(dialog, "panel", dialog)
-            instance_tap = taps.get(getattr(dialog, "_instance_id", "")) or {}
+            instance_id = getattr(dialog, "_instance_id", "")
+            instance_tap = taps.get(instance_id) or {}
             measured = instance_tap.get("spectrum") or {}
             if silent or instance_tap.get("bypassed"):
                 panel.update_spectrum([], [])
             elif measured:
                 panel.update_spectrum(measured.get("freqs", []), measured.get("output_db", []))
-            elif not instance_tap and spectrum:
-                # The dedicated channel-strip EQ has a track tap rather than
-                # an insert-chain ID. Insert windows wait for their own tap.
+            elif not instance_id and spectrum:
                 panel.update_spectrum(freqs, db)
+            elif not measured:
+                panel.update_spectrum([], [])
             if silent and hasattr(panel, "reset_peak_hold"):
                 panel.reset_peak_hold()
             panel.update_output_meter(tap_level(getattr(dialog, "_instance_id", ""), "out_db", out_db))
@@ -2376,13 +2381,25 @@ class TrackMixerWidget(QWidget):
             comp = ids.get("compressor", "")
             lim = ids.get("limiter", "")
             panel = getattr(self._dynamics_dialog, "panel", self._dynamics_dialog)
+            group = self._dynamics_instances()
+            if silent or (group and not panel.power_switch.isChecked()):
+                input_db = output_db = -100.0
+                gr_eg = gr_comp = gr_lim = 0.0
+                detector_db = -100.0
+            else:
+                ordered = sorted(group, key=lambda effect: effect.order)
+                first_id = ordered[0].instance_id if ordered else ""
+                last_id = ordered[-1].instance_id if ordered else ""
+                first = taps.get(first_id) or {}
+                last = taps.get(last_id) or {}
+                input_db = first.get("group_input_db", tap_level(first_id, "in_db", pre_db))
+                output_db = last.get("group_output_db", tap_level(last_id, "out_db", out_db))
+                gr_eg, gr_comp, gr_lim = (reduction.get(iid, 0.0) for iid in (eg, comp, lim))
+                detector_db = detectors.get(comp, -100.0)
             panel.update_meters(
-                input_db=tap_level(eg, "in_db", pre_db),
-                output_db=tap_level(lim, "out_db", out_db),
-                gr_eg_db=reduction.get(eg, 0.0),
-                gr_comp_db=reduction.get(comp, 0.0),
-                gr_lim_db=reduction.get(lim, 0.0),
-                sidechain_db=detectors.get(comp, -100.0),
+                input_db=input_db, output_db=output_db,
+                gr_eg_db=gr_eg, gr_comp_db=gr_comp, gr_lim_db=gr_lim,
+                sidechain_db=detector_db,
             )
 
         for kind, instance_id, dialog in self._iter_insert_dialogs():
@@ -2398,24 +2415,39 @@ class TrackMixerWidget(QWidget):
             detector = -100.0 if silent or tap.get("bypassed") else detectors.get(instance_id, -100.0)
             panel = getattr(dialog, "panel", dialog)
 
-            if kind == "convolution_reverb" and hasattr(dialog, "update_resource_status"):
+            if kind == "convolution_reverb":
                 dialog.update_resource_status(tap.get("analysis") or {})
+                if silent or tap.get("bypassed"):
+                    panel.update_meters(-100.0, -100.0, -100.0, -100.0)
+                else:
+                    panel.update_meters(*tap.get("in_db_lr", (input_level, input_level)),
+                                        *tap.get("out_db_lr", (output_level, output_level)))
             if kind in ("compressor", "expander", "noise_gate", "limiter", "dynamics"):
                 if hasattr(panel, "update_meters"):
                     panel.update_meters(
-                        input_db=input_level, output_db=output_level, sidechain_db=detector,
-                        gr_comp_db=gr if kind in ("compressor", "dynamics") else 0.0,
-                        gr_eg_db=gr if kind in ("expander", "noise_gate") else 0.0,
-                        gr_lim_db=gr if kind == "limiter" else 0.0,
+                        input_db=input_level, output_db=output_level,
+                        sidechain_db=analysis.get("detector_dbfs", detector),
+                        gr_comp_db=analysis.get("comp_gr_db", gr if kind == "compressor" else 0.0),
+                        gr_eg_db=analysis.get("eg_gr_db", gr if kind in ("expander", "noise_gate") else 0.0),
+                        gr_lim_db=analysis.get("lim_gr_db", gr if kind == "limiter" else 0.0),
                     )
                 elif kind == "compressor" and hasattr(dialog, "set_sidechain_level"):
                     dialog.set_sidechain_level(detector)
             elif kind in ("reverb", "saturation"):
                 panel.update_output_meter(output_level)
-                if kind == "saturation" and (silent or spectrum):
-                    panel.update_spectrum(freqs, db)
+                if kind == "saturation":
+                    measured = {} if silent or tap.get("bypassed") else tap.get("spectrum") or {}
+                    panel.update_spectrum(measured.get("freqs", []), measured.get("output_db", []))
+            elif kind == "imager":
+                measured = {} if silent else tap.get("analysis") or {}
+                panel.update_metering(
+                    measured.get("samples_l", []), measured.get("samples_r", []),
+                    measured.get("mid_db", -100.0), measured.get("side_db", -100.0),
+                    measured.get("correlation"),
+                )
             elif kind == "delay":
-                panel.update_output_meters(output_level, output_level)
+                levels = tap.get("out_db_lr") if not (silent or tap.get("bypassed")) else None
+                panel.update_output_meters(*(levels or (output_level, output_level)))
             elif kind == "voice_changer":
                 confidence = max(0.0, min(100.0, float(analysis.get("confidence", 0.0)) * 100.0))
                 # Spectra are optional in the engine payload. Keep a floor sample
@@ -2441,45 +2473,61 @@ class TrackMixerWidget(QWidget):
                     wave_samples=analysis.get("waveform", []), grains=analysis.get("grains", []),
                 )
             elif kind == "de_esser":
-                panel.update_meters(detector, -abs(analysis.get("gain_reduction_db", gr)), output_level)
+                measured = {} if silent or tap.get("bypassed") else tap.get("spectrum") or {}
+                panel.update_spectrum(measured.get("freqs", []), measured.get("input_db", []),
+                                      measured.get("output_db", []))
+                panel.update_meters(analysis.get("detector_dbfs", detector),
+                                    -abs(analysis.get("gain_reduction_db", gr)), output_level)
             elif kind == "dynamic_eq":
-                if silent or spectrum:
-                    panel.update_spectrum(freqs, db, sc_db=[])
+                measured = {} if silent or tap.get("bypassed") else tap.get("spectrum") or {}
+                panel.update_spectrum(measured.get("freqs", []), measured.get("output_db", []))
                 offsets = [0.0] * 6
-                offsets[3] = analysis.get("dynamic_gain_db", 0.0)
+                bands = analysis.get("bands") or []
+                if bands:
+                    for index, band in enumerate(bands[:len(offsets)]):
+                        offsets[index] = band.get("dynamic_gain_db", 0.0)
+                else:
+                    offsets[3] = analysis.get("dynamic_gain_db", 0.0)
                 panel.update_dynamic_meters(input_level, output_level, offsets)
             elif kind == "bus_comp":
-                panel.update_meters(input_level, gr, output_level)
+                panel.update_meters(input_level, analysis.get("gain_reduction_db", gr), output_level)
             elif kind == "multiband_comp":
                 band_gr = [analysis.get(f"band_{index}_gr_db", 0.0) for index in range(4)]
                 panel.update_meters(input_level, band_gr, output_level)
-            elif kind in ("chorus_flanger", "phaser", "transient_designer", "true_peak_limiter"):
+            elif kind == "true_peak_limiter":
+                panel.update_processor_meters(
+                    input_level, analysis.get("true_peak_dbtp"), output_level,
+                    analysis.get("output_true_peak_dbtp"), analysis.get("gain_reduction_db", gr),
+                )
+            elif kind == "transient_designer":
+                panel.push_realtime_frame(input_level, output_level,
+                                          analysis.get("attack_gain_db", 0.0),
+                                          analysis.get("sustain_gain_db", 0.0))
+            elif kind in ("chorus_flanger", "phaser"):
                 panel.meter_input.setValue(input_level)
-                if kind == "true_peak_limiter":
-                    panel.meter_gr.setValue(analysis.get("gain_reduction_db", gr))
-                else:
-                    panel.meter_output.setValue(output_level)
+                panel.meter_output.setValue(output_level)
 
-    def _iter_insert_dialogs(self) -> Iterator[tuple[str, str, QDialog]]:
+    def _iter_insert_dialogs(self, *, visible_only: bool = True) -> Iterator[tuple[str, str, QDialog]]:
         for attr in self._EFFECT_DIALOG_ATTRS:
             for instance_id, dialog in list(getattr(self, attr, {}).items()):
                 kind = getattr(dialog, "fx_effect_type", self._EFFECT_DIALOG_TYPES.get(attr))
-                if kind and (not hasattr(dialog, "isVisible") or dialog.isVisible()):
+                if kind and (not visible_only or not hasattr(dialog, "isVisible")
+                             or (dialog.isVisible() and not dialog.isMinimized())):
                     yield kind, instance_id, dialog
 
-    def _iter_eq_dialogs(self) -> list:
+    def _iter_eq_dialogs(self, *, visible_only: bool = True) -> list:
         """当前可见的 EQ 对话框（胶囊单例 + FX 列表多实例）。"""
         dlgs = []
         if self._eq_dialog is not None:
             try:
-                if self._eq_dialog.isVisible():
+                if not visible_only or (self._eq_dialog.isVisible() and not self._eq_dialog.isMinimized()):
                     dlgs.append(self._eq_dialog)
             except RuntimeError:
                 # C++ 对象已销毁而引用滞留（destroyed 未清属性）
                 self._eq_dialog = None
         for dlg in list(getattr(self, '_strip_eq_dialogs', {}).values()):
             try:
-                if dlg.isVisible():
+                if not visible_only or (dlg.isVisible() and not dlg.isMinimized()):
                     dlgs.append(dlg)
             except RuntimeError:
                 continue
@@ -2499,11 +2547,28 @@ class TrackMixerWidget(QWidget):
             iids["expander"] = iids["noise_gate"]
         return iids
 
+    @staticmethod
+    def _spectrum_graph(dialog: QDialog) -> QWidget | None:
+        panel = getattr(dialog, "panel", None)
+        graph = getattr(panel, "eq_graph", None) or getattr(panel, "graph", None)
+        return graph if hasattr(graph, "spectrumVisibilityChanged") else None
+
+    def spectrum_targets(self) -> frozenset[str]:
+        """Map visible spectrum displays to instance IDs, or the EQ draft's track tap."""
+        targets = set()
+        for dialog in self._iter_eq_dialogs():
+            graph = self._spectrum_graph(dialog)
+            if graph is None or graph.spectrum_visible():
+                targets.add(getattr(dialog, "_instance_id", ""))
+        for effect_type, instance_id, dialog in self._iter_insert_dialogs():
+            if effect_type in _SPECTRUM_EFFECT_TYPES - {"strip_eq"}:
+                graph = self._spectrum_graph(dialog)
+                if graph is None or graph.spectrum_visible():
+                    targets.add(instance_id)
+        return frozenset(targets)
+
     def has_spectrum_consumers(self) -> bool:
-        return bool(self._iter_eq_dialogs()) or any(
-            effect_type in _SPECTRUM_EFFECT_TYPES
-            for effect_type, _instance_id, _dialog in self._iter_insert_dialogs()
-        )
+        return bool(self.spectrum_targets())
 
     def _update_spectrum_gating(self) -> None:
         """Enable the existing track FFT tap while a consumer is visible."""
@@ -2531,8 +2596,8 @@ class TrackMixerWidget(QWidget):
                 self._dynamics_dialog.set_sidechain_sources(filtered)
             except RuntimeError:
                 self._dynamics_dialog = None
-        for kind, _instance_id, dlg in self._iter_insert_dialogs():
-            if kind not in ("compressor", "dynamics"):
+        for kind, _instance_id, dlg in self._iter_insert_dialogs(visible_only=False):
+            if kind not in ("compressor", "dynamics", "dynamic_eq", "transient_designer"):
                 continue
             try:
                 dlg.set_sidechain_sources(filtered)

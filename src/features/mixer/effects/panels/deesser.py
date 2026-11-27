@@ -13,6 +13,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont, QPolygonF
 )
 
+from src.features.mixer.spectrogram import hold_spectrum_peaks
 from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
@@ -402,6 +403,7 @@ class ProRotaryKnob(QWidget):
 # 4. 控件：交互式齿音检测与动态衰减频谱图
 # =====================================================================
 class DeEsserGraphWidget(QWidget):
+    spectrumVisibilityChanged = pyqtSignal(bool)
     nodeDragged = pyqtSignal(float, float)         # freq_hz, threshold_db
     nodeQScrolled = pyqtSignal(float)              # new_q
     modeToggleRequested = pyqtSignal(str)          # "split" | "sidechain"
@@ -453,6 +455,9 @@ class DeEsserGraphWidget(QWidget):
         self._current_gr_db = min(0.0, gr_db)
         self.update()
 
+    def spectrum_visible(self) -> bool:
+        return self._show_spectrum
+
     def update_spectrum(
         self,
         freqs_hz: list[float],
@@ -460,10 +465,11 @@ class DeEsserGraphWidget(QWidget):
         output_db: list[float] | None = None,
         peak_db: list[float] | None = None,
     ):
+        previous_peaks = self._spec_peak if self._show_peak_hold and freqs_hz == self._spec_freqs else []
         self._spec_freqs = freqs_hz
         self._spec_in = input_db
         self._spec_out = output_db if output_db is not None else input_db
-        self._spec_peak = peak_db if peak_db is not None else input_db
+        self._spec_peak = peak_db if peak_db is not None else hold_spectrum_peaks(self._spec_out, previous_peaks)
         self.update()
 
     def _plot_rect(self) -> QRectF:
@@ -534,10 +540,12 @@ class DeEsserGraphWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self._btn_spec_rect.contains(pos):
                 self._show_spectrum = not self._show_spectrum
+                self.spectrumVisibilityChanged.emit(self._show_spectrum)
                 self.update()
                 return
             if self._btn_peak_rect.contains(pos):
                 self._show_peak_hold = not self._show_peak_hold
+                self._spec_peak = self._spec_out
                 self.update()
                 return
 
@@ -618,6 +626,9 @@ class DeEsserGraphWidget(QWidget):
             self.update()
 
     def wheelEvent(self, event):
+        if self._processor_controls and self._state["filter_shape"] == "High Shelf":
+            super().wheelEvent(event)
+            return
         if self._plot_rect().contains(event.position()):
             delta = event.angleDelta().y() / 120.0
             new_q = max(0.5, min(8.0, round(self._state["q"] + delta * 0.2, 1)))
@@ -1768,11 +1779,13 @@ class StudioDeEsserWidget(QWidget):
             btn.setChecked(abs(st["freq"] - target_hz) < 120.0)
 
         # Q / Slope
-        self.q_title.setText("Slope / Q" if st["filter_shape"] == "High Shelf" else "Bandwidth (Q)")
+        shelf = st["filter_shape"] == "High Shelf"
+        bandwidth_enabled = en and not (self.graph._processor_controls and shelf)
+        self.q_title.setText("Bandwidth (Q)" if self.graph._processor_controls or not shelf else "Slope / Q")
         self.q_knob.setValue(st["q"])
-        self.q_knob.setActive(en)
+        self.q_knob.setActive(bandwidth_enabled)
         self.q_pill.setText(f"{st['q']:.1f}")
-        self.q_pill.setActive(en)
+        self.q_pill.setActive(bandwidth_enabled)
 
         # Threshold & Max Range
         self.thresh_knob.setValue(st["threshold"])

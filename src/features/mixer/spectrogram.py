@@ -12,6 +12,13 @@ FREQUENCY_KNEE = 500.0
 DB_FLOOR = -96.0
 
 
+def hold_spectrum_peaks(current: list[float], previous: list[float]) -> list[float]:
+    """Track per-bin maxima until the display is cleared or its bins change."""
+    if len(current) != len(previous) or not previous:
+        return current
+    return list(map(max, current, previous))
+
+
 def frequency_fraction(frequency: float, nyquist: float) -> float:
     offset = max(0.0, min(nyquist, frequency) - FREQUENCY_MIN)
     return math.log1p(offset / FREQUENCY_KNEE) / _frequency_span(nyquist)

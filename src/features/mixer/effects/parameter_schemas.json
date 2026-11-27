@@ -770,10 +770,18 @@
       },
       "tail_db": {
         "type": "number"
+      },
+      "dry_level": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "true_stereo": {
+        "type": "boolean"
       }
     },
     "additionalProperties": true,
-    "description": "Local UI state only; audio preview/export are not implemented"
+    "description": "Production preview and export use WAV impulse response, wet, dry, and true stereo. Other fields belong to the standalone design panel."
   },
   "panner": {
     "type": "object",

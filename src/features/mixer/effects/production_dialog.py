@@ -2,20 +2,25 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from functools import partial
 import logging
 from math import isfinite
 from typing import Any
 
 from PyQt6.QtCore import QSignalBlocker, Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QDialogButtonBox, QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
+from src.features.edit.core.audio_dsp import strip_eq_band_response_db
 from src.features.edit.core.effect_registry import get_effect_definition
 from src.features.edit.core.timeline_v2 import (
-    CompressorParams, SpatialPannerParams, _ensure_effect_param_registry, _params_f,
+    DYNAMIC_EQ_SINGLE_BAND_FIELDS, CompressorParams, SpatialPannerParams,
+    _ensure_effect_param_registry, _params_f,
 )
 from src.shared.i18n.i18n import I18N
+from src.shared.ui.audio_mixer.pro_widgets import apply_float_panel
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 from .bindings_core import collect_fields, project_fields, with_fallbacks
 from .catalog import create_panel
@@ -23,7 +28,9 @@ from .classic_bindings import CLASSIC_BINDINGS
 from .panel_presets import install_effect_presets
 from .panel_style import fit_effect_window, style_panel_inputs
 from .rack_bindings import RACK_BINDINGS
-from .production_extensions import collect_extended, display_projection, project_extended
+from .production_extensions import (
+    BUS_TEMPLATE_OVERRIDES, DE_ESSER_CONTROL_DEFAULTS, collect_extended, display_projection, project_extended,
+)
 from .windows import stop_panel_timers
 
 logger = logging.getLogger(__name__)
@@ -107,6 +114,7 @@ class ProductionEffectDialog(QDialog):
 
     preview = pyqtSignal(dict)
     committed = pyqtSignal(dict)
+    preview_cleared = pyqtSignal()
 
     def __init__(
         self,
@@ -117,8 +125,11 @@ class ProductionEffectDialog(QDialog):
         *,
         enabled: bool | None = None,
         sidechain_sources: tuple[tuple[str, str], ...] = (),
+        algorithm_version: int | None = None,
+        grouped_dynamics: bool = False,
     ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
+        apply_float_panel(self)
         self.fx_effect_type = effect_type
         panel_id, fields = PRODUCTION_BINDINGS[effect_type]
         self.fields = tuple(field for field in fields if field.ui != "enabled")
@@ -127,6 +138,7 @@ class ProductionEffectDialog(QDialog):
         self._staged: dict[str, Any] = {}
         self._external_enabled: bool | None = None
         self._sidechain_sources = sidechain_sources
+        self._grouped_dynamics = grouped_dynamics
         self._syncing = False
         self._last_preview: tuple[dict[str, Any], bool | None] | None = None
 
@@ -135,7 +147,12 @@ class ProductionEffectDialog(QDialog):
         self.setWindowTitle(f"{name} · {owner_name}")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.panel = create_panel(panel_id, owner_name)
+        if effect_type == "strip_eq":
+            self.eq_graph = self.panel.eq_graph
+            self.set_eq_algorithm_version(algorithm_version)
         self._configure_sections()
+        if effect_type == "convolution_reverb":
+            self.panel.set_true_stereo_available(algorithm_version is None or algorithm_version > 4)
         self._default_state = self.panel.get_state()
         self._baseline: dict[str, Any] = {}
         self._make_spectral_limiter_state()
@@ -149,7 +166,6 @@ class ProductionEffectDialog(QDialog):
         layout.setSpacing(0)
         layout.addWidget(self._build_toolbar())
         layout.addWidget(self.panel, 1)
-        self._build_model_selector(layout)
         style_panel_inputs(self.panel)
         stop_panel_timers(self.panel)
         self._clear_demo_spectrum(panel_id)
@@ -163,69 +179,11 @@ class ProductionEffectDialog(QDialog):
                 preset_combo.setCurrentIndex(-1)
         fit_effect_window(self, self.panel)
 
-    def _build_model_selector(self, layout: QVBoxLayout) -> None:
-        if self.fx_effect_type not in {"dynamic_eq", "saturation", "transient_designer"}:
+    def set_eq_algorithm_version(self, version: int | None) -> None:
+        if self.fx_effect_type != "strip_eq" or getattr(self, "_eq_version", -1) == version:
             return
-        self.model_selector = QComboBox(self)
-        self.model_selector.addItems(
-            [_tr("single_band", "Single band"), _tr("six_bands", "Six bands")]
-            if self.fx_effect_type == "dynamic_eq" else
-            [_tr("legacy_transient", "Classic detection"), _tr("channel_transient", "Channel aware detection")]
-            if self.fx_effect_type == "transient_designer" else
-            [_tr("legacy_saturation", "Classic saturation"), _tr("multiband_saturation", "Three band saturation")])
-        layout.insertWidget(1, self.model_selector)
-        self.model_selector.currentIndexChanged.connect(self._change_model)
-        if self.fx_effect_type == "dynamic_eq":
-            self.band_selector = QComboBox(self)
-            self.band_selector.addItems([_tr("band", "Band") + f" {i + 1}" for i in range(6)])
-            self.band_selector.setCurrentIndex(3)
-            self.band_selector.currentIndexChanged.connect(self._select_dynamic_band)
-            layout.insertWidget(2, self.band_selector)
-            self.band_enabled = QCheckBox(_tr("band_enabled", "Enable selected band"), self)
-            self.band_enabled.toggled.connect(self._enable_dynamic_band)
-            layout.insertWidget(3, self.band_enabled)
-
-    def _select_dynamic_band(self, index: int) -> None:
-        self.panel._select_band_card(index)
-        with QSignalBlocker(self.band_enabled):
-            self.band_enabled.setChecked(self.panel.get_state()["bands"][index]["enabled"])
-
-    def _enable_dynamic_band(self, enabled: bool) -> None:
-        if self._syncing:
-            return
-        state = self.panel.get_state()
-        state["bands"][self.band_selector.currentIndex()]["enabled"] = enabled
-        self.panel.set_state(state)
-        self._on_edited(state)
-
-    def _change_model(self, index: int) -> None:
-        if self._syncing:
-            return
-        pending = self.current_params()
-        if self.fx_effect_type == "dynamic_eq":
-            from src.features.edit.core.timeline_v2 import DynamicEqParams
-            pending["bands"] = [DynamicEqParams._normalize_band({
-                "enabled": i == 3, "frequency_hz": self.panel.get_state()["bands"][i]["freq"],
-                "static_gain_db": pending.get("gain_db", 0.0) if i == 3 else 0.0,
-            }) for i in range(6)] if index else []
-        elif self.fx_effect_type == "transient_designer":
-            if index:
-                pending["attack_pct"] = min(100.0, max(-100.0, pending.get("attack_db", 0.0) / 0.12))
-                pending["sustain_pct"] = min(100.0, max(-100.0, pending.get("sustain_db", 0.0) / 0.12))
-            else:
-                pending.pop("attack_pct", None)
-                pending.pop("sustain_pct", None)
-                pending["attack_pct"] = None
-                pending["sustain_pct"] = None
-        else:
-            pending["model_profile"] = "multiband" if index else "legacy"
-            if index and not pending.get("mb_bands"):
-                pending["mb_bands"] = [
-                    {"enabled": True, "model": "tape", "drive_db": 0.0,
-                     "tone_db": 0.0, "bias_pct": 0.0, "level_db": 0.0}
-                    for _ in range(3)]
-        self._stage(pending)
-        self._on_edited({})
+        self._eq_version = version
+        self.eq_graph.set_response_calculator(partial(strip_eq_band_response_db, algorithm_version=version))
 
     def _build_toolbar(self) -> QFrame:
         toolbar = QFrame(self)
@@ -233,13 +191,27 @@ class ProductionEffectDialog(QDialog):
         row = QHBoxLayout(toolbar)
         row.setContentsMargins(10, 5, 10, 5)
         row.setSpacing(10)
-        summary = _tr(
-            "mapped_parameters",
-            "Some design controls are pending audio support.",
-        )
+        if self.fx_effect_type == "dynamic_eq":
+            summary = _tr("dynamic_eq_graph_hint", "Double-click empty space to add a band.")
+        elif self.fx_effect_type == "spatial_panner":
+            summary = _tr("panner_summary", "Front stereo pair processing · Speaker layout preview")
+        elif self.fx_effect_type == "imager":
+            summary = _tr("imager_summary", "Solo M/S and Mono apply to playback only.")
+        elif self.fx_effect_type in {"strip_eq", "de_esser", "transient_designer", "bus_comp",
+                                     "multiband_comp", "true_peak_limiter", "convolution_reverb"}:
+            summary = ""
+        else:
+            summary = _tr("mapped_parameters", "Some design controls are pending audio support.")
         status = QLabel(summary, toolbar)
         self._status_label = status
         row.addWidget(status, 1)
+        if self.fx_effect_type == "transient_designer":
+            label = QLabel(_tr("sidechain_source", "Sidechain"), toolbar)
+            self._transient_source_combo = ChevronComboBox(toolbar)
+            self._transient_source_combo.setAccessibleName(label.text())
+            self._transient_source_combo.currentIndexChanged.connect(self._change_transient_sidechain)
+            row.addWidget(label)
+            row.addWidget(self._transient_source_combo)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
             | QDialogButtonBox.StandardButton.Apply, parent=toolbar,
@@ -265,9 +237,21 @@ class ProductionEffectDialog(QDialog):
 
     def update_resource_status(self, analysis: dict[str, Any]) -> None:
         """Display actual loader state, including actionable decode failures."""
-        status = str(analysis.get("resource_status", ""))
-        if status:
-            self._status_label.setText(str(analysis.get("resource_error") or status))
+        status = analysis.get("resource_status")
+        if status is None or analysis.get("ir_path") != self.panel.current_ir_path:
+            return
+        if status == "preparing":
+            message = I18N.tr("audio.fx.ir_preparing", "Preparing impulse response…")
+        elif status == "ready":
+            message = I18N.tr("audio.fx.ir_ready", "Impulse response ready")
+            self.panel.refresh_ir_if_changed(str(analysis.get("ir_sha256", "")))
+        elif status == "failed":
+            message = str(analysis.get("resource_error") or
+                          I18N.tr("audio.fx.ir_failed", "Unable to load impulse response"))
+        else:
+            message = ""
+        if message != self._status_label.text():
+            self._status_label.setText(message)
 
     def _clear_demo_spectrum(self, panel_id: str) -> None:
         if panel_id in {"eq", "dynamic_eq", "saturation", "deesser"}:
@@ -285,6 +269,8 @@ class ProductionEffectDialog(QDialog):
             configure()
         if self.fx_effect_type == "saturation":
             self.panel.use_wave_shaper_drive()
+        if self.fx_effect_type == "dynamic_eq":
+            self.panel.processorBandRequested.connect(self._add_dynamic_band)
         card = _DYNAMICS_CARD.get(self.fx_effect_type)
         if card:
             self.panel.show_stage(card)
@@ -310,6 +296,11 @@ class ProductionEffectDialog(QDialog):
         self._sidechain_sources = sources
         if self.fx_effect_type in {"compressor", "dynamics"}:
             self._populate_sidechain(self.panel.get_state()["comp"]["sc_source"])
+        if self.fx_effect_type == "dynamic_eq":
+            self._populate_source_ids(self.panel.sc_source_combo, self.panel.get_state()["ext_sc_source"])
+        if self.fx_effect_type == "transient_designer":
+            combo = self._transient_source_combo
+            self._populate_source_ids(combo, combo.currentData())
 
     def _populate_sidechain(self, current: str) -> None:
         combo = self.panel.comp_card.sc_source_combo
@@ -321,6 +312,48 @@ class ProductionEffectDialog(QDialog):
             if combo.findData(current) < 0:
                 combo.addItem(current, current)
             combo.setCurrentIndex(combo.findData(current))
+
+    def _populate_source_ids(self, combo: QComboBox, current: str) -> None:
+        with QSignalBlocker(combo):
+            combo.clear()
+            combo.addItem(_tr("sidechain_internal", "Internal"), "internal")
+            for source_id, name in self._sidechain_sources:
+                combo.addItem(name, source_id)
+            if combo.findData(current) < 0:
+                combo.addItem(current, current)
+            combo.setCurrentIndex(combo.findData(current))
+
+    def _change_transient_sidechain(self, index: int) -> None:
+        if self._syncing or index < 0:
+            return
+        source = self._transient_source_combo.itemData(index)
+        if not isinstance(source, str):
+            return
+        pending = self.current_params()
+        pending["sidechain_source_id"] = source
+        if source != "internal" and pending.get("sc_on") is False:
+            pending["sc_on"] = True
+        self._stage(pending)
+        self._on_edited({})
+
+    def _add_dynamic_band(self, frequency: float, gain: float) -> None:
+        if self._syncing:
+            return
+        pending = self.current_params()
+        current = _normalized(self.fx_effect_type, pending)
+        bands = list(pending.get("bands") or ())
+        if not bands:
+            bands.append({
+                "enabled": True,
+                "legacy_automation": True,
+                **{target: current[source] for source, target in DYNAMIC_EQ_SINGLE_BAND_FIELDS.items()},
+            })
+        if len(bands) >= len(self.panel.band_cards):
+            return
+        bands.append({"enabled": True, "frequency_hz": frequency, "static_gain_db": gain})
+        self._stage(pending | {"bands": bands})
+        self.panel.select_band(len(bands) - 1)
+        self._on_edited({})
 
     def _change_modulation_mode(self, mode: str) -> None:
         if self._syncing or mode == self._projection["mode"]:
@@ -339,11 +372,35 @@ class ProductionEffectDialog(QDialog):
         if self.fx_effect_type == "spatial_panner":
             panner = {key: value for key, value in preset.items() if key != "pan"}
             preset = {"pan": preset.get("pan", self._params.get("pan", 0.0)), "panner": panner}
-        self._stage(with_fallbacks(preset, self.current_params()))
+        if self.fx_effect_type == "imager":
+            preset = {key: value for key, value in preset.items() if key != "_imager_audition"}
+        pending = with_fallbacks(preset, self.current_params())
+        if self.fx_effect_type == "dynamic_eq" and "bands" in preset:
+            pending["bands"] = deepcopy(preset["bands"])
+        if self.fx_effect_type == "multiband_comp":
+            if "crossovers" in preset:
+                pending["crossovers"] = deepcopy(preset["crossovers"])
+            if "bands" in preset:
+                pending["bands"] = pending["bands"][:len(preset["bands"])]
+        if self.fx_effect_type == "bus_comp":
+            for key in BUS_TEMPLATE_OVERRIDES:
+                if key in pending:
+                    pending[key] = preset.get(key)
+        if self.fx_effect_type == "transient_designer":
+            for key in ("attack_pct", "sustain_pct"):
+                if key in pending:
+                    pending[key] = preset.get(key)
+        if self.fx_effect_type == "de_esser":
+            for key in DE_ESSER_CONTROL_DEFAULTS.keys() & pending.keys():
+                pending[key] = preset.get(key)
+        self._stage(pending)
         self._on_edited({})
 
     def _preset_params(self) -> dict[str, Any]:
-        return self._flat(self.current_params())
+        params = self._flat(self.current_params())
+        if self.fx_effect_type == "imager":
+            params.pop("_imager_audition", None)
+        return params
 
     def _flat(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.fx_effect_type != "spatial_panner":
@@ -362,39 +419,25 @@ class ProductionEffectDialog(QDialog):
             if not project_extended(self.fx_effect_type, state, projection):
                 project_fields(state, projection, self.fields)
             self._projection = projection
-            if hasattr(self, "model_selector"):
-                with QSignalBlocker(self.model_selector):
-                    self.model_selector.setCurrentIndex(int(
-                        bool(projection.get("bands")) if self.fx_effect_type == "dynamic_eq"
-                        else (projection.get("attack_pct") is not None or projection.get("sustain_pct") is not None)
-                        if self.fx_effect_type == "transient_designer" else
-                        projection.get("model_profile") == "multiband"))
-            if self.fx_effect_type == "dynamic_eq":
-                self.panel._processor_multiband = bool(projection.get("bands"))
-                self.band_selector.setEnabled(self.panel._processor_multiband)
-                self.band_enabled.setEnabled(self.panel._processor_multiband)
-                with QSignalBlocker(self.band_enabled):
-                    self.band_enabled.setChecked(state["bands"][self.band_selector.currentIndex()]["enabled"])
             engine_power = bool(self._flat(self._params).get("enabled", True))
             state["enabled"] = self._external_enabled is not False and engine_power
             card = _DYNAMICS_CARD.get(self.fx_effect_type)
             if card:
                 for key in ("eg", "comp", "lim"):
                     state[key]["enabled"] = key == card
+            if self.fx_effect_type == "dynamics":
+                compressor = self._params.get("comp")
+                self.panel.dyn_graph.makeup_after_limiter = (
+                    not self._grouped_dynamics
+                    or (isinstance(compressor, dict) and bool(compressor.get("makeup_post")))
+                )
             if self.fx_effect_type in {"compressor", "dynamics"}:
                 self._populate_sidechain(state["comp"]["sc_source"])
             if self.fx_effect_type == "dynamic_eq":
-                combo = self.panel.sc_source_combo
-                with QSignalBlocker(combo):
-                    combo.clear()
-                    combo.addItem("Internal", "internal")
-                    for source_id, name in self._sidechain_sources:
-                        combo.addItem(name, source_id)
-                    current = state["ext_sc_source"]
-                    if combo.findData(current) < 0:
-                        combo.addItem(current, current)
-                    combo.setCurrentIndex(combo.findData(current))
-                state["ext_sc_source"] = combo.currentText()
+                self.panel.set_processor_band_count(len(projection["bands"]))
+                self._populate_source_ids(self.panel.sc_source_combo, state["ext_sc_source"])
+            if self.fx_effect_type == "transient_designer":
+                self._populate_source_ids(self._transient_source_combo, projection["sidechain_source_id"])
             if self.fx_effect_type == "saturation":
                 multiband = projection.get("model_profile") == "multiband"
                 self.panel._production_multiband = multiband
@@ -430,6 +473,8 @@ class ProductionEffectDialog(QDialog):
 
     def set_current_params(self, params: dict[str, Any], *, enabled: bool | None = None) -> None:
         """Apply a replacement model snapshot without sending edits back to it."""
+        if self.fx_effect_type == "imager" and "_imager_audition" in params:
+            params = {key: value for key, value in params.items() if key != "_imager_audition"}
         if (self._baseline and self._params == params and self._external_enabled == enabled
                 and self.current_params() == params):
             return
@@ -452,11 +497,6 @@ class ProductionEffectDialog(QDialog):
         changed = collect_extended(self.fx_effect_type, self.panel.get_state(), self._baseline, values)
         if changed is None:
             changed = collect_fields(self.panel.get_state(), self._baseline, values, self.fields)
-        if self.fx_effect_type == "dynamic_eq" and "sidechain_source_id" in changed:
-            selected = self.panel.sc_source_combo.currentText()
-            match = self.panel.sc_source_combo.findText(selected)
-            if match >= 0:
-                values["sidechain_source_id"] = self.panel.sc_source_combo.itemData(match)
         self._validate_sidechain(values, changed)
         power = self.power_override
         if power is not None:
@@ -484,19 +524,11 @@ class ProductionEffectDialog(QDialog):
         if self.fx_effect_type == "dynamics" and "makeup" in updates:
             updates.setdefault("comp", deepcopy(values["comp"]))["makeup_gain"] = updates["makeup"]
         result = deepcopy(self._params) | deepcopy(self._staged) | updates
+        if (self.fx_effect_type == "dynamic_eq" and updates.get("sidechain_source_id", "internal") != "internal"
+                and result.get("sc_on") is False):
+            result["sc_on"] = True
         if self.fx_effect_type == "tremolo_auto_pan" and updates:
             result.setdefault("waveform", "sine")
-        if self.fx_effect_type == "dynamic_eq" and "sidechain_source_id" in updates:
-            source = result["sidechain_source_id"]
-            if source.lower() == "internal":
-                result["sidechain_source_id"] = "internal"
-            elif not any(source == sid for sid, _name in self._sidechain_sources):
-                matches = [sid for sid, name in self._sidechain_sources if source == name]
-                result["sidechain_source_id"] = (matches[0] if len(matches) == 1 else
-                                                  self._projection.get("sidechain_source_id", "internal"))
-        if self.fx_effect_type == "transient_designer":
-            result = {key: value for key, value in result.items()
-                      if key not in {"attack_pct", "sustain_pct"} or value is not None}
         return result
 
     def _validate_sidechain(self, values: dict[str, Any], changed: set[str]) -> None:
@@ -516,7 +548,12 @@ class ProductionEffectDialog(QDialog):
 
     def _on_edited(self, _state: dict[str, Any]) -> None:
         if not self._syncing:
-            self._apply_button.setEnabled(self.current_params() != self._params or self.power_override is not None)
+            pending = self.current_params()
+            if self.fx_effect_type == "bus_comp" and (
+                pending.get("template", self._projection["template"]) != self._projection["template"]
+            ):
+                self._stage(pending)
+            self._apply_button.setEnabled(pending != self._params or self.power_override is not None)
             if not self._preview_timer.isActive():
                 self._preview_timer.start()
 
@@ -535,11 +572,24 @@ class ProductionEffectDialog(QDialog):
         self._preview_timer.stop()
         params, power = self.current_params(), self.power_override
         if params == self._params and power is None:
+            self._emit_preview()
             return
+        stop_listen = bool(
+            self.fx_effect_type == "transient_designer" and self._last_preview
+            and self._last_preview[0].get("sc_listen")
+        )
+        if self.fx_effect_type == "imager":
+            stop_listen = bool(self._last_preview and self._last_preview[0].get("_imager_audition"))
+            params.pop("_imager_audition", None)
         if self.fx_effect_type == "transient_designer":
-            params.pop("sc_listen", None)
+            if self._params.get("sc_listen"):
+                params["sc_listen"] = False
+            else:
+                params.pop("sc_listen", None)
         self.committed.emit(params)
         self.set_current_params(params, enabled=power if power is not None else self._external_enabled)
+        if stop_listen:
+            self.preview_cleared.emit()
 
     def accept(self) -> None:
         self.apply()

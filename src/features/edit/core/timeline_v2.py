@@ -4162,6 +4162,20 @@ class TruePeakLimiterParams:
         )
 
 
+DYNAMIC_EQ_SINGLE_BAND_FIELDS: dict[str, str] = {
+    "frequency": "frequency_hz",
+    "gain_db": "static_gain_db",
+    "q": "q",
+    "threshold_dbfs": "threshold_dbfs",
+    "max_cut_db": "max_cut_db",
+    "max_boost_db": "max_boost_db",
+    "attack_ms": "attack_ms",
+    "release_ms": "release_ms",
+    "dynamic_enabled": "dynamic_enabled",
+    "slope": "slope",
+}
+
+
 @dataclass(frozen=True)
 @preserves_param_extras
 class DynamicEqParams:
@@ -4460,6 +4474,8 @@ class TransientDesignerParams:
     sustain_pct: float | None = None
     mix: float = 1.0
     output_gain_db: float = 0.0
+    # Older snapshots activate their filter whenever a cutoff is set.
+    sc_filter_enabled: bool | None = None
 
     @staticmethod
     def default() -> "TransientDesignerParams":
@@ -4477,6 +4493,8 @@ class TransientDesignerParams:
             data["sustain_pct"] = self.sustain_pct
         data["mix"] = self.mix
         data["output_gain_db"] = self.output_gain_db
+        if self.sc_filter_enabled is not None:
+            data["sc_filter_enabled"] = self.sc_filter_enabled
         return data
 
     @staticmethod
@@ -4485,6 +4503,7 @@ class TransientDesignerParams:
             value = data.get(key)
             return None if value is None else float(value)
 
+        filter_enabled = data.get("sc_filter_enabled")
         return TransientDesignerParams(
             attack_db=_params_f("attack_db", data, 6.0),
             sustain_db=_params_f("sustain_db", data, 0.0),
@@ -4495,6 +4514,7 @@ class TransientDesignerParams:
             sustain_pct=_pct("sustain_pct"),
             mix=_params_f("mix", data, 1.0),
             output_gain_db=_params_f("output_gain_db", data, 0.0),
+            sc_filter_enabled=filter_enabled if isinstance(filter_enabled, bool) else None,
         )
 
 
@@ -5732,6 +5752,25 @@ def automation_param_kind(param_key: str) -> str:
     return "continuous"
 
 
+def set_automated_effect_param(
+    effect_type: str, params: dict[str, Any], parameter: str, value: Any,
+) -> None:
+    """Set a sampled value without changing the stored band dictionaries."""
+    params[parameter] = value
+    if effect_type != "dynamic_eq":
+        return
+    band_key = DYNAMIC_EQ_SINGLE_BAND_FIELDS.get(parameter)
+    if band_key is None:
+        return
+    bands = params.get("bands")
+    if not isinstance(bands, (list, tuple)) or not bands:
+        return
+    first = bands[0]
+    if not isinstance(first, dict) or first.get("legacy_automation") is not True:
+        return
+    params["bands"] = [first | {band_key: value}, *bands[1:]]
+
+
 def validate_effect_params(effect_type: str, params: dict) -> tuple:
     """H12：参数统一校验（预览/导出/保存前共用）。
 
@@ -5813,7 +5852,7 @@ def build_track_fx_sampler(track: Any) -> Optional[Any]:
                     if automation_param_kind(pkey) == "never":
                         continue
                     try:
-                        p[pkey] = kt.get_value(int(frame), p[pkey])
+                        set_automated_effect_param(etype, p, pkey, kt.get_value(int(frame), p[pkey]))
                     except (TypeError, ValueError, KeyError):
                         pass
             entries.append((etype, p, enabled, iid, av,

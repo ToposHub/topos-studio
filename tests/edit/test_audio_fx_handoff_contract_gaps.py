@@ -73,6 +73,27 @@ def test_deesser_new_controls_reject_nonfinite_values() -> None:
     assert params["output_gain_db"] == 0.0
 
 
+def test_deesser_preview_removal_restores_legacy_latency_on_the_same_instance() -> None:
+    chain = EffectChain(48000)
+    legacy = DeEsserParams.default().to_dict()
+    chain.set_params([("de_esser", legacy | {"lookahead_ms": 5.0}, True, "ess", ALGORITHM_VERSION)])
+    assert chain.latency_samples() == 240
+    chain.set_params([("de_esser", legacy, True, "ess", ALGORITHM_VERSION)])
+    assert chain.latency_samples() == 0
+
+
+def test_dynamic_eq_preview_removal_restores_internal_detector_and_single_band() -> None:
+    chain = EffectChain(48000)
+    legacy = DynamicEqParams.default().to_dict()
+    params = legacy | {"sidechain_source_id": "dialogue", "bands": [{"frequency_hz": 1000.0}]}
+    chain.set_params([("dynamic_eq", params, True, "eq", ALGORITHM_VERSION)])
+    assert chain.sidechain_map({"dialogue": np.zeros((2, 512), dtype=np.float32)})
+    chain.set_params([("dynamic_eq", legacy, True, "eq", ALGORITHM_VERSION)])
+    assert not chain.sidechain_map({"dialogue": np.zeros((2, 512), dtype=np.float32)})
+    chain.process(np.ones((2, 512), dtype=np.float32))
+    assert chain.tap_levels()["eq"]["analysis"]["bands"] == []
+
+
 def test_dynamic_eq_band_identity_static_mode_and_future_fields_survive() -> None:
     raw = {
         "future_top": {"value": 1},

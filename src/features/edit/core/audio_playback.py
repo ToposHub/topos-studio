@@ -2008,6 +2008,7 @@ class AudioMixer:
         # CW-A1: 频谱仪按需计算——仅当存在 EQ 对话框打开时才维护每轨
         # post-chain 频谱窗并在表计节流点做 FFT（仿 LUFS 门控）。
         self._spectrum_metering_enabled: bool = False
+        self._spectrum_targets: dict[str, frozenset[str]] | None = None
         self._spectrum_windows: Dict[str, np.ndarray] = {}
         self._spectrum_write: Dict[str, int] = {}
         # CW-A1: 外部侧链 —— 上一混音块的 Bus 检源输出 tap（Bus 在阶段 2
@@ -2121,12 +2122,41 @@ class AudioMixer:
     def set_spectrum_metering(self, enabled: bool) -> None:
         """开/关频谱仪计算（EQ 对话框打开状态驱动，线程安全）。"""
         with QMutexLocker(self._mutex):
+            self._spectrum_targets = None
             self._spectrum_metering_enabled = bool(enabled)
             for chain in (*self._effect_chains.values(), *self._clip_effect_chains.values()):
                 chain.set_spectrum_metering(enabled)
             if not enabled:
                 self._spectrum_windows.clear()
                 self._spectrum_write.clear()
+
+    def set_spectrum_targets(self, targets: dict[str, frozenset[str]]) -> None:
+        """Subscribe by channel and instance. An empty ID requests the channel spectrum."""
+        requested = {owner: frozenset(ids) for owner, ids in targets.items() if ids}
+        with QMutexLocker(self._mutex):
+            previous = self._spectrum_targets
+            if requested == previous:
+                return
+            self._spectrum_targets = requested
+            self._spectrum_metering_enabled = bool(requested)
+            if previous is None:
+                for chain in self._clip_effect_chains.values():
+                    chain.set_spectrum_metering(False)
+            owners = self._effect_chains if previous is None else previous.keys() | requested.keys()
+            for owner in owners:
+                chain = self._effect_chains.get(owner)
+                if chain is not None and (previous is None or previous.get(owner) != requested.get(owner)):
+                    self._configure_chain_spectrum(owner, chain)
+            for owner in tuple(self._spectrum_windows):
+                if "" not in requested.get(owner, ()):
+                    self._spectrum_windows.pop(owner)
+                    self._spectrum_write.pop(owner, None)
+
+    def _configure_chain_spectrum(self, owner: str, chain: EffectChain) -> None:
+        if self._spectrum_targets is None:
+            chain.set_spectrum_metering(self._spectrum_metering_enabled)
+        else:
+            chain.set_spectrum_instances(self._spectrum_targets.get(owner, frozenset()) - {""})
 
     # 频谱窗长度（样本）与输出 bin 数
     SPECTRUM_WINDOW_SAMPLES = 2048
@@ -2146,7 +2176,7 @@ class AudioMixer:
             （20Hz..20kHz，峰值归一 dB，满量程 0dB 附近、地板 -120dB）。
         """
         result: Dict[str, tuple] = {}
-        if not self._spectrum_metering_enabled:
+        if not self._spectrum_metering_enabled or not self._spectrum_windows:
             return result
         n = self.SPECTRUM_WINDOW_SAMPLES
         freqs = self._spectrum_bin_freqs()
@@ -2191,6 +2221,8 @@ class AudioMixer:
         MX-09: 缓存立体声（L/R 两行），collect_spectra 做功率合成；
         write 指针记录环窗写入位置供时间序重排。
         """
+        if self._spectrum_targets is not None and "" not in self._spectrum_targets.get(track_id, ()):
+            return
         n = self.SPECTRUM_WINDOW_SAMPLES
         ch = track_output.shape[0]
         if ch >= 2:
@@ -2983,6 +3015,7 @@ class AudioMixer:
         with QMutexLocker(self._mutex):
             if track_id not in self._effect_chains:
                 self._effect_chains[track_id] = EffectChain(self._sample_rate, realtime_resources=True)
+                self._configure_chain_spectrum(track_id, self._effect_chains[track_id])
             self._effect_chains[track_id].set_params(entries, sample_rate=self._sample_rate)
             # H09：Freeze 捕获资产（注册表存在且实例引用资产 → 装载）
             if chain_params is not None and self._freeze_registry:
@@ -3035,6 +3068,7 @@ class AudioMixer:
             if chain is None:
                 chain = EffectChain(self._sample_rate, realtime_resources=True)
                 self._effect_chains[MASTER_BUS_KEY] = chain
+                self._configure_chain_spectrum(MASTER_BUS_KEY, chain)
             chain.set_params(entries, sample_rate=self._sample_rate)
             # H09：Master 链的 Freeze 资产装载（与轨级同语义）
             if chain_params is not None and self._freeze_registry:
@@ -3092,6 +3126,9 @@ class AudioMixer:
                 return
             if clip_id not in self._clip_effect_chains:
                 self._clip_effect_chains[clip_id] = EffectChain(self._sample_rate, realtime_resources=True)
+                self._clip_effect_chains[clip_id].set_spectrum_metering(
+                    self._spectrum_targets is None and self._spectrum_metering_enabled,
+                )
             self._clip_effect_chains[clip_id].set_params(entries, sample_rate=self._sample_rate)
             # P0 · Clip FX PDC：记录链延迟并重算轨级补偿量。
             try:
@@ -3853,7 +3890,6 @@ class AudioMixer:
                         if raw_map:
                             cur_n = samples.shape[-1]
                             sc_map = {iid: buf[:, :cur_n] for iid, buf in raw_map.items()}
-                    track_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                     samples = track_chain.process(samples, sidechain_by_id=sc_map)
 
                 if listening and listen_stage == "post":
@@ -4099,7 +4135,7 @@ class AudioMixer:
                 # CW-A1: Bus 空间声像器（与普通轨同级，balance 之后叠加矩阵）
                 bus_panner = self._track_panners.get(bus_id)
                 if bus_panner is not None and bus_panner.is_active:
-                    bus_samples = bus_panner.process(bus_samples, bus_pan)
+                    bus_samples = bus_panner.process(bus_samples, bus_pan, pan_ramp=bus_pan_ramp)
                 # EQ
                 bus_eq = self._eq_filters.get(bus_id)
                 if bus_eq is not None and bus_eq.is_active:
@@ -4130,7 +4166,6 @@ class AudioMixer:
                             cur_n = bus_samples.shape[-1]
                             bus_sc_map = {iid: buf[:, :cur_n]
                                           for iid, buf in raw_map.items()}
-                    bus_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                     bus_samples = bus_chain.process(
                         bus_samples, sidechain_by_id=bus_sc_map)
                 if listen_bus and listen_stage == "post":
@@ -4318,7 +4353,6 @@ class AudioMixer:
                         cur_n = output.shape[-1]
                         master_sc_map = {iid: buf[:, :cur_n]
                                          for iid, buf in raw_map.items()}
-                master_chain.set_spectrum_metering(self._spectrum_metering_enabled)
                 output = master_chain.process(
                     output, sidechain_by_id=master_sc_map)
 
@@ -6591,6 +6625,10 @@ class AudioPlaybackManager(QObject):
     def set_spectrum_metering(self, enabled: bool) -> None:
         """开/关频谱仪计算（EQ 对话框打开状态驱动，CW-A1）。转发到 AudioMixer。"""
         self._mixer.set_spectrum_metering(enabled)
+
+    def set_spectrum_targets(self, targets: dict[str, frozenset[str]]) -> None:
+        """Forward the visible Mixer spectrum consumers to the playback engine."""
+        self._mixer.set_spectrum_targets(targets)
 
     def set_clip_effects(
         self,

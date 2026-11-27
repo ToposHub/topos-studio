@@ -24,7 +24,7 @@ from typing import Optional
 
 import numpy as np
 
-from src.features.edit.core.audio_dsp import AudioEffect
+from src.features.edit.core.audio_dsp import AudioEffect, _smooth_attack_release
 
 try:  # pragma: no cover - 环境探测
     from scipy.ndimage import minimum_filter1d
@@ -79,6 +79,20 @@ def _sliding_min(values: np.ndarray, window: int) -> np.ndarray:
         values, size=window, origin=origin, mode="constant", cval=np.inf)
 
 
+def _oversampled_peaks(
+    samples: np.ndarray, context: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    channels, count = samples.shape
+    if context is None or context.shape != (channels, _FIR_HISTORY):
+        context = np.zeros((channels, _FIR_HISTORY), np.float32)
+    stream = np.concatenate((context, samples), axis=-1)
+    offset = _FIR_HISTORY * OVERSAMPLE
+    oversampled = upfirdn(_prototype_taps(), stream, up=OVERSAMPLE, axis=-1)
+    window = oversampled[:, offset:offset + count * OVERSAMPLE]
+    peaks = np.abs(window).reshape(channels, count, OVERSAMPLE).max(axis=-1)
+    return peaks, stream[:, -_FIR_HISTORY:].astype(np.float32, copy=True)
+
+
 class TruePeakLimiterEffect(AudioEffect):
     """True Peak 限幅器（4× 过采样 + lookahead + 平滑 release）。"""
 
@@ -92,12 +106,14 @@ class TruePeakLimiterEffect(AudioEffect):
         # 过采样 FIR 跨块上下文（overlap-save：块前接 2D 历史；分块与
         # 整段的过采样峰值逐位一致）。
         self._fir_context: Optional[np.ndarray] = None  # (ch, 2D)
+        self._output_fir_context: Optional[np.ndarray] = None
         # 峰值序列 R 的滚动尾（min 窗前缀；R[k] = 输入 k 的真实峰，
         # 检测滞后 D 完整产出）与目标尾（跨块连续；首块为 1.0）。
         self._raw_tail: Optional[np.ndarray] = None
         self._last_true_peak_dbtp = -120.0
         self._last_reduction_db = 0.0
         self._last_output_peak_dbfs = -120.0
+        self._last_output_true_peak_dbtp = -120.0
 
     # ── 参数与状态 ────────────────────────────────────────────────
     def set_params(self, params: object,
@@ -116,8 +132,12 @@ class TruePeakLimiterEffect(AudioEffect):
         self._gain_states = None
         self._delay_line = None
         self._fir_context = None
+        self._output_fir_context = None
         self._raw_tail = None
         self._last_reduction_db = 0.0
+        self._last_true_peak_dbtp = -120.0
+        self._last_output_peak_dbfs = -120.0
+        self._last_output_true_peak_dbtp = -120.0
 
     @property
     def is_active(self) -> bool:
@@ -141,18 +161,11 @@ class TruePeakLimiterEffect(AudioEffect):
         return int(lookahead) + _FIR_GROUP_DELAY
 
     # ── 处理 ──────────────────────────────────────────────────────
-    def _target_gain(self, peak: float) -> float:
-        ceiling = float(self._params.get("ceiling_dbtp", -1.0))
-        ceiling_linear = 10.0 ** (ceiling / 20.0)
-        if peak <= ceiling_linear:
-            return 1.0
-        return ceiling_linear / peak
-
     def process(self, samples: np.ndarray) -> np.ndarray:
         if not self.is_active or samples is None or samples.ndim != 2:
             return samples
         n = samples.shape[-1]
-        if n == 0:
+        if n == 0 or samples.shape[0] == 0:
             return samples
         lookahead = int(self._params.get("lookahead_ms", 5.0)
                         * self._sample_rate / 1000.0)
@@ -164,64 +177,26 @@ class TruePeakLimiterEffect(AudioEffect):
 
         # 过采样测 True Peak（固定原型 + 2D overlap-save 历史；逐声道
         # 一致相位——峰值序列 R[k] = 输入 k 的真峰，滞后 D 完整产出）。
-        hist = self._fir_context
-        if hist is None or hist.shape != (channels, _FIR_HISTORY):
-            hist = np.zeros((channels, _FIR_HISTORY), dtype=np.float32)
-        taps = _prototype_taps()
-        # 逐声道峰值桶；链接取各声道峰值上界（max）——反相不抵消。
-        per_channel = np.zeros((channels, n), dtype=np.float64)
-        offset = _FIR_HISTORY * OVERSAMPLE  # 桶 b 从流索引 b-D 开始（b≥2D）
-        for ch in range(channels):
-            stream = np.concatenate([hist[ch], samples[ch]])
-            up_full = upfirdn(taps, stream, up=OVERSAMPLE)
-            up = up_full[offset:offset + n * OVERSAMPLE]
-            padded = np.pad(np.abs(up), (0, OVERSAMPLE))
-            per_channel[ch] = padded[:n * OVERSAMPLE].reshape(
-                n, OVERSAMPLE).max(axis=1)
-        self._fir_context = np.ascontiguousarray(
-            np.concatenate([hist, samples], axis=1)[:, -_FIR_HISTORY:],
-            dtype=np.float32)
-        peaks = per_channel.max(axis=0) if linked else per_channel
+        per_channel, self._fir_context = _oversampled_peaks(samples, self._fir_context)
+        peaks = per_channel.max(axis=0, keepdims=True) if linked else per_channel
 
         # 原始目标增益（前视 min 窗只作用于应用值，不回写检测值）。
-        if linked:
-            raw_target = np.array(
-                [self._target_gain(float(p)) for p in peaks],
-                dtype=np.float64)
-        else:
-            raw_target = np.empty((channels, n), dtype=np.float64)
-            for ch in range(channels):
-                raw_target[ch] = [self._target_gain(float(p))
-                                  for p in per_channel[ch]]
+        ceiling = 10.0 ** (float(self._params.get("ceiling_dbtp", -1.0)) / 20.0)
+        raw_target = ceiling / np.maximum(peaks, ceiling)
 
+        applied = raw_target
         if lookahead > 0:
             # 前视：应用值 = 峰值序列 R 上的后向最小窗 [t-L, t]——覆盖
             # "播放样本（t−L−D）+ 后续 L 样本"；跨块接 R 的**原始**尾
             # （首块为 1.0；不存平滑后值，避免逐块复合加深衰减）。
-            rows = (1 if linked else channels)
-            if self._raw_tail is None or self._raw_tail.shape != (
-                    rows, lookahead):
-                self._raw_tail = np.ones((rows, lookahead), dtype=np.float64)
-            if linked:
-                stream = np.concatenate([self._raw_tail[0], raw_target])
-                applied = _sliding_min(
-                    stream, lookahead + 1)[lookahead:].reshape(1, n)
-                self._raw_tail[0] = raw_target[-lookahead:] if n >= lookahead \
-                    else np.concatenate(
-                        [self._raw_tail[0, n:], raw_target])
-            else:
-                applied = np.empty((channels, n), dtype=np.float64)
-                for ch in range(channels):
-                    stream = np.concatenate(
-                        [self._raw_tail[ch], raw_target[ch]])
-                    applied[ch] = _sliding_min(
-                        stream, lookahead + 1)[lookahead:]
-                    self._raw_tail[ch] = (
-                        raw_target[ch, -lookahead:] if n >= lookahead
-                        else np.concatenate(
-                            [self._raw_tail[ch, n:], raw_target[ch]]))
+            shape = (peaks.shape[0], lookahead)
+            if self._raw_tail is None or self._raw_tail.shape != shape:
+                self._raw_tail = np.ones(shape, dtype=np.float64)
+            stream = np.concatenate((self._raw_tail, raw_target), axis=-1)
+            applied = _sliding_min(stream, lookahead + 1)[:, lookahead:]
+            self._raw_tail = stream[:, -lookahead:].copy()
         else:
-            applied = (raw_target.reshape(1, n) if linked else raw_target)
+            self._raw_tail = None
 
         # 输出延迟线对齐 lookahead + 检测群延迟 D（块间连续）。
         total_delay = lookahead + _FIR_GROUP_DELAY
@@ -247,18 +222,11 @@ class TruePeakLimiterEffect(AudioEffect):
                 self._gain_states = np.full(
                     channels, self._gain_state, dtype=np.float64)
             states = self._gain_states.copy()
-        gains = np.empty((channels, n), dtype=np.float32)
-        for idx in range(n):
-            for ch in range(channels):
-                row = 0 if linked else ch
-                g = float(applied[row, idx]) if linked else float(
-                    applied[ch, idx])
-                if g < states[row]:
-                    states[row] = g  # attack：即时下降
-                else:
-                    states[row] = (release_coeff * states[row]
-                                   + (1 - release_coeff) * g)
-                gains[ch, idx] = states[row]
+        gains = np.empty((n_rows, n), dtype=np.float32)
+        for row, target in enumerate(applied):
+            envelope, end = _smooth_attack_release(-target, -states[row], 0.0, release_coeff)
+            gains[row] = -envelope
+            states[row] = -end
         if linked:
             self._gain_state = float(states[0])
             self._gain_states = None
@@ -275,6 +243,8 @@ class TruePeakLimiterEffect(AudioEffect):
         result = np.ascontiguousarray(delayed * gains, dtype=np.float32)
         out_peak = float(np.max(np.abs(result))) if result.size else 0.0
         self._last_output_peak_dbfs = 20.0 * np.log10(max(out_peak, 1e-9))
+        output_peaks, self._output_fir_context = _oversampled_peaks(result, self._output_fir_context)
+        self._last_output_true_peak_dbtp = 20.0 * np.log10(max(float(output_peaks.max()), 1e-9))
         return result
 
     # ── 遥测（dBTP 独立复核路径共用读数） ──────────────────────────
@@ -282,6 +252,7 @@ class TruePeakLimiterEffect(AudioEffect):
         return {
             "true_peak_dbtp": round(self._last_true_peak_dbtp, 3),
             "output_peak_dbfs": round(self._last_output_peak_dbfs, 3),
+            "output_true_peak_dbtp": round(self._last_output_true_peak_dbtp, 3),
             "gain_reduction_db": round(-self._last_reduction_db, 3),
             "ceiling_dbtp": float(self._params.get("ceiling_dbtp", -1.0)),
             "latency_samples": self.latency_samples(),

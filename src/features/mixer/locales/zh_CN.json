@@ -199,7 +199,13 @@
     "effect_panel": {
       "mapped_parameters": "部分设计功能待接入音频处理。",
       "ui_only": "可调整面板参数。音频处理和实时表计待接入。",
-      "dynamic_eq_scope": "现有动态均衡处理对应第 4 个频段的 Bell。",
+      "dynamic_eq_enable_band": "启用频段 {band}（{frequency} Hz）",
+      "dynamic_eq_add_band": "添加频段",
+      "dynamic_eq_graph_hint": "双击图中空白处添加频段。",
+      "sidechain_internal": "内部检源",
+      "sidechain_source": "侧链检源",
+      "reverb_prediction": "预测",
+      "dynamic_eq_disable_band": "停用频段",
       "multiband_comp_scope": "现有处理器使用 3 个频段和 2 个分频点。",
       "name": {
         "declick_dehum": "去爆音 / 去嗡声",
@@ -212,7 +218,14 @@
       "ok": "确定",
       "cancel": "取消",
       "apply": "应用",
-      "current_settings": "当前参数"
+      "current_settings": "当前参数",
+      "imager_summary": "中间、侧边和单声道监听仅用于播放试听。",
+      "panner_summary": "处理前置立体声声道 · 扬声器布局预览",
+      "panner_scene_format": "预览扬声器布局。混音输出布局由项目设置决定。",
+      "panner_scene_view": "切换 2D 和 3D 预览。",
+      "panner_front_back": "开启自动扩散后，前后位置会影响立体声宽度。",
+      "panner_scene_elevation": "调整 3D 预览中的高度。",
+      "panner_boom_routing": "将低通信号送入声像矩阵前（Pre）或矩阵后（Post），也可以只听低通信号（Only）。"
     },
     "console": {
       "search": "查找通道",

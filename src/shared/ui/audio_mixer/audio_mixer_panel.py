@@ -45,6 +45,7 @@ class AudioMixerPanel(QWidget):
     track_panner_preview = pyqtSignal(str, object)    # 实时听感
     track_panner_committed = pyqtSignal(str, object)  # 命令栈
     spectrum_metering_changed = pyqtSignal(bool)
+    spectrum_targets_changed = pyqtSignal(object)
     track_mute_toggled = pyqtSignal(str, bool)
     track_solo_toggled = pyqtSignal(str, bool)
     track_volume_changed = pyqtSignal(str, float)      # dB（松手时最终提交）
@@ -97,6 +98,7 @@ class AudioMixerPanel(QWidget):
         # 排队遥测载荷直接丢弃，旧代事件不得回亮表计/频谱）
         self._telemetry_generation: int = 0
         self._engine_sample_rate: float = 48000.0
+        self._spectrum_targets: dict[str, frozenset[str]] = {}
 
         self._init_ui()
 
@@ -963,22 +965,28 @@ class AudioMixerPanel(QWidget):
         return bool(getattr(self, "_lufs_metering_active", False))
 
     def _recompute_spectrum_metering(self) -> None:
-        """Subscribe to playback FFT only while a strip has a visible consumer."""
-        active = False
-        mixers = list(self._track_mixers.values())
+        """Publish the visible effect analyzers and preserve the legacy Boolean signal."""
+        targets: dict[str, frozenset[str]] = {}
+        mixers = list(self._track_mixers.items())
         if self._master_mixer is not None:
-            mixers.append(self._master_mixer)  # MX-03: Master EQ 对话框纳入汇总
-        for mixer in mixers:
+            mixers.append((MASTER_TRACK_ID, self._master_mixer))
+        for owner, mixer in mixers:
             try:
-                has_dlg = mixer.has_spectrum_consumers()
-            except (AttributeError, RuntimeError):
-                has_dlg = False
-            if has_dlg:
-                active = True
-                break
+                if ids := mixer.spectrum_targets():
+                    targets[owner] = ids
+            except RuntimeError:
+                continue
+        if targets != self._spectrum_targets:
+            self._spectrum_targets = targets
+            self.spectrum_targets_changed.emit(dict(targets))
+        active = bool(targets)
         if active != getattr(self, "_spectrum_metering_active", False):
             self._spectrum_metering_active = active
             self.spectrum_metering_changed.emit(active)
+
+    def spectrum_targets(self) -> dict[str, frozenset[str]]:
+        """Return the current playback spectrum subscriptions."""
+        return dict(self._spectrum_targets)
 
     def is_spectrum_metering_active(self) -> bool:
         """当前是否有 EQ 对话框打开（供初始化时同步开关）。"""
@@ -987,7 +995,9 @@ class AudioMixerPanel(QWidget):
     def set_sidechain_sources_all(self, sources: list) -> None:
         """CW-A1: 把侧链源列表 [(track_id, name), ...] 下发到所有 strip 的
         动态对话框（压缩器外部检源选择用）。轨列表变化时由宿主调用。"""
-        for mixer in self._track_mixers.values():
+        for mixer in (*self._track_mixers.values(), self._master_mixer):
+            if mixer is None:
+                continue
             try:
                 mixer.set_sidechain_sources(sources)
             except (AttributeError, RuntimeError):

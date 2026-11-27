@@ -89,6 +89,26 @@ class TestPartitionedConvolver:
         np.testing.assert_allclose(
             conv.process(x), x * np.array([[0.5], [0.25]]), atol=1e-7)
 
+    @pytest.mark.parametrize("channels", [1, 2, 3])
+    def test_long_ir_matches_direct_reference_across_partition_and_layout_boundaries(
+            self, channels: int) -> None:
+        from scipy.signal import fftconvolve
+
+        rng = np.random.default_rng(31)
+        dry = rng.uniform(-0.2, 0.2, (channels, 53511)).astype(np.float32)
+        kernel = rng.uniform(-0.01, 0.01, (2, 51500)).astype(np.float32)
+        conv = PartitionedConvolver(kernel)
+        # The 7- and 513-sample blocks change the near FFT alignment repeatedly.
+        spans = np.resize([512, 7, 1024, 513, 2048], dry.shape[-1])
+        edges = np.concatenate(([0], np.cumsum(spans)))
+        pieces = [conv.process(dry[:, start:min(end, dry.shape[-1])])
+                  for start, end in zip(edges[:-1], edges[1:]) if start < dry.shape[-1]]
+        stitched = np.concatenate(pieces, axis=-1)
+        mapping = [0, 1] if channels == 2 else ([0] if channels == 1 else [0, 0, 1])
+        for i, ir_channel in enumerate(mapping):
+            expected = fftconvolve(dry[i].astype(np.float64), kernel[ir_channel])[:dry.shape[-1]]
+            np.testing.assert_allclose(stitched[i], expected, atol=6e-7, rtol=0)
+
 
 class TestEffectMatrix:
     def test_mono_ir_applies_to_stereo(self) -> None:
@@ -141,6 +161,19 @@ class TestEffectMatrix:
         x = np.random.default_rng(1).standard_normal(
             (2, 512)).astype(np.float32)
         np.testing.assert_array_equal(fx.process(x.copy()), x)
+
+    def test_mono_uses_matrix_then_folds_stereo_back_to_the_host_layout(self) -> None:
+        fx = ConvolutionReverbEffect(RATE)
+        fx.set_params({"wet": 1.0, "dry": 0.0})
+        matrix = {key: np.eye(1, 16, idx, dtype=np.float32)
+                  for idx, key in enumerate(("LL", "LR", "RL", "RR"))}
+        fx.set_ir(matrix["LL"], true_stereo=True, matrix=matrix)
+        x = np.zeros((1, 32), dtype=np.float32)
+        x[:, 0] = 1.0
+        result = fx.process(x)
+        assert result.shape == x.shape
+        np.testing.assert_allclose(result[0, :4], 0.5, rtol=0, atol=1e-7)
+        np.testing.assert_allclose(result[0, 4:], 0.0, rtol=0, atol=1e-7)
 
 
 class TestIrLoading:

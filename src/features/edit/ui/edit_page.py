@@ -902,9 +902,12 @@ class EditPage(QWidget):
                 self._audio_manager.set_lufs_metering(
                     mixer_panel.is_lufs_metering_active()
                 )
-            # CW-A1: 频谱仪按需计算——EQ 对话框打开状态驱动（无对话框时
-            # 播放线程不做 FFT）。先同步当前状态再监听变化。
-            if hasattr(mixer_panel, "spectrum_metering_changed"):
+            # Subscribe only to the visible analyzers when both endpoints support it.
+            set_targets = getattr(self._audio_manager, "set_spectrum_targets", None)
+            if callable(set_targets) and hasattr(mixer_panel, "spectrum_targets_changed"):
+                mixer_panel.spectrum_targets_changed.connect(set_targets)
+                set_targets(mixer_panel.spectrum_targets())
+            elif hasattr(mixer_panel, "spectrum_metering_changed"):
                 set_spectrum = getattr(self._audio_manager, "set_spectrum_metering", None)
                 if callable(set_spectrum):
                     mixer_panel.spectrum_metering_changed.connect(set_spectrum)
