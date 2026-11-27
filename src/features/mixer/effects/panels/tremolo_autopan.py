@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QPainterPath, QFont
 )
 
+from src.shared.i18n.i18n import I18N
 from src.shared.ui.widgets.chevron_combo import ChevronComboBox
 
 # =====================================================================
@@ -56,16 +57,16 @@ WAVEFORMS = ["Sine", "Triangle", "Square", "Saw Up", "Saw Down", "Random"]
 def default_tremolo_autopan_state() -> dict:
     return {
         "enabled": True,
-        "mode": "Auto-Pan",       # "Tremolo" | "Auto-Pan" | "Dual"
+        "mode": "Tremolo",        # "Tremolo" | "Auto-Pan" | "Dual"
         "sync": False,            # False = Hz 自由速率 | True = BPM 节拍同步
-        "bpm": 120.0,             # 40.0 ~ 240.0 BPM
-        "rate_hz": 2.40,          # 0.05 ~ 30.0 Hz
-        "sync_div": "1/8",        # SYNC_DIVISIONS key
+        "bpm": 120.0,             # 20.0 ~ 300.0 BPM
+        "rate_hz": 4.0,           # 0.01 ~ 50.0 Hz
+        "sync_div": "1/4",        # SYNC_DIVISIONS key
         "waveform": "Sine",       # "Sine" | "Triangle" | "Square" | "Saw Up" | "Saw Down" | "Random"
-        "shape": 50.0,            # 0.0 ~ 100.0 % (50% = 标准对称，偏左/右改变占空比/斜率)
-        "smooth": 15.0,           # 0.0 ~ 100.0 % (方波/锯齿边沿抗锯齿平滑度)
-        "depth": 80.0,            # 0.0 ~ 100.0 % (调制深度)
-        "phase_offset": 180.0,    # 0.0 ~ 360.0 deg (立体声左右声道 LFO 相位差)
+        "shape": 50.0,            # Square duty cycle (%).
+        "smooth": 0.0,            # LFO smoothing (ms).
+        "depth": 70.0,            # 0.0 ~ 100.0 % (调制深度)
+        "phase_offset": 0.0,      # 0.0 ~ 360.0 deg (立体声左右声道 LFO 相位差)
         "pan_center": 0.0,        # -100.0 (100L) ~ +100.0 (100R) 声像中心偏移
         "pan_width": 100.0,       # 0.0 ~ 100.0 % 摆动幅度宽度
         "output_gain": 0.0,       # -12.0 ~ +12.0 dB 补偿输出增益
@@ -180,6 +181,21 @@ def evaluate_lfo_unipolar(phase_0_1: float, waveform: str, shape: float = 50.0, 
     return max(0.0, min(1.0, val))
 
 
+def _nominal_lfo(phase: float, waveform: str, duty: float) -> float:
+    fraction = phase % 1.0
+    if waveform == "Triangle":
+        return 1.0 - abs(2.0 * fraction - 1.0)
+    if waveform == "Square":
+        return float(fraction < duty)
+    if waveform == "Saw Up":
+        return fraction
+    if waveform == "Saw Down":
+        return 1.0 - fraction
+    if waveform == "Random":
+        return 0.5
+    return 0.5 + 0.5 * math.sin(math.tau * fraction)
+
+
 # =====================================================================
 # 3. 基础控件：现代发光电源开关（复用 Dynamics-UI 风格）
 # =====================================================================
@@ -277,13 +293,14 @@ class EditableValuePill(QWidget):
             self.update()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        if self._active and event.button() == Qt.MouseButton.LeftButton:
             clean = (
                 self._text.replace("Hz", "")
                 .replace("dB", "")
                 .replace("%", "")
                 .replace("°", "")
                 .replace("BPM", "")
+                .replace("ms", "")
                 .strip()
             )
             self._editor.setText(clean)
@@ -552,8 +569,13 @@ class KnobParameterCell(QWidget):
         self.pill.setText(self._formatter(val))
         self.valueChanged.emit(val)
 
-    def _on_pill_edited(self, text: str):
-        parsed = self._parser(text, self._val)
+    def _on_pill_edited(self, text: str) -> None:
+        try:
+            parsed = self._parser(text, self._val)
+        except (TypeError, ValueError, OverflowError):
+            return
+        if not math.isfinite(parsed):
+            return
         clamped = max(self._min, min(self._max, parsed))
         self.setValue(clamped)
         self.valueChanged.emit(clamped)
@@ -572,9 +594,12 @@ class StereoModulationMeter(QWidget):
         self._mode = "Auto-Pan"
         self._active = True
 
-    def setModulationValues(self, l_val: float, r_val: float, mode: str, active: bool):
-        self._l_val = max(0.0, min(1.0, l_val))
-        self._r_val = max(0.0, min(1.0, r_val))
+    def setModulationValues(self, l_val: float, r_val: float, mode: str, active: bool) -> None:
+        left, right = max(0.0, min(1.0, l_val)), max(0.0, min(1.0, r_val))
+        if (left, right, mode, active) == (self._l_val, self._r_val, self._mode, self._active):
+            return
+        self._l_val = left
+        self._r_val = right
         self._mode = mode
         self._active = active
         self.update()
@@ -645,17 +670,86 @@ class LfoModulationVisualizer(QWidget):
 
         self._state = default_tremolo_autopan_state()
         self._phase = 0.0  # [0.0, 1.0) 当前 LFO 播放相位
+        self._processor_mode = False
+        self._live_gains: tuple[float, float] | None = None
+        self._cached_scope: tuple[QRectF, QPainterPath, QPainterPath, QPainterPath] | None = None
         self._dragging_mode = ""  # "depth" | "phase" | ""
         self._drag_start = QPointF()
         self._drag_start_val = 0.0
 
     def setState(self, state: dict):
-        self._state = copy.deepcopy(state)
-        self.update()
+        if self._state != state:
+            self._state = copy.deepcopy(state)
+            self._cached_scope = None
+            self.update()
 
     def setPhase(self, phase_0_1: float):
         self._phase = phase_0_1 % 1.0
         self.update()
+
+    def set_live_monitoring(self, phase: float, gains: tuple[float, float] | None) -> None:
+        if not self._processor_mode:
+            self._processor_mode = True
+            self._cached_scope = None
+        if self._live_gains != gains or self._phase != phase:
+            self._live_gains = gains
+            self.setPhase(phase)
+
+    def _scope_paths(self, scope: QRectF) -> tuple[QPainterPath, QPainterPath, QPainterPath]:
+        if self._cached_scope is not None and self._cached_scope[0] == scope:
+            return self._cached_scope[1:]
+        state = self._state
+        enabled = state["enabled"]
+        mode = state["mode"]
+        depth = state["depth"] / 100.0 if enabled else 0.0
+        right_shift = state["phase_offset"] / 360.0
+        visual_cycles = 1.0 if self._processor_mode else 2.0
+        if self._processor_mode and mode != "Tremolo":
+            right_shift -= 0.5
+        left_path, right_path, fill = QPainterPath(), QPainterPath(), QPainterPath()
+        margin = 26.0
+        baseline = scope.bottom() - margin
+        height = max(40.0, scope.height() - 2.0 * margin)
+        center, spread = state["pan_center"] / 100.0, state["pan_width"] / 100.0
+        waveform = state["waveform"]
+        duty = max(1.0, min(99.0, state["shape"])) / 100.0
+        for index in range(241):
+            position = index / 240.0
+            phase = position * visual_cycles
+            if self._processor_mode:
+                left = _nominal_lfo(phase, waveform, duty)
+                right = _nominal_lfo(phase + right_shift, waveform, duty)
+                level_left = 1.0 - depth * (1.0 - left)
+                level_right = 1.0 - depth * (1.0 - right)
+                if mode != "Tremolo" and enabled:
+                    pan_l = max(-1.0, min(1.0, center + depth * spread * (2.0 * left - 1.0)))
+                    pan_r = max(-1.0, min(1.0, center + depth * spread * (2.0 * right - 1.0)))
+                    left, right = math.sqrt(0.5 * (1.0 - pan_l)), math.sqrt(0.5 * (1.0 + pan_r))
+                    if mode == "Dual":
+                        left, right = left * level_left, right * level_left
+                else:
+                    left, right = level_left, level_right
+            else:
+                left = evaluate_lfo_unipolar(phase, waveform, state["shape"], state["smooth"])
+                right = evaluate_lfo_unipolar(phase + right_shift, waveform, state["shape"], state["smooth"])
+                if mode == "Tremolo":
+                    left, right = 1.0 - depth * (1.0 - left), 1.0 - depth * (1.0 - right)
+                else:
+                    left, right = 0.5 + (left - 0.5) * depth, 0.5 + (right - 0.5) * depth
+            x = scope.left() + position * scope.width()
+            y_left, y_right = baseline - left * height, baseline - right * height
+            if index == 0:
+                left_path.moveTo(x, y_left)
+                right_path.moveTo(x, y_right)
+                fill.moveTo(x, baseline)
+            else:
+                left_path.lineTo(x, y_left)
+                right_path.lineTo(x, y_right)
+            fill.lineTo(x, y_left)
+        fill.lineTo(scope.right(), baseline)
+        fill.closeSubpath()
+        self._cached_scope = (scope, left_path, right_path, fill)
+        return left_path, right_path, fill
 
     def _scope_rect(self) -> QRectF:
         # 左侧 68% 为双通道 LFO 示波器，右侧 32% 为实时声像/振幅雷达舞台
@@ -749,49 +843,10 @@ class LfoModulationVisualizer(QWidget):
         shape = st["shape"]
         smooth = st["smooth"]
 
-        # 绘制 2 个完整周期的 L(绿) & R(琥珀) 调制包络线
-        cycles = 2.0
-        steps = 240
-        path_l = QPainterPath()
-        path_r = QPainterPath()
-        fill_l = QPainterPath()
-
+        cycles = 1.0 if self._processor_mode else 2.0
+        path_l, path_r, fill_l = self._scope_paths(sc)
         margin_y = 26.0
         usable_h = max(40.0, sc.height() - margin_y * 2.0)
-
-        for i in range(steps + 1):
-            t = i / steps
-            ph_l = (t * cycles) % 1.0
-            ph_r = (t * cycles + phase_off_norm) % 1.0
-
-            raw_l = evaluate_lfo_unipolar(ph_l, wf, shape, smooth)
-            raw_r = evaluate_lfo_unipolar(ph_r, wf, shape, smooth)
-
-            if mode == "Tremolo":
-                # Tremolo: 1.0 为 0dB 满幅，向下衰减 depth
-                val_l = 1.0 - depth * (1.0 - raw_l)
-                val_r = 1.0 - depth * (1.0 - raw_r)
-            else:
-                # Auto-Pan / Dual: 围绕 0.5 (Center) 上下摆动
-                val_l = 0.5 + (raw_l - 0.5) * depth
-                val_r = 0.5 + (raw_r - 0.5) * depth
-
-            px = sc.left() + t * sc.width()
-            py_l = sc.bottom() - margin_y - val_l * usable_h
-            py_r = sc.bottom() - margin_y - val_r * usable_h
-
-            if i == 0:
-                path_l.moveTo(px, py_l)
-                path_r.moveTo(px, py_r)
-                fill_l.moveTo(px, sc.bottom() - margin_y)
-                fill_l.lineTo(px, py_l)
-            else:
-                path_l.lineTo(px, py_l)
-                path_r.lineTo(px, py_r)
-                fill_l.lineTo(px, py_l)
-
-        fill_l.lineTo(sc.right(), sc.bottom() - margin_y)
-        fill_l.closeSubpath()
 
         if en:
             grad_l = QLinearGradient(sc.topLeft(), sc.bottomLeft())
@@ -820,13 +875,17 @@ class LfoModulationVisualizer(QWidget):
 
         # 实时扫描播放指针 (Playhead Cursor)
         play_x = sc.left() + (self._phase / cycles) * sc.width()
-        p.setPen(QPen(QColor(40, 216, 240, 170) if en else QColor("#55555C"), 1.2))
-        p.drawLine(QPointF(play_x, sc.top()), QPointF(play_x, sc.bottom()))
+        monitor_active = en and (not self._processor_mode or self._live_gains is not None)
+        if monitor_active:
+            p.setPen(QPen(QColor(40, 216, 240, 170), 1.2))
+            p.drawLine(QPointF(play_x, sc.top()), QPointF(play_x, sc.bottom()))
 
         # 当前瞬时采样点光珠
         cur_raw_l = evaluate_lfo_unipolar(self._phase, wf, shape, smooth)
         cur_raw_r = evaluate_lfo_unipolar((self._phase + phase_off_norm) % 1.0, wf, shape, smooth)
-        if mode == "Tremolo":
+        if self._live_gains is not None:
+            cur_vl, cur_vr = self._live_gains
+        elif mode == "Tremolo":
             cur_vl = 1.0 - depth * (1.0 - cur_raw_l)
             cur_vr = 1.0 - depth * (1.0 - cur_raw_r)
         else:
@@ -835,7 +894,7 @@ class LfoModulationVisualizer(QWidget):
 
         dot_ly = sc.bottom() - margin_y - cur_vl * usable_h
         dot_ry = sc.bottom() - margin_y - cur_vr * usable_h
-        if en:
+        if monitor_active:
             p.setPen(QPen(QColor("#111318"), 1.2))
             p.setBrush(QColor(PALETTE["amber"]))
             p.drawEllipse(QPointF(play_x, dot_ry), 4.2, 4.2)
@@ -896,7 +955,11 @@ class LfoModulationVisualizer(QWidget):
         bipolar_l = (cur_raw_l * 2.0 - 1.0) * depth * width_norm
         bipolar_r = (cur_raw_r * 2.0 - 1.0) * depth * width_norm
 
-        if mode == "Tremolo":
+        if self._processor_mode:
+            gain_l, gain_r = self._live_gains or (0.0, 0.0)
+            power = gain_l**2 + gain_r**2
+            pan_l = pan_r = (gain_r**2 - gain_l**2) / power if power > 0.0 else center_norm
+        elif mode == "Tremolo":
             pan_l = max(-1.0, min(1.0, center_norm - 0.35 * width_norm))
             pan_r = max(-1.0, min(1.0, center_norm + 0.35 * width_norm))
             gain_l = 1.0 - depth * (1.0 - cur_raw_l)
@@ -933,7 +996,7 @@ class LfoModulationVisualizer(QWidget):
             )
 
         # 声场耦合连线与光晕
-        if en:
+        if monitor_active:
             halo_r = 14.0 + 18.0 * ((gain_l + gain_r) * 0.5)
             rg = QRadialGradient(pt_mid, halo_r)
             rg.setColorAt(0.0, QColor(40, 216, 240, 75))
@@ -967,8 +1030,9 @@ class LfoModulationVisualizer(QWidget):
 
         avg_pan = ((pan_l + pan_r) * 0.5) * 100.0
         p.setPen(QColor(PALETTE["cyan"]) if en else QColor("#787882"))
+        position_text = format_lr(avg_pan) if monitor_active else "—"
         p.drawText(QRectF(st_rect.left() + 8, st_rect.bottom() - 20, st_rect.width() - 16, 16),
-                   Qt.AlignmentFlag.AlignCenter, f"Pos: {format_lr(avg_pan)}  •  Center: {format_lr(st['pan_center'])}")
+                   Qt.AlignmentFlag.AlignCenter, f"Pos: {position_text}  •  Center: {format_lr(st['pan_center'])}")
 
 
 # =====================================================================
@@ -1037,8 +1101,8 @@ class RateSyncCard(QFrame):
 
         # 自由速率旋钮
         self.c_rate = KnobParameterCell(
-            "Rate (Hz)", 0.05, 30.0, 2.40, self._accent,
-            "0.05", "Hz", "30.0",
+            "Rate (Hz)", 0.01, 50.0, 4.0, self._accent,
+            "0.01", "Hz", "50.0",
             format_hz, lambda s, fb: float(s), mode="log", pill_width=64
         )
         self.c_rate.valueChanged.connect(self._on_rate_changed)
@@ -1194,7 +1258,10 @@ class RateSyncCard(QFrame):
 
     def _on_bpm_edited(self, text: str):
         try:
-            val = max(40.0, min(240.0, round(float(text), 1)))
+            bpm = float(text)
+            if not math.isfinite(bpm):
+                return
+            val = max(20.0, min(300.0, round(bpm, 1)))
             self._state["bpm"] = val
             self.bpm_pill.setText(f"{val:.1f}")
             self._emit_change()
@@ -1203,7 +1270,7 @@ class RateSyncCard(QFrame):
 
     def _on_tap_tempo(self):
         now = time.monotonic()
-        if self._tap_times and (now - self._tap_times[-1]) > 2.0:
+        if self._tap_times and (now - self._tap_times[-1]) > 3.0:
             self._tap_times.clear()
         self._tap_times.append(now)
         if len(self._tap_times) > 4:
@@ -1212,7 +1279,7 @@ class RateSyncCard(QFrame):
             intervals = [self._tap_times[i] - self._tap_times[i - 1] for i in range(1, len(self._tap_times))]
             avg_dt = sum(intervals) / len(intervals)
             if avg_dt > 0.1:
-                bpm = max(40.0, min(240.0, round(60.0 / avg_dt, 1)))
+                bpm = max(20.0, min(300.0, round(60.0 / avg_dt, 1)))
                 self._state["bpm"] = bpm
                 self._state["sync"] = True
                 self.syncFromState(self._state)
@@ -1300,16 +1367,16 @@ class WaveformShapingCard(QFrame):
         knobs_row.setSpacing(10)
 
         self.c_shape = KnobParameterCell(
-            "Symmetry / Shape", 0.0, 100.0, 50.0, self._accent,
-            "0%", "50%", "100%",
+            "Square Duty Cycle", 1.0, 99.0, 50.0, self._accent,
+            "1%", "50%", "99%",
             lambda v: f"{int(round(v))}%", lambda s, fb: float(s), mode="linear", pill_width=60
         )
         self.c_shape.valueChanged.connect(self._on_shape_changed)
 
         self.c_smooth = KnobParameterCell(
-            "Edge Smooth", 0.0, 100.0, 15.0, PALETTE["blue"],
-            "Sharp", "", "Soft",
-            lambda v: f"{int(round(v))}%", lambda s, fb: float(s), mode="linear", pill_width=60
+            "LFO Smoothing", 0.0, 100.0, 0.0, PALETTE["blue"],
+            "0ms", "", "100ms",
+            lambda v: f"{v:g}ms", lambda s, fb: float(s), mode="linear", pill_width=60
         )
         self.c_smooth.valueChanged.connect(self._on_smooth_changed)
 
@@ -1361,7 +1428,8 @@ class WaveformShapingCard(QFrame):
             b.setStyleSheet(btn_css)
 
         self.c_shape.setValue(state["shape"])
-        self.c_shape.setModuleActive(en)
+        self.c_shape.setModuleActive(en and cur_wf == "Square")
+        self.c_shape.setEnabled(en and cur_wf == "Square")
 
         self.c_smooth.setValue(state["smooth"])
         self.c_smooth.setModuleActive(en)
@@ -1500,9 +1568,11 @@ class DepthStereoPhaseCard(QFrame):
 
         self.c_center.setValue(state["pan_center"])
         self.c_center.setModuleActive(is_pan_active)
+        self.c_center.setEnabled(is_pan_active)
 
         self.c_width.setValue(state["pan_width"])
         self.c_width.setModuleActive(is_pan_active)
+        self.c_width.setEnabled(is_pan_active)
         self._updating = False
 
     def _emit_change(self):
@@ -2021,8 +2091,12 @@ class StudioTremoloAutoPanWidget(QWidget):
         self.stateChanged.emit(self.get_state())
 
     def _on_mode_selected(self, mode: str):
-        if self._st()["mode"] != mode:
-            self._st()["mode"] = mode
+        state = self._st()
+        if state["mode"] != mode:
+            previous_default = 0.0 if state["mode"] == "Tremolo" else 180.0
+            if state["phase_offset"] == previous_default:
+                state["phase_offset"] = 0.0 if mode == "Tremolo" else 180.0
+            state["mode"] = mode
             self._refresh_all_views()
             self.modeChanged.emit(mode)
             self.stateChanged.emit(self.get_state())
@@ -2146,6 +2220,22 @@ class StudioTremoloAutoPanWidget(QWidget):
         self._banks[self._active_bank] = default_tremolo_autopan_state()
         self._refresh_all_views()
         self.stateChanged.emit(self.get_state())
+
+    def use_processor_controls(self) -> None:
+        self.rate_card.btn_retrig.hide()
+        self.visualizer.setToolTip(I18N.tr(
+            "mixer.effect_panel.tremolo_scope",
+            "The curves show the nominal LFO. During playback the markers show the processor's actual gains.",
+        ))
+        self.update_monitoring({})
+
+    def update_monitoring(self, analysis: dict) -> None:
+        if self._anim_timer.isActive():
+            self._anim_timer.stop()
+        gains = analysis.get("mod_gain_lr")
+        self.visualizer.set_live_monitoring(float(analysis.get("sample_phase_cycles", 0.0)), gains)
+        left, right = gains if gains is not None else (0.0, 0.0)
+        self.mod_meter.setModulationValues(left, right, self._st()["mode"], gains is not None)
 
     def get_state(self) -> dict:
         st = copy.deepcopy(self._st())

@@ -149,10 +149,8 @@ class ProductionEffectDialog(QDialog):
         self.panel = create_panel(panel_id, owner_name)
         if effect_type == "strip_eq":
             self.eq_graph = self.panel.eq_graph
-            self.set_eq_algorithm_version(algorithm_version)
         self._configure_sections()
-        if effect_type == "convolution_reverb":
-            self.panel.set_true_stereo_available(algorithm_version is None or algorithm_version > 4)
+        self.set_algorithm_version(algorithm_version)
         self._default_state = self.panel.get_state()
         self._baseline: dict[str, Any] = {}
         self._make_spectral_limiter_state()
@@ -179,11 +177,21 @@ class ProductionEffectDialog(QDialog):
                 preset_combo.setCurrentIndex(-1)
         fit_effect_window(self, self.panel)
 
-    def set_eq_algorithm_version(self, version: int | None) -> None:
-        if self.fx_effect_type != "strip_eq" or getattr(self, "_eq_version", -1) == version:
+    def set_algorithm_version(self, version: int | None) -> None:
+        if getattr(self, "_algorithm_version", -1) == version:
             return
-        self._eq_version = version
-        self.eq_graph.set_response_calculator(partial(strip_eq_band_response_db, algorithm_version=version))
+        self._algorithm_version = version
+        if self.fx_effect_type == "strip_eq":
+            self.eq_graph.set_response_calculator(
+                partial(strip_eq_band_response_db, algorithm_version=version))
+        elif self.fx_effect_type == "convolution_reverb":
+            self.panel.set_true_stereo_available(version is None or version > 4)
+        elif self.fx_effect_type in {"chorus_flanger", "phaser"}:
+            self.panel.set_processor_algorithm_version(version)
+            if getattr(self, "_baseline", None):
+                # A saved snapshot may project differently after an algorithm upgrade.
+                self._baseline = {}
+                self.set_current_params(self._params, enabled=self._external_enabled)
 
     def _build_toolbar(self) -> QFrame:
         toolbar = QFrame(self)
@@ -197,6 +205,8 @@ class ProductionEffectDialog(QDialog):
             summary = _tr("panner_summary", "Front stereo pair processing · Speaker layout preview")
         elif self.fx_effect_type == "imager":
             summary = _tr("imager_summary", "Solo M/S and Mono apply to playback only.")
+        elif self.fx_effect_type == "tremolo_auto_pan":
+            summary = _tr("tremolo_summary", "Tempo uses the BPM set here. The phase restarts when seeking.")
         elif self.fx_effect_type in {"strip_eq", "de_esser", "transient_designer", "bus_comp",
                                      "multiband_comp", "true_peak_limiter", "convolution_reverb"}:
             summary = ""
@@ -356,9 +366,11 @@ class ProductionEffectDialog(QDialog):
         self._on_edited({})
 
     def _change_modulation_mode(self, mode: str) -> None:
-        if self._syncing or mode == self._projection["mode"]:
+        if self._syncing:
             return
         pending = self.current_params()
+        if mode == pending.get("mode", self._projection["mode"]):
+            return
         pending["mode"] = mode
         self._stage(pending)
         self._on_edited({})
@@ -374,6 +386,10 @@ class ProductionEffectDialog(QDialog):
             preset = {"pan": preset.get("pan", self._params.get("pan", 0.0)), "panner": panner}
         if self.fx_effect_type == "imager":
             preset = {key: value for key, value in preset.items() if key != "_imager_audition"}
+        if self.fx_effect_type == "tremolo_auto_pan":
+            preset = {"waveform": "", "sync": False, "bpm": 120.0, "sync_div": "1/4",
+                      "duty_cycle_pct": 50.0, "smooth_ms": 0.0, "pan_center_pct": 0.0,
+                      "pan_width_pct": 100.0, "phase_offset_deg": None, "random_seed": 0, **preset}
         pending = with_fallbacks(preset, self.current_params())
         if self.fx_effect_type == "dynamic_eq" and "bands" in preset:
             pending["bands"] = deepcopy(preset["bands"])
@@ -416,6 +432,8 @@ class ProductionEffectDialog(QDialog):
             projection = (_multiband_display_params(self._projection) if self.fx_effect_type == "multiband_comp"
                           else self._projection)
             projection = display_projection(self.fx_effect_type, projection)
+            if self.fx_effect_type == "tremolo_auto_pan" and projection.get("phase_offset_deg") is None:
+                projection = {**projection, "phase_offset_deg": 0.0 if projection["mode"] == "tremolo" else 180.0}
             if not project_extended(self.fx_effect_type, state, projection):
                 project_fields(state, projection, self.fields)
             self._projection = projection
@@ -465,6 +483,12 @@ class ProductionEffectDialog(QDialog):
 
     def _configure_modulation(self, state: dict[str, Any]) -> None:
         active = "phaser" if self.fx_effect_type == "phaser" else self._projection["mode"]
+        if self.fx_effect_type == "chorus_flanger":
+            inactive = "flanger" if active == "chorus" else "chorus"
+            for key in ("rate", "depth", "feedback", "voices", "mix"):
+                state[inactive][key] = state[active][key]
+            delay_keys = {"chorus": "delay_ms", "flanger": "manual_ms"}
+            state[inactive][delay_keys[inactive]] = state[active][delay_keys[active]]
         for key in ("chorus", "flanger", "phaser"):
             state[key]["enabled"] = key == active
             card = getattr(self.panel, f"{key}_card")
@@ -527,8 +551,11 @@ class ProductionEffectDialog(QDialog):
         if (self.fx_effect_type == "dynamic_eq" and updates.get("sidechain_source_id", "internal") != "internal"
                 and result.get("sc_on") is False):
             result["sc_on"] = True
-        if self.fx_effect_type == "tremolo_auto_pan" and updates:
-            result.setdefault("waveform", "sine")
+        if self.fx_effect_type == "tremolo_auto_pan" and not result.get("waveform"):
+            if (updates.keys() & {"sync", "sync_div", "bpm", "duty_cycle_pct", "smooth_ms",
+                                  "pan_center_pct", "pan_width_pct", "phase_offset_deg"}
+                    or ("mode" in updates and result.get("mode") == "dual")):
+                result["waveform"] = "sine"
         return result
 
     def _validate_sidechain(self, values: dict[str, Any], changed: set[str]) -> None:

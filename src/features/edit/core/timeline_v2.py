@@ -4524,7 +4524,7 @@ class TremoloAutoPanParams:
     """Tremolo / Auto-Pan：等功率声像或幅度调制（相位连续 LFO）。
 
     FX-19（2026-11-21 计划）：``waveform`` 扩展 sine/triangle/square/
-    saw_up/saw_down/random；空/缺省/"sine" → 旧正弦路径（冻结）。
+    saw_up/saw_down/random；空/缺省走旧正弦路径（冻结）。
     """
     mode: str = "tremolo"  # "tremolo" | "auto_pan"
     rate_hz: float = 4.0
@@ -4533,6 +4533,7 @@ class TremoloAutoPanParams:
     enabled: bool = True
     waveform: str = ""
     random_seed: int = 0
+    phase_offset_deg: float | None = None
 
     _WAVEFORMS = ("sine", "triangle", "square", "saw_up", "saw_down",
                   "random")
@@ -4550,6 +4551,8 @@ class TremoloAutoPanParams:
         if self.waveform:
             data["waveform"] = self.waveform
             data["random_seed"] = self.random_seed
+        if self.phase_offset_deg is not None:
+            data["phase_offset_deg"] = self.phase_offset_deg
         return data
 
     @staticmethod
@@ -4562,8 +4565,13 @@ class TremoloAutoPanParams:
             waveform = ""
         try:
             seed = int(data.get("random_seed", 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             seed = 0
+        phase_default = 0.0 if mode == "tremolo" else 180.0
+        phase_offset = (_params_f("phase_offset_deg", data, phase_default)
+                        if data.get("phase_offset_deg") is not None else None)
+        if phase_offset is not None and not 0.0 <= phase_offset <= 360.0:
+            phase_offset = phase_default
         return TremoloAutoPanParams(
             mode=mode,
             rate_hz=_params_f("rate_hz", data, 4.0),
@@ -4572,6 +4580,7 @@ class TremoloAutoPanParams:
             enabled=bool(data.get("enabled", True)),
             waveform=waveform,
             random_seed=seed,
+            phase_offset_deg=phase_offset,
         )
 
 
@@ -4633,6 +4642,7 @@ class PhaserParams:
     mix: float = 0.5
     feedback: float = 0.3
     enabled: bool = True
+    stereo_processing: bool = True
 
     @staticmethod
     def default() -> "PhaserParams":
@@ -4643,14 +4653,14 @@ class PhaserParams:
             "rate_hz": self.rate_hz, "stages": self.stages,
             "base_hz": self.base_hz, "sweep_octaves": self.sweep_octaves,
             "mix": self.mix, "feedback": self.feedback,
-            "enabled": self.enabled,
+            "enabled": self.enabled, "stereo_processing": self.stereo_processing,
         }
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "PhaserParams":
         try:
             stages = int(data.get("stages", 4))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             stages = 4
         stages = max(1, min(12, stages))
         return PhaserParams(
@@ -4661,6 +4671,7 @@ class PhaserParams:
             mix=_params_f("mix", data, 0.5),
             feedback=_params_f("feedback", data, 0.3),
             enabled=bool(data.get("enabled", True)),
+            stereo_processing=data.get("stereo_processing") is True,
         )
 
 

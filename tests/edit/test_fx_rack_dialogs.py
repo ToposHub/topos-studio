@@ -131,11 +131,11 @@ class TestFxParamDialog:
         widget = TrackMixerWidget("t1", "Dialogue", "A1")
         menu = QMenu(widget)
         widget._populate_add_effect_menu(menu)
-        effect_types = {
-            action.data()
-            for category in menu.actions()
-            for action in category.menu().actions()
-        }
+        effect_types = set()
+        for entry in menu.actions():
+            submenu = entry.menu()
+            actions = submenu.actions() if submenu is not None else (entry,)
+            effect_types.update(action.data() for action in actions)
         assert set(NEW_FX) <= effect_types
 
     def test_generic_editor_roundtrip_through_chain(self, qapp):

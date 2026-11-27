@@ -1214,12 +1214,12 @@ class TrackMixerWidget(QWidget):
 
     def _backfill_effect_window(self, dialog: QDialog, instance: TrackEffectInstance) -> None:
         self._effect_previews.pop(dialog, None)
-        params = instance.params or _effect_default_params(instance.effect_type)
-        if hasattr(dialog, "fx_effect_type"):
-            dialog.set_eq_algorithm_version(instance.algorithm_version)
-            dialog.set_current_params(params, enabled=instance.enabled)
+        set_version = getattr(dialog, "set_algorithm_version", None)
+        if callable(set_version):
+            set_version(instance.algorithm_version)
+            dialog.set_current_params(instance.params, enabled=instance.enabled)
         else:
-            dialog.set_current_params(params)
+            dialog.set_current_params(instance.params or _effect_default_params(instance.effect_type))
 
     def _show_eq_insert_in_rack(self) -> bool:
         return False
@@ -1799,7 +1799,8 @@ class TrackMixerWidget(QWidget):
         for kind, _, dialog in self._iter_insert_dialogs(visible_only=False):
             if kind == "dynamic_eq":
                 dialog.panel.eq_graph.set_sample_rate(self._engine_sample_rate)
-            elif kind in ("multiband_comp", "reverb", "delay", "convolution_reverb"):
+            elif kind in ("multiband_comp", "reverb", "delay", "convolution_reverb",
+                          "chorus_flanger", "phaser"):
                 dialog.panel.set_sample_rate(self._engine_sample_rate)
 
     def _instance_in_chain(self, instance_id: str) -> bool:
@@ -1919,7 +1920,7 @@ class TrackMixerWidget(QWidget):
 
         dialog = ProductionEffectDialog(
             instance.effect_type, self._track_name,
-            instance.params or _effect_default_params(instance.effect_type),
+            instance.params,
             self.window(), enabled=instance.enabled, sidechain_sources=self._sidechain_sources,
             algorithm_version=instance.algorithm_version,
         )
@@ -1929,7 +1930,8 @@ class TrackMixerWidget(QWidget):
             dialog.eq_graph.set_sample_rate(self._engine_sample_rate)
         elif instance.effect_type == "dynamic_eq":
             dialog.panel.eq_graph.set_sample_rate(self._engine_sample_rate)
-        elif instance.effect_type in ("multiband_comp", "reverb", "delay", "convolution_reverb"):
+        elif instance.effect_type in ("multiband_comp", "reverb", "delay", "convolution_reverb",
+                                      "chorus_flanger", "phaser"):
             dialog.panel.set_sample_rate(self._engine_sample_rate)
 
         def edit(params: dict, commit: bool) -> None:
@@ -2445,6 +2447,8 @@ class TrackMixerWidget(QWidget):
                     measured.get("mid_db", -100.0), measured.get("side_db", -100.0),
                     measured.get("correlation"),
                 )
+            elif kind == "tremolo_auto_pan":
+                panel.update_monitoring(analysis)
             elif kind == "delay":
                 levels = tap.get("out_db_lr") if not (silent or tap.get("bypassed")) else None
                 panel.update_output_meters(*(levels or (output_level, output_level)))
@@ -2504,8 +2508,7 @@ class TrackMixerWidget(QWidget):
                                           analysis.get("attack_gain_db", 0.0),
                                           analysis.get("sustain_gain_db", 0.0))
             elif kind in ("chorus_flanger", "phaser"):
-                panel.meter_input.setValue(input_level)
-                panel.meter_output.setValue(output_level)
+                panel.update_processor_telemetry(input_level, output_level, analysis)
 
     def _iter_insert_dialogs(self, *, visible_only: bool = True) -> Iterator[tuple[str, str, QDialog]]:
         for attr in self._EFFECT_DIALOG_ATTRS:

@@ -18,4 +18,8 @@ The acoustic reverb graph uses the processor's room geometry for early reflectio
 
 Convolution Reverb decodes the selected WAV and prepares its waveform in the background. True Stereo uses the four LL, LR, RL and RR paths of a four-channel file with the current processor. Mono input folds the two resulting signals back to the host's mono layout. The current processor uses larger FFT partitions for long tails and retains zero algorithm delay across playback and export block sizes. Existing version 4 and earlier instances retain their historical timing.
 
+Chorus / Flanger shares a fractional-delay processor with signed feedback and one to four voices. Its presets select the mode and its corresponding delay and feedback settings. Switching the mode button retains the edited controls. Modulation depth and base delay are shown in milliseconds. The current processor keeps read-head timing and feedback history consistent across preview and export blocks.
+
+The modulation graph estimates the mixed response of Chorus, Flanger and Phaser at the current LFO phase on mixer channels. Clip settings show the response at a reference phase. New Phaser inserts process each channel separately. Saved Phaser snapshots without the stereo field retain their mono-summed wet signal.
+
 The standalone Mixer UI session also uses the design catalog. Its `EffectBrowserWidget` is owner-scoped and emits `effectChosen(effect_id)`; its rack edits session state.

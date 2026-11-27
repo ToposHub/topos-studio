@@ -30,6 +30,9 @@ _LIBRARY_KEYS = {
     "bus_comp": "bus_comp",
     "multiband_comp": "multiband_comp",
     "transient_designer": "transient_designer",
+    "chorus_flanger": "chorus_flanger",
+    "phaser": "phaser",
+    "tremolo_auto_pan": "tremolo_auto_pan",
     "true_peak_limiter": "true_peak_limiter",
     "voice_changer": "voice_changer",
 }
@@ -49,6 +52,9 @@ _PRESERVE_WHEN_LOADING = {
     "bus_comp": ("enabled",),
     "multiband_comp": ("enabled",),
     "transient_designer": ("enabled",),
+    "chorus_flanger": ("enabled",),
+    "phaser": ("enabled",),
+    "tremolo_auto_pan": ("enabled",),
     "true_peak_limiter": ("enabled",),
 }
 
@@ -90,7 +96,7 @@ class _EffectPresets(QObject):
             if button.text() == "+":
                 button.clicked.disconnect(getattr(panel, "_save_new_preset"))
                 button.clicked.connect(self._save)
-            elif effect_type == "voice_changer" and button.text() == "−":
+            elif effect_type in ("voice_changer", "chorus_flanger", "phaser") and button.text() == "−":
                 button.clicked.disconnect(getattr(panel, "_delete_current_preset"))
                 button.clicked.connect(self._delete)
 

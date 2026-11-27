@@ -59,7 +59,7 @@ class ClipAudioEffectDialogManager(QObject):
             dialog.finished.connect(lambda _result: self._finished(key, dialog))
             self._dialogs[key] = dialog
         else:
-            dialog.set_eq_algorithm_version(algorithm_version)
+            dialog.set_algorithm_version(algorithm_version)
             dialog.set_current_params(params_dict, enabled=enabled)
         present_effect_window(dialog)
         return dialog
@@ -91,7 +91,7 @@ class ClipAudioEffectDialogManager(QObject):
             if effect is None or effect.effect_type != dialog.fx_effect_type or track is None or track.is_locked:
                 dialog.close()
             else:
-                dialog.set_eq_algorithm_version(effect.algorithm_version)
+                dialog.set_algorithm_version(effect.algorithm_version)
                 dialog.set_current_params(dict(effect.params), enabled=effect.is_enabled)
 
     def close_all(self) -> None:

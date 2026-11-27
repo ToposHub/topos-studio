@@ -279,8 +279,9 @@ TREMOLO_AUTO_PAN_EFFECT = EffectDefinition(
     category="audio",
     description="Phase-continuous LFO tremolo or equal-power auto pan",
     params_schema={
-        "rate_hz": _float_schema(4.0, 0.05, 20.0, 0.05, "Rate", "Hz"),
+        "rate_hz": _float_schema(4.0, 0.01, 50.0, 0.01, "Rate", "Hz"),
         "depth": _float_schema(0.7, 0.0, 1.0, 0.01, "Depth", ""),
+        "phase_offset_deg": _float_schema(0.0, 0.0, 360.0, 1.0, "Stereo Phase", "°"),
     },
     icon="audio_track",
 )
@@ -292,8 +293,9 @@ CHORUS_FLANGER_EFFECT = EffectDefinition(
     description="Modulated delay line with feedback tail budget",
     params_schema={
         "rate_hz": _float_schema(0.6, 0.01, 20.0, 0.01, "Rate", "Hz"),
-        "depth_ms": _float_schema(3.0, 0.0, 10.0, 0.05, "Depth", "ms"),
-        "feedback": _float_schema(0.0, 0.0, 0.95, 0.01, "Feedback", ""),
+        "depth_ms": _float_schema(3.0, 0.0, 50.0, 0.1, "Depth", "ms"),
+        "base_ms": _float_schema(18.0, 0.5, 100.0, 0.1, "Delay", "ms"),
+        "feedback": _float_schema(0.0, -0.95, 0.95, 0.01, "Feedback", ""),
         "mix": _float_schema(0.5, 0.0, 1.0, 0.01, "Mix", ""),
     },
     icon="audio_track",
@@ -342,7 +344,7 @@ PHASER_EFFECT = EffectDefinition(
     params_schema={
         "rate_hz": _float_schema(0.5, 0.01, 20.0, 0.01, "Rate", "Hz"),
         "stages": _float_schema(4.0, 1.0, 12.0, 1.0, "Stages", ""),
-        "base_hz": _float_schema(600.0, 100.0, 4000.0, 10.0,
+        "base_hz": _float_schema(600.0, 10.0, 20000.0, 10.0,
                                  "Base Frequency", "Hz"),
         "sweep_octaves": _float_schema(2.5, 0.5, 5.0, 0.1,
                                        "Sweep", "oct"),

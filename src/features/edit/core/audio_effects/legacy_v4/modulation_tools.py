@@ -322,6 +322,9 @@ class PhaserEffect(AudioEffect):
     def latency_samples(self) -> int:
         return 0
 
+    def collect_telemetry(self) -> dict[str, float]:
+        return {"phase": self._lfo.phase, "sample_rate": self._sample_rate}
+
     def process(self, samples: np.ndarray) -> np.ndarray:
         if not self.is_active or samples is None or samples.ndim != 2:
             return samples

@@ -215,10 +215,12 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("sync", "sync"), Field("bpm", "bpm"), Field("sync_div", "sync_div"),
         Field("shape", "duty_cycle_pct"), Field("smooth", "smooth_ms"),
         Field("pan_center", "pan_center_pct"), Field("pan_width", "pan_width_pct"),
-        Field("waveform", "waveform", lambda v: v.replace("_", " ").title(),
+        Field("phase_offset", "phase_offset_deg"),
+        Field("waveform", "waveform", lambda v: v.replace("_", " ").title() or "Sine",
               lambda v: v.lower().replace(" ", "_")),
     )),
     "chorus_flanger": ("modulation", (
+        Field("mode", "mode"),
         Field("chorus.rate", "rate_hz", when=_is_chorus),
         Field("chorus.depth", "depth_ms", _percent_depth, _depth_ms, when=_is_chorus),
         Field("chorus.delay_ms", "base_ms", when=_is_chorus),
@@ -239,5 +241,6 @@ RACK_BINDINGS: dict[str, tuple[str, tuple[Field, ...]]] = {
         Field("phaser.center_hz", "base_hz"),
         Field("phaser.feedback", "feedback", _percent, _feedback_fraction),
         Field("phaser.mix", "mix", _percent, _fraction),
+        Field("phaser.stereo_processing", "stereo_processing"),
     )),
 }

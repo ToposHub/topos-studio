@@ -225,11 +225,19 @@ class TremoloAutoPanAdapter(_CompositeAdapterBase):
         from src.features.edit.core.audio_effects.modulation_tools import (
             TremoloAutoPanEffect,
         )
-        return TremoloAutoPanEffect(sr)
+        return TremoloAutoPanEffect(sr, params_are_snapshots=True)
 
 
 class ChorusFlangerAdapter(_CompositeAdapterBase):
     effect_type = "chorus_flanger"
+
+    def set_params(self, params: object, sample_rate: Optional[float] = None,
+                   algorithm_version: Optional[int] = None) -> None:
+        from src.features.edit.core.timeline_v2 import ChorusFlangerParams
+        snapshot = ChorusFlangerParams.default().to_dict()
+        if isinstance(params, dict):
+            snapshot.update(params)
+        super().set_params(snapshot, sample_rate, algorithm_version)
 
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.modulation_tools import (
@@ -247,11 +255,20 @@ class ChorusFlangerAdapter(_CompositeAdapterBase):
 class PhaserAdapter(_CompositeAdapterBase):
     effect_type = "phaser"
 
+    def set_params(self, params: object, sample_rate: Optional[float] = None,
+                   algorithm_version: Optional[int] = None) -> None:
+        if algorithm_version is not None and algorithm_version <= 4:
+            from src.features.edit.core.timeline_v2 import PhaserParams
+            # The legacy implementation accepts partial updates, while a chain
+            # installs complete snapshots, including after preview is cancelled.
+            params = PhaserParams.from_dict(params if isinstance(params, dict) else {}).to_dict()
+        super().set_params(params, sample_rate, algorithm_version)
+
     def _impl_factory(self, sr):  # noqa: N802（基类约定）
         from src.features.edit.core.audio_effects.modulation_tools import (
             PhaserEffect,
         )
-        return PhaserEffect(sr)
+        return PhaserEffect(sr, params_are_snapshots=True)
 
     def _legacy_impl_factory(self, sr: float) -> AudioEffect:
         from src.features.edit.core.audio_effects.legacy_v4.modulation_tools import (
