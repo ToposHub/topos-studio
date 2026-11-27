@@ -1,5 +1,7 @@
 # 片段版本功能复核与修复记录
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 2026-11-01，按 [实施计划](IMPLEMENTATION_PLAN.md) 对当前生产接线复核。此次先跑的 167 项测试通过，但补充真实工程结构、真实控制器调用链和桌面应用验证后发现以下遗漏，均已修复。
 
 ## 修复的问题
@@ -64,7 +66,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q \
 6. 远程加载后继续修改曝光为 0.75、创建版本，验证实际写入新远程栈。
 7. 正常关闭窗口，执行 Qt deferred delete，最终驱动进程退出码 **0**。
 
-证据：[最终日志](validation/real-app.log)、[真实窗口截图](validation/real-app.png)。可复用驱动：[drive_real_app_clip_versions.py](../../../tests/benchmark/drive_real_app_clip_versions.py)。此驱动从既有真实应用片段驱动提取初始化流程，并补上可清理的退出路径；测试时自动取消启动项目选择框，仅对其自建内存测试工程跳过保存确认。
+证据：[最终日志](validation/real-app.log)、真实窗口截图。可复用驱动：[drive_real_app_clip_versions.py](../../../tests/benchmark/drive_real_app_clip_versions.py)。此驱动从既有真实应用片段驱动提取初始化流程，并补上可清理的退出路径；测试时自动取消启动项目选择框，仅对其自建内存测试工程跳过保存确认。
 
 ```bash
 .venv/bin/python tests/benchmark/drive_real_app_clip_versions.py \

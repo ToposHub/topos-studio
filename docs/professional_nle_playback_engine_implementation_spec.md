@@ -1,7 +1,8 @@
 # Topos Color 专业 NLE 播放引擎实施规格书
 
 日期：2026-06-14  
-配套总计划：`docs/professional_nle_realtime_playback_optimization_plan.md`  
+配套总计划：`docs/topos_color_professional_nle_performance_master_plan_2026-09-15.md`
+
 目标范围：Edit 页面时间线实时播放内核  
 核心方向：`proxy/cache + decode scheduler + GPU compositor`
 
@@ -11,7 +12,7 @@
 
 后续 AI 执行时，必须同时阅读两份文档：
 
-- `docs/professional_nle_realtime_playback_optimization_plan.md`
+- `docs/topos_color_professional_nle_performance_master_plan_2026-09-15.md`
 - `docs/professional_nle_playback_engine_implementation_spec.md`
 
 本规格书的首要原则：
@@ -1391,7 +1392,7 @@ audio drift ms
 
 ```text
 请阅读：
-- docs/professional_nle_realtime_playback_optimization_plan.md
+- docs/topos_color_professional_nle_performance_master_plan_2026-09-15.md
 - docs/professional_nle_playback_engine_implementation_spec.md
 
 本次只实现 Stage X：[阶段名]。

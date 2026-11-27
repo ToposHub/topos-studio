@@ -4,7 +4,7 @@
 >
 > **关联文档**：
 > - 姊妹篇：`docs/edit_optimization_plan_2026-09-07.md`（剪辑页计划，**当前正在执行中**）。两计划**并行推进**：本计划中依赖剪辑页产出的任务已集中移入 **Batch E 硬门禁批**（第 6 节）——OFX 宿主（E2）必须等剪辑页计划**全部完成**、comp clip 缓存 GPU 化（E1）必须等剪辑页 B3 完成；稠密光流（D2）由剪辑页侧主导决策。并行协调规则见第 0.6 条。剪辑页计划文档本身不做改动（执行中）。
-> - 历史自审：`docs/plans/archive/composite_page_professional_gap_audit_optimization_plan_2026-08-27.md`（其 P0 项——时间语义、Despill/Light Wrap、Matte 精修——**已修复**，本计划不重复）
+> - 2026-08-27 自审的 P0 项已修复，涉及时间语义、Despill/Light Wrap 和 Matte 精修。
 >
 > **已核实现状提醒**：AI 节点中 `ai_inpaint` / `ai_expand` 有完整求值路由（`evaluators/ai_evaluator.py` → `render/ai_compute_manager.py` → LaMa ONNX），**基本可用**；`ai_generate` / `ai_remove` 无模型映射，为占位符（见 B6）。
 

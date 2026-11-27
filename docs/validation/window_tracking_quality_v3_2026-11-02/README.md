@@ -1,5 +1,7 @@
 # Window tracking quality — patch-scale consensus
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 This follow-up reduces the measured gap of ordinary 2D Cloud Window tracking
 against the running Resolve. It preserves the existing 3D/perspective and Point
 Tracker flow policy; it does not claim to solve their remaining quality gaps.
@@ -26,7 +28,7 @@ Improvement is not uniform at every sample: frame 60's mean changes from 7.01 to
 8.23 px, while the endpoint improves from 24.41 to 9.78 px. The new preset reduces
 both the overall sampled mean and the worst sampled corner difference.
 
-![Actual application viewer crops](comparison.jpg)
+Actual application viewer crops
 
 Columns: Resolve, previous Topos, updated Topos. Rows: frames 60, 90, 123.
 Only screenshot cropping and resizing were performed; no outlines were added.

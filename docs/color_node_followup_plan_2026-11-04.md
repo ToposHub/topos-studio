@@ -1,5 +1,7 @@
 # 调色节点与 Color 页面后续实施计划（2026-11-04）
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 ## 0. 使用范围与判定口径
 
 本表承接 [资源与节点后端计划](color_resources_backend_implementation_plan.md) 和
@@ -30,8 +32,8 @@ tests/test_videos/测试素材01.mov --production-resources --workflow
 LUT 候选图 128×72，交换通道后的像素平均差 0.0337；图命令、撤销、保存重载、
 断线重连、3 张逐节点预览和 scope 硬失败断言均通过。
 证据见 [原生运行报告](validation/color_resources/production_resource_audit_20261105/media_preview_report.json)
-、[LUT 面板截图](validation/color_resources/production_resource_audit_20261105/lut_production_preview.png)
-及 [Waveform 截图](validation/color_resources/production_resource_audit_20261105/scope_waveform.png)。
+、LUT 面板截图
+及 Waveform 截图。
 相关 261 条 LUT/目录/预览/Key 通道/语言环境测试通过。单进程合并测试
 曾有 10,452 通过、20 跳过、1 条 Key 通道测试失败；根因为测试假数据
 按短命字典的 `id()` 缓存，在地址复用时跨节点串 matte，已改按参数内容缓存。
@@ -82,7 +84,7 @@ Edit 单独一轮及五套件同进程第二轮已通过；跨平台 `NOT RUN` �
 
 ### 本轮实机布局证据
 
-![用户截图：底部工具区过高](validation/color_resources/color_layout_oversized_20261104.jpg)
+用户截图：底部工具区过高
 
 用户 2026-11-04 23:32 的实机截图显示：底部 Color Wheel/Blur/Scopes 工具区
 约占窗口**一半**，色轮却早已达到可用最大半径，工具区留下大片空白。

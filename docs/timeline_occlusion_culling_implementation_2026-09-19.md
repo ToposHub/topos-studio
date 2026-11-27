@@ -2,7 +2,6 @@
 
 > 实施日期：2026-09-19
 >
-> 对应计划：`docs/timeline_occlusion_culling_optimization_plan_2026-09-19.md`
 >
 > 分支：`bugfix`（O0+O1 → O2 → O3 → O4+O7 → 真实素材回归 → O8 分批提交）
 

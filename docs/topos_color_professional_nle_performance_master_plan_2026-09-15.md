@@ -48,7 +48,7 @@
 
 | 编号 | 证据 | 结论与影响 |
 |---|---|---|
-| E-01 | `docs/professional_nle_realtime_playback_optimization_plan.md` 的历史基线 | 历史上 4K、多轨、原片 fallback 和同步开片曾显著拉低播放帧率；当前必须重新跑同口径基线，不能假定问题已消失。 |
+| E-01 | 早期实时播放基线 | 历史上 4K、多轨、原片 fallback 和同步开片曾显著拉低播放帧率；当前必须重新跑同口径基线，不能假定问题已消失。 |
 | E-02 | `src/features/edit/core/realtime_playback/engine.py` 的模块说明 | Source decision 已用于 telemetry/代理触发，但重型 master 的严格禁用尚未完全执行；这会让实时策略与实际 decode source 不一致。 |
 | E-03 | `src/features/edit/core/edit_gpu_preview_renderer.py` | GPU 渲染线程有有界队列、过期 scrub 丢弃、fence 和合成纹理缓存；仍有共享 context 创建失败、QImage upload/readback 等退化路径，需要统计频率和影响。 |
 | E-04 | `src/features/edit/core/realtime_playback/playback_budget.py` | 已有帧预算和 back-pressure，但目前按渲染总耗时决策，尚不足以归因 decode / upload / effect / present / UI 的各段超时。 |
@@ -537,7 +537,6 @@ Topos 的优势应通过实际时间线体验证明：低延迟 decode、可控�
 
 本计划整合但不取代下列专项文档。后续实现应优先更新本总计划的状态，再在专项文档记录深入设计和实验细节。
 
-- `docs/professional_nle_realtime_playback_optimization_plan.md`
 - `docs/professional_nle_playback_engine_implementation_spec.md`
 - `docs/windows_timeline_gpu_export_optimization_plan_2026-09-15.md`
 - `docs/metal_backend_migration_and_cross_platform_gpu_plan.md`

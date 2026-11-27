@@ -280,10 +280,9 @@ CUDA 是 NVIDIA 计算/视频处理生态，不应被当作完整的窗口图形
 | 文档 | 关系 |
 |---|---|
 | `docs/4k-playback-optimization.md` | **上游**。其 §9 优先级表的 P0（benchmark 字段）由本计划 Phase 0 承接；其 §10 最终验收标准仍然有效。其 `:413` 的「probe 先行」顺序被本计划 Phase 1/2 明确采纳；`:614` 的「Metal 是长期目标，当前不应作为第一步」由本计划 §0.2 决策后解除。 |
-| `docs/system_check_plan_2026-09-04.md` | **当前有效计划指针**（见 `docs/plans/archive/README.md:5`）。其 ARCH-2（DecoderBackend ABC）已完成，见 §2.2。 |
-| `docs/professional_nle_realtime_playback_optimization_plan.md`、`docs/optimization_plan.md` | 并行计划，本计划不修改其范围；若冲突以本计划的四维接口为准并记录到 §9.4 ADR。 |
+| `docs/system_check_plan_2026-09-04.md` | **系统检查计划**。其 ARCH-2（DecoderBackend ABC）已完成，见 §2.2。 |
+| `docs/topos_color_professional_nle_performance_master_plan_2026-09-15.md` | 性能总计划覆盖早期播放优化事项。GPU 后端契约见本计划 §9.4。 |
 | `docs/windows_optimization_plan_2026-09-11.md` | **下游子计划（2026-09-11 新增）**：本计划 Phase 8/9 的展开与执行细化——W0~W7 阶段表、「本机可做 vs 需真机」边界标注、reason 枚举级回退表（§8.2 展开）、K-W 系列门槛、与 P8/P9 条目的映射表。条目冲突时以本计划的四维接口与回退语义为准。 |
-| `docs/plans/archive/**` | 仅历史参考，行号与结论可能过时，不作为依据。 |
 
 **§0.4 的 Normalize 百分位静默缺口不在上述任何文档中**——它是本次清点新发现的，未见于 `docs/4k-playback-optimization.md` 或 `system_check_plan_2026-09-04.md`。因此它不"接续"任何既有计划，是独立的新工作项。
 

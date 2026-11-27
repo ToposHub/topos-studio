@@ -515,8 +515,6 @@ class ConnectionItem(QGraphicsPathItem):
 
     # ── Connection Snap Detection ──
 
-    SNAP_DISTANCE = 15.0  # Distance threshold for connection snap detection
-
     def set_snap_highlight(self, active: bool, valid: bool = True) -> None:
         """Set snap highlight state during connection dragging.
 
