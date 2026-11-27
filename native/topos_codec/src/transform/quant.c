@@ -215,14 +215,32 @@ uint32_t tc_quant_step(uint16_t qm, uint32_t qp)
     return tc_quant_step_tbl(TC_QPTBL_CLASSIC, qm, qp);
 }
 
-uint32_t tc_quant_step_tbl(uint32_t table_sel, uint16_t qm, uint32_t qp)
+static inline uint32_t tc_quant_step_from_scale(uint16_t qm, uint32_t s)
 {
-    uint32_t s = tc_qp_scale_tbl(table_sel, qp);
     if (s == 0u) { return 0u; }
     /* v1.5 高 qp 域：qm 最大冻结值 655 × scale 7053950 ≈ 4.6e12 超出
      * uint32 —— 64 位中间量（每 slice 仅 ctx_init 64 次，非热路径）。 */
     uint32_t q = (uint32_t)((((uint64_t)qm * (uint64_t)s) + 128u) >> 8);
     return q == 0u ? 1u : q;
+}
+
+uint32_t tc_quant_step_tbl(uint32_t table_sel, uint16_t qm, uint32_t qp)
+{
+    return tc_quant_step_from_scale(qm, tc_qp_scale_tbl(table_sel, qp));
+}
+
+void tc_dequant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
+                               uint32_t qp, uint8_t bit_depth, uint32_t table_sel)
+{
+    const uint32_t scale = tc_qp_scale_tbl(table_sel, qp);
+    for (int i = 0; i < 64; ++i) {
+        ctx->Q[i] = tc_quant_step_from_scale(qm[i], scale);
+    }
+    ctx->f_clamp = 0;
+    if (bit_depth > 12u) {
+        const int64_t x = (int64_t)((1u << (bit_depth - 1u)) - 1u);
+        ctx->f_clamp = ((int64_t)TC_TRANSFORM_MAX_ABS_F * x) / 2047;
+    }
 }
 
 void tc_quant_block(const int32_t F[64], const uint16_t qm[64], uint32_t qp,
@@ -271,24 +289,18 @@ void tc_quant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
                               uint32_t qp, uint8_t bit_depth,
                               uint32_t table_sel)
 {
-    ctx->f_clamp = 0;
+    tc_dequant_ctx_init_bd_tbl(ctx, qm, qp, bit_depth, table_sel);
     ctx->exact_div = (bit_depth > 12u) ? 1u : 0u;
 #if defined(__x86_64__) || defined(_M_X64)
     ctx->avx2_fast_div = ctx->exact_div == 0u;
 #endif
-    if (ctx->exact_div != 0) {
-        /* |F|max ∝ max|x'|（12-bit 冻结域 2^24.4 @ |x'|≤2047 等比外推） */
-        const int64_t x = (int64_t)((1u << (bit_depth - 1u)) - 1u);
-        ctx->f_clamp = ((int64_t)TC_TRANSFORM_MAX_ABS_F * x) / 2047;
-    }
     /* AC 死区 = Q/4（spec §7.4 冻结值；golden_transform/golden_codec 门禁）。
      * 历史：TC_DZ_DEV 实验旋钮已于 P3 扫频后移除（2026-09-03 战役销账：
      * dz 0~6/16 × 4 素材，工作码率区间 1.4~3.6 bpp 内 1/4 已最优，
      * 见 docs/Topos_码率效率优化计划_2026-09-03.md §7）。DC 恒 0。 */
     const uint32_t dz_num = 1u, dz_den = 4u;
     for (int i = 0; i < 64; ++i) {
-        uint32_t q = tc_quant_step_tbl(table_sel, qm[i], qp);
-        ctx->Q[i] = q;
+        const uint32_t q = ctx->Q[i];
         ctx->half[i] = q >> 1;
         ctx->dz[i] = (i == 0) ? 0u
             : (uint32_t)(((uint64_t)q * dz_num) / dz_den);

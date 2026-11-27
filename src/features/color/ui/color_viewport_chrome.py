@@ -197,6 +197,8 @@ class ColorViewportChrome(QObject):
         self.header_timecode.setAccessibleName(I18N.tr("viewport.timecode", "Current Timecode"))
         self.transport.timecode_changed.connect(self.header_timecode.setText)
         right.addWidget(self.header_timecode)
+        right.addWidget(toolbar.fps_indicator)
+        toolbar.fps_indicator.show()
         toolbar.guides_menu_btn.setToolTip(I18N.tr("viewport.guides", "Viewer Guides"))
         self._adopt_header(right, toolbar.guides_menu_btn, "guides")
         self.proxy_button = _button(
@@ -423,10 +425,10 @@ class ColorViewportChrome(QObject):
         if not hasattr(self, "header_right"):
             return
         width = self.toolbar.width()
-        expanded = width >= 700
+        expanded = width >= 820
         for button in (self.proxy_button, self.resolution_button, self.bypass_button):
             button.setVisible(expanded)
-        self.header_timecode.setVisible(width >= 520)
+        self.header_timecode.setVisible(width >= 620)
         self.split_screen_button.setVisible(width >= 520)
         self.header_left.updateGeometry()
         self.header_right.updateGeometry()

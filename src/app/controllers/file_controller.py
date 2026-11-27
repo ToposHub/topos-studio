@@ -6589,7 +6589,7 @@ class FileOpsMixin:
         if controller is not None and getattr(controller, "is_playing", False):
             if int(frame) < int(getattr(controller, "current_frame", frame)):
                 return
-        self.canvas.set_timeline_preview_image(result)
+        self.canvas.set_timeline_preview_image(result, int(frame))
         self._on_color_timeline_playhead_changed(int(frame))
 
     def _on_color_timeline_playhead_changed(self, timeline_frame: int) -> None:

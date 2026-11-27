@@ -579,9 +579,61 @@ void tc_dequant_inverse_samples_half_avx2_limited(const tc_quant_ctx* ctx,
  * 反量化 pass 与大部分 pass-B 乘法；稠密块成本与分离版相当。
  * 跳转形态跨块稳定（同一 zigzag 位置在不同块间稀疏性一致）→ 分支预测
  * 命中率高。行稀疏掩码 rowmask：bit u = 第 u 频率行存在非零系数。 */
-#if defined(__GNUC__) || defined(__clang__)
+static inline TOPOS_SIMD_TARGET __m128i inverse_round_rows(__m256i sum)
+{
+    /* The high dword of sum + 2^31 - (sum < 0) rounds ties away from zero. */
+    const __m256i rounded = _mm256_add_epi64(
+        _mm256_add_epi64(sum, _mm256_set1_epi64x((int64_t)1 << 31)),
+        _mm256_cmpgt_epi64(_mm256_setzero_si256(), sum));
+    const __m256i order = _mm256_setr_epi32(1, 3, 5, 7, 1, 3, 5, 7);
+    return _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(rounded, order));
+}
+
+static inline TOPOS_SIMD_TARGET __m256i inverse_round_split24(__m256i high, __m256i low)
+{
+    /* Normalize to base * 2^24 + remainder, with 0 <= remainder < 2^24.
+     * The negative rounding correction borrows only when remainder is zero. */
+    const __m256i zero = _mm256_setzero_si256();
+    const __m256i base = _mm256_add_epi32(high, _mm256_srai_epi32(low, 24));
+    const __m256i remainder = _mm256_and_si256(low, _mm256_set1_epi32(0xffffff));
+    const __m256i borrow = _mm256_and_si256(_mm256_cmpgt_epi32(zero, base),
+                                          _mm256_cmpeq_epi32(remainder, zero));
+    return _mm256_srai_epi32(_mm256_add_epi32(_mm256_add_epi32(base, _mm256_set1_epi32(128)),
+                                             borrow), 8);
+}
+
+static inline int32_t dequant_narrow(int32_t value, uint32_t step)
+{
+    const int64_t coefficient = (int64_t)value * (int64_t)step;
+    if (coefficient > TC_TRANSFORM_MAX_ABS_F) { return TC_TRANSFORM_MAX_ABS_F; }
+    if (coefficient < -TC_TRANSFORM_MAX_ABS_F) { return -TC_TRANSFORM_MAX_ABS_F; }
+    return (int32_t)coefficient;
+}
+
 TOPOS_SIMD_TARGET
-#endif
+void tc_single_ac_store_avx2(const tc_quant_ctx* ctx, int32_t dc,
+                             uint32_t natural, int32_t ac, uint16_t* dst,
+                             size_t stride, int32_t mid, uint16_t max)
+{
+    /* Both coefficients are summed in 64 bits before the same final rounding
+     * as the separable inverse. The stored basis fits signed 32 bits. */
+    const __m256i bias = _mm256_set1_epi64x(
+        (int64_t)dequant_narrow(dc, ctx->Q[0]) * kSampleWeights[0][0]);
+    const __m256i scale = _mm256_set1_epi64x(dequant_narrow(ac, ctx->Q[natural]));
+    const __m128i vmid = _mm_set1_epi32(mid);
+    const __m128i vmax = _mm_set1_epi16((int16_t)max);
+    for (int y = 0; y < 8; ++y) {
+        const int64_t* basis = kSampleWeights[natural] + y * 8;
+        const __m256i left = _mm256_loadu_si256((const __m256i*)basis);
+        const __m256i right = _mm256_loadu_si256((const __m256i*)(basis + 4));
+        const __m128i a = inverse_round_rows(_mm256_add_epi64(bias, _mm256_mul_epi32(left, scale)));
+        const __m128i b = inverse_round_rows(_mm256_add_epi64(bias, _mm256_mul_epi32(right, scale)));
+        const __m128i pixels = _mm_packus_epi32(_mm_add_epi32(a, vmid), _mm_add_epi32(b, vmid));
+        _mm_storeu_si128((__m128i*)(dst + (size_t)y * stride), _mm_min_epu16(pixels, vmax));
+    }
+}
+
+TOPOS_SIMD_TARGET
 void tc_dequant_inverse_8x8_avx2(const tc_quant_ctx* ctx, const int32_t q[64],
                                  int32_t xhat[64], uint32_t ac_rowmask)
 {
@@ -597,10 +649,11 @@ void tc_dequant_inverse_8x8_avx2(const tc_quant_ctx* ctx, const int32_t q[64],
     /* pass B（lanes = x0..3）：pe/po → B[u][0..3] / B[u][7..4]（permute 反转）。
      * 非零行内 8 个 v 无条件执行（与旧版「先 dequant 后 inverse」每系数
      * 同做乘加一致，仅把反量化内联为标量 imul、省 Fp 64 元素写读往返）；
-     * 活跃行直接拆成 BHi·2^16 + BLo，pass 3 跳过同一批零行。 */
-    const __m256i m16 = _mm256_set1_epi64x((int64_t)0xFFFF);
-    __m256i bhi[8][2];
-    __m256i blo[8][2];
+     * 活跃行直接拆成 BHi·2^24 + BLo，pass 3 跳过同一批零行。 */
+    const __m256i low_mask = _mm256_set1_epi32(0xffffff);
+    const __m256i dword_order = _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7);
+    __m256i bhi[8];
+    __m256i blo[8];
     for (int u = 0; u < 8; ++u) {
         if ((rowmask & (1u << u)) != 0u) {
             __m256i pe = _mm256_setzero_si256();
@@ -609,63 +662,61 @@ void tc_dequant_inverse_8x8_avx2(const tc_quant_ctx* ctx, const int32_t q[64],
                 const int32_t c0 = q[u * 8 + v];
                 /* 内联反量化（int64 精确 + 防御钳位，与 tc_dequant_block_ctx
                  * 同式；c0==0 → p=0，无分支） */
-                int64_t p = (int64_t)c0 * (int64_t)Q[u * 8 + v];
-                if (p > (int64_t)TC_TRANSFORM_MAX_ABS_F) { p = (int64_t)TC_TRANSFORM_MAX_ABS_F; }
-                else if (p < -(int64_t)TC_TRANSFORM_MAX_ABS_F) { p = -(int64_t)TC_TRANSFORM_MAX_ABS_F; }
+                const int32_t p = dequant_narrow(c0, Q[u * 8 + v]);
                 __m256i cv = _mm256_set1_epi64x(p);
                 __m256i pr = _mm256_mul_epi32(cv, _mm256_loadu_si256((const __m256i*)kWMb[u][v]));
                 if ((v & 1) == 0) { pe = _mm256_add_epi64(pe, pr); }
                 else { po = _mm256_add_epi64(po, pr); }
             }
-            const __m256i b[2] = {
-                _mm256_add_epi64(pe, po),
-                _mm256_permute4x64_epi64(_mm256_sub_epi64(pe, po), _MM_SHUFFLE(0, 1, 2, 3)),
-            };
-            for (int g = 0; g < 2; ++g) {
-                const __m256i pair = _mm256_shuffle_epi32(b[g], _MM_SHUFFLE(3, 3, 1, 1));
-                bhi[u][g] = _mm256_or_si256(_mm256_srli_epi32(b[g], 16),
-                                            _mm256_slli_epi32(pair, 16));
-                blo[u][g] = _mm256_and_si256(b[g], m16);
-            }
+            const __m256i left = _mm256_add_epi64(pe, po);
+            const __m256i right = _mm256_permute4x64_epi64(
+                _mm256_sub_epi64(pe, po), _MM_SHUFFLE(0, 1, 2, 3));
+            const __m256i left_dwords = _mm256_permutevar8x32_epi32(left, dword_order);
+            const __m256i right_dwords = _mm256_permutevar8x32_epi32(right, dword_order);
+            const __m256i low = _mm256_permute2x128_si256(left_dwords, right_dwords, 0x20);
+            const __m256i high = _mm256_permute2x128_si256(left_dwords, right_dwords, 0x31);
+            bhi[u] = _mm256_or_si256(_mm256_srli_epi32(low, 24), _mm256_slli_epi32(high, 8));
+            blo[u] = _mm256_and_si256(low, low_mask);
         }
     }
 
-    /* pass 3（lanes = x0..3 / x4..7）+ 对称输出 + round32（u 行全零 → 跳过） */
-    const __m256i vr = _mm256_set1_epi64x((int64_t)1 << 31);
+    /* The zero-frequency vertical basis is constant, so all eight rows are
+     * identical when only coefficient row 0 is active. */
+    if (rowmask == 1u) {
+        const __m256i basis = _mm256_set1_epi32(kM32[0][0]);
+        const __m256i row = inverse_round_split24(_mm256_mullo_epi32(basis, bhi[0]),
+                                                 _mm256_mullo_epi32(basis, blo[0]));
+        for (int y = 0; y < 8; ++y) {
+            _mm256_storeu_si256((__m256i*)(xhat + y * 8), row);
+        }
+        return;
+    }
+
+    /* |B| < 2^46, so |BHi| <= 2^22 and BLo < 2^24. Even after combining
+     * mirrored rows, each sum is bounded by 8 * 13 * 2^24 < 2^31. */
     const __m256i zero = _mm256_setzero_si256();
     for (int y = 0; y < 4; ++y) {
-        for (int g = 0; g < 2; ++g) {
-            __m256i qe_hi = zero, qe_lo = zero;
-            __m256i qo_hi = zero, qo_lo = zero;
-            for (int u = 0; u < 8; ++u) {
-                if ((rowmask & (1u << u)) == 0u) { continue; } /* 加零项，跳过 */
-                __m256i my = _mm256_set1_epi64x((int64_t)kM32[u][y]);
-                __m256i hi = _mm256_mul_epi32(my, bhi[u][g]);
-                __m256i lo = _mm256_mul_epi32(my, blo[u][g]);
-                if ((u & 1) == 0) {
-                    qe_hi = _mm256_add_epi64(qe_hi, hi);
-                    qe_lo = _mm256_add_epi64(qe_lo, lo);
-                } else {
-                    qo_hi = _mm256_add_epi64(qo_hi, hi);
-                    qo_lo = _mm256_add_epi64(qo_lo, lo);
-                }
+        __m256i qe_hi = zero, qe_lo = zero;
+        __m256i qo_hi = zero, qo_lo = zero;
+        for (int u = 0; u < 8; ++u) {
+            if ((rowmask & (1u << u)) == 0u) { continue; }
+            const __m256i my = _mm256_set1_epi32(kM32[u][y]);
+            const __m256i hi = _mm256_mullo_epi32(my, bhi[u]);
+            const __m256i lo = _mm256_mullo_epi32(my, blo[u]);
+            if ((u & 1) == 0) {
+                qe_hi = _mm256_add_epi32(qe_hi, hi);
+                qe_lo = _mm256_add_epi32(qe_lo, lo);
+            } else {
+                qo_hi = _mm256_add_epi32(qo_hi, hi);
+                qo_lo = _mm256_add_epi32(qo_lo, lo);
             }
-            __m256i te = _mm256_add_epi64(_mm256_slli_epi64(qe_hi, 16), qe_lo);
-            __m256i to = _mm256_add_epi64(_mm256_slli_epi64(qo_hi, 16), qo_lo);
-            __m256i tp = _mm256_add_epi64(te, to);
-            __m256i tm = _mm256_sub_epi64(te, to);
-            // Signed round-to-nearest, ties away from zero. The rounded
-            // result is the high dword of (sum + 2^31 - (sum < 0)).
-            const __m256i order = _mm256_setr_epi32(1, 3, 5, 7, 1, 3, 5, 7);
-            const __m256i rp = _mm256_add_epi64(_mm256_add_epi64(tp, vr),
-                                               _mm256_cmpgt_epi64(zero, tp));
-            const __m256i rm = _mm256_add_epi64(_mm256_add_epi64(tm, vr),
-                                               _mm256_cmpgt_epi64(zero, tm));
-            const __m128i op = _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(rp, order));
-            const __m128i om = _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(rm, order));
-            _mm_storeu_si128((__m128i*)(xhat + y * 8 + g * 4), op);
-            _mm_storeu_si128((__m128i*)(xhat + (7 - y) * 8 + g * 4), om);
         }
+        const __m256i row = inverse_round_split24(_mm256_add_epi32(qe_hi, qo_hi),
+                                                 _mm256_add_epi32(qe_lo, qo_lo));
+        const __m256i mirrored = inverse_round_split24(_mm256_sub_epi32(qe_hi, qo_hi),
+                                                      _mm256_sub_epi32(qe_lo, qo_lo));
+        _mm256_storeu_si256((__m256i*)(xhat + y * 8), row);
+        _mm256_storeu_si256((__m256i*)(xhat + (7 - y) * 8), mirrored);
     }
 }
 

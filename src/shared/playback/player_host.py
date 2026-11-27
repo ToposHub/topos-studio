@@ -195,6 +195,9 @@ class NativePlayerHost(QObject):
         for player in self._players.values():
             try:
                 player.stop()
+                canvas = getattr(player, 'canvas', None)
+                if canvas is not None:
+                    canvas.close()
             except Exception:
                 pass
         self._players.clear()

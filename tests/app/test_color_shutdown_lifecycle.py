@@ -43,7 +43,7 @@ class _CanvasHost(QGraphicsView):
     def end_timeline_preview(self) -> None:
         self.timeline_preview_end_calls += 1
 
-    def set_timeline_preview_image(self, image) -> None:
+    def set_timeline_preview_image(self, image: QImage, frame: int) -> None:
         self.timeline_preview_images += 1
 
 

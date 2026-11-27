@@ -15,14 +15,18 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-_MAX_WORKERS = 16
-def _default_capacity() -> int:
+DEFAULT_DECODE_WORKERS = 16
+_WINDOWS_PLAYBACK_WORKERS = 24
+
+
+def _default_capacity(max_workers: int) -> int:
     raw = os.environ.get("TOPOS_DECODE_WORKER_BUDGET")
     if raw:
         try:
@@ -30,8 +34,25 @@ def _default_capacity() -> int:
         except ValueError:
             value = 0
         if value > 0:
-            return max(1, min(_MAX_WORKERS, value))
-    return max(1, min(_MAX_WORKERS, int(os.cpu_count() or 1)))
+            return min(max_workers, value)
+    return min(max_workers, int(os.cpu_count() or 1))
+
+
+def _playback_worker_limit() -> int:
+    if sys.platform != "win32" or os.environ.get("TOPOS_DECODE_WORKER_BUDGET"):
+        return DEFAULT_DECODE_WORKERS
+    try:
+        import psutil
+    except ImportError:
+        return DEFAULT_DECODE_WORKERS
+    try:
+        available_cpus = len(psutil.Process().cpu_affinity())
+    except (psutil.Error, OSError, NotImplementedError):
+        return DEFAULT_DECODE_WORKERS
+    # Leave eight logical CPUs for the rest of the app on wide Windows hosts.
+    if available_cpus >= 32:
+        return _WINDOWS_PLAYBACK_WORKERS
+    return DEFAULT_DECODE_WORKERS
 
 
 @dataclass
@@ -74,10 +95,11 @@ class DecodeWorkerLease:
 class DecodeWorkerBudget:
     """Fair process-local worker budget for independent decoder contexts."""
 
-    def __init__(self, capacity: Optional[int] = None) -> None:
+    def __init__(self, capacity: Optional[int] = None, *, max_workers: int = DEFAULT_DECODE_WORKERS) -> None:
         self._lock = threading.RLock()
+        self._max_workers = max(1, min(_WINDOWS_PLAYBACK_WORKERS, int(max_workers)))
         self._capacity = self._sanitize_capacity(
-            _default_capacity() if capacity is None else capacity
+            _default_capacity(self._max_workers) if capacity is None else capacity
         )
         self._entries: dict[str, _Entry] = {}
         # AUD-32104：回调在注册表锁外执行（避免持锁调用用户代码），但
@@ -87,14 +109,16 @@ class DecodeWorkerBudget:
         self._applied_generation = 0  # 已按序下发的最新世代
         self._apply_lock = threading.Lock()
 
-    @staticmethod
-    def _sanitize_capacity(value: int) -> int:
-        return max(1, min(_MAX_WORKERS, int(value)))
+    @property
+    def max_workers(self) -> int:
+        return self._max_workers
 
-    @staticmethod
-    def _sanitize_requested(value: int) -> int:
+    def _sanitize_capacity(self, value: int) -> int:
+        return max(1, min(self._max_workers, int(value)))
+
+    def _sanitize_requested(self, value: int) -> int:
         # 0 means no per-context cap and participates in fair sharing.
-        return max(0, min(_MAX_WORKERS, int(value)))
+        return max(0, min(self._max_workers, int(value)))
 
     def acquire(
         self,
@@ -168,6 +192,20 @@ class DecodeWorkerBudget:
             if entry is None:
                 raise KeyError(key)
             entry.apply = apply
+            # The share may have changed while the native context was opening.
+            # Publish the current allocation to every callback together.
+            self._generation += 1
+            generation = self._generation
+            updates = self._rebalance_locked()
+        self._apply_updates(updates, generation)
+
+    def _active_capacity_locked(self) -> int:
+        if self._capacity <= DEFAULT_DECODE_WORKERS:
+            return self._capacity
+        if any(entry.role == "playback" and (entry.requested == 0 or entry.requested > DEFAULT_DECODE_WORKERS)
+               for entry in self._entries.values()):
+            return self._capacity
+        return DEFAULT_DECODE_WORKERS
 
     def _rebalance_locked(self) -> list[tuple[Callable[[int], None], int, str]]:
         entries = list(self._entries.values())
@@ -179,14 +217,15 @@ class DecodeWorkerBudget:
         # an already-running playback context.
         for entry in entries:
             entry.assigned = 1
-        remaining = max(0, self._capacity - len(entries))
+        capacity = self._active_capacity_locked()
+        remaining = max(0, capacity - len(entries))
         cursor = 0
         while remaining:
             progressed = False
             for _ in range(len(entries)):
                 entry = entries[cursor]
                 cursor = (cursor + 1) % len(entries)
-                limit = entry.requested or self._capacity
+                limit = entry.requested or capacity
                 if entry.assigned < limit:
                     entry.assigned += 1
                     remaining -= 1
@@ -230,11 +269,12 @@ class DecodeWorkerBudget:
 
     def _snapshot_locked(self) -> Dict[str, Any]:
         assigned = sum(entry.assigned for entry in self._entries.values())
+        capacity = self._active_capacity_locked()
         return {
-            "capacity": self._capacity,
+            "capacity": capacity,
             "active": len(self._entries),
             "assigned_total": assigned,
-            "oversubscribed": assigned > self._capacity,
+            "oversubscribed": assigned > capacity,
             "leases": [
                 {
                     "key": entry.key,
@@ -257,4 +297,4 @@ class DecodeWorkerBudget:
             self._generation += 1
 
 
-DECODE_WORKER_BUDGET = DecodeWorkerBudget()
+DECODE_WORKER_BUDGET = DecodeWorkerBudget(max_workers=_playback_worker_limit())

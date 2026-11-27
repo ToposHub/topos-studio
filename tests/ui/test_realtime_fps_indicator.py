@@ -68,14 +68,14 @@ def test_realtime_fps_indicator_is_neutral_before_first_valid_sample(qapp):
     indicator = RealtimeFpsIndicator(now_fn=lambda: clock[0])
     indicator.set_playback_state(True, 24.0)
     indicator.record_presented_frame(1)
-    clock[0] = 1.0
+    clock[0] = 0.25
     indicator._refresh_display()
 
-    assert indicator.text() == "FPS --"
+    assert indicator.text() == "FPS —"
     assert "#9a9a9a" in indicator.styleSheet()
 
 
-def test_realtime_fps_indicator_keeps_last_value_when_frames_stop_arriving(qapp):
+def test_realtime_fps_indicator_shows_zero_during_a_stall(qapp):
     from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 
     clock = [0.0]
@@ -89,12 +89,24 @@ def test_realtime_fps_indicator_keeps_last_value_when_frames_stop_arriving(qapp)
     clock[0] = 2.0
     indicator._refresh_display()
 
-    assert indicator.text() == "24 FPS"
+    assert indicator.text() == "0 FPS"
+    assert indicator.measured_fps == 0.0
     assert "#ff6b6b" in indicator.styleSheet()
 
     indicator.set_playback_state(False, 24.0)
     assert indicator.text() == "24 FPS"
     assert "#9a9a9a" in indicator.styleSheet()
+
+
+def test_realtime_fps_indicator_shows_zero_if_playback_never_presents(qapp) -> None:
+    from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
+
+    clock = [0.0]
+    indicator = RealtimeFpsIndicator(now_fn=lambda: clock[0])
+    indicator.set_playback_state(True, 120.0)
+    clock[0] = 1.0
+    indicator._refresh_display()
+    assert indicator.text() == "0 FPS"
 
 
 def test_realtime_fps_indicator_refresh_is_throttled_to_playback(qapp):

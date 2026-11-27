@@ -60,8 +60,10 @@ from src.shared.codec.topos_binding import (
     ToposMovieFile,
     ToposMovieSummary,
 )
-from src.shared.codec.decode_worker_budget import DECODE_WORKER_BUDGET, DecodeWorkerLease
-from src.shared.codec.topos_profiles import topos_tier_label_by_numeric_id
+from src.shared.codec.decode_worker_budget import (
+    DECODE_WORKER_BUDGET, DEFAULT_DECODE_WORKERS, DecodeWorkerLease,
+)
+from src.shared.codec.topos_profiles import TOPOS_TIER_IDS, topos_tier_label_by_numeric_id
 
 from .color_metadata import (
     map_color_primaries,
@@ -112,15 +114,18 @@ _PIXEL_FORMAT_NO_ALPHA = {
 }
 
 # 顺序读前批量预取（阶段4 兑现）：decode_views_batch 单批跨帧解码。
-# D1 实测显示同步批量会把整批成本集中到首个显示帧，抬高 4K p95/p99；
-# 因此播放路径默认关闭批量，导出路径仅自动使用有界深度，仍保留
-# TOPOS_READAHEAD/read_ahead 显式 opt-in/override。
+# 同步批量会把整批成本集中到首个显示帧。播放仅对低档 1080p V7 在宽
+# worker 预算下自动使用有界批量；导出有独立默认深度。两种路径都支持
+# TOPOS_READAHEAD/read_ahead 显式覆盖。
 # 显式深度仍受“预取帧总平面字节数 ≤ 预算”约束（0=关闭、正数=固定深度）。
 # P1-03：预算按"平面池条目（max(5, depth+2)）× 帧平面字节"记账，任何来
 # 源的深度都不得突破；超预算覆盖必须显式设 TOPOS_UNSAFE_READAHEAD 真值
 # 并记 warning（可见降级，审计 P1-03）。
 _READAHEAD_BUDGET_BYTES = 160 << 20
 _READAHEAD_MAX_DEPTH = 0
+_READAHEAD_PLAYBACK_LOW_DEPTH = 2
+_READAHEAD_PLAYBACK_LOW_TIERS = frozenset(TOPOS_TIER_IDS[tier] for tier in ('proxy', 'lt'))
+_READAHEAD_HD_PROXY_DEPTH = 4
 # 导出由顺序生产者 + 编码队列吸收首批尾延迟；小于 4K 目标的素材可获得
 # 跨帧批处理收益，而 4K 4444 会因预算 cap 自动回到 0，不额外占用内存。
 _READAHEAD_EXPORT_DEPTH = 4
@@ -519,8 +524,8 @@ class ToposMediaSource:
             path: Topos MOV 文件路径
             target_size: 可选代理目标尺寸 (w, h)（仅缩小；放大回退原始分辨率）
             preserve_planes: 接受但对本源无效果（恒 planar）
-            read_ahead: 顺序读前批量预取深度；None=自动策略（播放关闭、导出为
-                4 帧并受预算限制；TOPOS_READAHEAD 可显式覆盖），0=关闭，正数=固定深度
+            read_ahead: 顺序读前批量预取深度；None=受预算限制的自动策略
+                （TOPOS_READAHEAD 可覆盖），0=关闭，正数=固定深度。
             decode_workers: 本 source decoder context 的 worker 上限；None=按
                 D3 共享预算公平分配，0=跟随进程池，正数=显式上限。也可用
                 TOPOS_DECODE_WORKERS 设置默认值。
@@ -585,6 +590,7 @@ class ToposMediaSource:
         self._gop_em = 0  # 帧间载体 cfg 选择子（10=V9 / 11=V7-R3；0=非帧间）
         # 阶段4 兑现：顺序读前批量预取（depth=0 关闭；open 时定容）
         self._ra_depth = 0
+        self._ra_auto_playback = False
         self._ra_seq = False  # 上一次 read_next_frame 是否顺序前进（批量触发条件）
         self._ra_cache: dict[int, "tuple[_ToposPlaneEntry, tuple, ToposFrameInfo, int]"] = {}
         self._ra_stats = {
@@ -1295,15 +1301,17 @@ class ToposMediaSource:
                         self._ra_seq = True
                         return self._assemble_decoded_frame(
                             index, info, list(arrays), pts, pool_entry=entry)
-                    if self._ra_seq:
+                    if self._ra_seq and (
+                        not self._ra_auto_playback
+                        or self._decode_workers_assigned == DECODE_WORKER_BUDGET.max_workers
+                    ):
                         served = self._read_ahead(index)
                         if served is not None:
                             return served
                         # 整批拒绝/末尾不足 2 帧 → 回退本帧单帧路径（保持错误语义）
                         self._ra_stats['batch_fallbacks'] += 1
-                    else:
-                        # 首帧单解，下一帧起顺序性确认、批量读前
-                        self._ra_seq = True
+                    # 首帧单解；自动播放在共享 worker 预算缩小时暂停发起批量。
+                    self._ra_seq = True
                 decode_request = self._decode_request
                 is_base_packet = False
                 if (decode_request is not None and self._bitstream_major == 7 and
@@ -1637,6 +1645,7 @@ class ToposMediaSource:
         warning 记录估计占用。自适应在预算容不下最小摊销深度时诚实关闭
         （depth=0）而非超预算预取。
         """
+        self._ra_auto_playback = False
         raw = self._read_ahead_param
         if raw is None:
             env = os.environ.get('TOPOS_READAHEAD')
@@ -1673,15 +1682,31 @@ class ToposMediaSource:
                     _READAHEAD_BUDGET_BYTES >> 20, _READAHEAD_UNSAFE_ENV,
                 )
             return depth
-        # 播放路径以每帧尾延迟为优先；导出路径的顺序生产者可由编码队列
-        # 吸收批首延迟，因此自动启用一个受预算约束的小深度。
-        default_depth = (
-            _READAHEAD_EXPORT_DEPTH
-            if self._decode_role == "export"
-            else _READAHEAD_MAX_DEPTH
+        if self._decode_role == "export":
+            return min(cap, _READAHEAD_EXPORT_DEPTH)
+        s = self._summary
+        max_workers = DECODE_WORKER_BUDGET.max_workers
+        # Native batch uses the explicit context budget before consulting the
+        # process-wide fallback in tc_dev_thread_count().
+        self._ra_auto_playback = (
+            cap >= _READAHEAD_PLAYBACK_LOW_DEPTH
+            and self._decode_role == "playback"
+            and self._target_size is None
+            and self._decode_request is None
+            and self._decode_budget_lease is not None
+            and max_workers > DEFAULT_DECODE_WORKERS
+            and self._decode_workers_requested in (0, max_workers)
+            and self._bitstream_major == 7
+            and s is not None
+            and s.tier_id in _READAHEAD_PLAYBACK_LOW_TIERS
+            and s.width <= 1920 and s.height <= 1080
+            and (s.pixel_format, s.bit_depth, s.alpha_mode) == (0, 10, 0)
         )
-        depth = max(0, min(cap, default_depth))
-        return depth
+        if not self._ra_auto_playback or s is None:
+            return _READAHEAD_MAX_DEPTH
+        if (s.width, s.height, s.tier_id) == (1920, 1080, TOPOS_TIER_IDS['proxy']):
+            return min(cap, _READAHEAD_HD_PROXY_DEPTH)
+        return _READAHEAD_PLAYBACK_LOW_DEPTH
 
     def _resolve_decode_workers(self) -> int:
         """Resolve source worker preference without changing the native pool."""
@@ -1694,12 +1719,15 @@ class ToposMediaSource:
                 except ValueError:
                     logger.warning("TOPOS_DECODE_WORKERS=%r 非法，使用共享预算", env)
                     raw = None
-        if raw is None:
-            requested = 0
-        else:
-            requested = max(0, min(16, int(raw)))
+        limit = DECODE_WORKER_BUDGET.max_workers
+        if self._decode_role != "playback" or self._target_size is not None:
+            limit = min(limit, DEFAULT_DECODE_WORKERS)
+        requested = 0 if raw is None else max(0, min(limit, int(raw)))
+        if raw is not None:
             if int(raw) != requested:
                 logger.warning("decode_workers=%r 被钳到 %d", raw, requested)
+        if requested == 0 and limit < DECODE_WORKER_BUDGET.max_workers:
+            requested = limit
         self._decode_workers_requested = requested
         return requested
 

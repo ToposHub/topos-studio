@@ -58,11 +58,33 @@ typedef struct tc_deblock_plane_view {
     uint32_t height;
 } tc_deblock_plane_view;
 
+#define TC_DEBLOCK_MAX_COLOR_PLANES 3u
+#define TC_DEBLOCK_BATCH_SIZE 2u
+
+typedef struct tc_deblock_frame_view {
+    tc_deblock_plane_view planes[TC_DEBLOCK_MAX_COLOR_PLANES];
+    uint32_t plane_count;
+    uint32_t qp;
+    uint32_t table_sel;
+    uint8_t bit_depth;
+} tc_deblock_frame_view;
+
 /* Filter up to three disjoint full-resolution color planes in one batch.
  * Each stride is expressed in samples and covers the plane width. */
 void tc_deblock_planes(const tc_deblock_plane_view* planes, uint32_t count,
                        uint32_t qp, uint32_t table_sel, uint8_t bit_depth,
                        uint32_t max_workers);
+
+/* Share one pool dispatch across up to TC_DEBLOCK_BATCH_SIZE frames.
+ * All planes across the batch must have disjoint output storage. */
+void tc_deblock_frames(const tc_deblock_frame_view* frames, uint32_t count,
+                      uint32_t max_workers);
+
+/* Filter the rows owned by one decoded stripe, or just its leading boundary
+ * after adjacent stripes have completed. Full-size 8x8 grid only. */
+void tc_deblock_slice_band(const tc_deblock_plane_view* plane, uint32_t block_y,
+                           uint32_t block_rows, uint32_t qp, uint32_t table_sel,
+                           uint8_t bit_depth, int boundary_only);
 
 /* 对单平面就地去块。pix 为行主序 uint16 采样；stride_pix 为行距（采样数）；
  * w/h 为平面几何（8 的倍数，非对齐防御性跳过）；qp 取帧级有效 qp；

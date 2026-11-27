@@ -652,13 +652,20 @@ static inline int32_t tc_color_store_block_xy(tc_color_store_ctx* c, uint32_t id
         uint32_t cw = (c->vis_w - px0 < 8u) ? c->vis_w - px0 : 8u;
         uint32_t ch = (c->vis_h - py0 < 8u) ? c->vis_h - py0 : 8u;
         uint16_t* blk = c->dst + (size_t)py0 * c->stride + px0;
-#if defined(TOPOS_SINK_NEON)
+#if defined(TOPOS_SINK_SSE2) || defined(TOPOS_SINK_NEON)
         if (cw == 8u) {
-            const uint16x8_t vfill = vdupq_n_u16(fill);
             const uint64_t t_store = sample ? tc_profile_now_ns() : 0u;
+#if defined(TOPOS_SINK_SSE2)
+            const __m128i vfill = _mm_set1_epi16((int16_t)fill);
+            for (uint32_t y = 0u; y < ch; ++y) {
+                _mm_storeu_si128((__m128i*)(blk + (size_t)y * c->stride), vfill);
+            }
+#else
+            const uint16x8_t vfill = vdupq_n_u16(fill);
             for (uint32_t y = 0u; y < ch; ++y) {
                 vst1q_u16(blk + (size_t)y * c->stride, vfill);
             }
+#endif
             tc_color_store_profile_store_done(c, sample, t_store, 1u);
             if (c->stats != NULL) {
                 if (sample) {
