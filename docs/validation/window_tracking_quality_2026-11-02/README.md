@@ -1,5 +1,7 @@
 # Window tracking quality and interaction verification — 2026-11-02
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 ## Scope and acceptance
 
 The supplied `测试素材01.mov` contains 124 frames at 25 fps, 1920 × 1080.
@@ -17,7 +19,7 @@ ProRes 4444 source; Topos used the supplied H.264 1080p file of the same scene.
 The UI readouts are rounded, and source resolution was accounted for by a 2:1
 conversion. Treat the comparison as approximate, not ground truth.
 
-![Actual viewer crops, Resolve on the left and Topos on the right](comparison.jpg)
+Actual viewer crops, Resolve on the left and Topos on the right
 
 The crops are resized to the same display size. They are actual application
 screenshots; no synthetic tracking outlines were added. The footage, tint,

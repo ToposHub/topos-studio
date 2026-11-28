@@ -63,7 +63,7 @@ standalone 闭环不满足实时（4K 尤甚），不冒充满足。bench RSS �
   `TOPOS_SCOPE_DIAG`（S01）与 `get_render_stats()["gpu_scope_diagnostics"]`
   提供运行期诊断；
 - 操作帮助：本目录文档（backend_matrix / capability_inventory /
-  scopes/s00_s01_record / 本文件）+ docs/color_nodes_mixer_spec.md。
+  scopes/s00_s01_record / 本文件）+ docs/architecture/color_nodes_mixer_spec.md。
 
 ## 复跑命令
 

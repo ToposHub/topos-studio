@@ -18,7 +18,7 @@
 - 基类桩行为、代理分辨率计算、显示几何、渲染参数与提交路径
 
 已知疑似 bug 以 characterization test 固定当前行为并引用 BUG-C2-xx 编号，
-详见 docs/testcoverage/2026-09-28/BUGS-agent-C2.md。
+详见 docs/validation/coverage/2026-09-28/BUGS-agent-C2.md。
 
 验收命令：
 .venv/bin/python -m pytest tests/video/test_video_playback_coverage.py -q

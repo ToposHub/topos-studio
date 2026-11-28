@@ -10,7 +10,7 @@ tests/test_videos:
     falls back per codec availability)
 
 Outputs:
-  docs/decode_speed_benchmark_<date>.json  raw per-frame stats
+  docs/benchmarks/performance/decode_speed_benchmark_<date>.json  raw per-frame stats
   stdout summary table
 
 Run:
@@ -217,7 +217,7 @@ def main() -> None:
                                   "ffmpeg": ff, "vt": vt})
 
     json_path = args.json_out or os.path.join(
-        ROOT, "docs", f"decode_speed_benchmark_{date.today():%Y-%m-%d}.json")
+        ROOT, "docs", "benchmarks", "performance", f"decode_speed_benchmark_{date.today():%Y-%m-%d}.json")
     os.makedirs(os.path.dirname(json_path), exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)

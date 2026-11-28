@@ -383,7 +383,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_hdr_math_contract_document_exists():
     """Test that HDR math contract document exists."""
-    contract_path = ROOT / 'docs' / 'hdr_math_contract.md'
+    contract_path = ROOT / 'docs' / 'architecture' / 'hdr_math_contract.md'
     assert contract_path.exists(), f"HDR math contract not found at {contract_path}"
 
 

@@ -1,6 +1,6 @@
 # content_staging/library_v1 —— 内容库 L 计划第三机暂存区
 
-> 计划：`docs/upgrade_plan_L_content_library_2026-10-24.md`（§2.1 文件所有权）。
+> 计划：`docs/plans/platform/upgrade_plan_L_content_library_2026-10-24.md`（§2.1 文件所有权）。
 > 本目录由第三机（L 线）独占写入；Mac 主集成者只在发布时从这里取组件放入生产路径。
 > 开工时间：2026-10-25；开工时 `content_staging/` 不存在，目录未被占用。
 
@@ -38,7 +38,7 @@
 ## 测试与文档
 
 - `tests/content_library_v1/`：自有 focused/契约/视觉测试；不改父 conftest 与共享夹具。
-- `docs/content_library_v1/`：使用说明、算法区别、平台交接、发布记录。
+- `docs/architecture/content_library_v1/`：使用说明、算法区别、平台交接、发布记录。
 - `docs/validation/upgrade_L/`：每包基线/结果/能力矩阵与证据索引。
 
 ## 发布路径（拟定，由 L02–L04 定稿）

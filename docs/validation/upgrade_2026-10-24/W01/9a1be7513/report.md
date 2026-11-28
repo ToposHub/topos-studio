@@ -1,6 +1,6 @@
 # W01 · Windows codec 重建与红基线清理报告（机器 B · 2026-10-24）
 
-> 责任包：W01（`docs/upgrade_plan_W_windows_2026-10-24.md` §3）。
+> 责任包：W01（`docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md` §3）。
 > base `9a1be7513`（W00 提交后）；构建+修复全在本机完成。
 
 ## 1. DLL 重建（W-I01 主项）

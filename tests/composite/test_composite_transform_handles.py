@@ -8,7 +8,7 @@ Covers the rotation-aware geometry & drag math in viewer_handles:
   edge) / Shift-uniform / clamp, all correct under any rotation, with the
   opposite anchor held fixed in world space.
 
-Reference: docs/superpowers/specs/2026-06-12-composite-transform-handles-design.md
+Reference: docs/architecture/design/specs/2026-06-12-composite-transform-handles-design.md
 """
 
 import math

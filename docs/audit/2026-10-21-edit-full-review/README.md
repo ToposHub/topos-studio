@@ -1,8 +1,10 @@
 # 2026-10-21 Edit 第六轮审计证据
 
-主计划：[edit_page_sixth_full_audit_optimization_plan_2026-10-21.md](../../edit_page_sixth_full_audit_optimization_plan_2026-10-21.md)。
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
 
-基线与环境见 [records/environment.json](records/environment.json)。目录只保存审计资料，没有产品修复。用户原始测试视频只读；隔离配置、临时字幕/音频、生成工程与成片位于 `/tmp/topos-edit-audit-20261021/` 及探针各自声明的 `/tmp` 路径。成片二进制没有额外复制入库，保存了 ffprobe、manifest 和解码画面；临时文件可能被系统清理，重放时应重新生成。
+主计划：edit_page_sixth_full_audit_optimization_plan_2026-10-21.md。
+
+基线与环境见 records/environment.json。目录只保存审计资料，没有产品修复。用户原始测试视频只读；隔离配置、临时字幕/音频、生成工程与成片位于 `/tmp/topos-edit-audit-20261021/` 及探针各自声明的 `/tmp` 路径。成片二进制没有额外复制入库，保存了 ffprobe、manifest 和解码画面；临时文件可能被系统清理，重放时应重新生成。
 
 ## 文件组织
 
@@ -21,19 +23,19 @@
 
 ## 最重要的交互证据
 
-- [015：锁轨效果◆仍提交](records/015_effect_keyframe_locked.json)。轨锁准备使用生产handler，◆为真实鼠标点击。
-- [020：SRT/ASS实际拖入，ASS文本丢失](records/020_import_captions.json)。
-- [025：真实音频分析阻塞UI心跳](records/025_normalize_ui_responsiveness.json)。调用生产分析方法于实际GUI线程，不是替换解码器。
-- [029：300帧序列的Custom范围误报0帧](records/029_delivery_context.json)。
-- [030：真实队列普通导出成功](records/030_export_run.json)、[成片ffprobe](records/gui_export_ffprobe.json)、[manifest](records/gui_export_manifest.json)。
-- [032：真实嵌套导出失败](records/032_nested_delivery.json)。
-- [033：非当前序列导出失败](records/033_other_timeline_export.json)。
-- [037：尺规/控制器同步后，Next/Home破坏同步](records/037_transport_fresh_timeline.json)。
-- [038：无截图的18次切源复验仍有GPU错误/释放告警](records/038_source_switch_no_capture.json)。
-- [042：真实场景检测完成](records/042_scene_results.json)。
-- [043：生产保存重开、12素材/3时间线一致](records/043_save_reopen.json)。
-- [044：真实运行中的队列任务取消，未生成成功manifest](records/044_export_cancel.json)。不等同底层decoder释放正确。
-- [045：保存后正常关窗](records/045_close_requested.json)、[进程退出码0](records/process_exit.json)。应用日志末尾有GPU线程2000ms未退出的错误，清理路径仍需优化，归入U06。
+- 015：锁轨效果◆仍提交。轨锁准备使用生产handler，◆为真实鼠标点击。
+- 020：SRT/ASS实际拖入，ASS文本丢失。
+- 025：真实音频分析阻塞UI心跳。调用生产分析方法于实际GUI线程，不是替换解码器。
+- 029：300帧序列的Custom范围误报0帧。
+- 030：真实队列普通导出成功、成片ffprobe、manifest。
+- 032：真实嵌套导出失败。
+- 033：非当前序列导出失败。
+- 037：尺规/控制器同步后，Next/Home破坏同步。
+- 038：无截图的18次切源复验仍有GPU错误/释放告警。
+- 042：真实场景检测完成。
+- 043：生产保存重开、12素材/3时间线一致。
+- 044：真实运行中的队列任务取消，未生成成功manifest。不等同底层decoder释放正确。
+- 045：保存后正常关窗、进程退出码0。应用日志末尾有GPU线程2000ms未退出的错误，清理路径仍需优化，归入U06。
 
 ## 证据解释和驱动修正
 

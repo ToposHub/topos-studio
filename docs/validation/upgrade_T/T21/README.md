@@ -22,7 +22,7 @@
 - 命令：`.venv/bin/python -m pytest tests/architecture -q`
 - 结果：409 passed, 1 xfailed, **2 failed**——开工前基线存量
   （`edit_controller.py` 深导入指纹未更新，见
-  `docs/insights/handoff_M_baseline_guardrails.md`）；G1a/G2 新增改动
+  `docs/architecture/insights/handoff_M_baseline_guardrails.md`）；G1a/G2 新增改动
   未产生新违例。
 
 ## 3. 真实产品入口（G1a + G1b-lite 已验 ✅ / 鼠标级交互待人工 ⏳）

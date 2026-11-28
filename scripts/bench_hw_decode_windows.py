@@ -13,7 +13,7 @@ H.264/H.265 跑全部 4 条；ProRes/DNxHR 仅 CPU 两条（无硬解能力）�
 GPU 升频、解码器 JIT），再计时后续 N 帧的顺序解码（播放热路径是顺序读，
 不走 seek）。
 
-B0.2（docs/perf_plan_B_windows_2026-10-22.md）测量口径：
+B0.2（docs/plans/performance/perf_plan_B_windows_2026-10-22.md）测量口径：
 
 - 分段计时：``open_ms``（容器打开+会话建立；prod 路径含 probe，raw 不含，
   语义随路径）/ ``first_frame_ms``（open 后首帧取回）/ ``warmup_ms``（首帧

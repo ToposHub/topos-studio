@@ -36,8 +36,8 @@ def test_backend_self_reports_available_with_pinned_build(backend):
         pytest.skip(
             "pinned headless browser unavailable in this environment "
             "(playwright/chromium not installed). W0-A gate cannot run; "
-            "see docs/adr/0001-html-renderer-offscreen-readback.md and "
-            "docs/adr/0002-html-renderer-pinned-headless-backend.md.")
+            "see docs/architecture/adr/0001-html-renderer-offscreen-readback.md and "
+            "docs/architecture/adr/0002-html-renderer-pinned-headless-backend.md.")
     # The build string pins the python + browser revision for cache keys.
     assert backend.backend_build.startswith("playwright-chromium/py")
     # is_available captured a real chrome version into the build.

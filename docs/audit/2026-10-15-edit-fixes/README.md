@@ -1,10 +1,12 @@
 # 第四轮剪辑复查：修复与验证证据
 
-执行日期：2026-10-15 至 2026-10-16。代码基线 `8330e42df`。主记录：[第四轮修复记录](../../edit_page_fourth_audit_fixes_2026-10-16.md)，兼容性：[Edit v4 采样时钟](../../edit_sampling_phase_v4.md)。这是修复记录，历史三轮计划和证据未覆盖。
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
+执行日期：2026-10-15 至 2026-10-16。代码基线 `8330e42df`。主记录：[第四轮修复记录](../../validation/edit/edit_page_fourth_audit_fixes_2026-10-16.md)，兼容性：[Edit v4 采样时钟](../../architecture/edit_sampling_phase_v4.md)。这是修复记录，历史三轮计划和证据未覆盖。
 
 ## 最终结果
 
-最终 Edit 回归：**10,606 passed，20 skipped，0 failed / 0 error**（10,613 个分片用例加独立生命周期 13 项；分片 605 文件，另有生命周期 1 文件）。七个分片均退出 0 且未超时。汇总见 [final-validation-summary.json](validation/final-validation-summary.json)，原始日志/XML 在 `validation/final-edit-batches-v2/`。
+最终 Edit 回归：**10,606 passed，20 skipped，0 failed / 0 error**（10,613 个分片用例加独立生命周期 13 项；分片 605 文件，另有生命周期 1 文件）。七个分片均退出 0 且未超时。汇总见 final-validation-summary.json，原始日志/XML 在 `validation/final-edit-batches-v2/`。
 
 各分工报告、focused 测试与最终全集存在重叠，不能累加成独立测试数。`skipped` 仍是未执行项，不能算通过；具体原因保存在 JUnit XML。未运行整个仓库所有产品模块。
 
@@ -12,7 +14,7 @@
 
 `interactive_driver.py` 使用生产 `src.main` 的原生库隔离和 Qt 启动顺序、完整 `MainWindow`、macOS `cocoa`，在独立配置和新建临时工程中发真实 QTest 鼠标、键盘、拖放事件。没有打开或改写用户既有工程，没有复制/修改 `tests/test_videos/` 原素材。运行时 Qt 为 6.10.2，编译标记为 6.10.0。
 
-最终记录位于 [gui-session3/interaction_records.json](gui-session3/interaction_records.json)，可执行输入为同目录 `command-*.py`，窗口截图保留在同目录。验证内容：
+最终记录位于 gui-session3/interaction_records.json，可执行输入为同目录 `command-*.py`，窗口截图保留在同目录。验证内容：
 
 | 路径 | 实际操作与断言 |
 |---|---|
@@ -31,9 +33,9 @@
 
 ### 真实导出
 
-[export_smoke.py](export_smoke.py) 从上述已保存工程加载三个序列（含 Nest 父/子），通过 `TimelineExporter` 正式服务分别导出 49 帧、640×360、H264/AAC 短片，全部 `success=true`、`audio_omitted=false`。输出短片、导出 manifest 和 [export-smoke-results.json](gui-session3/export-smoke-results.json) 均保留。
+export_smoke.py 从上述已保存工程加载三个序列（含 Nest 父/子），通过 `TimelineExporter` 正式服务分别导出 49 帧、640×360、H264/AAC 短片，全部 `success=true`、`audio_omitted=false`。输出短片、导出 manifest 和 export-smoke-results.json 均保留。
 
-另用 [probe_exports.py](probe_exports.py) 的独立 PyAV 进程重新解码三个文件，确认每个 49 帧视频、AAC 95,232 个解码样本、非零音频 RMS，见 [export-probe-results.json](gui-session3/export-probe-results.json)。解码样本含 AAC 编码填充，不当作时长误差证明。GPU primary 数值路径另见调色回归：实际 OpenGL 预览/导出与 Metal worker、uint8/uint16/float、alpha、HDR 超白/负值；随机 150 个合法轮/暗部/饱和度组合中 68 个被快路接受，最大 uint8 code 偏差为 0，见 `validation/color-random-domain.json`。
+另用 probe_exports.py 的独立 PyAV 进程重新解码三个文件，确认每个 49 帧视频、AAC 95,232 个解码样本、非零音频 RMS，见 export-probe-results.json。解码样本含 AAC 编码填充，不当作时长误差证明。GPU primary 数值路径另见调色回归：实际 OpenGL 预览/导出与 Metal worker、uint8/uint16/float、alpha、HDR 超白/负值；随机 150 个合法轮/暗部/饱和度组合中 68 个被快路接受，最大 uint8 code 偏差为 0，见 `validation/color-random-domain.json`。
 
 ## 自动回归与复现
 

@@ -2,7 +2,7 @@
 
 日期：2026-09-12 ｜ 真机：AMD Radeon RX 6800（0x1002/0x73BF，驱动 26.8.1.260806）+ Win11 26200
 脚本：`scripts/probe_wgl_interop_windows.py` ｜ 原始数据：`wgl_interop_probe_amd_rx6800.json`
-对应计划：`docs/windows_optimization_plan_2026-09-11.md` W1-02、K-W2、开放问题 2/3
+对应计划：`docs/plans/platform/windows_optimization_plan_2026-09-11.md` W1-02、K-W2、开放问题 2/3
 
 ## 结论（只信探测，不按 vendor 猜）
 

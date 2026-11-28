@@ -1,7 +1,7 @@
 # Vignette_Shapes 插件规格（计划03）
 
 > 状态：已实现（plugins/Vignette_Shapes.tglsl）
-> 依据：`docs/plugins/2026-09-28/STYLE_NOTES.md`、`docs/PLUGIN_DEV_GUIDE.md` 暗角案例 A
+> 依据：`docs/plugins/2026-09-28/STYLE_NOTES.md`、`docs/plugins/PLUGIN_DEV_GUIDE.md` 暗角案例 A
 > （仅作需求参照，实现未照抄：本插件为多形状 + 均值保持亮度补偿的完整重设计）、
 > `plugins/Radial_Blur_Pro.tglsl`（计划03 select 分发与文档惯例参照）
 > 日期：2026-09-28

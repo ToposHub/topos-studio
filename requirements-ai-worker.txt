@@ -1,6 +1,6 @@
 # ==============================================================================
 # Topos Color - 可选 AI Worker 依赖 · 组合A「ASR 主链」（M01）
-# 计划：docs/upgrade_plan_M_mac_2026-10-24.md §M01
+# 计划：docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md §M01
 # ==============================================================================
 # 覆盖：ASR（Qwen3-ASR）/词级对齐（Qwen3-ForcedAligner）/Vault real embed
 # （sentence-transformers）。

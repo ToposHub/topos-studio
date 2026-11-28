@@ -2,7 +2,7 @@
 
 历史版本在仓库根写 test_cache_image.exr、rmtree 生产 FileIO.CACHE_DIR、
 以 print+return 代替断言，并在 cv2/OpenEXR 编码路径触发 Illegal instruction
-进程崩溃（见 docs/project_full_audit_optimization_plan_2026-09-20.md P0-QA-01）。
+进程崩溃（见 docs/plans/code_quality/project_full_audit_optimization_plan_2026-09-20.md P0-QA-01）。
 
 实测确认（2026-09-20，本机 opencv-python 构建）：其 OpenEXR 编码器存在
 与输入无关的随机 SIGILL（约 15-30% 频率，4x4 与 2000x2000 均可触发，

@@ -19,7 +19,7 @@
   "type": "doc-gap",
   "severity": "Suggestion",
   "title": "@export_support opengl 值域未在 PLUGIN_DEV_GUIDE 能力清单中文档化（Two 插件沿用 warm_tint 先例）",
-  "location": "docs/PLUGIN_DEV_GUIDE.md",
+  "location": "docs/plugins/PLUGIN_DEV_GUIDE.md",
   "evidence": "docs/plugins/2026-09-28/DEFECTS.md D-2",
   "recommendation": "指南补充能力键合法值域",
   "confidence": "high",

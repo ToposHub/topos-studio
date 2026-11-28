@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """X-TEST-00：冻结 tests/test_videos 环境 + 素材不可变 manifest。
 
-总计划（docs/ai_executable_optimization_upgrade_plan_2026-09-17.md §3.5）要求：
+总计划（docs/plans/ai/ai_executable_optimization_upgrade_plan_2026-09-17.md §3.5）要求：
 为 tests/test_videos 中每个原始素材生成不可变 manifest——绝对路径/内容哈希、
 codec、profile、pix_fmt、位深、分辨率、FPS、帧数、时长、音频流；同时记录
 macOS、GPU、Metal/GL、FFmpeg、TOPOS dylib ABI、git revision。

@@ -6,7 +6,7 @@ composition 路径而非 build_shader 融合路径），在 ModernGL standalone
 context 上以固定输入图案渲染固定效果旗标组合，输出 RGBA8 **位级哈希**
 与已归档基线比对。
 
-- 门禁定义见 ``docs/adr/0004-dual-emitter-refactor-and-coverage-gates.md``：
+- 门禁定义见 ``docs/architecture/adr/0004-dual-emitter-refactor-and-coverage-gates.md``：
   任何触碰 shader_compiler / effect_spec / shader_nodes 的 PR 必须全绿
   ——重构期间 GL 输出像素不得变化（P7-01 验收原文）。
 - 基线按 GPU 指纹绑定：``tests/color/golden/shader_golden_corpus.json``。

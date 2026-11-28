@@ -145,7 +145,7 @@ format.
 > (2K Proxy/Standard/HQ), +1.01/+0.78 dB (4K Proxy/LT); encode/decode speed
 > unchanged. At ≥3840 width the Standard/HQ operating points fall back to
 > flat (id=0) — measured negative there (Y≈52–60 dB near-transparent).
-> See `docs/topos_edge_jag_diagnosis_2026-09-21.md`.
+> See `docs/codec/topos_edge_jag_diagnosis_2026-09-21.md`.
 > ⁴ v1.11 output features (2026-09-21, "V7-R4/R5"): frame-header **flags**
 > bit 2 = *output deblocking* (post-loop, decoder-side 8×8-grid filter with
 > QP-adaptive strength and true-edge protection; spec in

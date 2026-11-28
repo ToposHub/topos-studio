@@ -1,5 +1,5 @@
 """
-Timeline 遮挡裁剪实机基准（计划 §7：docs/timeline_occlusion_culling_optimization_plan_2026-09-19.md）。
+Timeline 遮挡裁剪实机基准（实施记录见 docs/architecture/timeline_occlusion_culling_implementation_2026-09-19.md）。
 
 使用 tests/test_videos 真实素材，对 B0–B6 基准组计时并输出 telemetry
 证据（实际减少的 layer 取帧请求，而非仅 Python 循环次数）。

@@ -15,7 +15,7 @@ Run from the repository root against an A/B directory built by
 
     TOPOS_BACKEND_GRAPHICS=metal PYTHONPATH=. .venv/bin/python \\
         tools/diag_edit_metal_preview_gate.py --ab-dir bench_out/metal-ab.<date> \\
-        --output docs/macos_metal_migration/evidence/metal-preview-gate.json
+        --output docs/architecture/macos_metal_migration/evidence/metal-preview-gate.json
 """
 
 from __future__ import annotations

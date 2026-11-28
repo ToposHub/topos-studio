@@ -47,7 +47,7 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-依赖规则（依据 `docs/module_boundary_rules.md`，该文档由 `tests/test_boundary_guardrails.py::TestAppLayerForbiddenImports` 静态强制）：
+依赖规则（依据 `docs/architecture/module_boundary_rules.md`，该文档由 `tests/test_boundary_guardrails.py::TestAppLayerForbiddenImports` 静态强制）：
 
 | 层 | 允许 import | 禁止 import |
 |---|---|---|
@@ -307,7 +307,7 @@ Dock 的 `qt_qmainwindow_extended_splitter` 鼠标代理必须保持透明，避
 - `src/app/feature_registry.py`、`src/app/app_context.py`、`src/app/module_loader.py`
 - `src/shared/feature_flags.py`、`src/products/__init__.py`、`src/products/topos_studio.py`
 - `src/shared/actions/__init__.py`、`src/shared/panels/registry.py`、`src/shared/preferences/__init__.py`
-- `docs/module_boundary_rules.md`（分层规则与平台归属裁定的既有落档）
+- `docs/architecture/module_boundary_rules.md`（分层规则与平台归属裁定的既有落档）
 - `apps/topos_studio/main.py`（产品入口薄壳）
 
 **工程包**

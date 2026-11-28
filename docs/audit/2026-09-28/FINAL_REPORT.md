@@ -30,15 +30,12 @@
 5. **UI 线程阻塞**：同步探测/解码/网络/渲染（AUD-0711、AUD-2810X、AUD-19603、AUD-30600 等）。
 6. **死代码/未接线功能**：播放降级系统、PREFETCH_EVALUATE、menu 路径不可达、assets_dropped 死信号——功能"存在但从未生效"是一类系统性问题。
 
-## 4. 交付物清单
+## 4. 审查记录
 
-- `INVENTORY.md`：全量文件清单与 398 批次表
-- `batches/batch-NNN-*.md`：398 份批次审查报告（证据与修复建议）
-- `verification/`：Critical 复核 4 份 + P5 抽查任务书 2 份 + 抽查结论 2 份
-- `ISSUES.md`：全量台账（本报告的索引）
-- `FINDINGS.json`：5,067 条机器可读发现（总纲第七节 schema，round=1）
-- `SUMMARY.md`：阶段摘要 ｜ `PROGRESS.md`：执行履历 ｜ `issues_v1.json`：早期中间版本
-- `tools/check_progress.py`、`assignments/`：驱动机制存档（供第 2 轮复用）
+- [发现台账](FINDINGS.json)汇总全部 5,067 条发现，包含位置、证据、严重度和建议。
+- [复核记录](verification/)保留关键问题复核和抽查结论。
+- [文件与批次清单](INVENTORY.md)记录审查范围。
+- [整改台账](../../plans/2026-09-28-multi-machine-program/REMEDIATION_PLAN.md)跟踪遗留项。仍在处理的批次保留原始记录。
 
 ## 5. 遗留与建议
 

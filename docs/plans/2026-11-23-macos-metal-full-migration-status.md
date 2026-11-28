@@ -2,7 +2,7 @@
 
 对应 [实施计划](2026-11-23-macos-metal-full-migration.md)，代码基线 `6249e136`。每完成一个编号在此
 登记：提交、运行命令、测试报告、实际后端、差异与回退结果。证据与清单见
-[docs/macos_metal_migration](../macos_metal_migration/README.md)。
+[docs/architecture/macos_metal_migration](../architecture/macos_metal_migration/README.md)。
 
 本机为 **Intel 独显类**（i9-9900K + AMD Radeon RX 6900 XT，macOS 15.3.1，显示器 3840×2160 @ 60 Hz，
 DPR = 1）。Apple Silicon 机器尚未采集，凡标「仅 Intel 独显」的验收项在另一类机器上仍为待办。
@@ -69,15 +69,15 @@ HEVC 10-bit 软件编码元数据用例在 `0e049b4d` 也被本机 libx265 防�
   PyObjC 的 CoreVideo 路由 `-6661` 不可用，沿用 ctypes。
 - 版本：macOS 15.3.1 (24D70)、Python 3.12.13、PyQt6 6.11.0、PyAV 18.1.0、moderngl 5.12.0、
   FFmpeg 9.0.2、DaVinci Resolve 21.2.0。
-- 产物：[environment](../macos_metal_migration/evidence/environment-intel-2026-11-23.md)、
-  [capabilities](../macos_metal_migration/evidence/capabilities-intel-amd-2026-11-23.md)。
+- 产物：[environment](../architecture/macos_metal_migration/evidence/environment-intel-2026-11-23.md)、
+  [capabilities](../architecture/macos_metal_migration/evidence/capabilities-intel-amd-2026-11-23.md)。
 
 ### 0.2 建清单（同一提交）
 
 - 命令：`rg -n 'QOpenGLWidget|OpenGL[. ]|moderngl|[.]glo\b|GLsync' src apps plugins`。
 - 结果：1623 条命中 / 189 个文件，其中 89 个直接绑定 GL API；按运行路径整理为 37 条（G-01～G-37），
   每条带入口、阶段、预计能力、计划编号、当前实际后端、回退方式与销账状态。
-  见 [gl-inventory.md](../macos_metal_migration/gl-inventory.md)。
+  见 [gl-inventory.md](../architecture/macos_metal_migration/gl-inventory.md)。
 - 关键事实：生产中「选择器」有两套——声明式 `backend_selector` 未接线，实际由 `ConfigManager`
   与 `TOPOS_BACKEND_GRAPHICS` 决定，且导出端（`timeline_export.py:9890`）与预览端
   （`metal_timeline_preview.py:86`）各自解析；`auto` 在导出端落 `opengl`，在预览端为 `lut`。
@@ -162,7 +162,7 @@ HEVC 10-bit 软件编码元数据用例在 `0e049b4d` 也被本机 libx265 防�
 样本 A（单 LUT 交付与播放对照）已建成并核验，可由 `tools/bench_metal_ab_topos.py --build` 重建。
 样本 B–G 已登记内容、媒体、核验点与归属阶段，各自在首次改动其覆盖的渲染路径之前建成并采集
 强制 OpenGL 基线。实测发现冻结媒体集里没有 HDR 素材（`4K_H265.mov` 是 10-bit BT.709 SDR），
-样本 E 的 HDR 源需要合成。见 [samples.md](../macos_metal_migration/samples.md)。
+样本 E 的 HDR 源需要合成。见 [samples.md](../architecture/macos_metal_migration/samples.md)。
 
 ## 阶段 1 共享 GPU 帧和生命周期
 
@@ -414,8 +414,8 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 # 真实应用（显示器必须清醒，数值才可比）
 .venv/bin/python tools/bench_metal_ab_playback.py \
   --ab-dir bench_out/metal-ab.2026-11-23 --configs gl,metal,native --repeats 4 \
-  --output-json docs/macos_metal_migration/evidence/ab-playback-native.json \
-  --output-md docs/macos_metal_migration/evidence/ab-playback-native.md
+  --output-json docs/architecture/macos_metal_migration/evidence/ab-playback-native.json \
+  --output-md docs/architecture/macos_metal_migration/evidence/ab-playback-native.md
 ```
 
 ### 真机播放（显示器清醒，`572d9f4c`、`c92d8703`）
@@ -434,7 +434,7 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 「修复前」两列是呈现到原生图层的帧数（H.264）与呈现帧数（DNxHR）。DNxHR 解码为 planar 帧，按设计留在 GL，
 在原生配置下只是多一个隐藏的宿主控件，帧数与 Metal 配置同量级（单轮波动约 ±10%）。
 
-**与迁移前基线的同机交替对照**（`6249e136` 对 `c92d8703`，02:15–02:27；[evidence](../macos_metal_migration/evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.md)）：
+**与迁移前基线的同机交替对照**（`6249e136` 对 `c92d8703`，02:15–02:27；[evidence](../architecture/macos_metal_migration/evidence/ab-playback-interleaved-6249e136-vs-c92d8703-2026-11-24.md)）：
 `gl` 与 `metal` 两种配置各两轮、每个配置内先基线后 HEAD，16 组呈现帧数总和 5375 对 5396（+0.4%）。同一份代码
 两轮之间最多相差 47 帧，基线与 HEAD 同一组时间的最大差 36 帧，小于轮间波动——没有可归因于迁移的回退。这天双方
 的绝对帧数（约 360）都低于 11-23 基线里的 399 / 398 / 370 / 368.5：测量期间另有程序在用这台机器（一个浏览器约
@@ -468,7 +468,7 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
 请求重绘、图层移走时补一次重绘；被盖住时重绘只清屏。
 
 **采样工具的正式一轮**（`tools/bench_metal_ab_playback.py`，提交 `9fe07060`，03:50–04:04；
-[evidence/ab-playback-9fe07060.md](../macos_metal_migration/evidence/ab-playback-9fe07060.md)，条件见同目录
+[evidence/ab-playback-9fe07060.md](../architecture/macos_metal_migration/evidence/ab-playback-9fe07060.md)，条件见同目录
 `-conditions.json`）：四种配置各一个会话为一次，共两轮，第二轮倒序，再用工具的 `--import` 汇成一份报告。八个会话显示器
 都是清醒的（`4/4`），32 个用例全部有效（时间线 400 帧）。呈现帧数（分母 399，两轮依次）：
 
@@ -485,7 +485,7 @@ QT_QPA_PLATFORM=cocoa .venv/bin/python -m pytest -q \
   计划的「400 帧轻剪辑至少 396 帧实际呈现」在这一轮里没有任何配置稳定达到；这一条要等机器空闲时重测（8.3）。
 - **原生视口的 H.264**：LUT 时间线 396 / 398，Original 389 / 352（352 是离群的一轮；此前四轮为 392–394）。
 - **原生视口下的 DNxHR**（CPU 合成帧，仍由 GL Viewer 呈现）：随后做的 `gl` 对原生配置交替各 4 轮
-  （[evidence](../macos_metal_migration/evidence/ab-playback-interleaved-gl-vs-native-9fe07060-2026-11-24.md)，
+  （[evidence](../architecture/macos_metal_migration/evidence/ab-playback-interleaved-gl-vs-native-9fe07060-2026-11-24.md)，
   04:11–04:24，显示器清醒）给出了稳定的差：H.264 原生配置更高（中位数 395 / 397 对 391 / 379），DNxHR 每一轮都低约
   10 帧（324.5 对 334，−2.8%，Original 的四轮区间不重叠）。原生配置同时改了 Metal 后端与原生视口两个变量，**这 3% 出在
   哪一个上还没分清**：`metal` 对 `native` 的交替对照在第三个会话之后显示器休眠（约 04:28），数据作废；休眠前的两轮里
@@ -694,7 +694,7 @@ kill switch、Metal 出错后的回退与缓存键、worker 退出时释放；GL
 
 | 编号 | 提交 | 内容 |
 |---|---|---|
-| 6.1 | `4cbbe500` `b6ace562` | 验证登记表 `msl_plugin_verification.py`、兼容矩阵 `docs/macos_metal_migration/effect-compat-matrix.md`（生成器 `tools/build_effect_compat_matrix.py`） |
+| 6.1 | `4cbbe500` `b6ace562` | 验证登记表 `msl_plugin_verification.py`、兼容矩阵 `docs/architecture/macos_metal_migration/effect-compat-matrix.md`（生成器 `tools/build_effect_compat_matrix.py`） |
 | 6.2 | `4cbbe500` | 内置曝光 `builtin:exposure`（`msl_effect_registry.py` 的 `migration_exposure` helper）与 `metal_effect_runtime.py` |
 | 6.3 | `4cbbe500` | 受限转译器 `tglsl_front.py` → `tglsl_msl_transpiler.py` → `metal_abi.py`（显式纹理 / sampler 绑定、参数布局、指纹） |
 | 6.4 / 6.5 | `4cbbe500` | 编译缓存键（源码指纹、宿主 ABI、编译选项、像素格式、设备能力、插件版本）；按效果 ID 的诊断 `effect_backend_fallback.py`、`tglsl_metal_support.py` |
@@ -857,7 +857,7 @@ kill switch、Metal 出错后的回退与缓存键、worker 退出时释放；GL
 
 ### 插件与效果域
 
-见 `docs/macos_metal_migration/effect-compat-matrix.md`（由生成器从效果目录产出，声明集合与已验证集合不一致时
+见 `docs/architecture/macos_metal_migration/effect-compat-matrix.md`（由生成器从效果目录产出，声明集合与已验证集合不一致时
 构建失败）。
 
 - **未做**：导出域的矩阵（等 3.3 / 3.4 落地）；真机上的实际运行结果、日志、机器配置与日期。

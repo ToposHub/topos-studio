@@ -14,7 +14,7 @@ units directly:
 * signal / UI plumbing (full-res progress, item status, timeline info)
 
 Suspected src bugs found while writing these tests are recorded in
-``docs/testcoverage/2026-09-28/BUGS-agent-A3.md`` (BUG-A3-xx); nothing in
+``docs/validation/coverage/2026-09-28/BUGS-agent-A3.md`` (BUG-A3-xx); nothing in
 src is modified here.
 """
 
@@ -192,7 +192,7 @@ class TestEncodeCompositeLinearToSrgb:
 
         -0.5 must encode to 0.0 (not the historical -6.46 amplification);
         positive highlights stay unclamped (2.0 → 1.353256) and alpha
-        passes through untouched. See docs/testcoverage/2026-09-28/
+        passes through untouched. See docs/validation/coverage/2026-09-28/
         BUGS-agent-A3.md.
         """
         _force_srgb_fallback(monkeypatch)
@@ -430,7 +430,7 @@ class TestPerformQuickExport:
 
         ``perform_panel_export`` and ``_batch_export_single_file`` both
         downsample uint16 sources via ``/ 256`` for 8-bit formats; quick
-        export now does the same (see docs/testcoverage/2026-09-28/
+        export now does the same (see docs/validation/coverage/2026-09-28/
         BUGS-agent-A3.md), so all three export paths agree.
         """
         harness._export_color = MagicMock(
@@ -1577,7 +1577,7 @@ class TestBatchExportSingleFile:
         unassigned, and the flip-state check a few lines later read it and
         raised UnboundLocalError. In production the per-file caller caught
         it and marked every sidecar-less queue item FAILED. Fixed in
-        docs/testcoverage/2026-09-28/BUGS-agent-A3.md (BUG-A3-01); this
+        docs/validation/coverage/2026-09-28/BUGS-agent-A3.md (BUG-A3-01); this
         now asserts a successful export instead.
         """
         src = self._prime(harness, tmp_path, name="nosidecar.png",

@@ -1,5 +1,7 @@
 # Eagle布局参考、真实素材补测与四布局验证
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 日期：2026-11-17。起点为 `fix-ui @ 7f025973`，最终状态为本轮工作区（包含上一轮Files复核的小修）。
 
 ## 实际观察与实现
@@ -58,7 +60,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python docs/validation/files_eagle_layout_20
 
 新几何与虚拟视图测试覆盖混合比例、无交叠、全项命中、尾页、metadata与晚到比例、10000条三模式虚拟化、resize锚点、实际Qt绘制、鼠标/键盘/框选；panel测试覆盖共享选区与MIME/预览身份、真实缩略图像素、grid-only裁切、偏好迁移、短窗滚动和编辑内容保留。
 
-最终回归命令与统计见[regression.txt](regression.txt)、[JUnit](regression.xml)。测试进程内将`tests.real_media.TEST_VIDEOS`绑定到用户视频目录且`STRICT=True`，不把测试路径写进产品配置，不以缺素材skip缩减此组覆盖。没有把本组测试当成旧扩展可退役、原生GPU/音频设备或文件事务验收。
+最终回归命令与统计见[regression.txt](regression.txt)、JUnit。测试进程内将`tests.real_media.TEST_VIDEOS`绑定到用户视频目录且`STRICT=True`，不把测试路径写进产品配置，不以缺素材skip缩减此组覆盖。没有把本组测试当成旧扩展可退役、原生GPU/音频设备或文件事务验收。
 
 最终集合：**293 passed，0 skipped（17.48秒）**。随后开启平滑缩放呈现，相关画廊与四模式像素/交互测试另行复验；不改变几何、模型与媒体读取口径。
 

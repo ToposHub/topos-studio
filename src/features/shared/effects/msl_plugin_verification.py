@@ -36,7 +36,7 @@ __all__ = [
 
 VERIFICATION_DEVICE = "AMD Radeon RX 6900 XT (Intel Mac, hasUnifiedMemory=False)"
 VERIFICATION_DATE = "2026-11-23"
-EVIDENCE_FILE = "docs/macos_metal_migration/evidence/effect-metal-parity-2026-11-23.json"
+EVIDENCE_FILE = "docs/architecture/macos_metal_migration/evidence/effect-metal-parity-2026-11-23.json"
 PLUGIN_CORPUS = (
     "GL: dctl_wrapper.wrap_dctl_process + EffectPassRunner 顶点/quad，RGBA16F；5 种尺寸"
     "（19x13、7x1、1x7、64x48、33x32）× 3 类图像（HDR 负值/零/超白、边缘极值、渐变）"

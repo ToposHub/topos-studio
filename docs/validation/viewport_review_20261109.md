@@ -1,5 +1,7 @@
 # 剪辑／调色 Viewport 合流复查验证
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 日期：2026-11-09。参考：用户附件及本机 DaVinci Resolve Studio 20，最终只读复核 Color 页。用户要求播放区保留 Topos 原版较大的首末／逐帧按钮和橙色 Play/Pause，这是相对于 Resolve 外观的有意差异。
 
 ## 外观交付
@@ -13,7 +15,7 @@
 
 - [Edit 布局记录](edit_viewport_20261109/README.md)
 - [Color 布局记录](color_viewport_20261109/README.md)
-- [Color 原尺寸控件细节](color_viewport_20261109/chrome_detail.png)
+- Color 原尺寸控件细节
 
 截图由真实 Qt 控件＋空画布替身生成，使用应用 `DARK_THEME`。没有用样例图片冒充媒体播放。Color 全局主题下的短标题隐藏／双箭头也经最终渲染修正。
 

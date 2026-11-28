@@ -1,6 +1,6 @@
 """W6-G2 修复回归测试（批 B，Major×S：BUG-B3-02/03/04 + BUG-B4-02/03）。
 
-对 ``docs/testcoverage/2026-09-28/BUGS-agent-B3.md`` / ``BUGS-agent-B4.md``
+对 ``docs/validation/coverage/2026-09-28/BUGS-agent-B3.md`` / ``BUGS-agent-B4.md``
 中五条发现的根因修复做独立回归（锁定用例已在原补测文件中翻转，本文件
 从"默认键完整性 / 清单完整性"角度再加一层防线）：
 

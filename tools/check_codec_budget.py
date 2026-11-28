@@ -9,7 +9,7 @@
    优化计划_2026-09-27.md` §1 V10-422 验收线："每档同码率非劣和默认档
    容量≤对应 ProRes 的既定 98% 帽须同时验证"；§6/最终判定规则）：
    每档 `topos_mov.bytes ≤ cap_ratio × prores_mov.bytes`；
-2. **QP 地板预算**（bench 报告 docs/benchreports/2026-09-28/codec.md
+2. **QP 地板预算**（bench 报告 docs/benchmarks/reports/2026-09-28/codec.md
    §1.1：qp 全帧钉死 63 的档位处于帧内 VLC 内核压缩能力上限，实际 bpp
    仍高于档位 target_bpp 即超支）：`qp_min == qp_max == qp_floor` 的档位
    要求 `实际 bpp ≤ 容差 × target_bpp`（实际 bpp 由 bytes 复算，不信任
@@ -246,7 +246,7 @@ def main() -> int:
         f"\n验收线判定：{verdict}（98% 体积帽 × QP 地板预算，"
         f"{len(violations)} 项违规）——证据链："
         f"bench_out/real_codec_bitrate_20260907/result.json ↔ "
-        f"docs/benchreports/2026-09-28/codec.md §1.1/§3 ↔ 决策文档"
+        f"docs/benchmarks/reports/2026-09-28/codec.md §1.1/§3 ↔ 决策文档"
         f" TOPOS全格式ProRes对标与终轮优化计划_2026-09-27.md §1/§6")
     if args.json:
         args.json.write_text(json.dumps(

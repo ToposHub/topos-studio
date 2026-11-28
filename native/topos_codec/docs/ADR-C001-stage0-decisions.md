@@ -6,7 +6,7 @@
 - 调研依据：2026-08-29 对仓库 `src/shared/media`、`src/shared/video`、`src/shared/export`、
   `src/features/edit|deliver|color|composite`、`tools/`、`tests/` 的只读架构调研（结论已并入本文）。
 
-> 编号规则：codec 专属 ADR 使用 `docs/ADR-C0xx`，与仓库既有 `docs/adr/000x`（HTML 渲染器）
+> 编号规则：codec 专属 ADR 使用 `docs/ADR-C0xx`，与仓库既有 `docs/architecture/adr/000x`（HTML 渲染器）
 > 互不冲突。本文是阶段 0 交付物「architecture decision record」，一次冻结全部首版决策；
 > 后续阶段如推翻某条决策，新建 ADR-C0xx 并在此处标注被取代。
 

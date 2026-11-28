@@ -589,7 +589,7 @@ def soft_clip_reference(
 # ---------------------------------------------------------------------------
 
 # 语义对齐要点：
-# - 分支/键/通道算子与 docs/color_nodes_mixer_spec.md（v1 冻结）及
+# - 分支/键/通道算子与 docs/architecture/color_nodes_mixer_spec.md（v1 冻结）及
 #   src/features/color/shaders/node_ops_gl.py 的 GL fragment 逐条对应；
 #   buffer 布局为 RGBA16F 线性数组（half4 = 4×float16，与 kernels.py
 #   的 CPU staging 桥约定一致）。

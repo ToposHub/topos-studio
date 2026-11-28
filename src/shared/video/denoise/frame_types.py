@@ -1,6 +1,6 @@
 """视频降噪帧窗口类型与消费者侧缓存。
 
-对应 docs/video_denoise_implementation_plan.md 第 7 节（M2 邻帧读取与缓存）。
+对应 docs/plans/video/video_denoise_implementation_plan.md 第 7 节（M2 邻帧读取与缓存）。
 
 - FrameWindow: 一次邻帧窗口请求的结果（中心帧 + 前后邻帧 + 缺帧信息）
 - TemporalFrameWindowCache: 消费者侧窗口缓存，键包含

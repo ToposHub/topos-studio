@@ -1,4 +1,4 @@
-"""Build ``docs/macos_metal_migration/effect-compat-matrix.md``.
+"""Build ``docs/architecture/macos_metal_migration/effect-compat-matrix.md``.
 
 The compatibility matrix of plan 6.1: every effect, plugin, transition and
 preset the repository ships, with its entry, version, graphics and compute
@@ -30,7 +30,7 @@ from typing import Iterable
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-DOCUMENT = ROOT / "docs" / "macos_metal_migration" / "effect-compat-matrix.md"
+DOCUMENT = ROOT / "docs" / "architecture" / "macos_metal_migration" / "effect-compat-matrix.md"
 UNREGISTERED = "未登记"
 
 

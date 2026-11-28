@@ -1,7 +1,7 @@
 """UI-only resource interaction session. No engine/project mutation or rendering.
 
 Replace this presenter with an acknowledged command adapter when implementing
-``docs/color_resources_backend_implementation_plan.md``. Drafts are intentionally
+``docs/plans/color/color_resources_backend_implementation_plan.md``. Drafts are intentionally
 not saved in a .topos file and never advertise that pixels have changed.
 
 R02：LUT 导入经 ``LutResourceSession`` 真实注册（验证/去重/暂存/随包保存），

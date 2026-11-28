@@ -6,7 +6,7 @@ QP63 地板预算逐档判定，违规 exit 1）。
 
 覆盖：
 1. 真实 bench 数据 → 6 项体积帽违规 + 3 项 QP 地板超支违规（与
-   docs/benchreports/2026-09-28/codec.md §1.1 表值一致）；
+   docs/benchmarks/reports/2026-09-28/codec.md §1.1 表值一致）；
 2. 合规合成数据 → 通过（防"永远红灯"的门禁假阳性）；
 3. 地板钉死判定语义（qp_min==qp_max==地板才算钉死；仅触及不算）；
 4. bpp 复算完整性自检、缺档检测、--exclude 跳过；

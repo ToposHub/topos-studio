@@ -1,6 +1,6 @@
 # W00 · Windows 能力/环境基线 manifest（机器 B · 2026-10-24）
 
-> 责任包：W00（`docs/upgrade_plan_W_windows_2026-10-24.md` §3）。
+> 责任包：W00（`docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md` §3）。
 > 采集时点：HEAD `12b998754`（feature 分支，工作树干净）；本 manifest 由本轮
 > W 计划执行机现场采集，非复制旧 B 矩阵。
 > 采集器：`scripts/probe_env_matrix_windows.py --tag W00_20261024_run01`

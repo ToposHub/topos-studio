@@ -1,6 +1,6 @@
 # ==============================================================================
 # Topos Color - 可选 AI Worker 依赖 · 组合B「TTS 专用」（M01）
-# 计划：docs/upgrade_plan_M_mac_2026-10-24.md §M01
+# 计划：docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md §M01
 # ==============================================================================
 # 覆盖：Qwen3-TTS 语音合成（src/features/edit/ai_editing/tts_provider.py）。
 #

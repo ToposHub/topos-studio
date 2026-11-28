@@ -1,6 +1,6 @@
 # Windows 首切实机执行总结（2026-09-28）
 
-> 对象：`docs/windows_topos_codec_sdk_optimization_plan_2026-09-28.md` 全部任务。
+> 对象：`docs/plans/platform/windows_topos_codec_sdk_optimization_plan_2026-09-28.md` 全部任务。
 > 环境：Windows 11 26200 / i7 16C24T / 64GB / VS2022 BuildTools MSVC 19.44.35228 /
 > WinSDK 10.0.26100 / CMake 3.31.6 / Python 3.12.10（`.venv-win`）。
 > 起点 commit a77733b4 → 执行至本批提交（逐批 git 记录）。

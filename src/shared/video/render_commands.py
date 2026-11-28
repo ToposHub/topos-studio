@@ -39,7 +39,7 @@ class RenderCommand:
     UPLOAD_AI_PLUGIN_RESULT = "upload_ai_plugin_result"
     REMOVE_AI_PLUGIN_TEXTURE = "remove_ai_plugin_texture"
     RELEASE_VIDEO_TEXTURE_POOL = "release_video_texture_pool"
-    # 视频降噪（时域+空域）参数更新 / 历史重置 / 暂停态邻帧窗口（docs/video_denoise_implementation_plan.md M4.2/M5）
+    # 视频降噪（时域+空域）参数更新 / 历史重置 / 暂停态邻帧窗口（docs/plans/video/video_denoise_implementation_plan.md M4.2/M5）
     SET_VIDEO_DENOISE = "set_video_denoise"
     RESET_VIDEO_DENOISE_HISTORY = "reset_video_denoise_history"
     SET_VIDEO_DENOISE_WINDOW = "set_video_denoise_window"

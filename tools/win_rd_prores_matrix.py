@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """W10/W11/W12：Windows 同机 TOPOS ↔ ProRes RD/画质/性能矩阵（PyAV，无 ffmpeg CLI）。
 
-口径（对齐 docs/windows_topos_codec_sdk_optimization_plan_2026-09-28.md §4）：
+口径（对齐 docs/plans/platform/windows_topos_codec_sdk_optimization_plan_2026-09-28.md §4）：
 - 同一原始母版、同帧区间（默认 32 帧）、同几何/位深/chroma；
 - TOPOS 逐档 sized 编码（target = 档位定义 bpp）；ProRes prores_ks 同名档；
 - 双轴：同名档配对 + 实测码率与 PSNR 逐点（供同码率插值）；

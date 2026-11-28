@@ -1,6 +1,6 @@
 # R00 — 固定基线与写入口清单
 
-更新：2026-11-03。本文件是 [资源后端实施计划](../../../color_resources_backend_implementation_plan.md) R00 的留档证据。
+更新：2026-11-03。本文件是 [资源后端实施计划](../../../plans/color/color_resources_backend_implementation_plan.md) R00 的留档证据。
 
 ## 1. 基线环境
 
