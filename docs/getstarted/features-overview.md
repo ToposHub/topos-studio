@@ -24,7 +24,7 @@ Topos 采用**产品变体架构**，同一代码库构建四个专业产品：
 | **toposctl** | AI 编辑协议 CLI：`read` / `validate` / `preview` 经与 UI/MCP **同一 ToolFacade** 路径执行，写操作一律由 GUI/ApprovalService 签发授权 |
 | **topos-vault** | 素材资产库 CLI：素材 AI 打标（`index`）、移动后重连（`relink` 三级匹配）、provider 列表与依赖状态 |
 
-产品形态的功能开关与测试矩阵见 [docs/product_test_matrix.md](../product_test_matrix.md)。
+产品形态的功能开关与测试矩阵见 [docs/validation/product_test_matrix.md](../validation/product_test_matrix.md)。
 
 ### 2. 项目核心架构
 
@@ -48,7 +48,7 @@ Topos 采用**产品变体架构**，同一代码库构建四个专业产品：
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**GPU 后端策略**（[ADR-0003](../adr/0003-metal-gpu-backend-dual-track-and-phase1-gates.md)）：OpenGL/ModernGL 永久保留为跨平台基线、回退与画质参考；Metal 作为 macOS 第二实现渐进接入（渲染/计算/解码/互操作四个独立维度的能力接口，`src/shared/gpu/backend_types.py` + `backend_selector.py`）。macOS 侧已有 VideoToolbox 零拷贝解码桥与 Metal 编码面直投；Windows 侧已接入 NVDEC/D3D11VA 硬解下载与 NVENC/AMF 硬件编码（D3D11 全链路 GPU 渲染仍在建设中）。
+**GPU 后端策略**（[ADR-0003](../architecture/adr/0003-metal-gpu-backend-dual-track-and-phase1-gates.md)）：OpenGL/ModernGL 永久保留为跨平台基线、回退与画质参考；Metal 作为 macOS 第二实现渐进接入（渲染/计算/解码/互操作四个独立维度的能力接口，`src/shared/gpu/backend_types.py` + `backend_selector.py`）。macOS 侧已有 VideoToolbox 零拷贝解码桥与 Metal 编码面直投；Windows 侧已接入 NVDEC/D3D11VA 硬解下载与 NVENC/AMF 硬件编码（D3D11 全链路 GPU 渲染仍在建设中）。
 
 ### 3. 核心模块
 
@@ -72,7 +72,7 @@ Topos 采用**产品变体架构**，同一代码库构建四个专业产品：
 
 *   **ImageEngine**: 图层管理、渲染调度
 *   **AsyncRenderer**: OpenGL 异步渲染、双缓冲
-*   **ShaderPipeline**: 动态 GLSL 编译，EffectSpec 双发射器权威输入 + 结构化 uniform manifest（[ADR-0004](../adr/0004-dual-emitter-refactor-and-coverage-gates.md)）
+*   **ShaderPipeline**: 动态 GLSL 编译，EffectSpec 双发射器权威输入 + 结构化 uniform manifest（[ADR-0004](../architecture/adr/0004-dual-emitter-refactor-and-coverage-gates.md)）
 *   **ColorManager**: OCIO v2 集成（内置回退配置，可指向外部 ACES Studio Config）
 *   **ColorSession**: 色彩会话管理
 
@@ -214,7 +214,7 @@ Two command-line tools are also installed with `pip install -e .`:
 | **`toposctl`** | AI editing protocol CLI. `read`, `validate`, and `preview` use the same `ToolFacade` path as the UI and MCP; write operations require authorization issued by the GUI/`ApprovalService`. |
 | **`topos-vault`** | Media asset library CLI for AI indexing, three-stage relinking after files move, provider listing, and dependency status. |
 
-Feature toggles and the test matrix for the four editions: [docs/product_test_matrix.md](../product_test_matrix.md).
+Feature toggles and the test matrix for the four editions: [docs/validation/product_test_matrix.md](../validation/product_test_matrix.md).
 
 ### 2. High-Level Architecture
 
@@ -238,7 +238,7 @@ Topos uses a **product editions + feature modules + shared infrastructure + nati
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**GPU backend strategy** ([ADR-0003](../adr/0003-metal-gpu-backend-dual-track-and-phase1-gates.md)): OpenGL/ModernGL remains the cross-platform baseline, fallback, and image-quality reference. Metal is being added as a second macOS implementation through separate graphics, compute, decode, and interop capability interfaces (`src/shared/gpu/backend_types.py` and `backend_selector.py`). macOS includes a VideoToolbox zero-copy decode bridge and direct Metal encode-surface submission. Windows includes NVDEC/D3D11VA hardware decode and NVENC/AMF hardware encode; a fully GPU-rendered D3D11 pipeline is still under development.
+**GPU backend strategy** ([ADR-0003](../architecture/adr/0003-metal-gpu-backend-dual-track-and-phase1-gates.md)): OpenGL/ModernGL remains the cross-platform baseline, fallback, and image-quality reference. Metal is being added as a second macOS implementation through separate graphics, compute, decode, and interop capability interfaces (`src/shared/gpu/backend_types.py` and `backend_selector.py`). macOS includes a VideoToolbox zero-copy decode bridge and direct Metal encode-surface submission. Windows includes NVDEC/D3D11VA hardware decode and NVENC/AMF hardware encode; a fully GPU-rendered D3D11 pipeline is still under development.
 
 ### 3. Core Modules
 
@@ -262,7 +262,7 @@ Topos uses a **product editions + feature modules + shared infrastructure + nati
 
 - **ImageEngine:** Layer management and render scheduling.
 - **AsyncRenderer:** Asynchronous OpenGL rendering with double buffering.
-- **Shader pipeline:** Dynamic GLSL compilation. EffectSpec is the authoritative input to dual emitters and a structured uniform manifest ([ADR-0004](../adr/0004-dual-emitter-refactor-and-coverage-gates.md)).
+- **Shader pipeline:** Dynamic GLSL compilation. EffectSpec is the authoritative input to dual emitters and a structured uniform manifest ([ADR-0004](../architecture/adr/0004-dual-emitter-refactor-and-coverage-gates.md)).
 - **ColorManager:** OCIO v2 integration with a bundled fallback configuration; can use an external ACES Studio configuration.
 - **ColorSession:** Color-session management.
 

@@ -2,7 +2,7 @@
 
 - 日期：2026-10-24
 - 提交：`ef0993564`
-- 计划条目：docs/feature_plan_F_davinci_2026-10-22.md §F4.1
+- 计划条目：docs/plans/performance/feature_plan_F_davinci_2026-10-22.md §F4.1
 - 调研：Explore 全量盘点（color_stack 三层现状/消费点/缓存指纹/向量形态，
   2026-10-24）——差距结论：缺组实体、组前后顺序、"共享 look 之上保留
   各镜头微调"的叠加解析（旧模型改共享栈即改全组，微调无处安放）。

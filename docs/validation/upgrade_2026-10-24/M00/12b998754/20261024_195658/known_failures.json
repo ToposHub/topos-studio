@@ -28,7 +28,7 @@
       "id": "M-I02",
       "kind": "perf_retest_pending",
       "detail": "旧 4K 窗口解码等待/预取锁争用（历史 38.2ms 记录，非当前 HEAD 结论）",
-      "evidence": "docs/perf_baseline_freeze_mac_2026-10.md:135",
+      "evidence": "docs/benchmarks/performance/perf_baseline_freeze_mac_2026-10.md:135",
       "host": "macOS（历史）",
       "owner": "M16",
       "blocking": "复测优先级，不冒充当前实测"
@@ -37,7 +37,7 @@
       "id": "M-I03",
       "kind": "perf_retest_pending",
       "detail": "监看第一刀后历史 48.2ms 超 25fps 的 40ms 预算（历史记录）",
-      "evidence": "docs/perf_baseline_freeze_mac_2026-10.md:135",
+      "evidence": "docs/benchmarks/performance/perf_baseline_freeze_mac_2026-10.md:135",
       "host": "macOS（历史）",
       "owner": "M17",
       "blocking": "复测优先级，不冒充当前实测"
@@ -46,7 +46,7 @@
       "id": "BASELINE-media-tests",
       "kind": "pre_existing_test_failures",
       "detail": "tests/media 3535 用例 190F/945E（失败/错误 ID 集合 1135 项，与 C0.1-G2 基线逐 ID 一致，零新回归）",
-      "evidence": "docs/b22_decode_matrix_machineB_2026-10.md（Phase5，提交 e3d9313ac 记录）",
+      "evidence": "docs/validation/windows/b22_decode_matrix_machineB_2026-10.md（Phase5，提交 e3d9313ac 记录）",
       "host": "机器 B（Windows）",
       "dependency": "GPU/硬件相关用例在无硬件宿主 skip",
       "owner": "历史基线；Mac 全量复跑归 M16.3/M18 记录，不在 M00 重推导",

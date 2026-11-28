@@ -23,11 +23,11 @@ T 线只新增/修改以下路径，其余仓库内容只读：
 |---|---|
 | `src/features/edit/insights/` | 新增，T 独占 |
 | `tests/edit/insights/` | 新增，T 独占（含自有 conftest，不改 `tests/edit/conftest.py`） |
-| `docs/insights/` | 新增，T 独占 |
+| `docs/architecture/insights/` | 新增，T 独占 |
 | `docs/validation/upgrade_T/` | 新增，T 独占 |
-| `docs/upgrade_plan_T_third_machine_2026-10-24.md` | 仅更新 T 任务状态/证据链接 |
+| `docs/plans/platform/upgrade_plan_T_third_machine_2026-10-24.md` | 仅更新 T 任务状态/证据链接 |
 
-不改：`edit/core/` 原模型与 commands/IO、`.topos` schema、renderer/decoder/音频/Deliver/QC/归档、`pyproject.toml`/打包基类、根 conftest/pytest.ini、共享 i18n 表、M/W 计划状态。发现这些范围的问题写交接记录（`docs/insights/handoff_*.md`），不顺手修。
+不改：`edit/core/` 原模型与 commands/IO、`.topos` schema、renderer/decoder/音频/Deliver/QC/归档、`pyproject.toml`/打包基类、根 conftest/pytest.ini、共享 i18n 表、M/W 计划状态。发现这些范围的问题写交接记录（`docs/architecture/insights/handoff_*.md`），不顺手修。
 
 ## 3. G1/G2 责任（重申，不排队）
 

@@ -1,9 +1,11 @@
 # M01 交付 manifest · 隔离并修复 Mac 运行依赖组合
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 > HEAD：`cc97300cb`；执行宿主：Darwin x86_64 / Python 3.12.13；日期：2026-10-24。
 > 对应：升级计划 M §M01（P1，前置 M00）；对应缺口 M-I01。
 
-## 1. 三个受支持安装组合（全部 pip check=0，证据 [pip_checks.log](pip_checks.log)）
+## 1. 三个受支持安装组合（全部 pip check=0，证据 pip_checks.log）
 
 | 组合 | 环境 | 依赖定义 | pip check | 关键验证 |
 |---|---|---|---|---|

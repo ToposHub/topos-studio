@@ -62,7 +62,7 @@ KNOWN_JSON_FILES: dict[str, str] = {
     "teaching_animation/render_cache_manifest.json": "teaching_animation/render_cache_manifest",
     # AI Workflow 存储（用户编辑的节点图，plan §13）。
     "ai_workflow/workflows.json": "ai_workflow/workflows",
-    # DESK-01B：内嵌资源索引（资源协议见 docs/adr/0005 §3）。登记为已知
+    # DESK-01B：内嵌资源索引（资源协议见 docs/architecture/adr/0005 §3）。登记为已知
     # JSON 使索引随 Phase B 往返保留，且 load 侧可读取。
     "resources/resources.json": "resources/index",
 }

@@ -1,6 +1,8 @@
 # 剪辑页面第三轮审计证据
 
-HEAD：`63c0bdeaeb5edcee59363479cd8c10b947c3ddb1`，对照`833dcd382`。主文件：[第三轮新优化计划表](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/edit_page_third_audit_optimization_plan_2026-10-14.md>)。
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
+HEAD：`63c0bdeaeb5edcee59363479cd8c10b947c3ddb1`，对照`833dcd382`。主文件：第三轮新优化计划表。
 
 本目录只记录本次审计；旧证据、原测试、业务代码及用户素材未修改。脚本会写专用临时配置和审计专用工程，不打开用户已有工程。
 
@@ -17,7 +19,7 @@ HEAD：`63c0bdeaeb5edcee59363479cd8c10b947c3ddb1`，对照`833dcd382`。主文�
 
 ## 完整窗口测试
 
-[interactive_driver.py](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-third-review/interactive_driver.py>)显示完整MainWindow，隔离配置和项目，QTest发送鼠标/键盘/拖动/按钮事件；真实素材来自用户tests/test_videos。它记录Qt槽异常以继续采证，不是生产修复。部分选区/锁轨fixture通过已有selection/command接口建立，然后实际编辑可见控件；不把fixture准备描述为人工操作。
+interactive_driver.py显示完整MainWindow，隔离配置和项目，QTest发送鼠标/键盘/拖动/按钮事件；真实素材来自用户tests/test_videos。它记录Qt槽异常以继续采证，不是生产修复。部分选区/锁轨fixture通过已有selection/command接口建立，然后实际编辑可见控件；不把fixture准备描述为人工操作。
 
 `evidence/gui-session1`、`gui-session2`、`gui-session3`各自保留截图、command脚本、interaction_records.json、full-app.log。Session2已成功创建时间线、Append/Overwrite/Insert；早期command03缺timeline_id是脚本错误。Session3改用真实接口重跑，最后正常关闭专用窗口，`normal_audit_close.window_visible=false`且进程exit0。
 

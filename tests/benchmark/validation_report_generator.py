@@ -24,7 +24,7 @@ Validation Report Generator for DaVinci-Level Acceptance Matrix
 
 使用方法：
     python tests/benchmark/validation_report_generator.py
-    python tests/benchmark/validation_report_generator.py --output docs/video_playback_performance_report.md
+    python tests/benchmark/validation_report_generator.py --output docs/benchmarks/performance/video_playback_performance_report.md
     python tests/benchmark/validation_report_generator.py --run-tests
 
 """
@@ -431,7 +431,7 @@ class ValidationReportGenerator:
             self.project_root = Path(__file__).parent.parent.parent
 
         self.results_dir = self.project_root / "tests" / "media" / "benchmark_results"
-        self.docs_dir = self.project_root / "docs"
+        self.docs_dir = self.project_root / "docs" / "benchmarks" / "performance"
 
         self.unit_test_results: Dict[str, Any] = {}
         self.synthetic_smoke_results: Dict[str, Any] = {}
@@ -1158,6 +1158,7 @@ class ValidationReportGenerator:
         # 写入文件
         report_content = "\n".join(report_lines)
 
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(report_content)
 

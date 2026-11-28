@@ -1,6 +1,6 @@
 name: focused-logic-gate
 
-# M00（docs/upgrade_plan_M_mac_2026-10-24.md §M00）：关键正确性/保存/导出
+# M00（docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md §M00）：关键正确性/保存/导出
 # focused suites 的真实阻断门禁。分域子进程运行（scripts/m00_focused_gate.py），
 # 避免全量单进程累积 Qt/C 解码器挂起；任何域非零失败/超时 → 门禁失败，
 # 不允许"与旧基线失败集合相等"放行。历史上这 12 个文件在本机/CI 均应 142 全绿，

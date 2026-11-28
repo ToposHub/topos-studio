@@ -45,7 +45,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASELINE = PROJECT_ROOT / "docs" / "benchreports" / (
+DEFAULT_BASELINE = PROJECT_ROOT / "docs" / "benchmarks" / "reports" / (
     "2026-09-28") / "REGRESSION_BASELINE.json"
 DEFAULT_OUT_ROOT = PROJECT_ROOT / "bench_out" / "anchor_registry"
 

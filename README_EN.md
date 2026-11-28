@@ -80,8 +80,8 @@ Full feature lists and measured data: [docs/getstarted/features-overview.md](doc
 - Full documentation index: [docs/INDEX.md](docs/INDEX.md)
 - Architecture volumes: [docs/architecture/](docs/architecture/) (app-products / color-rendering / composite / deliver-export / edit-timeline / shared-foundations)
 - Codec whitepapers: [Topos Codec whitepaper](native/topos_codec/Topos_Codec_Whitepaper.md) ([Chinese](native/topos_codec/Topos_Codec_白皮书.md)) · [Topos Image whitepaper](native/topos_codec/Topos_Image_Whitepaper.md) ([Chinese](native/topos_codec/Topos_Image_白皮书.md))
-- Plugin development: [docs/PLUGIN_DEV_GUIDE.md](docs/PLUGIN_DEV_GUIDE.md)
-- Architecture decision records: `docs/adr/`, `docs/image/` (ADR-I series), `native/topos_codec/docs/` (ADR-C series)
+- Plugin development: [docs/plugins/PLUGIN_DEV_GUIDE.md](docs/plugins/PLUGIN_DEV_GUIDE.md)
+- Architecture decision records: `docs/architecture/adr/`, `docs/image/` (ADR-I series), `native/topos_codec/docs/` (ADR-C series)
 
 ## 5. Compatibility and Environment
 

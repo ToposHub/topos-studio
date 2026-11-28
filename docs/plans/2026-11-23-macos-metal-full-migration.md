@@ -1,6 +1,6 @@
 # Topos Studio macOS Metal 全链路迁移实施计划
 
-基线提交 `6249e136`，2026-11-22。目标是在 macOS 上让剪辑、调色、合成、交付和受支持的着色器插件默认通过 Metal 渲染。预览和导出从同一工程快照求值，共享帧格式、色彩语义和效果参数。Windows/Linux、macOS 兼容模式和画质对拍使用独立的 OpenGL 路径。已有的 ADR、跨平台迁移计划和项目格式是施工依据。 [GPU 后端 ADR](../adr/0003-metal-gpu-backend-dual-track-and-phase1-gates.md) · [早期迁移计划](../metal_backend_migration_and_cross_platform_gpu_plan.md)
+基线提交 `6249e136`，2026-11-22。目标是在 macOS 上让剪辑、调色、合成、交付和受支持的着色器插件默认通过 Metal 渲染。预览和导出从同一工程快照求值，共享帧格式、色彩语义和效果参数。Windows/Linux、macOS 兼容模式和画质对拍使用独立的 OpenGL 路径。已有的 ADR、跨平台迁移计划和项目格式是施工依据。 [GPU 后端 ADR](../architecture/adr/0003-metal-gpu-backend-dual-track-and-phase1-gates.md) · [早期迁移计划](platform/metal_backend_migration_and_cross_platform_gpu_plan.md)
 
 ## 从哪里开始
 
@@ -428,7 +428,7 @@ python -m pytest -q \
 
 ## 阶段 6 着色器插件和内置效果
 
-保留插件 ID、参数名、默认值、版本与项目序列化，通过既有 `EffectSpec`、`EffectCatalog`、`EffectCapability` 管理能力。首先迁宿主自带高频效果和可重建样本，然后扩大第三方覆盖。`.tai` 按 ONNX Runtime provider 验证，Python 插件按宿主和脚本服务验证。只有它们调用图像帧或图形设备的边界需要采用共享帧契约。 [插件开发指南](../PLUGIN_DEV_GUIDE.md) · [能力 API](../../src/features/shared/effects/effect_capability.py)
+保留插件 ID、参数名、默认值、版本与项目序列化，通过既有 `EffectSpec`、`EffectCatalog`、`EffectCapability` 管理能力。首先迁宿主自带高频效果和可重建样本，然后扩大第三方覆盖。`.tai` 按 ONNX Runtime provider 验证，Python 插件按宿主和脚本服务验证。只有它们调用图像帧或图形设备的边界需要采用共享帧契约。 [插件开发指南](../plugins/PLUGIN_DEV_GUIDE.md) · [能力 API](../../src/features/shared/effects/effect_capability.py)
 
 | 编号 | 实施方法 | 验收方法 |
 |---|---|---|

@@ -1,7 +1,7 @@
 # F3.2 · 流式实时保调变速 — 验证台账
 
 - 日期：2026-10-24
-- 计划条目：docs/feature_plan_F_davinci_2026-10-22.md §F3.2
+- 计划条目：docs/plans/performance/feature_plan_F_davinci_2026-10-22.md §F3.2
 - 测试：`tests/edit/test_streaming_wsola.py`（16）+ `tests/edit/test_preserve_pitch_realtime.py`（8）+
   回归 `test_audio_timestretch / test_clip_speed_fade_realtime / test_preserve_pitch_ui /
   test_capability_registry / test_fix_round7_audio_output / test_audio_transitions` = **合计 143 绿**

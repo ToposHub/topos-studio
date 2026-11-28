@@ -2,7 +2,7 @@
 
 - 日期：2026-10-24
 - 提交：片1 `1bbadd9e3`（响度公式/stem 键/静音缺陷）＋ 片2 `834bb9fcb`（sends 路由/BUS 干声）＋ 片3（sidecar/录音设备/收口）
-- 计划条目：docs/feature_plan_F_davinci_2026-10-22.md §F3.4
+- 计划条目：docs/plans/performance/feature_plan_F_davinci_2026-10-22.md §F3.4
 - 调研：Explore 全量盘点（六验收项差距，2026-10-24，结论驱动本台账）
 
 ## 1. 缺陷修复（本轮实测发现）

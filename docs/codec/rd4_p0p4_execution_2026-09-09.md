@@ -1,6 +1,6 @@
 # V7-B 主计划 P0–P4 执行报告（2026-09-09）
 
-**对应计划：** `docs/topos_v7b_reduced_decode_master_plan_2026-09-09.md`
+**对应计划：** `docs/plans/codec/topos_v7b_reduced_decode_master_plan_2026-09-09.md`
 **分支：** `fix-ui`（基线 `8a087e6d` 起步；本报告截至本提交）
 **核心结论：** P0 全部收口、P1 全部交付、P2 写入器落地并通过结构验收；
 **尺寸与质量门禁在合成 corpus 上首次实测通过（匹配质量点）**；编码速度

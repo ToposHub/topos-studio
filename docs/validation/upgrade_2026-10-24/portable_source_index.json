@@ -10,7 +10,7 @@
   "path_policy": "repository_relative_path is POSIX-separated and resolved against the current checkout; line is a hint for audit_commit, relocate by symbol on later commits; machine absolute paths belong only to run environment metadata",
   "entries": [
     {
-      "repository_relative_path": "docs/c31_stress_cuda_resident_2026-10.md",
+      "repository_relative_path": "docs/validation/windows/c31_stress_cuda_resident_2026-10.md",
       "line": 15,
       "audit_commit": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
       "kind": "evidence_or_document",
@@ -20,7 +20,7 @@
       ]
     },
     {
-      "repository_relative_path": "docs/perf_baseline_freeze_mac_2026-10.md",
+      "repository_relative_path": "docs/benchmarks/performance/perf_baseline_freeze_mac_2026-10.md",
       "line": 135,
       "audit_commit": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
       "kind": "evidence_or_document",
@@ -38,7 +38,7 @@
       ]
     },
     {
-      "repository_relative_path": "docs/upgrade_plan_M_mac_2026-10-24.md",
+      "repository_relative_path": "docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md",
       "line": null,
       "audit_commit": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
       "kind": "plan",
@@ -46,7 +46,7 @@
       "owner_tasks": []
     },
     {
-      "repository_relative_path": "docs/upgrade_plan_W_windows_2026-10-24.md",
+      "repository_relative_path": "docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md",
       "line": null,
       "audit_commit": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
       "kind": "evidence_or_document",
@@ -54,7 +54,7 @@
       "owner_tasks": []
     },
     {
-      "repository_relative_path": "docs/upgrade_plan_W_windows_2026-10-24.md",
+      "repository_relative_path": "docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md",
       "line": 1,
       "audit_commit": "9e05556c3a3e6d900e7db1d7d3a14ae68552a87c",
       "kind": "evidence_or_document",

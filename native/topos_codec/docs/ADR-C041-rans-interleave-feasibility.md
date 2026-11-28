@@ -69,7 +69,7 @@ SIMD IDCT 残余 ~15%（bit-exact 风险高，ADR-C009 判不启）、NT-store
 i9-9900K）已达实用平台**；产品档位下解码全配置 ≥2× 实时（P5），
 同码率 2K 高码率档 0.45~0.70× ProRes 的差距属该平台的合理落点。
 下一代收益窗口在指令集/内存子系统变化或平台迁移（见
-docs/metal_backend_migration_and_cross_platform_gpu_plan.md 方向）时重开。
+docs/plans/platform/metal_backend_migration_and_cross_platform_gpu_plan.md 方向）时重开。
 
 ## 5. 证据与复现
 

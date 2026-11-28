@@ -1213,7 +1213,7 @@ class TestDiagnosticsState:
 
 
 # ── ROI/PAINT drags through real mouse events ────────────────────────────────
-# See docs/testcoverage/2026-09-28/BUGS-agent-B1.md (BUG-B1-01 / BUG-B1-02).
+# See docs/validation/coverage/2026-09-28/BUGS-agent-B1.md (BUG-B1-01 / BUG-B1-02).
 # mouseMoveEvent/mouseReleaseEvent dispatch tool handlers only when
 # ViewerInteractionState.is_dragging is True, but the ROI and PAINT press
 # handlers used to return True without calling start_drag(), so the drag

@@ -1,6 +1,6 @@
 """R01: authoritative read-only projection of effect resources for Color UI.
 
-权威来源与投影契约（docs/color_resources_backend_implementation_plan.md R01）：
+权威来源与投影契约（docs/plans/color/color_resources_backend_implementation_plan.md R01）：
 
 - **PluginManager**（``.tglsl`` DCTL / ``.tai`` AI 插件注册表）与
   **EffectCatalog**（Composite 内建效果统一目录）是唯一权威。本 presenter

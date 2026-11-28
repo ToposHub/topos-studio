@@ -1,6 +1,6 @@
 # 预览关滤波开关（TC_DECODE_FLAG_NO_DEBLOCK / video_preview_no_deblock，2026-09-22）
 
-承接 `docs/topos_prores_quality_gain_2026-09-22.md`（P6 去块 v2.1）与
+承接 `docs/codec/topos_prores_quality_gain_2026-09-22.md`（P6 去块 v2.1）与
 `docs/codec/topos_speed_matrix_2k_4k_2026-09-22.md`（滤波解码开销 1.19–2.02×）。
 
 ## 0. 决策

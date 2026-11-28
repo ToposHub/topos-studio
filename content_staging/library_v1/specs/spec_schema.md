@@ -1,6 +1,6 @@
 # L01 组件规格契约（spec schema）
 
-> 依据 `docs/upgrade_plan_L_content_library_2026-10-24.md` §8 L01。
+> 依据 `docs/plans/platform/upgrade_plan_L_content_library_2026-10-24.md` §8 L01。
 > 这是**拟定交付契约**：字段由现有 parser/registry 适配（Mac 集成者窄补丁），
 > 不是新造万能插件引擎。机器可读载体是 `manifest.py` 的 `ComponentManifest`。
 

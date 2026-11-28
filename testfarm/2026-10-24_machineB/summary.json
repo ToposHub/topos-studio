@@ -7636,7 +7636,7 @@
         },
         {
           "name": "tests.render.html_spike.test_html_spike_playwright_gate::test_backend_self_reports_available_with_pinned_build",
-          "reason": "pinned headless browser unavailable in this environment (playwright/chromium not installed). W0-A gate cannot run; see docs/adr/0001-html-re"
+          "reason": "pinned headless browser unavailable in this environment (playwright/chromium not installed). W0-A gate cannot run; see docs/architecture/adr/0001-html-re"
         },
         {
           "name": "tests.render.html_spike.test_html_spike_playwright_gate::test_w0a_gate_passes_on_pinned_backend",
@@ -7648,7 +7648,7 @@
         },
         {
           "name": "tests.render.html_spike.test_html_spike_real_browser::test_offscreen_html_renderer_gate",
-          "reason": "W0-A HTML renderer backend unavailable in this environment: offscreen grab() uniform blank. See docs/adr/0001-html-renderer-offscreen-readba"
+          "reason": "W0-A HTML renderer backend unavailable in this environment: offscreen grab() uniform blank. See docs/architecture/adr/0001-html-renderer-offscreen-readba"
         },
         {
           "name": "tests.render.test_html_export_e2e.TestHtmlExportEndToEnd::test_rgba_sequence_manifest_records_provenance",

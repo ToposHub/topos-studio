@@ -294,7 +294,7 @@ class ConfigManager:
         # V-P1-4: 协议测试全绿前默认禁用，通过 Preferences 手动开启
         # Color、Composite、Export 共享同一 VideoFrameProviderService
         "video_color_use_shared_frame_provider": False,
-        # 视频降噪（时域+空域）功能开关（docs/video_denoise_implementation_plan.md §13）
+        # 视频降噪（时域+空域）功能开关（docs/plans/video/video_denoise_implementation_plan.md §13）
         # 回退链：时域+空域 -> 仅空域 -> 原始帧；任何异常不阻塞播放
         "video_denoise_enabled": True,
         "video_temporal_denoise_enabled": True,

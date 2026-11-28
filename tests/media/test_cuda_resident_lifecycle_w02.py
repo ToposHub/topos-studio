@@ -1,6 +1,6 @@
 """W02：CudaGlInteropSession 生命周期/回滚/池预算/current-context 契约（L1 替身）。
 
-计划 `docs/upgrade_plan_W_windows_2026-10-24.md` W02（W-I03/R12）：
+计划 `docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md` W02（W-I03/R12）：
 
 - destroy 必须调用 cuCtxDestroy（旧实现从不销毁，上下文泄漏）且幂等；
 - 分阶段创建（纹理对 → 注册Y → 注册UV）失败逆序回滚：第二平面注册失败

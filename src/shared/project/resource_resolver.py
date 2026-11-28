@@ -6,7 +6,7 @@
 目录。桌面加载包后解包到 ``.topos_cache/<包名>/``，但素材表里的路径仍
 指向手机上的外部路径——换机即离线，解码器不知道去包里找。
 
-设计（契约冻结于 docs/adr/0005 §3）
+设计（契约冻结于 docs/architecture/adr/0005 §3）
 -----------------------------------
 1. **资源索引** ``resources/resources.json``（schema v1）：每个资源按
    SHA-256 内容寻址登记（resource_id / kind / archive_path / size_bytes /

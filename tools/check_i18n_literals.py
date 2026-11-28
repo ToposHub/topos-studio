@@ -2,9 +2,9 @@
 """i18n 硬编码防回归检查（P3 防回归，2026-10-28）。
 
 AST 扫描 src/ 的 UI 字面量 setter/构造器调用（与首轮清单
-docs/i18n_leak_inventory_2026-10-28.md 同口径：5 setter + 11 构造器 +
+docs/validation/code_quality/i18n_leak_inventory_2026-10-28.md 同口径：5 setter + 11 构造器 +
 addAction 首参；豁免空串/纯数字符号/时间格式/占位符），对存量残留走
-基线棘轮（docs/i18n_literal_baseline.json，含理由）：
+基线棘轮（docs/validation/code_quality/i18n_literal_baseline.json，含理由）：
 - 命中基线的残留不报警；
 - **新增**字面量 → 非零退出（CI 红）。
 
@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-BASELINE = REPO / "docs" / "i18n_literal_baseline.json"
+BASELINE = REPO / "docs" / "validation" / "code_quality" / "i18n_literal_baseline.json"
 
 SETTERS = {
     "setText", "setWindowTitle", "setToolTip", "setPlaceholderText", "setTitle",

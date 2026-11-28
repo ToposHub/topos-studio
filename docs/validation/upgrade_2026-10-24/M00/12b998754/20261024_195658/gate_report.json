@@ -1,6 +1,6 @@
 {
   "gate": "m00_focused_gate",
-  "plan": "docs/upgrade_plan_M_mac_2026-10-24.md#M00",
+  "plan": "docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md#M00",
   "blocking_semantics": "any domain failure/timeout fails the gate; baseline comparison is not an excuse",
   "env_overrides": {
     "QT_QPA_PLATFORM": "offscreen",

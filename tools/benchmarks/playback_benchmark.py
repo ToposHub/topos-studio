@@ -11,13 +11,13 @@ Realtime Playback Benchmark (FINAL-P0-07 / 规格 §18)
 5. source_decision   engine SourceResolver 决策统计（source_kinds 分布）
 6. avsync_drift      模拟 A/V drift（用 AVSyncController 评估决策分布）
 
-输出：docs/playback_benchmark_<timestamp>.md（人类可读）+ .json（机读）。
+输出：docs/benchmarks/performance/playback_benchmark_<timestamp>.md（人类可读）+ .json（机读）。
 
 Usage:
     .venv/bin/python tools/benchmarks/playback_benchmark.py
     .venv/bin/python tools/benchmarks/playback_benchmark.py --frames 100
     .venv/bin/python tools/benchmarks/playback_benchmark.py --scenario source_decision
-    .venv/bin/python tools/benchmarks/playback_benchmark.py --out docs/playback_benchmark_final.md
+    .venv/bin/python tools/benchmarks/playback_benchmark.py --out docs/benchmarks/performance/playback_benchmark_final.md
 
 Exit code: 0 全绿，1 有指标不达标。
 """
@@ -388,7 +388,7 @@ def main() -> int:
     parser.add_argument("--scenario", type=str, default="all",
                         help="all | source_decision | seek_stress | avsync | decode_real")
     parser.add_argument("--out", type=str, default="",
-                        help="output markdown path (default docs/playback_benchmark_<ts>.md)")
+                        help="output markdown path (default docs/benchmarks/performance/playback_benchmark_<ts>.md)")
     parser.add_argument("--no-decode-real", action="store_true",
                         help="skip real video decode (PyAV) scenarios")
     args = parser.parse_args()
@@ -414,7 +414,7 @@ def main() -> int:
 
     md = render_markdown(report)
     out_path = Path(args.out) if args.out else (
-        ROOT / "docs" / f"playback_benchmark_{int(time.time())}.md"
+        ROOT / "docs" / "benchmarks" / "performance" / f"playback_benchmark_{int(time.time())}.md"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(md, encoding="utf-8")

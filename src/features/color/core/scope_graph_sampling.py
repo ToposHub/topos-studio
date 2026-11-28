@@ -1,4 +1,4 @@
-"""图取样契约与取样身份（S03/S05，spec docs/color_nodes_backend_implementation_plan.md §6.8）。
+"""图取样契约与取样身份（S03/S05，spec docs/plans/color/color_nodes_backend_implementation_plan.md §6.8）。
 
 S03 契约（本模块是唯一事实来源，UI/E02/E03/面板都从这里取常量）：
 

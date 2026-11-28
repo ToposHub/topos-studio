@@ -1,5 +1,7 @@
 # Audio Mixer UI 与效果器审计证据
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 日期：2026-11-14。源基线：6fecfb1c；后续工作区仅实现Mixer UI／交互，后端留待计划执行。
 
 ## 真实主窗口播放
@@ -44,11 +46,11 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest \
 
 下面是实际Qt控件的离屏布局渲染，使用示例静态读数，**不是新增实播截图或模拟音频功能**。生产UI没有新增随机电平／假动画。
 
-![标准布局](mixer-standard.png)
+标准布局
 
-![紧凑布局](mixer-compact.png)
+紧凑布局
 
-![隐藏Inserts的布局](mixer-faders.png)
+隐藏Inserts的布局
 
 重建预览：
 

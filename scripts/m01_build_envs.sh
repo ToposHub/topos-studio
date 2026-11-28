@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M01 · 构建并验证 Mac 隔离依赖环境（核心 UI/视频 + 可选 AI worker）。
-# 计划：docs/upgrade_plan_M_mac_2026-10-24.md §M01。
+# 计划：docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md §M01。
 #
 # 用法：scripts/m01_build_envs.sh [core|ai|all]
 #   core —— 构建核心环境 .venv-m01-core（主 venv 冻结 − AI 栈），pip check + focused 门禁

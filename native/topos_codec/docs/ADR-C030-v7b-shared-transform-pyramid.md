@@ -6,7 +6,7 @@
   边界延拓、422 chroma 相位、舍入、level/tile 几何、错误隐藏与版本升级
 - 取代：无（RD4-08 的像素 residual 架构不在本 ADR 内修正，由本 ADR 的
   后继实现替代其写入路径；minor-1/2/3 读取兼容不受影响）
-- 关联：`docs/topos_v7b_reduced_decode_master_plan_2026-09-09.md` §5 P1、
+- 关联：`docs/plans/codec/topos_v7b_reduced_decode_master_plan_2026-09-09.md` §5 P1、
   ADR-C029（V7-A band directory）、`capability_manifest.json`
 
 ## 1. 背景与决策

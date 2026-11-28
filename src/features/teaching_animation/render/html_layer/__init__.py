@@ -2,7 +2,7 @@
 
 This package implements the FH-02/FH-10/FH-13 machinery the W2 ``HtmlRendererService``
 will use, WITHOUT attaching ``FreeformHtmlMotionLayer`` to the scene schema.
-Per the W0-A gate (``docs/adr/0001-...``) the HTML layer cannot enter the project
+Per the W0-A gate (``docs/architecture/adr/0001-...``) the HTML layer cannot enter the project
 format until a capture backend reports available AND passes the determinism gate.
 These modules are the validated, ready-to-activate layer for that day.
 """

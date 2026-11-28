@@ -1,5 +1,7 @@
 # Color Gallery 前端验证（2026-11-09）
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 参考本机 DaVinci Resolve Studio 20 Color Gallery。实际查看了缩略图、相册侧栏、搜索展开与列表模式；结束后恢复参考应用的缩略图／侧栏收起／搜索收起状态。
 
 ## 已实现的外观与交互
@@ -27,14 +29,14 @@ Viewport分屏图标和Gallery分屏菜单打开同一设置窗口：可选参�
 
 | 图片 | 内容 |
 |---|---|
-| [504px Grid](gallery_504x440_grid.png) | 与参考Gallery约同宽，默认108×61缩略图 |
-| [相册 Grid](gallery_700x500_grid_albums.png) | 侧栏与真实目录入口 |
-| [相册 List](gallery_700x500_list_albums.png) | 三列表头、27px行；缺少Label／Timeline metadata的列留空 |
-| [Search](gallery_504x440_grid_search.png) | 50px搜索展开行 |
-| [280px Grid](gallery_280x360_grid.png) | 窄面板保留核心入口，可选工具收进更多菜单 |
-| [空画廊](gallery_empty_504x440.png) | 新建的空库，右侧没有常驻滚动条；搜索无匹配的路径另有行为测试 |
-| [划像选择](comparison_wipe.png) | 单选真实still路径，原reference信号 |
-| [分屏设置](comparison_split.png) | 布局示意、参考选择和待接通状态 |
+| 504px Grid | 与参考Gallery约同宽，默认108×61缩略图 |
+| 相册 Grid | 侧栏与真实目录入口 |
+| 相册 List | 三列表头、27px行；缺少Label／Timeline metadata的列留空 |
+| Search | 50px搜索展开行 |
+| 280px Grid | 窄面板保留核心入口，可选工具收进更多菜单 |
+| 空画廊 | 新建的空库，右侧没有常驻滚动条；搜索无匹配的路径另有行为测试 |
+| 划像选择 | 单选真实still路径，原reference信号 |
+| 分屏设置 | 布局示意、参考选择和待接通状态 |
 
 重建图片：
 

@@ -4,7 +4,7 @@
 总表（T11）、素材使用与剪辑节奏统计（T12）、联系表（T13）、审片资料包
 （T14）与快照对照（T15）。
 
-边界纪律（docs/upgrade_plan_T_third_machine_2026-10-24.md §2）：
+边界纪律（docs/plans/platform/upgrade_plan_T_third_machine_2026-10-24.md §2）：
 
 - 不导入 ``src.app.*``；宿主状态经注入的只读 adapter 进入（T02/G1）。
 - core 查询/报表/统计只接本包 DTO（``dto.InsightSnapshot``），不直接

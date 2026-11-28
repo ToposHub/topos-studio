@@ -597,7 +597,7 @@ tests/media/fixtures/
 
 ## W0-01 Windows 解码素材矩阵（2026-09-12 增补）
 
-计划 `docs/windows_optimization_plan_2026-09-11.md` W0-01：Windows 解码素材清单，
+计划 `docs/plans/platform/windows_optimization_plan_2026-09-11.md` W0-01：Windows 解码素材清单，
 在 P5-2 矩阵之上扩展 AV1 与 4:2:2 诊断用例（**4:2:2 10-bit 必含**）。
 
 | ID | 编码 | 色深 | 色度 | 分辨率 | 硬解期望 |

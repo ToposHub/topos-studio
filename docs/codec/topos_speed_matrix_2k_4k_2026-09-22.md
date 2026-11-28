@@ -3,7 +3,7 @@
 测速机器：MacPro7,1（Intel x86_64，16 核），macOS 24.3.0，Release native dylib
 （`native/topos_codec/build/release`，含 P6 去块 v2.1：门控符号对称性 + 两趟并行 +
 缩放交付目标网格滤波），编码/解码均 16 切片线程。**本机重复测量噪声 ±12%**
-（同一二进制三轮回读摆动，见 `docs/topos_prores_quality_gain_2026-09-22.md` §5），
+（同一二进制三轮回读摆动，见 `docs/codec/topos_prores_quality_gain_2026-09-22.md` §5），
 故表内差异 <12% 的档位之间不要下结论。
 
 口径（`tools/bench_specs_speed.py`）：
@@ -83,7 +83,7 @@
 
 - `docs/codec/topos_codec_speed_matrix_2026-09-15.md`：当轮 2K proxy 码率 15.2 Mbps、
   且 **P6 去块尚未落地**（2026-09-21 才合入），故其解码/编码 fps 与本表不同口径。
-- 本表与 `docs/topos_prores_quality_gain_2026-09-22.md` §5 的同源档位一致
+- 本表与 `docs/codec/topos_prores_quality_gain_2026-09-22.md` §5 的同源档位一致
   （2K proxy 296–338 → 本表 323.2；4K proxy 85–92 → 86.4），属同一构建的复现。
 - 图片链路（`.toos`）速度不在此表：见 `docs/image/topos_image_*_speed_2k_4k_2026-09-07.*`
   与 `docs/image/toos_deblock_verify_2026-09-22.md`。

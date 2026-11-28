@@ -1,6 +1,6 @@
 """CPU oracle —— 调色节点算子的参考实现（N09，B10/B12）。
 
-与 ``docs/color_nodes_mixer_spec.md``（v1 冻结）逐条对应；float32 精确
+与 ``docs/architecture/color_nodes_mixer_spec.md``（v1 冻结）逐条对应；float32 精确
 语义，供 GL/Metal 等价对照与手算验证。**不做隐式近似**：不支持的
 Corrector 参数域显式声明（``UnsupportedNode``）。
 

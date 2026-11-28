@@ -2,7 +2,7 @@
 Timeline Occlusion Culling
 时间线多轨遮挡裁剪共享纯分析模块。
 
-对应计划：docs/timeline_occlusion_culling_optimization_plan_2026-09-19.md
+实施记录：docs/architecture/timeline_occlusion_culling_implementation_2026-09-19.md
 
 ## 职责
 

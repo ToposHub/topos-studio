@@ -1,4 +1,4 @@
-"""B0.1 环境兼容矩阵实录（计划表 B · Windows 线，docs/perf_plan_B_windows_2026-10-22.md）。
+"""B0.1 环境兼容矩阵实录（计划表 B · Windows 线，docs/plans/performance/perf_plan_B_windows_2026-10-22.md）。
 
 一次性采集本机可复现环境记录，供跨机/跨版本分层归档：
 

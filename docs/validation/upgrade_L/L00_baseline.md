@@ -1,6 +1,6 @@
 # L00 基线记录 · 2026-10-25
 
-> 计划：`docs/upgrade_plan_L_content_library_2026-10-24.md` §8 L00。
+> 计划：`docs/plans/platform/upgrade_plan_L_content_library_2026-10-24.md` §8 L00。
 > 编制时观测 HEAD（计划文档 v1）：35a9ff904；本基线为开工重新记录。
 
 ## 仓库与环境
@@ -20,13 +20,13 @@
 
 ## 目录租约确认（§2.1）
 
-开工时 `content_staging/`、`tests/content_library_v1/`、`docs/content_library_v1/`、
+开工时 `content_staging/`、`tests/content_library_v1/`、`docs/architecture/content_library_v1/`、
 `docs/validation/upgrade_L/` 均不存在，未被他人占用；本基线提交创建全部租约目录
 （`content_staging/library_v1/README.md` 记录边界红线）。
 
 ## 关联计划门控实况（影响 L 线声明口径）
 
-依据 `docs/upgrade_plan_M_mac_2026-10-24.md`（v5）与 git 实况（详见台账附录）：
+依据 `docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md`（v5）与 git 实况（详见台账附录）：
 
 | 门 | 状态 | 对 L 线的含义 |
 |---|---|---|

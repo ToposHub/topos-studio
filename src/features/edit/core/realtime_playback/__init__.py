@@ -2,7 +2,7 @@
 Edit Realtime Playback Kernel
 专业 NLE 实时播放内核包。
 
-本包按 docs/professional_nle_playback_engine_implementation_spec.md 的目标
+本包按 docs/architecture/professional_nle_playback_engine_implementation_spec.md 的目标
 架构建立，将 Edit 时间线实时播放从 "同步按帧请求 + CPU 合成 + QImage" 升级为：
 
     播放 tick

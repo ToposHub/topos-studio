@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """步骤 1 真机门禁：D3D11 device 生命周期 + 定长纹理池 1,000 帧 lease 循环。
 
-对应计划 docs/windows_timeline_gpu_export_optimization_plan_2026-09-15.md
+对应计划 docs/plans/platform/windows_timeline_gpu_export_optimization_plan_2026-09-15.md
 §6 步骤 1 的验收："NVIDIA、AMD 实机各做 device/surface probe；跨 LUID 必须
 得到 adapter_mismatch，1,000 帧循环无资源增长。"
 

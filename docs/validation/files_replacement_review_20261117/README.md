@@ -1,5 +1,7 @@
 # Files 替代计划第二轮复核证据
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 日期：2026-11-17。读取基线：`fix-ui @ 7f025973`；修复后报告对应本轮工作区。
 结论和后续任务见[新计划](../../plans/2026-11-17-files-replacement-followup-plan.md)。
 
@@ -7,7 +9,7 @@
 
 ## 自动化验证
 
-修复前第一组（Files + 原生Files UI + 播放语义 + 导入补偿）共216项：**215 passed, 1 failed**。失败为 `test_capabilities_disable_metadata_controls_with_reason`，未选择素材时禁用原因为空；其后“能力恢复立即启用”的断言也与必须有选区的规则冲突。本轮修复提示并修正选区断言。[原始JUnit](baseline_before.xml)。
+修复前第一组（Files + 原生Files UI + 播放语义 + 导入补偿）共216项：**215 passed, 1 failed**。失败为 `test_capabilities_disable_metadata_controls_with_reason`，未选择素材时禁用原因为空；其后“能力恢复立即启用”的断言也与必须有选区的规则冲突。本轮修复提示并修正选区断言。原始JUnit。
 
 额外播放宿主/Topos音频/YUV验证：15 passed, 3 skipped。最终采用下列明确集合一次复跑，不能将不同测试集合的计数直接当作完成率。
 
@@ -22,7 +24,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q \
   --junitxml=docs/validation/files_replacement_review_20261117/regression.xml
 ```
 
-**结果：247 passed, 3 skipped（14.08秒）**。[完整输出](regression.txt)、[JUnit](regression.xml)。3项跳过是 `test_gpu_yuv_frame.py` 中本机缺失的真实媒体夹具；其余该文件测试不要求真实GL context。测试通过不等于GPU、声卡、平台、完整替代或恢复演练验收。
+**结果：247 passed, 3 skipped（14.08秒）**。[完整输出](regression.txt)、JUnit。3项跳过是 `test_gpu_yuv_frame.py` 中本机缺失的真实媒体夹具；其余该文件测试不要求真实GL context。测试通过不等于GPU、声卡、平台、完整替代或恢复演练验收。
 
 局部新增回归覆盖：批改名执行的会话回包/HTTP错误/网络错误/无效与未确认响应、在途改模板/重复预览乱序、同路径fetch两种回包顺序、Capability DTO原因与无选择门控。并收紧原有文件并发断言。子审查独立复核过3组UI测试，随后最终集合覆盖了进一步补充的响应/DTO用例。
 

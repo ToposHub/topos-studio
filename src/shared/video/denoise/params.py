@@ -1,6 +1,6 @@
 """视频降噪参数定义（时域 + 空域）。
 
-对应 docs/video_denoise_implementation_plan.md 第 4 节参数规格。
+对应 docs/plans/video/video_denoise_implementation_plan.md 第 4 节参数规格。
 
 参数对象是不可变的 dataclass，跨线程传递安全（UI 线程构建、渲染线程读取）。
 序列化格式与图片降噪（source_bake）完全独立，使用项目顶层 "video_denoise" 字段。

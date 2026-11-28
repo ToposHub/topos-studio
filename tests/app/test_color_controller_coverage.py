@@ -26,7 +26,7 @@ engine and panels (no GL, no engine threads, no modal dialogs):
   pattern / search commit, task lifecycle slots)
 
 Suspected src bugs found while writing these tests are recorded in
-``docs/testcoverage/2026-09-28/BUGS-agent-C4.md`` (BUG-C4-xx); nothing in
+``docs/validation/coverage/2026-09-28/BUGS-agent-C4.md`` (BUG-C4-xx); nothing in
 src is modified here.  Where a test pins the *current* behaviour of a
 suspected bug it references the matching BUG-C4-xx number in a comment so
 the assertion gets updated together with the fix.

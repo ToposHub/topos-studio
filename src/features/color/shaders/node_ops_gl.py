@@ -1,6 +1,6 @@
 """节点分支/键/通道算子的 GL shader（B10，spec v1 逐条对应）。
 
-每个 shader 与 ``docs/color_nodes_mixer_spec.md`` 公式一一对应；CPU
+每个 shader 与 ``docs/architecture/color_nodes_mixer_spec.md`` 公式一一对应；CPU
 oracle（N09）为等价参考。HDR 不截断；key 不写 image alpha。
 """
 

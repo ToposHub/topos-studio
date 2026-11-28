@@ -1,14 +1,16 @@
 # 2026-10-14 剪辑实施后复查证据
 
-审计 HEAD：`833dcd382d40f3ff75cb31bc3e3374814efa2b1b`。主计划：[新优化计划表](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/edit_page_followup_audit_optimization_plan_2026-10-14.md>)。
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
+审计 HEAD：`833dcd382d40f3ff75cb31bc3e3374814efa2b1b`。主计划：新优化计划表。
 
 这是本轮新增目录，旧计划、旧审计、生产代码及用户测试素材均保留。`audit-scratch.topos` 是本次专用工程，仅引用原素材，未写用户现有工程。
 
 ## 可见窗口交互
 
-[驱动脚本](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/interactive_driver.py>) 显示完整 MainWindow，隔离配置和项目；QTest 驱动真实 Qt 按钮、键盘、拖动事件。人工阅读窗口截图进行像素/界面核对，但没有把它描述为人工鼠标操作。`evidence/command-01.py` 到 `command-08.py` 为按顺序执行的动作；`command-99.py` 为退出动作。
+驱动脚本 显示完整 MainWindow，隔离配置和项目；QTest 驱动真实 Qt 按钮、键盘、拖动事件。人工阅读窗口截图进行像素/界面核对，但没有把它描述为人工鼠标操作。`evidence/command-01.py` 到 `command-08.py` 为按顺序执行的动作；`command-99.py` 为退出动作。
 
-[交互记录](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/interaction_records.json>)、[完整应用日志](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/full-app.log>) 和 [未捕获槽异常](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/uncaught-qt-exceptions.log>) 保留了模型前后数据、输入、截图名称及 Source Overwrite 调用链。异常记录钩子只属于审计驱动，不是生产修复；不能以进程继续运行来判断槽异常已被产品处理。
+交互记录、完整应用日志 和 未捕获槽异常 保留了模型前后数据、输入、截图名称及 Source Overwrite 调用链。异常记录钩子只属于审计驱动，不是生产修复；不能以进程继续运行来判断槽异常已被产品处理。
 
 关键记录：
 
@@ -40,10 +42,10 @@
 
 ## 测试与导出
 
-[修复批次日志](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/pytest-fixes.log>) 与同名XML：107 passed、1 skipped；skip原因是fixture中ShortcutManager unavailable。实际Qt清空快捷键probe另通过。
+修复批次日志 与同名XML：107 passed、1 skipped；skip原因是fixture中ShortcutManager unavailable。实际Qt清空快捷键probe另通过。
 
-[既有失败范围日志](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/evidence/pytest-existing-failures.log>) 与同名XML：168 passed、9 failed；4个数值失败为LUT及GPU primary grade真实问题，5个为no_deblock fixture、孤立Sync Lock状态断言、Metal私有缓存键三类测试维护项。
+既有失败范围日志 与同名XML：168 passed、9 failed；4个数值失败为LUT及GPU primary grade真实问题，5个为no_deblock fixture、孤立Sync Lock状态断言、Metal私有缓存键三类测试维护项。
 
-[导出脚本](</Users/testuser/Documents/vscode/topos-color-multitask /topos-color01/docs/audit/2026-10-14-edit-recheck/export_smoke.py>)、`export-smoke.log`、`export-smoke-results.json`：两条专用时间线各49帧、640×360 H.264，均success、audio_omitted=false。`smoke-*.mp4`保留实际输出；仅为短片服务烟测，未宣称硬件编码、耳听或完整颜色保真通过。
+导出脚本、`export-smoke.log`、`export-smoke-results.json`：两条专用时间线各49帧、640×360 H.264，均success、audio_omitted=false。`smoke-*.mp4`保留实际输出；仅为短片服务烟测，未宣称硬件编码、耳听或完整颜色保真通过。
 
 `manifest.json`记录交付文件大小和SHA-256，便于将来核对本次证据。不同分工测试存在重叠，主计划没有将其直接相加。

@@ -1,5 +1,7 @@
 # 用户提供目录的真实媒体补测
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 日期：2026-11-17。使用现有 `decode_preview`、`_LibavSession`、`ToposMovieSession` 做只读CPU解码；不创建GPU context、不启动声卡，也不把这些结果等同于连续播放、显示色彩或设备验收。
 
 ## 范围和实际结果
@@ -40,7 +42,7 @@ media.STRICT = True
 pytest.main(['-q', 'tests/ui/test_gpu_yuv_frame.py'])
 ```
 
-结果：**9 passed，0 skipped（2.14秒）**。此前缺失的ProRes422LT、DNxHR HQX 10bit、4K H264三个样本已实际覆盖；[输出](real_yuv_tests.txt)、[JUnit](real_yuv_tests.xml)。测试读取YUV数组，不执行GPU上传或绘制。
+结果：**9 passed，0 skipped（2.14秒）**。此前缺失的ProRes422LT、DNxHR HQX 10bit、4K H264三个样本已实际覆盖；[输出](real_yuv_tests.txt)、JUnit。测试读取YUV数组，不执行GPU上传或绘制。
 
 ## 布局验证建议
 

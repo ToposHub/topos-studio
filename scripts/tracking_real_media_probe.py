@@ -10,7 +10,7 @@
 示例：
     .venv/bin/python scripts/tracking_real_media_probe.py \
         --rounds 3 --max-frames 120 \
-        --out docs/color_tracker_real_media_report.md
+        --out docs/validation/color/color_tracker_real_media_report.md
 """
 
 from __future__ import annotations
@@ -344,7 +344,7 @@ def render_markdown(payload: dict) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="real media tracker performance probe")
     parser.add_argument("--video-dir", default=str(ROOT / "tests" / "test_videos"))
-    parser.add_argument("--out", default=str(ROOT / "docs" / "color_tracker_real_media_report.md"))
+    parser.add_argument("--out", default=str(ROOT / "docs" / "validation" / "color" / "color_tracker_real_media_report.md"))
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--max-frames", type=int, default=120,
                         help="每轮最多跟踪帧数；0=到视频末尾")

@@ -1,5 +1,7 @@
 # Window / Tracker redesign — 2026-11-02
 
+> 截图附件已清理，以下保留当时的验证记录。
+
 Implemented a video-specific Window palette and rebuilt Tracker - Window around
 the supplied screenshots and direct inspection of the running DaVinci Resolve
 Studio 20 Color page. Image mode retains its existing segmentation, background,
@@ -37,11 +39,11 @@ available when work mode is `image`.
 
 These are actual Qt widget renders at 786 × 418, not design mockups.
 
-![Window, empty](window_empty.png)
-![Window, circle](window_circle.png)
-![Window, rectangle](window_rectangle.png)
-![Tracker, empty](tracker_empty.png)
-![Image tools retained](image_tools_preserved.png)
+Window, empty
+Window, circle
+Window, rectangle
+Tracker, empty
+Image tools retained
 
 ## Validation and limits
 

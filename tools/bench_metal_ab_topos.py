@@ -20,8 +20,8 @@ Run from the repository root::
 
     PYTHONPATH=. .venv/bin/python tools/bench_metal_ab_topos.py \
         --ab-dir bench_out/metal-ab.2026-11-23 --rounds 6 \
-        --output-json docs/macos_metal_migration/evidence/ab-export.json \
-        --output-md docs/macos_metal_migration/evidence/ab-export.md
+        --output-json docs/architecture/macos_metal_migration/evidence/ab-export.json \
+        --output-md docs/architecture/macos_metal_migration/evidence/ab-export.md
 """
 
 from __future__ import annotations

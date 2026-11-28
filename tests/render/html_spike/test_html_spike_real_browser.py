@@ -113,7 +113,7 @@ def test_offscreen_html_renderer_gate() -> None:
         pytest.skip(
             "W0-A HTML renderer backend unavailable in this environment: "
             f"{report.get('self_test_reason', 'unknown')}. "
-            "See docs/adr/0001-html-renderer-offscreen-readback.md for the "
+            "See docs/architecture/adr/0001-html-renderer-offscreen-readback.md for the "
             "decision and the pinned headless-browser fallback for the W2 HTML waves."
         )
 

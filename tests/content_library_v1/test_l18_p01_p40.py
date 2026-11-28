@@ -1,6 +1,6 @@
 """L18 批次 P01–P40 配方交付测试。
 
-范围与口径（docs/upgrade_plan_L_content_library_2026-10-24.md §7，L18 配方与宏）：
+范围与口径（docs/plans/platform/upgrade_plan_L_content_library_2026-10-24.md §7，L18 配方与宏）：
 - 逐项：recipe.json 可解析 + 必填字段/枚举契约。P29 为 L05 已交付试点
   （tests/content_library_v1/test_l05_entries.py 深检），本文件只做浅检不重做；
 - 依赖真实存在（防悬空引用）：生产插件 plugins/<X>.tglsl、暂存组件

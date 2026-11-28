@@ -42,7 +42,7 @@ S4（编码免 idiv，ADR-C044）+ S5 一期（后向环专化，ADR-C045）落�
 
 ## 三、与 Metal 并行轨道的关系（边界声明）
 
-`docs/metal_backend_migration_and_cross_platform_gpu_plan.md`（另线
+`docs/plans/platform/metal_backend_migration_and_cross_platform_gpu_plan.md`（另线
 维护）**§2.5 已明确 native codec 不纳入其第一阶段**——其范围为编辑器
 管线（源解码/调色/composite/UI 表面）。本计划拥有 codec 编解码轴，
 互补不重叠；可复用其 Phase 4 已落地的 `MetalComputeContext`

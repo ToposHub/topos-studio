@@ -32,7 +32,7 @@ docks (no GL, no engine, no modal dialogs):
   ``_migrate_color_remapping_dock_layout``)
 
 Suspected src bugs found while writing these tests are recorded in
-``docs/testcoverage/2026-09-28/BUGS-agent-B4.md`` (BUG-B4-xx); nothing in
+``docs/validation/coverage/2026-09-28/BUGS-agent-B4.md`` (BUG-B4-xx); nothing in
 src is modified here.  Where a test pins the *current* behaviour of a
 suspected bug it references the matching BUG-B4-xx number in a comment so
 the assertion gets updated together with the fix.

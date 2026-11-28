@@ -97,7 +97,7 @@ Topos 家族八个档位的命名与定位对标 ProRes 家族，便于工作流
 > 2K Proxy/Standard/HQ +0.66/+0.54/+0.29 dB，4K Proxy/LT +1.01/+0.78 dB；
 > 编解码速度不变。宽 ≥3840 时 Standard/HQ 工作点回退 flat（该域实测负
 > 收益，Y≈52–60 dB 近透明）。详见
-> `docs/topos_edge_jag_diagnosis_2026-09-21.md`。
+> `docs/codec/topos_edge_jag_diagnosis_2026-09-21.md`。
 >
 > **v1.11 输出特性（2026-09-21，"V7-R4/R5"）**：帧头 **flags** bit2 =
 > *输出去块*（解码端后环 8×8 网格滤波，强度随 qp 自适应、真实边缘由
