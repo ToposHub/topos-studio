@@ -12,7 +12,12 @@ save/restore system. It does not replace it.
 from src.shared.layout.profile import LayoutProfile
 from src.shared.layout.store import LayoutStore
 
+TIMELINE_DOCK_MIN_HEIGHT = 260
+TIMELINE_DOCK_DEFAULT_HEIGHT = 420
+
 __all__ = [
     "LayoutProfile",
     "LayoutStore",
+    "TIMELINE_DOCK_MIN_HEIGHT",
+    "TIMELINE_DOCK_DEFAULT_HEIGHT",
 ]

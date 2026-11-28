@@ -12,18 +12,22 @@ from PyQt6.QtWidgets import QApplication, QVBoxLayout, QWidget
 from src.features.edit.ui.edit_viewport import EditViewport
 from src.features.edit.ui.program_viewer import ProgramViewerBar, TransportControlBar
 from src.features.edit.ui.source_viewer import SourceSlider, SourceViewerBar
+from src.shared.i18n.i18n import I18N
 
 
 class _Canvas(QWidget):
     zoom_changed = pyqtSignal(float)
+    is_fit_to_window = True
 
     def fit_to_window(self) -> None:
+        self.is_fit_to_window = True
         self.zoom_changed.emit(1.0)
 
     def actual_size(self) -> None:
-        self.zoom_changed.emit(2.0)
+        self.set_zoom(2.0)
 
     def set_zoom(self, zoom: float) -> None:
+        self.is_fit_to_window = False
         self.zoom_changed.emit(zoom)
 
 
@@ -126,7 +130,7 @@ def test_switch_preserves_marks_scrub_position_and_zoom(viewport) -> None:
     viewport.show_source()
     assert source.slider.value() == 37
     assert (source.toolbar._in_point, source.toolbar._out_point) == (10, 60)
-    source.viewer.zoom_changed.emit(1.5)
+    source.viewer.set_zoom(1.5)
     assert viewport.source_header.zoom_button.text() == "150%"
 
 
@@ -154,11 +158,16 @@ def test_header_uses_same_live_labels_and_timeline_selector(viewport, qapp) -> N
     assert viewport.source_header.title.text() == "Camera A.mov"
     assert viewport.source_header.timecode.text() == "01:02:03:04"
     assert viewport.source_header.duration.text() == "00:00:10:00"
+    assert viewport.source_header.fps_indicator is source_bar.fps_indicator
+    assert viewport.source_header.isAncestorOf(source_bar.fps_indicator)
     transport = viewport.program_viewer.get_transport_bar()
     transport.update_timecode("10:20:30:05")
     assert viewport.program_header.timecode is transport.timecode_label
     assert viewport.program_header.timecode.text() == "10:20:30:05"
     toolbar = viewport.program_viewer.get_toolbar()
+    assert viewport.program_header.fps_indicator is toolbar.fps_indicator
+    assert viewport.program_header.isAncestorOf(toolbar.fps_indicator)
+    assert toolbar.fps_indicator.isVisible()
     toolbar.set_timeline_choices({"one": SimpleNamespace(name="Timeline 1"), "two": SimpleNamespace(name="Timeline 2")}, "two")
     qapp.processEvents()
     assert viewport.program_header.title is toolbar._timeline_selector
@@ -187,7 +196,7 @@ def test_opening_another_source_resets_header_zoom_and_metadata(qapp, widget_she
     assert widget.source_header.zoom_button.text() == "150%"
     source.open_asset(SimpleNamespace(asset_id="two", display_name="Camera B.mov",
                                      total_frames=500, fps=25.0, width=1920, height=1080))
-    assert widget.source_header.zoom_button.text() == "100%"
+    assert widget.source_header.zoom_button.text() == I18N.tr("viewport.zoom_auto", "Auto")
     assert widget.source_header.title.text() == "Camera B.mov"
     assert widget.source_header.timecode.text() == "00:00:00:00"
     assert source.slider.maximum() == 499
@@ -468,6 +477,24 @@ def test_dual_program_range_mirrors_timeline_marks_clear_and_undo(viewport, qtbo
     assert slider.isHidden()
 
 
+def test_fit_visible_monitors_resets_only_the_shown_canvases(viewport: EditViewport) -> None:
+    program = viewport.program_viewer.get_viewer()
+    source = viewport.source_viewer.viewer
+    program.set_zoom(2.0)
+    source.set_zoom(1.5)
+
+    viewport.fit_visible_monitors()
+    assert program.is_fit_to_window
+    assert not source.is_fit_to_window
+    assert viewport.program_header.zoom_button.text() == I18N.tr("viewport.zoom_auto", "Auto")
+
+    viewport.set_dual_view(True)
+    program.set_zoom(0.5)
+    viewport.fit_visible_monitors()
+    assert program.is_fit_to_window and source.is_fit_to_window
+    assert viewport.source_header.zoom_button.text() == I18N.tr("viewport.zoom_auto", "Auto")
+
+
 def test_program_zoom_presets_keep_viewer_api(viewport) -> None:
     toolbar = viewport.program_viewer.get_toolbar()
     half = next(action for action in toolbar.view_menu.actions() if action.text() == "50%")
@@ -503,11 +530,13 @@ def test_mode_buttons_stay_inside_header_at_narrow_width(viewport, qapp, width, 
     assert viewport.width() == width
     assert not mode_button.isHidden()
     timecode_x = header.timecode.mapTo(header, QPoint(0, 0)).x()
+    fps_x = header.fps_indicator.mapTo(header, QPoint(0, 0)).x()
     mode_x = mode_button.mapTo(header, QPoint(0, 0)).x()
     options_x = header.options_button.mapTo(header, QPoint(0, 0)).x()
     assert mode_x >= 0
     assert options_x + header.options_button.width() <= header.width()
-    assert timecode_x + header.timecode.width() <= mode_x
+    assert timecode_x + header.timecode.width() <= fps_x
+    assert fps_x + header.fps_indicator.width() <= mode_x
     if not header.title.isHidden():
         assert header.title.geometry().right() < timecode_x
 

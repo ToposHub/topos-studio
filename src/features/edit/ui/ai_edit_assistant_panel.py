@@ -1756,7 +1756,11 @@ class AiEditAssistantPanel(PanelDockWidget):
         self._brief_editor = AiBriefEditor()
         # 转发：editor emit → panel emit（controller 连的是 panel 的信号）
         self._brief_editor.brief_patch_requested.connect(self.brief_patch_requested.emit)
-        self._stack.addWidget(self._brief_editor)
+        brief_area = QScrollArea()
+        brief_area.setWidgetResizable(True)
+        brief_area.setFrameShape(QFrame.Shape.NoFrame)
+        brief_area.setWidget(self._brief_editor)
+        self._stack.addWidget(brief_area)
 
         # --- M5：上下文检查器页（§7.1 可检查/可预算/可排除）---
         # 显示 ContextBundle 每块的 kind/优先级/token/为何包含/可排除；用户排除某块

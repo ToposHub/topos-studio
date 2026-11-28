@@ -1975,13 +1975,13 @@ class AsyncRenderer(QThread):
     # Composite renderer execute byte-identical passes.  These wrappers
     # keep the historical call sites (and test seams) intact.
     # ------------------------------------------------------------------
-    def _scope_accumulate_waveform(self, pool) -> None:
+    def _scope_accumulate_waveform(self, pool: dict, show_excursions: bool = True) -> None:
         """RGB waveform density (three additive POINTS passes, R/G/B)."""
-        self._ensure_scope_engine().accumulate_waveform(pool)
+        self._ensure_scope_engine().accumulate_waveform(pool, show_excursions=show_excursions)
 
-    def _scope_accumulate_luma(self, pool) -> None:
+    def _scope_accumulate_luma(self, pool: dict, show_excursions: bool = True) -> None:
         """Luma waveform density (BT.709 Y, white trace via channel 3)."""
-        self._ensure_scope_engine().accumulate_waveform(pool, channel=3)
+        self._ensure_scope_engine().accumulate_waveform(pool, channel=3, show_excursions=show_excursions)
 
     def _scope_display_luma(self, pool: dict, *, target: str = 'wf_display') -> None:
         """Tone-map luma density (waveform display renders the white trace)."""
@@ -1989,13 +1989,13 @@ class AsyncRenderer(QThread):
                                                    target=target)
 
     def _scope_display_waveform(self, pool) -> float:
-        """Tone-map waveform/luma density -> RGBA8 with graticule."""
+        """Tone-map waveform/luma density into the plot texture."""
         self._ensure_scope_engine().display_waveform(pool)
         return 1.0
 
-    def _scope_accumulate_parade(self, pool) -> None:
+    def _scope_accumulate_parade(self, pool: dict, show_excursions: bool = True) -> None:
         """RGB parade: waveform accumulation viewport-partitioned in thirds."""
-        self._ensure_scope_engine().accumulate_parade(pool)
+        self._ensure_scope_engine().accumulate_parade(pool, show_excursions=show_excursions)
 
     def _scope_display_parade(self, pool: dict, *, target: str = 'wf_display') -> None:
         """Tone-map parade density (waveform display over channel thirds)."""
@@ -2511,9 +2511,10 @@ class AsyncRenderer(QThread):
             fc_id = None
             need_wf = mode_needs_waveform(demand.mode)
             need_vs = mode_needs_vectorscope(demand.mode)
+            show_excursions = getattr(demand, 'show_waveform_excursions', True)
 
             if need_wf:
-                self._scope_accumulate_waveform(pool)
+                self._scope_accumulate_waveform(pool, show_excursions)
                 self._scope_display_waveform(pool)
                 wf_id = pool['wf_display'].glo
 
@@ -2523,7 +2524,7 @@ class AsyncRenderer(QThread):
                 vs_id = pool['vs_display'].glo
 
             if mode_needs_parade(demand.mode):
-                self._scope_accumulate_parade(pool)
+                self._scope_accumulate_parade(pool, show_excursions)
                 if demand.mode in ('quad', 'all'):
                     self._scope_display_parade(pool, target='parade_display')
                     parade_id = pool['parade_display'].glo
@@ -2532,7 +2533,7 @@ class AsyncRenderer(QThread):
                     parade_id = pool['wf_display'].glo
 
             if mode_needs_luma(demand.mode):
-                self._scope_accumulate_luma(pool)
+                self._scope_accumulate_luma(pool, show_excursions)
                 if demand.mode == 'all':
                     self._scope_display_luma(pool, target='luma_display')
                     luma_id = pool['luma_display'].glo
@@ -3455,6 +3456,7 @@ class AsyncRenderer(QThread):
             and params.get('color_graph_snapshot') is not None)
         metal_preview = self.__dict__.get("_color_metal_preview")
         warper_sample = params.get("warper_sample") if not color_output_mode else None
+        viewport_background = params.get("viewport_background", (0.1, 0.1, 0.1, 1.0))
         metal_grade = False
         metal_display = None
         if metal_preview is not None and not color_output_mode:
@@ -3485,7 +3487,8 @@ class AsyncRenderer(QThread):
                     params["color_graph_snapshot"],
                     params.get("color_graph_source_frame"),
                     raw_view_fbo, ping_fbo, cancelled=is_cancelled,
-                    display=metal_display, scope_output=color_output_mode, **sample_kwargs)
+                    display=metal_display, scope_output=color_output_mode,
+                    viewport_background=viewport_background[:3], **sample_kwargs)
             except MetalGraphCancelled:
                 return False
             if metal_grade:
@@ -3753,7 +3756,7 @@ class AsyncRenderer(QThread):
             fbo_screen = self.fbo_pair[self.write_idx]
             fbo_screen.use()
             self.ctx.viewport = (0, 0, w, h)
-            self.ctx.clear(0.1, 0.1, 0.1, 1.0) # Viewport background remains stable
+            self.ctx.clear(*viewport_background)
 
             self.ctx.enable(moderngl.BLEND)
             self.ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA

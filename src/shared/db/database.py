@@ -199,6 +199,9 @@ class Database:
             elif 'panel_states' not in columns:
                 cursor.execute('ALTER TABLE layouts ADD COLUMN panel_states TEXT')
 
+            if not self._table_columns(cursor, "page_layout_presets"):
+                self._create_page_layout_presets(cursor)
+
             # Shortcuts Table (Action, Shortcut) - Placeholder for future use
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS shortcuts (
@@ -255,6 +258,48 @@ class Database:
     # ------------------------------------------------------------------
     # layouts
     # ------------------------------------------------------------------
+    @staticmethod
+    def _create_page_layout_presets(cursor: sqlite3.Cursor) -> None:
+        cursor.execute('''
+            CREATE TABLE page_layout_presets (
+                work_mode TEXT NOT NULL,
+                page_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                state TEXT NOT NULL,
+                PRIMARY KEY (work_mode, page_id, name)
+            )
+        ''')
+        cursor.execute('SELECT work_mode, name, panel_states FROM layouts WHERE panel_states IS NOT NULL')
+        for work_mode, name, encoded_pages in cursor.fetchall():
+            try:
+                pages = json.loads(encoded_pages)
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                logger.warning("Skipping invalid page captures in layout preset %r", name)
+                continue
+            if isinstance(pages, dict):
+                cursor.executemany('INSERT INTO page_layout_presets VALUES (?, ?, ?, ?)', (
+                    (work_mode, page, name, state)
+                    for page, state in pages.items() if page and isinstance(state, str) and state
+                ))
+
+    def save_page_layout(self, work_mode: str, page_id: str, name: str, state: str) -> None:
+        with self._write() as cursor:
+            cursor.execute('INSERT OR REPLACE INTO page_layout_presets VALUES (?, ?, ?, ?)',
+                           (work_mode, page_id, name, state))
+
+    def list_page_layouts(self, work_mode: str, page_id: str) -> dict[str, str]:
+        with self._read() as cursor:
+            cursor.execute('''
+                SELECT name, state FROM page_layout_presets
+                WHERE work_mode = ? AND page_id = ? ORDER BY name COLLATE NOCASE
+            ''', (work_mode, page_id))
+            return dict(cursor.fetchall())
+
+    def delete_page_layout(self, work_mode: str, page_id: str, name: str) -> None:
+        with self._write() as cursor:
+            cursor.execute('DELETE FROM page_layout_presets WHERE work_mode = ? AND page_id = ? AND name = ?',
+                           (work_mode, page_id, name))
+
     def save_layout(self, name: str, geometry: str, state: str,
                     panel_states=None, is_default: bool = False,
                     work_mode: str = "all") -> None:
@@ -298,6 +343,28 @@ class Database:
             rows = cursor.fetchall()
         return [row[0] for row in rows]
 
+    def list_layout_bundles(self, work_mode: str) -> dict[str, dict[str, str]]:
+        with self._read() as cursor:
+            cursor.execute('''
+                SELECT name, panel_states FROM layouts
+                WHERE work_mode = ? AND is_default = 0 AND panel_states IS NOT NULL
+                ORDER BY name COLLATE NOCASE
+            ''', (work_mode,))
+            rows = cursor.fetchall()
+        bundles = {}
+        for name, encoded_pages in rows:
+            try:
+                pages = json.loads(encoded_pages)
+            except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+                logger.warning("Skipping invalid layout bundle %r", name)
+                continue
+            if isinstance(pages, dict):
+                captures = {page: state for page, state in pages.items()
+                            if page and isinstance(state, str) and state}
+                if captures:
+                    bundles[name] = captures
+        return bundles
+
     def delete_layout(self, name: str, work_mode: str = "all") -> None:
         with self._write() as cursor:
             cursor.execute(
@@ -305,9 +372,21 @@ class Database:
                 (name, work_mode),
             )
 
+    def reset_obsolete_layout_presets(self) -> None:
+        """Clear the presets preceding the new per-page defaults once."""
+        key = "layout_preset_reset_v1"
+        with self._write() as cursor:
+            cursor.execute("SELECT value FROM settings WHERE key = ?", (key,))
+            if cursor.fetchone() is not None:
+                return
+            cursor.execute("DELETE FROM page_layout_presets")
+            cursor.execute("DELETE FROM layouts")
+            cursor.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (key, "1"))
+
     def clear_layouts(self) -> None:
         with self._write() as cursor:
             cursor.execute('DELETE FROM layouts')
+            cursor.execute('DELETE FROM page_layout_presets')
 
     def get_default_layout(self, work_mode: str = "all"):
         """Returns (geometry, state, panel_states) for the default layout of the

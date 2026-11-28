@@ -37,6 +37,9 @@ class _Window(QMainWindow):
             self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
         self.tabifyDockWidget(self.dock_layers, self.dock_plugin)
 
+    def _current_work_mode(self) -> str:
+        return "all"
+
     def _save_current_layout_to_store(self, page: str) -> None:
         self.saved.append(page)
 

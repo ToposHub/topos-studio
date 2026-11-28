@@ -854,6 +854,7 @@ class TimelineView(QGraphicsView):
     scrub_finished = pyqtSignal(int)  # frame
     scrub_cancelled = pyqtSignal(int)
     range_display_changed = pyqtSignal(int, object, object, object)  # duration, fps, inclusive In/Out
+    deliver_range_adjusted = pyqtSignal()
     selection_changed = pyqtSignal(object)  # TimelineSelection
     tool_changed = pyqtSignal(str)  # tool name
     snap_changed = pyqtSignal(bool)  # enabled
@@ -1141,7 +1142,7 @@ class TimelineView(QGraphicsView):
         # Deliver can temporarily hide the model's range visualization when
         # the export mode is Entire Timeline.  None restores normal Edit
         # behavior; True/False are display-only overrides.
-        self._deliver_range_visibility: Optional[bool] = None
+        self._deliver_ruler_range: str | None = None
 
         # B1: scene cut detection candidate overlay (view-level, lazy).
         # Candidates are presentation-only visuals and never enter the model.
@@ -3156,6 +3157,9 @@ class TimelineView(QGraphicsView):
         if timeline is None:
             return 0, None, None
         duration = self._effective_timeline_duration(timeline)
+        if self._deliver_ruler_range == "entire":
+            export_duration = effective_timeline_duration_frames(timeline, include_marks=False)
+            return duration, 0, export_duration - 1
         marks = resolve_timeline_in_out(timeline.range_start, timeline.range_end, duration)
         start, end = marks or (None, None)
         return duration, start, end
@@ -3164,21 +3168,6 @@ class TimelineView(QGraphicsView):
         """Refresh In/Out handles and the non-interactive track highlight."""
         duration, range_start, range_end = self.get_range_presentation(timeline)
         self.range_display_changed.emit(duration, timeline.fps, range_start, range_end)
-        if self._deliver_range_visibility is False:
-            if self._range_item is not None:
-                self._range_item.set_range(None, None)
-            if self._range_mask_item is not None:
-                self._configure_layout_engine()
-                track_area = self._layout_engine.area_layout().total_track_area
-                self._range_mask_item.set_range(
-                    None,
-                    None,
-                    duration,
-                    track_area.top(),
-                    track_area.height(),
-                )
-            return
-
         if self._range_item is not None:
             self._range_item.set_pixels_per_frame(self._pixels_per_frame)
             self._range_item.set_range(range_start, range_end)
@@ -3194,9 +3183,11 @@ class TimelineView(QGraphicsView):
                 track_area.height(),
             )
 
-    def set_deliver_range_visibility(self, visible: Optional[bool]) -> None:
-        """Set a temporary Deliver-only range-bar visibility override."""
-        self._deliver_range_visibility = visible
+    def set_deliver_ruler_range(self, range_type: str | None) -> None:
+        """Show the full export extent or the sequence's saved In/Out points."""
+        if self._deliver_ruler_range == range_type:
+            return
+        self._deliver_ruler_range = range_type
         if self._timeline is not None:
             self._update_range_visuals(self._timeline)
 
@@ -11938,6 +11929,9 @@ class TimelineView(QGraphicsView):
         finally:
             if self._timeline is timeline:
                 self._update_range_visuals(timeline)
+        if (self._deliver_ruler_range == "entire" and self._timeline is not None
+                and (self._timeline.range_start, self._timeline.range_end) == (new_start, new_end)):
+            self.deliver_range_adjusted.emit()
 
     def _on_range_handle_dragged(self, edge: str, frame: int) -> None:
         """Update range handles and mask live; commit only on mouse release."""

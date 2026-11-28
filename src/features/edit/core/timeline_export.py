@@ -4296,7 +4296,9 @@ class TimelineExporter:
         Returns:
             (start_frame, end_frame) tuple
         """
-        duration = effective_timeline_duration_frames(self._sequence)
+        duration = effective_timeline_duration_frames(
+            self._sequence, include_marks=config.range_type != ExportRangeType.ENTIRE,
+        )
 
         if config.range_type == ExportRangeType.ENTIRE:
             # 整个时间线
@@ -15254,7 +15256,9 @@ def estimate_export_duration(
         估算时长（秒）
     """
     # 计算帧数
-    duration = effective_timeline_duration_frames(sequence)
+    duration = effective_timeline_duration_frames(
+        sequence, include_marks=config.range_type != ExportRangeType.ENTIRE,
+    )
     if config.range_type == ExportRangeType.ENTIRE:
         frame_count = duration
     elif config.range_type == ExportRangeType.IN_OUT:
@@ -15299,7 +15303,9 @@ def estimate_export_size(
         估算大小（字节）
     """
     # 计算帧数
-    duration = effective_timeline_duration_frames(sequence)
+    duration = effective_timeline_duration_frames(
+        sequence, include_marks=config.range_type != ExportRangeType.ENTIRE,
+    )
     if config.range_type == ExportRangeType.ENTIRE:
         frame_count = duration
     elif config.range_type == ExportRangeType.IN_OUT:

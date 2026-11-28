@@ -7,8 +7,8 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtWidgets import QPushButton, QWidget
 
 from src.app.controllers.color_layer_resource_controller import ColorLayerResourceController
 from src.app.controllers.layer_controller import LayerOpsMixin
@@ -99,6 +99,15 @@ def _add(rig) -> dict:
     rig.adapter.activate_effect({"id": "grain", "kind": "effect"})
     return rig.engine.layers[0].plugins[-1]
 
+
+def test_layer_header_offers_reset_all(rig, qtbot):
+    panel = rig.host.layer_panel
+    header = panel.findChild(QWidget, "colorLayersHeader")
+    button = header.findChild(QPushButton, "colorLayersResetAllButton")
+    assert button.toolTip() == button.accessibleName()
+    assert not button.icon().isNull()
+    with qtbot.waitSignal(panel.reset_all_requested, timeout=500):
+        qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
 
 def test_real_layer_effect_add_preserves_source_and_undo(rig):
     assert not hasattr(rig.host, "media_pool_panel") and not hasattr(rig.host, "color_graph_host")

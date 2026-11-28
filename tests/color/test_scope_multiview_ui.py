@@ -6,9 +6,11 @@ import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
 from PyQt6.QtCore import QPoint, QRect, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QImage
 from PyQt6.QtWidgets import QDialog, QDockWidget, QMainWindow, QMenu, QWidget
 
 from src.features.color.ui.scope_panel import MODE_ORDER, ScopePanel, _MULTI_LAYOUTS, _MODE_PRESENTER_ATTR
+from src.shared.i18n.i18n import I18N
 
 
 def test_scope_panel_minimum_width_is_250(qtbot: QtBot) -> None:
@@ -17,6 +19,94 @@ def test_scope_panel_minimum_width_is_250(qtbot: QtBot) -> None:
     panel.resize(100, 200)
     assert panel.minimumWidth() == 250
     assert panel.width() == 250
+
+
+def test_scope_options_toggle_black_on_the_existing_plot(qtbot: QtBot) -> None:
+    panel = ScopePanel()
+    qtbot.addWidget(panel)
+    panel.display_stack.setCurrentIndex(0)
+    panel.resize(520, 360)
+    panel.show()
+    qtbot.wait(1)
+    plot = panel.waveform_widget
+    plot.q_scope_image = QImage(16, 16, QImage.Format.Format_RGB32)
+    plot.q_scope_image.fill(Qt.GlobalColor.black)
+
+    def toggle(menu: QMenu, *_) -> None:
+        label = I18N.tr("analysis.pure_black_background", "Pure Black Background")
+        action = next(action for action in menu.actions() if action.text() == label)
+        assert action.isCheckable()
+        action.trigger()
+
+    for color in ("#191919", "#000000", "#191919"):
+        assert plot.grab().toImage().pixelColor(4, 20) == QColor(color)
+        assert panel._gpu_wf_presenter._background_color == QColor(color)
+        with patch.object(QMenu, "exec", toggle):
+            panel.more_btn.click()
+
+
+@pytest.mark.parametrize(("key", "fallback", "mode", "transfer"), [
+    ("scale_percent", "% (SDR)", "percent", "srgb"),
+    ("scale_code10", "10-bit (64-940)", "code10", "srgb"),
+    ("scale_code10_full", "10-bit (0–1023)", "code10_full", "srgb"),
+    ("scale_nits_sdr", "nits (SDR · 100-nit white)", "nits", "srgb"),
+    ("scale_nits_pq", "nits (PQ)", "nits", "pq"),
+    ("scale_nits_hlg", "nits (HLG)", "nits", "hlg"),
+])
+def test_scope_menu_changes_only_the_ruler(
+    qtbot: QtBot, key: str, fallback: str, mode: str, transfer: str,
+) -> None:
+    panel = ScopePanel()
+    qtbot.addWidget(panel)
+    panel.resize(360, 300)
+    panel.show()
+    qtbot.wait(1)
+    original_geometry = panel.selector_container.geometry()
+    revision = panel.gpu_demand_revision
+    analysis = panel.demand_state()
+
+    def choose(menu: QMenu, *_) -> None:
+        label = I18N.tr("analysis." + key, fallback)
+        next(action for action in menu.actions() if action.text() == label).trigger()
+
+    with patch.object(QMenu, "exec", choose):
+        panel.more_btn.click()
+    assert panel.selector_container.geometry() == original_geometry
+    assert panel.gpu_demand_revision == revision
+    assert panel.demand_state() == analysis
+    for widget in (panel.waveform_widget, panel.split_waveform, panel.parade_widget, panel.luma_widget):
+        assert (widget._scale_mode, widget._transfer) == (mode, transfer)
+    assert panel._gpu_wf_presenter._scale_mode == {"code10": "code10_video", "code10_full": "code10"}.get(mode, mode)
+
+
+def test_scope_menu_hides_excursions_and_refreshes_the_plot(qtbot: QtBot) -> None:
+    panel = ScopePanel()
+    qtbot.addWidget(panel)
+    panel.display_stack.setCurrentIndex(0)
+    panel.resize(360, 300)
+    panel.show()
+    image = np.full((12, 20, 3), 1.125, dtype=np.float32)
+    panel.update_scope(image)
+    panel._process_pending_image()
+    plot = panel.waveform_widget
+    assert plot.q_scope_image is not None
+    assert any(plot.q_scope_image.pixelColor(10, y).red() for y in range(plot.q_scope_image.height()))
+
+    def toggle(menu: QMenu, *_) -> None:
+        label = I18N.tr("analysis.hide_waveform_excursions", "Hide Out-of-Range Signal")
+        next(action for action in menu.actions() if action.text() == label).trigger()
+
+    revision = panel.gpu_demand_revision
+    assert panel.demand_state()["show_waveform_excursions"]
+    with patch.object(QMenu, "exec", toggle):
+        panel.more_btn.click()
+        assert not panel.demand_state()["show_waveform_excursions"]
+        assert not panel._gpu_wf_presenter._show_excursions
+        assert panel.gpu_demand_revision == revision + 1
+        assert not any(plot.q_scope_image.pixelColor(10, y).red() for y in range(plot.q_scope_image.height()))
+        panel.more_btn.click()
+    assert panel.demand_state()["show_waveform_excursions"]
+    assert any(plot.q_scope_image.pixelColor(10, y).red() for y in range(plot.q_scope_image.height()))
 
 
 @pytest.mark.parametrize('width', [250, 440])

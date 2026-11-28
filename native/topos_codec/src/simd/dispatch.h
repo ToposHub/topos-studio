@@ -80,6 +80,12 @@ typedef void (*tc_dequant_inverse_fn)(const struct tc_quant_ctx* ctx, const int3
  * 重选后需重新解析才生效（解码每帧入口重取，满足差分测试语义）。 */
 tc_dequant_inverse_fn tc_simd_resolve_dequant_inverse(uint8_t wide);
 
+/* Optional full-block store for DC and one AC coefficient (at most 12-bit). */
+typedef void (*tc_single_ac_store_fn)(const struct tc_quant_ctx* ctx, int32_t dc,
+                                     uint32_t natural, int32_t ac, uint16_t* dst,
+                                     size_t stride, int32_t mid, uint16_t max);
+tc_single_ac_store_fn tc_simd_resolve_single_ac_store(tc_dequant_inverse_fn inverse);
+
 /* 批 4：宽位深融合反量化+逆变换的稳定入口（= 标量 compose；可直接取址
  * 作 fn 指针用，dec 帧内 per-frame 覆写用）。语义 ==
  * tc_dequant_block_ctx + tc_transform_inverse_8x8_scalar（宽钳位）。 */
@@ -119,6 +125,9 @@ int32_t tc_dev_simd_mode(void);
 
 /* 当前生效后端描述："scalar" / "avx2" / "neon"（诊断/测试断言用） */
 const char* tc_dev_simd_backend(void);
+
+/* True when AVX2 is selected, honoring the dev scalar override. */
+int tc_simd_avx2_enabled(void);
 
 /* 本构建支持的 SIMD 后端存在性（编译期门控；测试用） */
 int tc_simd_have_avx2(void);

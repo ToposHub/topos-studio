@@ -13,7 +13,11 @@ from PyQt6.QtGui import (
 )
 from typing import Any, List, Tuple, Optional
 from src.shared.ui.widgets.video_display_color import VideoDisplayColor
-from src.shared.video.viewer_colors import VIEWER_BACKGROUND_HEX, VIEWER_TRANSPORT_BACKGROUND
+from src.shared.video.viewer_colors import (
+    VIEWER_BACKGROUND_HEX,
+    VIEWER_BACKGROUND_RGBA,
+    VIEWER_TRANSPORT_BACKGROUND,
+)
 from src.features.color.ui.gl_viewport import GLCanvasViewport
 from src.features.color.ui.tracker_overlay import TrackerOverlay, OverlayState
 from src.features.color.core.layer import MaskGroup
@@ -2672,20 +2676,14 @@ class ViewportMenuBar(ViewportToolBarBase):
     def _zoom_by_factor(self, factor) -> None:
         """Zoom the view by a given factor."""
         canvas = self._get_canvas()
-        if canvas and hasattr(canvas, 'scale'):
-            canvas.scale(factor, factor)
-            if hasattr(canvas, '_update_lod'):
-                canvas._update_lod()
-            canvas.viewport().update()
+        if canvas:
+            canvas.set_manual_zoom(factor, relative=True)
     
     def _set_actual_size(self) -> None:
         """Set view to actual size (100% zoom)."""
         canvas = self._get_canvas()
-        if canvas and hasattr(canvas, 'resetTransform'):
-            canvas.resetTransform()
-            if hasattr(canvas, '_update_lod'):
-                canvas._update_lod()
-            canvas.viewport().update()
+        if canvas:
+            canvas.set_manual_zoom(1.0)
 
     def _sync_button_states(self) -> None:
         """Sync button states with canvas state.
@@ -4048,9 +4046,10 @@ class Canvas(QGraphicsView):
         paths = [url.toLocalFile() for url in mime.urls()]
         return paths if all(is_image(path) for path in paths) else []
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, photo_mode: bool = False) -> None:
         super().__init__(parent)
         self.engine = None
+        self.photo_viewer_background = VIEWER_BACKGROUND_RGBA if photo_mode else None
         self.active_shape_id = None
         self.grade_set_import_enabled = False
         self.setAcceptDrops(True)
@@ -4089,7 +4088,8 @@ class Canvas(QGraphicsView):
         self.setViewport(self.gl_viewport)
         self._display_color = VideoDisplayColor(self.gl_viewport, self._refresh_display_color)
         self._video_display: tuple[str | None, bool] = (None, False)
-        self._timeline_monitor_image: QImage | None = None
+        self._timeline_monitor_frame: tuple[QImage, int] | None = None
+        self._timeline_pixmap_frame: int | None = None
         self._color_metal_host = None
         self._color_metal_ready = False
         self.gl_viewport.gl_initialized.connect(self._schedule_color_metal_viewer)
@@ -4107,9 +4107,9 @@ class Canvas(QGraphicsView):
         # DaVinci 级别视觉优化：OpenGL 视口下使用全量更新，避免 CPU 计算脏矩形开销
         self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        # Match the Color viewer's #191919 native letterbox surround. This is
-        # UI backdrop styling; the rendered media's color values are untouched.
         self.setBackgroundBrush(QBrush(QColor(VIEWER_BACKGROUND_HEX)))
+        if photo_mode:
+            self.setStyleSheet(f"QGraphicsView {{ background-color: {VIEWER_BACKGROUND_HEX}; }}")
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
@@ -4127,6 +4127,8 @@ class Canvas(QGraphicsView):
         self.mask_items = {}
         self.current_interaction_type = "general"
         self._needs_initial_fit = False
+        self._fit_on_resize = True
+        self.photo_fit_on_resize = False
 
         # Viewer guide overlay
         self._guide_overlay = None
@@ -4361,12 +4363,13 @@ class Canvas(QGraphicsView):
         self._sync_color_metal_host()
 
     def _refresh_display_color(self) -> None:
-        if self._timeline_preview_active and self._timeline_monitor_image is not None:
-            self._display_color.display_image(self._timeline_monitor_image, self._paint_timeline_preview_image)
+        if self._timeline_preview_active and self._timeline_monitor_frame is not None:
+            image, frame = self._timeline_monitor_frame
+            self.set_timeline_preview_image(image, frame)
         self.scene.invalidate(QRectF(), QGraphicsScene.SceneLayer.BackgroundLayer)
         self.viewport().update()
 
-    def set_timeline_preview_image(self, image: QImage) -> None:
+    def set_timeline_preview_image(self, image: QImage, frame: int) -> None:
         """Present a completed Edit timeline preview without re-decoding it.
 
         The Color page uses this while timeline transport is playing.  The
@@ -4378,10 +4381,12 @@ class Canvas(QGraphicsView):
             return
         self._timeline_preview_active = True
         self._sync_color_metal_host()
-        self._timeline_monitor_image = image
-        self._display_color.display_image(image, self._paint_timeline_preview_image)
+        self._timeline_monitor_frame = (image, frame)
+        self._display_color.display_image(
+            image, lambda adjusted: self._paint_timeline_preview_image(adjusted, frame),
+        )
 
-    def _paint_timeline_preview_image(self, image: QImage) -> None:
+    def _paint_timeline_preview_image(self, image: QImage, frame: int) -> None:
         if not self._timeline_preview_active:
             return
         pixmap = QPixmap.fromImage(image)
@@ -4399,6 +4404,7 @@ class Canvas(QGraphicsView):
             self._update_scene_pan_bounds()
             self._update_lod()
         self.pixmap_item.setPixmap(pixmap)
+        self._timeline_pixmap_frame = frame
         self.pixmap_item.setPos(0.0, 0.0)
         # Fit the view BEFORE revealing the pixmap.  Showing it first left one
         # repaint where the new pixmap was laid out under a stale view transform
@@ -4421,7 +4427,8 @@ class Canvas(QGraphicsView):
         background, so it must never be composited with that renderer's last
         front texture.
         """
-        self._timeline_monitor_image = None
+        self._timeline_monitor_frame = None
+        self._timeline_pixmap_frame = None
         self._display_color.cancel_images()
         self._timeline_preview_active = True
         self._sync_color_metal_host()
@@ -4432,7 +4439,8 @@ class Canvas(QGraphicsView):
     def end_timeline_preview(self) -> None:
         """Return the canvas to the normal Color OpenGL presentation path."""
         self._timeline_preview_active = False
-        self._timeline_monitor_image = None
+        self._timeline_monitor_frame = None
+        self._timeline_pixmap_frame = None
         self._display_color.cancel_images()
         self._timeline_preview_needs_fit = False
         self.pixmap_item.setVisible(False)
@@ -4441,7 +4449,7 @@ class Canvas(QGraphicsView):
     def _update_lod(self):
         chrome = getattr(self, "color_viewport_chrome", None)
         if chrome is not None:
-            chrome.update_zoom(self.transform().m11())
+            chrome.update_zoom(self.transform().m11(), auto=self._fit_on_resize)
         if not self.engine or not self.logical_size: return False
         changed = False
         self.engine.scene_size = (float(self.logical_size.width()), float(self.logical_size.height()))
@@ -4526,7 +4534,17 @@ class Canvas(QGraphicsView):
         ):
             self.scene.setSceneRect(target)
 
+    def set_manual_zoom(self, factor: float, *, relative: bool = False) -> None:
+        self._fit_on_resize = False
+        self._needs_initial_fit = False
+        if not relative:
+            self.resetTransform()
+        self.scale(factor, factor)
+        self._update_lod()
+        self.viewport().update()
+
     def fit_to_window(self, *, render: bool = True) -> None:
+        self._fit_on_resize = True
         if not self.logical_size: return
         view_rect = self.viewport().rect()
         if view_rect.width() <= 10 or view_rect.height() <= 10: return
@@ -5278,6 +5296,8 @@ class Canvas(QGraphicsView):
         widget = self.parent()
         while widget:
             if isinstance(widget, QDockWidget):
+                if not widget.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable:
+                    break
                 menu.addSeparator()
                 if widget.isFloating():
                     menu.addAction(
@@ -5992,6 +6012,8 @@ class Canvas(QGraphicsView):
         steps = max(-4.0, min(4.0, steps))
         base_factor = 1.0 + (speed / 100.0) * 0.15  # speed=100 → one wheel notch = 1.15x
         z = base_factor ** steps
+        self._fit_on_resize = False
+        self._needs_initial_fit = False
 
         # Wheel zoom is a zoom-only operation.  ``AnchorUnderMouse`` makes
         # QGraphicsView change the scroll position on every wheel event so the
@@ -6670,9 +6692,14 @@ class Canvas(QGraphicsView):
         # Update video control bar position
         self.update_video_control_bar_position()
 
-        if self._needs_initial_fit and self.viewport().width() > 100:
-            self.fit_to_window()
+        bar = self.video_control_bar
+        color_video = (not bar.isHidden() and getattr(bar, "_color_chrome", None) is not None
+                       and not bar._fusion_mode)
+        auto_fit = self._fit_on_resize and (self.photo_fit_on_resize or color_video)
+        if (self._needs_initial_fit or auto_fit) and self.viewport().width() > 100 and self.logical_size:
             self._needs_initial_fit = False
+            self.fit_to_window()
+            return
         self._update_scene_pan_bounds()
         # Update LOD and re-render
         if self._update_lod():
@@ -6742,7 +6769,9 @@ class Canvas(QGraphicsView):
             return
         self._color_metal_status_serial = serial
         self._color_metal_ready = ready and self._color_metal_host_can_show()
-        if not self._sync_color_metal_host():
+        if self._sync_color_metal_host():
+            self._record_presented_preview_frame(("metal", generation, serial))
+        else:
             self.scene.invalidate(QRectF(), QGraphicsScene.SceneLayer.BackgroundLayer)
             self.viewport().update()
 
@@ -6887,8 +6916,7 @@ class Canvas(QGraphicsView):
                 # to clear a QOpenGLWidget framebuffer.  Explicitly paint the
                 # whole exposed rect; otherwise the uninitialised GL buffer
                 # leaks as bright-green bands around the fitted QImage.
-                painter.fillRect(rect, QColor(VIEWER_BACKGROUND_HEX))
-                self._record_presented_preview_frame()
+                painter.fillRect(rect, self.backgroundBrush())
                 return
             if self.engine and self.engine.renderer:
                 dpr = self.gl_viewport.devicePixelRatio()
@@ -6896,12 +6924,12 @@ class Canvas(QGraphicsView):
                 renderer = self.engine.renderer
                 tex_id = renderer.current_front_tex_id
 
-                painter.beginNativePainting()
                 if (
                     tex_id is not None
                     and tex_id > 0
                     and self._should_present_renderer_front_texture(renderer)
                 ):
+                    painter.beginNativePainting()
                     did_draw = self.engine._draw_background_tex_id(
                         tex_id,
                         (vw, vh),
@@ -6909,20 +6937,24 @@ class Canvas(QGraphicsView):
                         desktop_display=self._display_color,
                         viewer_paint=True,
                     )
+                    painter.endNativePainting()
                     if did_draw:
                         if self._present_retry.isActive():
                             self._present_retry.stop()
                         self._video_present_retry_key = None
                         self._video_present_retry_attempts = 0
                         _diag_blit_tex = int(tex_id)
-                        self._record_presented_preview_frame()
+                        drawn_frame = getattr(self.engine, "drawn_video_frame", None)
+                        if drawn_frame is not None:
+                            self._record_presented_preview_frame(("source", drawn_frame))
                     else:
                         # A failed blit can share its frame with a scope pass.
                         # Retry the published front without regrading it.
                         self._schedule_front_paint_retry()
                 else:
+                    if self.photo_viewer_background is not None:
+                        painter.fillRect(rect, self.backgroundBrush())
                     _diag_pending = bool(getattr(renderer, 'video_texture_pending', False))
-                painter.endNativePainting()
             else:
                 super().drawBackground(painter, rect)
         finally:
@@ -6938,10 +6970,16 @@ class Canvas(QGraphicsView):
                         'blit', tex=_diag_blit_tex, pending=_diag_pending,
                     )
 
-    def _record_presented_preview_frame(self) -> None:
+    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
+        super().drawForeground(painter, rect)
+        if (self._timeline_preview_active and self._timeline_pixmap_frame is not None
+                and self.pixmap_item.isVisible() and rect.intersects(self.pixmap_item.sceneBoundingRect())):
+            self._record_presented_preview_frame(("timeline", self._timeline_pixmap_frame))
+
+    def _record_presented_preview_frame(self, frame_token: object) -> None:
         """Record a frame after the Color preview has painted it."""
         toolbar = getattr(self, "viewport_menu", None)
         bar = getattr(self, "video_control_bar", None)
         if toolbar is None or bar is None or not bar.is_playing:
             return
-        toolbar.record_presented_frame(bar.current_frame)
+        toolbar.record_presented_frame(frame_token)

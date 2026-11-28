@@ -2,9 +2,9 @@
 
 This is a *display-only* ``QOpenGLWidget``.  It never runs the scope
 analysis shader, never creates an analysis FBO, and never calls
-``read()``.  It only blits a texture produced by ``AsyncRenderer`` (which
-lives in the shared render-thread context) into a framebuffer it owns,
-then lets Qt composite the result.
+``read()``.  It copies the texture produced by ``AsyncRenderer`` in the
+shared render-thread context. The widget presents its local snapshot with
+an optional display backdrop and lets Qt composite the result.
 
 Safety model:
 
@@ -24,9 +24,11 @@ import math
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QSurfaceFormat, QPaintEvent, QResizeEvent
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QSurfaceFormat, QPaintEvent, QResizeEvent, QVector4D
+from PyQt6.QtOpenGL import QOpenGLShader, QOpenGLShaderProgram, QOpenGLVertexArrayObject
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import QWidget
+from src.features.color.core.scope_types import waveform_plot_range
 from src.shared.gpu.scope_publication import ScopePublication
 
 # PyOpenGL provides a complete, driver-resolved binding for the framebuffer
@@ -45,9 +47,32 @@ from OpenGL.GL import (
     GL_CLAMP_TO_EDGE, GL_NEAREST,
     glGenTextures, glDeleteTextures, glBindTexture, glTexImage2D, glTexParameteri,
     GL_SCISSOR_TEST, glIsEnabled, glDisable, glEnable,
+    GL_BLEND, GL_TEXTURE0, GL_TRIANGLE_STRIP, glActiveTexture, glDrawArrays, glViewport,
 )
 
 logger = logging.getLogger(__name__)
+
+_BACKDROP_VERTEX = """#version 330 core
+uniform vec4 uv_rect;
+out vec2 uv;
+void main() {
+    vec2 corner = vec2(float(gl_VertexID % 2), float(gl_VertexID / 2));
+    uv = mix(uv_rect.xy, uv_rect.zw, corner);
+    gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
+}
+"""
+_BACKDROP_FRAGMENT = """#version 330 core
+uniform sampler2D plot;
+uniform float background;
+uniform float plot_floor;
+in vec2 uv;
+out vec4 pixel;
+void main() {
+    vec3 signal = max(texture(plot, uv).rgb - vec3(plot_floor), vec3(0.0))
+                  / (1.0 - plot_floor);
+    pixel = vec4(mix(vec3(background), vec3(1.0), signal), 1.0);
+}
+"""
 
 
 def _blit_scope_pixels(source: tuple[int, int, int, int],
@@ -73,6 +98,7 @@ def _scope_ruler_font() -> QFont:
 def draw_waveform_ruler(
     painter: QPainter, height: int, axis_left_px: int,
     scale_mode: str = 'code10', transfer: str = 'srgb',
+    *, plot_width: int = 0, show_excursions: bool = True,
 ) -> list[tuple[str, QRectF, int]]:
     """Paint readable value labels; return their bounds and exact tick rows."""
     if height <= 0 or axis_left_px <= 8:
@@ -81,9 +107,13 @@ def draw_waveform_ruler(
     painter.setFont(_scope_ruler_font())
     painter.setPen(QColor(190, 160, 70))
     metrics = painter.fontMetrics()
-    if scale_mode in ('nits', 'code10_video'):
+    if scale_mode == 'percent':
+        marks = [(value / 100.0, f"{value}%") for value in range(0, 101, 25)]
+    elif scale_mode in ('nits', 'code10_video'):
         from src.shared.ui.widgets.vectorscope_widget import waveform_scale_marks
         marks = waveform_scale_marks('nits' if scale_mode == 'nits' else 'code10', transfer)
+        if scale_mode == 'nits':
+            marks = [(0.0, '0'), *marks]
     else:
         marks = [(code / 1023.0, str(code))
                  for code in (1023, 896, 768, 640, 512, 384, 256, 128, 0)]
@@ -93,9 +123,10 @@ def draw_waveform_ruler(
     priority = marks[:1] + marks[-1:] + marks[1:-1] if len(marks) > 1 else marks
     labels: list[tuple[str, QRectF, int]] = []
     text_height = float(metrics.height())
+    range_min, range_max = waveform_plot_range(show_excursions)
     for value, label in priority:
         label = label.removesuffix(' nits')
-        y = round((1.0 - (float(value) + 0.1) / 1.3) * height)
+        y = min(height - 1, round((1.0 - (float(value) - range_min) / (range_max - range_min)) * height))
         rect = QRectF(2.0, max(0.0, min(height - text_height, y - text_height / 2.0)),
                       float(axis_left_px - 10), text_height)
         if any(rect.adjusted(0.0, -2.0, 0.0, 2.0).intersects(other) for _, other, _ in labels):
@@ -103,8 +134,21 @@ def draw_waveform_ruler(
         labels.append((label, rect, y))
     labels.sort(key=lambda entry: entry[2])
     for label, rect, y in labels:
+        if plot_width > axis_left_px:
+            painter.setPen(QColor(190, 160, 70, 84))
+            painter.drawLine(axis_left_px + 1, y, plot_width - 1, y)
+        painter.setPen(QColor(190, 160, 70))
         painter.drawText(rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label)
         painter.drawLine(axis_left_px - 5, y, axis_left_px, y)
+    if scale_mode == 'nits' and labels:
+        gaps = [(0.0, labels[0][1].top())]
+        gaps.extend((before.bottom(), after.top())
+                    for (_, before, _), (_, after, _) in zip(labels, labels[1:]))
+        for start, end in gaps:
+            if end - start >= text_height + 4:
+                painter.drawText(QRectF(2, start + 2, axis_left_px - 10, text_height),
+                                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, 'nits')
+                break
     painter.restore()
     return labels
 
@@ -245,7 +289,7 @@ class GpuScopeWidget(QOpenGLWidget):
     The widget is given the latest ``ScopeGpuFrame`` via
     :meth:`set_scope_frame`.  ``paintGL`` blits the shared texture into the
     Qt-owned draw framebuffer (the widget's internal offscreen FBO) so Qt
-    composites it.  The waveform graticule is baked into the source texture;
+    composites it. The waveform graticule is drawn with the selected ruler;
     the presenter adds only the small 10-bit axis labels as UI chrome.
     """
 
@@ -283,6 +327,12 @@ class GpuScopeWidget(QOpenGLWidget):
         # into an internal offscreen FBO that Qt composites; painting
         # directly to the screen is undefined for this class.
         self.setStyleSheet("background-color: #050505;")
+        self._background_color = QColor(5, 5, 5)
+        self._plot_floor = 0.0
+        self._composite_plot = False
+        self._backdrop_program: QOpenGLShaderProgram | None = None
+        self._backdrop_vao: QOpenGLVertexArrayObject | None = None
+        self._backdrop_available = True
         # Waveform displays intentionally fill the panel, matching the CPU
         # widget's drawImage(rect, ...) behavior. Vectorscope callers opt into
         # aspect preservation so its circular graticule stays circular.
@@ -327,10 +377,18 @@ class GpuScopeWidget(QOpenGLWidget):
         # (PQ/HLG absolute luminance marks).
         self._scale_mode = 'code10'
         self._transfer = 'srgb'
+        self._show_excursions = True
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+    def set_scope_background(self, color: QColor, *, tint_plot: bool = True, plot_floor: int = 0) -> None:
+        self._background_color = QColor(color)
+        self._plot_floor = plot_floor / 255.0
+        self._composite_plot = tint_plot and (color.red() != 0 or plot_floor != 0)
+        self.setStyleSheet(f"background-color: {color.name()};")
+        self.update()
+
     def set_vectorscope_zoom(self, zoom: float) -> None:
         """Keep chroma reference positions aligned with magnified samples."""
         if self._targets_overlay is not None:
@@ -364,19 +422,25 @@ class GpuScopeWidget(QOpenGLWidget):
         ``mode``: 'code10' (full range 0..1023), 'code10_video' (64..940
         legal range), or 'nits' (HDR luminance marks for ``transfer``).
         """
-        if mode not in ('code10', 'code10_video', 'nits'):
+        if mode not in ('percent', 'code10', 'code10_video', 'nits'):
             return
         if mode != self._scale_mode or transfer != self._transfer:
             self._scale_mode = mode
             self._transfer = transfer
             self.update()
 
-    def set_legend(self, legend: str) -> None:
+    def set_legend(self, legend: str, *, transfer: str = 'srgb') -> None:
         """Choose the legend strip ('', 'falsecolor_sdr'/'_hdr'/'_zebra')."""
         legend = str(legend)
-        if legend != self._legend:
+        if legend != self._legend or transfer != self._transfer:
             self._legend = legend
+            self._transfer = transfer
             self.update()
+
+    def set_show_excursions(self, show: bool) -> None:
+        if show != self._show_excursions:
+            self._show_excursions = show
+            self.clear()
 
     def clear(self) -> None:
         """Drop the current frame (e.g. when the panel hides)."""
@@ -419,6 +483,11 @@ class GpuScopeWidget(QOpenGLWidget):
 
     def teardownGL(self) -> None:  # pragma: no cover - GL required
         """Release the widget-owned read FBO on context teardown."""
+        if self._backdrop_vao is not None:
+            self._backdrop_vao.destroy()
+            self._backdrop_vao = None
+        self._backdrop_program = None
+        self._backdrop_available = True
         if self._cache_fbo is not None:
             glDeleteFramebuffers(1, [self._cache_fbo])
         if self._cache_tex is not None:
@@ -441,7 +510,7 @@ class GpuScopeWidget(QOpenGLWidget):
         # A resized QOpenGLWidget has a new, empty FBO. Always initialise it;
         # retaining old Qt FBO pixels alone cannot protect live resize.
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(5, 5, 5))
+        painter.fillRect(self.rect(), self._background_color)
         painter.end()
         if self._frame_tex_id is None:
             return
@@ -528,8 +597,10 @@ class GpuScopeWidget(QOpenGLWidget):
             marks = [("100", float(pq_nits_to_code(100.0))),
                      ("1k", float(pq_nits_to_code(1000.0))),
                      ("10k", 1.0)]
-        elif mode == 'hdr':
+        elif mode == 'hdr' and self._transfer == 'hlg':
             marks = [("203", 0.75), ("1000", 1.0)]
+        elif mode == 'hdr':
+            marks = [("50", 0.5), ("100", 1.0)]
         else:
             marks = [("25", 0.25), ("50", 0.50), ("75", 0.75), ("100+", 1.0)]
         for label, code in marks:
@@ -539,7 +610,7 @@ class GpuScopeWidget(QOpenGLWidget):
         painter.end()
 
     def _paint_waveform_scale(self) -> None:  # pragma: no cover - Qt/GL required
-        """Draw 10-bit scale labels into the current QOpenGLWidget FBO.
+        """Draw waveform labels and reference lines into the current FBO.
 
         This is UI annotation only; the waveform pixels and all analysis stay
         in the renderer-owned GPU texture. Painting from ``paintGL`` ensures
@@ -554,7 +625,8 @@ class GpuScopeWidget(QOpenGLWidget):
         if not painter.begin(self):
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        draw_waveform_ruler(painter, h, self._axis_left_px, self._scale_mode, self._transfer)
+        draw_waveform_ruler(painter, h, self._axis_left_px, self._scale_mode, self._transfer,
+                            plot_width=self.width(), show_excursions=self._show_excursions)
         painter.end()
 
     def _blit_src_rect(self, fw: int, fh: int) -> tuple[int, int, int, int]:
@@ -705,8 +777,57 @@ class GpuScopeWidget(QOpenGLWidget):
         if self._flip_y:
             src_y0, src_y1 = src_y1, src_y0
         try:
+            if self._composite_plot and self._backdrop_available:
+                uv = QVector4D(src_x0 / fw, src_y0 / fh, src_x1 / fw, src_y1 / fh)
+                if self._draw_with_backdrop(uv, (dx0, dy0, dw, dh), (w, h)):
+                    return
             _blit_scope_pixels((src_x0, src_y0, src_x1, src_y1),
                                (dx0, dy0, dx0 + dw, dy0 + dh), GL_LINEAR)
         finally:
             glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fbo)
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw_fbo)
+
+    def _draw_with_backdrop(
+        self, uv: QVector4D, viewport: tuple[int, int, int, int], framebuffer_size: tuple[int, int],
+    ) -> bool:
+        """Composite the cached plot over the background at presentation time."""
+        if self._backdrop_program is None:
+            program = QOpenGLShaderProgram()
+            if not (program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Vertex, _BACKDROP_VERTEX)
+                    and program.addShaderFromSourceCode(QOpenGLShader.ShaderTypeBit.Fragment, _BACKDROP_FRAGMENT)
+                    and program.link()):
+                logger.warning("Scope backdrop shader unavailable: %s", program.log())
+                self._backdrop_available = False
+                return False
+            vao = QOpenGLVertexArrayObject()
+            if not vao.create():
+                logger.warning("Scope backdrop vertex array unavailable")
+                self._backdrop_available = False
+                return False
+            self._backdrop_program, self._backdrop_vao = program, vao
+        program, vao = self._backdrop_program, self._backdrop_vao
+        if not program.bind():
+            logger.warning("Scope backdrop shader bind failed: %s", program.log())
+            self._backdrop_available = False
+            return False
+        disabled = [cap for cap in (GL_SCISSOR_TEST, GL_BLEND) if glIsEnabled(cap)]
+        try:
+            for cap in disabled:
+                glDisable(cap)
+            glViewport(*viewport)
+            glActiveTexture(GL_TEXTURE0)
+            glBindTexture(GL_TEXTURE_2D, self._cache_tex)
+            vao.bind()
+            program.setUniformValue("uv_rect", uv)
+            program.setUniformValue("background", self._background_color.redF())
+            program.setUniformValue("plot_floor", self._plot_floor)
+            program.setUniformValue("plot", 0)
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+        finally:
+            vao.release()
+            glBindTexture(GL_TEXTURE_2D, 0)
+            program.release()
+            glViewport(0, 0, *framebuffer_size)
+            for cap in disabled:
+                glEnable(cap)
+        return True

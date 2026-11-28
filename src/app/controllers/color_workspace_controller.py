@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import List, Optional, Tuple
 
+from src.app.controllers.dock_layout_controller import save_workspace_dock_state
 from src.shared.i18n.i18n import I18N
 from src.shared.panels.registry import PanelDescriptor, get_panel_registry
 
@@ -116,7 +117,7 @@ class ColorWorkspaceMixin:
                     scope.set_scope_source(preset.scope_source)
             self._enforce_page_dock_visibility()
             # 把切换结果写回当前 Color 页布局（用户全局布局键不受影响）
-            self.page_layouts["Color"] = self.saveState()
+            self.page_layouts["Color"] = save_workspace_dock_state(self, "Color")
             self._save_current_layout_to_store("Color")
         except Exception as exc:
             logger.warning("Failed to apply color workspace %s: %s", preset_id, exc)

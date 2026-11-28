@@ -31,6 +31,7 @@ here.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
@@ -584,6 +585,33 @@ class TestStateSaveRestore:
 
 
 class TestTextureBookkeeping:
+    def test_fps_advances_only_when_a_new_composite_output_is_painted(self, viewer, monkeypatch) -> None:
+        monkeypatch.setattr(cvmod, "_gl", Mock())
+        monkeypatch.setattr(viewer, "_ensure_project_aces_program", lambda: True)
+        monkeypatch.setattr(viewer, "is_quad_view", lambda: True)
+        for name in ("_draw_quad_view", "_draw_gizmo_overlay", "_draw_node_icons_overlay",
+                     "_draw_3d_viewport_overlay", "_update_inspector_from_framebuffer"):
+            monkeypatch.setattr(viewer, name, Mock())
+        indicator = viewer._toolbar.fps_indicator
+        viewer.video_control_bar.set_playing(True)
+
+        def paint() -> None:
+            viewer._gl_initialized = True
+            try:
+                viewer.paintGL()
+            finally:
+                viewer._gl_initialized = False
+
+        paint()
+        viewer.video_control_bar.set_current_frame(10)
+        paint()
+        assert len(indicator._samples) == 1
+
+        viewer.set_texture(7, TEX_W, TEX_H)
+        assert len(indicator._samples) == 1
+        paint()
+        assert len(indicator._samples) == 2
+
     def test_set_texture_without_gl_records_metadata(self, qapp) -> None:
         v = cvmod.CompositeViewer()
         try:

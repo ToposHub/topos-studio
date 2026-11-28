@@ -2838,6 +2838,79 @@ int main(void)
         MT_CHECK_EQ_U64(nd_moved_any, 1u);
     }
 
+    /* Batch filtering shares one dispatch and retains the exact per-frame
+     * filter strength and the output of a concealed slice. */
+    {
+        enum { DBW = 384u, DBH = 192u, DBF = 2u };
+        static uint16_t y[DBW * DBH], c422[(DBW / 2u) * DBH];
+        const uint16_t* input_planes[4] = {y, c422, c422, NULL};
+        for (size_t i = 0u; i < (size_t)(DBW / 2u) * DBH; ++i) { c422[i] = 512u; }
+        topos_frame_input input;
+        fill_input(&input, input_planes);
+
+        uint8_t* compressed[DBF] = {NULL, NULL};
+        topos_batch_packet packets[DBF];
+        topos_frame_output refs[DBF], infos[DBF] = {0};
+        uint16_t* reference[DBF][TC_FRAME_MAX_PLANES] = {{NULL}, {NULL}};
+        uint16_t* outputs[DBF * TC_FRAME_MAX_PLANES] = {NULL};
+        size_t bytes[DBF][3] = {{0u}, {0u}};
+        tc_dev_set_thread_count(4);
+        for (uint32_t f = 0u; f < DBF; ++f) {
+            for (uint32_t row = 0u; row < DBH; ++row) {
+                for (uint32_t x = 0u; x < DBW; ++x) {
+                    y[(size_t)row * DBW + x] = (uint16_t)(
+                        500u + ((x / 8u + row / 8u + f) & 1u) * (8u + 4u * f));
+                }
+            }
+            topos_frame_config cfg;
+            base_cfg(&cfg, DBW, DBH);
+            cfg.profile = 3u;
+            cfg.pixel_format = 0u;
+            cfg.bit_depth = 10u;
+            cfg.qmatrix_id = 0u;
+            cfg.reserved[0] = 8u;
+            cfg.reserved[1] = 1u;
+            cfg.reserved[5] = 1u;
+            cfg.qp_base = (uint8_t)(82u + 4u * f);
+            size_t size = 0u;
+            MT_CHECK_EQ_I64(encode_to_buf(&cfg, &input, &compressed[f], &size, NULL), TC_OK);
+            packets[f] = (topos_batch_packet){compressed[f], size};
+            if (compressed[f] == NULL) { continue; }
+            topos_frame_header header;
+            MT_CHECK_EQ_I64(tc_frame_header_decode(compressed[f], size, &header), TC_OK);
+            MT_CHECK((header.flags & 0x0004u) != 0u);
+            if (f == 1u) { compressed[f][TC_FRAME_HEADER_SIZE + TC_SLICE_HEADER_SIZE] ^= 0x40u; }
+            MT_CHECK_EQ_I64(decode_to_planes(compressed[f], size, &refs[f], reference[f]),
+                            f == 0u ? TC_OK : TC_WARN_CONCEALED);
+            for (uint32_t p = 0u; p < 3u; ++p) {
+                const uint32_t pw = p == 0u ? DBW : DBW / 2u;
+                bytes[f][p] = (size_t)pw * DBH * sizeof(uint16_t);
+                outputs[f * TC_FRAME_MAX_PLANES + p] = (uint16_t*)malloc(bytes[f][p]);
+                MT_CHECK(outputs[f * TC_FRAME_MAX_PLANES + p] != NULL);
+            }
+        }
+
+        tc_dev_tpool_stats_reset();
+        const int32_t batch_rc = tc_frame_decode_batch(packets, DBF, outputs, NULL, infos);
+        MT_CHECK_EQ_I64(batch_rc, TC_WARN_CONCEALED);
+        tc_tpool_stats stats;
+        tc_dev_tpool_stats_get(&stats);
+        MT_CHECK_EQ_U64(stats.pool_batches, 2u); /* decode, then filter both frames */
+        for (uint32_t f = 0u; f < DBF; ++f) {
+            MT_CHECK_EQ_U64(infos[f].concealed_slices, f);
+            for (uint32_t p = 0u; p < 3u; ++p) {
+                uint16_t* output = outputs[f * TC_FRAME_MAX_PLANES + p];
+                if (batch_rc == TC_WARN_CONCEALED && output != NULL && reference[f][p] != NULL) {
+                    MT_CHECK(memcmp(output, reference[f][p], bytes[f][p]) == 0);
+                }
+                free(output);
+            }
+            free_planes(reference[f]);
+            free(compressed[f]);
+        }
+        tc_dev_set_thread_count(0);
+    }
+
     /* RD0-03：profile 诊断契约（仅在 TOPOS_CODEC_PROFILE=1 的 sanitizer/诊断
      * 运行中断言；默认单测保持零统计开销）。当前 V1/V2 没有可跳过 segment，
      * 所以 segments_skipped 必须保持 0，而 entropy_symbols 仍应覆盖完整消费。 */

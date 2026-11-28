@@ -224,3 +224,43 @@ def test_copy_encoder_can_reopen_for_pixel_encoding(source_files, tmp_path, fini
         source.close()
     assert encoder.frame_count == 1
     assert not list(tmp_path.glob("*.topos-tmp"))
+
+
+def test_lt_packet_copy_retains_legacy_matrix(tmp_path: Path) -> None:
+    if not any(path.is_file() for path in candidate_library_paths()):
+        pytest.skip("TOPOS native library is required")
+
+    class LegacyLtEncoder(ToposVideoEncoder):
+        def _effective_qmatrix_id(self) -> int:
+            return 4
+
+    width, height = 1920, 1080
+    config = FFmpegEncoderConfig(codec="topos", profile="lt", pix_fmt="yuv422p10le",
+                                  width=width, height=height, fps=FPS)
+    planes = tuple(np.full((height, plane_width), 512, np.uint16)
+                   for plane_width in (width, width // 2, width // 2))
+    source_path = tmp_path / "legacy-lt.mov"
+    source = LegacyLtEncoder(str(source_path), config)
+    source.open()
+    source.encode_frame(DecodedFrame(0, 0, 0.0, planes=planes, pixel_format=config.pix_fmt,
+                                     width=width, height=height))
+    source.close()
+
+    output = tmp_path / "copied-lt.mov"
+    encoder = ToposVideoEncoder(str(output), config)
+    codec = ToposCodec()
+    with ToposMovieFile(codec, str(source_path)) as movie:
+        encoder.open(packet_copy_source=movie.info())
+        encoder.add_audio_stream(codec="pcm_s16le")
+        encoder.write_source_packet(*movie.packet_into(0))
+        encoder.write_audio_samples(np.zeros((2, 48_000 // 25), dtype=np.float32))
+        encoder.close()
+        with ToposMovieFile(codec, str(output)) as copied:
+            assert copied.info().qmatrix_id == 4
+            assert copied.packet(0) == movie.packet(0)
+            assert copied.audio_info().sample_count == 48_000 // 25
+    encoder.open()
+    try:
+        assert encoder._movie_cfg.qmatrix_id == 0
+    finally:
+        encoder.abort()

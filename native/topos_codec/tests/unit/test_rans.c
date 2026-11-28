@@ -282,6 +282,48 @@ static void test_lut_equivalence(void)
     }
 }
 
+static void test_final_run_interval(void)
+{
+    const uint32_t freqs[] = {0u, 1u, 16u, 2048u, TC_RANS_SCALE_TOTAL};
+    const uint8_t refill[] = {0x42u, 0x81u};
+    for (size_t f = 0u; f < sizeof(freqs) / sizeof(freqs[0]); ++f) {
+        const uint32_t freq = freqs[f];
+        const uint32_t start = TC_RANS_SCALE_TOTAL - freq;
+        uint32_t counts[TC_RANS_RUN_SYMS] = {0};
+        counts[0] = start;
+        counts[63] = freq;
+        tc_rans_model model;
+        MT_CHECK(tc_rans_model_build(&model, counts, TC_RANS_RUN_SYMS) == TC_OK);
+        MT_CHECK_EQ_U64(model.cum[63], start);
+        if (start != 0u) {
+            tc_rans_dec before = {0};
+            before.x = TC_RANS_L + start - 1u;
+            before.buf = refill;
+            before.size = sizeof(refill);
+            uint32_t sym = 63u;
+            MT_CHECK(tc_rans_get(&before, &model, &sym) == TC_OK);
+            MT_CHECK_EQ_U64(sym, 0u);
+        }
+        if (freq == 0u) { continue; }
+        const uint32_t slots[] = {start, TC_RANS_SCALE_TOTAL - 1u};
+        for (size_t q = 0u; q < sizeof(slots) / sizeof(slots[0]); ++q) {
+            for (size_t bytes = 0u; bytes <= sizeof(refill); ++bytes) {
+                tc_rans_dec ref = {0};
+                ref.x = TC_RANS_L + slots[q];
+                ref.buf = refill;
+                ref.size = bytes;
+                tc_rans_dec fast = ref;
+                uint32_t sym = 0u;
+                const int32_t expected = tc_rans_get(&ref, &model, &sym);
+                MT_CHECK(tc_rans_advance(&fast, model.freq[63], slots[q] - start) == expected);
+                MT_CHECK_EQ_U64(fast.pos, ref.pos);
+                MT_CHECK_EQ_U64(fast.x, ref.x);
+                if (expected == TC_OK) { MT_CHECK_EQ_U64(sym, 63u); }
+            }
+        }
+    }
+}
+
 static void test_encoder_symbol_transition(void)
 {
     for (uint32_t freq = 1u; freq <= TC_RANS_SCALE_TOTAL; ++freq) {
@@ -310,6 +352,7 @@ int main(void)
     test_uniform_bit_cost();
     test_mixed_rawbits_roundtrip();
     test_lut_equivalence();
+    test_final_run_interval();
     test_encoder_symbol_transition();
     return MT_MAIN_RETURN();
 }

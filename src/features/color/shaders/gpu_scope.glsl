@@ -12,7 +12,7 @@
 //                                     coords from gl_VertexID + texelFetch.
 //   2b. (accumulation via additive blending, no fragment shader body needed)
 //   3. SCOPE_WAVEFORM_DISPLAY       : tone-map RGB16F density -> RGBA8 with
-//                                     horizontal graticule baked in.
+//                                     waveform traces only.
 //   4. SCOPE_VECTORSCOPE_ACCUM_VERTEX: per-sample vertex, RGB->Rec709 Cb/Cr.
 //   5. SCOPE_VECTORSCOPE_DISPLAY    : tone-map R16F density -> RGBA8 with
 //                                     circular graticule + color targets.
@@ -117,6 +117,7 @@ void main() {
 #version 330
 uniform int u_channel;
 uniform float u_viewport_x;
+uniform bool u_show_excursions;
 in float v_weight;
 in float v_range_flag;
 flat in vec2 v_column_bounds;
@@ -130,7 +131,7 @@ void main() {
     float coverage = max(0.0,
         min(x + 0.5, v_column_bounds.y) - max(x - 0.5, v_column_bounds.x));
     float dy = gl_FragCoord.y - v_center_y;
-    if (coverage <= 0.0 || abs(dy) > 1.0) {
+    if (coverage <= 0.0 || abs(dy) > 1.0 || (!u_show_excursions && v_range_flag != 0.0)) {
         discard;
     }
     // Keep the narrow vertical glow and the established 512px trace strength
@@ -152,33 +153,16 @@ void main() {
 // 3. Waveform display / tone-map pass (full-screen quad)
 // -----------------------------------------------------------------------------
 // Tone-maps the RGB16F density texture into an RGBA8 parade-style waveform
-// with gamma boost and horizontal graticule lines baked into the shader so
-// QPainter never needs to redraw the background each frame.
+// with gamma boost. The presenter draws the selected units and grid.
 #define SCOPE_WAVEFORM_DISPLAY_FRAGMENT """
 #version 330
 uniform sampler2D u_density;
 uniform vec2 u_density_size;
 uniform float u_max_inv;     // 1.0 / max density seen (precomputed on CPU)
-uniform float u_range_min;
-uniform float u_range_max;
 uniform bool u_parade;
 in vec2 v_texcoord;
 out vec4 f_color;
 const float PARADE_DISPLAY_GAIN = 1.60;
-
-// Draw a 1px horizontal graticule line at normalized height h in [0,1].
-float graticule(float h) {
-    float pixel = 1.0 / u_density_size.y;
-    float d = abs(v_texcoord.y - h);
-    return 1.0 - smoothstep(0.0, pixel * 1.5, d);
-}
-
-float value_to_uv(float value) {
-    return clamp(
-        (value - u_range_min) / max(u_range_max - u_range_min, 0.000001),
-        0.0, 1.0
-    );
-}
 
 void main() {
     vec2 texel = 1.0 / u_density_size;
@@ -245,25 +229,7 @@ void main() {
     float under_alert = clamp(pow(under_density * u_max_inv, 0.54) * 1.45, 0.0, 1.0);
     mapped = mix(mapped, vec3(1.0, 0.035, 0.0), over_alert);
     mapped = mix(mapped, vec3(0.02, 0.20, 1.0), under_alert);
-    // The value axis includes -10%..120% headroom. Place the familiar
-    // 0%/100% guides at their actual value positions instead of the texture
-    // edges (which represent -10%/120%).
-    float line_0 = graticule(value_to_uv(0.0));
-    float line_100 = graticule(value_to_uv(1.0));
-    float grid = 0.0;
-    // 10-bit-style minor divisions (0, 128, ... 1023), matching the
-    // reference scope's evenly spaced amber graticule.
-    for (int i = 1; i < 8; i++) {
-        grid = max(grid, graticule(value_to_uv(float(i * 128) / 1023.0)) * 0.55);
-    }
-    // DaVinci's waveform uses a restrained amber graticule. Keep it bright
-    // enough to read through the black background without competing with
-    // saturated signal traces.
-    vec3 grid_rgb = vec3(grid) * vec3(0.30, 0.23, 0.025);
-    grid_rgb = max(grid_rgb, line_0 * vec3(0.38, 0.28, 0.025));
-    grid_rgb = max(grid_rgb, line_100 * vec3(0.38, 0.28, 0.025));
-    vec3 out_rgb = max(mapped, grid_rgb);
-    f_color = vec4(out_rgb, 1.0);
+    f_color = vec4(mapped, 1.0);
 }
 """
 

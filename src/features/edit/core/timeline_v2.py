@@ -5971,6 +5971,7 @@ def effective_timeline_duration_frames(
     timeline: Any,
     *,
     empty_duration_seconds: float = DEFAULT_EMPTY_TIMELINE_SECONDS,
+    include_marks: bool = True,
 ) -> int:
     """Return the usable playback/export duration for a timeline.
 
@@ -5980,6 +5981,7 @@ def effective_timeline_duration_frames(
     canvas, and persisted In/Out marks may extend past the last clip.  This
     helper folds those extents together and gives a new empty timeline a
     small, deterministic default canvas (10 seconds at its sequence FPS).
+    Entire-timeline export excludes marks so it ends at the media extent.
 
     The function is deliberately duck-typed so it can be used by controller
     tests and lightweight timeline-like objects without importing Qt.
@@ -5996,10 +5998,11 @@ def effective_timeline_duration_frames(
 
     # A range is an explicit request for an output canvas.  The end point is
     # inclusive in the model, hence the +1 when converting to a duration.
-    for field_name in ("range_start", "range_end"):
-        value = getattr(timeline, field_name, None)
-        if value is not None:
-            duration = max(duration, int(value) + 1)
+    if include_marks:
+        for field_name in ("range_start", "range_end"):
+            value = getattr(timeline, field_name, None)
+            if value is not None:
+                duration = max(duration, int(value) + 1)
 
     fps_value = getattr(timeline, "fps", 24.0) or 24.0
     try:

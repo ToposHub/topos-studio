@@ -45,6 +45,7 @@ from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from src.app.controllers.dock_layout_controller import (
     COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS,
     restore_workspace_dock_state,
+    save_workspace_dock_state,
 )
 from src.shared.diagnostics import flash_diag as _flash_diag
 
@@ -432,7 +433,7 @@ class PageManagementMixin:
         self.leave_page_hook(self.current_page)
 
         # Save current state (both legacy and LayoutStore)
-        outgoing_state = self.saveState()
+        outgoing_state = save_workspace_dock_state(self, self.current_page)
         self.page_layouts[self.current_page] = outgoing_state
         if hasattr(self, '_save_current_layout_to_store'):
             self._save_current_layout_to_store(
@@ -467,7 +468,7 @@ class PageManagementMixin:
             restore_workspace_dock_state(self, self.page_layouts[page_name], page_name)
         elif not restored_from_store:
             # New page without saved layout - save current state as its layout
-            self.page_layouts[page_name] = self.saveState()
+            self.page_layouts[page_name] = save_workspace_dock_state(self, page_name)
 
         # After the Deliver layout is restored, move the actual Edit viewer
         # and timeline widgets into its centre column. They remain the same
@@ -482,6 +483,11 @@ class PageManagementMixin:
             self._attach_edit_panels_to_mixer()
 
         self.current_page = page_name
+        if page_name == "Mixer":
+            self._migrate_mixer_workspace_layout()
+            self._fit_mixer_workspace_height()
+        if getattr(self, "layout_combo", None) is not None:
+            self.update_layout_combobox()
         if hasattr(self, "_sync_timeline_idle_prebuffer"):
             self._sync_timeline_idle_prebuffer()
         self.status_bar.showMessage(f"Mode: {page_name}", 2000)
@@ -513,15 +519,12 @@ class PageManagementMixin:
             schedule(COLOR_TOOL_LAYOUT_RESTORE_DELAY_MS, self._migrate_color_grading_dock_height)
         if page_name == "Color" and hasattr(self, "_migrate_color_remapping_dock_layout"):
             schedule(0, self._migrate_color_remapping_dock_layout)
+        if page_name == "Composite" and hasattr(self, "_migrate_composite_default_layout"):
+            schedule(0, self._migrate_composite_default_layout)
         if page_name == "Composite" and hasattr(self, "_migrate_composite_scopes_dock_visibility"):
             # Scopes was available before it entered the panel registry. Add
             # it to existing Composite layouts once, after restoreState().
             schedule(0, self._migrate_composite_scopes_dock_visibility)
-        if page_name == "Mixer" and hasattr(self, "_migrate_mixer_media_docks_layout"):
-            # Place added Mixer panels once after the saved Qt layout is restored.
-            schedule(0, self._migrate_mixer_media_docks_layout)
-        if page_name == "Mixer" and hasattr(self, "_migrate_mixer_properties_layout"):
-            schedule(0, self._migrate_mixer_properties_layout)
         if page_name == "Deliver" and hasattr(self, "_migrate_deliver_layout"):
             # Old Deliver layouts had a separate queue dock and could restore
             # the settings dock at a collapsed width.  The queue now lives

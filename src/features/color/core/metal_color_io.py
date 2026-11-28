@@ -77,6 +77,7 @@ DISPLAY_PARAMS_DTYPE = np.dtype([
     ("target_peak", "<f4"),        # tonemap 参考白（nit）
     ("out_scale", "<f4"),          # edr headroom / pq 的 nit 缩放
     ("composite_background", "<i4"),
+    ("background_rgb", "<f4", (3,)),
 ])
 
 #: transfer_mode 编码（与 MSL kernel 的 switch 一致）
@@ -285,6 +286,7 @@ struct DisplayParams {
     float target_peak;
     float out_scale;
     int composite_background;
+    float background_rgb[3];
 };
 
 float linear_to_srgb(float c) {
@@ -340,7 +342,7 @@ kernel void working_to_display(
     }
     // mode 0（sdr_passthrough）：恒等——编码信号直通（F5.1 三路语义表）
     if (p.composite_background != 0) {
-        rgb = mix(float3(0.1), rgb, src.a);
+        rgb = mix(float3(p.background_rgb[0], p.background_rgb[1], p.background_rgb[2]), rgb, src.a);
         src.a = 1.0;
     }
     out_tex.write(float4(rgb, src.a), gid);
@@ -558,7 +560,7 @@ class MetalColorIO:
 
     def encode_for_display(
         self, working_tex: Any, output: DisplayOutputDescription,
-        *, target: Any = None, composite_viewport_background: bool = False,
+        *, target: Any = None, viewport_background: tuple[float, float, float] | None = None,
     ) -> Any:
         """工作空间线性 → 展示码值纹理（不提交）。
 
@@ -574,7 +576,9 @@ class MetalColorIO:
             self._display_kernel = self.ctx.compile_kernel(
                 "working_to_display", _MSML_DISPLAY_ENCODE)
         params = build_display_params(output)
-        params["composite_background"] = int(composite_viewport_background)
+        if viewport_background is not None:
+            params["composite_background"] = 1
+            params["background_rgb"] = viewport_background
         self.ctx.dispatch(
             self._display_kernel,
             buffers={0: self._param_buffer(params)},

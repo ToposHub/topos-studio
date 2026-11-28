@@ -35,6 +35,7 @@ context。此时 ``gpu_active`` 保持 False，画布仍可按普通 QImage 绘�
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 import numpy as np
 
@@ -85,50 +86,19 @@ def _flip_rows(plane) -> np.ndarray:
 
 _GL_TEXTURE0 = 0x84C0
 _GL_TEXTURE_2D = 0x0DE1
-_gl_module = None
 
 
-def _raw_gl_binder():
-    """跨上下文纹理 raw bind 的最小 GL 接口（按可用性择一）。
-
-    1. ``QOpenGLFunctions_4_1_Core``（repo 既有模式，composite/gl_utils 同款）；
-    2. ctypes 直载系统 GL（PyQt6 构建未暴露 QOpenGLFunctions 时的兜底）。
-    返回 ``(glActiveTexture, glBindTexture)`` 或 None。
-    """
-    global _gl_module
-    if _gl_module is not None:
-        return _gl_module or None
+def _raw_gl_binder() -> tuple[Callable[[int], None], Callable[[int, int], None]]:
+    """Resolve the blit's entry points with the widget's context current."""
     try:
         from PyQt6.QtOpenGL import QOpenGLFunctions_4_1_Core
-
         gl = QOpenGLFunctions_4_1_Core()
-        gl.initializeOpenGLFunctions()
-        _gl_module = (gl.glActiveTexture, gl.glBindTexture)
-        return _gl_module
-    except Exception:
+        if gl.initializeOpenGLFunctions():
+            return gl.glActiveTexture, gl.glBindTexture
+    except ImportError:
         pass
-    try:
-        import ctypes
-        import ctypes.util
-
-        for name in ("OpenGL", ctypes.util.find_library("OpenGL") or ""):
-            if not name:
-                continue
-            try:
-                lib = ctypes.CDLL(
-                    "/System/Library/Frameworks/OpenGL.framework/OpenGL"
-                    if name == "OpenGL" and __import__("sys").platform == "darwin"
-                    else name)
-                lib.glActiveTexture.argtypes = [ctypes.c_uint]
-                lib.glBindTexture.argtypes = [ctypes.c_uint, ctypes.c_uint]
-                _gl_module = (lib.glActiveTexture, lib.glBindTexture)
-                return _gl_module
-            except Exception:
-                continue
-    except Exception:
-        pass
-    _gl_module = False
-    return None
+    from OpenGL.GL import glActiveTexture, glBindTexture
+    return glActiveTexture, glBindTexture
 
 
 class GLVideoCanvas(QOpenGLWidget):
@@ -163,6 +133,8 @@ class GLVideoCanvas(QOpenGLWidget):
         self._render_worker = None
         self._blit_prog = None
         self._blit_vao = None
+        self._blit_vbo = None
+        self._texture_binder = None
         self._presented_array = None   # CPU 前台帧缓冲（绘制期间保活）
         self._size_cache = None   # [FR-21] 显示尺寸快照（GUI 线程维护）
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -254,7 +226,7 @@ class GLVideoCanvas(QOpenGLWidget):
             return
         logger.warning('[GL-CANVAS] render worker unavailable (%s); '
                        'GUI direct path', worker.init_error)
-        worker.deleteLater()
+        worker.dispose()
         self._init_direct_uploader()
 
     def _init_direct_uploader(self) -> None:
@@ -325,49 +297,57 @@ class GLVideoCanvas(QOpenGLWidget):
           回读，GUI 只把呈现结果按 QImage 贴出；
         没有前台帧（首帧在途）时画黑底——不阻塞等渲染线程。
         """
-        info = self._render_worker.front_texture()
-        if info is None:
-            self._paint_black()
-            return
-        mode, payload, width, height, _frame_id = info
         try:
-            if mode == "cpu":
+            with self._render_worker.front_for_present() as info:
+                if info is not None and info[0] == "texture":
+                    self._paint_shared_texture(int(info[1]))
+                    return
+            if info is None:
+                self._paint_black()
+            else:
+                _, payload, width, height, _frame_id = info
                 image = QImage(payload.data, width, height,
                                width * 4, QImage.Format.Format_RGBA8888)
-                self._presented_array = payload   # 绘制期间保持缓冲存活
+                self._presented_array = payload
                 self._paint_qimage(image)
-                return
-            import moderngl
-
-            if self._blit_prog is None:
-                self._blit_prog = self._ctx.program(
-                    vertex_shader=_BLIT_VERT, fragment_shader=_BLIT_FRAG)
-                vbo = self._ctx.buffer(np.array([
-                    -1.0, -1.0, 0.0, 0.0,
-                    1.0, -1.0, 1.0, 0.0,
-                    -1.0, 1.0, 0.0, 1.0,
-                    1.0, 1.0, 1.0, 1.0,
-                ], dtype='f4'))
-                self._blit_vao = self._ctx.vertex_array(
-                    self._blit_prog, [(vbo, '2f 2f', 'in_vert', 'in_uv')])
-            # 跨上下文纹理：同一 share group 的 GL 名，raw bind 采样
-            # （与 image_engine/composite 消费跨上下文纹理的既有模式一致）
-            binder = _raw_gl_binder()
-            if binder is None:
-                raise RuntimeError("no raw GL binder available")
-            gl_active, gl_bind = binder
-            gl_active(_GL_TEXTURE0)
-            gl_bind(_GL_TEXTURE_2D, int(payload))
-            self._blit_prog['u_tex'].value = 0
-            self._ctx.viewport = (0, 0, max(1, self.width() * int(
-                self.devicePixelRatioF())), max(1, self.height() * int(
-                    self.devicePixelRatioF())))
-            self._blit_vao.render(moderngl.TRIANGLE_STRIP)
-            gl_active(_GL_TEXTURE0)
-            gl_bind(_GL_TEXTURE_2D, 0)
         except Exception as exc:
-            logger.warning('[GL-CANVAS] present failed: %s', exc, exc_info=True)
+            error = f'{type(exc).__name__}: {exc}'
+            if error != self._gpu_error:
+                self._gpu_error = error
+                logger.warning('[GL-CANVAS] texture present failed, using readback: %s',
+                               error, exc_info=True)
+            if isinstance(self._frame, YuvFrame):
+                self._render_worker.request_readback(self._frame)
             self._paint_black()
+
+    def _paint_shared_texture(self, texture_id: int) -> None:
+        import moderngl
+
+        if self._blit_prog is None:
+            self._blit_prog = self._ctx.program(
+                vertex_shader=_BLIT_VERT, fragment_shader=_BLIT_FRAG)
+            self._blit_vbo = self._ctx.buffer(np.array([
+                -1.0, -1.0, 0.0, 0.0,
+                1.0, -1.0, 1.0, 0.0,
+                -1.0, 1.0, 0.0, 1.0,
+                1.0, 1.0, 1.0, 1.0,
+            ], dtype='f4'))
+            self._blit_vao = self._ctx.vertex_array(
+                self._blit_prog, [(self._blit_vbo, '2f 2f', 'in_vert', 'in_uv')])
+            self._blit_prog['u_tex'].value = 0
+        if self._texture_binder is None:
+            self._texture_binder = _raw_gl_binder()
+        gl_active, gl_bind = self._texture_binder
+        fbo = self._current_fbo()
+        if self._size_cache is not None:
+            fbo.viewport = (0, 0, *self._size_cache)
+        fbo.use()
+        gl_active(_GL_TEXTURE0)
+        gl_bind(_GL_TEXTURE_2D, texture_id)
+        try:
+            self._blit_vao.render(moderngl.TRIANGLE_STRIP)
+        finally:
+            gl_bind(_GL_TEXTURE_2D, 0)
 
     def _release_gl(self) -> None:
         # [E5] 先停渲染线程（其资源在渲染线程释放）；再收 GUI 侧呈现资源
@@ -377,33 +357,30 @@ class GLVideoCanvas(QOpenGLWidget):
                 worker.stop()
             except Exception:
                 logger.debug('[GL-CANVAS] worker stop failed', exc_info=True)
-            worker.deleteLater()
+            worker.dispose()
         uploader = self._uploader
         self._uploader = None
         self._gpu_active = False
+        vao, vbo, program = self._blit_vao, self._blit_vbo, self._blit_prog
+        self._blit_vao = self._blit_vbo = self._blit_prog = None
+        self._texture_binder = None
+        self._textures = self._uploaded_frame = None
+        self._presented_array = None
         try:
-            if self._blit_vao is not None or self._blit_prog is not None:
+            if any(resource is not None for resource in (vao, vbo, program, uploader)):
                 self.makeCurrent()
-                if self._blit_vao is not None:
-                    self._blit_vao.release()
-                if self._blit_prog is not None:
-                    self._blit_prog.release()
-                self._blit_vao = self._blit_prog = None
-        except Exception:
-            logger.debug('[GL-CANVAS] blit release failed', exc_info=True)
-        if uploader is None:
-            return
-        try:
-            self.makeCurrent()
-            uploader.release()
-        except Exception:
-            logger.debug('[GL-CANVAS] uploader release failed', exc_info=True)
+                try:
+                    for resource in (vao, vbo, program, uploader):
+                        if resource is not None:
+                            try:
+                                resource.release()
+                            except Exception:
+                                logger.debug('[GL-CANVAS] resource release failed',
+                                             exc_info=True)
+                finally:
+                    self.doneCurrent()
         finally:
-            try:
-                self.doneCurrent()
-            except Exception:
-                pass
-        self._ctx = None
+            self._ctx = None
 
     # -- 绘制 --
 
@@ -446,7 +423,6 @@ class GLVideoCanvas(QOpenGLWidget):
         if not frame.is_valid():
             raise ValueError('YUV plane geometry does not match subsampling')
 
-        ctx = self._ctx
         fbo = self._current_fbo()
         fbo.use()
 
@@ -454,7 +430,7 @@ class GLVideoCanvas(QOpenGLWidget):
         dpr = float(self.devicePixelRatioF())
         fw = max(1, int(self.width() * dpr))
         fh = max(1, int(self.height() * dpr))
-        ctx.viewport = (0, 0, fw, fh)
+        fbo.viewport = (0, 0, fw, fh)
         fbo.clear(0.0, 0.0, 0.0, 1.0)
 
         scale = min(fw / frame.width, fh / frame.height)
@@ -462,7 +438,7 @@ class GLVideoCanvas(QOpenGLWidget):
         vh = max(1, int(frame.height * scale))
         vx = (fw - vw) // 2
         vy = (fh - vh) // 2
-        ctx.viewport = (vx, vy, vw, vh)
+        fbo.viewport = (vx, vy, vw, vh)
 
         if frame is not self._uploaded_frame:
             self._upload_planes(frame)

@@ -8038,6 +8038,7 @@ typedef struct dec_slice_task {
     uint32_t dst_w;       /* 目标输出宽 */
     uint32_t dst_h;       /* 目标输出高 */
     uint8_t scaled;       /* target-size reconstruction */
+    uint8_t filter_slice; /* deblock stripe before it leaves the worker cache */
     uint8_t coefficient_limit; /* 扫描序低频保留上限 */
     dec_scratch* scratch; /* M10-1：非 NULL 时 alpha 行 + 颜色 DC 行取池槽位 */
     uint32_t worker_slot; /* 池槽位（job 入口按执行线程绑定） */
@@ -8051,6 +8052,35 @@ typedef struct dec_slice_task {
     uint32_t* qcap_Q;     /* A2 差分机：该 slice Q[64] 写入位 */
     uint32_t qcap_gi;     /* A2 差分机：捕获元数据全局序号（稀疏发射用） */
 } dec_slice_task;
+
+static int dec_filter_in_slices(const dec_frame_req* r)
+{
+#if defined(TC_DB_TUNE)
+    (void)r;
+    return 0;
+#else
+    const topos_frame_header* fh = &r->view->fh;
+    return r->scaled == 0u && r->no_deblock == 0u && (fh->flags & 0x0004u) != 0u &&
+        s_dev_qcap_on == 0 && fh->version_major == 7u && fh->entropy_mode == 7u &&
+        fh->pixel_format == 0u && fh->bit_depth == 10u &&
+        (uint64_t)fh->visible_width * fh->visible_height >= 64u * 1024u;
+#endif
+}
+
+static void dec_slice_filter(const dec_slice_task* t, int boundary_only)
+{
+    const topos_frame_header* fh = t->fh;
+    const tc_deblock_plane_view plane = {
+        t->dst, (int32_t)t->dst_stride, t->vis_w, t->vis_h,
+    };
+    tc_deblock_slice_band(&plane, t->sh->block_y0, t->sh->block_h, fh->qp_base,
+                           tc_qtbl_of_flags(fh->flags), fh->bit_depth, boundary_only);
+}
+
+static void dec_slice_filter_boundary(void* ctx)
+{
+    dec_slice_filter((const dec_slice_task*)ctx, 1);
+}
 
 /* Larger payloads generally have more entropy symbols to decode. Reorder
  * dispatch only. Finalization and slice status still use packet order. */
@@ -8141,9 +8171,14 @@ static void dec_slice_job(void* vctx)
     } else {
         int32_t qp_eff = tc_slice_effective_qp(fh->qp_base, sh->qp_delta_biased);
         tc_quant_ctx qctx;
-        tc_quant_ctx_init_bd_tbl(&qctx, is_chroma_plane(fh, cur_plane) ? t->qms->chroma : t->qms->luma,
-                                 (uint32_t)qp_eff, fh->bit_depth,
-                                 tc_qtbl_of_flags(fh->flags));
+        const uint16_t* qm = is_chroma_plane(fh, cur_plane) ? t->qms->chroma : t->qms->luma;
+        if (fh->version_major == 7u && fh->entropy_mode == 7u) {
+            tc_dequant_ctx_init_bd_tbl(&qctx, qm, (uint32_t)qp_eff, fh->bit_depth,
+                                      tc_qtbl_of_flags(fh->flags));
+        } else {
+            tc_quant_ctx_init_bd_tbl(&qctx, qm, (uint32_t)qp_eff, fh->bit_depth,
+                                    tc_qtbl_of_flags(fh->flags));
+        }
         tc_color_store_ctx cctx;
         cctx.dst = t->dst;
         cctx.stride = t->dst_stride;
@@ -8354,6 +8389,9 @@ static void dec_slice_job(void* vctx)
     } else {
         t->status_out[t->si] = TC_FRAME_SLICE_OK;
     }
+    if (t->filter_slice != 0u) {
+        dec_slice_filter(t, 0);
+    }
 }
 
 /* 阶段4：跨帧单批切片队列核心（dec_frame_req 定义见 codec.h）。 */
@@ -8403,6 +8441,13 @@ static int32_t dec_frame_prep(dec_frame_req* r, uint32_t nw)
     /* M10-1b：帧入口一次预热熵表（Rice LUT / VLC book）——首个使用某表
      * 的 slice 不再在 worker 内持 mutex 建表；slice 内 ensure 恒命中
      * acquire 快路。错误码不在预热处拦截（无效 k 由 slice 路径正常报错）。 */
+    const uint8_t entropy = view->fh.entropy_mode;
+    const int use_rans = view->fh.version_major == 7u &&
+                         (entropy == 6u || entropy == 7u || entropy == 8u);
+    /* Only alpha still uses Rice in these streams. */
+    if (use_rans && (view->fh.alpha_mode == 0u || r->skip_alpha != 0u)) {
+        return TC_OK;
+    }
     const int use_vlc = (view->fh.version_major >= 2u
                          && view->fh.entropy_mode == 1u) ||
                         (view->fh.version_major == 4u
@@ -8411,6 +8456,7 @@ static int32_t dec_frame_prep(dec_frame_req* r, uint32_t nw)
                          && view->fh.entropy_mode == 3u);
     for (uint32_t si = 0u; si < view->slice_count; ++si) {
         const topos_slice_header* sh = &view->slices[si];
+        if (use_rans && !is_alpha_plane(&view->fh, sh->plane)) { continue; }
         if (use_vlc != 0 && sh->plane != 3u) {
             (void)tc_vlc_tables_ensure(TC_VLC_FAMILY_DC, sh->k1);
             (void)tc_vlc_tables_ensure(TC_VLC_FAMILY_LVL, sh->k2);
@@ -8437,6 +8483,7 @@ static int32_t dec_frame_build_jobs(const dec_frame_req* r, uint32_t base,
 {
     const topos_packet_view* view = r->view;
     uint32_t built = 0u;
+    const uint8_t filter_slices = (uint8_t)dec_filter_in_slices(r);
     for (uint32_t si = 0u; si < view->slice_count; ++si) {
         const uint32_t plane = view->slices[si].plane;
         if (r->skip_alpha != 0u && is_alpha_plane(&view->fh, plane)) {
@@ -8480,6 +8527,7 @@ static int32_t dec_frame_build_jobs(const dec_frame_req* r, uint32_t base,
         t->dst_w = dw;
         t->dst_h = dh;
         t->scaled = r->scaled;
+        t->filter_slice = plane < 3u ? filter_slices : 0u;
         t->coefficient_limit = r->coefficient_limit;
         t->scratch = r->scratch; /* job 内按 plane 取 alpha/dc 子池 */
         t->worker_slot = 0u; /* job 入口按 worker 槽位取（动态领取） */
@@ -8521,8 +8569,10 @@ static uint32_t dec_scaled_deblock_unit(const dec_frame_req* r)
 
 /* 帧级汇合（串行段）：M0 统计聚合 + 状态扫描 → 该帧 rc + concealed 计数 */
 static int32_t dec_frame_finalize(dec_frame_req* r,
-                                  const dec_slice_task* tasks, uint32_t count)
+                                  const dec_slice_task* tasks, uint32_t count,
+                                  tc_deblock_frame_view* deferred_deblock)
 {
+    if (deferred_deblock != NULL) { deferred_deblock->plane_count = 0u; }
     uint32_t concealed = 0u;
     if (count > 0u && tasks[0].stats_on != 0) { /* M0：worker 局部累计 → 全局聚合（汇合后无竞争） */
         TC_STATS_LOCK();
@@ -8569,14 +8619,21 @@ static int32_t dec_frame_finalize(dec_frame_req* r,
      * 抽样比保持不过滤。此前缩放交付完全不过滤，是预览里 8 周期小色块的来源。
      * alpha 平面（plane 3）不过滤；强度 qp = 帧级 qp_base（产品流全帧
      * 单一 qp，位流验证见锯齿诊断 §2.1）；QPT2 流滤波强度随细化表同源。 */
-    if ((r->view->fh.flags & 0x0004u) != 0u && r->no_deblock == 0u) {
+    if ((r->view->fh.flags & 0x0004u) != 0u && r->no_deblock == 0u &&
+        !dec_filter_in_slices(r)) {
         const uint32_t qtbl = tc_qtbl_of_flags(r->view->fh.flags);
         const uint32_t dqp = (uint32_t)r->view->fh.qp_base;
         const uint32_t unit = r->scaled != 0u ? dec_scaled_deblock_unit(r) : 0u;
-        tc_deblock_plane_view color_planes[3];
-        uint32_t color_count = 0u;
+        tc_deblock_frame_view immediate_deblock;
+        tc_deblock_frame_view* frame = deferred_deblock != NULL
+            ? deferred_deblock : &immediate_deblock;
+        frame->plane_count = 0u;
+        frame->qp = dqp;
+        frame->table_sel = qtbl;
+        frame->bit_depth = (uint8_t)r->view->fh.bit_depth;
         if (r->scaled == 0u || unit != 0u) {
-            for (uint32_t p = 0; p < r->view->fh.plane_count && p < 3u; ++p) {
+            for (uint32_t p = 0u; p < r->view->fh.plane_count
+                    && p < TC_DEBLOCK_MAX_COLOR_PLANES; ++p) {
                 /* 目标几何按 slice 任务侧同一规则推导（dec_slice_task 的
                  * dst_w/dh：TRAW 全平面半宽半高；4:2:2 仅 U/V 半宽）。 */
                 uint32_t pw = r->view->fh.plane_visible_w[p];
@@ -8597,7 +8654,7 @@ static int32_t dec_frame_finalize(dec_frame_req* r,
                     ? r->strides[p] : (size_t)pw;
                 if (dstride < (size_t)pw) { continue; }
                 if (r->scaled == 0u) {
-                    color_planes[color_count++] = (tc_deblock_plane_view){
+                    frame->planes[frame->plane_count++] = (tc_deblock_plane_view){
                         r->planes[p], (int32_t)dstride, pw, ph,
                     };
                 } else {
@@ -8607,9 +8664,9 @@ static int32_t dec_frame_finalize(dec_frame_req* r,
                 }
             }
         }
-        if (color_count != 0u) {
-            tc_deblock_planes(color_planes, color_count, dqp, qtbl,
-                              (uint8_t)r->view->fh.bit_depth, r->nw_override);
+        if (deferred_deblock == NULL && frame->plane_count != 0u) {
+            tc_deblock_planes(frame->planes, frame->plane_count, frame->qp,
+                              frame->table_sel, frame->bit_depth, r->nw_override);
         }
     }
     (void)r;
@@ -8730,21 +8787,54 @@ static int32_t dec_frames_core_impl(dec_frame_req* reqs, uint32_t nframes)
     }
     if (built > 0u) { (void)tc_parallel_for(jobs, built, nw); }
 
+    /* A slice can finish its own rows immediately. Edge windows straddling
+     * slices must wait for both neighbors, and cannot overlap one another. */
+    uint32_t edge_jobs = 0u;
+    for (uint32_t j = 0u; j < built; ++j) {
+        dec_slice_task* t = &tasks[j];
+        if (t->filter_slice != 0u && t->sh->block_y0 != 0u) {
+            jobs[edge_jobs++] = (tc_job){dec_slice_filter_boundary, t};
+        }
+    }
+    if (edge_jobs != 0u) { (void)tc_parallel_for(jobs, edge_jobs, nw); }
+
+    /* Full-size frames have disjoint output planes. Defer their filtering so
+     * a pair can share one dispatch while keeping the same per-plane bands. */
+    tc_deblock_frame_view deblock_frames[TC_DEBLOCK_BATCH_SIZE];
+    uint32_t deblock_count = 0u;
+    uint32_t deblock_workers = 0u;
     int32_t first = TC_OK;
     for (uint32_t i = 0u; i < nframes; ++i) {
-        if (reqs[i].rc == TC_OK) {
+        dec_frame_req* r = &reqs[i];
+        if (r->rc == TC_OK) {
+            if (deblock_count != 0u
+                    && (r->scaled != 0u || r->nw_override != deblock_workers)) {
+                tc_deblock_frames(deblock_frames, deblock_count, deblock_workers);
+                deblock_count = 0u;
+            }
+            tc_deblock_frame_view* deferred_deblock = nframes > 1u && r->scaled == 0u
+                ? &deblock_frames[deblock_count] : NULL;
             uint32_t frame_task_count = 0u;
-            for (uint32_t si = 0u; si < reqs[i].view->slice_count; ++si) {
-                if (reqs[i].skip_alpha == 0u
-                        || !is_alpha_plane(&reqs[i].view->fh,
-                                           reqs[i].view->slices[si].plane)) {
+            for (uint32_t si = 0u; si < r->view->slice_count; ++si) {
+                if (r->skip_alpha == 0u
+                        || !is_alpha_plane(&r->view->fh, r->view->slices[si].plane)) {
                     ++frame_task_count;
                 }
             }
-            reqs[i].rc = dec_frame_finalize(
-                &reqs[i], &tasks[reqs[i].task_base], frame_task_count);
+            r->rc = dec_frame_finalize(r, &tasks[r->task_base], frame_task_count,
+                                       deferred_deblock);
+            if (deferred_deblock != NULL && deferred_deblock->plane_count != 0u) {
+                deblock_workers = r->nw_override;
+                if (++deblock_count == TC_DEBLOCK_BATCH_SIZE) {
+                    tc_deblock_frames(deblock_frames, deblock_count, deblock_workers);
+                    deblock_count = 0u;
+                }
+            }
         }
-        if (first == TC_OK) { first = reqs[i].rc; }
+        if (first == TC_OK) { first = r->rc; }
+    }
+    if (deblock_count != 0u) {
+        tc_deblock_frames(deblock_frames, deblock_count, deblock_workers);
     }
 
     if (heap) {

@@ -15,6 +15,7 @@ from PyQt6.QtGui import QColor, QKeySequence, QMouseEvent, QPainter, QPainterPat
 from PyQt6.QtWidgets import QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QScrollBar, QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget
 
 from src.features.edit.ui.edit_style import EDIT_COLORS, EDIT_SIZES
+from src.shared.layout import TIMELINE_DOCK_MIN_HEIGHT
 from src.features.edit.ui.timeline_icons import timeline_icon
 from src.shared.assets.icon_manager import IconColors, icon_folder_open
 from .session import MixerUiSession, UiClip
@@ -436,7 +437,7 @@ class TimelinePanel(QWidget):
         self._syncing = False
         self.setObjectName("MixerTimeline")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setMinimumSize(480, 210)
+        self.setMinimumSize(480, TIMELINE_DOCK_MIN_HEIGHT)
         self.setStyleSheet(PANEL_QSS)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

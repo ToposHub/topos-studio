@@ -387,10 +387,6 @@ LINKED_GROUP_COLORS = [
     QColor(151, 108, 185),  # muted purple
 ]
 
-# Linked group border settings
-LINKED_GROUP_BORDER_WIDTH = 1  # Bottom border width in pixels
-LINKED_GROUP_BORDER_HIGHLIGHT_WIDTH = 3  # Highlighted border width
-
 # ================================================================
 # Fade Handle Constants (Phase 1.2)
 # ================================================================
@@ -2411,40 +2407,6 @@ class ClipItem(QGraphicsObject):
             paint_trim_bracket(painter, QRectF(0, 0, self._width, self._track_height),
                                edge, TRIM_EDIT_COLOR, active=active)
 
-    def _draw_source_info(self, painter: QPainter) -> None:
-        """Draw source in/out or duration at bottom of clip (P1.4)."""
-        info_font = QFont(UI_FONT_FAMILIES, 8)
-        painter.setFont(info_font)
-        painter.setPen(QPen(TEXT_MUTED_COLOR))
-
-        # Format: show source_in -> source_out or just duration
-        source_in = self._source_start
-        source_out = source_in + self._source_duration
-
-        # Use timeline fps (self._fps) instead of hardcoded 24fps
-        fps = self._fps if self._fps > 0 else 24.0
-
-        # Format timecode-style
-        def format_frames(frames: int) -> str:
-            seconds = frames / fps  # Use actual fps
-            if frames < fps:
-                return f"{frames}f"
-            elif seconds < 60:
-                return f"{int(seconds)}s"
-            else:
-                mins = int(seconds / 60)
-                secs = int(seconds % 60)
-                return f"{mins}:{secs:02d}"
-
-        # Show "in -> out" if we have source info, else duration
-        if self._source_duration > 0:
-            info_text = f"{format_frames(source_in)} - {format_frames(source_out)}"
-        else:
-            info_text = format_frames(self._duration_frames)
-
-        info_rect = QRectF(6, self._track_height - 16, self._width - 12, 12)
-        painter.drawText(info_rect, Qt.TextFlag.TextSingleLine, info_text)
-
     def _draw_disabled_pattern(self, painter: QPainter, rect: QRectF) -> None:
         """Draw diagonal stripe pattern for disabled/muted clips (P1.4).
 
@@ -3658,51 +3620,6 @@ class ClipItem(QGraphicsObject):
         painter.save()
         painter.setOpacity(painter.opacity() * opacity)
         icon.paint(painter, rect)
-        painter.restore()
-
-    def _draw_linked_group_border(self, painter: QPainter, clip_rect: QRectF) -> None:
-        """
-        Draw linked group border (bottom colored line) for Phase 6.1.
-
-        参考 Kdenlive groupColor: 为同一链接组的 clip 绘制相同颜色的底部边框线。
-
-        Args:
-            painter: QPainter instance
-            clip_rect: Clip bounding rectangle
-        """
-        # Get color index for this linked group
-        color_index = self._linked_group_color_index
-
-        # If no color assigned, use a default color (first in palette)
-        if color_index < 0 or color_index >= len(LINKED_GROUP_COLORS):
-            color_index = 0
-
-        # Get base color from palette
-        base_color = LINKED_GROUP_COLORS[color_index]
-
-        # Determine if highlighted (hover on this or linked clip, or
-        # linked-to-selection — P2-03 selection diagnostic).
-        border_width = LINKED_GROUP_BORDER_WIDTH
-        if self._is_group_highlighted or self._linked_to_selection:
-            # Use brighter color for highlight
-            border_color = base_color.lighter(130)
-            border_width = LINKED_GROUP_BORDER_HIGHLIGHT_WIDTH
-        else:
-            border_color = base_color
-
-        # Draw bottom border line
-        painter.save()
-        painter.setPen(QPen(Qt.PenStyle.NoPen))
-        painter.setBrush(QBrush(border_color))
-
-        # Bottom border rectangle (full width of clip)
-        border_rect = QRectF(
-            clip_rect.left(),
-            clip_rect.bottom() - border_width,
-            clip_rect.width(),
-            border_width
-        )
-        painter.drawRect(border_rect)
         painter.restore()
 
     def _draw_locked_indicator(self, painter: QPainter) -> None:
@@ -8497,10 +8414,6 @@ class TrackHeaderItem(QGraphicsObject):
             # Hidden: diagonal line through eye
             painter.setPen(QPen(icon_color, 1.5))
             painter.drawLine(QPointF(cx - eye_w / 2, cy), QPointF(cx + eye_w / 2, cy))
-
-    def _get_icon_key(self, button_type: str, is_active: bool) -> str:
-        """Legacy icon key lookup — no longer used (vector icons instead)."""
-        return ""
 
     def _draw_meter_fader(self, painter: QPainter) -> None:
         rect = self._get_volume_slider_rect()

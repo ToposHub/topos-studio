@@ -35,12 +35,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from src.features.color.core.scope_types import SCOPE_RANGE_MAX, SCOPE_RANGE_MIN, waveform_plot_range
 from src.shared.gpu.metal.context import MetalComputeContext
 
 # ── 常量（与 GL 引擎/scope_types 同口径） ────────────────────────────────
 
-SCOPE_RANGE_MIN = -0.1
-SCOPE_RANGE_MAX = 1.2
 WEIGHT_SCALE = 65536.0                    # 定点累加刻度（uint32 安全：
                                           # 4K 分析图全落一 bin 亦 < 2^32/2^16）
 CIE_X_RANGE = (0.0, 0.8)
@@ -101,7 +100,7 @@ kernel void scope_sample(
 kernel void scope_waveform_accum(
     texture2d<float, access::read> analysis [[texture(0)]],
     device atomic_uint* density             [[buffer(0)]],
-    constant int& mode_p0, constant int& mode_p1,
+    constant int& mode_p0, constant int& show_excursions,
     constant int& sample_w, constant int& sample_h,
     constant int& density_w, constant int& density_h,
     constant float& range_min, constant float& range_max,
@@ -137,6 +136,9 @@ kernel void scope_waveform_accum(
             if (ch > 0) { break; }
         } else {
             val = vals[ch];
+        }
+        if (show_excursions == 0 && (val < 0.0 || val > 1.0)) {
+            continue;
         }
         int col = int((float(gid.x) + 0.5) / float(sample_w)
                       * float(column_span));
@@ -347,12 +349,6 @@ kernel void scope_clear_buffer(
 }
 
 // ── 展示：波形/Parade/Luma（GL SCOPE_WAVEFORM_DISPLAY_FRAGMENT 全量移植）
-float wf_graticule(float h, float yb, int density_h) {
-    float pixel = 1.0 / float(density_h);
-    float d = fabs(yb - h);
-    return 1.0 - smoothstep(0.0, pixel * 1.5, d);
-}
-
 float3 wf_density_tap(const device uint* density, uint area,
                       int density_w, int density_h,
                       int row_bu, int col, float dy, float dx) {
@@ -363,18 +359,11 @@ float3 wf_density_tap(const device uint* density, uint area,
                   float(density[area + base]) * (1.0 / 65536.0),
                   float(density[area * 2u + base]) * (1.0 / 65536.0));
 }
-float wf_value_to_uv(float value, float range_min, float range_max) {
-    return clamp((value - range_min) / max(range_max - range_min, 0.000001),
-                 0.0, 1.0);
-}
-
 kernel void scope_display_waveform(
     const device uint* density               [[buffer(0)]],
     texture2d<float, access::write> out_tex  [[texture(0)]],
     constant int& density_w, constant int& density_h,
-    constant float& range_min, constant float& range_max,
     constant float& max_inv, constant float& weight_inv,
-    constant int& pad0, constant int& pad1,
     uint2 gid [[thread_position_in_grid]])
 {
     if (gid.x >= out_tex.get_width() || gid.y >= out_tex.get_height()) {
@@ -425,20 +414,7 @@ kernel void scope_display_waveform(
     mapped = mix(mapped, float3(1.0, 0.035, 0.0), over_alert);
     mapped = mix(mapped, float3(0.02, 0.20, 1.0), under_alert);
 
-    float line_0 = wf_graticule(
-        wf_value_to_uv(0.0, range_min, range_max), yb, density_h);
-    float line_100 = wf_graticule(
-        wf_value_to_uv(1.0, range_min, range_max), yb, density_h);
-    float grid = 0.0;
-    for (int i = 1; i < 8; i++) {                       // 常量界循环
-        grid = max(grid, wf_graticule(
-            wf_value_to_uv(float(i) / 8.0, range_min, range_max),
-            yb, density_h) * 0.55);
-    }
-    float3 grid_rgb = float3(grid) * float3(0.30, 0.23, 0.025);
-    grid_rgb = max(grid_rgb, line_0 * float3(0.38, 0.28, 0.025));
-    grid_rgb = max(grid_rgb, line_100 * float3(0.38, 0.28, 0.025));
-    out_tex.write(float4(max(mapped, grid_rgb), 1.0), gid);
+    out_tex.write(float4(mapped, 1.0), gid);
 }
 
 // ── 展示：矢量示波器（GL SCOPE_VECTORSCOPE_DISPLAY_FRAGMENT 全量移植）
@@ -785,7 +761,7 @@ class MetalScopeEngine:
             if not wanted:
                 continue
             self._clear(pool["waveform_density"], ww * wh * 5)
-            self._waveform_accum(pool, scope_mode)
+            self._waveform_accum(pool, scope_mode, getattr(demand, "show_waveform_excursions", True))
             self._display_waveform(pool, name, (ww, wh),
                                    single_channel=single)
         if needs_vectorscope:
@@ -968,21 +944,22 @@ class MetalScopeEngine:
         return self.ctx.create_buffer_from_numpy(
             np.array([np.float32(value)]))
 
-    def _waveform_accum(self, pool: dict, mode: int) -> None:
+    def _waveform_accum(self, pool: dict, mode: int, show_excursions: bool = True) -> None:
         aw, ah = pool["sizes"]["analysis"]
         ww, wh = pool["sizes"]["waveform"]
+        range_min, range_max = waveform_plot_range(show_excursions)
         self.ctx.dispatch(
             self._kernel("scope_waveform_accum"),
             buffers={
                 0: pool["waveform_density"],
                 1: self._int_buffer(mode),
-                2: self._int_buffer(0),          # mode_p1（保留）
+                2: self._int_buffer(int(show_excursions)),
                 3: self._int_buffer(aw),
                 4: self._int_buffer(ah),
                 5: self._int_buffer(ww),
                 6: self._int_buffer(wh),
-                7: self._float_buffer(SCOPE_RANGE_MIN),
-                8: self._float_buffer(SCOPE_RANGE_MAX),
+                7: self._float_buffer(range_min),
+                8: self._float_buffer(range_max),
             },
             textures={0: pool["analysis"]},
             threads=(aw, ah, 1))
@@ -1052,13 +1029,9 @@ class MetalScopeEngine:
                 0: pool["waveform_density"],
                 1: self._int_buffer(ww),
                 2: self._int_buffer(wh),
-                3: self._float_buffer(SCOPE_RANGE_MIN),
-                4: self._float_buffer(SCOPE_RANGE_MAX),
-                5: self._float_buffer(
+                3: self._float_buffer(
                     1.0 / expected_waveform_peak(ah, single_channel)),
-                6: self._float_buffer(1.0 / WEIGHT_SCALE),
-                7: self._int_buffer(0),
-                8: self._int_buffer(0),
+                4: self._float_buffer(1.0 / WEIGHT_SCALE),
             },
             textures={0: texture},
             threads=(ww, wh, 1))

@@ -1001,6 +1001,8 @@ class TimelineClipStrip(QWidget):
         self._bottom_mode = _get_bottom_label_mode_setting()
         # Keep the same compact density when restoring a taller saved dock.
         self._card_size = CardSize.SMALL
+        self._preferred_card_size = self._card_size
+        self._compact_height = False
         self._fps = 24.0
 
         # Lazy thumbnail loading state
@@ -1184,7 +1186,23 @@ class TimelineClipStrip(QWidget):
     def sizeHint(self) -> QSize:
         return QSize(800, _preset_card_height(self._card_size) + _CARD_VERTICAL_MARGINS + _SCROLLBAR_HEIGHT)
 
+    def preferred_height_delta(self) -> int:
+        """Extra strip height needed to restore the user-selected preset."""
+        return _preset_card_height(self._preferred_card_size) - _preset_card_height(self._card_size)
+
+    def set_compact_height(self, compact: bool) -> None:
+        """Temporarily use Small when the workspace has limited vertical space."""
+        if compact != self._compact_height:
+            self._compact_height = compact
+            self._apply_card_size(CardSize.SMALL if compact else self._preferred_card_size)
+
     def _set_card_size(self, size: CardSize) -> None:
+        self._preferred_card_size = size
+        self._apply_card_size(size)
+
+    def _apply_card_size(self, size: CardSize) -> None:
+        if self._card_size == size:
+            return
         self._card_size = size
         self._update_strip_height()
         self.updateGeometry()

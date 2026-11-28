@@ -520,6 +520,7 @@ class MainWindowAdapter:
                 HIGH_QUALITY_ANALYSIS_SIZE if force else PLAYBACK_ANALYSIS_SIZE
             ),
             vectorscope_zoom=state['vectorscope_zoom'],
+            show_waveform_excursions=state.get('show_waveform_excursions', True),
             is_playing=False,
             scope_transfer=state.get('scope_transfer', 'srgb'),
             scope_primaries=state.get('scope_primaries', 'bt709'),

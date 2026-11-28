@@ -79,16 +79,15 @@ def test_module_factory_is_local_and_reuses_one_session(qtbot, monkeypatch):
     assert module.register_save_handlers(SimpleNamespace()) is None
 
 
-def test_four_independent_panel_entries_and_optional_editor():
+def test_mixer_panel_entries_are_visible_by_default():
     registry = PanelRegistry()
     MixerModule().register_panels(registry)
     panels = registry.get_all()
     assert [p.dock_attr for p in panels] == [spec[1] for spec in MIXER_PANEL_SPECS]
     assert all(p.feature_id == "mixer" and p.page_ids == ("Mixer",) for p in panels)
-    # The inspector is visible; the effect library remains available on demand.
     assert [p.panel_id for p in panels if p.default_visible] == [
         "mixer.console", "mixer.viewer", "mixer.timeline",
-        "mixer.media_pool", "mixer.properties",
+        "mixer.clip_editor", "mixer.media_pool", "mixer.effects", "mixer.properties",
     ]
     assert registry.get_panels_by_category({"mixer"}, work_mode="image") == {}
 
@@ -113,6 +112,7 @@ def test_registry_session_is_parented_to_main_window_without_second_editor(qtbot
     from src.app.page_contract import PageDescriptor
     host = QMainWindow()
     qtbot.addWidget(host)
+    host.config_manager = MemoryConfig(work_mode="video")
     page = QWidget()
     descriptor = PageDescriptor("mixer", "Mixer", lambda _context: page)
     host.feature_registry = SimpleNamespace(get_all_pages=lambda: [descriptor])
@@ -133,6 +133,7 @@ class DockHost(QMainWindow, DockLayoutMixin):
         self._floating_docks = set()
         self.page_layouts = {}
         self.config_manager = MemoryConfig()
+        self.db = SimpleNamespace(list_page_layouts=lambda *_args: {})
         self.layout_store = LayoutStore(self.config_manager)
         self.mixer_page = SimpleNamespace(**{
             spec[2]: QWidget(self) for spec in MIXER_PANEL_SPECS
@@ -180,15 +181,17 @@ def dock_host(qtbot, monkeypatch):
     return host
 
 
-def test_native_factory_layout_top_console_video_bottom_timeline(dock_host, qtbot):
+def test_native_editing_layout_top_console_video_bottom_timeline(dock_host, qtbot):
     host = dock_host
+    host._arrange_audio_workspace_layout()
     qtbot.waitUntil(lambda: host.dock_audio_console.isVisible())
     console, viewer, timeline = host._audio_workspace_docks()[:3]
     assert host.legacy.isHidden()
-    assert host.dock_audio_clip_editor.isHidden()
+    assert host.dock_audio_clip_editor in host.tabifiedDockWidgets(timeline)
+    assert not host.dock_audio_clip_editor.isHidden()
     assert host.dockWidgetArea(console) == Qt.DockWidgetArea.TopDockWidgetArea
     assert host.dockWidgetArea(viewer) == Qt.DockWidgetArea.TopDockWidgetArea
-    assert host.dockWidgetArea(timeline) == Qt.DockWidgetArea.BottomDockWidgetArea
+    assert host.dockWidgetArea(timeline) == Qt.DockWidgetArea.TopDockWidgetArea
     assert console.geometry().right() <= viewer.geometry().left()
     assert console.geometry().bottom() <= timeline.geometry().top()
     assert timeline.width() >= console.width() + viewer.width()
@@ -223,12 +226,9 @@ def test_floating_redocking_and_layoutstore_round_trip(dock_host, qtbot):
     assert not viewer.isHidden()
 
 
-def test_clip_editor_tab_or_float_is_restorable_and_opt_in(dock_host, qtbot):
+def test_clip_editor_tab_layout_can_be_restored_after_floating(dock_host, qtbot):
     host = dock_host
     editor = host.dock_audio_clip_editor
-    assert editor.isHidden()
-    host.tabifyDockWidget(host.dock_audio_timeline, editor)
-    editor.show()
     editor.raise_()
     assert editor in host.tabifiedDockWidgets(host.dock_audio_timeline)
     host._save_current_layout_to_store("Mixer")
@@ -241,19 +241,42 @@ def test_clip_editor_tab_or_float_is_restorable_and_opt_in(dock_host, qtbot):
     assert not editor.isHidden()  # entering Mixer does not force its visibility
 
 
-def test_native_reset_restores_three_panels_and_hides_optional_editor(dock_host, qtbot):
+def test_native_reset_restores_timeline_tab_and_its_editor(dock_host, qtbot):
     host = dock_host
     host.status_bar = host.statusBar()
+    host._apply_page_layout_choice("Editing Layout", "factory")
     host.dock_audio_viewer.setFloating(True)
     host.dock_audio_console.hide()
     host.dock_audio_clip_editor.show()
     host.reset_layout_to_default()
     qtbot.waitUntil(lambda: not host.dock_audio_viewer.isFloating())
     assert all(d.isVisible() for d in host._audio_workspace_docks()[:3])
-    assert host.dock_audio_clip_editor.isHidden()
+    assert host.dock_audio_clip_editor in host.tabifiedDockWidgets(host.dock_audio_timeline)
     assert host.dockWidgetArea(host.dock_audio_viewer) == Qt.DockWidgetArea.TopDockWidgetArea
     profile = host.layout_store.get_profile(host._layout_profile_mode(), "Mixer")
-    assert set(profile.visible_panels) == {"mixer.console", "mixer.viewer", "mixer.timeline"}
+    assert set(profile.visible_panels) == {"mixer.console", "mixer.viewer", "mixer.timeline", "mixer.clip_editor"}
+
+
+def test_video_mixing_is_mixer_only_and_reset_restores_it(dock_host, qtbot) -> None:
+    host = dock_host
+    host.status_bar = host.statusBar()
+    host.current_page = "Color"
+    assert "mixer_tabbed" not in dict(host._builtin_page_layouts()).values()
+    host.current_page = "Mixer"
+    choices = host._page_layout_choices()
+    assert [key for _, key in choices] == ["mixer_tabbed", "factory"]
+    assert host._active_page_layout_index(choices) == 1
+    console, viewer, timeline, editor = host._audio_workspace_docks()
+    qtbot.waitUntil(lambda: not timeline.visibleRegion().isEmpty())
+    assert host.tabifiedDockWidgets(timeline) == [editor]
+    assert not viewer.isHidden()
+    assert viewer.geometry().right() < timeline.x()
+    assert viewer.geometry().bottom() < console.y()
+    viewer.toggleViewAction().trigger()
+    assert viewer.isHidden()
+    host.reset_layout_to_default()
+    assert not viewer.isHidden()
+    assert host.config_manager.get(host._active_page_layout_key()) == {"preset_id": "mixer_tabbed"}
 
 
 def test_toggle_action_and_other_pages_keep_mixer_panels_isolated(dock_host):

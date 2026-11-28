@@ -17,6 +17,7 @@ from __future__ import annotations
 import inspect
 import json
 import os
+from pathlib import Path
 
 import numpy as np
 import os
@@ -549,6 +550,81 @@ class TestToposVideoEncoder:
                               _enc_config(profile='4444'))
         with pytest.raises(ValueError, match="0-95"):   # v1.5 qp 域（ADR-C031）
             ToposVideoEncoder(str(tmp_path / "y.mov"), _enc_config(crf=96))
+
+    @pytest.mark.parametrize(("tier", "width", "height", "hdr", "entropy", "qp", "container", "matrix"), [
+        ("proxy", 1920, 1080, False, "rans2", None, "mov", 4),
+        ("proxy", 3840, 2160, False, "rans2", None, "mov", 0),
+        ("proxy", 4096, 2160, False, "rans2", None, "mov", 4),
+        ("lt", 3840, 2160, False, "rans2", None, "mov", 4),
+        ("lt", 1920, 1080, False, "rans2", None, "mov", 0),
+        ("lt", 1920, 1080, True, "rans2", None, "mov", 4),
+        ("lt", 1920, 1080, False, "rans2", 64, "mov", 4),
+        ("proxy", 3840, 2160, True, "rans2", None, "mov", 4),
+        ("proxy", 3840, 2160, False, "v1", None, "mov", 4),
+        ("proxy", 3840, 2160, False, "rans2", 64, "mov", 4),
+        ("proxy", 3840, 2160, False, "rans2", None, "image_sequence", 4),
+    ])
+    def test_low_tier_quantization_matrix_by_output_settings(
+        self, require_lib: None, tmp_path: Path, tier: str, width: int,
+        height: int, hdr: bool, entropy: str, qp: int | None, container: str,
+        matrix: int,
+    ) -> None:
+        from src.shared.codec.color_metadata_config import ColorMetadataConfig
+
+        color = ColorMetadataConfig.hdr10() if hdr else ColorMetadataConfig.sdr()
+        config = _enc_config(width=width, height=height, profile=tier, crf=qp,
+                             entropy_mode=entropy, color_metadata=color)
+        encoder = ToposVideoEncoder(str(tmp_path / "matrix.mov"), config,
+                                    container_mode=container)
+        encoder.open()
+        try:
+            assert encoder._frame_cfg.qmatrix_id == matrix
+            assert encoder._movie_cfg.qmatrix_id == matrix
+        finally:
+            encoder.abort()
+
+    @pytest.mark.parametrize(("qp", "original_bytes", "trial_bytes", "selected", "hard_budget"), [
+        (71, 99, 98, 72, False),
+        (72, 99, 97, 72, False),
+        (71, 99, 100, 71, False),
+        (71, 99, 0, 71, False),
+        (63, 99, None, 63, False),
+        (95, 99, None, 95, False),
+        (71, 97, None, 71, False),
+        (71, 99, None, 71, True),
+    ])
+    def test_hq_rate_seed_uses_selected_packet_for_feedback(
+        self, require_lib: None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        qp: int, original_bytes: int, trial_bytes: int | None, selected: int, hard_budget: bool,
+    ) -> None:
+        rate = {"max_video_bytes": 1000, "budget_frames": 10} if hard_budget else {"bitrate": 19_200}
+        config = _enc_config(profile="hq", width=3840, height=2160, crf=None, **rate)
+        encoder = ToposVideoEncoder(str(tmp_path / "rate-seed.mov"), config)
+        encoder.open()
+        original = bytes(original_bytes)
+        original_stats, trial_stats = object(), object()
+        calls = []
+
+        def encode_trial(frame_cfg: topos_binding._CFrameConfig, _planes: list) -> tuple[bytes, object]:
+            calls.append(frame_cfg.qp_base)
+            assert frame_cfg is not encoder._frame_cfg
+            assert trial_bytes is not None
+            if trial_bytes == 0:
+                raise topos_binding.ToposCodecError("optional probe failed")
+            return bytes(trial_bytes), trial_stats
+
+        try:
+            monkeypatch.setattr(encoder._codec, "encode_sized", lambda *args, **kwargs: (
+                original, original_stats, qp))
+            monkeypatch.setattr(encoder._codec, "encode_frame", encode_trial)
+            packet, stats = encoder._encode_packet([])
+            assert calls == ([qp + 1] if trial_bytes is not None else [])
+            assert stats is (trial_stats if selected != qp else original_stats)
+            assert encoder._rc.qp == selected
+            assert encoder._rc.total == len(packet)
+            assert encoder._rc.frames == 1
+        finally:
+            encoder.abort()
 
     def test_rate_controlled_default_tier(self, require_lib, tmp_path) -> None:
         # 不给 crf → 档位 bpp 帧级 sized 搜索（默认路径）

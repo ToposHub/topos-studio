@@ -71,6 +71,7 @@ from .payload_cache import ProjectArchivePayload, ProjectArchiveReadError
 from .package_spec import classify_package_versions
 from .resource_resolver import (
     RESOURCE_INDEX_ARCHIVE_PATH,
+    RESOURCE_URI_SCHEME,
     ProjectResourceResolver,
     ResourceIndex,
     ResourceResolutionError,
@@ -114,6 +115,31 @@ _COMPOSITE_ARCHIVE_MODULES = frozenset(
 
 #: 解压流式拷贝的单块大小。
 _EXTRACT_CHUNK_BYTES: int = 1024 * 1024
+
+
+_COMPOSITE_INPUT_PATH_FIELDS = {
+    "audio_source": ("file_path",),
+    "image_input": ("file_path",),
+    "video_frame": ("file_path",),
+    "pointcloud3d": ("file_path",),
+    "volume3d": ("file_path",),
+    "lut": ("lut_path",),
+    "model3d": ("model_path",),
+    "light3d": ("ies_profile", "hdri_path"),
+}
+
+
+def composite_input_path_fields(
+    node_type: object, parameters: dict[str, Any],
+) -> tuple[str, ...]:
+    """Return project-relative filesystem inputs for a persisted node."""
+    if node_type == "file_output":
+        return ()
+    if parameters.get("psd_import"):
+        return ("file_path",)
+    if not isinstance(node_type, str):
+        return ()
+    return _COMPOSITE_INPUT_PATH_FIELDS.get(node_type, ())
 
 
 def _lock_advisory(fd: int) -> None:
@@ -1603,9 +1629,11 @@ class ToposProjectIO:
         return assets_data
 
     @staticmethod
-    def _composite_media_paths(graphs: dict[str, Any], base_dir: str,
-                               assets: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Save layered Photoshop and audio source paths relative to the project."""
+    def _composite_media_paths(
+        graphs: dict[str, Any], base_dir: str,
+        assets: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Store filesystem inputs relative to the project and resolve them on load."""
         updated: dict[str, Any] = {}
         for graph_id, graph in graphs.items():
             if not isinstance(graph, dict) or not isinstance(graph.get("nodes"), list):
@@ -1614,26 +1642,44 @@ class ToposProjectIO:
             nodes = []
             for node in graph["nodes"]:
                 params = node.get("parameters") if isinstance(node, dict) else None
-                if not isinstance(params, dict) or not (
-                        params.get("psd_import") or node.get("type") == "audio_source"):
+                if not isinstance(params, dict):
                     nodes.append(node)
                     continue
-                path = params.get("file_path")
-                if not isinstance(path, str) or not path:
-                    nodes.append(node)
-                    continue
-                if assets is None:
-                    try:
-                        path = os.path.relpath(path, base_dir) if os.path.isabs(path) else path
-                    except ValueError:
-                        path = os.path.basename(path)
-                else:
-                    path = ToposProjectIO._to_absolute_path(path, base_dir)
-                    asset = assets.get(params.get("asset_id"))
-                    asset_path = asset.get("path") if isinstance(asset, dict) else None
-                    if not os.path.isfile(path) and isinstance(asset_path, str) and os.path.isfile(asset_path):
-                        path = asset_path
-                nodes.append({**node, "parameters": {**params, "file_path": path}})
+
+                node_type = node.get("type")
+                paths = {}
+                for field in composite_input_path_fields(node_type, params):
+                    path = params.get(field)
+                    if (
+                        not isinstance(path, str) or not path or "\x00" in path
+                        or is_virtual_asset_path(path)
+                        or path.startswith(f"{RESOURCE_URI_SCHEME}://")
+                    ):
+                        continue
+                    if assets is None:
+                        if os.path.isabs(path):
+                            try:
+                                path = os.path.relpath(path, base_dir).replace(os.sep, "/")
+                            except ValueError:
+                                # Drive-relative links cannot cross a Windows volume.
+                                pass
+                    else:
+                        path = ToposProjectIO._to_absolute_path(path, base_dir)
+                        # Preserve the existing PSD/audio relink fallback. Other
+                        # inputs can be frame patterns or independent files.
+                        if (
+                            field == "file_path"
+                            and (params.get("psd_import") or node_type == "audio_source")
+                            and not os.path.isfile(path)
+                        ):
+                            asset_id = params.get("asset_id")
+                            asset = assets.get(asset_id) if isinstance(asset_id, str) else None
+                            asset_path = asset.get("path") if isinstance(asset, dict) else None
+                            if isinstance(asset_path, str) and os.path.isfile(asset_path):
+                                path = asset_path
+                    paths[field] = path
+
+                nodes.append({**node, "parameters": {**params, **paths}} if paths else node)
             updated[graph_id] = {**graph, "nodes": nodes}
         return updated
 

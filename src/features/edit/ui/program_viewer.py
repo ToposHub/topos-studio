@@ -404,7 +404,7 @@ class ProgramViewerBar(ViewportToolBarBase):
         menu.addAction(I18N.tr("viewport.zoom_in", "Zoom In"), self.zoom_in_requested.emit)
         menu.addAction(I18N.tr("viewport.zoom_out", "Zoom Out"), self.zoom_out_requested.emit)
         menu.addSeparator()
-        menu.addAction(I18N.tr("viewport.fit", "Fit to Window"), self.fit_requested.emit)
+        menu.addAction(I18N.tr("viewport.zoom_auto", "Auto"), self.fit_requested.emit)
         menu.addAction(I18N.tr("viewport.actual_size", "Actual Size"), self.actual_size_requested.emit)
         menu.addSeparator()
         menu.addAction(I18N.tr("viewport.fullscreen", "Fullscreen"), self.fullscreen_requested.emit)
@@ -976,6 +976,8 @@ class ProgramViewer(QOpenGLWidget):
         # Current frame info (for requesting frames)
         self._current_clip_id: Optional[str] = None
         self._current_frame_index: int = 0
+        self._pending_frame_index: int = 0
+        self._texture_frame_index: int = 0
 
         # Mouse tracking for pan
         self.setMouseTracking(True)
@@ -1225,6 +1227,7 @@ class ProgramViewer(QOpenGLWidget):
         self._shared_tex_id = None
         self._current_tex_is_gl_oriented = False
         self._copied_scrub_present = None
+        self._texture_frame_index = self._pending_frame_index
 
         # 清除错误状态
         self._error_state = "none"
@@ -1435,7 +1438,7 @@ class ProgramViewer(QOpenGLWidget):
                     except Exception:
                         pass
                     self._current_display_trace_id = 0
-                self.frame_presented.emit(int(self._current_frame_index))
+                self.frame_presented.emit(self._texture_frame_index)
 
         self._paint_overlays()
 
@@ -2182,6 +2185,7 @@ class ProgramViewer(QOpenGLWidget):
         self._tex_width = width
         self._tex_height = height
         self._current_tex_is_gl_oriented = target_is_gl_oriented
+        self._texture_frame_index = int(getattr(present, 'frame', self._pending_frame_index))
         self._copied_present_key = getattr(present, 'lease_key', None) if has_fence else None
         extra = getattr(present, "extra", {}) or {}
         self._copied_scrub_present = present if extra.get("scrub_request_token") is not None else None
@@ -2563,6 +2567,14 @@ class ProgramViewer(QOpenGLWidget):
         self._view_transform.pan_y_px = -pan_y * h / 2.0
         self._view_transform.mode = "manual"
         self.update()
+
+    @property
+    def is_fit_to_window(self) -> bool:
+        return self._view_transform.mode == "fit"
+
+    def fit_to_window(self) -> None:
+        """Activate automatic whole-frame fitting."""
+        self._fit_to_window()
 
     def _fit_to_window(self) -> None:
         """Fit video to window (reset zoom and pan)."""
@@ -3577,6 +3589,10 @@ class ProgramViewerWidget(QWidget):
         """Get the ProgramViewer instance."""
         return self._viewer
 
+    def picture_size(self) -> QSize:
+        """Return the preview surface size shared by the OpenGL and Metal views."""
+        return self._viewer_container.size()
+
     def set_monitor_readback_enabled(self, enabled: bool) -> None:
         """Enable GPU PBO readback for external monitor output."""
         self._viewer.set_monitor_readback_enabled(enabled)
@@ -3713,6 +3729,7 @@ class ProgramViewerWidget(QWidget):
 
         # Store image for GL context upload
         self._viewer._pending_qimage = image
+        self._viewer._pending_frame_index = self._viewer._current_frame_index
         self._viewer._tex_width = image.width()
         self._viewer._tex_height = image.height()
         playback_trace(
@@ -3862,6 +3879,7 @@ class ProgramViewerWidget(QWidget):
                     height=height,
                     scrub_active=scrub_active_for_trace,
                 )
+                self._viewer._pending_frame_index = int(frame)
                 self._viewer.set_shared_texture(tex_id, width, height)
                 return
 

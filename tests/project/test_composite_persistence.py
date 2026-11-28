@@ -8,7 +8,12 @@ on image A must survive a save → reload so per-image composite isolation works
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import json
+from pathlib import Path
 import tempfile
+from zipfile import ZipFile
+
+import pytest
 
 from src.features.composite.core.node_engine import NodeGraph
 from src.features.composite.nodes.color_node import COLORNode
@@ -103,3 +108,82 @@ def test_raw_graph_dict_round_trip_was_broken():
         is_real_graph = bool(restored and restored.get("nodes"))
         assert is_real_graph is False, (
             "raw-dict format unexpectedly yielded a valid graph — reader changed?")
+
+
+@pytest.mark.parametrize("composite_only", (False, True))
+def test_composite_input_paths_follow_project_folder(tmp_path: Path, composite_only: bool) -> None:
+    original = tmp_path / "original"
+    media = original / "media"
+    media.mkdir(parents=True)
+    preview = media / "preview.png"
+    preview.touch()
+    project = ToposProject.create_single_asset(
+        name="Project", asset_path=str(preview), media_type="image"
+    )
+    source_paths = {
+        "image_input": {"file_path": "frame.####.exr"},
+        "video_frame": {"file_path": "clip.mov"},
+        "audio_source": {"file_path": "voice.wav"},
+        "pointcloud3d": {"file_path": "cloud.ply"},
+        "volume3d": {"file_path": "smoke.%04d.vdb"},
+        "lut": {"lut_path": "look.cube"},
+        "model3d": {"model_path": "model.glb"},
+        "light3d": {"hdri_path": "sky.hdr", "ies_profile": "fixture.ies"},
+    }
+    terminal = str(tmp_path / "result.exr")
+    graph = {"nodes": [
+        {
+            "id": node_type,
+            "type": node_type,
+            "parameters": {field: str(media / name) for field, name in paths.items()},
+        }
+        for node_type, paths in source_paths.items()
+    ] + [
+        {"id": "output", "type": "file_output", "parameters": {"file_path": terminal}},
+        {"id": "resource", "type": "image_input", "parameters": {"file_path": "topos-res://source"}},
+        {"id": "virtual", "type": "video_frame", "parameters": {"file_path": "topos://generated/a"}},
+        {"id": "unknown", "type": "future", "parameters": {"file_path": str(media / "future.data")}},
+    ]}
+
+    archive = original / "Project.topos"
+    assert ToposProjectIO.save(project, str(archive), full_compositions_data={"graph": graph})
+    with ZipFile(archive) as bundle:
+        stored_graph = json.loads(bundle.read("composite/graphs.json"))["graph"]
+
+    stored = {node["id"]: node for node in stored_graph["nodes"]}
+    for node_type, paths in source_paths.items():
+        assert stored[node_type]["parameters"] == {
+            field: f"media/{name}" for field, name in paths.items()
+        }
+
+    moved = original.rename(tmp_path / "moved")
+    _, full_data = ToposProjectIO.load(
+        str(moved / archive.name), composite_only=composite_only, activate_resources=False
+    )
+    loaded = {node["id"]: node for node in full_data["compositions"]["graph"]["nodes"]}
+    for node_type, paths in source_paths.items():
+        assert loaded[node_type]["parameters"] == {
+            field: str(moved / "media" / name) for field, name in paths.items()
+        }
+    for original_node in graph["nodes"][-4:]:
+        assert loaded[original_node["id"]] == original_node
+
+
+def test_composite_audio_and_legacy_psd_relink_missing_paths(tmp_path: Path) -> None:
+    available = tmp_path / "available.psd"
+    available.touch()
+    source = {"nodes": [
+        {"type": "audio_source", "parameters": {"file_path": "missing.wav", "asset_id": "original"}},
+        {"type": "legacy_psd", "parameters": {
+            "file_path": "missing.psd", "asset_id": "original", "psd_import": {"layer": 4},
+        }},
+        {"type": "image_input", "parameters": {"file_path": "plate.####.exr", "asset_id": "original"}},
+    ]}
+
+    loaded = ToposProjectIO._composite_media_paths(
+        {"graph": source}, str(tmp_path), assets={"original": {"path": str(available)}}
+    )["graph"]
+
+    assert loaded["nodes"][0]["parameters"]["file_path"] == str(available)
+    assert loaded["nodes"][1]["parameters"]["file_path"] == str(available)
+    assert loaded["nodes"][2]["parameters"]["file_path"] == str(tmp_path / "plate.####.exr")

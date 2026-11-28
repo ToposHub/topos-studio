@@ -23,6 +23,7 @@ from src.shared.media.metadata import Rational
 from src.shared.media.timecode import Timecode
 from src.shared.ui.viewport_icons import viewer_icon, viewer_icon_size
 from src.shared.video.viewer_colors import VIEWER_TRANSPORT_BACKGROUND
+from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 from src.shared.ui.widgets.viewport_toolbar_base import ViewerZoomMenuButton
 from src.shared.assets.icon_manager import (
     IconColors, icon_jump_start, icon_step_back, icon_play, icon_pause,
@@ -33,8 +34,8 @@ from src.features.edit.ui.viewport_scrubber import MonitorScrubber
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from src.features.edit.ui.program_viewer import ProgramViewerWidget
-    from src.features.edit.ui.source_viewer import SourceViewerWidget
+    from src.features.edit.ui.program_viewer import ProgramViewer, ProgramViewerWidget
+    from src.features.edit.ui.source_viewer import SourceViewer, SourceViewerWidget
 
 HEADER_HEIGHT = 30
 HEADER_TITLE_GAP = 8
@@ -219,7 +220,10 @@ class _MonitorFooter(QFrame):
 class _MonitorHeader(QFrame):
     """Reference-aligned cells with an independently centered timeline title."""
 
-    def __init__(self, title: QWidget, timecode: QLabel, duration: QLabel, parent: QWidget) -> None:
+    def __init__(
+        self, title: QWidget, timecode: QLabel, duration: QLabel,
+        fps_indicator: RealtimeFpsIndicator, parent: QWidget,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("editMonitorHeader")
         self.setFixedHeight(HEADER_HEIGHT)
@@ -263,7 +267,7 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         self.zoom_button.setFixedSize(62, 28)
         self.zoom_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.zoom_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.zoom_button.setText(I18N.tr("viewport.fit", "Fit"))
+        self.zoom_button.setText(I18N.tr("viewport.zoom_auto", "Auto"))
         self.zoom_button.setToolTip(I18N.tr("edit.viewport.zoom", "Viewer Zoom"))
         self.zoom_button.setAccessibleName(self.zoom_button.toolTip())
         self.zoom_button.setStyleSheet(_BUTTON_STYLE + "QToolButton { padding-right: 12px; border-left: 1px solid #131316; border-right: 1px solid #131316; }")
@@ -284,6 +288,9 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         timecode.setAccessibleName(timecode.toolTip())
         self.right.addWidget(timecode)
         timecode.show()
+        self.fps_indicator = fps_indicator
+        self.right.addWidget(fps_indicator)
+        fps_indicator.show()
         self.single_button = _tool("single_view", I18N.tr("edit.viewport.single", "Single Viewer Mode"), self.right_group, 36)
         self.dual_button = _tool("dual_view", I18N.tr("edit.viewport.dual", "Dual Viewer Mode"), self.right_group, 36)
         for button in (self.single_button, self.dual_button):
@@ -310,6 +317,14 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         super().resizeEvent(event)
         self.position_title()
 
+    def bind_zoom(self, canvas: ProgramViewer | SourceViewer) -> None:
+        def update_label(value: float) -> None:
+            label = I18N.tr("viewport.zoom_auto", "Auto") if canvas.is_fit_to_window else f"{value * 100.0:.0f}%"
+            if self.zoom_button.text() != label:
+                self.zoom_button.setText(label)
+
+        canvas.zoom_changed.connect(update_label)
+
     def add_display_control(self, control: QWidget) -> None:
         """Insert a reference display cell between timecode and mode switch."""
         self.right.insertWidget(self.right.indexOf(self.single_button), control)
@@ -319,6 +334,9 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
     def position_title(self) -> None:
         """Keep the title at the exact monitor center without covering tools."""
         width = self.width()
+        compact = width < 350 and not self.mixer_mode
+        self.zoom_button.setFixedWidth(48 if compact else 62)
+        self.timecode.setFixedWidth(116 if self.mixer_mode else (78 if compact else 90))
         for button in (self.source_button, self.timeline_button):
             button.setVisible(self.show_monitor_switches)
         self.source_tape_button.setVisible(self.show_monitor_switches and width >= 560)
@@ -332,7 +350,9 @@ QLabel { color: #dedee1; background: transparent; border: none; font-size: 11px;
         duration_width = self.duration.minimumWidth()
         show_duration = not self.mixer_mode and width >= 560 and left_width + duration_width <= side_budget
         self.duration.setVisible(show_duration)
-        right_tools = (self.timecode, self.single_button, self.dual_button, self.options_button)
+        right_tools = (
+            self.timecode, self.fps_indicator, self.single_button, self.dual_button, self.options_button,
+        )
         right_width = sum(tool.minimumWidth() for tool in right_tools if not tool.isHidden())
         extra_width = sum(tool.minimumWidth() for tool in self.extra_controls)
         show_extras = not self.mixer_mode and width >= 760 and right_width + extra_width <= side_budget
@@ -456,13 +476,15 @@ class EditViewport(QWidget):
         bar.source_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if not bar.source_label.text():
             bar.source_label.setText(I18N.tr("edit.viewport.source", "Source"))
-        header = _MonitorHeader(bar.source_label, bar.timecode_label, bar.duration_label, viewer)
+        header = _MonitorHeader(
+            bar.source_label, bar.timecode_label, bar.duration_label, bar.fps_indicator, viewer,
+        )
         layout.insertWidget(0, header)
         zoom_menu = QMenu(header)
-        zoom_menu.addAction(I18N.tr("viewport.fit", "Fit to Window"), viewer.viewer.fit_to_window)
+        zoom_menu.addAction(I18N.tr("viewport.zoom_auto", "Auto"), viewer.viewer.fit_to_window)
         zoom_menu.addAction(I18N.tr("viewport.actual_size", "Actual Size"), viewer.viewer.actual_size)
         header.zoom_button.setMenu(zoom_menu)
-        viewer.viewer.zoom_changed.connect(lambda value: header.zoom_button.setText(f"{value * 100.0:.0f}%"))
+        header.bind_zoom(viewer.viewer)
         options = QMenu(header)
         clear_label = I18N.tr("timeline.range.clear", "Clear Range")
         clear_action = options.addAction(viewer_icon("clear_range"), clear_label, bar.btn_clear.click)
@@ -542,13 +564,16 @@ class EditViewport(QWidget):
             lambda name: _legacy_transport_icon(name, transport._loop_enabled))
         self._program_toolbar = toolbar
         self._program_transport = transport
-        header = _MonitorHeader(toolbar._timeline_selector, transport.timecode_label, QLabel("00:00:00:00"), viewer)
+        header = _MonitorHeader(
+            toolbar._timeline_selector, transport.timecode_label, QLabel("00:00:00:00"),
+            toolbar.fps_indicator, viewer,
+        )
         viewer.layout().insertWidget(0, header)
         header.zoom_button.setMenu(toolbar.view_menu)
         toolbar.view_menu.addSeparator()
         for zoom in (0.125, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0):
             toolbar.view_menu.addAction(f"{zoom * 100.0:g}%", lambda checked=False, value=zoom: viewer.get_viewer().set_zoom(value))
-        viewer.get_viewer().zoom_changed.connect(lambda value: header.zoom_button.setText(f"{value * 100.0:.0f}%"))
+        header.bind_zoom(viewer.get_viewer())
         options = QMenu(header)
         options.addMenu(toolbar.view_menu).setText(I18N.tr("viewport.view", "View"))
         options.addMenu(toolbar.quality_menu).setText(I18N.tr("edit.viewport.quality", "Timeline Proxy Resolution"))
@@ -793,6 +818,12 @@ class EditViewport(QWidget):
         action.setChecked(self.source_viewer.loop_enabled)
         action.setEnabled(self.source_viewer.current_asset is not None)
         del blocker
+
+    def fit_visible_monitors(self) -> None:
+        """Return the visible monitors to automatic whole-frame fitting."""
+        for canvas in (self.program_viewer.get_viewer(), self.source_viewer.viewer):
+            if canvas.isVisible() and not canvas.is_fit_to_window:
+                canvas.fit_to_window()
 
     def set_dual_view(self, enabled: bool) -> None:
         """Switch monitor presentation while retaining both viewer instances."""

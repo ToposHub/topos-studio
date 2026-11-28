@@ -48,10 +48,15 @@ def test_lease_identifies_only_a_successfully_drawn_texture(qapp, monkeypatch) -
     monkeypatch.setattr(program_viewer, "_gl", Mock())
     draw = Mock(return_value=True)
     monkeypatch.setattr(viewer, "_render_texture", draw)
+    frames: list[int] = []
+    viewer.frame_presented.connect(frames.append)
+    viewer._texture_frame_index = 7
+    viewer.set_clip_info("incoming", 20)
 
     assert viewer.painted_present_key() is None
     viewer._paintGL_impl()
     assert viewer.painted_present_key() is key
+    assert frames == [7]
 
     draw.return_value = False
     viewer._paintGL_impl()

@@ -115,3 +115,23 @@ def test_path_env_override_and_source_default(monkeypatch):
 
     monkeypatch.setenv("TOPOS_DEFAULT_LAYOUT_PATH", "/tmp/custom.json")
     assert _stub._get_factory_layout_path() == "/tmp/custom.json"
+
+
+def test_obsolete_layout_cleanup_keeps_presets_saved_after_reset(tmp_path: Path) -> None:
+    from src.shared.db.database import Database
+
+    db = Database(str(tmp_path / "host.db"))
+    db.save_page_layout("video", "Edit", "Old Page", "state")
+    db.save_layout("Old Bundle", "", "state", {"Edit": "state"}, work_mode="video")
+    db.reset_obsolete_layout_presets()
+    assert db.list_page_layouts("video", "Edit") == {}
+    assert db.list_layout_bundles("video") == {}
+
+    db.save_page_layout("video", "Edit", "New Page", "state")
+    db.save_layout("New Bundle", "", "state", {"Edit": "state"}, work_mode="video")
+    db.close()
+    db = Database(str(tmp_path / "host.db"))
+    db.reset_obsolete_layout_presets()
+    assert db.list_page_layouts("video", "Edit") == {"New Page": "state"}
+    assert db.list_layout_bundles("video") == {"New Bundle": {"Edit": "state"}}
+    db.close()

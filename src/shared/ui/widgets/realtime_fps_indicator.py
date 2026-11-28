@@ -8,7 +8,7 @@ from typing import Callable, Deque, Optional
 
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QLabel
+from PyQt6.QtWidgets import QLabel, QWidget
 
 
 _SAMPLE_WINDOW_SECONDS = 1.0
@@ -26,13 +26,13 @@ class RealtimeFpsIndicator(QLabel):
 
     def __init__(
         self,
-        parent=None,
+        parent: QWidget | None = None,
         now_fn: Callable[[], float] = monotonic,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("previewFpsIndicator")
         self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.setFixedWidth(76)
+        self.setFixedWidth(60)
         from src.shared.i18n.i18n import I18N
 
         self.setToolTip(I18N.tr("fps_indicator.tooltip", "Realtime preview FPS / 实时预览帧率"))
@@ -44,6 +44,7 @@ class RealtimeFpsIndicator(QLabel):
         self._now = now_fn
         self._target_fps: float = 24.0
         self._is_playing: bool = False
+        self._started_at: float = 0.0
         self._last_frame_token: object = object()
         self._samples: Deque[float] = deque()
         self._measured_fps: Optional[float] = None
@@ -65,12 +66,11 @@ class RealtimeFpsIndicator(QLabel):
     def is_realtime(self) -> bool:
         """Whether the latest display measurement is close to target FPS."""
         last_sample = self._samples[-1] if self._samples else None
-        stale_after = max(0.6, 2.0 / max(self._target_fps, 1.0))
         return bool(
             self._is_playing
             and self._measured_fps is not None
             and last_sample is not None
-            and float(self._now()) - last_sample <= stale_after
+            and self._now() - last_sample <= self._stall_interval()
             and self._measured_fps >= self._target_fps * _REALTIME_RATIO
         )
 
@@ -80,20 +80,24 @@ class RealtimeFpsIndicator(QLabel):
             target = float(target_fps)
         except (TypeError, ValueError):
             target = self._target_fps
-        if target > 0.0:
-            self._target_fps = target
-
         playing = bool(is_playing)
+        target = target if target > 0.0 else self._target_fps
+        if playing == self._is_playing and target == self._target_fps:
+            return
+        self._target_fps = target
         if playing and not self._is_playing:
+            self._started_at = self._now()
             self._samples.clear()
             self._measured_fps = None
             self._last_frame_token = object()
-        self._is_playing = playing
-        if playing:
             self._refresh_timer.start()
-        else:
+        elif not playing:
             self._refresh_timer.stop()
+        self._is_playing = playing
         self._refresh_display()
+
+    def _stall_interval(self) -> float:
+        return max(0.6, 2.0 / max(self._target_fps, 1.0))
 
     def record_presented_frame(self, frame_token: object = None) -> None:
         """Record one frame after it has reached the preview paint path."""
@@ -128,39 +132,26 @@ class RealtimeFpsIndicator(QLabel):
             self._set_color("#9a9a9a")
             return
 
-        last_sample = self._samples[-1] if self._samples else None
-        stale_after = max(0.6, 2.0 / max(self._target_fps, 1.0))
-        if last_sample is None:
-            self._show_last_displayed_fps()
-            self._set_color("#9a9a9a")
-            return
-        if now - last_sample > stale_after:
-            self._show_last_displayed_fps()
-            self._set_color(
-                "#ff6b6b" if self._displayed_fps is not None else "#9a9a9a"
-            )
+        last_sample = self._samples[-1] if self._samples else self._started_at
+        if now - last_sample > self._stall_interval():
+            self._measured_fps = 0.0
+            self._set_text("0 FPS")
+            self._set_color("#ff6b6b")
             return
 
         measured = self._measured_fps
         if measured is None:
-            self._show_last_displayed_fps()
+            self._set_text("FPS —")
             self._set_color("#9a9a9a")
             return
 
         self._displayed_fps = max(0, int(round(measured)))
-        self._show_last_displayed_fps()
+        self._set_text(f"{self._displayed_fps} FPS")
         self._set_color(
             "#7fd18b"
             if measured >= self._target_fps * _REALTIME_RATIO
             else "#ff6b6b"
         )
-
-    def _show_last_displayed_fps(self) -> None:
-        """Keep the last stable integer visible when no fresh sample exists."""
-        if self._displayed_fps is None:
-            self._set_text("FPS --")
-        else:
-            self._set_text(f"{self._displayed_fps} FPS")
 
     def _set_text(self, text: str) -> None:
         if self._display_text == text:

@@ -102,6 +102,11 @@ void tc_quant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
                               uint32_t qp, uint8_t bit_depth,
                               uint32_t table_sel);
 
+/* Decode only: prepares Q and f_clamp. Quantization also needs the encoder
+ * lookup fields populated by tc_quant_ctx_init_bd_tbl. */
+void tc_dequant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
+                               uint32_t qp, uint8_t bit_depth, uint32_t table_sel);
+
 /* 位流 flags bit3（V7-R5 细化表）→ 量化表选择（编解码共用）；
  * 非 V7-R5 流 flags 校验拒绝该位 → 恒经典表。 */
 static inline uint32_t tc_qtbl_of_flags(uint16_t flags)

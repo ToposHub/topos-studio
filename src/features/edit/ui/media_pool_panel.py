@@ -1006,12 +1006,16 @@ class BinTreeWidget(QTreeWidget):
                 continue
             item = find_item(root)
             if item is not None:
-                keep_collapsed = is_smart_bin and not root.isExpanded()
                 previous = self.blockSignals(True)
                 try:
-                    self.setCurrentItem(item)
-                    if keep_collapsed:
-                        root.setExpanded(False)
+                    if is_smart_bin and not root.isExpanded():
+                        # Making a hidden child current can expand its section
+                        # when Qt next shows the tree and scrolls to that child.
+                        self.setCurrentItem(None)
+                        self.clearSelection()
+                        item.setSelected(True)
+                    else:
+                        self.setCurrentItem(item)
                 finally:
                     self.blockSignals(previous)
                 return True
@@ -12498,26 +12502,6 @@ class MediaPoolPanel(QWidget):
                     )
         except Exception as e:
             logger.warning(f"Failed to update FrameProviderService: {e}")
-
-    def _get_proxy_resolution(
-        self, proxy_path: str, asset: MediaAsset
-    ) -> Optional[tuple[int, int]]:
-        """
-        Get proxy resolution by probing the file.
-
-        AUD-20210: 探测实现已提取为模块级 :func:`_probe_proxy_resolution`
-        （供 :class:`ProxyResolutionWorker` 在后台线程调用）。本方法仅保留
-        为兼容入口 —— **不要在 UI 线程调用**（av.open / ffprobe 子进程可
-        阻塞最长 5s）；正常路径走 ``_update_disk_proxy_services`` 的 worker。
-
-        Args:
-            proxy_path: Path to the proxy file
-            asset: Source asset for reference resolution
-
-        Returns:
-            (width, height) tuple or None if cannot determine
-        """
-        return _probe_proxy_resolution(proxy_path, asset)
 
     def _on_proxy_error(
         self, asset_id: str, error_message: str, token: int = -1

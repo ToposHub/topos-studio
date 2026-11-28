@@ -111,7 +111,7 @@
       "clear_completed": "Clear Completed",
       "more": "More",
       "float": "Float Panel",
-      "return_to_deliver": "Return to Deliver",
+      "return_to_deliver": "Return to Export",
       "empty_title": "No video export tasks yet",
       "empty_hint": "Choose a timeline and a video preset above, then click “Add to Video Queue”.",
       "tasks": "tasks",

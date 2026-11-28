@@ -13,17 +13,18 @@ import logging
 from typing import Any
 
 from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QGridLayout, QButtonGroup,
-    QPushButton, QToolBar, QStatusBar, QMessageBox, QMenu,
+    QWidget, QHBoxLayout, QButtonGroup,
+    QPushButton, QToolBar, QToolButton, QStatusBar, QMessageBox, QMenu,
     QInputDialog, QApplication, QProgressBar,
-    QComboBox, QDialog, QLabel,
+    QDialog, QLabel,
 )
 from PyQt6.QtGui import QAction, QKeySequence
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, Qt, QSize, pyqtSignal
 
 from src.shared.i18n.i18n import I18N
-from src.shared.ui.style_sheet import C, apply_combo_dropdown_style
-from src.shared.assets.icon_manager import icon_reset, icon_settings, icon_home
+from src.shared.ui.style_sheet import C
+from src.shared.ui.widgets.chevron_combo import ChevronComboBox
+from src.shared.assets.icon_manager import icon_settings, icon_home
 from src.features.color.core.plugin_manager import get_plugin_manager
 
 logger = logging.getLogger(__name__)
@@ -384,7 +385,7 @@ class MenuToolbarMixin:
         if "composite" in enabled_features:
             self.menu_composite = menu_bar.addMenu(I18N.tr("menu.composite", "&Composite"))
         if "deliver" in enabled_features:
-            self.menu_deliver = menu_bar.addMenu(I18N.tr("menu.deliver", "&Deliver"))
+            self.menu_deliver = menu_bar.addMenu(I18N.tr("menu.deliver", "E&xport"))
 
         # --- Window Menu ---
         self.menu_window = menu_bar.addMenu(I18N.tr("menu.window", "&Window"))
@@ -428,7 +429,7 @@ class MenuToolbarMixin:
         self.load_layout_menu = window_menu.addMenu(I18N.tr("action.load_layout", "Load Layout"))
         self.load_layout_menu.aboutToShow.connect(self.update_load_layout_menu)
 
-        # P1-24: built-in Edit workspace presets (Editing/Audio/Captions/Review).
+        # Built-in preset for the current workspace.
         # Populated on aboutToShow so availability reflects the live edit flag.
         self.workspace_menu = window_menu.addMenu(I18N.tr("menu.workspaces", "Workspaces"))
         self.workspace_menu.aboutToShow.connect(self.update_workspace_menu)
@@ -1194,10 +1195,9 @@ class MenuToolbarMixin:
             self.canvas.set_tool_mode('inspector')
 
     def reset_view_to_actual(self) -> None:
-        self.canvas.resetTransform()
+        self.canvas.set_manual_zoom(1.0)
         if self.canvas.engine:
             self.canvas.engine.render_pipeline(render_reason='viewport_refresh')
-        self.canvas.viewport().update()
 
     def toggle_focus_mode(self) -> None:
         """Toggle focus mode - hide/show all panels except viewport."""
@@ -1290,11 +1290,12 @@ class MenuToolbarMixin:
     def _show_project_manager(self, startup: bool = False) -> None:
         """Show the video-mode Project Manager.
 
-        At startup, closing without choosing a project creates an unsaved
-        ``Untitled Project`` workspace instead of exiting. When opened from
-        the running app, closing the manager simply returns to the current
-        workspace.
+        At startup, skipping or closing the manager initializes an unsaved
+        workspace. Opening the manager manually always shows the dialog.
         """
+        if startup and self.config_manager.get("show_project_manager_on_startup") is False:
+            self._ensure_startup_edit_project()
+            return
         from src.app.ui.project_manager_dialog import ProjectManagerDialog
         dlg = ProjectManagerDialog(
             self.config_manager,
@@ -1307,20 +1308,21 @@ class MenuToolbarMixin:
         dlg.project_renamed.connect(self._on_project_renamed_from_manager)
         dlg.new_project_requested.connect(lambda: self._new_project_from_manager(dlg))
         result = dlg.exec()
+        if startup and result != QDialog.DialogCode.Accepted:
+            self._ensure_startup_edit_project()
+
+    def _ensure_startup_edit_project(self) -> None:
         # Keep the application usable even when the user closes the startup
         # manager without selecting a saved project.  The temporary project is
         # deliberately in-memory only; the first Save/Save As persists it.
-        if startup and result != QDialog.DialogCode.Accepted:
-            if not getattr(self, "_current_edit_project", None):
-                name = self._next_untitled_project_name()
-                try:
-                    self._auto_create_edit_project(name=name)
-                except Exception:
-                    logger.exception("Could not create the default untitled project")
-                    # A failure here is exceptional (for example, the Edit
-                    # module may be unavailable). Preserve the old safe
-                    # fallback rather than leaving the startup flow unusable.
-                    QApplication.quit()
+        if getattr(self, "_current_edit_project", None):
+            return
+        name = self._next_untitled_project_name()
+        try:
+            self._auto_create_edit_project(name=name)
+        except Exception:
+            logger.exception("Could not create the default untitled project")
+            QApplication.quit()
 
     def _next_untitled_project_name(self) -> str:
         """Return a unique in-memory project name for startup fallback.
@@ -1688,7 +1690,9 @@ class MenuToolbarMixin:
     # ------------------------------------------------------------------
 
     def setup_toolbar(self) -> None:
-        from src.app.ui.workspace_panel_bar import WorkspacePanelBar, create_toolbar_menu_button
+        from src.app.ui.workspace_panel_bar import (
+            WorkspacePanelBar, WorkspaceToolbarContents, create_toolbar_menu_button,
+        )
 
         toolbar = QToolBar("Main Toolbar")
         toolbar.setObjectName("mainToolbar")
@@ -1704,26 +1708,57 @@ class MenuToolbarMixin:
         self.redo_action.triggered.connect(lambda: self._route_color_node_history(True))
 
         # === 创建工具栏主容器 ===
-        toolbar_container = QWidget()
-        main_layout = QGridLayout(toolbar_container)
-        main_layout.setContentsMargins(10, 0, 10, 0)
+        toolbar_container = WorkspaceToolbarContents(self.config_manager)
+        toolbar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        toolbar.customContextMenuRequested.connect(
+            lambda pos: toolbar_container.show_context_menu(toolbar.mapToGlobal(pos)),
+        )
+        main_layout = toolbar_container.grid
+        main_layout.setContentsMargins(8, 0, 8, 0)
         main_layout.setSpacing(4)
         main_layout.setColumnStretch(0, 1)
         main_layout.setColumnStretch(2, 1)
         left_tools = QWidget(toolbar_container)
         left_layout = QHBoxLayout(left_tools)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(3)
+        left_layout.setSpacing(2)
         main_layout.addWidget(left_tools, 0, 0)
 
-        menu_label = I18N.tr("menu.application_menu", "Application Menu")
+        menu_label = I18N.tr("menu.application_menu", "Menu")
         app_menu = QMenu(toolbar_container)
         for action in self.menuBar().actions():
             app_menu.addAction(action)
-        self.application_menu_button = create_toolbar_menu_button(left_tools, menu_label, "list", app_menu)
+        self.application_menu_button = create_toolbar_menu_button(
+            left_tools, menu_label, "bars", app_menu,
+        )
         self.application_menu_button.setObjectName("applicationMenuButton")
         left_layout.addWidget(self.application_menu_button, alignment=Qt.AlignmentFlag.AlignVCenter)
-        self.workspace_panel_bar = WorkspacePanelBar(self)
+        toolbar_button_style = """
+            QToolButton {
+                background-color: transparent; border: none; border-radius: 4px;
+                padding: 0 4px; font-size: 12px;
+            }
+            QToolButton:hover { background-color: #3d3d3d; }
+            QToolButton:pressed { background-color: #2d2d2d; }
+        """
+        # Home reopens the startup panel for the current workspace mode.
+        self.project_manager_btn = QToolButton()
+        self.project_manager_btn.setIcon(icon_home())
+        self.project_manager_btn.setIconSize(QSize(16, 16))
+        if self._is_video_work_mode():
+            home_label = I18N.tr("action.open_project_manager", "Open Project Manager...")
+            self.project_manager_btn.setText(I18N.tr("action.project_manager_label", "Project Manager"))
+            self.project_manager_btn.clicked.connect(self._show_project_manager)
+        else:
+            home_label = I18N.tr("welcome.recent_projects", "Recent Projects")
+            self.project_manager_btn.setText(home_label)
+            self.project_manager_btn.clicked.connect(self._show_welcome_dialog)
+        self.project_manager_btn.setToolTip(home_label)
+        self.project_manager_btn.setAccessibleName(home_label)
+        self.project_manager_btn.setFixedHeight(28)
+        self.project_manager_btn.setStyleSheet(toolbar_button_style)
+
+        self.workspace_panel_bar = WorkspacePanelBar(self, home_button=self.project_manager_btn)
         left_layout.addWidget(self.workspace_panel_bar, alignment=Qt.AlignmentFlag.AlignVCenter)
         self.workspace_panel_bar.set_page(self.current_page)
         left_layout.addStretch(1)
@@ -1769,7 +1804,7 @@ class MenuToolbarMixin:
                 QPushButton {{
                     background-color: rgb(70, 70, 77); border: none; outline: none;
                     color: #bbb; font-size: 12px; font-weight: bold;
-                    padding: 6px 16px; {radius}
+                    padding: 6px 10px; {radius}
                 }}
                 QPushButton:hover {{ color: #fff; background-color: #3d3d3d; }}
                 QPushButton:checked {{
@@ -1802,83 +1837,36 @@ class MenuToolbarMixin:
         main_layout.addWidget(right_tools, 0, 2)
 
         # --- 右侧工具区域（添加到工具栏末尾）---
-        # Reset button (放在最前面)
-        self.reset_all_btn = QPushButton()
-        self.reset_all_btn.setIcon(icon_reset())
-        self.reset_all_btn.setToolTip(I18N.tr("action.reset_all_layers", "Reset All Layer Adjustments"))
-        self.reset_all_btn.setFixedSize(28, 28)
-        self.reset_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent; border: none; border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #3d3d3d; }
-            QPushButton:pressed { background-color: #2d2d2d; }
-        """)
-        self.reset_all_btn.clicked.connect(self.on_reset_all_click)
-        right_layout.addWidget(self.reset_all_btn)
-
         # Preferences button
-        self.pref_btn = QPushButton()
+        self.pref_btn = QToolButton()
+        self.pref_btn.setText(I18N.tr("action.preferences_label", "Preferences"))
         self.pref_btn.setIcon(icon_settings())
+        self.pref_btn.setIconSize(QSize(16, 16))
         self.pref_btn.setToolTip(I18N.tr("action.preferences", "Preferences..."))
-        self.pref_btn.setFixedSize(28, 28)
-        self.pref_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent; border: none; border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #3d3d3d; }
-            QPushButton:pressed { background-color: #2d2d2d; }
-        """)
+        self.pref_btn.setFixedHeight(28)
+        self.pref_btn.setStyleSheet(toolbar_button_style)
         self.pref_btn.clicked.connect(self.show_preferences_dialog)
         right_layout.addWidget(self.pref_btn)
 
-        # Home reopens the startup panel for the current workspace mode.
-        self.project_manager_btn = QPushButton()
-        self.project_manager_btn.setIcon(icon_home())
-        if self._is_video_work_mode():
-            home_label = I18N.tr("action.open_project_manager", "Open Project Manager...")
-            self.project_manager_btn.clicked.connect(self._show_project_manager)
-        else:
-            home_label = I18N.tr("welcome.recent_projects", "Recent Projects")
-            self.project_manager_btn.clicked.connect(self._show_welcome_dialog)
-        self.project_manager_btn.setToolTip(home_label)
-        self.project_manager_btn.setAccessibleName(home_label)
-        self.project_manager_btn.setFixedSize(28, 28)
-        self.project_manager_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent; border: none; border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #3d3d3d; }
-            QPushButton:pressed { background-color: #2d2d2d; }
-        """)
-        right_layout.addWidget(self.project_manager_btn)
-        right_layout.addSpacing(8)
+        right_layout.addSpacing(4)
 
         # Layout combo
-        self.layout_combo = QComboBox()
-        self.layout_combo.setFixedWidth(130)
+        self.layout_combo = ChevronComboBox()
+        self.layout_combo.setFixedWidth(134)
         self.layout_combo.setToolTip(I18N.tr("workspace.select_layout", "Select Workspace Layout"))
-        self.layout_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #252529; border: 1px solid #444; border-radius: 12px;
-                padding: 2px 12px; color: #aaa; font-size: 11px; font-weight: bold;
-            }
-            QComboBox:hover { background-color: #333; border: 1px solid #ff8800; color: #eee; }
-            QComboBox::drop-down { border: 0; width: 20px; background: transparent; subcontrol-origin: padding; subcontrol-position: right; }
-        """)
-        apply_combo_dropdown_style(self.layout_combo)
         self.layout_combo.activated.connect(self.on_layout_combo_activated)
         right_layout.addWidget(self.layout_combo)
-        right_layout.addSpacing(8)
+        right_layout.addSpacing(4)
         self.update_layout_combobox()
 
-        # Export button
-        self.export_btn = QPushButton(I18N.tr("action.export", "Export"))
-        self.export_btn.setToolTip(I18N.tr("tooltip.export", "导出图像"))
+        # Quick Export button
+        quick_export_label = I18N.tr("export.quick_title", "Quick Export")
+        self.export_btn = QPushButton(quick_export_label)
+        self.export_btn.setToolTip(quick_export_label)
         self.export_btn.setStyleSheet("""
             QPushButton {
                 background-color: #cc6600; border: none; border-radius: 4px;
-                color: white; font-size: 12px; font-weight: bold; padding: 6px 16px;
+                color: white; font-size: 12px; font-weight: bold; padding: 6px 10px;
             }
             QPushButton:hover { background-color: #e67300; }
             QPushButton:pressed { background-color: #b35900; }
@@ -1888,6 +1876,10 @@ class MenuToolbarMixin:
 
         # 将容器添加到工具栏
         toolbar.addWidget(toolbar_container)
+        toolbar_container.bind_buttons(
+            self.workspace_panel_bar,
+            (self.application_menu_button, self.project_manager_btn, self.pref_btn),
+        )
 
     # ------------------------------------------------------------------
     # Status bar

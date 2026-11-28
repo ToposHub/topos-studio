@@ -2,6 +2,8 @@
 
 #include "../../include/topos_codec.h"
 #include "../common/tpool.h"
+#include "../simd/deblock_avx2.h"
+#include "../simd/dispatch.h"
 #include "../transform/quant.h"
 
 #include <stdlib.h>
@@ -167,11 +169,18 @@ static inline void db_apply(uint16_t* p1, uint16_t* p0, uint16_t* q0,
 static void deblock_v_pass(uint16_t* pix, int32_t stride, uint32_t w,
                            uint32_t h, uint32_t unit,
                            int32_t alpha, int32_t beta,
-                           int32_t clip, int32_t maxv)
+                           int32_t clip, int32_t maxv, int avx2)
 {
+    (void)avx2;
     for (uint32_t y = 0u; y < h; ++y) {
         uint16_t* row = pix + (size_t)y * (size_t)stride;
-        for (uint32_t x0 = unit; x0 + 1u < w; x0 += unit) {
+        uint32_t x0 = unit;
+#if defined(__x86_64__) || defined(_M_X64)
+        if (avx2 && unit == 8u) {
+            x0 = tc_deblock_vertical_row_avx2(row, w, alpha, beta, clip, maxv);
+        }
+#endif
+        for (; x0 + 1u < w; x0 += unit) {
             const int32_t p1 = row[x0 - 2], p0 = row[x0 - 1];
             const int32_t q0 = row[x0], q1 = row[x0 + 1];
             if (db_gate(p1, p0, q0, q1, alpha, beta, maxv)) {
@@ -195,8 +204,9 @@ static void deblock_v_pass(uint16_t* pix, int32_t stride, uint32_t w,
 static void deblock_h_range(uint16_t* pix, int32_t stride, uint32_t w,
                             uint32_t unit, uint32_t r_begin, uint32_t r_end,
                             int32_t alpha, int32_t beta, int32_t clip,
-                            int32_t maxv)
+                            int32_t maxv, int avx2)
 {
+    (void)avx2;
     for (uint32_t r = r_begin; r < r_end; ++r) {
         const uint32_t y0 = r * unit;
         uint16_t* pu2 = pix + (size_t)(y0 - 2u) * (size_t)stride;
@@ -204,7 +214,13 @@ static void deblock_h_range(uint16_t* pix, int32_t stride, uint32_t w,
         uint16_t* qu = pix + (size_t)y0 * (size_t)stride;
         uint16_t* qu2 = pix + (size_t)(y0 + 1u) * (size_t)stride;
         /* 整行稠密 stencil：每个 x 都跨同一条边界，逐 x 互不相干 */
-        for (uint32_t x = 0u; x < w; ++x) {
+        uint32_t x = 0u;
+#if defined(__x86_64__) || defined(_M_X64)
+        if (avx2) {
+            x = tc_deblock_horizontal_row_avx2(pu2, pu, qu, qu2, w, alpha, beta, clip, maxv);
+        }
+#endif
+        for (; x < w; ++x) {
             const int32_t p1 = pu2[x], p0 = pu[x];
             const int32_t q0 = qu[x], q1 = qu2[x];
             if (db_gate(p1, p0, q0, q1, alpha, beta, maxv)) {
@@ -242,22 +258,61 @@ static void db_band_run(void* ctx)
 {
     const db_band* band = (const db_band*)ctx;
     const tc_deblock_plane_view* plane = band->plane;
+    int avx2 = 0;
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(TC_DB_TUNE)
+    avx2 = band->maxv <= 4095 && tc_simd_avx2_enabled();
+#endif
     deblock_v_pass(plane->pix + (size_t)band->first_row * (size_t)plane->stride,
                    plane->stride, plane->width,
                    band->end_row - band->first_row, band->unit,
-                   band->alpha, band->beta, band->clip, band->maxv);
+                   band->alpha, band->beta, band->clip, band->maxv, avx2);
     deblock_h_range(plane->pix, plane->stride, plane->width, band->unit,
                     band->first_edge, band->end_edge, band->alpha,
-                    band->beta, band->clip, band->maxv);
+                    band->beta, band->clip, band->maxv, avx2);
 }
 
-static void deblock_planes_unit(const tc_deblock_plane_view* planes, uint32_t count,
-                                uint32_t qp, uint32_t table_sel, uint8_t bit_depth,
-                                uint32_t unit, uint32_t max_workers)
+void tc_deblock_slice_band(const tc_deblock_plane_view* plane, uint32_t block_y,
+                           uint32_t block_rows, uint32_t qp, uint32_t table_sel,
+                           uint8_t bit_depth, int boundary_only)
+{
+    const uint32_t unit = 8u;
+    const uint32_t w = plane->width, h = plane->height;
+    if (plane->pix == NULL || plane->stride <= 0 || (uint32_t)plane->stride < w ||
+        qp > TC_QP_MAX || bit_depth < 8u || bit_depth > 16u ||
+        w < 2u * unit || h < 2u * unit || w % unit != 0u || h % unit != 0u) {
+        return;
+    }
+    const uint32_t visible_blocks = h / unit;
+    if (block_y >= visible_blocks || (boundary_only && block_y == 0u)) { return; }
+    const uint32_t remaining = visible_blocks - block_y;
+    const uint32_t end_block = block_y + (block_rows < remaining ? block_rows : remaining);
+    const int32_t alpha = (int32_t)deblock_alpha(table_sel, qp);
+    db_band band = {
+        plane,
+        boundary_only ? 0u : block_y * unit,
+        boundary_only ? 0u : end_block * unit,
+        boundary_only ? block_y : block_y + 1u,
+        boundary_only ? block_y + 1u : end_block,
+        unit, alpha, alpha / 2 + 2, alpha >> 1,
+        (int32_t)((1u << bit_depth) - 1u),
+    };
+    db_band_run(&band);
+}
+
+static uint32_t deblock_worker_count(uint32_t max_workers)
+{
+    const uint32_t workers = max_workers != 0u ? max_workers : (uint32_t)tc_dev_thread_count();
+    return workers <= TC_SLICE_MAX_THREADS ? workers : TC_SLICE_MAX_THREADS;
+}
+
+static uint32_t deblock_enqueue_planes(const tc_deblock_plane_view* planes, uint32_t count,
+                                       uint32_t qp, uint32_t table_sel, uint8_t bit_depth,
+                                       uint32_t unit, uint32_t workers,
+                                       tc_job* jobs, db_band* bands, uint32_t job_count)
 {
     if (planes == NULL || count == 0u || count > DB_MAX_PLANES || qp > TC_QP_MAX ||
         bit_depth < 8u || bit_depth > 16u || unit < 4u || unit > 8u) {
-        return;
+        return job_count;
     }
 
     DB_TUNE_INIT();
@@ -265,12 +320,6 @@ static void deblock_planes_unit(const tc_deblock_plane_view* planes, uint32_t co
     const int32_t beta = alpha / 2 + 2;
     const int32_t clip = alpha >> 1;
     const int32_t maxv = (int32_t)((1u << bit_depth) - 1u);
-    uint32_t workers = max_workers != 0u ? max_workers : (uint32_t)tc_dev_thread_count();
-    if (workers > TC_SLICE_MAX_THREADS) { workers = TC_SLICE_MAX_THREADS; }
-
-    tc_job jobs[DB_MAX_PLANES * DB_MAX_BANDS];
-    db_band bands[DB_MAX_PLANES * DB_MAX_BANDS];
-    uint32_t job_count = 0u;
     for (uint32_t p = 0; p < count; ++p) {
         const tc_deblock_plane_view* plane = &planes[p];
         const uint32_t w = plane->width;
@@ -301,6 +350,18 @@ static void deblock_planes_unit(const tc_deblock_plane_view* planes, uint32_t co
             }
         }
     }
+    return job_count;
+}
+
+static void deblock_planes_unit(const tc_deblock_plane_view* planes, uint32_t count,
+                                uint32_t qp, uint32_t table_sel, uint8_t bit_depth,
+                                uint32_t unit, uint32_t max_workers)
+{
+    const uint32_t workers = deblock_worker_count(max_workers);
+    tc_job jobs[DB_MAX_PLANES * DB_MAX_BANDS];
+    db_band bands[DB_MAX_PLANES * DB_MAX_BANDS];
+    const uint32_t job_count = deblock_enqueue_planes(
+        planes, count, qp, table_sel, bit_depth, unit, workers, jobs, bands, 0u);
     if (job_count != 0u) {
         (void)tc_parallel_for(jobs, job_count, workers);
     }
@@ -311,6 +372,32 @@ void tc_deblock_planes(const tc_deblock_plane_view* planes, uint32_t count,
                        uint32_t max_workers)
 {
     deblock_planes_unit(planes, count, qp, table_sel, bit_depth, 8u, max_workers);
+}
+
+void tc_deblock_frames(const tc_deblock_frame_view* frames, uint32_t count,
+                      uint32_t max_workers)
+{
+    if (frames == NULL || count == 0u || count > TC_DEBLOCK_BATCH_SIZE) { return; }
+    if (count == 1u) {
+        const tc_deblock_frame_view* frame = &frames[0];
+        tc_deblock_planes(frame->planes, frame->plane_count, frame->qp,
+                          frame->table_sel, frame->bit_depth, max_workers);
+        return;
+    }
+
+    const uint32_t workers = deblock_worker_count(max_workers);
+    tc_job jobs[TC_DEBLOCK_BATCH_SIZE * DB_MAX_PLANES * DB_MAX_BANDS];
+    db_band bands[TC_DEBLOCK_BATCH_SIZE * DB_MAX_PLANES * DB_MAX_BANDS];
+    uint32_t job_count = 0u;
+    for (uint32_t i = 0u; i < count; ++i) {
+        const tc_deblock_frame_view* frame = &frames[i];
+        job_count = deblock_enqueue_planes(frame->planes, frame->plane_count,
+                                           frame->qp, frame->table_sel, frame->bit_depth,
+                                           8u, workers, jobs, bands, job_count);
+    }
+    if (job_count != 0u) {
+        (void)tc_parallel_for(jobs, job_count, workers);
+    }
 }
 
 void tc_deblock_plane(uint16_t* pix, int32_t stride_pix, uint32_t w, uint32_t h,

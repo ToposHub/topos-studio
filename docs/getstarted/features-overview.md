@@ -107,6 +107,7 @@ Topos 采用**产品变体架构**，同一代码库构建四个专业产品：
 *   **曲线调整**：RGB, HSL, Saturation 曲线
 *   **色彩管理**：OCIO v2 集成 + 内置回退配置（lin / sRGB / Rec.709 / BT.2020 PQ·HLG / Display P3），ACEScg (AP1) 工作空间与 IDT，可指向外部 ACES Studio Config
 *   **GPU 示波器（8 模式）**：Waveform、Vectorscope（色靶/肤色线）、Split 分屏、RGB Parade、Luma Waveform、Histogram、CIE 色度图、False Color——全 GPU 分析 shader，零 CPU 回读，自适应分辨率与刷新率；Color/Composite 共用示波器 dock
+    *   波形、RGB Parade 和亮度波形共用一套标尺。百分比、10 位码值与 SDR／PQ／HLG 尼特的读数和网格同步切换，保留当前波形信号。勾选「隐藏超范围信号」后，标尺的有效码值范围占满纵轴，超出该范围的信号不绘制。
 *   **视频降噪**：GPU 时域 + 空域降噪核心与专用面板，随工程保存/恢复
 *   **跟踪**：DaVinci 风格 Tracker 面板（点跟踪 + 置信度统计 + 四态状态机）
 *   **硬件调色台**：原生 Tangent 控制台集成（轨迹球/旋钮，Hub 缺失优雅待机）
@@ -121,7 +122,7 @@ Topos 采用**产品变体架构**，同一代码库构建四个专业产品：
 *   **时间线遮挡剔除**：上层片段完全遮挡下层时自动跳过其解码/合成——实测 2K 两轨全屏遮挡 **3.26×**（11.3→36.7 fps，下轨解码请求 -100%）、四轨 **5.23×**、4K 两轨 **3.67×**；分析器单帧开销 < 11 µs（结果存档 `benchmarks/`）
 *   **播放引擎**：有界实时解码预取、J/K/L 变速感知前瞻、负载自适应预览质量、codec 感知代理默认策略、预览 FPS 显示
 *   **专业音频混音**：多轨混音台（Master + 推子/电平表/声像/Mute-Solo-Monitor）、效果器机架（图示 EQ / Compressor / Gate / Limiter / Reverb / Delay / Saturation / Imager）、路由矩阵、自动化车道（Read/Write/Touch/Latch）、通道条预设与 A/B 对比、波形显示、录音（VO/ADR）、片段级 Clip Gain 包络
-*   **效率**：快捷键完全可自定义、工作区预设（Editing / Audio / Captions / Review）
+*   **效率**：快捷键完全可自定义、按页面保存和切换工作区布局
 
 #### 4.3 合成节点 (Composite，93 节点)
 *   **输入节点**：Image（多层 EXR + AOV 透传）、Video, Constant, Ramp, Motion Graphic
@@ -298,6 +299,7 @@ Topos uses a **product editions + feature modules + shared infrastructure + nati
 - RGB, HSL, and Saturation curves.
 - OCIO v2 color management with a bundled fallback configuration (linear, sRGB, Rec.709, BT.2020 PQ/HLG, and Display P3), ACEScg (AP1) working space and IDTs, and optional external ACES Studio configuration.
 - **Eight GPU scopes:** Waveform, Vectorscope (color targets/skin-tone line), Split, RGB Parade, Luma Waveform, Histogram, CIE chromaticity, and False Color. Analysis runs in GPU shaders without CPU readback; resolution and refresh rate adapt to load. Color and Composite share the scopes dock.
+  - Waveform, RGB Parade, and Luma Waveform share the same ruler. Changing between percent, 10-bit code values, and SDR, PQ, or HLG nits updates both labels and grid lines while retaining the signal. Hide Out-of-Range Signal plots the ruler's valid code values across the full vertical axis.
 - GPU temporal and spatial video denoising with a dedicated panel; settings persist with the project.
 - DaVinci-style tracker panel with point tracking, confidence statistics, and a four-state state machine.
 - Native Tangent hardware-panel integration for trackballs and knobs; the app waits gracefully if the Tangent Hub is unavailable.
@@ -313,7 +315,7 @@ Topos uses a **product editions + feature modules + shared infrastructure + nati
 - **Timeline occlusion culling:** Fully covered lower clips skip decode/compositing. Reported benchmarks: 2K, two-track full-screen occlusion **3.26×** (11.3→36.7 fps; lower-track decode requests −100%); four tracks **5.23×**; 4K, two tracks **3.67×**. Analyzer overhead is under 11 µs per frame. Results are archived in `benchmarks/`.
 - Playback engine with bounded decode prefetch, J/K/L-aware lookahead, load-adaptive preview quality, codec-aware proxy defaults, and preview-FPS display.
 - **Professional audio mixer:** Multitrack mixer (Master, faders, meters, pan, Mute/Solo/Monitor); graphic EQ, Compressor, Gate, Limiter, Reverb, Delay, Saturation, and Imager effects; routing matrix; Read/Write/Touch/Latch automation lanes; channel-strip presets and A/B comparison; waveforms; VO/ADR recording; and clip-level Clip Gain envelopes.
-- Fully customizable keyboard shortcuts and Editing/Audio/Captions/Review workspace presets.
+- Fully customizable keyboard shortcuts and page-specific workspace layouts.
 
 #### 4.3 Node-Based Compositing (93 Nodes)
 

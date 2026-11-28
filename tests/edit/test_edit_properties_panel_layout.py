@@ -373,7 +373,7 @@ def test_timeline_layout_migration_replaces_a_corrupted_giant_saved_height(qapp)
     DockLayoutMixin._migrate_edit_timeline_dock_height(window)
     qapp.processEvents()
 
-    assert timeline_dock.height() <= 320
+    assert abs(timeline_dock.height() - 420) <= 5
     assert program_dock.height() > timeline_dock.height()
     assert config.data[_EDIT_TIMELINE_DOCK_LAYOUT_MIGRATION_KEY] == \
         _EDIT_TIMELINE_DOCK_LAYOUT_MIGRATION_VERSION

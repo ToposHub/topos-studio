@@ -12,6 +12,8 @@
 
 #include "codec/deblock.h"
 #include "common/tpool.h"
+#include "simd/dispatch.h"
+#include "topos_codec.h"
 #include "transform/quant.h"
 
 #include <stdlib.h>
@@ -456,6 +458,62 @@ static void test_planes_match_serial_bands(void)
     free(parallel);
 }
 
+static void test_simd_matches_scalar(void)
+{
+    enum { WIDTH = 72, HEIGHT = 48, PITCH = 77 };
+    uint16_t ref[HEIGHT * PITCH], simd[HEIGHT * PITCH];
+    const int32_t old_mode = tc_dev_simd_mode();
+    uint32_t seed = 193156u;
+    for (uint8_t depth = 8u; depth <= 16u; depth += 2u) {
+        const uint32_t maxv = (1u << depth) - 1u;
+        for (uint32_t unit = 4u; unit <= 8u; unit += 4u) {
+            for (uint32_t mode = 0; mode < 4u; ++mode) {
+                for (uint32_t y = 0u; y < HEIGHT; ++y) {
+                    for (uint32_t x = 0u; x < PITCH; ++x) {
+                        seed = seed * 1664525u + 1013904223u;
+                        const uint32_t tile = (5u * (x / unit) + 3u * (y / unit)) % 17u;
+                        uint16_t value = (uint16_t)(maxv / 2u + tile + (seed >> 30u));
+                        if (mode == 1u) { value = (uint16_t)(maxv - 8u + tile); }
+                        if (mode == 2u) { value = (uint16_t)(seed >> 16u); }
+                        if (mode == 3u && x > 20u && x < 35u) { value = UINT16_MAX; }
+                        ref[y * PITCH + x] = x < WIDTH ? value : UINT16_MAX;
+                    }
+                }
+                memcpy(simd, ref, sizeof(ref));
+                tc_dev_set_simd_mode(TC_SIMD_SCALAR);
+                tc_deblock_plane_scaled(ref, PITCH, WIDTH, HEIGHT, 86u,
+                                        TC_QPTBL_REFINED, depth, unit);
+                tc_dev_set_simd_mode(TC_SIMD_AUTO);
+                tc_deblock_plane_scaled(simd, PITCH, WIDTH, HEIGHT, 86u,
+                                        TC_QPTBL_REFINED, depth, unit);
+                MT_CHECK(memcmp(ref, simd, sizeof(ref)) == 0);
+            }
+        }
+    }
+    tc_dev_set_simd_mode(old_mode);
+}
+
+static void test_slice_filter_clips_coded_rows(void)
+{
+    enum { WIDTH = 72, HEIGHT = 48, PITCH = 77, STORAGE_ROWS = 56 };
+    uint16_t ref[STORAGE_ROWS * PITCH], stripes[STORAGE_ROWS * PITCH];
+    for (uint32_t y = 0; y < STORAGE_ROWS; ++y) {
+        for (uint32_t x = 0; x < PITCH; ++x) {
+            ref[y * PITCH + x] = y < HEIGHT && x < WIDTH
+                ? (uint16_t)(400u + 8u * ((x / 8u + y / 8u) % 2u)) : UINT16_MAX;
+        }
+    }
+    memcpy(stripes, ref, sizeof(ref));
+    const tc_deblock_plane_view plane = {stripes, PITCH, WIDTH, HEIGHT};
+    tc_deblock_plane(ref, PITCH, WIDTH, HEIGHT, 82u, TC_QPTBL_CLASSIC, BD);
+    tc_deblock_slice_band(&plane, 0u, 3u, 82u, TC_QPTBL_CLASSIC, BD, 0);
+    tc_deblock_slice_band(&plane, 3u, 4u, 82u, TC_QPTBL_CLASSIC, BD, 0);
+    tc_deblock_slice_band(&plane, 6u, 1u, 82u, TC_QPTBL_CLASSIC, BD, 0);
+    tc_deblock_slice_band(&plane, 3u, 4u, 82u, TC_QPTBL_CLASSIC, BD, 1);
+    tc_deblock_slice_band(&plane, 6u, 1u, 82u, TC_QPTBL_CLASSIC, BD, 1);
+    MT_CHECK(memcmp(ref, stripes, sizeof(ref)) == 0);
+}
+
 void test_deblock_main(void)
 {
     /* ---- 表变体：经典表 = 旧访问器；细化表 qp≤63 一致、64..95 更细、
@@ -503,6 +561,8 @@ void test_deblock_main(void)
     par_eq_serial(8u);
     par_eq_serial(4u);
     test_planes_match_serial_bands();
+    test_simd_matches_scalar();
+    test_slice_filter_clips_coded_rows();
 }
 
 int main(void)

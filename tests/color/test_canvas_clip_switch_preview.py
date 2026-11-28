@@ -4,10 +4,38 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt
-from PyQt6.QtGui import QWheelEvent
+from PyQt6.QtGui import QImage, QPainter, QWheelEvent
 
 from src.features.color.ui.canvas import Canvas
 from src.shared.video.video_playback import EnhancedVideoPlaybackEngine
+
+
+def test_color_timeline_fps_waits_for_the_completed_pixmap(qtbot, monkeypatch) -> None:
+    canvas = Canvas()
+    qtbot.addWidget(canvas)
+    canvas.begin_timeline_preview()
+    indicator = canvas.viewport_menu.fps_indicator
+    canvas.video_control_bar.set_playing(True)
+    display = Mock()
+    monkeypatch.setattr(canvas._display_color, "display_image", display)
+    image = QImage(32, 24, QImage.Format.Format_RGB32)
+    image.fill(Qt.GlobalColor.black)
+    rect = QRectF(0, 0, 32, 24)
+    canvas.set_timeline_preview_image(image, 7)
+    canvas.drawBackground(Mock(), rect)
+    assert not indicator._samples
+    display.call_args.args[1](image)
+
+    painter = QPainter(image)
+    try:
+        canvas.video_control_bar.set_current_frame(12)
+        canvas.drawForeground(painter, rect)
+        canvas.video_control_bar.set_current_frame(13)
+        canvas.drawForeground(painter, rect)
+    finally:
+        painter.end()
+    assert indicator._last_frame_token == ("timeline", 7)
+    assert len(indicator._samples) == 1
 
 
 def test_canvas_hides_previous_front_texture_while_replacement_is_pending() -> None:

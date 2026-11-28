@@ -10,7 +10,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -104,6 +105,47 @@ def test_queue_can_detach_and_return_without_rebuilding_widget(qapp):
     assert workspace.edit_preview_splitter.indexOf(workspace.batch_panel) == 1
     assert id(workspace.batch_panel) == original_panel_id
 
+    window.close()
+
+
+def test_compact_export_keeps_preview_queue_and_timeline_usable(qapp):
+    window = QMainWindow()
+    workspace = DeliverWorkspace()
+    window.setCentralWidget(workspace)
+    viewer = QWidget()
+    viewer.setMinimumSize(200, 150)
+    timeline = _TimelinePanelStub()
+    timeline.setMinimumHeight(140)
+    workspace.attach_edit_panels(viewer, timeline, None, None)
+    window.resize(1160, 590)
+    window.show()
+    qapp.processEvents()
+    workspace.ensure_deliver_layout()
+    qapp.processEvents()
+
+    assert window.width() == 1160
+    assert window.height() == 590
+    assert viewer.width() >= 400
+    assert workspace.batch_panel.width() >= workspace.batch_panel.minimumWidth()
+    assert timeline.height() >= 240
+    assert workspace.settings_panel._add_btn.isVisible()
+
+    queue = workspace.batch_panel
+    workspace.render_queue_visibility_action.trigger()
+    qapp.processEvents()
+    assert queue.isHidden()
+    assert viewer.width() >= 700
+    workspace.reset_render_queue_visibility()
+    qapp.processEvents()
+    assert queue.isVisible()
+    assert viewer.width() >= 400
+
+    preview_splitter = workspace.edit_preview_splitter
+    preview_splitter.moveSplitter(preview_splitter.width() - 400 - preview_splitter.handleWidth(), 1)
+    workspace.render_queue_visibility_action.trigger()
+    workspace.render_queue_visibility_action.trigger()
+    qapp.processEvents()
+    assert queue.width() == 400
     window.close()
 
 
@@ -322,6 +364,83 @@ def test_deliver_returns_nested_program_without_replacing_viewport(qapp):
         assert viewport_layout.indexOf(viewer) == 0
         assert timeline_dock.widget() is timeline
     assert modes == [True, False, True, False]
+    window.close()
+
+
+def test_export_defaults_to_full_timeline_and_drag_updates_render_range(qapp):
+    from src.features.edit.core.timeline_export import (
+        ExportRangeType, TimelineExportConfig, TimelineExporter, estimate_export_duration,
+    )
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+    from src.features.edit.ui.timeline_items import TRACK_HEADER_WIDTH
+    from src.features.edit.ui.timeline_panel import TimelinePanel
+    from src.shared.media.metadata import Rational
+
+    window = QMainWindow()
+    workspace = DeliverWorkspace()
+    window.setCentralWidget(workspace)
+    timeline = TimelinePanel()
+    dock = QDockWidget("Timeline", window)
+    dock.setWidget(timeline)
+    window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+
+    clip = ClipInstance(
+        clip_id="clip", asset_id="asset", track_id="v1", timeline_start=0,
+        timeline_duration=1200, source_start=0, source_duration=1200,
+    )
+    sequence = TimelineSequence(
+        timeline_id="sequence", name="Export Range", fps=Rational(24, 1),
+        video_tracks=(EditTrack("v1", "V1", "video", 0, clips=(clip,)),),
+        range_start=30, range_end=1499,
+    )
+    timeline.load_timeline(sequence)
+    timeline.set_zoom_level(4.0)
+    window.resize(1440, 900)
+    window.show()
+    qapp.processEvents()
+    workspace.attach_edit_panels(QWidget(), timeline, None, dock)
+    workspace.set_sequence(sequence)
+    qapp.processEvents()
+
+    view = timeline.get_timeline_view()
+    ruler_range = view._range_item
+    assert timeline.btn_zoom_fit.isChecked()
+    assert view.horizontalScrollBar().value() == 0
+    assert timeline.export_presentation_state()["custom_pixels_per_frame"] == 4.0
+    assert (ruler_range._range_start, ruler_range._range_end) == (0, 1199)
+    assert view.get_timeline() is sequence
+    assert workspace.settings_panel.current_range_type() == "entire"
+
+    exporter = SimpleNamespace(_sequence=sequence)
+    config = TimelineExportConfig(range_type=ExportRangeType.ENTIRE)
+    assert TimelineExporter._calculate_frame_range(exporter, config) == (0, 1200)
+    assert estimate_export_duration(config, sequence) == 50.0
+    assert workspace.settings_panel._output_duration_seconds() == 50.0
+
+    def ruler_point(frame: int) -> QPoint:
+        return view.mapFromScene(QPointF(
+            TRACK_HEADER_WIDTH + frame * timeline.get_zoom_level(), ruler_range._bar_y,
+        ))
+
+    target = ruler_point(600)
+    assert view.viewport().rect().contains(ruler_point(1199))
+    QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=ruler_point(1199))
+    QTest.mouseMove(view.viewport(), target)
+    QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=target)
+    qapp.processEvents()
+
+    assert workspace.settings_panel.current_range_type() == "in_out"
+    adjusted = view.get_timeline()
+    assert adjusted.range_start == 0
+    assert adjusted.range_end == pytest.approx(600, abs=2)
+    exporter._sequence = adjusted
+    config = TimelineExportConfig(range_type=ExportRangeType.IN_OUT)
+    assert TimelineExporter._calculate_frame_range(exporter, config) == (0, adjusted.range_end + 1)
+    assert workspace.settings_panel._output_duration_seconds() == (adjusted.range_end + 1) / 24
+
+    workspace.detach_edit_panels()
+    assert timeline.get_zoom_level() == 4.0
+    assert not timeline.btn_zoom_fit.isChecked()
     window.close()
 
 
