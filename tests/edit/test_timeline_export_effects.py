@@ -110,6 +110,14 @@ class TestCpuEffectHandlers:
         # Glow should not darken anything; the white pixel stays near 255.
         assert int(out[8, 8].max()) >= 250
 
+    def test_glow_preserves_float_samples_below_threshold(self) -> None:
+        frame = np.full((16, 16, 3), (-0.125, 0.25, 0.375), dtype=np.float32)
+        out = _cpu_glow(frame, {
+            "threshold": 0.5, "radius": 3.0, "intensity": 1.0, "mix": 1.0,
+        })
+        assert out.dtype == frame.dtype
+        np.testing.assert_array_equal(out, frame)
+
     def test_edge_detect_finds_vertical_sobel_edge(self):
         frame = _edge_frame()
         out = _cpu_edge_detect(frame, {

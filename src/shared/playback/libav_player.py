@@ -477,6 +477,8 @@ class _LibavSession(DecoderBackend):
         self._iter = None
         self._next_idx = 0  # 迭代器当前指向的帧号
         self._lock = threading.Lock()
+        # Keep swscale state within this session and use it under _lock.
+        self._reformatter = av.video.reformatter.VideoReformatter()
 
     # -- 索引/时间换算 --
 
@@ -619,8 +621,9 @@ class _LibavSession(DecoderBackend):
                                     getattr(self, 'sar', None),
                                     rotation_quarters=getattr(
                                         self, 'rotation_quarters', 0))
-            return frame.reformat(width=w, height=h, format=pixel_format or frame.format.name)
-        return frame.reformat(format=pixel_format) if pixel_format else frame
+            return self._reformatter.reformat(
+                frame, width=w, height=h, format=pixel_format or frame.format.name)
+        return self._reformatter.reformat(frame, format=pixel_format) if pixel_format else frame
 
     def close(self):
         try:

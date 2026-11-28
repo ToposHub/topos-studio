@@ -59,13 +59,40 @@ def test_iosurface_pool_fails_closed_off_macos() -> None:
 # ---------------- C18（2026-09-27）：lease 异常清理不泄漏槽位 ----------------
 
 @pytest.mark.skipif(not MACOS_TOPOS_SURFACE_AVAILABLE, reason="macOS IOSurface unavailable")
-def test_lease_released_when_frame_construction_fails(monkeypatch) -> None:
+def test_lease_released_when_frame_construction_fails(monkeypatch, tmp_path) -> None:
     """C18 反例：post-fence 段（GpuDecodedFrame 构造）抛错 → lease 必须被
     释放——历史直接返回 None，槽位随失败累积泄漏，8 槽耗尽后永久回落 CPU。"""
+    from types import SimpleNamespace
+
+    import numpy as np
+
     import src.shared.media.gpu_frame as gpu_frame_mod
+    from src.shared.codec.topos_binding import (
+        LIB_RESOLUTION_NOT_FOUND, LIB_RESOLUTION_OK, resolve_topos_codec_library,
+    )
+    from src.shared.export.topos_encoder import ToposVideoEncoder
+    from src.shared.media.frame import DecodedFrame
+    from src.shared.media.metadata import Rational
     from src.shared.media.topos_source import ToposMediaSource
 
-    src = ToposMediaSource("tests/test_videos/2K_topos_422_Proxy.mov")
+    resolution = resolve_topos_codec_library()
+    if resolution.status == LIB_RESOLUTION_NOT_FOUND:
+        pytest.skip(resolution.detail)
+    assert resolution.status == LIB_RESOLUTION_OK, resolution.detail
+    path = str(tmp_path / "lease.mov")
+    config = SimpleNamespace(width=64, height=40, fps=Rational(24, 1),
+                             pix_fmt="yuv422p10le", profile="proxy", crf=40)
+    planes = tuple(np.full((40, width), value, dtype="<u2")
+                   for width, value in ((64, 256), (32, 512), (32, 512)))
+    encoder = ToposVideoEncoder(path, config)
+    encoder.open()
+    try:
+        encoder.encode_frame(DecodedFrame(0, 0, 0.0, planes=planes,
+                                          pixel_format=config.pix_fmt))
+    finally:
+        encoder.close()
+
+    src = ToposMediaSource(path)
     src.open()
     try:
         def boom(*_a, **_kw):
@@ -81,7 +108,7 @@ def test_lease_released_when_frame_construction_fails(monkeypatch) -> None:
         for attempt in range(1, total + 3):  # 超过槽位数：无泄漏才不饿死
             monkeypatch.setattr(gpu_frame_mod, "GpuDecodedFrame", boom)
             try:
-                assert src.read_frame_metal(attempt) is None
+                assert src.read_frame_metal(0) is None
             finally:
                 monkeypatch.undo()
             lease = pool.acquire()

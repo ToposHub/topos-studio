@@ -708,19 +708,20 @@ class TestRegistrationPoints:
             assert pix_fmt == fmt
             assert profile == tier
 
-    def test_create_encoder_dispatch(self, tmp_path) -> None:
+    def test_create_encoder_dispatch(self, tmp_path, monkeypatch) -> None:
         from src.features.edit.core.timeline_export import TimelineExporter
         from src.shared.export.video_encoder import FFmpegVideoEncoder
 
-        top = TimelineExporter._create_encoder(
-            object(), str(tmp_path / "t.mov"), _enc_config())
+        monkeypatch.delenv("TOPOS_EXPORT_NATIVE_VT", raising=False)
+        exporter = TimelineExporter.__new__(TimelineExporter)
+        top = exporter._create_encoder(str(tmp_path / "t.mov"), _enc_config())
         assert isinstance(top, ToposVideoEncoder)
 
         from src.shared.export.video_encoder import FFmpegEncoderConfig
         from src.shared.media.metadata import Rational
 
-        ff = TimelineExporter._create_encoder(
-            object(), str(tmp_path / "p.mov"),
+        ff = exporter._create_encoder(
+            str(tmp_path / "p.mov"),
             FFmpegEncoderConfig(codec='prores', width=64, height=40,
                                 fps=Rational(24, 1)))
         assert isinstance(ff, FFmpegVideoEncoder)

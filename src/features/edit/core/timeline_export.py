@@ -135,8 +135,10 @@ if TYPE_CHECKING:
     from src.shared.video.frame_provider_service import VideoFrameProviderService
     from src.features.edit.core.timeline_v2 import TimelineSequence
     from src.features.edit.core.timeline_render_plan import DirectToposDeliveryPlan
-    from src.features.edit.core.timeline_render_plan import TimelineRenderPlan, ClipLayerInfo, TransitionBlendInfo
-    from src.features.edit.core.project import EditProject
+    from src.features.edit.core.timeline_render_plan import (
+        TimelineRenderPlan, ClipLayerInfo, FrameRenderPlan, TransitionBlendInfo,
+    )
+    from src.features.edit.core.project import EditProject, MediaAsset
     from src.features.edit.core.nested_sequence import NestedAudioDiagnostic, SequenceResolver
 
 logger = logging.getLogger(__name__)
@@ -1571,7 +1573,9 @@ def _cpu_glow(frame_bgr_u8, params: dict):
     source_f = frame_bgr_u8.astype(np.float32) / max_value
     bloom_f = bloom / max_value
     screen = 1.0 - (1.0 - source_f) * (1.0 - bloom_f)
-    screen = np.rint(np.clip(screen, 0.0, 1.0) * max_value).astype(frame_bgr_u8.dtype)
+    if np.issubdtype(frame_bgr_u8.dtype, np.integer):
+        screen = np.rint(np.clip(screen, 0.0, 1.0) * max_value)
+    screen = screen.astype(frame_bgr_u8.dtype, copy=False)
     if mix >= 0.999:
         return screen
     return cv2.addWeighted(frame_bgr_u8, 1.0 - mix, screen, mix, 0)
@@ -3399,11 +3403,19 @@ class TimelineExporter:
                     if not _source_color_tags_match(
                             getattr(asset, "metadata", None), encoder_config.color_metadata):
                         direct_plan, direct_reason = None, "source_color_tags_mismatch"
-                if direct_plan is not None and direct_plan.source_color_layout == "yuv422":
+                if direct_plan is not None and direct_plan.source_color_layout in ("yuv422", "cfa"):
                     frame = self._render_plan.get_frame_plan(start_frame)
-                    identity = self._identity_delivery_layer(frame, start_frame, config)
+                    identity = self._identity_delivery_layer(
+                        frame, start_frame, config,
+                        allow_raw_development=direct_plan.source_color_layout == "cfa",
+                    )
                     if identity is None or self._clip_stabilization_state(identity[0]):
                         direct_plan, direct_reason = None, "video_processing_required"
+                    elif direct_plan.source_color_layout == "cfa" and (
+                        (direct_plan.width, direct_plan.height) != self._get_sequence_resolution()
+                        or self._has_caption_graphic(identity[0])
+                    ):
+                        direct_plan, direct_reason = None, "raw_video_processing_required"
                 if direct_plan is not None:
                     outcome = self._export_direct_topos(
                         direct_plan, config, encoder_config)
@@ -3572,8 +3584,13 @@ class TimelineExporter:
                     try:
                         from src.shared.export.video_encoder import FFmpegVideoEncoder
                         from src.shared.export.hdr_hevc_encoder import HdrHevcEncoder
+                        from src.shared.export.topos_encoder import ToposVideoEncoder
 
-                        if (isinstance(self._encoder, HdrHevcEncoder)
+                        if isinstance(self._encoder, ToposVideoEncoder):
+                            published = self._encoder.close(
+                                should_cancel=lambda: self._cancel_requested,
+                            )
+                        elif (isinstance(self._encoder, HdrHevcEncoder)
                                 or (config.codec in (ExportCodec.DNXHR_HQX, ExportCodec.H264, ExportCodec.HEVC)
                                     and isinstance(self._encoder, FFmpegVideoEncoder))):
                             published = self._encoder.close(
@@ -3606,7 +3623,10 @@ class TimelineExporter:
             )
 
             delivery_path = ""
-            if self._dnxhr_metal_frames:
+            if self._export_delivery_pixel_format.startswith("topos_cfa"):
+                delivery_path = "topos_cfa_planar_cpu_encode"
+                self._export_telemetry.set_delivery_path(delivery_path)
+            elif self._dnxhr_metal_frames:
                 delivery_path = (
                     "metal_dnxhr_hqx_partial" if self._dnxhr_metal_fell_back
                     else "metal_dnxhr_hqx_422_planar"
@@ -7682,6 +7702,10 @@ class TimelineExporter:
         deferred_display = getattr(self, "_hdr_export", None) is not None or aces is not None and project_output_space(
             getattr(self._project, "color_management", None)) == aces.target
 
+        planar_too = self._render_topos_still_or_raw(frame_plan, frame_idx, config)
+        if planar_too is not None:
+            return planar_too
+
         # TOPOS 高精度、严格无效果的单视频层可保留源 YUV 平面直达编码器。
         # 这仍然走同一个有界 render→encode 队列，只略过无意义的
         # YUV→RGB→GPU upload/readback→YUV 往返。
@@ -8322,6 +8346,78 @@ class TimelineExporter:
         self._write_success_manifest_async(config)
         return ExportOutcome(success=True, delivery_path=delivery_path)
 
+    def _has_caption_graphic(self, layer: "ClipLayerInfo") -> bool:
+        lookup = getattr(self._sequence, "get_caption_graphic_binding_by_clip", None)
+        return callable(lookup) and lookup(layer.clip_id) is not None
+
+    def _render_topos_still_or_raw(
+        self, frame_plan: "FrameRenderPlan", frame_idx: int, config: TimelineExportConfig,
+    ) -> Optional["DecodedFrame"]:
+        """Keep matching native planes; CFA has no packed/composited fallback."""
+        output_format = getattr(self, "_export_delivery_pixel_format", "")
+        raw = output_format.startswith("topos_cfa")
+        if not raw and not (
+            config.codec in (ExportCodec.TOPOS, ExportCodec.TOPOS_IMAGE_SEQUENCE)
+            and output_format in ("yuv422p10le", "yuv422p12le")
+        ):
+            return None
+        layers = frame_plan.layers
+        layer = layers[0] if len(layers) == 1 else None
+        asset = self._project.get_asset_by_id(layer.asset_id) if layer is not None else None
+        path = export_source_path(self._project, asset) if asset is not None else ""
+        still = (asset is not None and asset.media_type in ("image", "image_sequence")
+                 and path.lower().endswith(".toos"))
+        if not raw and not still:
+            return None
+        if (layer is None or getattr(self, "_export_has_alpha", False)
+                or self._delivery_guide_burns_in() or self._has_caption_graphic(layer)
+                or self._needs_delivery_signal_conversion()
+                or self._identity_delivery_layer(frame_plan, frame_idx, config) is None):
+            if raw:
+                raise ValueError(
+                    f"CFA delivery requires one unmodified source at timeline frame {frame_idx} "
+                    "(no effects, transitions, transforms, subtitles or Alpha)"
+                )
+            return None
+        if still and asset is not None:
+            member = self._export_still_path(asset, path, layer.source_frame)
+            decoded = self._read_topos_export_still(member)
+            if raw and decoded.pixel_format == output_format:
+                self._reject_topos_still_raw_metadata(member)
+        elif (asset is not None and asset.media_type == "video"
+              and config.codec == ExportCodec.TOPOS_IMAGE_SEQUENCE):
+            decoded = self._request_video_decoded_frame(
+                path, layer.source_frame, layer.asset_id, session_key=self._layer_session_key(layer),
+            )
+            # The playback provider may clamp out-of-range indices; delivery must not.
+            if decoded is None or decoded.frame_index != layer.source_frame:
+                raise OSError(f"Cannot read CFA source frame {layer.source_frame}: {path}")
+            if (decoded.extra or {}).get("topos_concealed_slices"):
+                raise OSError(f"CFA source frame {layer.source_frame} has damaged slices: {path}")
+            if (decoded.extra or {}).get("topos_trwm"):
+                raise ValueError(f"CFA delivery cannot preserve TRWM in this route: {path}")
+        else:
+            # MOV-to-MOV is handled by the whole-range path, which preserves TRWM.
+            raise ValueError("CFA delivery requires a compatible Topos CFA MOV or .toos source "
+                             "with matching dimensions and bit depth")
+        if decoded.pixel_format != output_format:
+            if raw:
+                raise ValueError(f"CFA source format {decoded.pixel_format} does not match {output_format}")
+            return None
+        size = (decoded.width, decoded.height)
+        if size != self._get_output_resolution(config) or size != self._get_sequence_resolution():
+            if raw:
+                raise ValueError(f"CFA delivery does not support scaling (source dimensions {size})")
+            return None
+        if not raw:
+            metadata = decoded.metadata
+            tags = {key: getattr(metadata, key, None) for key in (
+                "color_primaries", "color_transfer", "color_matrix", "color_range",
+            )}
+            if not _source_color_tags_match(tags, self._export_color_metadata):
+                return None
+        return decoded
+
     def _identity_delivery_layer(
         self,
         frame_plan: Any,
@@ -8330,6 +8426,7 @@ class TimelineExporter:
         *,
         allow_scalar_delivery: bool = False,
         allow_color_graph: bool = False,
+        allow_raw_development: bool = False,
     ) -> Optional[Tuple["ClipLayerInfo", int, float]]:
         """Allow passthrough only when this frame needs no pixel processing."""
         if bool(getattr(config, "burn_subtitles", False)):
@@ -8351,11 +8448,12 @@ class TimelineExporter:
 
         return self._identity_delivery_clip_layer(
             layers[0], frame_idx, allow_scalar_delivery=allow_scalar_delivery,
-            allow_color_graph=allow_color_graph)
+            allow_color_graph=allow_color_graph, allow_raw_development=allow_raw_development)
 
     def _identity_delivery_clip_layer(
         self, layer: "ClipLayerInfo", frame_idx: int, *,
         allow_scalar_delivery: bool = False, allow_color_graph: bool = False,
+        allow_raw_development: bool = False,
     ) -> Optional[Tuple["ClipLayerInfo", int, float]]:
         from src.shared.tracking.stabilization_state import stabilization_matrix
         if stabilization_matrix(self._clip_stabilization_state(layer), int(layer.source_frame)) is not None:
@@ -8389,7 +8487,7 @@ class TimelineExporter:
                 or getattr(clip, "effects", ())
                 or getattr(clip, "composite_id", None)
                 or getattr(clip, "render_cache_id", None)
-                or getattr(clip, "raw", None) is not None
+                or (not allow_raw_development and getattr(clip, "raw", None) is not None)
                 or getattr(clip, "freeze_source_frame", None) is not None
                 or (allow_scalar_delivery
                     and any(str(name) != "opacity"
@@ -13495,13 +13593,12 @@ class TimelineExporter:
             )
         elif asset_type == "image":
             return self._get_image_frame(asset_path, input_override=getattr(asset, "input_color_space", None))
-        elif asset_type == "image_sequence" and (
-            getattr(self, "_aces_export", None) is not None or getattr(self, "_hdr_export", None) is not None
-        ):
-            from src.features.edit.core.sequence_classify import still_sequence_frame_path
-
-            path = still_sequence_frame_path(asset_path, asset.metadata, int(layer.source_frame))
-            return self._get_image_frame(path, input_override=getattr(asset, "input_color_space", None))
+        elif asset_type == "image_sequence":
+            path = self._export_still_path(asset, asset_path, layer.source_frame)
+            pixels = self._get_image_frame(path, input_override=getattr(asset, "input_color_space", None))
+            if pixels is None:
+                raise OSError(f"Cannot read image sequence frame {layer.source_frame}: {path}")
+            return pixels
         elif asset_type == "nested_sequence":
             # P1-02：嵌套序列——解析子序列并复用导出合成管线递归求值
             # （防循环 + 子序列帧钳制与预览路径语义一致）。
@@ -14300,6 +14397,46 @@ class TimelineExporter:
 
     _IMAGE_FRAME_CACHE_MAX = 8
 
+    @staticmethod
+    def _export_still_path(asset: "MediaAsset", anchor: str, source_frame: int) -> str:
+        if asset.media_type != "image_sequence":
+            return anchor
+        from src.features.edit.core.sequence_classify import still_sequence_frame_path
+
+        return still_sequence_frame_path(anchor, asset.metadata, source_frame)
+
+    @staticmethod
+    def _reject_topos_still_raw_metadata(path: str) -> None:
+        from src.shared.codec.topos_binding import TC_ERR_INVALID_ARGUMENT
+        from src.shared.codec.topos_image_binding import (
+            TC_IMG_CHUNK_TRWM, ToposImageError, get_image_codec,
+        )
+
+        try:
+            get_image_codec().read_metadata(path, TC_IMG_CHUNK_TRWM)
+        except ToposImageError as exc:
+            if exc.status == TC_ERR_INVALID_ARGUMENT:  # No TRWM chunk.
+                return
+            raise
+        raise ValueError(f"CFA delivery cannot preserve TRWM in this route: {path}")
+
+    def _read_topos_export_still(self, path: str) -> "DecodedFrame":
+        from src.shared.codec.topos_image_binding import ToposImageError
+        from src.shared.media.source import MediaSourceError
+        from src.shared.media.topos_image_source import ToposImageSource
+
+        started = time.perf_counter()
+        source = ToposImageSource(path)
+        try:
+            decoded = source.read_frame(0)
+        except (MediaSourceError, ToposImageError, OSError) as exc:
+            raise OSError(f"Cannot read Topos image frame: {path}: {exc}") from exc
+        finally:
+            source.close()
+        self._record_gpu_stage("decode", "topos_image_source",
+                               wall_ms=(time.perf_counter() - started) * 1000.0)
+        return decoded
+
     def _get_image_frame(
         self,
         asset_path: str,
@@ -14334,6 +14471,15 @@ class TimelineExporter:
             return cached.copy()
         aces = getattr(self, "_aces_export", None)
         hdr = getattr(self, "_hdr_export", None)
+        if aces is None and hdr is None and asset_path.lower().endswith(".toos"):
+            decoded = self._read_topos_export_still(asset_path)
+            img = self._finish_source_frame(decoded)
+            if img is None:
+                raise ValueError(f"Unsupported Topos image frame {decoded.pixel_format}: {asset_path}")
+            cache[cache_key] = img
+            while len(cache) > self._IMAGE_FRAME_CACHE_MAX:
+                cache.popitem(last=False)
+            return img.copy()
         if hdr is not None:
             timeline = self._export_video_signal_spaces[0]
             source = hdr_input_descriptor(hdr, timeline, media_type="image", path=asset_path)
@@ -14490,6 +14636,10 @@ class TimelineExporter:
                     return self._debayer_cfa_to_bgr(
                         decoded_frame, planes, pixel_format,
                         raw_params=raw_params)
+                if pixel_format in _TOPOS_HALF_FORMATS:
+                    # Native HALF values are linear samples, not integer code words.
+                    order = (1, 0, 2, 3) if keep_alpha and len(planes) == 4 else (1, 0, 2)
+                    return np.stack([planes[i] for i in order], axis=-1).astype(np.float32)
                 keep_alpha_planes = keep_alpha and len(planes) >= 4
                 if getattr(self, "_hdr_export", None) is not None:
                     return self._planes_to_bgr_float(
@@ -14723,7 +14873,7 @@ class TimelineExporter:
             encoder_config = getattr(self._encoder, "_config", None)
             encoder_codec = str(
                 getattr(encoder_config, "codec", "")).lower()
-            planar_topos = encoder_codec == "topos"
+            planar_topos = encoder_codec in ("topos", "topos_image_sequence")
             frame_pix_fmt = str(
                 getattr(frame_data, "pixel_format", "")).lower()
             # 8-bit 4:2:0 FFmpeg 直通交付（h264/hevc + yuv420p）：直通门

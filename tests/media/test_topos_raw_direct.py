@@ -230,14 +230,16 @@ def _cfa_planes(seed: int, w: int, h: int, bd: int = 12):
 
 
 def _write_traw_source(path: Path, frames: int, w: int, h: int,
-                       bd: int = 12, crf: int = 59):
+                       bd: int = 12, crf: int = 59,
+                       raw_meta_payload: bytes | None = None) -> list[tuple[np.ndarray, ...]]:
     from src.shared.export.topos_encoder import ToposVideoEncoder
     from src.shared.media.frame import DecodedFrame
 
     planes_out = []
     enc = ToposVideoEncoder(str(path), SimpleNamespace(
         codec="topos", width=w, height=h, fps=24.0,
-        pix_fmt=f"topos_cfa{bd}le", profile="raw", crf=crf))
+        pix_fmt=f"topos_cfa{bd}le", profile="raw", crf=crf),
+        raw_meta_payload=raw_meta_payload)
     enc.open()
     for i in range(frames):
         planes = tuple(_cfa_planes(i, w, h, bd))
@@ -287,6 +289,105 @@ def _build_raw_timeline(raw_src: Path, frames: int, w: int, h: int):
         fps=Rational(24, 1), width=w, height=h,
         video_tracks=(v1,), audio_tracks=(),
     )
+
+
+@pytest.mark.skipif(not _lib_available(), reason="libtopos_codec 未构建")
+@pytest.mark.parametrize("depth", [12, 16])
+@pytest.mark.parametrize("source_kind, target_kind, rejection", [
+    ("mov", "mov", None), ("mov", "toos", None),
+    ("toos", "mov", None), ("toos", "toos", None),
+    ("toos", "mov", "scaling"), ("mov", "toos", "effects"),
+    ("toos", "toos", "bit depth"), ("toos", "toos", "missing"),
+    ("mov", "toos", "trwm"),
+])
+def test_cfa_container_delivery(
+    tmp_path: Path, depth: int, source_kind: str, target_kind: str, rejection: str | None,
+) -> None:
+    from dataclasses import replace
+
+    from src.features.edit.core.project import EditProject
+    from src.features.edit.core.sequence_classify import classify_import_batch
+    from src.features.edit.core.timeline_export import ExportCodec, TimelineExportConfig, create_timeline_exporter
+    from src.shared.export.topos_encoder import ToposImageSequenceEncoder
+    from src.shared.export.video_encoder import FFmpegEncoderConfig
+    from src.shared.media.frame import DecodedFrame
+    from src.shared.media.metadata import Rational
+    from src.shared.media.topos_image_source import ToposImageSource
+    from src.shared.media.topos_source import ToposMediaSource
+
+    width, height, count = 64, 48, 4
+    pix_fmt = f"topos_cfa{depth}le"
+    raw_mov = tmp_path / "source.mov"
+    raw_meta = None
+    if rejection == "trwm":
+        from src.shared.codec.topos_trwm import encode_trwm
+
+        raw_meta = encode_trwm(1.7, 1.0, 1.5, 0.25, 32.0, "GBRG", 2)
+    original = _write_traw_source(raw_mov, count, width, height, bd=depth,
+                                  crf=59 if depth == 12 else 72, raw_meta_payload=raw_meta)
+    project, seq = _build_raw_timeline(raw_mov, count, width, height)
+    track, = seq.video_tracks
+    clip, = track.clips
+    if source_kind == "toos":
+        source_dir = tmp_path / "sequence"
+        enc = ToposImageSequenceEncoder(str(source_dir), FFmpegEncoderConfig(
+            codec="topos_image_sequence", width=width, height=height, fps=Rational(24, 1),
+            pix_fmt=pix_fmt, profile=f"raw{depth}-4",
+        ), slice_threads=2)
+        enc.open()
+        for i, planes in enumerate(original):
+            enc.encode_frame(DecodedFrame(
+                frame_index=i, pts=i, time_seconds=i / 24, data=None, planes=planes,
+                pixel_format=pix_fmt, dtype=np.dtype(np.uint16), width=width, height=height,
+            ))
+        enc.close()
+        paths = sorted(source_dir.glob("*.toos"))
+        groups, _ = classify_import_batch([str(p) for p in paths])
+        group, = groups
+        asset = replace(project.assets[clip.asset_id], path=group.first_path,
+                        media_type="image_sequence", metadata=group.asset_metadata(24))
+        project = EditProject("p", "CFA sequence", assets={asset.asset_id: asset})
+        if rejection == "missing":
+            paths[2].unlink()
+    clip = replace(clip, source_start=1, source_duration=3, timeline_duration=3)
+    if rejection == "effects":
+        clip = replace(clip, transform=TransformParams(scale_x=1.25))
+    seq = replace(seq, video_tracks=(replace(track, clips=(clip,)),),
+                  width=width // 2 if rejection == "scaling" else width)
+    target = tmp_path / ("output.mov" if target_kind == "mov" else "output")
+    target_depth = 28 - depth if rejection == "bit depth" else depth
+    result = create_timeline_exporter(project, seq).export_timeline(TimelineExportConfig(
+        codec=ExportCodec.TOPOS_RAW if target_kind == "mov" else ExportCodec.TOPOS_IMAGE_SEQUENCE,
+        codec_profile=f"raw{target_depth}-4", timeline_id=seq.timeline_id,
+        include_audio=False, output_path=str(target),
+    ))
+    if rejection is not None:
+        message = {"bit depth": "does not match", "missing": "frame"}.get(rejection, rejection)
+        assert not result.success and message in result.cause.lower(), result.cause
+        assert not target.exists()
+        assert not list(tmp_path.glob("output.topos-seq-tmp*"))
+        return
+    assert result.success, result.cause
+    if target_kind == "mov":
+        with ToposMediaSource(str(target)) as source:
+            assert source.probe().total_frames == 3
+            decoded = [source.read_frame(i) for i in range(3)]
+    else:
+        delivered = sorted(target.glob("*.toos"))
+        assert len(delivered) == 3
+        decoded = []
+        for path in delivered:
+            source = ToposImageSource(str(path))
+            try:
+                decoded.append(source.read_frame(0))
+            finally:
+                source.close()
+    for frame, expected in zip(decoded, original[1:]):
+        assert (frame.width, frame.height, frame.pixel_format) == (width, height, pix_fmt)
+        assert len(frame.planes) == 4
+        for actual, original_plane in zip(frame.planes, expected):
+            assert actual.shape == original_plane.shape
+            assert np.abs(actual.astype(np.int32) - original_plane).mean() < 0.02 * (1 << depth)
 
 
 @pytest.mark.skipif(not _lib_available(), reason="libtopos_codec 未构建")

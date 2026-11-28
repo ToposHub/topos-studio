@@ -690,6 +690,8 @@ class ToposMediaSource:
                 # context（prev_sync 定位 + 顺序解 + 有界 GOP 缓存），
                 # 禁用无状态 readahead/批量机制（它们假设逐帧独立解码）。
                 self._stream_compatibility = 'v9_micro_gop'
+            elif self._bitstream_major == 7:
+                self._stream_compatibility = 'v7_intra'
             elif self._bitstream_major == 0:
                 # Compatibility with a pre-RD7 native dylib: the MOV parser
                 # already validated the stream, but cannot report its major.

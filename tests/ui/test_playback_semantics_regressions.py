@@ -359,6 +359,7 @@ def test_topos_v7b_preview_decodes_embedded_base_and_snapshot_reads_full() -> No
 def _yuv_session_with_frame(frame):
     session = _LibavSession.__new__(_LibavSession)
     session._lock = threading.Lock()
+    session._reformatter = av.video.reformatter.VideoReformatter()
     session._iter = iter([frame])
     session._next_idx = 0
     session.fps = 24
@@ -374,6 +375,27 @@ def test_fr20_wide_video_in_square_box_keeps_aspect():
     result = session.frame_yuv(0, size=(400, 400))
     assert (result.width, result.height) == (400, 200)   # 2:1，不再是 400×400
     assert result.width / result.height == pytest.approx(2.0)
+
+
+def test_session_reformatter_preserves_visible_10bit_samples_when_resized() -> None:
+    import numpy as np
+
+    frame = av.VideoFrame(160, 80, 'yuv422p10le')
+    frame.pts, frame.time_base = 0, Fraction(1, 24)
+    frame.colorspace, frame.color_range = 1, 1
+    for index, plane in enumerate(frame.planes):
+        values = (np.arange(plane.buffer_size // 2, dtype=np.uint16) + 64 + index) % 960
+        plane.update(values.astype('<u2').tobytes())
+    session = _yuv_session_with_frame(frame)
+    for width, height in ((120, 60), (80, 40), (120, 60)):
+        session._iter = iter([frame])
+        session._next_idx = 0
+        actual = session.frame_yuv(0, size=(width, height))
+        expected = frame.reformat(width=width, height=height, format='yuv422p10le')
+        assert (actual.width, actual.height, actual.bit_depth, actual.matrix) == (width, height, 10, 1)
+        for samples, plane in zip((actual.y, actual.u, actual.v), expected.planes, strict=True):
+            rows = np.frombuffer(plane, dtype='<u2').reshape(plane.height, plane.line_size // 2)
+            np.testing.assert_array_equal(samples, rows[:, :plane.width])
 
 
 def test_fr20_portrait_video_in_square_box_keeps_aspect():

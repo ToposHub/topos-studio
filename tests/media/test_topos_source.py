@@ -960,6 +960,7 @@ def test_low_tier_readahead_pauses_when_workers_are_shared(
         mux.finish()
 
     with ts.ToposMediaSource(path, read_ahead=0) as reference:
+        assert reference.diagnostics['stream_compatibility'] == 'v7_intra'
         expected = [tuple(p.tobytes() for p in reference.read_frame(i).planes) for i in range(7)]
 
     with ts.ToposMediaSource(path) as src:

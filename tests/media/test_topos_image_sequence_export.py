@@ -83,6 +83,71 @@ def test_persistent_encoder_writes_independent_toos(tmp_path) -> None:
         assert len(planes) == 3
 
 
+@pytest.mark.parametrize("tier", ["422-low", "float-ultra"])
+@pytest.mark.parametrize("missing", [None, "listed-hole", "deleted"])
+def test_sdr_grouped_toos_redelivery(tmp_path: Path, tier: str, missing: str | None) -> None:
+    from src.features.edit.core.project import EditProject, MediaAsset
+    from src.features.edit.core.sequence_classify import classify_import_batch
+    from src.features.edit.core.timeline_export import ExportCodec, TimelineExportConfig, create_timeline_exporter
+    from src.features.edit.core.timeline_v2 import ClipInstance, EditTrack, TimelineSequence
+    from src.shared.codec.topos_image_binding import get_image_codec
+
+    floating = tier.startswith("float")
+    source_dir = tmp_path / "input"
+    encoder = ToposImageSequenceEncoder(str(source_dir), FFmpegEncoderConfig(
+        codec="topos_image_sequence", width=64, height=40, fps=Rational(24, 1),
+        pix_fmt="gbrph16le" if floating else "yuv422p10le", profile=tier,
+    ), slice_threads=2)
+    encoder.open()
+    for i in range(4):
+        frame = _frame(i)
+        if floating:
+            frame.data = np.broadcast_to(np.array([-0.125, 0.25 + i / 8, 2.0], np.float32), (40, 64, 3))
+            frame.pixel_format = "bgrf32le"
+        encoder.encode_frame(frame)
+    encoder.close()
+    paths = sorted(source_dir.glob("*.toos"))
+    # A file present on disk must not fill a hole omitted by the import list.
+    groups, _ = classify_import_batch([str(p) for i, p in enumerate(paths)
+                                       if i != 1 or missing != "listed-hole"])
+    group, = groups
+    if missing == "deleted":
+        paths[1].unlink()
+    asset = MediaAsset("a", group.first_path, "image_sequence", "TOOS", group.asset_metadata(24))
+    project = EditProject("p", "Default SDR", assets={asset.asset_id: asset})
+    clip = ClipInstance("c", asset.asset_id, "v0", 0, 3, 1 if missing is None else 0, 3)
+    seq = TimelineSequence(
+        timeline_id="t1", name="Reimport", width=64, height=40, fps=Rational(24, 1),
+        video_tracks=(EditTrack("v0", "V1", "video", 0, clips=(clip,)),),
+    )
+    target = tmp_path / "output"
+    if missing is not None:
+        target.mkdir()
+        (target / "frame_0001.toos").write_bytes(b"previous export")
+    outcome = create_timeline_exporter(project, seq).export_timeline(TimelineExportConfig(
+        output_path=str(target), codec=ExportCodec.TOPOS_IMAGE_SEQUENCE, codec_profile=tier,
+        timeline_id=seq.timeline_id, include_audio=False, image_sequence_overwrite=True,
+    ))
+    if missing is not None:
+        assert not outcome.success and "frame" in outcome.cause.lower(), outcome.cause
+        assert sorted(p.name for p in target.iterdir()) == ["frame_0001.toos"]
+        assert (target / "frame_0001.toos").read_bytes() == b"previous export"
+        assert not _staging_dirs(tmp_path, "output")
+        return
+    assert outcome.success, outcome.cause
+    exported = sorted(target.glob("*.toos"))
+    assert len(exported) == 3
+    codec = get_image_codec()
+    decode = codec.decode_float if floating else codec.decode
+    for original, delivered in zip(paths[1:], exported):
+        expected, _, _ = decode(str(original))
+        actual, _, _ = decode(str(delivered))
+        np.testing.assert_allclose(np.asarray(actual[0], dtype=np.float32), expected[0],
+                                   atol=0.01 if floating else 12, rtol=0)
+        if floating:
+            assert float(actual[1].mean()) < -0.1 and float(actual[2].mean()) > 1.9
+
+
 @pytest.mark.parametrize("with_alpha", [False, True])
 def test_timeline_float_tier_encodes_linear_samples(tmp_path, with_alpha) -> None:
     import cv2
@@ -171,7 +236,8 @@ def test_abort_leaves_user_files_untouched(tmp_path) -> None:
     assert not output.exists()
 
 
-def test_abort_preserves_preexisting_sequence_frames(tmp_path) -> None:
+@pytest.mark.parametrize("cancel_during_close", [False, True])
+def test_abort_preserves_preexisting_sequence_frames(tmp_path, cancel_during_close: bool) -> None:
     """C01 反例（原缺陷：abort 按路径 unlink 删掉被覆盖的用户原文件）。"""
     output = tmp_path / "sequence"
     output.mkdir()
@@ -182,7 +248,10 @@ def test_abort_preserves_preexisting_sequence_frames(tmp_path) -> None:
     enc.open()
     enc.encode_frame(_frame(0))
     enc.encode_frame(_frame(1))
-    enc.abort()
+    if cancel_during_close:
+        assert enc.close(should_cancel=lambda: True) is False
+    else:
+        enc.abort()
     assert old1.read_bytes() == b"OLD-FRAME-1"
     assert old2.read_bytes() == b"OLD-FRAME-2"
     assert not _staging_dirs(tmp_path)
@@ -691,14 +760,16 @@ class TestRawImageExport:
 
     def test_raw_matches_cli_byte_identical(self, tmp_path) -> None:
         """R1 验收：应用导出 RAW .toos ≡ CLI 同档产物（payload+TMET）。"""
+        import os
         import subprocess
-        import sys
-        from pathlib import Path as _P
+        from pathlib import Path
 
-        cli = _P(__file__).resolve().parents[2] / \
-            "native/topos_codec/build/debug/toos"
-        if not cli.exists():
-            pytest.skip("toos CLI 未构建")
+        explicit_lib = os.environ.get("TOPOS_CODEC_LIB")
+        build = (Path(explicit_lib).resolve().parent if explicit_lib else
+                 Path(__file__).resolve().parents[2] / "native/topos_codec/build/debug")
+        cli = build / ("toos.exe" if os.name == "nt" else "toos")
+        if not cli.is_file():
+            pytest.skip(f"配套 toos CLI 未构建：{cli}")
 
         from src.shared.codec.topos_image_binding import get_image_codec
 

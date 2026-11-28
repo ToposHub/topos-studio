@@ -62,7 +62,7 @@ for _path in (PROJECT_ROOT, TOOLS_DIR):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-from archive.dbg_encode_stage_probe import _load_frames  # noqa: E402
+from bench_frame_input import load_frames as _load_frames  # noqa: E402
 from bench_manifest import ManifestMismatch, build_manifest  # noqa: E402
 from bench_encode_stages import (  # noqa: E402
     NATIVE_STAGE_NS_FIELDS,

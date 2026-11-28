@@ -1768,6 +1768,10 @@ class ToposVideoEncoder:
             if self._container_mode == "image_sequence":
                 if self._frame_count == 0:
                     raise RuntimeError("Topos image sequence: no frames written")
+                if should_cancel is not None and should_cancel():
+                    self._cleanup_temp()
+                    self._is_open = False
+                    return False
                 # C01：全部帧已落暂存目录，此处一次性提交到输出目录。
                 # 提交失败先回滚（暂存内保留被替换原文件的硬链接备份），
                 # 再走下方定稿失败清理路径。

@@ -40,7 +40,7 @@ for path in (PROJECT_ROOT, TOOLS_DIR):
         sys.path.insert(0, str(path))
 
 from bench_manifest import ManifestMismatch, build_manifest, sha256_file  # noqa: E402
-from archive.dbg_encode_stage_probe import _load_frames  # noqa: E402
+from bench_frame_input import load_frames as _load_frames  # noqa: E402
 
 #: native 阶段统计的计时字段名（_CEncodeStageStats 镜像；见 result 段）。
 NATIVE_STAGE_NS_FIELDS = (
