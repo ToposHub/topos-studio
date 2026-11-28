@@ -787,6 +787,7 @@ class ToposVideoEncoder:
         self._max_file_bytes = getattr(config, 'max_file_bytes', None)
         self._budget_frames = getattr(config, 'budget_frames', None)
         self._bitrate_bps = getattr(config, 'bitrate', None)
+        self._uhd_proxy_detail = False
         for _fname, _val in (('max_video_bytes', self._max_video_bytes),
                              ('max_file_bytes', self._max_file_bytes),
                              ('budget_frames', self._budget_frames)):
@@ -1130,6 +1131,14 @@ class ToposVideoEncoder:
             self._cfg_fields['range_code'] = 1
             self._cfg_fields['primaries'] = 1
 
+        self._uhd_proxy_detail = (
+            self._tier.tier_id == "proxy" and (width, height) == (3840, 2160)
+            and self._is_sdr_422_intra_mov()
+            and self._max_video_bytes is None and self._max_file_bytes is None
+            and getattr(self._codec, "_has_capabilities", False)
+            and self._codec.capabilities().encode_ac_deadzone
+        )
+
         # R3：mode2 + 隐式位深（质量旋钮）→ 延迟建 mux：首帧预算探测
         # （12→10→8）定深后再建（mux/tpcC 容器级位深一致性要求文件级定深）。
         self._lazy_mux = (self._has_alpha and self._alpha_mode == 2
@@ -1310,6 +1319,10 @@ class ToposVideoEncoder:
         # （reserved[0]=8，V7-R2）；位流侧 fh->flags bit2/bit3 选载，旧解码
         # 器对保留 flags 位非零干净拒绝。帧间 ip2（em=11）不携带。
         fc.reserved[5] = self._output_features() if fc.reserved[0] == 8 else 0
+        if self._uhd_proxy_detail:
+            from src.shared.codec.topos_binding import TC_ENCODE_AC_DEADZONE_EIGHTH
+
+            fc.reserved[6] = TC_ENCODE_AC_DEADZONE_EIGHTH
         return movie_cfg, fc
 
     def set_raw_meta(self, payload: bytes) -> None:
@@ -2982,6 +2995,9 @@ class ToposVideoEncoder:
         if self._bitrate_bps is not None:
             per_frame_bits = float(self._bitrate_bps) * self._dur / float(self._timescale)
             return max(1, int(per_frame_bits / 8.0))
+        if self._uhd_proxy_detail:
+            # UHD DNxHR HQX yardsticks: Apple Proxy averaged 0.705–0.728 bpp.
+            return round(0.70 * int(self._config.width) * int(self._config.height) / 8)
         return self._tier.frame_target_bytes(
             int(self._config.width), int(self._config.height))
 
@@ -3061,6 +3077,9 @@ class ToposVideoEncoder:
                 budget = self._resolve_video_budget()
                 rc = ToposRateFeedback(
                     target, qp_max=TOPOS_QP_MAX,
+                    # UHD Proxy rate curves change by a factor of two in
+                    # about five QP steps. The historical gain overshoots.
+                    frame_gain=5.0 if self._uhd_proxy_detail else 8.0,
                     total_budget_bytes=budget,
                     total_frames=(int(self._budget_frames)
                                   if budget is not None else None))

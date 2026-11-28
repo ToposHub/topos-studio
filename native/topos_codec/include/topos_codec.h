@@ -90,6 +90,8 @@ typedef struct topos_cpu_features {
 #define TC_CODEC_CAP_V7B_SCALABLE_BASE     (1u << 6)
 #define TC_CODEC_CAP_DECODE_DROP_ALPHA     (1u << 7) /* request flags: omit alpha */
 #define TC_CODEC_CAP_DECODE_NO_DEBLOCK     (1u << 8) /* request flags: skip output deblock */
+#define TC_CODEC_CAP_ENCODE_AC_DEADZONE      (1u << 9) /* encoder-only AC decision */
+#define TC_ENCODE_AC_DEADZONE_EIGHTH         1u
 
 #define TC_CODEC_MAX_DIM 16384u
 #define TC_CODEC_AUTO_2K_MAX_DIM 2048u
@@ -220,6 +222,8 @@ typedef struct topos_frame_config {
                                    校验返回 TC_ERR_INVALID_ARGUMENT；对应
                                    位流代际仅保留解码，编号永久封存）。
                                    reserved[1]/[2] = V2 AQ/RDO（0/1）；
+                                   reserved[6] in mode 8: 0 = AC Q/4, 1 = AC Q/8
+                                   (opaque profile 3, 10-bit 4:2:2, encode only).
                                    reserved[3..7]：按模式承载结构化槽位
                                    （8/9/10/11 见 spec），其余必须为 0。 */
     } topos_frame_config;

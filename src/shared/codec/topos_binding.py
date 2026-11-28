@@ -73,6 +73,8 @@ TC_CODEC_CAP_V7A_BAND_DECODE = 1 << 5  # 已退役（2026-09-13 归档）：nati
 TC_CODEC_CAP_V7B_SCALABLE_BASE = 1 << 6
 TC_CODEC_CAP_DECODE_DROP_ALPHA = 1 << 7
 TC_CODEC_CAP_DECODE_NO_DEBLOCK = 1 << 8  # request flags: skip output deblock
+TC_CODEC_CAP_ENCODE_AC_DEADZONE = 1 << 9
+TC_ENCODE_AC_DEADZONE_EIGHTH = 1
 TC_CODEC_MAX_DIM = 16384
 TC_CODEC_AUTO_2K_MAX_DIM = 2048
 # v1.5 qp 域上限（ADR-C031；native TC_QP_MAX）。qp≥64 需帧头 minor=4
@@ -593,6 +595,10 @@ class ToposCodecCapabilities:
     def decode_no_deblock(self) -> bool:
         """native 是否解释 TC_DECODE_FLAG_NO_DEBLOCK（跳过输出去块）。"""
         return bool(self.flags & TC_CODEC_CAP_DECODE_NO_DEBLOCK)
+
+    @property
+    def encode_ac_deadzone(self) -> bool:
+        return bool(self.flags & TC_CODEC_CAP_ENCODE_AC_DEADZONE)
 
 
 @dataclass(frozen=True)

@@ -55,7 +55,8 @@ int32_t tc_query_capabilities(topos_codec_capabilities* out)
                  TC_CODEC_CAP_CPU_SURFACE_OUTPUT |
                  TC_CODEC_CAP_HOST_VISIBLE_GPU_SURFACE |
                  TC_CODEC_CAP_DECODE_DROP_ALPHA |
-                 TC_CODEC_CAP_DECODE_NO_DEBLOCK;
+                 TC_CODEC_CAP_DECODE_NO_DEBLOCK |
+                 TC_CODEC_CAP_ENCODE_AC_DEADZONE;
     out->max_width = TC_CODEC_MAX_DIM;
     out->max_height = TC_CODEC_MAX_DIM;
     out->auto2k_max_dim = TC_CODEC_AUTO_2K_MAX_DIM;

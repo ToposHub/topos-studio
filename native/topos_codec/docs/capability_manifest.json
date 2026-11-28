@@ -9,6 +9,10 @@
   "audio": false,
   "audio_note": "视频帧编码器不编码音频；MOV 容器支持最多 16 条宿主已编码音轨（container_spec v1.9 附录 A.7）。"
  },
+ "encoder_quantization": {
+  "ac_deadzone": true,
+  "ac_deadzone_config": "V7-R2 reserved[6]: 0 = Q/4, 1 = Q/8. Q/8 is available for opaque profile 3 YUV 4:2:2 10-bit. The option changes encoder decisions only."
+ },
  "reduced_decode": {
   "max_source_width": 16384,
   "max_source_height": 16384,

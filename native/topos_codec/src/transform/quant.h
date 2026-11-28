@@ -102,6 +102,11 @@ void tc_quant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
                               uint32_t qp, uint8_t bit_depth,
                               uint32_t table_sel);
 
+/* Encoder-only AC decision. The Q table and reconstructed levels are unchanged. */
+void tc_quant_ctx_init_bd_tbl_dz(tc_quant_ctx* ctx, const uint16_t qm[64],
+                                 uint32_t qp, uint8_t bit_depth, uint32_t table_sel,
+                                 bool ac_deadzone_eighth);
+
 /* Decode only: prepares Q and f_clamp. Quantization also needs the encoder
  * lookup fields populated by tc_quant_ctx_init_bd_tbl. */
 void tc_dequant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],

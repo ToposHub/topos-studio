@@ -55,9 +55,13 @@ class ToposRateFeedback:
                  lend_cap_factor: float = 3.0,
                  repay_window: int = 12,
                  lend_repay_clamp: int = 2,
-                 telemetry_cap: int = 4096) -> None:
+                 telemetry_cap: int = 4096,
+                 frame_gain: float = 8.0) -> None:
         if target_bytes <= 0:
             raise ValueError(f"target_bytes 必须为正，得到 {target_bytes}")
+        if not math.isfinite(frame_gain) or frame_gain <= 0:
+            raise ValueError("frame_gain must be positive and finite")
+        self._frame_gain = frame_gain
         self.target = float(target_bytes)
         self.qp_min = int(qp_min)
         self.qp_max = int(qp_max)
@@ -152,7 +156,7 @@ class ToposRateFeedback:
     def _next_qp(self, size: int) -> int:
         """控制律：比例 + 短窗 VBV + 长程积分 + 债务偿还 → 下一帧 qp。"""
         t = max(1.0, self.target)
-        prop = 8.0 * math.log2(max(int(size), 1) / t)
+        prop = self._frame_gain * math.log2(max(int(size), 1) / t)
         # 短窗 VBV：窗口均值 vs 当前目标（窗口满帧后生效）
         win_term = 0.0
         if len(self._win) >= max(4, self.window // 2):

@@ -192,6 +192,11 @@ class TestCapabilityManifestConsistency:
             f"native={status}, manifest={declared['v7b_scalable_status']}"
         )
 
+    def test_encoder_quantization_capabilities_match_manifest(self, manifest, require_lib) -> None:
+        from src.shared.codec.topos_binding import ToposCodec
+
+        assert ToposCodec().capabilities().encode_ac_deadzone == manifest["encoder_quantization"]["ac_deadzone"]
+
     def test_perf_gate_thresholds_match_manifest(self, manifest) -> None:
         path = os.path.join(_ROOT, "native", "topos_codec", "scripts",
                             "perf_gate.py")

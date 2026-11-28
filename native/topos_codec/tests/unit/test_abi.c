@@ -93,7 +93,7 @@ int main(void)
                     TC_CODEC_CAP_CPU_SURFACE_OUTPUT |
                     TC_CODEC_CAP_HOST_VISIBLE_GPU_SURFACE |
                     TC_CODEC_CAP_DECODE_DROP_ALPHA |
-                    TC_CODEC_CAP_DECODE_NO_DEBLOCK);
+                    TC_CODEC_CAP_DECODE_NO_DEBLOCK | TC_CODEC_CAP_ENCODE_AC_DEADZONE);
                     /* V 代际收纳（2026-09-13）：V7-A 位随归档不再广播；
                      * 半尺寸优化（2026-09-20）：DECODE_DROP_ALPHA 随
                      * TC_DECODE_FLAG_DROP_ALPHA 支持一并广播；

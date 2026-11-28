@@ -495,7 +495,7 @@ int32_t tc_frame_config_validate(const topos_frame_config* cfg)
          * [3]/[4] 粒度槽、[5..7] 恒 0。 */
         const int rsv_end = em_lo >= 10u ? 6 : (em_lo == 9u ? 5 : 3);
         for (int i = rsv_end; i < 8; ++i) {
-            if (em_lo == 8u && i == 5) { continue; } /* 特性槽单独校验 */
+            if (em_lo == 8u && (i == 5 || i == 6)) { continue; }
             if (cfg->reserved[i] != 0u) {
                 tc_set_error(TC_ERR_INVALID_ARGUMENT,
                              "reserved[%d] must be 0 (got %u)",
@@ -517,6 +517,14 @@ int32_t tc_frame_config_validate(const topos_frame_config* cfg)
                              (unsigned)feats);
                 return TC_ERR_INVALID_ARGUMENT;
             }
+        }
+        if (em_lo == 8u && cfg->reserved[6] != 0u &&
+            (cfg->reserved[6] != TC_ENCODE_AC_DEADZONE_EIGHTH ||
+             cfg->profile != 3u || cfg->pixel_format != 0u ||
+             cfg->bit_depth != 10u || cfg->alpha_mode != 0u)) {
+            tc_set_error(TC_ERR_INVALID_ARGUMENT,
+                         "AC dead zone option requires opaque profile 3 / 4:2:2 / 10-bit");
+            return TC_ERR_INVALID_ARGUMENT;
         }
         if (em_lo == 10u || em_lo == 11u) {
             /* V9 / V7-R3（ADR-C048）：frame_type 0=I/1=P；ref_distance
@@ -870,9 +878,17 @@ typedef struct enc_shared {
      * aq_on=0（默认）时偏移全 0，行为与旧版逐位一致。 */
     int aq_on;
     int rdo_on;                    /* V2.x：reserved[2]=1 逐系数 level RDO */
+    bool ac_deadzone_eighth;
     uint64_t aq_act[4][TC_MAX_SLICES];
     int8_t aq_off[4][TC_MAX_SLICES];
 } enc_shared;
+
+static void enc_quant_ctx_init(const enc_shared* e, tc_quant_ctx* ctx,
+                               const uint16_t qm[64], uint32_t qp)
+{
+    tc_quant_ctx_init_bd_tbl_dz(ctx, qm, qp, e->fh.bit_depth,
+                              tc_qtbl_of_flags(e->fh.flags), e->ac_deadzone_eighth);
+}
 
 static void enc_free_members(enc_shared* e)
 {
@@ -5109,8 +5125,7 @@ static int32_t enc_encode_plane_opt(enc_shared* e, uint32_t p, int use_fcache,
             const int32_t ceiling = (int32_t)tc_qp_eff_ceiling(fh->qp_base);
             if (qp_eff > ceiling) { qp_eff = ceiling; }
         }
-        tc_quant_ctx_init_bd_tbl(&qctx, qm, (uint32_t)qp_eff, fh->bit_depth,
-                                 tc_qtbl_of_flags(fh->flags));
+        enc_quant_ctx_init(e, &qctx, qm, (uint32_t)qp_eff);
     }
 
     /* band 划分与顺序版一致：y0 += slice_rows */
@@ -5299,8 +5314,7 @@ static int32_t enc_band_pass_all(enc_shared* e, uint32_t plane_end, int use_fcac
                 if (qe > ceiling) { qe = ceiling; }
             }
             qp_eff[p] = qe;
-            tc_quant_ctx_init_bd_tbl(&qctx[p], qm, (uint32_t)qe, fh->bit_depth,
-                                 tc_qtbl_of_flags(fh->flags));
+            enc_quant_ctx_init(e, &qctx[p], qm, (uint32_t)qe);
         }
         uint32_t rows = fh->plane_block_rows[p];
         uint32_t bands = (rows + e->slice_rows - 1u) / e->slice_rows;
@@ -5365,8 +5379,7 @@ static int32_t enc_band_pass_all(enc_shared* e, uint32_t plane_end, int use_fcac
                 if ((uint32_t)qev > tc_qp_eff_ceiling(e->fh.qp_base)) {
                     qev = (int32_t)tc_qp_eff_ceiling(e->fh.qp_base);
                 }
-                tc_quant_ctx_init_bd_tbl(&aq_v[p][d], qmp, (uint32_t)qev, e->fh.bit_depth,
-                                         tc_qtbl_of_flags(e->fh.flags));
+                enc_quant_ctx_init(e, &aq_v[p][d], qmp, (uint32_t)qev);
             }
         }
         aq_v_ok = 1;
@@ -5598,6 +5611,8 @@ static int32_t enc_frame_setup(enc_shared* e, const topos_frame_config* cfg,
      * TRAW（pf=3）冻结关闭：单色相位平面无色度语义（计划 §3.1/风险登记）。 */
     e->aq_on = (cfg->reserved[1] == 1u && cfg->pixel_format != 3u) ? 1 : 0;
     e->rdo_on = (cfg->reserved[2] == 1u) ? 1 : 0;
+    e->ac_deadzone_eighth = cfg->reserved[0] == 8u &&
+                           cfg->reserved[6] == TC_ENCODE_AC_DEADZONE_EIGHTH;
     /* V8（em==9）参数：reserved[3]/[4] 覆盖段/瓦片粒度（0 = 批 0 默认档）。
      * V9（em==10）/ V7-R3（em==11）：reserved[3]/[4]/[5] = frame_type/
      * gop_id/ref_distance（GOP 序列输入，非粒度）——段/瓦片粒度恒取
@@ -6754,8 +6769,7 @@ static int32_t m7_probe(enc_shared* e, uint32_t qp, uint32_t* bytes_out)
             if (qp_eff > ceiling) { qp_eff = ceiling; }
         }
         qp_effs[p] = qp_eff;
-        tc_quant_ctx_init_bd_tbl(&qctx[p], qm, (uint32_t)qp_eff, e->fh.bit_depth,
-                                 tc_qtbl_of_flags(e->fh.flags));
+        enc_quant_ctx_init(e, &qctx[p], qm, (uint32_t)qp_eff);
         uint32_t rows = e->fh.plane_block_rows[p];
         uint32_t bands = (rows + e->slice_rows - 1u) / e->slice_rows;
         if (bands == 0u) { bands = 1u; }
@@ -6804,8 +6818,7 @@ static int32_t m7_probe(enc_shared* e, uint32_t qp, uint32_t* bytes_out)
                 if ((uint32_t)qev > tc_qp_eff_ceiling(qp)) {
                     qev = (int32_t)tc_qp_eff_ceiling(qp);
                 }
-                tc_quant_ctx_init_bd_tbl(&aq_v[p][d], qmp, (uint32_t)qev, e->fh.bit_depth,
-                                         tc_qtbl_of_flags(e->fh.flags));
+                enc_quant_ctx_init(e, &aq_v[p][d], qmp, (uint32_t)qev);
             }
         }
     }

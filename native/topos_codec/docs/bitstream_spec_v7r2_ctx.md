@@ -55,6 +55,14 @@ libm 依赖）。这是编码器内唯一的浮点使用点；同输入同输出
 （纯算术、无 libm/平台近似），且选择结果入流信令——即便跨平台
 选择不同，解码输出仍由码流自描述决定。
 
+### AC 量化死区选项
+
+`tc_query_capabilities` 返回 `TC_CODEC_CAP_ENCODE_AC_DEADZONE` 时，V7-R2
+编码配置的 `reserved[6]` 可以设为 `TC_ENCODE_AC_DEADZONE_EIGHTH`，在
+无 Alpha 的 profile 3、10-bit 4:2:2 输入上把 AC 死区从 Q/4 调到 Q/8。
+该编码端选择由固定 QP、码率搜索和最终编码共用。常规解码继续按位流中的
+量化值和 Q 重建。
+
 ## 5. 确定性与错误语义
 
 - 同输入 → 同字节（含模型选择；单测钉死）。

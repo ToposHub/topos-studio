@@ -20,7 +20,9 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
 from src.shared.codec.color_metadata_config import ColorMetadataConfig  # noqa: E402
-from src.shared.codec.topos_binding import ToposCodec, ToposMovieFile  # noqa: E402
+from src.shared.codec.topos_binding import (  # noqa: E402
+    TC_ENCODE_AC_DEADZONE_EIGHTH, ToposCodec, ToposMovieFile,
+)
 from src.shared.export.topos_encoder import ToposVideoEncoder  # noqa: E402
 from src.shared.export.topos_rate_control import ToposRateFeedback  # noqa: E402
 
@@ -206,3 +208,57 @@ def test_complexity_estimate_deterministic(tmp_path):
         enc.close()
         outs.append(out)
     assert outs[0].read_bytes() == outs[1].read_bytes()
+
+
+def test_reduced_ac_deadzone_keeps_decode_header_and_sized_probe_parity(tmp_path: Path) -> None:
+    codec = ToposCodec()
+    if not codec.capabilities().encode_ac_deadzone:
+        pytest.skip("native library predates the AC dead zone control")
+    encoder = ToposVideoEncoder(str(tmp_path / "deadzone.mov"), _config(), slice_threads=2)
+    encoder.open()
+    try:
+        frame = Frame(7, "noise")
+        plan = encoder._frame_cfg
+        plan.qp_base = 79
+        planes = list(frame.planes)
+        classic, _ = codec.encode_frame(plan, planes)
+        plan.reserved[6] = TC_ENCODE_AC_DEADZONE_EIGHTH
+        tuned, _ = codec.encode_frame(plan, planes)
+        sized, _, qp = codec.encode_sized(plan, planes, len(tuned), qp_min=79, qp_max=79)
+        assert qp == 79
+        assert sized == tuned
+        assert tuned != classic
+        assert tuned[6:41] == classic[6:41]
+        assert codec.decode(tuned).info.concealed_slices == 0
+
+        plan.reserved[6] = 0
+        assert codec.encode_frame(plan, planes)[0] == classic
+    finally:
+        encoder.abort()
+
+
+@pytest.mark.parametrize(
+    ("settings", "expect_tuned", "expected_target"),
+    [
+        ({}, True, 725_760),
+        ({"bitrate": 120_000_000}, True, 600_000),
+        ({"crf": 70}, False, 668_560),
+        ({"width": 1920, "height": 1080}, False, 167_140),
+        ({"max_video_bytes": 10_000_000, "budget_frames": 20}, False, 500_000),
+    ],
+)
+def test_uhd_proxy_detail_settings(
+    tmp_path: Path, settings: dict, expect_tuned: bool, expected_target: int,
+) -> None:
+    codec = ToposCodec()
+    if not codec.capabilities().encode_ac_deadzone:
+        pytest.skip("native library predates the AC dead zone control")
+    config = _config(**(dict(width=3840, height=2160,
+                             color_metadata=ColorMetadataConfig.sdr()) | settings))
+    encoder = ToposVideoEncoder(str(tmp_path / "settings.mov"), config)
+    encoder.open()
+    try:
+        assert bool(encoder._frame_cfg.reserved[6]) is expect_tuned
+        assert encoder._frame_target_bytes() == expected_target
+    finally:
+        encoder.abort()

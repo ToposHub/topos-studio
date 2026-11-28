@@ -289,21 +289,25 @@ void tc_quant_ctx_init_bd_tbl(tc_quant_ctx* ctx, const uint16_t qm[64],
                               uint32_t qp, uint8_t bit_depth,
                               uint32_t table_sel)
 {
+    tc_quant_ctx_init_bd_tbl_dz(ctx, qm, qp, bit_depth, table_sel, false);
+}
+
+void tc_quant_ctx_init_bd_tbl_dz(tc_quant_ctx* ctx, const uint16_t qm[64],
+                                 uint32_t qp, uint8_t bit_depth, uint32_t table_sel,
+                                 bool ac_deadzone_eighth)
+{
     tc_dequant_ctx_init_bd_tbl(ctx, qm, qp, bit_depth, table_sel);
     ctx->exact_div = (bit_depth > 12u) ? 1u : 0u;
 #if defined(__x86_64__) || defined(_M_X64)
     ctx->avx2_fast_div = ctx->exact_div == 0u;
 #endif
-    /* AC 死区 = Q/4（spec §7.4 冻结值；golden_transform/golden_codec 门禁）。
-     * 历史：TC_DZ_DEV 实验旋钮已于 P3 扫频后移除（2026-09-03 战役销账：
-     * dz 0~6/16 × 4 素材，工作码率区间 1.4~3.6 bpp 内 1/4 已最优，
-     * 见 docs/Topos_码率效率优化计划_2026-09-03.md §7）。DC 恒 0。 */
-    const uint32_t dz_num = 1u, dz_den = 4u;
+    /* Preserve the reference Q/4 quantizer by default. Q/8 retains more
+     * AC contrast at Proxy rates. Neither changes reconstruction or DC. */
+    const uint32_t ac_deadzone_shift = ac_deadzone_eighth ? 3u : 2u;
     for (int i = 0; i < 64; ++i) {
         const uint32_t q = ctx->Q[i];
         ctx->half[i] = q >> 1;
-        ctx->dz[i] = (i == 0) ? 0u
-            : (uint32_t)(((uint64_t)q * dz_num) / dz_den);
+        ctx->dz[i] = (i == 0) ? 0u : (q >> ac_deadzone_shift);
         tc_fastdiv_init(q, &ctx->fd[i]);
         /* M10-6.3B：zigzag 孪生（v1.5 域：fd.shift ≤ 25 → 51−s ≥ 26 无移位
          * UB；magic 恒 < 2^51 → m1 < 2^25 打包不变。域外大除数（>2^25−1，
