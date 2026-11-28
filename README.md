@@ -82,8 +82,8 @@ python src/main.py --product studio   # 统一入口 + 产品参数
 *   全部文档索引：[docs/INDEX.md](docs/INDEX.md)
 *   架构分册：[docs/architecture/](docs/architecture/)（app-products / color-rendering / composite / deliver-export / edit-timeline / shared-foundations）
 *   编解码白皮书：[Topos Codec 白皮书](native/topos_codec/Topos_Codec_白皮书.md)（[English](native/topos_codec/Topos_Codec_Whitepaper.md)）· [Topos Image 白皮书](native/topos_codec/Topos_Image_白皮书.md)（[English](native/topos_codec/Topos_Image_Whitepaper.md)）
-*   插件开发：[docs/PLUGIN_DEV_GUIDE.md](docs/PLUGIN_DEV_GUIDE.md)
-*   架构决策记录：`docs/adr/`、`docs/image/`（ADR-I 系列）、`native/topos_codec/docs/`（ADR-C 系列）
+*   插件开发：[docs/plugins/PLUGIN_DEV_GUIDE.md](docs/plugins/PLUGIN_DEV_GUIDE.md)
+*   架构决策记录：`docs/architecture/adr/`、`docs/image/`（ADR-I 系列）、`native/topos_codec/docs/`（ADR-C 系列）
 
 ## 5. 兼容性与环境
 

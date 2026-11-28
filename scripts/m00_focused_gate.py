@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""M00 focused regression gate — 升级计划 M (docs/upgrade_plan_M_mac_2026-10-24.md §M00)。
+"""M00 focused regression gate — 升级计划 M (docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md §M00)。
 
 真实阻断语义（M00 验收句）：
 - 每个分域在独立子进程运行（避免 Qt/C 解码器累积挂起拖垮整轮）；
@@ -160,7 +160,7 @@ def main() -> int:
 
     report = {
         "gate": "m00_focused_gate",
-        "plan": "docs/upgrade_plan_M_mac_2026-10-24.md#M00",
+        "plan": "docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md#M00",
         "blocking_semantics": "any domain failure/timeout fails the gate; baseline comparison is not an excuse",
         "env_overrides": ENV_OVERRIDES,
         "domains": results,

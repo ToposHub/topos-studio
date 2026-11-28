@@ -1,4 +1,4 @@
-"""GC 停顿观测器（计划 A A1.1 观测级；docs/perf_baseline_freeze_mac_2026-10.md §6）。
+"""GC 停顿观测器（计划 A A1.1 观测级；docs/benchmarks/performance/perf_baseline_freeze_mac_2026-10.md §6）。
 
 只观测，不改策略：通过 ``gc.callbacks`` 记录每次回收的停顿时长并按
 generation 聚合，供与帧 deadline miss 做重叠关联（FrameTraceCollector

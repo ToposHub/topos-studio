@@ -46,6 +46,37 @@
 | log_low_range | scalar | — | — |
 | log_high_range | scalar | — | — |
 | lum_mix | scalar | — | — |
+| base_grade_flare | scalar | — | — |
+| base_grade_contrast | scalar | — | — |
+| base_grade_contrast_pivot | scalar | — | — |
+| base_grade_saturation | scalar | — | — |
+| base_grade_balance_exposure | scalar | — | — |
+| base_grade_balance_a | scalar | — | — |
+| base_grade_balance_b | scalar | — | — |
+| base_grade_dim_exposure | scalar | — | — |
+| base_grade_dim_a | scalar | — | — |
+| base_grade_dim_b | scalar | — | — |
+| base_grade_dim_pivot | scalar | — | — |
+| base_grade_dim_falloff | scalar | — | — |
+| base_grade_dim_saturation | scalar | — | — |
+| base_grade_light_exposure | scalar | — | — |
+| base_grade_light_a | scalar | — | — |
+| base_grade_light_b | scalar | — | — |
+| base_grade_light_pivot | scalar | — | — |
+| base_grade_light_falloff | scalar | — | — |
+| base_grade_light_saturation | scalar | — | — |
+| base_grade_dark_exposure | scalar | — | — |
+| base_grade_dark_a | scalar | — | — |
+| base_grade_dark_b | scalar | — | — |
+| base_grade_dark_pivot | scalar | — | — |
+| base_grade_dark_falloff | scalar | — | — |
+| base_grade_dark_saturation | scalar | — | — |
+| base_grade_bright_exposure | scalar | — | — |
+| base_grade_bright_a | scalar | — | — |
+| base_grade_bright_b | scalar | — | — |
+| base_grade_bright_pivot | scalar | — | — |
+| base_grade_bright_falloff | scalar | — | — |
+| base_grade_bright_saturation | scalar | — | — |
 
 ### Window 窗口子轨（window）
 

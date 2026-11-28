@@ -67,7 +67,7 @@ DNxHR HQX），顺序解码（播放热路径，不走 seek），warmup 12 帧�
 
 ## 机器 B 重锚（RTX 4090 · 2026-10-24 · 计划表 B §B0.2）
 
-环境：i9-13900K / RTX 4090（驱动 **621.01**，见 `docs/perf_env_matrix_windows_2026-10.md`
+环境：i9-13900K / RTX 4090（驱动 **621.01**，见 `docs/benchmarks/performance/perf_env_matrix_windows_2026-10.md`
 驱动漂移记录）/ Python 3.13.12 / PyAV 18.1.0 / commit `8782b4eec`。
 产物：`scripts/bench_hw_decode_results_B0_20261024_run0{1,2,4}*.json`（d3d11va 默认 ×3）
 与 `..._run03_nvdec.json`（`--hw-backend nvdec`）。

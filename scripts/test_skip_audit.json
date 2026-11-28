@@ -4711,7 +4711,7 @@
       "line": 36,
       "scope": "in_callable",
       "category": "optional_tool_or_api",
-      "detail": "pinned headless browser unavailable in this environment (playwright/chromium not installed). W0-A gate cannot run; see docs/adr/0001-html-renderer-offscreen-readback.md and docs/adr/0002-html-renderer-pinned-headless-backend.md."
+      "detail": "pinned headless browser unavailable in this environment (playwright/chromium not installed). W0-A gate cannot run; see docs/architecture/adr/0001-html-renderer-offscreen-readback.md and docs/architecture/adr/0002-html-renderer-pinned-headless-backend.md."
     },
     {
       "file": "tests/render/html_spike/test_html_spike_playwright_gate.py",
@@ -4735,7 +4735,7 @@
       "line": 113,
       "scope": "in_callable",
       "category": "optional_tool_or_api",
-      "detail": "f\"W0-A HTML renderer backend unavailable in this environment: {report.get('self_test_reason', 'unknown')}. See docs/adr/0001-html-renderer-offscreen-readback.md"
+      "detail": "f\"W0-A HTML renderer backend unavailable in this environment: {report.get('self_test_reason', 'unknown')}. See docs/architecture/adr/0001-html-renderer-offscreen-readback.md"
     },
     {
       "file": "tests/render/test_bitrate_probe.py",

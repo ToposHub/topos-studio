@@ -1,8 +1,10 @@
 # 剪辑页第五轮全功能复查证据
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 日期：2026-10-20
 基线：`4e4c8b461`（分支 `fix-ui`）
-主计划：[edit_page_fifth_audit_optimization_plan_2026-10-20.md](../../edit_page_fifth_audit_optimization_plan_2026-10-20.md)
+主计划：edit_page_fifth_audit_optimization_plan_2026-10-20.md
 
 ## 1. 本轮做了什么
 

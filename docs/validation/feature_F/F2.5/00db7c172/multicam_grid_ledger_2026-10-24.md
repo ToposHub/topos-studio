@@ -2,7 +2,7 @@
 
 - 日期：2026-10-24
 - 提交：片1 `20864f8a4`（音频策略三模式）＋ 片2 `00db7c172`（实时四路网格 + 插入侧成对落轨）
-- 计划条目：docs/feature_plan_F_davinci_2026-10-22.md §F2.5
+- 计划条目：docs/plans/performance/feature_plan_F_davinci_2026-10-22.md §F2.5
 - 测试命令：`QT_QPA_PLATFORM=offscreen TOPOS_HEADLESS_GL=1 .venv/bin/python -m pytest tests/edit/test_multicam_production.py tests/edit/test_multicam_sync_guards.py tests/edit/test_multicam_audio_policy.py tests/edit/test_multicam_grid_stream.py tests/edit/test_multicam_panel_grid.py tests/edit/test_multicam_grid_real_media.py tests/edit/test_playback_budget.py tests/edit/test_adaptive_playback_quality.py -q`
 - 结果：**115 passed**（multicam 全护栏 + 播放预算/自适应质量无回归）
 

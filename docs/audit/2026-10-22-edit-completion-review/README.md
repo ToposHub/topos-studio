@@ -1,6 +1,6 @@
 # 2026-10-22 剪辑完成项复核证据
 
-主计划：[第七轮完成项复核及优化计划](../../edit_page_seventh_completion_review_optimization_plan_2026-10-22.md)。基线 `d11615bb85d057f92735dbfcbfdc0debb127fc13`。本目录仅包含审计工具、结果和截图，未改产品源码与已有测试。
+主计划：[第七轮完成项复核及优化计划](../../plans/edit/edit_page_seventh_completion_review_optimization_plan_2026-10-22.md)。基线 `d11615bb85d057f92735dbfcbfdc0debb127fc13`。本目录仅包含审计工具、结果和截图，未改产品源码与已有测试。
 
 ## 如何阅读
 

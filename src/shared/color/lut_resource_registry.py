@@ -1,6 +1,6 @@
 """R02: LUT 资源注册、导入、迁移与重定位（无 Qt，headless 可测）。
 
-权威与身份规则（docs/color_resources_backend_implementation_plan.md R02）：
+权威与身份规则（docs/plans/color/color_resources_backend_implementation_plan.md R02）：
 
 - **验证**：``.cube``/``.3dl``/``.look`` 按实际解析能力验证（维度、数据
   长度、DOMAIN、非有限值、尺寸上限）；未支持/损坏格式给结构化错误码，

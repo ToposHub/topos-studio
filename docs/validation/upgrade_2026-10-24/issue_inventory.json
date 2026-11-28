@@ -152,7 +152,7 @@
       "id": "W-I07",
       "evidence": "待验收",
       "finding": "驻留默认关闭；91s 顺序/60s seek/8 次重开不能替代窗口浸泡、长压、多轨、多屏与设备事件；AMD/Intel/A-C 矩阵仍缺。",
-      "path": "docs/c31_stress_cuda_resident_2026-10.md",
+      "path": "docs/validation/windows/c31_stress_cuda_resident_2026-10.md",
       "line": 15,
       "owner_task": "W08"
     }

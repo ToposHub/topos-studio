@@ -127,7 +127,7 @@ class MediaAsset:
     color_label: str = "none"  # 颜色标签（见 ASSET_COLOR_LABELS）
     comment: str = ""  # 注释
     # DESK-01B：内嵌资源身份（手机自包含包）。resource_uri 是权威引用
-    # （topos-res://…，见 docs/adr/0005 §3）；path_original 保留外部原
+    # （topos-res://…，见 docs/architecture/adr/0005 §3）；path_original 保留外部原
     # 路径提示（重链接/溯源用）。加载时外部路径离线 → path 被物化为
     # 解包缓存内的 seekable 文件（本机实现细节，保存侧守卫不落盘）。
     resource_uri: str | None = None

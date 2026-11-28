@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """P0 基准清洗：同一 4K ProRes 4444 母版的 2K/4K 六档 ProRes + TOPOS 基准集。
 
-依据 docs/topos_prores_quality_optimization_plan_2026-09-21.md §5 P0：
+依据 docs/plans/codec/topos_prores_quality_optimization_plan_2026-09-21.md §5 P0：
 
 - 现有 Apple 原生 ProRes 基准（2K 六档、4K Proxy/LT/4444/4444XQ）已是
   同母版 487 帧资产（vendor 'appl'、同批生成时间戳），保留并校验；
@@ -517,7 +517,7 @@ def main() -> int:
     manifest = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generator": str(Path(__file__).relative_to(REPO)),
-        "plan": "docs/topos_prores_quality_optimization_plan_2026-09-21.md",
+        "plan": "docs/plans/codec/topos_prores_quality_optimization_plan_2026-09-21.md",
         "phase": "P0",
         "topos_naming": dict(TOPOS_NAMING),  # C02：冻结名契约随清单落盘
         "master": {

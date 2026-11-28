@@ -3,7 +3,7 @@
 This module deliberately has no engine, project, renderer or Qt dependency.
 Draft edits describe the interaction prototype; they never change a grade in
 the running image engine.  Production graph commands are a separate integration
-step documented in ``docs/color_nodes_backend_implementation_plan.md``.
+step documented in ``docs/plans/color/color_nodes_backend_implementation_plan.md``.
 """
 
 from __future__ import annotations

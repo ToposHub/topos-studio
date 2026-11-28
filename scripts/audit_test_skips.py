@@ -1,4 +1,4 @@
-"""C0.2 skip 审计（计划表 B · Windows 线，docs/perf_plan_B_windows_2026-10-22.md）。
+"""C0.2 skip 审计（计划表 B · Windows 线，docs/plans/performance/perf_plan_B_windows_2026-10-22.md）。
 
 对 tests/ 做纯 AST 静态归类（不导入任何测试模块）：
 
@@ -10,7 +10,7 @@
 
 静态 skip 语句数与运行时 skip 用例数是两个口径：本脚本产出前者；
 后者由 C0.1 的 --junitxml 报告统计（运行时跳过还包含条件在采集机器上
-实际为真/假的动态判定）。两者对拍见 docs/test_skip_audit_windows_2026-10.md。
+实际为真/假的动态判定）。两者对拍见 docs/validation/windows/test_skip_audit_windows_2026-10.md。
 
 用法：
     .venv/Scripts/python.exe scripts/audit_test_skips.py [--root tests] [--json out.json]

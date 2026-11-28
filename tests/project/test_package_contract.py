@@ -1,6 +1,6 @@
 """DESK-01A/08A · .topos 包契约合同测试（黄金包 + 规范哈希 + 版本分级）。
 
-验收锚点（docs/adr/0005）：
+验收锚点（docs/architecture/adr/0005）：
 - 黄金包由生产 save 路径产出，逐条目通过 ``package_spec`` 冻结 schema
   ——证明"schema 与生产 serializer 一致"；
 - ``spec_digest`` 金丝雀钉死契约哈希——任何字段/版本变更必须显式更新

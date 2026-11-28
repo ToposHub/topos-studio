@@ -1,6 +1,6 @@
 # W02 · CUDA 生命周期/异常回滚/池预算（L1 替身 + 真机抽检）报告
 
-> 责任包：W02（`docs/upgrade_plan_W_windows_2026-10-24.md` §3，对应 W-I03/R12）。
+> 责任包：W02（`docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md` §3，对应 W-I03/R12）。
 > base `620168431`（W01 提交后）；实现 + 测试全在本机（机器 B，RTX 4090/621.01）。
 
 ## 1. 实现（`src/shared/media/windows_hw/cuda_resident.py`）

@@ -35,7 +35,7 @@ from dataclasses import dataclass
 #: v2: P1-06 分段 deadline（deadline_missed_segment / import_upload_ms /
 #: present_ms）+ SEGMENT_BUDGET_RATIOS 预算表；P1-01 路由通道正字段
 #: dispatch_channel（engine/scrub/background/direct/refresh）。
-#: v3: A0.1 帧预算遥测契约（docs/perf_frame_budget_schema_2026-10.md）——
+#: v3: A0.1 帧预算遥测契约（docs/benchmarks/performance/perf_frame_budget_schema_2026-10.md）——
 #: present_status / present_slot_id / present_submitted_mono / readback_kind /
 #: import_upload_status 字段 + STAGE_VALIDITY_STATES / PRESENT_STATUSES /
 #: READBACK_KINDS 词表；annotate() 的字节字段改为累加合并并收紧白名单。

@@ -1,7 +1,7 @@
 # .tglsl 插件开发风格基准笔记（STYLE_NOTES）
 
 > 用途：计划03（GLSL 插件库扩充）12 个插件开发子智能体的统一规范输入。
-> 依据：`docs/PLUGIN_DEV_GUIDE.md`（658 行）、`plugins/` 下全部 5 个现有 `.tglsl`
+> 依据：`docs/plugins/PLUGIN_DEV_GUIDE.md`（658 行）、`plugins/` 下全部 5 个现有 `.tglsl`
 > （warm_tint、Film_Halation、HighPass_Retouch、bilateral_skin_smooth、
 > Color_Space_Transform）、`src/features/color/core/plugin_manager.py` 解析实现、
 > `src/shared/i18n/locales/*.json` 现状。日期：2026-09-28。

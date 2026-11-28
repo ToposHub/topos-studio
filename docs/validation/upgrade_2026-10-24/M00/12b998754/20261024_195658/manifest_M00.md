@@ -1,5 +1,7 @@
 # M00 交付 manifest · 冻结真实完成状态与回归门禁
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 > HEAD：`12b998754`；执行宿主：Darwin x86_64 / Python 3.12.13（项目 .venv）；日期：2026-10-24。
 > 对应：升级计划 M §M00（P0）；对应旧账 O01/O02、F0/F1。
 
@@ -17,7 +19,7 @@
 
 | 套件 | 结果 | 证据 |
 |---|---|---|
-| 12 个 focused 文件单进程 | **142 passed / 6.50s，exit 0** | [focused_baseline.log](focused_baseline.log) |
+| 12 个 focused 文件单进程 | **142 passed / 6.50s，exit 0** | focused_baseline.log |
 | 分域子进程门禁（5 域） | **全绿（edit_core/edit_ai/deliver/color/shared 均 exit 0）** | [gate_report.json](gate_report.json) |
 
 与 2026-10-24 审查轮（`9e05556c3`，142 passed / 7.48s）一致：零漂移。
@@ -35,7 +37,7 @@
 ## 5. 文档头与旧状态冲突校正
 
 - 本 manifest 冻结 v2 计划编制时点的"全部工作包未开始"为开工期历史事实；自本轮起各包完成状态以 M 计划文档勾选 + 各包 manifest 为准（M00 本包已勾选并附本 manifest）。
-- 未修改任何旧 A/B/F manifest；`docs/upgrade_plan_M_mac_2026-10-24.md` 仅更新 M00 勾选与修订记录。
+- 未修改任何旧 A/B/F manifest；`docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md` 仅更新 M00 勾选与修订记录。
 
 ## 6. 完成定义核对
 

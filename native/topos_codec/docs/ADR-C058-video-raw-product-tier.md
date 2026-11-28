@@ -1,7 +1,7 @@
 # ADR-C058：视频 RAW 产品化——Topos RAW 产品档注册（tier 8）
 
 日期：2026-09-21 · 状态：**已采纳**
-关联：`docs/float_toos_and_raw_productization_plan_2026-09-21.md` §5 C-视频（R5–R12）、
+关联：`docs/plans/image/float_toos_and_raw_productization_plan_2026-09-21.md` §5 C-视频（R5–R12）、
 `docs/codec/topos_traw_format_plan_2026-09-12.md`（TRAW 批 0~5：bitstream profile 7
 冻结契约）、ADR-C056（LP：tier 域扩展先例）、container_spec v1.8→v1.9、
 ADR-C021（MOV 追加原子模式）、RC1（TRWM 开发元数据块）

@@ -3,7 +3,7 @@
 - 交付物：`plugins/Fake_Infrared.tglsl`
 - 计划：计划03（GLSL 插件库扩充），2026-09-28
 - 版本：1.0 ／ 作者：Topos Team
-- 依据：`docs/PLUGIN_DEV_GUIDE.md`、`docs/plugins/2026-09-28/STYLE_NOTES.md`、
+- 依据：`docs/plugins/PLUGIN_DEV_GUIDE.md`、`docs/plugins/2026-09-28/STYLE_NOTES.md`、
   `src/features/color/core/plugin_manager.py` 解析实现、
   `plugins/Bleach_Bypass.tglsl` 与 `plugins/bilateral_skin_smooth.tglsl`（结构与性能参照）
 

@@ -1,6 +1,6 @@
 # Windows 编解码基线报告（win-msvc，2026-09-28）
 
-> 对应计划：`docs/windows_topos_codec_sdk_optimization_plan_2026-09-28.md` W01、W02。
+> 对应计划：`docs/plans/platform/windows_topos_codec_sdk_optimization_plan_2026-09-28.md` W01、W02。
 > 状态：**W01/W02 完成**（本机实机证据，非 CI 外推）。
 
 ## 机器与环境

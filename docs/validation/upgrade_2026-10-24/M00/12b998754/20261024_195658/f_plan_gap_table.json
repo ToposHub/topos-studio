@@ -3,7 +3,7 @@
   "title": "冻结真实完成状态：F 计划逐任务差量表",
   "head": "12b998754",
   "date": "2026-10-24",
-  "source": "docs/feature_plan_F_davinci_2026-10-22.md §1 总表 + 各项 ledger",
+  "source": "docs/plans/performance/feature_plan_F_davinci_2026-10-22.md §1 总表 + 各项 ledger",
   "classification_legend": {
     "audit_closed": "核验/门禁类任务，按其自身完成定义（审计+证据）已收口",
     "production_wired": "生产链已接线（模型+命令+渲染/导出消费者+测试）；其'后续片'仍开",

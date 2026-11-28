@@ -3,7 +3,7 @@
 与 :class:`ColorResourcePreview`（显式开发 preview 模式）互斥装配——同一
 组浏览器信号只接一个适配器，禁止同时写草稿和正式 service。
 
-契约（docs/color_resources_backend_implementation_plan.md R03）：
+契约（docs/plans/color/color_resources_backend_implementation_plan.md R03）：
 
 - **typed target 在意图接收瞬间捕获**：`(session_id, generation, scope,
   scope_owner_id, stack_id, compound_path, node_id)` + 意图时刻的

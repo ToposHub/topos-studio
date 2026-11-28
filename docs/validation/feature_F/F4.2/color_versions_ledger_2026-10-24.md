@@ -1,7 +1,7 @@
 # F4.2 · 命名调色版本与共享 look 锁定 — 验证台账
 
 - 日期：2026-10-24
-- 计划条目：docs/feature_plan_F_davinci_2026-10-22.md §F4.2
+- 计划条目：docs/plans/performance/feature_plan_F_davinci_2026-10-22.md §F4.2
 - 测试：tests/edit/test_color_versions.py（14）＋回归全绿
   （color stack 40/组 13/切换持久化/source patch 消费/save router/
   schema v3/archive/interpretation/audio sync 共 300+）

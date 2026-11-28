@@ -1,6 +1,6 @@
 """N24 · 升级面板共用宿主：生命周期 + 提交 adapter + 过期守卫。
 
-审计缺口（docs/upgrade_audit_followup_2026-10-25.md §2 N24）：菜单经
+审计缺口（docs/plans/platform/upgrade_audit_followup_2026-10-25.md §2 N24）：菜单经
 ``upgrade_panel_actions`` 注册表打开的面板此前只 ``show()``——无 parent、
 无引用保持、无关闭清理、accepted 结果无消费者；多次点击产生多个并存
 实例；换工程后旧对话框仍可写入。本模块把"宿主职责"从各菜单回调里

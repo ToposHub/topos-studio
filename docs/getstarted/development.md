@@ -1,7 +1,7 @@
 # 开发指南 / Development Guide
 
 > getstarted · 计划 04 P3（2026-09-28）。目录结构与模块说明整理自 `README.md` / `README_EN.md`。
-> 构建与打包见 [building.md](building.md)；模块分层硬约束见 [docs/module_boundary_rules.md](../module_boundary_rules.md)。
+> 构建与打包见 [building.md](building.md)；模块分层硬约束见 [docs/architecture/module_boundary_rules.md](../architecture/module_boundary_rules.md)。
 > 本文为双语文档：简体中文在前，English follows below。
 
 ## 中文
@@ -209,7 +209,7 @@
 └── pyproject.toml                 # 项目配置（v3.0）
 ```
 
-分层导入硬约束见 [docs/module_boundary_rules.md](../module_boundary_rules.md)（products → features → shared → app）。
+分层导入硬约束见 [docs/architecture/module_boundary_rules.md](../architecture/module_boundary_rules.md)（products → features → shared → app）。
 
 ### 2. Feature Module System (特性模块系统)
 
@@ -269,7 +269,7 @@ vec3 process(vec3 color, vec2 uv) {
 // -----------------------------
 ```
 
-完整插件开发规范（含 file_explorer 双插件体系辨析）见 [docs/PLUGIN_DEV_GUIDE.md](../PLUGIN_DEV_GUIDE.md)。
+完整插件开发规范（含 file_explorer 双插件体系辨析）见 [docs/plugins/PLUGIN_DEV_GUIDE.md](../plugins/PLUGIN_DEV_GUIDE.md)。
 
 ### 5. 开发流程
 
@@ -320,11 +320,11 @@ vec3 process(vec3 color, vec2 uv) {
 
 ### 7. 开发规范文档
 
-*   [插件开发指南](../PLUGIN_DEV_GUIDE.md) — `.tglsl` / `.tai` 插件规范（含两套插件体系辨析）
-*   [模块边界规则](../module_boundary_rules.md) — 特性模块分层与依赖约束
-*   [TAEP 工程规范](../taep_engineering_conventions.md) — 编码与架构约定
-*   [HDR 数学契约](../hdr_math_contract.md) — HDR 管线数学定义
-*   [Prompt 库](../PROMPTS.md)
+*   [插件开发指南](../plugins/PLUGIN_DEV_GUIDE.md) — `.tglsl` / `.tai` 插件规范（含两套插件体系辨析）
+*   [模块边界规则](../architecture/module_boundary_rules.md) — 特性模块分层与依赖约束
+*   [TAEP 工程规范](../architecture/taep_engineering_conventions.md) — 编码与架构约定
+*   [HDR 数学契约](../architecture/hdr_math_contract.md) — HDR 管线数学定义
+*   [Prompt 库](../plugins/PROMPTS.md)
 
 ---
 
@@ -387,7 +387,7 @@ vec3 process(vec3 color, vec2 uv) {
 └── pyproject.toml                 # Package metadata and console entry points (v3.0)
 ```
 
-Layering and import constraints: [docs/module_boundary_rules.md](../module_boundary_rules.md) (products → features → shared → app).
+Layering and import constraints: [docs/architecture/module_boundary_rules.md](../architecture/module_boundary_rules.md) (products → features → shared → app).
 
 ### 2. Feature Module System
 
@@ -416,7 +416,7 @@ class ProductPreset:
 
 ### 4. Plugin System
 
-The repository has two plugin systems: the main Topos application plugins described here, and a separate Python plugin system for `external/file_explorer` (see `docs/PLUGIN_DEV_GUIDE.md`).
+The repository has two plugin systems: the main Topos application plugins described here, and a separate Python plugin system for `external/file_explorer` (see `docs/plugins/PLUGIN_DEV_GUIDE.md`).
 
 #### GLSL Shader Plugins (`.tglsl`)
 
@@ -449,7 +449,7 @@ vec3 process(vec3 color, vec2 uv) {
 // -----------------------------
 ```
 
-Full plugin conventions, including the two plugin systems: [docs/PLUGIN_DEV_GUIDE.md](../PLUGIN_DEV_GUIDE.md).
+Full plugin conventions, including the two plugin systems: [docs/plugins/PLUGIN_DEV_GUIDE.md](../plugins/PLUGIN_DEV_GUIDE.md).
 
 ### 5. Development Workflows
 
@@ -500,8 +500,8 @@ For builds and test gates, see [building.md](building.md) (`bash native/topos_co
 
 ### 7. Development References
 
-- [Plugin development guide](../PLUGIN_DEV_GUIDE.md) — `.tglsl`/`.tai` conventions and the two plugin systems.
-- [Module boundary rules](../module_boundary_rules.md) — feature layering and dependency constraints.
-- [TAEP engineering conventions](../taep_engineering_conventions.md) — coding and architecture rules.
-- [HDR math contract](../hdr_math_contract.md) — HDR pipeline definitions.
-- [Prompt library](../PROMPTS.md).
+- [Plugin development guide](../plugins/PLUGIN_DEV_GUIDE.md) — `.tglsl`/`.tai` conventions and the two plugin systems.
+- [Module boundary rules](../architecture/module_boundary_rules.md) — feature layering and dependency constraints.
+- [TAEP engineering conventions](../architecture/taep_engineering_conventions.md) — coding and architecture rules.
+- [HDR math contract](../architecture/hdr_math_contract.md) — HDR pipeline definitions.
+- [Prompt library](../plugins/PROMPTS.md).

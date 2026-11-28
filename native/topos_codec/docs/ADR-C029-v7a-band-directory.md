@@ -4,7 +4,7 @@
 - 状态：已接受（RD2-01 规范冻结；实现由 RD2-02～RD2-09 分批交付）
 - 关联：ADR-C027（帧头字段注册表）、ADR-C026（验收门）、
   `docs/bitstream_spec_v7.md`、
-  `docs/topos_prores_style_reduced_decode_implementation_plan.md`
+  `docs/plans/codec/topos_prores_style_reduced_decode_implementation_plan.md`
 
 ## 0. 背景
 

@@ -1,5 +1,7 @@
 # 七款音频效果器接入后复审证据
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 2026-11-15；输入提交 `22e6e1c8`，开始时工作区干净。对应 [新修复计划](../../plans/2026-11-15-audio-fx-post-integration-review.md)。本目录包含修前、修后和仍待修复的测量，不把所有JSON都当作通过结果。
 
 ## 最终验证
@@ -15,16 +17,16 @@
 | 文件 | 用途／边界 |
 |---|---|
 | [baseline.json](baseline.json)、[environment.json](environment.json) | revision、测试环境与范围 |
-| [baseline-regression.log](baseline-regression.log)／[baseline-regression.xml](baseline-regression.xml) | 修前现有回归1719项通过 |
-| [final-regression.log](final-regression.log)／[final-regression.xml](final-regression.xml) | 修后完整本轮范围的最终结果 |
+| baseline-regression.log／baseline-regression.xml | 修前现有回归1719项通过 |
+| final-regression.log／final-regression.xml | 修后完整本轮范围的最终结果 |
 | [test-files.txt](test-files.txt)、[final-test-files.txt](final-test-files.txt) | 确切96／102文件路径 |
 | [voice-before.json](voice-before.json)／[voice-after.json](voice-after.json) | Voice独立数值：局部修复与仍存在的WOLA／Pitch／F0问题 |
 | [mangler-before.json](mangler-before.json)／[mangler-after.json](mangler-after.json) | Ring／reset小修及Grain／Dist／MiniLimiter剩余缺陷 |
 | [state-export-baseline.json](state-export-baseline.json)／[state-export-after.json](state-export-after.json) | 真实导出、Stem、选区、尾音、变化自动化和真历史v2；大问题未改 |
 | [mangler-master-limiter.json](mangler-master-limiter.json) | Master修前：同PCM pre-Master差0、post差0.08230；未来峰导致整块变小 |
 | [master-guard-after.json](master-guard-after.json) | 修后首样本保留0.2，整块／1920块相同，峰受保护 |
-| [real-app-result.json](real-app-result.json)／[real-app.log](real-app.log) | 有两款新FX、两个真实编辑窗口、实际AudioSink测量 |
-| [real-app-none-result.json](real-app-none-result.json)／[real-app-none.log](real-app-none.log) | 同视频和提取音频、无FX对照；新FX收集器没有实例所以emissions=0，不代表没有播放音频 |
+| [real-app-result.json](real-app-result.json)／real-app.log | 有两款新FX、两个真实编辑窗口、实际AudioSink测量 |
+| [real-app-none-result.json](real-app-none-result.json)／real-app-none.log | 同视频和提取音频、无FX对照；新FX收集器没有实例所以emissions=0，不代表没有播放音频 |
 | [parameter-validation.json](parameter-validation.json) | NaN gain／bad seed现象，不是通过的功能声明 |
 | [delay-feedback-hotspot.json](delay-feedback-hotspot.json) | 带反馈近零Delay仍超预算，非隔离计时 |
 

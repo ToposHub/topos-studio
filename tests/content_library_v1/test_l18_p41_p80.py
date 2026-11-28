@@ -1,6 +1,6 @@
 """L18 批次 P41–P80 配方交付测试（转场 P41–P56 + 合成宏 P57–P80）。
 
-范围与口径（docs/upgrade_plan_L_content_library_2026-10-24.md §7，L18 配方与宏）：
+范围与口径（docs/plans/platform/upgrade_plan_L_content_library_2026-10-24.md §7，L18 配方与宏）：
 - 逐项：recipe.json 可解析 + 必填字段/枚举契约（kind 新增 composite_macro）；
 - 依赖真实存在（防悬空引用）：生产 transition_catalog 注册类型、暂存
   transitions/nodes 组件 manifest（nodes/ 目录只读引用）、生产 node_engine

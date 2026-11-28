@@ -1,5 +1,7 @@
 # Audio Mixer 与五款效果器复审证据
 
+> 文中提及的部分旧计划或测试附件已清理，正文保留当时的记录。
+
 日期：2026-11-15。输入提交 `06d670a9`；最终源码小修在本轮工作区。任务与实施步骤见 [新复审计划](../../plans/2026-11-15-audio-mixer-fx-review-followup.md)。
 
 ## 最终验证结果
@@ -12,15 +14,15 @@
 
 | 文件 | 用途 |
 |---|---|
-| [regression.log](regression.log)／[regression.xml](regression.xml) | 最终 pytest 文本／JUnit 证据 |
+| regression.log／regression.xml | 最终 pytest 文本／JUnit 证据 |
 | [test-files.txt](test-files.txt) | 确切测试范围，82 个路径 |
 | [environment.json](environment.json) | 输入 revision、Python／NumPy／SciPy／Qt 环境 |
 | [real-playback.json](real-playback.json) | 本轮完整 MainWindow 实播探针的数值记录 |
 | [remaining-issues.json](remaining-issues.json) | 时间回退、Bus FX 自动化、Stem pre-send、空预设／快照／未知 FX、SC cache 数值 |
-| [probe.stderr.log](probe.stderr.log) | 剩余问题探针日志；含“丢弃损坏 Master chain”这条真实降级警告 |
+| probe.stderr.log | 剩余问题探针日志；含“丢弃损坏 Master chain”这条真实降级警告 |
 | [delay-measurements.json](delay-measurements.json) | Delay 参数跳变、近零时间处理成本；机器／负载相关，非 CI 硬阈值 |
 | [legacy-eq-comparison.json](legacy-eq-comparison.json) | 相同 HPF 参数在旧 df749759 与当前 DSP 的 24.12dB 声音差异 |
-| [regression-before-fixture-update.log](regression-before-fixture-update.log) | 首次宽回归发现的测试替身接口不完整，1506 passed／1 failed／1 skipped；已修并完整复跑 |
+| regression-before-fixture-update.log | 首次宽回归发现的测试替身接口不完整，1506 passed／1 failed／1 skipped；已修并完整复跑 |
 
 首次宽回归失败原因：`test_fix_audio_mixer_aud4.py` 的 FakeDlg 只派生 QObject，缺少新增窗口释放逻辑使用的 QDialog.setAttribute／finished 接口。已将替身改为 QDialog，仍然真实发射 preview／committed 并验证命令接线；没有在产品代码中绕过窗口生命周期以迁就替身。
 

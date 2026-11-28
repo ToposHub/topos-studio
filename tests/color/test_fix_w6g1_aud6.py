@@ -1,6 +1,6 @@
 """W6-G1（批 B）修复回归测试：plan-02 发现的五条缺陷。
 
-对应证据文档 docs/testcoverage/2026-09-28/BUGS-agent-A{1,2,3}.md：
+对应证据文档 docs/validation/coverage/2026-09-28/BUGS-agent-A{1,2,3}.md：
 
 - BUG-A2-01：undo/redo 恢复翻转状态（image_engine._restore_state 消费
   flip 字段 + HistoryManager.undo/redo 对称交换记录翻转）

@@ -20,7 +20,7 @@ bpp 取紧端 × 0.98 × 0.95（proxy 2.22×/lt 1.44×/standard 1.41×/hq 1.24×
 全 22 档（整数 422/444 六档 + 浮点四档 ADR-C057 + RAW 十二档 TRAW
 批 0~5）的 display name ↔ tier id ↔ TMET label ↔ CLI ``--tier`` id
 单一映射（命名规则总纲 N-7 单一注册表，
-``docs/float_toos_and_raw_productization_plan_2026-09-21.md`` §2.1）；
+``docs/plans/image/float_toos_and_raw_productization_plan_2026-09-21.md`` §2.1）；
 应用侧档位选择面（图像序列/Quick Export/TMET 写入）一律从这里取名，
 不再各持硬编码字串表。
 
@@ -142,7 +142,7 @@ TOPOS_PROFILE_TIERS: Dict[str, ToposProfileTier] = {
             reference_mb_per_s=(1.7, 2.3),
             alpha_budget_ratio=0.20, alpha_hard_cap=0.25,
             # 2026-09-21 边缘均衡矩阵战役：422 视频档 flat(0)→id=4
-            # （锯齿诊断 docs/topos_edge_jag_diagnosis_2026-09-21.md：
+            # （锯齿诊断 docs/codec/topos_edge_jag_diagnosis_2026-09-21.md：
             #   同尺寸边缘 +0.5~0.7 dB、全帧 +0.1~0.3、色度持平、速度
             #   持平；A/B 见 bench_out/edge_jag/variants/）。仅限
             #   YUV422 10-bit profile3 域，编码器域外自动回退 flat。
@@ -527,7 +527,7 @@ def topos_capability_summary() -> Dict[str, dict]:
 # ============================================================================
 #
 # **命名规则总纲**（全产品线统一，原文见
-# docs/float_toos_and_raw_productization_plan_2026-09-21.md §2.1，已落两份
+# docs/plans/image/float_toos_and_raw_productization_plan_2026-09-21.md §2.1，已落两份
 # 白皮书"命名规则"章节）：
 #
 #   N-1 家族前缀     视频线 `Topos`（大写，MOV 容器）；图片线 `toos`（小写，

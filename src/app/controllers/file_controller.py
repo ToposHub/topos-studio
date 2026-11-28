@@ -8189,7 +8189,7 @@ class FileOpsMixin:
         """暂停/seek/逐帧/参数变化后调度邻帧窗口获取（去抖合并）。
 
         只覆盖单视频（video_controller）路径；Color 时间线 clip 路径的
-        source 帧映射较复杂，作为后续迭代（见 docs/video_denoise_spec.md）。
+        source 帧映射较复杂，作为后续迭代（见 docs/architecture/video_denoise_spec.md）。
         单独构造的 Mixin 测试桩没有全部主窗口属性，全部走 getattr 防御。
         """
         if not (getattr(self, 'current_file_is_video', False)

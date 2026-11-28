@@ -13,7 +13,7 @@
       "machine_class": "macos_intel_x86_64",
       "state": "active",
       "note": "1080p/2K H.264 单轨稳态 p95：25fps 前台渲染预算。",
-      "source": "master_plan §3.2; baseline docs/p0_baseline_report_macos_2026-09-16.md"
+      "source": "master_plan §3.2; baseline docs/benchmarks/performance/p0_baseline_report_macos_2026-09-16.md"
     },
     {
       "budget_id": "BUD-B01-SEEK-P95",
@@ -61,7 +61,7 @@
       "machine_class": "macos_intel_x86_64",
       "state": "known_breach",
       "note": "4K H265 长 GOP seek p95：首轮基线 519ms。P2-05 已落地（commit 1f710878：持久化 GOP 索引 + HEVC SLICE seek 会话）复测 266.7ms（-49%），仍超 150ms 硬门——剩余缺口为 HEVC 软解单帧成本（~13ms/帧 × 平均 11 帧 walk），责任转移 P2-14（解码内核 SIMD/内存布局）；macOS 生产播放路径走 VT 硬解 + 交互 coarse，本口径为 CPU 软解回退路径的下界证据。",
-      "source": "baseline docs/p0_baseline_report_macos_2026-09-16.md; P2-05 复测 bench_out/p2_05_after（2026-09-16）"
+      "source": "baseline docs/benchmarks/performance/p0_baseline_report_macos_2026-09-16.md; P2-05 复测 bench_out/p2_05_after（2026-09-16）"
     },
     {
       "budget_id": "BUD-B03-STEADY-P95",
@@ -73,7 +73,7 @@
       "machine_class": "macos_intel_x86_64",
       "state": "known_breach",
       "note": "4K ProRes 软解稳态 p95 实测 38.2ms（E-06 复现）。修复责任工作项 P1-04/P2-02（realtime 代理接管）——接管后原片不再进实时解码路径，本预算约束代理档位。",
-      "source": "baseline docs/p0_baseline_report_macos_2026-09-16.md"
+      "source": "baseline docs/benchmarks/performance/p0_baseline_report_macos_2026-09-16.md"
     },
     {
       "budget_id": "BUD-B03-SEEK-P95",
@@ -97,7 +97,7 @@
       "machine_class": "macos_intel_x86_64",
       "state": "active",
       "note": "Topos 422 家族（含 proxy）稳态 p95：native 75.6fps / proxy 212fps，soft 门槛 20ms 有充分余量。",
-      "source": "master_plan §3.2; T-01 复验 docs/topos_422_family_benchmark_2026-09-16.md"
+      "source": "master_plan §3.2; T-01 复验 docs/benchmarks/performance/topos_422_family_benchmark_2026-09-16.md"
     },
     {
       "budget_id": "BUD-B04-SEEK-P95",

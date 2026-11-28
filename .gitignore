@@ -175,7 +175,7 @@ testfarm/**/G*.xml
 bench_out/**/*.wav
 
 # [隐私清洗 2026-10-31] 覆盖率原始二进制含本机路径，不入仓(可再生)
-docs/testcoverage/**/.covdata
+docs/validation/coverage/**/.covdata
 
 # [侵权排查 2026-11-01] Blackmagic DeckLink SDK 为专有许可，禁止公开再分发；
 # 本地保留用于开发，需要时从 Blackmagic 官网下载

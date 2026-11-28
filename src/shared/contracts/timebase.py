@@ -17,7 +17,7 @@
 3. **生产对拍**：合同测试（``tests/shared/test_timebase_contract_vectors.py``）
    把向量逐点喂给桌面生产实现。
 
-冻结的映射规则（与 docs/adr/0005 §5、F0.4 ADR 一致）
+冻结的映射规则（与 docs/architecture/adr/0005 §5、F0.4 ADR 一致）
 -----------------------------------------------------
 CFR（恒定帧率）::
 

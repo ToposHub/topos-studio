@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """T-P1-11 step 1 — TOPOS CPU encode stage matrix (native encode_stage_stats).
 
-Task card (docs/ai_executable_optimization_upgrade_plan_2026-09-17.md
+Task card (docs/plans/ai/ai_executable_optimization_upgrade_plan_2026-09-17.md
 §T-P1-11) step 1: build a matrix over output profile (proxy/lt/standard/hq),
 source resolution (2K/4K real TOPOS sources), slice thread count and
 slice_rows before changing anything, and locate the dominant encode stage.

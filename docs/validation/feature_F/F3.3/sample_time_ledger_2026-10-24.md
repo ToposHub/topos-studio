@@ -1,7 +1,7 @@
 # F3.3 · 采样级音频编辑与迁移 — 验证台账
 
 - 日期：2026-10-24
-- 计划条目：docs/feature_plan_F_davinci_2026-10-22.md §F3.3
+- 计划条目：docs/plans/performance/feature_plan_F_davinci_2026-10-22.md §F3.3
 - 测试：`tests/edit/test_sample_time_audio.py`（16）＋回归 138 绿
   （audio transitions / clip speed fade / preserve-pitch×2 / round7 audio
   output / timestretch / multicam production / 序列化×3）

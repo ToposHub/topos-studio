@@ -7,8 +7,8 @@
   "initial_git_status": "clean",
   "scope": "Plan/source/evidence audit, isolated domain pytest, helper probes; no current Windows/GPU/GUI/packaged-app acceptance. Small fixes are uncommitted working-tree changes.",
   "original_plans": [
-    "docs/upgrade_plan_M_mac_2026-10-24.md",
-    "docs/upgrade_plan_W_windows_2026-10-24.md"
+    "docs/plans/platform/upgrade_plan_M_mac_2026-10-24.md",
+    "docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md"
   ],
   "checks": {
     "m00_gate": {

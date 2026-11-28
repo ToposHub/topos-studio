@@ -3,7 +3,7 @@
 
 读取 ``bench_out/d1_playback/**/result.json``（bench_topos_playback_path.py
 产物），对每轮 sequential run 的 ``p99_ms`` 按 30fps 帧预算判定：
-预算默认 **33.3 ms**（docs/4k-playback-optimization.md §3.1；可用
+预算默认 **33.3 ms**（docs/plans/performance/4k-playback-optimization.md §3.1；可用
 ``--budget-ms`` 覆盖）。任何一轮 p99 超预算即打印明细并以 **exit 1**
 失败——已知案例：4K 4444xq 第二轮 p99=36.638 ms（REGRESSION_BASELINE.md
 ANC-04 / BENCH-0002）。

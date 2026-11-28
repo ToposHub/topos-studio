@@ -34,7 +34,7 @@
 
 Apple 公布的 RX 6900 XT 支持信息适用于其文档中的 Intel Mac eGPU 配置（列出 Device ID `0x73BF`）。黑苹果须按这台机器的 macOS、CPU、显卡和系统配置做实测。先冻结当前能启动的配置，记录 Topos 选中的 Metal 设备以及 `VideoToolbox` 解码/编码会话状态。出现硬件回退时，用同一版本复跑 CPU 路径定位。只转交型号和版本，设备序列号等机器标识留在本机。 [Apple eGPU 说明](https://support.apple.com/en-ie/102363) · [Rosetta 与应用架构](https://support.apple.com/en-us/102527)
 
-项目已有 i9-9900K、RX 6900 XT 16 GB、macOS 15.3.1 的机器基线。11 月 23 日的探针识别了 6900 XT，NV12、P010、BGRA 和 4:2:2 测试表面可用，同时记录了 `pyobjc_corevideo_route_unusable`。11 月 25 日旧库回归的 UHD25 H.264 播放以 VT 零拷贝为主。若测试同一台机器，沿用它作为 6900 XT 对照并保留这些旧记录，补测本轮 Topos 和 ProRes。已有证据覆盖该机对应的表面或 H.264 路径。 [机器基线](../perf_baseline_freeze_mac_2026-10.md) · [6900 XT Metal 探针](../macos_metal_migration/evidence/capabilities-intel-amd-2026-11-23.md) · [旧库播放实测](../validation/2026-11-25-macos-h264-main10-regression.md)
+项目已有 i9-9900K、RX 6900 XT 16 GB、macOS 15.3.1 的机器基线。11 月 23 日的探针识别了 6900 XT，NV12、P010、BGRA 和 4:2:2 测试表面可用，同时记录了 `pyobjc_corevideo_route_unusable`。11 月 25 日旧库回归的 UHD25 H.264 播放以 VT 零拷贝为主。若测试同一台机器，沿用它作为 6900 XT 对照并保留这些旧记录，补测本轮 Topos 和 ProRes。已有证据覆盖该机对应的表面或 H.264 路径。 [机器基线](../benchmarks/performance/perf_baseline_freeze_mac_2026-10.md) · [6900 XT Metal 探针](../architecture/macos_metal_migration/evidence/capabilities-intel-amd-2026-11-23.md) · [旧库播放实测](../validation/2026-11-25-macos-h264-main10-regression.md)
 
 ## 3. 版本和素材准备
 

@@ -41,7 +41,7 @@ Covered units:
   guards, clip-strip debounce wiring
 
 Suspected src bugs found while writing these tests are recorded in
-``docs/testcoverage/2026-09-28/BUGS-agent-C3.md`` (BUG-C3-xx); nothing in
+``docs/validation/coverage/2026-09-28/BUGS-agent-C3.md`` (BUG-C3-xx); nothing in
 src is modified here.  Where a test pins the *current* behaviour of a
 suspected bug it references the matching BUG-C3-xx number in a comment so
 the assertion gets updated together with the fix.
@@ -1235,7 +1235,7 @@ def test_timeline_controls_bar_slots_accumulate_across_rewires() -> None:
     closures, so previous enters stayed connected and captured stale
     controllers.  Now the previous closures are recorded in
     ``_composite_timeline_bar_slots`` and torn down on the next rewire.
-    See docs/testcoverage/2026-09-28/BUGS-agent-C3.md.
+    See docs/validation/coverage/2026-09-28/BUGS-agent-C3.md.
     """
     controller = _RecordingPlaybackController(current_frame=5)
     host, bar, _page = _timeline_controls_host(controller)

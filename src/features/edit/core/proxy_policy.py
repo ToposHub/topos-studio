@@ -22,7 +22,7 @@ PROXY_POLICY_MODES = ("off", "auto", "all")
 """``off``：完全关闭自动生成；``auto``：超过原生阈值的视频自动生成；
 ``all``：所有在线视频自动生成（不论分辨率）。"""
 
-#: T-02 默认档位证据（docs/topos_422_family_benchmark_2026-09-16.md）：
+#: T-02 默认档位证据（docs/benchmarks/performance/topos_422_family_benchmark_2026-09-16.md）：
 #: Topos 家族 native decode 4K 75.6fps / 2K ≥140fps / proxy 212-740fps，
 #: 本身就是编辑优化编码——任何分辨率都不需要再套代理。
 _TOPOS_CODEC_MARKER = "topos"

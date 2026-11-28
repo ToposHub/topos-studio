@@ -48,7 +48,7 @@ jobs:
   lint:
     # P2 质量还债（2026-10-28）：ruff（E9/F63/F7/F82 零误报集，首轮已全量
     # 清零）+ mypy（增量 files=src/shared/logging|paths + src/products，起步
-    # 域 0 错误）。收紧节奏按 docs/code_quality_debt_plan_2026-10-28.md P2，
+    # 域 0 错误）。收紧节奏按 docs/plans/code_quality/code_quality_debt_plan_2026-10-28.md P2，
     # 每轮加规则/扩 files 当轮清零。分支保护需将 lint 设为 required。
     name: lint (ruff + mypy)
     runs-on: ubuntu-latest
@@ -222,7 +222,7 @@ jobs:
           fi
       - name: i18n literal ratchet (watch-only)
         # P3 防回归（2026-10-28）：新增 UI 硬编码字面量即红；存量残留走
-        # docs/i18n_literal_baseline.json 棘轮（14 处已登记误报）。先在
+        # docs/validation/code_quality/i18n_literal_baseline.json 棘轮（14 处已登记误报）。先在
         # watch job 观察，误报率可接受后翻 required。
         run: python tools/check_i18n_literals.py
       - name: Architecture guardrails

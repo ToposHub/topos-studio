@@ -1,7 +1,7 @@
 """视频降噪 GLSL 着色器集合（时域 + 空域 + 运动估计）。
 
 所有 shader 在渲染线程的 ModernGL 上下文中编译（#version 330 core）。
-设计约束（docs/video_denoise_implementation_plan.md M1.4 / M6）：
+设计约束（docs/plans/video/video_denoise_implementation_plan.md M1.4 / M6）：
 - 避免逐采样 exp()：空间/值域权重使用有理近似 1/(1+k*x*x)
 - Fast 模式单 pass 小半径；Better 模式可分离两 pass；Enhanced 多尺度
 - 运动估计在 1/4 分辨率亮度图上做块匹配

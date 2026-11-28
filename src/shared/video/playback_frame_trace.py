@@ -709,7 +709,7 @@ class FrameTraceCollector:
         """按并行解码流数分桶的 decode_ms 分布（多流解码波饱和遥测）。
 
         判读（W3 zero-copy 立项的 K-W1 触发信号采集，
-        见 docs/windows_optimization_plan_2026-09-11.md §11）：
+        见 docs/plans/platform/windows_optimization_plan_2026-09-11.md §11）：
         - 单流（layers=1）decode_ms 已超预算 → 单流解码本身是瓶颈；
         - decode_ms 随 decode_layers 线性恶化且单流不超预算 → 多流下
           CPU 解码核饱和，硬解 zero-copy / 代理档才有立项收益；

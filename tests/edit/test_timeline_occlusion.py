@@ -1,7 +1,7 @@
 """
 Timeline Occlusion Culling 单元测试。
 
-实施记录：docs/timeline_occlusion_culling_implementation_2026-09-19.md
+实施记录：docs/architecture/timeline_occlusion_culling_implementation_2026-09-19.md
 覆盖全部安全/不安全条件的纯逻辑单测（fake layer，不请求解码帧）。
 """
 

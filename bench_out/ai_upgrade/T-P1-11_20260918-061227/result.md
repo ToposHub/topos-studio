@@ -2,7 +2,7 @@
 
 - 执行日期：2026-09-18
 - 分支：chore/edit
-- 任务卡：docs/ai_executable_optimization_upgrade_plan_2026-09-17.md §T-P1-11
+- 任务卡：docs/plans/ai/ai_executable_optimization_upgrade_plan_2026-09-17.md §T-P1-11
 - 依赖：T-P0-20（DONE）、T-P1-10（DONE）
 
 ## 结论

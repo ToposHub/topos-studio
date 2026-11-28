@@ -1,6 +1,6 @@
 name: windows-logic
 
-# W7-02（docs/windows_optimization_plan_2026-09-11.md）：
+# W7-02（docs/plans/platform/windows_optimization_plan_2026-09-11.md）：
 # Windows 无 GPU 逻辑层常跑 —— capability 数据整形、windows_hw 契约
 # （reason 词表 / D3D11 骨架 / planar source mock 注入）、hwaccel 枚举、
 # 硬编映射、backend selector 诊断链。

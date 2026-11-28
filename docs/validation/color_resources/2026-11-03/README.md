@@ -1,6 +1,6 @@
 # Effects / LUT UI 交付与验证（2026-11-03）
 
-本轮只完成 UI、交互和只读资源目录展示，不接入新的效果/LUT项目写入或渲染。后续统一施工入口为 [详细后端计划](../../../color_resources_backend_implementation_plan.md)：R00–R12为资源接线任务，N01–N17覆盖旧节点计划及最新实测仍未完成的事项。
+本轮只完成 UI、交互和只读资源目录展示，不接入新的效果/LUT项目写入或渲染。后续统一施工入口为 [详细后端计划](../../../plans/color/color_resources_backend_implementation_plan.md)：R00–R12为资源接线任务，N01–N17覆盖旧节点计划及最新实测仍未完成的事项。
 
 ## 已实现
 

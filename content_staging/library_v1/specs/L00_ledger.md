@@ -1,6 +1,6 @@
 # L00 逐项去重台账 · F/X/C/P
 
-> 依据 `docs/upgrade_plan_L_content_library_2026-10-24.md` §8 L00。
+> 依据 `docs/plans/platform/upgrade_plan_L_content_library_2026-10-24.md` §8 L00。
 > 基线：HEAD 70bfe5fee，2026-10-25（见 `docs/validation/upgrade_L/L00_baseline.md`）。
 > 状态均为 **planned**（本表为 L00 去重结论，非完成声明）。
 > 证据列给到"文件（行号按开工 checkout）"；行号是定位锚点不是固定接口。
@@ -11,7 +11,7 @@
 > X01/X09（transition_packs 生产核 + L03 报告）、C01/C17（nodes/lib1_nodes +
 > L04 报告）、F18（EffectCatalog 内置 lib1_posterize）。下表"状态"列保持
 > L00 冻结口径；逐项最新状态见 docs/validation/upgrade_L/ 各报告与
-> docs/upgrade_plan_L_content_library_2026-10-24.md 的包表勾选。
+> docs/plans/platform/upgrade_plan_L_content_library_2026-10-24.md 的包表勾选。
 
 图例：分类 N=新算法候选，E=已有算法明确差量，W=复用现有核提供入口；
 等价度 = **无重复**（全新核）/ **部分等价**（算法或子集已存在，差量明确）/ **可复用**（入口差量）。

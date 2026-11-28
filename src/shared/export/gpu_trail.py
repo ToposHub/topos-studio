@@ -1,6 +1,6 @@
 """ExportGpuTrail：Windows 全 GPU 导出的证据契约。
 
-对应计划 docs/windows_timeline_gpu_export_optimization_plan_2026-09-15.md §3.3：
+对应计划 docs/plans/platform/windows_timeline_gpu_export_optimization_plan_2026-09-15.md §3.3：
 
     | ExportGpuTrail | 每段后端、回读字节数、上传字节数、等待时间、回退 reason |
     | 任何"全 GPU"结论必须由该 trail 证明。 |

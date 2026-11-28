@@ -22,8 +22,8 @@ Run from the repository root::
 
     PYTHONPATH=. .venv/bin/python tools/bench_metal_ab_playback.py \
         --ab-dir bench_out/metal-ab.2026-11-23 --repeats 4 \
-        --output-json docs/macos_metal_migration/evidence/ab-playback.json \
-        --output-md docs/macos_metal_migration/evidence/ab-playback.md
+        --output-json docs/architecture/macos_metal_migration/evidence/ab-playback.json \
+        --output-md docs/architecture/macos_metal_migration/evidence/ab-playback.md
 """
 
 from __future__ import annotations

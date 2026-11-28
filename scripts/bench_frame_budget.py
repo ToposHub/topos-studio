@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""帧预算基准 harness（计划 A A0.1/A0.2；docs/perf_frame_budget_schema_2026-10.md）。
+"""帧预算基准 harness（计划 A A0.1/A0.2；docs/benchmarks/performance/perf_frame_budget_schema_2026-10.md）。
 
 目标：在**真实生产原语**（真实解码源路由、YuvGpuUploader、GlPassTimer、
 FrameTraceCollector/TelemetryAggregator 的 schema v3 通道）上，对每帧做

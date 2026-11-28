@@ -118,7 +118,7 @@
       "id": "R14",
       "omission": "硬依赖过大与W09/UW01推广口径倒置",
       "owner": "M07/M09–M12/M18；W09/升级UW01",
-      "repository_relative_path": "docs/upgrade_plan_W_windows_2026-10-24.md",
+      "repository_relative_path": "docs/plans/platform/upgrade_plan_W_windows_2026-10-24.md",
       "line": 1,
       "evidence": "计划安排修正，不计产品新bug"
     }
