@@ -19,7 +19,7 @@ from PyQt6.QtGui import (
     QFontMetrics,
     QIcon,
     QKeySequence,
-    QMouseEvent,
+    QPaintEvent,
     QPainter,
     QPainterPath,
     QPen,
@@ -28,10 +28,8 @@ from PyQt6.QtGui import (
     QShortcut,
 )
 from PyQt6.QtWidgets import (
-    QButtonGroup,
     QCheckBox,
     QDialog,
-    QFrame,
     QGridLayout,
     QInputDialog,
     QHBoxLayout,
@@ -46,12 +44,15 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QStyle,
+    QStyleOptionButton,
     QStyleOptionViewItem,
+    QStylePainter,
     QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
 
+from src.app.ui.startup_dialog import DraggableHeaderDialog, WorkModeSelector
 from src.app.update_checker import CURRENT_VERSION
 from src.shared.config.config_manager import ConfigManager
 from src.shared.feature_flags import get_product_mode, get_work_mode
@@ -114,6 +115,22 @@ _BROWSER_SETTINGS = "project_manager_browser"
 _MIN_CARD_CELL_WIDTH = 150
 _CARD_INSET = 6
 _CARD_DETAILS_HEIGHT = 42
+
+
+class _ResumeButton(QPushButton):
+    """Keep the footer action readable when the project name is long."""
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        return QSize(100, super().minimumSizeHint().height())
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt override
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        contents = self.style().subElementRect(QStyle.SubElement.SE_PushButtonContents, option, self)
+        text_width = contents.width() - option.iconSize.width() - 4
+        option.text = option.fontMetrics.elidedText(option.text, Qt.TextElideMode.ElideRight, text_width)
+        painter = QStylePainter(self)
+        painter.drawControl(QStyle.ControlElement.CE_PushButton, option)
 
 
 class _ProjectGrid(QListWidget):
@@ -487,7 +504,7 @@ class _BackupHistoryDialog(QDialog):
             super().reject()
 
 
-class ProjectManagerDialog(QDialog):
+class ProjectManagerDialog(DraggableHeaderDialog):
     """Video-mode project manager shown at startup.
 
     Signals:
@@ -512,7 +529,6 @@ class ProjectManagerDialog(QDialog):
         # WA_DeleteOnClose 销毁时 Qt 自动断开本对象的全部连接，一并解决。
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._config = config_manager
-        self._drag_offset: QPoint | None = None
         self._active_project_path = (
             os.path.abspath(active_project_path) if active_project_path else None
         )
@@ -558,7 +574,6 @@ class ProjectManagerDialog(QDialog):
         layout.setContentsMargins(24, 16, 24, 20)
         layout.setSpacing(12)
 
-        self._header = QWidget()
         header = QGridLayout(self._header)
         header.setContentsMargins(0, 0, 0, 0)
         header.setHorizontalSpacing(12)
@@ -578,23 +593,9 @@ class ProjectManagerDialog(QDialog):
         self._mode_btns: dict[str, QPushButton] = {}
 
         if get_product_mode() == "studio":
-            mode_bar = QFrame()
-            mode_bar.setObjectName("pmModes")
-            modes = QHBoxLayout(mode_bar)
-            modes.setContentsMargins(4, 4, 4, 4)
-            modes.setSpacing(4)
-            self._mode_group = QButtonGroup(self)
-            current_mode = get_work_mode(self._config)
-            for mode, default in (("image", "Image Grading"), ("video", "Video Grading")):
-                button = self._button(
-                    I18N.tr(f"preferences.general.work_mode.{mode}", default), "pmMode"
-                )
-                button.setCheckable(True)
-                self._mode_group.addButton(button)
-                button.setChecked(mode == current_mode)
-                button.clicked.connect(lambda _checked, target=mode: self._on_mode_clicked(target))
-                self._mode_btns[mode] = button
-                modes.addWidget(button, 1)
+            mode_bar = WorkModeSelector(get_work_mode(self._config))
+            mode_bar.mode_requested.connect(self._on_mode_clicked)
+            self._mode_btns = mode_bar.buttons
             header.addWidget(mode_bar, 0, 1)
 
         self.close_btn = self._button(
@@ -618,21 +619,6 @@ class ProjectManagerDialog(QDialog):
         self.scan_status.hide()
         heading.addWidget(self.scan_status)
         heading.addStretch()
-
-        self.resume_btn = self._button(
-            I18N.tr("pm.resume", "Continue last project"), "pmQuiet",
-            get_icon("fa5s.history", color=_MUTED),
-        )
-        self.resume_btn.clicked.connect(self._on_resume_last_project)
-        self._update_resume_button()
-        heading.addWidget(self.resume_btn)
-
-        self.new_btn = self._button(
-            I18N.tr("pm.new_project", "New Project"), "pmPrimary",
-            icon_operation_add(_PRIMARY_TEXT), height=36,
-        )
-        self.new_btn.clicked.connect(self._on_new_project)
-        heading.addWidget(self.new_btn)
         layout.addLayout(heading)
 
         toolbar = QHBoxLayout()
@@ -773,6 +759,22 @@ class ProjectManagerDialog(QDialog):
         self.selection_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.selection_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         footer.addWidget(self.selection_label, 1)
+        self.resume_btn = self._button(
+            I18N.tr("pm.resume", "Continue last project"), "pmQuiet",
+            get_icon("fa5s.history", color=_MUTED),
+            button_type=_ResumeButton,
+        )
+        self.resume_btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.resume_btn.clicked.connect(self._on_resume_last_project)
+        self._update_resume_button()
+        footer.addWidget(self.resume_btn)
+
+        self.new_btn = self._button(
+            I18N.tr("pm.new_project", "New Project"), "pmPrimary",
+            icon_operation_add(_PRIMARY_TEXT), height=36,
+        )
+        self.new_btn.clicked.connect(self._on_new_project)
+        footer.addWidget(self.new_btn)
         self.open_btn = self._button(I18N.tr("pm.open", "Open"), "pmOpen", height=36)
         self.open_btn.setEnabled(False)
         self.open_btn.clicked.connect(self._on_open_clicked)
@@ -833,9 +835,10 @@ class ProjectManagerDialog(QDialog):
 
     @staticmethod
     def _button(
-        text: str, role: str, icon: QIcon | None = None, *, height: int = 36, hint: str = ""
+        text: str, role: str, icon: QIcon | None = None, *, height: int = 36, hint: str = "",
+        button_type: type[QPushButton] = QPushButton,
     ) -> QPushButton:
-        button = QPushButton(text)
+        button = button_type(text)
         button.setObjectName(role)
         button.setAutoDefault(False)
         button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -883,19 +886,18 @@ class ProjectManagerDialog(QDialog):
             QPushButton#pmOpen:disabled {{
                 background: transparent; color: {_DISABLED}; border-color: {_BORDER};
             }}
-            QFrame#pmModes {{ background: {_WELL}; border: 1px solid {_BORDER}; border-radius: 10px; }}
-            QPushButton#pmMode {{
-                min-width: 100px; font-size: 13px; font-weight: 600;
-            }}
-            QPushButton#pmPrimary, QPushButton#pmOpen:enabled, QPushButton#pmMode:checked {{
+            QPushButton#pmPrimary, QPushButton#pmOpen:enabled {{
                 background: {_PRIMARY}; color: {_PRIMARY_TEXT}; font-weight: 700; padding: 0 16px;
             }}
-            QPushButton#pmPrimary:hover, QPushButton#pmOpen:enabled:hover,
-            QPushButton#pmMode:checked:hover {{ background: {_PRIMARY_HOVER}; }}
-            QPushButton#pmPrimary:pressed, QPushButton#pmOpen:enabled:pressed,
-            QPushButton#pmMode:checked:pressed {{ background: {_PRIMARY_PRESSED}; }}
-            QPushButton#pmPrimary:focus, QPushButton#pmOpen:enabled:focus,
-            QPushButton#pmMode:checked:focus {{ border-color: {_PRIMARY_TEXT}; }}
+            QPushButton#pmPrimary:hover, QPushButton#pmOpen:enabled:hover {{
+                background: {_PRIMARY_HOVER};
+            }}
+            QPushButton#pmPrimary:pressed, QPushButton#pmOpen:enabled:pressed {{
+                background: {_PRIMARY_PRESSED};
+            }}
+            QPushButton#pmPrimary:focus, QPushButton#pmOpen:enabled:focus {{
+                border-color: {_PRIMARY_TEXT};
+            }}
             QLineEdit#pmSearch, QComboBox#pmSort {{
                 background: {_WELL}; color: {_TEXT}; border: 1px solid {_BORDER};
                 border-radius: 6px; font-size: 13px;
@@ -926,33 +928,6 @@ class ProjectManagerDialog(QDialog):
             QListWidget#pmList QScrollBar::add-page:vertical,
             QListWidget#pmList QScrollBar::sub-page:vertical {{ background: transparent; }}
         """)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        if (
-            event.button() == Qt.MouseButton.LeftButton
-            and event.position().y() <= self._header.geometry().bottom()
-        ):
-            self._drag_offset = None
-            window = self.windowHandle()
-            if window is None or not window.startSystemMove():
-                self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-            return
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        if self._drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
-            event.accept()
-            return
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 - Qt override
-        if event.button() == Qt.MouseButton.LeftButton and self._drag_offset is not None:
-            self._drag_offset = None
-            event.accept()
-            return
-        super().mouseReleaseEvent(event)
 
     def _on_skip_startup_toggled(self, checked: bool) -> None:
         self._config.set("show_project_manager_on_startup", not checked, auto_save=True)

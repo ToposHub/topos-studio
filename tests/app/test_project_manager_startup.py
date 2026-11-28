@@ -184,6 +184,22 @@ def test_sort_refresh_and_keyboard_open_preserve_selected_project(qtbot, project
     assert opened.args == [cut.path]
 
 
+def test_project_creation_and_resume_are_in_the_footer(qtbot, project_browser):
+    dialog, _projects = project_browser
+    dialog.resize(dialog.minimumSize())
+    dialog.resume_btn.setText(dialog.resume_btn.text() + " " + "long project name " * 6)
+    dialog.layout().activate()
+
+    assert dialog.resume_btn.isVisible()
+    assert dialog.resume_btn.y() == dialog.new_btn.y() == dialog.open_btn.y()
+    assert 0 < dialog.open_btn.x() - dialog.new_btn.geometry().right() <= 13
+    assert dialog.resume_btn.y() > dialog.list_widget.geometry().bottom()
+    assert dialog.resume_btn.width() < dialog.resume_btn.sizeHint().width()
+    assert dialog.new_btn.width() >= dialog.new_btn.minimumSizeHint().width()
+    with qtbot.waitSignal(dialog.new_project_requested, timeout=1000):
+        qtbot.mouseClick(dialog.new_btn, Qt.MouseButton.LeftButton)
+
+
 def test_resume_hides_if_last_project_is_removed(qtbot, project_browser, monkeypatch):
     dialog, projects = project_browser
     cut, _grade, _delivery = projects

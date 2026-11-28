@@ -12,6 +12,7 @@ import logging
 
 from typing import Any
 
+from PyQt6 import sip
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QButtonGroup,
     QPushButton, QToolBar, QToolButton, QStatusBar, QMessageBox, QMenu,
@@ -1226,7 +1227,9 @@ class MenuToolbarMixin:
         dlg = WelcomeDialog(self.config_manager, self)
         dlg.open_file_requested.connect(self.open_file)
         dlg.recent_file_selected.connect(self._open_recent_from_welcome)
-        dlg.recent_project_selected.connect(self._open_recent_project_from_welcome)
+        dlg.recent_project_selected.connect(
+            lambda path: self._open_project_from_welcome(path, dlg),
+        )
         dlg.exec()
 
     def _is_video_work_mode(self) -> bool:
@@ -1552,9 +1555,14 @@ class MenuToolbarMixin:
         if self._open_project_path(project_path):
             manager_dialog.accept()
 
-    def _open_recent_project_from_welcome(self, filepath: str) -> None:
-        """Open a .topos project selected from the welcome dialog."""
-        self._open_project_path(filepath)
+    def _open_project_from_welcome(self, filepath: str, dialog: QDialog) -> None:
+        """Close the welcome dialog only after the selected project opens."""
+
+        def close_dialog() -> None:
+            if not sip.isdeleted(dialog):
+                dialog.accept()
+
+        self._open_project_path(filepath, on_opened=close_dialog)
 
     def _open_recent_from_welcome(self, filepath: str) -> None:
         """Open a file selected from the welcome dialog."""

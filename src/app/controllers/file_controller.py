@@ -652,8 +652,11 @@ class FileOpsMixin:
         if filepath:
             self._open_project_path(filepath)
 
-    def _open_project_path(self, filepath: str, *, decoded_photo: DecodedPhoto | None = None) -> bool:
-        """Open a project path, choosing image or edit hydration automatically."""
+    def _open_project_path(
+        self, filepath: str, *, decoded_photo: DecodedPhoto | None = None,
+        on_opened: Callable[[], None] | None = None,
+    ) -> bool:
+        """Open an image or edit project and notify callers after a successful load."""
         if decoded_photo is None:
             FileOpsMixin._cancel_grade_set_image_request(self)
         decode_args = {"decoded_photo": decoded_photo} if decoded_photo is not None else {}
@@ -661,8 +664,11 @@ class FileOpsMixin:
             return False
         if not self._check_project_matches_work_mode(filepath):
             return False
+        open_args = dict(decode_args)
+        if on_opened is not None:
+            open_args["on_opened"] = on_opened
         if not FileOpsMixin._prepare_to_leave_photo(
-                self, lambda: self._open_project_path(filepath, **decode_args)):
+                self, lambda: self._open_project_path(filepath, **open_args)):
             return False
         if getattr(self, "_current_edit_project", None) is not None:
             # Closing the previous document is part of this decode's handoff.
@@ -692,6 +698,8 @@ class FileOpsMixin:
                 apply_window_size()
         if loaded:
             self._sync_mg_preset_project_root(filepath)
+            if on_opened is not None:
+                on_opened()
 
         return loaded
 

@@ -116,6 +116,7 @@ class ConfigManager:
         # ~/Documents/ToposProjects (created on first use). Only the video-mode
         # Project Manager scans this directory; image mode is unaffected.
         "project_library_directory": "",
+        "image_project_folders": [],
         # Back up the saved project every 15 minutes into the backup archive.
         # This is separate from auto-save recovery files.
         "auto_backup_interval": 15,

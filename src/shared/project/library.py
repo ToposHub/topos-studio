@@ -1,13 +1,4 @@
-"""Video-mode project library scanning and metadata.
-
-The Project Manager (video mode only) scans a fixed library directory for
-.topos archives and presents them as cards. This module provides the data
-layer: directory resolution, lightweight metadata reads (no full project
-load) and cover-thumbnail extraction.
-
-The image workflow also uses the lightweight metadata reader to establish
-which adjacent .topos archive belongs to a particular source.
-"""
+"""Project folder scanning, lightweight archive metadata, and backups."""
 
 from __future__ import annotations
 
@@ -21,9 +12,10 @@ import time
 import uuid
 import zipfile
 import datetime
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +379,9 @@ def _archive_float(value: Any, fallback: float) -> float:
         return fallback
 
 
-def read_project_meta(path: str, *, require_manifest_mode: bool = False) -> Optional[ProjectMeta]:
+def read_project_meta(
+    path: str, *, require_manifest_mode: bool = False, require_manifest: bool = False,
+) -> Optional[ProjectMeta]:
     """Read a .topos archive's metadata without a full load.
 
     Opens the zip and reads only manifest.json + project.json. Returns None
@@ -396,8 +390,11 @@ def read_project_meta(path: str, *, require_manifest_mode: bool = False) -> Opti
     """
     try:
         with zipfile.ZipFile(path, "r") as zf:
-            manifest = _read_zip_json(zf, "manifest.json") or {}
-            if require_manifest_mode and (not isinstance(manifest, dict) or not manifest.get("project_mode")):
+            manifest = _read_zip_json(zf, "manifest.json")
+            if require_manifest and manifest is None:
+                return None
+            manifest = manifest or {}
+            if require_manifest_mode and not manifest.get("project_mode"):
                 return None
             project = _read_zip_json(zf, "project.json") or {}
     except (zipfile.BadZipFile, OSError) as exc:
@@ -500,14 +497,19 @@ def scan_video_projects(config: Any = None) -> list[ProjectMeta]:
 
 def scan_project_libraries(
     config: Any = None,
+    *,
+    work_mode: Literal["image", "video"] = "video",
+    directories: Iterable[Path] | None = None,
 ) -> tuple[list[ProjectMeta], list[ProjectLibraryLocation]]:
-    """Read projects and report which registered directories could be listed."""
+    """List projects of a work mode in the supplied folders or registered libraries."""
     results: list[ProjectMeta] = []
     locations: list[ProjectLibraryLocation] = []
     seen_paths: set[str] = set()
-    if config is None or not config.get("project_library_directory"):
-        get_project_library_dir(config)
-    for lib_dir in get_project_library_dirs(config):
+    if directories is None:
+        if config is None or not config.get("project_library_directory"):
+            get_project_library_dir(config)
+        directories = get_project_library_dirs(config)
+    for lib_dir in directories:
         try:
             entries = list(lib_dir.iterdir())
         except OSError as exc:
@@ -525,8 +527,8 @@ def scan_project_libraries(
             if key in seen_paths:
                 continue
             seen_paths.add(key)
-            meta = read_project_meta(os.path.abspath(entry))
-            if meta is not None and is_video_project(meta):
+            meta = read_project_meta(os.path.abspath(entry), require_manifest=work_mode == "image")
+            if meta is not None and is_video_project(meta) == (work_mode == "video"):
                 results.append(meta)
     results.sort(key=lambda m: (m.modified_at or m.file_modified_at or 0.0), reverse=True)
     return results, locations
