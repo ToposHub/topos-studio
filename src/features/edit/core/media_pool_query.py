@@ -237,7 +237,7 @@ def _scope_assets(project: EditProject, query: MediaPoolQuery) -> list[MediaAsse
     if query.scope == _SCOPE_SMART_BIN:
         # R10：Smart Bin 的规则求值与普通查询同一执行域（查询线程），
         # 大数据池切 Smart Bin 不再在 UI 线程同步全量求值。
-        assets = project.get_smart_bin_assets(query.bin_id or "")
+        assets = project.get_smart_bin_assets(query.bin_id or "", probe_offline=False)
         if assets is None:
             raise ValueError(f"Smart bin not found: {query.bin_id}")
         return list(assets)

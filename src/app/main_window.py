@@ -44,6 +44,7 @@ def _config_bool(value, default: bool = False) -> bool:
 # --- Category 2: Imports needed in __init__ (module-level) ---
 from src.features.color.core.image_engine import ImageEngine
 from src.shared.io.file_io import FileIO
+from src.shared.io.mount_paths import is_external_mount_path
 from src.shared.ui.style_sheet import DARK_THEME
 from src.shared.ui.panel_divider import paint_shared_dock_dividers
 from src.shared.db.database import Database
@@ -332,6 +333,8 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
     # AUD-3513: the audio-backend probe runs on a worker thread; the snapshot
     # is delivered back to the UI thread through this queued signal.
     audio_capabilities_probed = pyqtSignal(object)
+    _startup_image_probed = pyqtSignal(str, int)
+    _startup_cache_probed = pyqtSignal(str, str)
 
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt override
         super().paintEvent(event)
@@ -345,6 +348,9 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         self._test_mode = test_mode
         # AUD-3513: worker-thread audio probe results land here on the UI thread.
         self.audio_capabilities_probed.connect(self._apply_audio_capabilities)
+        self._startup_image_probed.connect(self._restore_probed_startup_image, Qt.ConnectionType.QueuedConnection)
+        self._startup_cache_probed.connect(self._apply_startup_cache, Qt.ConnectionType.QueuedConnection)
+        self._startup_image_probe_started = False
         # [R2-10] 命令行启动行为：--project PATH / --no-startup-dialog
         self._startup_project = startup_project
         self._startup_no_dialog = startup_no_dialog
@@ -499,10 +505,10 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
         # second full-save timer here used to cause two complete ZIP writes at
         # the same five-minute boundary.
 
-        # Apply custom cache directory from config
+        # The default cache remains usable while a saved location is checked.
         custom_cache = self.config_manager.get("cache_directory")
-        if custom_cache and os.path.isdir(custom_cache):
-            FileIO.set_cache_directory(custom_cache)
+        if isinstance(custom_cache, str) and custom_cache:
+            self._probe_startup_cache(custom_cache)
 
         # Restore current page from config
         self.page_layouts = {} # Stores bytearray states for each page
@@ -629,110 +635,31 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 self.config_manager.get(f"last_opened_file_{elm}")
                 or self.config_manager.get("last_opened_file")
             )
-            # Video mode skips auto-restore: it must enter through the Project
-            # Manager, so the last file is never auto-loaded on startup.
-            # Image mode keeps the Lightroom-style "reopen last image" behavior.
-            try:
-                from src.shared.feature_flags import get_work_mode as _get_wm
-                _video_mode_startup = _get_wm(self.config_manager) == "video"
-            except Exception:
-                _video_mode_startup = False
-            if (not _video_mode_startup
-                    and self.config_manager.get("auto_load_last_project")
-                    and last_opened_file
-                    and os.path.exists(last_opened_file)):
-                # Connect to the gl_initialized signal to load file after renderer is ready
-                def load_last_file():
-                    from src.shared.media.format_registry import is_video as _is_video_file
-                    is_video = _is_video_file(last_opened_file)
-                    # Work-mode-aware restore: each mode only auto-restores files
-                    # of its own kind, so a file opened in the other mode (e.g. an
-                    # image opened as a reference in video mode) does not leak into
-                    # the wrong workflow on next launch.
-                    try:
-                        from src.shared.feature_flags import get_work_mode
-                        active_mode = get_work_mode(self.config_manager)
-                    except Exception:
-                        active_mode = "video"
-                    if is_video and active_mode == "image":
-                        # Image mode has no Edit page — skip video restore silently.
-                        logger.info(
-                            "[STARTUP] Skipping video restore in Image mode: %s",
-                            last_opened_file,
-                        )
-                        return
-                    if not is_video and active_mode == "video":
-                        # Video mode is timeline-centric — don't auto-restore a
-                        # still image into the Color/Composite pages.
-                        logger.info(
-                            "[STARTUP] Skipping image restore in Video mode: %s",
-                            last_opened_file,
-                        )
-                        return
-                    if is_video:
-                        self.load_video(last_opened_file)
-                        # On Composite-page startup with a video, the legacy Color
-                        # pipeline never emits color_output_changed, so the pending-
-                        # swap wait below would always time out. Build the timeline
-                        # clip context directly so TimelineClipInputNode can resolve
-                        # frames and the Output node produces a valid image.
-                        # Deferred to the next event-loop tick to avoid GL/Qt
-                        # re-entrancy during initializeGL's signal chain.
-                        if self.current_page == "Composite" and self._composite_available:
-                            def _establish_ctx():
-                                try:
-                                    self._establish_composite_timeline_context(last_opened_file)
-                                except Exception:
-                                    logger.exception("[COMPOSITE-STARTUP] establish timeline context failed")
-                            QTimer.singleShot(0, _establish_ctx)
-                    else:
-                        self.load_image(last_opened_file)
+            from src.shared.feature_flags import get_work_mode
+            from src.shared.media.format_registry import is_video
 
-                # Use QueuedConnection to defer file loading to the next event loop
-                # iteration. DirectConnection would run load_last_file() inside
-                # initializeGL(), blocking the window from ever finishing show().
-                from PyQt6.QtCore import Qt
-                self.canvas.gl_viewport.gl_initialized.connect(load_last_file, Qt.ConnectionType.QueuedConnection)
+            # Passive restore must never open a removable volume. Check path
+            # aliases and availability on a worker once the viewport is ready.
+            restore_image = (
+                get_work_mode(self.config_manager) != "video"
+                and not self._startup_project
+                and self.config_manager.get("auto_load_last_project")
+                and isinstance(last_opened_file, str)
+                and bool(last_opened_file)
+                and not is_external_mount_path(last_opened_file)
+                and not is_video(last_opened_file)
+            )
+            if restore_image:
+                self.canvas.gl_viewport.gl_initialized.connect(
+                    lambda: self._probe_startup_image(last_opened_file),
+                    Qt.ConnectionType.QueuedConnection,
+                )
 
-            # If starting on Composite page, the canvas MUST stay in the dock
-            # until the Color engine finishes its first render (color_output_changed).
-            # Only then can we safely swap to CompositeViewer.
             if self.current_page == "Composite" and self._composite_available:
-                if self.config_manager.get("auto_load_last_project") and last_opened_file and os.path.exists(last_opened_file):
-                    # Detect whether the file is a video. Video files never trigger
-                    # color_output_changed from the legacy Color pipeline, so waiting
-                    # for it would always time out (2s fallback). For videos we instead
-                    # build the timeline clip context directly (see load_last_file above)
-                    # and drive the viewer swap from there.
-                    from src.shared.media.format_registry import is_video as _is_startup_video_file
-                    _is_startup_video = _is_startup_video_file(last_opened_file)
-                    if _is_startup_video:
-                        # Video: do not wait for color_output_changed. The context-
-                        # building path (load_last_file → _establish_composite_timeline_context)
-                        # owns the runtime_context setup. Keep a short fallback only to
-                        # guarantee the viewer swap + Properties wiring if the context
-                        # path fails or is slow.
-                        self._composite_startup_pending = True
-                        self._composite_enter_needed_on_startup = True
-                        logger.info(f"[COMPOSITE-STARTUP] Video startup, building timeline context (file: {last_opened_file})")
-                        QTimer.singleShot(2500, self._composite_startup_fallback)
-                    else:
-                        # Image: wait for color_output_changed to swap.
-                        # The canvas stays visible so the Color render pipeline can complete.
-                        self._composite_startup_pending = True
-                        logger.info(f"[COMPOSITE-STARTUP] Waiting for color_output_changed (file: {last_opened_file})")
-                        # Fallback: if color_output_changed doesn't arrive within 2s
-                        # (e.g. ImageInput graphs that don't need Color output, or a
-                        # slow/failed Color render), force the viewer swap so the user
-                        # doesn't see a stale Color canvas. The fallback is a no-op if
-                        # color_output_changed already swapped the viewer (it checks
-                        # _composite_startup_pending and returns early).
-                        QTimer.singleShot(2000, self._composite_startup_fallback)
-                        # Run the full Composite activation (enter_page_hook) once the
-                        # startup completes, regardless of whether color_output_changed
-                        # or the fallback fires. This ensures the Properties panel is
-                        # wired up and the graph is bound on first launch.
-                        self._composite_enter_needed_on_startup = True
+                if restore_image:
+                    self._composite_startup_pending = True
+                    self._composite_enter_needed_on_startup = True
+                    QTimer.singleShot(2000, self._composite_startup_fallback)
                 else:
                     # No file to load — swap to CompositeViewer immediately
                     self._composite_startup_pending = False
@@ -844,6 +771,55 @@ class MainWindow(QMainWindow, StabilizerControllerMixin, MixerRecordingControlle
                 logger.debug("Startup failure dialog could not be shown")
         raise RuntimeError(
             f"Topos startup failed during {stage} initialization") from exc
+
+    def _probe_startup_cache(self, path: str) -> None:
+        def probe() -> None:
+            if is_external_mount_path(path):
+                return
+            resolved = os.path.realpath(os.path.expanduser(path))
+            if is_external_mount_path(resolved) or not os.path.isdir(resolved):
+                return
+            target = os.path.realpath(os.path.join(resolved, "baked_layers"))
+            if is_external_mount_path(target):
+                return
+            try:
+                os.makedirs(target, exist_ok=True)
+                self._startup_cache_probed.emit(path, target)
+            except OSError as exc:
+                logger.warning("Using local cache; custom cache preparation failed: %s", exc)
+            except RuntimeError:
+                logger.debug("Startup cache probe finished after window deletion")
+
+        threading.Thread(target=probe, name="startup-cache-probe", daemon=True).start()
+
+    def _apply_startup_cache(self, path: str, target: str) -> None:
+        # Never switch storage roots after media has started using the cache.
+        project = self._current_edit_project
+        if (self.config_manager.get("cache_directory") == path and not self.current_file_path
+                and not self._current_edit_project_filepath
+                and (project is None or not project.assets)):
+            FileIO.BAKED_CACHE_DIR = target
+
+    def _probe_startup_image(self, path: str) -> None:
+        if self._startup_image_probe_started:
+            return
+        self._startup_image_probe_started = True
+        generation = getattr(self, "_page_switch_generation", 0)
+
+        def probe() -> None:
+            resolved = os.path.realpath(os.path.expanduser(path))
+            if not is_external_mount_path(resolved) and os.path.isfile(resolved):
+                try:
+                    self._startup_image_probed.emit(path, generation)
+                except RuntimeError:
+                    logger.debug("Startup image probe finished after window deletion")
+
+        threading.Thread(target=probe, name="startup-image-probe", daemon=True).start()
+
+    def _restore_probed_startup_image(self, path: str, generation: int) -> None:
+        if (self.isVisible() and generation == getattr(self, "_page_switch_generation", 0)
+                and not self.current_file_path and self._current_edit_project is None):
+            self.load_image(path)
 
     def _run_audio_backend_diagnostics(self) -> None:
         """AM-01: 启动时探测音频后端并把降级状态反馈给用户。

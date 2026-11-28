@@ -100,6 +100,7 @@ def test_missing_recent_image_shows_path_and_keeps_panel_open(
 
     with qtbot.assertNotEmitted(dialog.recent_file_selected):
         qtbot.keyClick(dialog.recent_list, Qt.Key.Key_Return)
+        qtbot.waitUntil(lambda: bool(messages))
 
     assert str(missing) in messages[0]
     assert dialog.isVisible()

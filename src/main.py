@@ -224,17 +224,13 @@ def main() -> int:
         from src.shared.gpu.graphics_ledger import start_session_ledger
         start_session_ledger(sys.argv[0])
 
-        # AUD-31202: 校验 --project，非法路径不再静默无效。仅补诊断日志，
-        # 传参与下游行为保持不变（是否升级为拒绝启动属产品决策，未改动）。
-        if args.project and not (
-            os.path.isfile(args.project)
-            and args.project.lower().endswith(".topos")
-        ):
+        # Validate the extension here without touching the selected drive.
+        if args.project and not args.project.lower().endswith(".topos"):
             logger.error(
-                "--project path is not an existing .topos file: %s "
-                "(project will not be opened)",
+                "--project must name a .topos file: %s",
                 args.project,
             )
+            args.project = None
 
         # Apply product mode from CLI arg if specified
         if args.product and not os.environ.get("TOPOS_PRODUCT_MODE"):

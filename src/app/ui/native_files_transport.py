@@ -15,7 +15,7 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import QObject, QTimer, Qt, pyqtSignal
 
@@ -34,6 +34,9 @@ from src.features.files.services.facade import MAX_WORKERS, FacadeOutcome, Files
 from src.features.files.transactions import CancelToken
 from src.shared.i18n.i18n import I18N
 from src.shared.plugins.services import ItemResult
+
+if TYPE_CHECKING:
+    from src.features.files.services.thumbnail_cache import FileRevision
 
 
 @dataclass
@@ -92,7 +95,7 @@ class NativeFilesTransport(QObject):
     # 服务确认后的最终 user 快照：UI 一律按此回显（不自行推算）
     metadata_snapshot = pyqtSignal(dict)
     capabilities_loaded = pyqtSignal(list)
-    preview_loaded = pyqtSignal(str, bytes)
+    preview_loaded = pyqtSignal(str, object, object)  # path, bytes (None for a cache hit), revision
     preview_failed = pyqtSignal(str, str)
     preview_cancelled = pyqtSignal(str)
     task_started = pyqtSignal(dict)
@@ -141,6 +144,7 @@ class NativeFilesTransport(QObject):
     _tree_done = pyqtSignal(object, str)
     _volumes_done = pyqtSignal(object)
     _directory_done = pyqtSignal(int, str, object)
+    _preview_done = pyqtSignal(int, str, object)
     _source_preview_done = pyqtSignal(int, int, object)
     _ai_library_index_done = pyqtSignal(object)
     _ai_library_settings_done = pyqtSignal(object, object, object)
@@ -174,6 +178,7 @@ class NativeFilesTransport(QObject):
         self._tree_done.connect(self._finish_tree, Qt.ConnectionType.QueuedConnection)
         self._volumes_done.connect(self._finish_volumes, Qt.ConnectionType.QueuedConnection)
         self._directory_done.connect(self._finish_directory, Qt.ConnectionType.QueuedConnection)
+        self._preview_done.connect(self._finish_preview, Qt.ConnectionType.QueuedConnection)
         self._source_preview_done.connect(self._finish_source_preview, Qt.ConnectionType.QueuedConnection)
         self._ai_library_index_done.connect(self._finish_ai_library_index, Qt.ConnectionType.QueuedConnection)
         self._ai_library_settings_done.connect(self._finish_ai_library_settings, Qt.ConnectionType.QueuedConnection)
@@ -1763,8 +1768,8 @@ class NativeFilesTransport(QObject):
         ])
 
     # ------------------------------------------------------------ 原生预览取数（本地直读）
-    def load_preview(self, path: str) -> None:
-        """只取字节；解码在 UI 侧工作线程完成，主线程不做同步解码。"""
+    def load_preview(self, path: str, *, cached_revisions: tuple[FileRevision, ...] = ()) -> None:
+        """Validate the image revision and read bytes on the same worker."""
         self.cancel_preview()
         if self._closed:
             return
@@ -1774,28 +1779,47 @@ class NativeFilesTransport(QObject):
             return
         seq = self._preview_seq
 
-        def _deliver(outcome) -> None:
-            # 同路径重开也必须按请求身份丢弃旧读取，不能让旧字节成为新解码任务。
-            if self._closed or seq != self._preview_seq:
-                return
-            if outcome.error is not None:
-                self.preview_failed.emit(path, _preview_error_message(outcome.error))
-                return
-            self.preview_loaded.emit(path, bytes(outcome.result))
+        def _deliver(outcome: FacadeOutcome) -> None:
+            if not self._closed and seq == self._preview_seq:
+                self._preview_done.emit(seq, path, outcome)
 
         request_id = uuid.uuid4().hex
+        from src.features.files.services.facade import read_file_bytes as read_bytes
         from src.features.files.services.media import RAW_PREVIEW_SUFFIXES, embedded_raw_preview, thumbnail_bytes
+        from src.features.files.services.thumbnail_cache import GradedThumbnailStamp
         suffix = os.path.splitext(path)[1].lower()
-        if suffix in RAW_PREVIEW_SUFFIXES:
-            facade.run(key="preview:" + identity_key(path), request_id=request_id,
-                       work=lambda: embedded_raw_preview(path, max_bytes=self.MAX_PREVIEW_BYTES),
-                       listener=_deliver)
-        elif suffix == ".toos":
-            facade.run(key="preview:" + identity_key(path), request_id=request_id,
-                       work=lambda: thumbnail_bytes(path), listener=_deliver)
-        else:
-            facade.read_file(path, request_id=request_id, listener=_deliver,
-                             max_bytes=self.MAX_PREVIEW_BYTES)
+        limit = self.MAX_PREVIEW_BYTES
+
+        def revision() -> FileRevision | None:
+            try:
+                return GradedThumbnailStamp.revision(path)
+            except OSError:
+                return None
+
+        def work() -> tuple[bytes | None, FileRevision | None]:
+            before = revision()
+            if before is not None and before in cached_revisions:
+                return None, before
+            if suffix in RAW_PREVIEW_SUFFIXES:
+                data = embedded_raw_preview(path, max_bytes=limit)
+            elif suffix == ".toos":
+                data = thumbnail_bytes(path)
+            else:
+                data = read_bytes(path, limit)
+            # A replacement while the reader was active must not prime the cache.
+            return data, before if before is not None and before == revision() else None
+
+        facade.run(key="preview:" + identity_key(path), request_id=request_id,
+                   work=work, listener=_deliver)
+
+    def _finish_preview(self, sequence: int, path: str, outcome: FacadeOutcome) -> None:
+        if self._closed or sequence != self._preview_seq:
+            return
+        if outcome.error is not None:
+            self.preview_failed.emit(path, _preview_error_message(outcome.error))
+            return
+        data, revision = outcome.result
+        self.preview_loaded.emit(path, data, revision)
 
     def cancel_preview(self) -> None:
         self._preview_seq += 1

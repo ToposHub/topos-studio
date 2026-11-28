@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QDockWidget, QFrame, QHBoxLayout, QInputDialog, QLa
                              QListView, QMenu, QMessageBox, QScrollArea, QSizePolicy, QTabWidget,
                              QTabBar, QToolBar, QToolButton, QVBoxLayout, QWidget, QApplication)
 
-from src.app.ui.edit_workspace_layout import EditDockResizeHandles
+from src.app.ui.edit_workspace_layout import WorkspaceDockResizeHandles
 from src.app.ui.photo_color_layout import PhotoColorResizeHandles, front_dock
 from src.app.ui.video_color_layout import (
     VIDEO_COLOR_PRIMARY, VIDEO_COLOR_SCOPES, VIDEO_COLOR_SECONDARY, VideoColorResizeHandles,
@@ -121,7 +121,8 @@ _COLOR_REMAPPING_DOCK_LAYOUT_MIGRATION_VERSION = 2
 _COLOR_KEYFRAMES_DOCK_PLACEMENT_KEY = "color_keyframes_dock_placed"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY = "composite_scopes_dock_layout_version"
 _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION = 1
-_COMPOSITE_DEFAULT_LAYOUT_VERSION = 1
+_COMPOSITE_DEFAULT_LAYOUT_VERSION = 4
+_COMPOSITE_COLUMN_SHARES = (3, 4, 3)
 _MIXER_WORKSPACE_LAYOUT_VERSION = 3
 _VIDEO_MIX_WORKSPACE_LAYOUT_VERSION = 3
 _MIXER_DOCK_TAB_HEIGHT = 26
@@ -651,6 +652,7 @@ class DockLayoutMixin:
         # This updates _current_edit_project and marks dirty state on project changes
         if self._edit_available and self.media_pool_panel is not None:
             self.media_pool_panel.project_changed.connect(self._on_media_pool_project_changed)
+            self.media_pool_panel.project_availability_changed.connect(self._on_media_pool_availability_changed)
         if self._edit_available and self.timeline_panel is not None:
             self.timeline_panel.project_changed.connect(self._on_timeline_project_changed)
 
@@ -2289,10 +2291,16 @@ class DockLayoutMixin:
         # Keep the persisted key so saved Audition-style layouts upgrade in place.
         return f"mixer_audition_layout_version_{self._layout_profile_mode()}"
 
+    def _composite_top_dock_groups(self) -> tuple[tuple[QDockWidget, ...], tuple[QDockWidget, ...]]:
+        media = (self.dock_edit_media_pool, self.dock_composite_scope)
+        inspector = (self.dock_node_properties, self.dock_composite_scene_outliner,
+                     self.dock_composite_material, self.dock_composite_asset_dependency,
+                     self.dock_composite_import_report)
+        return (tuple(dock for dock in media if dock is not None),
+                tuple(dock for dock in inspector if dock is not None))
+
     def _apply_default_composite_layout(self) -> None:
-        """Arrange the Composite workspace for its available editing surface."""
         top = Qt.DockWidgetArea.TopDockWidgetArea
-        left = Qt.DockWidgetArea.LeftDockWidgetArea
         right = Qt.DockWidgetArea.RightDockWidgetArea
         bottom = Qt.DockWidgetArea.BottomDockWidgetArea
         horizontal = Qt.Orientation.Horizontal
@@ -2300,92 +2308,85 @@ class DockLayoutMixin:
         timeline = self.dock_composite_keyframes
         graph = self.dock_composite
         viewer = self.dock_viewport
-        inspector = self.dock_node_properties
-        media = self.dock_edit_media_pool
-        scopes = self.dock_composite_scope
-        width, height = self.contentsRect().width(), self.contentsRect().height()
-        media_width = max(230, media.minimumWidth(), media.minimumSizeHint().width()) if media else 0
-        inspector_width = max(300, inspector.minimumWidth(), inspector.minimumSizeHint().width()) if inspector else 0
-        if scopes is not None:
-            inspector_width = max(inspector_width, scopes.minimumWidth(), scopes.minimumSizeHint().width())
-        viewer_minimum = max(viewer.minimumWidth(), viewer.minimumSizeHint().width())
-        compact = timeline is not None and width < media_width + viewer_minimum + inspector_width + 2
+        media, inspector = self._composite_top_dock_groups()
+        spline = self.dock_composite_spline
+        assets = self.dock_composite_asset_dependency
+        report = self.dock_composite_import_report
+        compact = timeline is not None and WorkspaceDockResizeHandles.needs_compact_columns(
+            min(self.width(), WorkspaceDockResizeHandles.screen_width(self)), viewer, (media, inspector[:1]),
+        )
 
         for dock in self.all_docks:
             dock.hide()
-        self.setCorner(Qt.Corner.TopLeftCorner, left if timeline else top)
-        self.setCorner(Qt.Corner.TopRightCorner, right if timeline else top)
+        self.setCorner(Qt.Corner.TopLeftCorner, top)
+        self.setCorner(Qt.Corner.TopRightCorner, top)
         self.setCorner(Qt.Corner.BottomLeftCorner, bottom)
         self.setCorner(Qt.Corner.BottomRightCorner, bottom)
 
-        primary = [(viewer, top), (inspector, right), (media, left), (timeline, bottom)]
-        for dock, area in primary:
-            if dock is not None:
-                dock.setFloating(False)
-                self.addDockWidget(area, dock)
-                dock.setVisible(dock is not media or not compact)
-
-        graph.setFloating(False)
         if timeline is not None:
-            self.addDockWidget(bottom, graph)
-            self.tabifyDockWidget(timeline, graph)
-            graph.hide()
+            placements = (
+                (top, (viewer, *media, *inspector)),
+                (bottom, (timeline, graph, spline)),
+            )
         else:
+            placements = (
+                (top, (viewer, graph)),
+                (right, inspector),
+                (bottom, (*media, spline)),
+            )
+        for area, docks in placements:
+            for dock in docks:
+                if dock is not None:
+                    dock.setFloating(False)
+                    self.removeDockWidget(dock)
+                    self.addDockWidget(area, dock)
+
+        if timeline is None:
             self.splitDockWidget(viewer, graph, horizontal)
-            graph.show()
-
-        # Rebuild the optional groups with their own dock identities so
-        # Show Panels and saved Qt state can still address each tool.
-        for dock in (
-            self.dock_composite_scene_outliner, self.dock_composite_material,
-        ):
-            if dock is not None:
-                dock.setFloating(False)
-                self.addDockWidget(right, dock)
-                if inspector is not None:
-                    self.tabifyDockWidget(inspector, dock)
-                dock.hide()
-
-        assets = self.dock_composite_asset_dependency
-        report = self.dock_composite_import_report
-        for dock in (assets, report):
-            if dock is not None:
-                dock.setFloating(False)
-                self.addDockWidget(right, dock)
-                dock.hide()
-        if assets is not None and report is not None:
-            self.tabifyDockWidget(assets, report)
-
-        spline = self.dock_composite_spline
-        if spline is not None:
-            spline.setFloating(False)
-            self.addDockWidget(bottom, spline)
-            spline.hide()
-
-        if scopes is not None:
-            scopes.setFloating(False)
-            self.addDockWidget(right if timeline is not None else bottom, scopes)
-            scopes.show()
-            if timeline is not None and inspector is not None:
-                self.resizeDocks([inspector, scopes], [370, 220], vertical)
-
-        if timeline is not None:
-            layout = self.layout()
-            layout.activate()
-            for bar in (getattr(self, "main_toolbar", None), getattr(self, "status_bar", None)):
-                if bar is not None and not bar.isHidden():
-                    height -= bar.height()
-            if compact:
-                media_width = 0
-            column_sizes = ((media, media_width), (viewer, max(1, width - media_width - inspector_width)),
-                            (inspector or scopes, inspector_width))
-            columns, widths = zip(*((dock, size) for dock, size in column_sizes if dock is not None and size > 0))
-            self.resizeDocks(list(columns), list(widths), horizontal)
-            timeline_height = max(timeline.minimumHeight(), round(height * 0.38))
-            self.resizeDocks([viewer, timeline], [max(1, height - timeline_height), timeline_height], vertical)
-            timeline.raise_()
-        else:
+            properties = self.dock_node_properties
+            if properties is not None:
+                for dock in (self.dock_composite_scene_outliner, self.dock_composite_material):
+                    if dock is not None:
+                        self.tabifyDockWidget(properties, dock)
+                properties.show()
+            if assets is not None and report is not None:
+                self.tabifyDockWidget(assets, report)
+            for dock in (viewer, graph, *media):
+                dock.show()
             self.resizeDocks([viewer, graph], [800, 600], horizontal)
+            return
+
+        # Keep all three upper columns in one Qt split so they share space
+        # proportionally, just like the Edit workspace.
+        if media:
+            self.splitDockWidget(media[0], viewer, horizontal)
+        if inspector and not compact:
+            self.splitDockWidget(viewer, inspector[0], horizontal)
+        groups = ((*media, *inspector),) if compact else (media, inspector)
+        for group in groups:
+            for dock in group[1:]:
+                self.tabifyDockWidget(group[0], dock)
+        self.tabifyDockWidget(timeline, graph)
+        for dock in (viewer, timeline, graph, *media, *inspector[:1]):
+            dock.show()
+        if media:
+            media[0].raise_()
+        timeline.raise_()
+
+        right_column = () if compact else inspector[:1]
+        columns = (*media[:1], viewer, *right_column)
+        left_share, right_share = (_COMPOSITE_COLUMN_SHARES[0] if media else 0,
+                                  _COMPOSITE_COLUMN_SHARES[2] if right_column else 0)
+        viewer_share = sum(_COMPOSITE_COLUMN_SHARES) - left_share - right_share
+        self.resizeDocks(list(columns), [share for share in (left_share, viewer_share, right_share) if share],
+                         horizontal)
+        self.layout().activate()
+        height = self.contentsRect().height()
+        for bar in (getattr(self, "main_toolbar", None), getattr(self, "status_bar", None)):
+            if bar is not None and not bar.isHidden():
+                height -= bar.height()
+        timeline_height = max(timeline.minimumHeight(), round(height * 0.38))
+        self.resizeDocks([viewer, timeline], [max(1, height - timeline_height), timeline_height], vertical)
 
     def _capture_default_composite_layout(self) -> QByteArray:
         """Create the default without changing the currently displayed layout."""
@@ -2411,6 +2412,15 @@ class DockLayoutMixin:
         self._apply_default_composite_layout()
         self.page_layouts["Composite"] = save_workspace_dock_state(self, "Composite")
         self._save_current_layout_to_store("Composite", auto_save=False)
+        self._mark_default_composite_layout()
+        self._configure_composite_resize_handles()
+
+    def _mark_default_composite_layout(self) -> None:
+        # Default placement already accounts for Scopes, including compact layouts.
+        if self.dock_composite_scope is not None:
+            self.config_manager.set(_COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_KEY,
+                                    _COMPOSITE_SCOPES_DOCK_LAYOUT_MIGRATION_VERSION, auto_save=False)
+        key = f"composite_default_layout_version_{self._layout_profile_mode()}"
         self.config_manager.set(key, _COMPOSITE_DEFAULT_LAYOUT_VERSION)
 
     def _color_program_monitor_available(self) -> bool:
@@ -4746,6 +4756,8 @@ class DockLayoutMixin:
             else:
                 self._reset_factory_page_layout()
             self._remember_page_layout_choice(name, preset_id)
+            if self.current_page == "Composite":
+                self._configure_composite_resize_handles()
             if video_mix:
                 self._fit_video_mix_workspace_height()
             self.status_bar.showMessage(
@@ -5144,8 +5156,8 @@ class DockLayoutMixin:
                 reset_sizes()
         elif page == "Composite" and self.dock_composite:
             self._apply_default_composite_layout()
-            key = f"composite_default_layout_version_{self._layout_profile_mode()}"
-            self.config_manager.set(key, _COMPOSITE_DEFAULT_LAYOUT_VERSION)
+            self._mark_default_composite_layout()
+            self._configure_composite_resize_handles(reset=True)
         else:
             _, _, panel_states = self._load_factory_layout()
             state_hex = (panel_states or {}).get(page)
@@ -5496,6 +5508,50 @@ class DockLayoutMixin:
         bundle = selection.get("bundle")
         return not isinstance(bundle, str) or "Edit" not in self._layout_bundles().get(bundle, {})
 
+    def _create_workspace_resize_handles(
+        self, page: str, viewer: QDockWidget, timeline: QDockWidget,
+        sides: tuple[QDockWidget, ...], groups: tuple[tuple[QDockWidget, ...], ...],
+    ) -> WorkspaceDockResizeHandles:
+        config = getattr(self, "config_manager", None)
+        mode = self._layout_profile_mode()
+        key = f"{page}_column_shares_{mode}"
+        compact_key = f"{page}_compact_column_share_{mode}"
+        stored = config.get(key) if config is not None else None
+        compact = config.get(compact_key) if config is not None else None
+        shares = None
+        if (isinstance(stored, list) and len(stored) == 3
+                and all(type(share) is int and share > 0 for share in stored)):
+            shares = stored[0], stored[1], stored[2]
+        handles = WorkspaceDockResizeHandles(
+            self, viewer, timeline, sides, groups, saved_shares=shares,
+            saved_compact_share=compact if type(compact) is float and 0 < compact < 1 else None,
+        )
+        if config is not None:
+            handles.column_shares_changed.connect(lambda shares: config.set(key, list(shares), auto_save=False))
+            handles.compact_share_changed.connect(lambda share: config.set(compact_key, share, auto_save=False))
+        return handles
+
+    def _configure_composite_resize_handles(self, *, reset: bool = False) -> None:
+        timeline = getattr(self, "dock_composite_keyframes", None)
+        active = self.current_page == "Composite" and timeline is not None and self.dock_composite is not None
+        handles = getattr(self, "_composite_dock_resize_handles", None)
+        if active and handles is None:
+            media, inspector = self._composite_top_dock_groups()
+            handles = self._create_workspace_resize_handles(
+                "composite", self.dock_viewport, timeline, (*media, *inspector), (media, inspector),
+            )
+            self._composite_dock_resize_handles = handles
+        if handles is not None:
+            if reset:
+                handles.reset_column_shares()
+            shares = None
+            if active:
+                choices = self._page_layout_choices()
+                index = self._active_page_layout_index(choices)
+                if index and choices[index - 1][1] == "factory":
+                    shares = _COMPOSITE_COLUMN_SHARES
+            handles.set_active(active, shares)
+
     def _configure_edit_resize_handles(self) -> None:
         active = self.current_page == "Edit" and getattr(self, "_edit_available", False)
         handles = getattr(self, "_edit_dock_resize_handles", None)
@@ -5510,28 +5566,9 @@ class DockLayoutMixin:
                 tuple(dock_map[name] for name in names if name in dock_map)
                 for names in (media, (*inspector, "dockCaptionWorkspace", "dockMulticam"))
             )
-            config = getattr(self, "config_manager", None)
-            # Start the rebuilt default from its configured ratios, without old pixel overrides.
-            mode = self._layout_profile_mode()
-            key = f"edit_column_shares_{mode}"
-            compact_key = f"edit_compact_column_share_{mode}"
-            stored = config.get(key) if config is not None else None
-            compact = config.get(compact_key) if config is not None else None
-            shares = None
-            if (isinstance(stored, list) and len(stored) == 3
-                    and all(type(share) is int and share > 0 for share in stored)):
-                shares = stored[0], stored[1], stored[2]
-            handles = EditDockResizeHandles(
-                self, self.dock_program_viewer, self.dock_edit_timeline, sides, groups, saved_shares=shares,
-                saved_compact_share=compact if type(compact) is float and 0 < compact < 1 else None,
+            handles = self._create_workspace_resize_handles(
+                "edit", self.dock_program_viewer, self.dock_edit_timeline, sides, groups,
             )
-            if config is not None:
-                handles.column_shares_changed.connect(
-                    lambda shares: config.set(key, list(shares), auto_save=False),
-                )
-                handles.compact_share_changed.connect(
-                    lambda share: config.set(compact_key, share, auto_save=False),
-                )
             self._edit_dock_resize_handles = handles
         if handles is not None:
             shares = None
@@ -5553,6 +5590,7 @@ class DockLayoutMixin:
         (Edit feature disabled at startup).
         """
         self._configure_edit_resize_handles()
+        self._configure_composite_resize_handles()
         color_active = self.current_page == "Color"
         if _is_video_color(self, "Color"):
             self._configure_video_color_dock_controls(color_active)

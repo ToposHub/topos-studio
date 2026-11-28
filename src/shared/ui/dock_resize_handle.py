@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import QPoint, QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QHideEvent, QMouseEvent
-from PyQt6.QtWidgets import QDockWidget, QMainWindow, QWidget
+from PyQt6.QtWidgets import QDockWidget, QMainWindow, QStyle, QWidget
 
 
 class DockResizeHandle(QWidget):
@@ -76,6 +76,9 @@ class DockResizeHandle(QWidget):
         position: QPoint = event.globalPosition().toPoint()
         return position.x() if self._horizontal else position.y()
 
+    def separator_extent(self) -> int:
+        return self._host.style().pixelMetric(QStyle.PixelMetric.PM_DockWidgetSeparatorExtent, None, self._host)
+
     def place_column(self, before: QDockWidget | None, after: QDockWidget | None,
                      *, include_tab_strip: bool = False) -> None:
         if before is None or after is None:
@@ -84,7 +87,7 @@ class DockResizeHandle(QWidget):
         left, right = before.geometry(), after.geometry()
         # Only cover adjacent columns in the same row. A user may move a main dock.
         top, bottom = max(left.top(), right.top()), min(left.bottom(), right.bottom())
-        if not 0 <= right.left() - left.right() <= 2 or bottom <= top:
+        if not 0 <= right.left() - left.right() - 1 <= self.separator_extent() or bottom <= top:
             self.hide()
             return
         if include_tab_strip and abs(left.top() - right.top()) <= 32:

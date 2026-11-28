@@ -442,31 +442,23 @@ class _MetadataLoader(QObject):
 
     def __init__(self, parent: QObject) -> None:
         super().__init__(parent)
-        self._cache: "OrderedDict[tuple, dict]" = OrderedDict()
+        self._cache: OrderedDict[str, tuple[tuple[int, int], dict]] = OrderedDict()
         self._inflight: set[str] = set()
 
     def request(self, path: str) -> None:
-        try:
-            key = (path, os.path.getmtime(path), os.path.getsize(path))
-        except OSError:
-            key = (path, None, None)
-
-        cached = self._cache.get(key)
-        if cached is not None:
-            self._cache.move_to_end(key)
-            self.ready.emit(path, cached)
-            return
         if path in self._inflight:
             return
 
         self._inflight.add(path)
-        worker = _MetadataWorker(path, key, self)
+        worker = _MetadataWorker(path, self._cache.get(path), self)
         worker.signals.ready.connect(self._on_ready)
         QThreadPool.globalInstance().start(worker)
 
-    def _on_ready(self, path: str, key: tuple, metadata: dict) -> None:
+    def _on_ready(self, path: str, revision: tuple[int, int] | None, metadata: dict) -> None:
         self._inflight.discard(path)
-        self._cache[key] = metadata
+        self._cache.pop(path, None)
+        if revision is not None:
+            self._cache[path] = revision, metadata
         while len(self._cache) > self._CACHE_LIMIT:
             self._cache.popitem(last=False)
         self.ready.emit(path, metadata)
@@ -476,21 +468,31 @@ class _MetadataWorker(QRunnable):
     """在工作线程执行 FileIO.get_metadata（exiftool 子进程）。"""
 
     class _Signals(QObject):
-        ready = pyqtSignal(str, tuple, dict)
+        ready = pyqtSignal(str, object, dict)
 
-    def __init__(self, path: str, key: tuple, parent_loader: _MetadataLoader) -> None:
+    def __init__(self, path: str, cached: tuple[tuple[int, int], dict] | None,
+                 parent_loader: _MetadataLoader) -> None:
         super().__init__()
         self._path = path
-        self._key = key
+        self._cached = cached
         self.signals = self._Signals(parent_loader)
 
     def run(self) -> None:
+        try:
+            stat = os.stat(self._path)
+        except OSError:
+            self.signals.ready.emit(self._path, None, {})
+            return
+        revision = stat.st_mtime_ns, stat.st_size
+        if self._cached is not None and self._cached[0] == revision:
+            self.signals.ready.emit(self._path, revision, self._cached[1])
+            return
         try:
             metadata = FileIO.get_metadata(self._path)
         except Exception:
             logger.debug("metadata load failed: %s", self._path, exc_info=True)
             metadata = {}
-        self.signals.ready.emit(self._path, self._key, metadata)
+        self.signals.ready.emit(self._path, revision, metadata)
 
 
 class _InterchangeRowsWorker(QRunnable):
@@ -2180,6 +2182,32 @@ class FileOpsMixin:
         self._on_media_pool_project_changed(project)
         if self.media_pool_panel is not None:
             self.media_pool_panel.set_project(self._current_edit_project, check_offline=False)
+
+    def _on_media_pool_availability_changed(self, previous: EditProject, checked: EditProject) -> None:
+        """Share background availability flags without marking an edit or reopening decoders."""
+        active = self._current_edit_project
+        if active is None:
+            return
+        updated = checked if active is previous else active.with_scanned_asset_availability(previous, checked)
+        if updated is active:
+            return
+        self._current_edit_project = updated
+        if updated is not checked and self.media_pool_panel is not None:
+            self.media_pool_panel.set_project(updated, check_offline=False)
+        if self.timeline_panel is not None:
+            self.timeline_panel.set_project(updated)
+        for renderer in (
+            getattr(self, "timeline_preview_renderer", None),
+            getattr(self, "_color_timeline_preview_renderer", None),
+        ):
+            if renderer is not None:
+                renderer.update_project_metadata(updated)
+        provider = getattr(self, "_timeline_clip_frame_provider", None)
+        if provider is not None:
+            provider.set_project(updated)
+        page = getattr(self, "composite_page", None)
+        if page is not None:
+            page.set_edit_project(updated)
 
     def _on_media_pool_project_changed(self, project: EditProject) -> None:
         """

@@ -1328,25 +1328,14 @@ class MenuToolbarMixin:
             QApplication.quit()
 
     def _next_untitled_project_name(self) -> str:
-        """Return a unique in-memory project name for startup fallback.
-
-        Names are compared case-insensitively against the same project
-        metadata used by Project Manager, including all configured library
-        folders.  The unsaved document therefore cannot visually collide with
-        a saved project card.
-        """
-        from src.shared.project.library import scan_video_projects
-
-        try:
-            metas = scan_video_projects(getattr(self, "config_manager", None))
-        except Exception:
-            logger.debug("Could not scan project names for startup fallback", exc_info=True)
-            metas = []
+        """Choose an in-memory name from remembered paths without scanning libraries."""
+        config = self.config_manager
+        recent = config.get("recent_projects")
+        paths = recent if isinstance(recent, (list, tuple)) else ()
         used = {
-            str(getattr(meta, "name", "") or "").strip().casefold()
-            for meta in metas
+            os.path.splitext(os.path.basename(path))[0].strip().casefold()
+            for path in (*paths, config.get("last_project")) if isinstance(path, str) and path
         }
-        used.discard("")
 
         base = "Untitled Project"
         index = 1

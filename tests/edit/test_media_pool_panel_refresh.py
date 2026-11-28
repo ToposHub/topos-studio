@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import os
+from dataclasses import replace
+from threading import Event, get_ident
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtTest import QTest
 
-from src.features.edit.core.project import EditProject, update_offline_status
+from src.features.edit.core.project import EditProject, SMART_BIN_OFFLINE_MEDIA, update_offline_status
 from src.features.edit.ui.media_pool_panel import (
     MediaPoolPanel,
     SORT_BY_DURATION,
@@ -179,6 +182,101 @@ def test_panel_refresh_detects_source_removed_while_project_is_open(
     asset = next(iter(panel._project.assets.values()))
     assert asset.is_offline is True
     panel.close()
+
+
+def test_blocked_volume_probe_leaves_media_pool_usable(qtbot, monkeypatch, tmp_path) -> None:
+    """Binding and selecting Offline Media use snapshots while a disk call waits."""
+    from src.features.edit.ui import media_pool_panel as mpp
+
+    panel = MediaPoolPanel()
+    qtbot.addWidget(panel)
+    project = _project_with_asset(tmp_path)
+    asset = next(iter(project.assets.values()))
+    ui_thread = get_ident()
+    entered, release = Event(), Event()
+    scan_calls: list[EditProject] = []
+    exists = os.path.exists
+
+    def guarded_exists(path: str) -> bool:
+        assert path != asset.path or get_ident() != ui_thread, "UI queried a media path"
+        return exists(path)
+
+    def blocked_scan(snapshot: EditProject) -> EditProject:
+        assert get_ident() != ui_thread
+        scan_calls.append(snapshot)
+        entered.set()
+        assert release.wait(5), "test did not release the blocked scan"
+        return update_offline_status(snapshot)
+
+    monkeypatch.setattr(os.path, "exists", guarded_exists)
+    monkeypatch.setattr(mpp, "update_offline_status", blocked_scan)
+    try:
+        panel.resize(720, 480)
+        panel.show()
+        panel.set_project(project)
+        qtbot.waitUntil(entered.is_set)
+        panel._on_bin_selected(SMART_BIN_OFFLINE_MEDIA, True)
+        assert panel._get_current_bin_assets() == []
+        qtbot.mouseClick(panel.btn_search, Qt.MouseButton.LeftButton)
+        qtbot.keyClicks(panel.search_box.line_edit, "clip")
+        assert panel.search_box.line_edit.text() == "clip"
+        panel.search_box.line_edit.clear()
+        with qtbot.waitSignal(panel._refresh_timer.timeout):
+            panel._refresh_tree()
+        assert panel.asset_model.rowCount() == 0
+        renamed = replace(project, name="An edit made while the disk spins")
+        panel.set_project(renamed)
+        assert panel.get_project() is renamed
+        panel._refresh_offline_status()  # repeated ticks must not queue more scans
+        (tmp_path / "clip.mp4").unlink()
+
+        with qtbot.waitSignal(panel.project_availability_changed) as result:
+            QTimer.singleShot(0, release.set)
+        updated = panel.get_project()
+        assert result.args == [renamed, updated]
+        assert updated.name == renamed.name
+        assert updated.revision == renamed.revision
+        assert updated.modified_at == renamed.modified_at
+        assert updated.assets[asset.asset_id].is_offline
+        assert panel._get_current_bin_assets() == [updated.assets[asset.asset_id]]
+        assert scan_calls == [project]
+
+        (tmp_path / "clip.mp4").write_bytes(b"placeholder")
+        with qtbot.waitSignal(panel.project_availability_changed):
+            panel._refresh_offline_status()
+        reconnected = panel.get_project()
+        assert reconnected is not updated
+        assert reconnected.assets[asset.asset_id].is_offline is False
+        assert panel._get_current_bin_assets() == []
+    finally:
+        release.set()
+
+
+def test_availability_refresh_does_not_reset_playback_or_mark_an_edit(tmp_path) -> None:
+    from src.app.controllers.file_controller import FileOpsMixin
+
+    source = _project_with_asset(tmp_path)
+    asset = next(iter(source.assets.values()))
+    (tmp_path / "clip.mp4").unlink()
+    scanned = update_offline_status(source)
+    active = replace(source, name="Keep the current document")
+    host = SimpleNamespace(
+        _current_edit_project=active,
+        edit_project_dirty=False,
+        media_pool_panel=MagicMock(),
+        timeline_panel=MagicMock(),
+        timeline_preview_renderer=MagicMock(),
+    )
+    FileOpsMixin._on_media_pool_availability_changed(host, source, scanned)
+
+    updated = host._current_edit_project
+    assert updated.name == active.name
+    assert updated.assets[asset.asset_id].is_offline
+    assert host.edit_project_dirty is False
+    host.media_pool_panel.set_project.assert_called_once_with(updated, check_offline=False)
+    host.timeline_panel.set_project.assert_called_once_with(updated)
+    host.timeline_preview_renderer.update_project_metadata.assert_called_once_with(updated)
+    host.timeline_preview_renderer.set_project.assert_not_called()
 
 
 def test_4k_video_starts_a_background_full_hd_proxy(qapp, tmp_path) -> None:

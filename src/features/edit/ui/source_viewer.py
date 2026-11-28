@@ -54,7 +54,7 @@ import threading
 import time
 import numpy as np
 from dataclasses import replace
-from typing import Any, Optional, Tuple, Callable
+from typing import TYPE_CHECKING, Any, Optional, Tuple, Callable
 
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 from PyQt6.QtWidgets import (
@@ -109,6 +109,9 @@ from src.shared.ui.widgets.realtime_fps_indicator import RealtimeFpsIndicator
 from src.shared.ui.widgets.video_display_color import VideoDisplayColor
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from src.features.edit.core.audio_playback import AudioDecoder
 
 
 def _build_time_domain(
@@ -168,7 +171,7 @@ def _build_time_domain(
             logger.debug("Ignoring unparsable start_timecode %r for %s",
                          raw_tc, asset.asset_id)
     fingerprint = media_fingerprint_for_path(
-        str(getattr(asset, "path", "") or ""))
+        str(getattr(asset, "path", "") or ""), check_file=False)
     time_index = None
     pts_raw = metadata.get("pts_index")
     if pts_raw:
@@ -1701,6 +1704,91 @@ class _CpuFallbackDecodeSignals(QObject):
     decode_failed = pyqtSignal(int, str, int)          # frame, error, generation
 
 
+class _SourceOpenSignals(QObject):
+    fingerprint_ready = pyqtSignal(object, str)
+    audio_ready = pyqtSignal(object)
+
+
+class _SourceOpenWorker:
+    """Keep disk probes off the UI thread and queue only the latest source."""
+
+    def __init__(self) -> None:
+        self.signals = _SourceOpenSignals()
+        self._lock = threading.Lock()
+        self._token: object | None = None
+        self._pending: dict[str, Callable[[], None]] = {}
+        self._prepared_audio: AudioDecoder | None = None
+        self._active = False
+
+    def reset(self, token: object | None = None) -> None:
+        with self._lock:
+            self._token = token
+            self._pending.pop("fingerprint", None)
+            self._pending.pop("audio", None)
+            if self._prepared_audio is not None:
+                self._pending[f"discard_audio_{id(self._prepared_audio)}"] = self._prepared_audio.close
+                self._prepared_audio = None
+                self._start_locked()
+
+    def fingerprint(self, token: object, path: str) -> None:
+        def probe() -> None:
+            result = media_fingerprint_for_path(path)
+            self.signals.fingerprint_ready.emit(token, result)
+
+        self._enqueue("fingerprint", probe)
+
+    def audio(self, token: object, path: str, fps: float, start: int) -> None:
+        def probe() -> None:
+            from pathlib import Path
+            from src.features.edit.core.audio_playback import AudioDecoder
+
+            decoder = AudioDecoder()
+            if not decoder.open(Path(path), fps, source_start=start, source_fps=fps):
+                return
+            with self._lock:
+                current = self._token is token
+                if current:
+                    self._prepared_audio = decoder
+            if current:
+                self.signals.audio_ready.emit(token)
+            else:
+                decoder.close()
+
+        self._enqueue("audio", probe)
+
+    def take_audio(self, token: object) -> "AudioDecoder | None":
+        with self._lock:
+            if self._token is not token:
+                return None
+            decoder, self._prepared_audio = self._prepared_audio, None
+            return decoder
+
+    def discard_audio(self, decoder: "AudioDecoder") -> None:
+        self._enqueue(f"discard_audio_{id(decoder)}", decoder.close)
+
+    def _enqueue(self, kind: str, work: Callable[[], None]) -> None:
+        with self._lock:
+            self._pending[kind] = work
+            self._start_locked()
+
+    def _start_locked(self) -> None:
+        if not self._active:
+            self._active = True
+            threading.Thread(target=self._run, daemon=True, name="SourceViewerOpen").start()
+
+    def _run(self) -> None:
+        while True:
+            with self._lock:
+                if not self._pending:
+                    self._active = False
+                    return
+                work = self._pending.pop(next(iter(self._pending)))
+            try:
+                work()
+            except (ImportError, OSError, RuntimeError, ValueError):
+                logger.exception("Source Monitor background preparation failed")
+
+
 class _CpuFallbackDecodeWorker:
     """AUD-20903: CPU 回退解码在后台线程执行。
 
@@ -1959,6 +2047,13 @@ class SourceViewerWidget(QWidget):
         # 换源监看状态存储（A→B→A 恢复播放头与 In/Out；换版即作废）
         self._time_domain: Optional[SourceTimeDomain] = None
         self._monitor_state_store = SourceMonitorStateStore()
+        self._source_open_worker = _SourceOpenWorker()
+        self._source_open_token: object | None = None
+        self._pending_monitor_restore: tuple[int, int | None, int | None] | None = None
+        self._source_open_worker.signals.fingerprint_ready.connect(self._on_source_fingerprint_ready)
+        self._source_open_worker.signals.audio_ready.connect(self._on_source_audio_ready)
+        source_open_worker = self._source_open_worker
+        self.destroyed.connect(lambda _obj=None: source_open_worker.reset())
         # I01-2：起播仲裁门（宿主协调器安装；None = 未安装，行为同旧）
         self._playback_gate: Optional[Callable[[str], Optional[str]]] = None
 
@@ -2210,11 +2305,15 @@ class SourceViewerWidget(QWidget):
             audio_offset_seconds: F2.10 WAV 提前开录量（秒）。
         """
         logger.debug(f"Opening asset: {asset.asset_id} ({asset.display_name})")
+        if self._shutdown_prepared:
+            return
 
         # Close previous asset if not already closed
         if self._current_asset:
             self.close_source()
 
+        token = self._source_open_token = object()
+        self._source_open_worker.reset(token)
         self._current_asset = asset
         self._project_aces = project_aces
         self._preview_only = preview_only
@@ -2250,36 +2349,11 @@ class SourceViewerWidget(QWidget):
             ) and (start is None or end is None or start <= end):
                 self._in_point, self._out_point = start, end
 
-        # I02-3：按 asset_id + 媒体指纹 + 帧数恢复监看状态（换版自动作
-        # 废，不回填假位置）。恢复值经时间域再校验；恢复发生在 generation
-        # 提升（下方）与末尾单次 _load_frame 之间——顺序保证迟到的旧资产
-        # 解码结果不会覆盖恢复帧。
-        if self._time_domain is not None:
-            restored = self._monitor_state_store.restore(
-                asset.asset_id, self._time_domain.media_fingerprint,
-                self._total_frames)
-            if restored is not None:
-                self._in_point, self._out_point = None, None
-                self._current_frame = max(
-                    0, min(int(restored.frame), self._total_frames - 1))
-                if restored.in_point is not None and \
-                        restored.out_point is not None:
-                    check = self._time_domain.validate_range(
-                        restored.in_point, restored.out_point)
-                    if check.ok:
-                        self._in_point = restored.in_point
-                        self._out_point = restored.out_point
-                elif restored.in_point is not None:
-                    if self._time_domain.validate_range(
-                            restored.in_point, restored.in_point).ok:
-                        self._in_point = restored.in_point
-                elif restored.out_point is not None:
-                    if self._time_domain.validate_range(
-                            restored.out_point, restored.out_point).ok:
-                        self._out_point = restored.out_point
-
         # Bump generation on asset change to invalidate all pending GPU results
         self._gpu_generation += 1
+        self._pending_monitor_restore = (
+            self._gpu_generation, self._in_point, self._out_point,
+        )
         self._gpu_expected_frame = -1
         self._gpu_watchdog_timer.stop()
         self._gpu_pending_frame = -1
@@ -2290,7 +2364,6 @@ class SourceViewerWidget(QWidget):
         self._scrub_pending_frame = None
         self._scrub_timer_pending = False
         self._scrub_audio_last_emit_ms = 0.0
-        self._sync_scrub_audio_for_asset()
 
         # Reset zoom/pan to fit mode for new asset
         self.viewer._view_transform.reset_fit()
@@ -2312,8 +2385,7 @@ class SourceViewerWidget(QWidget):
         self.toolbar.fps_indicator.set_playback_state(False, self._fps)
         self.toolbar.update_in_out_state(self._in_point, self._out_point)
 
-        # Restoring controls is one projection of the saved source state.
-        # A clamped slider value must not seek before the restored frame is set.
+        # Project the initial range without triggering a duplicate seek.
         with QSignalBlocker(self.slider):
             self.slider.setRange(0, self._total_frames - 1 if self._total_frames > 1 else 100)
             self.slider.setValue(self._current_frame)
@@ -2329,18 +2401,46 @@ class SourceViewerWidget(QWidget):
         self.toolbar.set_frame_number(self._current_frame)
         self.toolbar.set_duration(duration_tc)
 
-        # Load the (possibly restored) current frame — single request after
-        # the generation bump so stale results from the previous asset or a
-        # pre-restore position can never overwrite the restored frame.
         if initial_preview is not None and not initial_preview.isNull():
             if asset.is_image or (asset.is_video and self._current_frame == 0):
                 # The poster stays visible until the exact source frame arrives.
                 self.viewer.submit_qimage(initial_preview)
         self._load_frame(self._current_frame)
+        if self._source_open_token is token:
+            self._source_open_worker.fingerprint(token, str(getattr(asset, "path", "") or ""))
+            self._sync_scrub_audio_for_asset()
 
         # E22: source_opened 信号已删除（无接收者）
 
         logger.info(f"Source opened: {asset.display_name} ({self._total_frames} frames @ {self._fps} fps)")
+
+    @pyqtSlot(object, str)
+    def _on_source_fingerprint_ready(self, token: object, fingerprint: str) -> None:
+        domain = self._time_domain
+        if token is not self._source_open_token or domain is None:
+            return
+        time_index = domain.time_index
+        if time_index is not None and time_index.media_fingerprint != fingerprint:
+            time_index = replace(time_index, media_fingerprint=fingerprint)
+        self._time_domain = replace(domain, media_fingerprint=fingerprint, time_index=time_index)
+        opening_state, self._pending_monitor_restore = self._pending_monitor_restore, None
+        if (self._is_playing or self._scrub_active
+                or opening_state != (self._gpu_generation, self._in_point, self._out_point)):
+            return
+        restored = self._monitor_state_store.restore(domain.asset_id, fingerprint, self._total_frames)
+        if restored is None:
+            return
+
+        start, end = restored.in_point, restored.out_point
+        check_start = start if start is not None else end
+        check_end = end if end is not None else start
+        if not domain.validate_range(check_start, check_end).ok:
+            start, end = None, None
+        self._in_point, self._out_point = start, end
+        self.toolbar.update_in_out_state(start, end)
+        self.slider.set_in_out_points(start, end)
+        self.seek(restored.frame)
+        self.range_changed.emit(start, end)
 
     def prepare_for_shutdown(self) -> None:
         """VP-B11: 关闭序列的 widget 侧入口（幂等）。
@@ -2356,6 +2456,8 @@ class SourceViewerWidget(QWidget):
         if self._shutdown_prepared:
             return
         self._shutdown_prepared = True
+        self._source_open_token = None
+        self._source_open_worker.reset()
 
         # 1) 停止新请求：播放/时钟/watchdog + 撤销会话 generation
         was_playing = self._is_playing
@@ -2394,8 +2496,11 @@ class SourceViewerWidget(QWidget):
 
     def close_source(self) -> None:
         """Close the current source."""
+        self._source_open_token = None
+        self._source_open_worker.reset()
         # I02-3：换源/关闭前按指纹保存监看状态（播放头 + In/Out）
-        if self._current_asset is not None and self._time_domain is not None:
+        if (self._current_asset is not None and self._time_domain is not None
+                and self._pending_monitor_restore is None):
             self._monitor_state_store.save(
                 self._current_asset.asset_id,
                 self._time_domain.media_fingerprint,
@@ -2403,6 +2508,7 @@ class SourceViewerWidget(QWidget):
                 frame=self._current_frame,
                 in_point=self._in_point,
                 out_point=self._out_point)
+        self._pending_monitor_restore = None
         # Stop playback
         self._playback_timer.stop()
         was_playing = self._is_playing
@@ -3290,7 +3396,9 @@ class SourceViewerWidget(QWidget):
     def _sync_scrub_audio_for_asset(self) -> None:
         """Prepare a single-track audio preview graph for the source asset."""
         asset = self._current_asset
-        if asset is None or not (getattr(asset, "is_video", False) or getattr(asset, "is_audio", False)):
+        token = self._source_open_token
+        if (asset is None or token is None
+                or not (getattr(asset, "is_video", False) or getattr(asset, "is_audio", False))):
             self._cleanup_scrub_audio_manager()
             return
         if (
@@ -3300,49 +3408,52 @@ class SourceViewerWidget(QWidget):
         ):
             return
         self._cleanup_scrub_audio_manager()
-        try:
-            from pathlib import Path
-            from src.features.edit.core.audio_playback import (
-                AudioPlaybackManager,
-                AudioTrackState,
-            )
+        from src.features.edit.core.audio_sync import bound_audio_frame
 
+        # External-recording offset uses the same source-frame mapping as Edit.
+        audio_path = self._scrub_audio_source_path or asset.path
+        fps = float(self._fps or 24.0)
+        source_start = (bound_audio_frame(0, self._scrub_audio_offset, fps)
+                        if self._scrub_audio_source_path and self._scrub_audio_offset else 0)
+        self._source_open_worker.audio(token, audio_path, fps, source_start)
+
+    @pyqtSlot(object)
+    def _on_source_audio_ready(self, token: object) -> None:
+        asset = self._current_asset
+        if token is not self._source_open_token or asset is None:
+            return
+        decoder = self._source_open_worker.take_audio(token)
+        if decoder is None:
+            return
+        from pathlib import Path
+        from src.features.edit.core.audio_playback import AudioPlaybackManager, AudioTrackState
+
+        manager = None
+        try:
             manager = AudioPlaybackManager(parent=self)
             manager.set_timeline_fps(float(self._fps or 24.0))
             manager.set_timeline_duration(max(1, int(self._total_frames or 1)))
-            # F2.10：外录绑定——预听同源（open_asset 时由 EditPage 解析
-            # 传入，与时间线播放/导出同一关系）
-            from src.features.edit.core.audio_sync import bound_audio_frame
-            scrub_source_start = 0
-            if self._scrub_audio_source_path:
-                audio_path = self._scrub_audio_source_path
-                if self._scrub_audio_offset:
-                    scrub_source_start = bound_audio_frame(
-                        0, self._scrub_audio_offset, float(self._fps or 24.0))
-            else:
-                audio_path = asset.path
             ok = manager.add_track(
                 "source_preview",
-                Path(audio_path),
+                Path(self._scrub_audio_source_path or asset.path),
                 AudioTrackState(track_id="source_preview"),
-                source_start=scrub_source_start,
-                source_fps=float(self._fps or 24.0),
-                timeline_start=0,
                 timeline_duration=max(1, int(self._total_frames or 1)),
-                replace_existing=True,
                 source_channel_map=self._scrub_source_channel_map,
+                prepared_decoder=decoder,
             )
-            if not ok:
-                manager.cleanup()
-                return
-            self._scrub_audio_manager = manager
-            self._scrub_audio_asset_id = asset.asset_id
-            self._scrub_audio_map_applied = self._scrub_source_channel_map
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             logger.debug("Source scrub audio preview unavailable: %s", exc)
-            self._scrub_audio_manager = None
-            self._scrub_audio_asset_id = None
-            self._scrub_audio_map_applied = None
+            ok = False
+        if not ok:
+            self._source_open_worker.discard_audio(decoder)
+            if manager is not None:
+                manager.deleteLater()
+            return
+        self._scrub_audio_manager = manager
+        self._scrub_audio_asset_id = asset.asset_id
+        self._scrub_audio_map_applied = self._scrub_source_channel_map
+        if self._is_playing and not self._reverse_playback:
+            self._start_source_audio(self._current_frame)
 
     def _cleanup_scrub_audio_manager(self) -> None:
         manager = self._scrub_audio_manager
@@ -3789,24 +3900,11 @@ class SourceViewerWidget(QWidget):
 
     def _load_image_frame(self) -> None:
         """Load an image asset."""
-        color = self.aces_source_color
-        if self._preview_only or color is not None:
-            if not self._shutdown_prepared:
-                self._cpu_worker.request(
-                    self._current_asset.path, 0, self._gpu_generation, target_size=None, still=True,
-                    **({"color": color} if color is not None else {}),
-                )
-            return
-        try:
-            from PyQt6.QtGui import QPixmap
-            pixmap = QPixmap(self._current_asset.path)
-            if not pixmap.isNull():
-                qimage = pixmap.toImage()
-                self.viewer.submit_qimage(qimage)
-                # Cache it
-                self._frame_cache[0] = qimage
-        except Exception as e:
-            logger.error(f"Failed to load image: {e}")
+        if not self._shutdown_prepared and self._current_asset is not None:
+            self._cpu_worker.request(
+                self._current_asset.path, 0, self._gpu_generation, target_size=None, still=True,
+                color=self.aces_source_color,
+            )
 
     def _get_media_display_target_size(self) -> Optional[tuple[int, int]]:
         """

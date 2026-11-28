@@ -14,6 +14,7 @@ frame/In/Out、``_frame_to_timecode`` 不消费起始 TC/VFR、In/Out setter 无
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 import pytest
@@ -153,10 +154,11 @@ def test_i02_no_asset_rejects_mark_points(qapp):
 # ── 换源状态：A→B→A / 换版作废 / 污染区间 ─────────────────────────
 
 
-def test_i02_asset_roundtrip_restores_frame_and_marks(qapp):
+def test_i02_asset_roundtrip_restores_frame_and_marks(qapp, qtbot):
     widget = _widget(qapp)
     asset_a, asset_b = _asset("a", total=240), _asset("b", total=120)
     widget.open_asset(asset_a)
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     widget.seek(42)
     widget.set_in_point(10)
     widget.set_out_point(49)
@@ -169,20 +171,23 @@ def test_i02_asset_roundtrip_restores_frame_and_marks(qapp):
     assert widget._in_point is None
 
     widget.open_asset(asset_a)   # 回到 A（恢复）
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     assert widget._current_frame == 42
     assert (widget._in_point, widget._out_point) == (10, 49)
     assert (10, 49) in ranges    # 恢复的范围随状态信号广播（按钮同步）
 
 
 @pytest.mark.parametrize("endpoint", ["in", "out"])
-def test_asset_roundtrip_restores_single_mark(qapp: Any, endpoint: str) -> None:
+def test_asset_roundtrip_restores_single_mark(qapp: Any, qtbot: Any, endpoint: str) -> None:
     widget = _widget(qapp)
     asset_a = _asset("a", total=100)
     widget.open_asset(asset_a)
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     setter = widget.set_in_point if endpoint == "in" else widget.set_out_point
     setter(10)
     widget.open_asset(_asset("b"))
     widget.open_asset(asset_a)
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     assert (widget.in_point, widget.out_point) == (
         (10, None) if endpoint == "in" else (None, 10))
 
@@ -190,10 +195,11 @@ def test_asset_roundtrip_restores_single_mark(qapp: Any, endpoint: str) -> None:
 @pytest.mark.parametrize("endpoint", ["in", "out"])
 @pytest.mark.parametrize("value", [-1, 100])
 def test_invalid_stored_single_mark_is_discarded(
-        qapp: Any, endpoint: str, value: int) -> None:
+        qapp: Any, qtbot: Any, endpoint: str, value: int) -> None:
     widget = _widget(qapp)
     asset_a = _asset("a", total=100)
     widget.open_asset(asset_a)
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     domain = widget.source_time_domain
     widget.open_asset(_asset("b"))
     widget._monitor_state_store.save(
@@ -201,6 +207,7 @@ def test_invalid_stored_single_mark_is_discarded(
         in_point=value if endpoint == "in" else None,
         out_point=value if endpoint == "out" else None)
     widget.open_asset(asset_a)
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     assert widget.current_frame == 5
     assert widget.in_point is None and widget.out_point is None
 
@@ -245,10 +252,11 @@ def test_i02_media_version_change_invalidates_state(qapp):
     assert widget._in_point is None
 
 
-def test_i02_poisoned_stored_range_not_restored(qapp):
+def test_i02_poisoned_stored_range_not_restored(qapp, qtbot):
     widget = _widget(qapp)
     asset = _asset("a", total=100)
     widget.open_asset(asset)
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     domain = widget.source_time_domain
     assert domain is not None
     widget.open_asset(_asset("b", total=60))   # 正常保存 a 后离开
@@ -257,6 +265,7 @@ def test_i02_poisoned_stored_range_not_restored(qapp):
         asset.asset_id, domain.media_fingerprint, 100,
         frame=5, in_point=50, out_point=400)
     widget.open_asset(asset)
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
 
     assert widget._current_frame == 5          # 播放头仍恢复
     assert widget._in_point is None            # 越界区间经时间域再校验丢弃
@@ -279,3 +288,150 @@ def test_i02_time_index_adoption(qapp):
         "a", domain.media_fingerprint, [0.0, 0.04, 0.09])
     widget.set_source_time_index(sentinel)
     assert widget.source_time_domain.time_index is sentinel
+
+
+def test_slow_source_fingerprint_does_not_block_or_replace_new_source(qapp, qtbot, monkeypatch) -> None:
+    from src.features.edit.ui import source_viewer
+
+    widget = _widget(qapp)
+    qtbot.addWidget(widget)
+    slow, replacement = _asset("slow"), _asset("replacement")
+    entered, release = threading.Event(), threading.Event()
+    fingerprint = source_viewer.media_fingerprint_for_path
+    ui_thread = threading.get_ident()
+    probe_thread = []
+
+    def probe(path: str, *, check_file: bool = True) -> str:
+        if path == slow.path and check_file:
+            probe_thread.append(threading.get_ident())
+            entered.set()
+            release.wait(3)
+        return fingerprint(path, check_file=check_file)
+
+    monkeypatch.setattr(source_viewer, "media_fingerprint_for_path", probe)
+    try:
+        widget.open_asset(slow)
+        qtbot.waitUntil(entered.is_set)
+        assert probe_thread != [ui_thread]
+        assert widget._pending_monitor_restore is not None
+        widget.open_asset(replacement)
+        assert widget.current_asset is replacement
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
+    assert widget.source_time_domain.asset_id == replacement.asset_id
+
+
+def test_confirming_source_identity_does_not_override_a_new_seek(qapp, qtbot, monkeypatch) -> None:
+    from src.features.edit.ui import source_viewer
+
+    widget = _widget(qapp)
+    qtbot.addWidget(widget)
+    asset = _asset()
+    fingerprint = source_viewer.media_fingerprint_for_path
+    release = threading.Event()
+
+    def probe(path: str, *, check_file: bool = True) -> str:
+        if check_file:
+            release.wait(3)
+        return fingerprint(path, check_file=check_file)
+
+    widget._monitor_state_store.save(asset.asset_id, fingerprint(asset.path), 240, frame=20)
+    monkeypatch.setattr(source_viewer, "media_fingerprint_for_path", probe)
+    try:
+        widget.open_asset(asset)
+        widget.seek(42)
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
+    assert widget.current_frame == 42
+
+
+def test_still_source_frame_is_read_in_existing_decode_worker(qtbot, tmp_path, monkeypatch) -> None:
+    from PyQt6.QtGui import QImage
+    from src.features.edit.ui import source_viewer
+
+    path = tmp_path / "source.png"
+    image = QImage(8, 8, QImage.Format.Format_RGB32)
+    image.fill(0xFF112233)
+    assert image.save(str(path))
+    asset = MediaAsset("still", str(path), "image", "Source", {})
+    reader = source_viewer.QImageReader
+    entered, release = threading.Event(), threading.Event()
+    ui_thread = threading.get_ident()
+    read_thread = []
+
+    def delayed_reader(path: str) -> Any:
+        read_thread.append(threading.get_ident())
+        entered.set()
+        release.wait(3)
+        return reader(path)
+
+    monkeypatch.setattr(source_viewer, "QImageReader", delayed_reader)
+    widget = SourceViewerWidget()
+    qtbot.addWidget(widget)
+    try:
+        widget.open_asset(asset)
+        qtbot.waitUntil(entered.is_set)
+        assert read_thread != [ui_thread]
+        assert not widget._frame_cache
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: 0 in widget._frame_cache)
+    assert widget._frame_cache[0].pixel(0, 0) == image.pixel(0, 0)
+
+
+def test_slow_audio_open_does_not_block_close_or_attach_to_new_source(qtbot, tmp_path, monkeypatch) -> None:
+    import wave
+
+    from src.features.edit.core import audio_playback
+
+    if not audio_playback.PYAV_AVAILABLE:
+        pytest.skip("Audio source open requires PyAV")
+    path = tmp_path / "audio.wav"
+    with wave.open(str(path), "wb") as recording:
+        recording.setparams((1, 2, 48000, 0, "NONE", "not compressed"))
+        recording.writeframes(bytes(960))
+    asset = MediaAsset("audio", str(path), "audio", "Audio", {})
+    entered, release, discarded = threading.Event(), threading.Event(), threading.Event()
+    ui_thread = threading.get_ident()
+    decoder_open = audio_playback.AudioDecoder.open
+    decoder_close = audio_playback.AudioDecoder.close
+    opened_on = []
+    closed_on = []
+
+    def delayed_open(decoder: Any, *args: Any, **kwargs: Any) -> bool:
+        opened_on.append(threading.get_ident())
+        entered.set()
+        release.wait(3)
+        return decoder_open(decoder, *args, **kwargs)
+
+    def track_close(decoder: Any) -> None:
+        if decoder.is_open:
+            closed_on.append(threading.get_ident())
+            decoder_close(decoder)
+            discarded.set()
+        else:
+            decoder_close(decoder)
+
+    monkeypatch.setattr(audio_playback.AudioDecoder, "open", delayed_open)
+    monkeypatch.setattr(audio_playback.AudioDecoder, "close", track_close)
+    widget = SourceViewerWidget()
+    qtbot.addWidget(widget)
+    try:
+        widget.open_asset(asset)
+        qtbot.waitUntil(entered.is_set)
+        assert opened_on != [ui_thread]
+        widget.close_source()
+        assert widget.current_asset is None
+    finally:
+        release.set()
+    qtbot.waitUntil(discarded.is_set)
+    assert closed_on != [ui_thread]
+    assert widget._scrub_audio_manager is None
+
+    widget.open_asset(asset)
+    qtbot.waitUntil(lambda: widget._scrub_audio_manager is not None)
+    assert len(opened_on) == 2
+    assert ui_thread not in opened_on
+    widget.close_source()

@@ -7,6 +7,7 @@ conversion to QPixmap happens in the main-thread callbacks of ThumbnailProvider.
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 from typing import List
 
@@ -14,7 +15,8 @@ import numpy as np
 import pytest
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from pytestqt.qtbot import QtBot
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +173,97 @@ def test_timeline_reset_preserves_pending_media_card_frames(
     assert ready == [(path, 10)]
     assert provider.get_cached_frame_pixmap("card", 10, 256, path=path) is not None
     assert provider.get_cached_frame_pixmap("timeline", 20, 48, path=path) is None
+
+
+def test_frame_lookup_stays_responsive_while_source_revision_is_blocked(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    from src.shared.media import thumbnail_provider as thumbnails
+    from src.shared.media import topos_source
+
+    monkeypatch.setattr(thumbnails, "_bridge", _IsolatedBridge())
+    provider = thumbnails.ThumbnailProvider()
+    path = str(tmp_path / "external.mp4")
+    probe_started = threading.Event()
+    release_probe = threading.Event()
+    probes = []
+    main_thread = threading.current_thread()
+
+    def probe(asset_id: str, source: str, frame: int, height: int) -> thumbnails.FrameThumbnailKey:
+        assert threading.current_thread() is not main_thread
+        probes.append(source)
+        probe_started.set()
+        assert release_probe.wait(timeout=5)
+        return thumbnails.FrameThumbnailKey(asset_id, source, 100, frame, height)
+
+    cap = MagicMock()
+    cap.isOpened.return_value = True
+    cap.read.return_value = True, _make_test_image_bgr()
+    monkeypatch.setattr(thumbnails, "_make_frame_key", probe)
+    monkeypatch.setattr(thumbnails, "_get_capture", lambda _path: cap)
+    monkeypatch.setattr(thumbnails, "_return_capture", lambda *_args: None)
+    monkeypatch.setattr(topos_source, "is_topos_movie", lambda _path: False)
+    ready = []
+    provider.frame_thumbnail_ready.connect(lambda _path, _frame, pixmap: ready.append(pixmap))
+    try:
+        provider.request_frame_pixmap_async("asset", path, 7, 100)
+        qtbot.waitUntil(probe_started.is_set)
+        provider.request_frame_pixmap_async("asset", path, 7, 100)
+        assert provider.get_cached_frame_pixmap("asset", 7, 48, path=path) is None
+        assert provider.get_cached_frame_pixmap_any(path, 7, 48, asset_id="asset") is None
+        heartbeat = threading.Event()
+        QTimer.singleShot(0, heartbeat.set)
+        qtbot.waitUntil(heartbeat.is_set)
+        assert not ready
+    finally:
+        release_probe.set()
+        assert provider.pool.waitForDone(2000)
+
+    qtbot.waitUntil(lambda: len(ready) == 1)
+    assert provider.get_cached_frame_pixmap("asset", 7, 48, path=path).cacheKey() == ready[0].cacheKey()
+    assert probes == [path]
+
+
+def test_frame_revision_recheck_reuses_cache_and_refreshes_replaced_source(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.shared.media import thumbnail_provider as thumbnails
+    from src.shared.media import topos_source
+
+    monkeypatch.setattr(thumbnails, "_bridge", _IsolatedBridge())
+    provider = thumbnails.ThumbnailProvider()
+    pool = MagicMock()
+    monkeypatch.setattr(provider, "pool", pool)
+    cap = MagicMock()
+    cap.isOpened.return_value = True
+    cap.read.return_value = True, _make_test_image_bgr()
+    capture = MagicMock(return_value=cap)
+    drop_handles = MagicMock()
+    probe = MagicMock(side_effect=[
+        thumbnails.FrameThumbnailKey("asset", "/tmp/replaced.mp4", mtime, 7, 48)
+        for mtime in (100, 100, 200)
+    ])
+    monkeypatch.setattr(thumbnails, "_make_frame_key", probe)
+    monkeypatch.setattr(thumbnails, "_get_capture", capture)
+    monkeypatch.setattr(thumbnails, "_drop_pooled_captures", drop_handles)
+    monkeypatch.setattr(thumbnails, "_return_capture", lambda *_args: None)
+    monkeypatch.setattr(topos_source, "is_topos_movie", lambda _path: False)
+    path = "/tmp/replaced.mp4"
+    ready = []
+    provider.frame_thumbnail_ready.connect(lambda _path, _frame, pixmap: ready.append(pixmap))
+
+    for expected_probes in (0, 1, 2):
+        if expected_probes:
+            provider._frame_source_revisions.put(path, (100, float("-inf")))
+        provider.request_frame_pixmap_async("asset", path, 7, 100)
+        assert probe.call_count == expected_probes
+        pool.start.call_args.args[0].run()
+
+    assert ready[0].cacheKey() == ready[1].cacheKey()
+    assert ready[2].cacheKey() != ready[1].cacheKey()
+    assert provider.get_cached_frame_pixmap("asset", 7, 48, path=path).cacheKey() == ready[2].cacheKey()
+    assert capture.call_count == 2
+    drop_handles.assert_called_once_with(path)
 
 
 # ---------------------------------------------------------------------------

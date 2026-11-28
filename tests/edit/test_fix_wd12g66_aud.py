@@ -139,10 +139,14 @@ def _offline_shell(monkeypatch) -> tuple[_OfflineShell, _ThreadPoolRecorder]:
     shell._project = project
     shell._updating = False
     shell._offline_scan_in_flight = False
+    shell._offline_scan_pending = False
+    shell._offline_project_generation = 0
+    shell._offline_scan_generation = 0
     shell._offline_status_signature = None
     applied: list = []
-    shell.set_project = lambda project_: applied.append(project_)
-    shell.project_changed = SimpleNamespace(emit=lambda project_: applied.append(project_))
+    shell.set_project = lambda project_, *, check_offline: applied.append(project_)
+    shell.project_availability_changed = SimpleNamespace(
+        emit=lambda previous, checked: applied.append(checked))
     shell._applied = applied
     shell._refresh_offline_status = (
         mpp.MediaPoolPanel._refresh_offline_status.__get__(shell)
@@ -180,7 +184,10 @@ def test_offline_scan_result_applied_when_source_current(qapp, monkeypatch) -> N
     assert checked is not source, "fixture precondition: availability changed"
 
     shell._on_offline_scan_finished(source, checked)
-    assert shell._applied == [checked, checked]  # set_project + project_changed
+    bound, published = shell._applied
+    assert bound is published
+    assert next(iter(bound.assets.values())).is_offline
+    assert bound.modified_at == source.modified_at
 
 
 def test_offline_scan_result_discarded_when_project_swapped(qapp, monkeypatch) -> None:

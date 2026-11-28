@@ -53,6 +53,7 @@ from src.features.files.contracts import (
 
 if TYPE_CHECKING:
     from src.app.ui.native_files_transport import NativeFilesTransport
+    from src.features.files.services.thumbnail_cache import FileRevision
 
 _LOCATION_DEFAULT_WIDTH = 240
 _INSPECTOR_DEFAULT_WIDTH = 210
@@ -567,8 +568,8 @@ class NativeFilesPanel(QWidget):
         self._space_preview = False
         self._preview_edge = MAX_DECODE_PIXELS
         self._preview_loading = False
-        self._preview_cache: OrderedDict[tuple, tuple[QImage, bool]] = OrderedDict()
-        self._preview_cache_key: tuple | None = None
+        self._preview_cache: OrderedDict[tuple[str, FileRevision, int], tuple[QImage, bool]] = OrderedDict()
+        self._preview_cache_key: tuple[str, FileRevision, int] | None = None
         self._preview = NativeFilesPreview(
             self,
             bg=C.BG_DARKEST,
@@ -2364,18 +2365,12 @@ class NativeFilesPanel(QWidget):
             paths = self._previewable_paths()
         self._preview.set_steppers_enabled(len(paths) > 1)
         self._preview_edge = self._preview.fit_decode_edge()
-        self._preview_cache_key = self._preview_key(entry.path)
-        cached = self._preview_cache.get(self._preview_cache_key)
-        self._preview_loading = cached is None
-        if cached is not None:
-            self._preview_cache.move_to_end(self._preview_cache_key)
-            image, has_detail = cached
-            self._preview.show_image(entry.path, image, has_detail=has_detail)
-        else:
-            placeholder = self._image_for_entry(entry) if entry.path in self._entry_paths else None
-            if placeholder is not None:
-                self._preview.show_placeholder(entry.path, placeholder)
-            self.preview_requested.emit(entry.path)
+        self._preview_cache_key = None
+        self._preview_loading = True
+        placeholder = self._image_for_entry(entry) if entry.path in self._entry_paths else None
+        if placeholder is not None:
+            self._preview.show_placeholder(entry.path, placeholder)
+        self.preview_requested.emit(entry.path)
         if len(paths) > 1 and entry.path in paths:
             row = paths.index(entry.path)
             for delta in (-1, 1):
@@ -2383,12 +2378,10 @@ class NativeFilesPanel(QWidget):
                 if neighbor is not None:
                     self._image_for_entry(neighbor)
 
-    def _preview_key(self, path: str) -> tuple | None:
-        try:
-            stat = os.stat(path)
-        except OSError:
-            return None
-        return path, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, self._preview_edge
+    def preview_cache_revisions(self, path: str) -> tuple[FileRevision, ...]:
+        """Offer revisions for the current decode size to the background reader."""
+        return tuple(revision for cached_path, revision, edge in self._preview_cache
+                     if path == cached_path and edge == self._preview_edge)
 
     def _request_preview_detail(self) -> None:
         if not self._preview_path or (self._preview_loading and self._preview_edge == MAX_DECODE_PIXELS):
@@ -2504,10 +2497,21 @@ class NativeFilesPanel(QWidget):
             self.selection.setCurrentIndex(
                 index, QItemSelectionModel.SelectionFlag.NoUpdate)
 
-    def show_preview_bytes(self, path: str, data: bytes) -> None:
-        """transport 拿到原始字节后交给解码线程；与当前会话不匹配一律丢弃。"""
+    def show_preview_bytes(self, path: str, data: bytes | None, revision: FileRevision | None = None) -> None:
+        """Display a validated cached image or send fresh bytes to the decoder."""
         if not self._preview_loading or not self._preview.is_open or path != self._preview_path:
             return
+        key = (path, revision, self._preview_edge) if revision is not None else None
+        if data is None:
+            if key is None or (cached := self._preview_cache.get(key)) is None:
+                self.preview_requested.emit(path)
+                return
+            self._preview_cache.move_to_end(key)
+            self._preview_loading = False
+            image, has_detail = cached
+            self._preview.show_image(path, image, has_detail=has_detail)
+            return
+        self._preview_cache_key = key
         self._preview_decoder.start(path, data, max_edge=self._preview_edge)
 
     def preview_load_failed(self, path: str, message: str) -> None:
@@ -2522,7 +2526,7 @@ class NativeFilesPanel(QWidget):
         self._preview_loading = False
         has_detail = self._preview_edge == MAX_DECODE_PIXELS or max(image.width(), image.height()) < self._preview_edge
         key = self._preview_cache_key
-        if key is not None and key == self._preview_key(path) and image.sizeInBytes() <= 64 * 1024 * 1024:
+        if key is not None and image.sizeInBytes() <= 64 * 1024 * 1024:
             self._preview_cache[key] = (image, has_detail)
             self._preview_cache.move_to_end(key)
             while (len(self._preview_cache) > 8

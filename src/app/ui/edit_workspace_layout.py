@@ -1,4 +1,4 @@
-"""Expanded resize targets for the three Edit workspace dividers."""
+"""Responsive dock columns and expanded resize targets for workspace dividers."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QDockWidget, QMainWindow
 from src.shared.ui.dock_resize_handle import DockResizeHandle
 
 
-class EditDockResizeHandles(QObject):
+class WorkspaceDockResizeHandles(QObject):
     column_shares_changed = pyqtSignal(tuple)
     compact_share_changed = pyqtSignal(float)
 
@@ -29,7 +29,7 @@ class EditDockResizeHandles(QObject):
         self._compact_share = saved_compact_share
         self._sides_compact = False
         self._column_inputs: tuple[
-            int, int, tuple[tuple[bool, bool, Qt.DockWidgetArea], ...],
+            int, int, int, tuple[tuple[bool, bool, Qt.DockWidgetArea, int], ...],
         ] | None = None
         self._side_columns: tuple[QDockWidget | None, QDockWidget | None] = (None, None)
         self._left.drag_finished.connect(self._remember_shares)
@@ -60,9 +60,9 @@ class EditDockResizeHandles(QObject):
         self.compact_share_changed.emit(0.0)
 
     def _remember_shares(self) -> None:
-        shares = self._manual_shares or self._default_shares
-        if shares is None:
+        if self._default_shares is None:
             return
+        shares = self._manual_shares or self._default_shares
         self._host.layout().activate()
         left, right = self._find_side_columns()
         total = sum(dock.width() for dock in (left, self._viewer, right) if dock is not None)
@@ -89,7 +89,7 @@ class EditDockResizeHandles(QObject):
             return
 
         columns = [dock for dock in (left, self._viewer, right) if dock is not None]
-        available = self._host.contentsRect().width() - (len(columns) - 1)
+        available = self._host.contentsRect().width() - (len(columns) - 1) * self._left.separator_extent()
         total = sum(shares)
         left_share = shares[0] / total if left is not None else 0.0
         right_share = shares[2] / total if right is not None else 0.0
@@ -129,19 +129,32 @@ class EditDockResizeHandles(QObject):
             self._host.resizeDocks(columns, widths, Qt.Orientation.Horizontal)
             self._host.layout().activate()
 
-    def _screen_width(self) -> int:
-        screen = self._host.screen()
-        return screen.availableGeometry().width() if screen else self._host.width()
+    @staticmethod
+    def screen_width(host: QMainWindow) -> int:
+        screen = host.screen()
+        return screen.availableGeometry().width() if screen else host.width()
 
-    def _layout_inputs(self) -> tuple[int, int, tuple[tuple[bool, bool, Qt.DockWidgetArea], ...]]:
+    def _layout_inputs(self) -> tuple[int, int, int, tuple[tuple[bool, bool, Qt.DockWidgetArea, int], ...]]:
         """Only inputs to the layout can schedule a fit, never resulting dock sizes."""
-        topology = tuple((dock.isHidden(), dock.isFloating(), self._host.dockWidgetArea(dock))
-                         for dock in self._sides)
-        return self._host.contentsRect().width(), self._screen_width(), topology
+        columns = tuple(
+            (dock.isHidden(), dock.isFloating(), self._host.dockWidgetArea(dock), self._minimum_width(dock))
+            for dock in self._sides
+        )
+        return (self._host.contentsRect().width(), self.screen_width(self._host),
+                self._minimum_width(self._viewer), columns)
 
     @staticmethod
     def _minimum_width(dock: QDockWidget) -> int:
         return max(dock.minimumWidth(), dock.minimumSizeHint().width())
+
+    @classmethod
+    def needs_compact_columns(
+        cls, width: int, viewer: QDockWidget, groups: tuple[tuple[QDockWidget, ...], ...],
+    ) -> bool:
+        if not all(groups):
+            return False
+        sidebar_minimum = sum(max(map(cls._minimum_width, stack)) for stack in groups)
+        return width < sidebar_minimum + cls._minimum_width(viewer) + 24
 
     def _adapt_side_groups(self) -> None:
         if self._default_shares is None or len(self._side_groups) != 2:
@@ -162,16 +175,13 @@ class EditDockResizeHandles(QObject):
             return
 
         # Account for the two stacks separately, even when they are tabified.
-        sidebar_minimum = sum(
-            max((self._minimum_width(dock) for dock in stack
-                 if not dock.isFloating() and not dock.isHidden()),
-                default=self._minimum_width(stack[0]))
+        open_groups = tuple(
+            tuple(dock for dock in stack if not dock.isFloating() and not dock.isHidden()) or stack[:1]
             for stack in self._side_groups
         )
-        breakpoint = sidebar_minimum + self._minimum_width(self._viewer) + 24
-        screen_width = self._screen_width()
+        screen_width = self.screen_width(self._host)
         available = min(self._host.width(), screen_width)
-        compact = available < breakpoint
+        compact = self.needs_compact_columns(available, self._viewer, open_groups)
 
         spanning_tabs = any(
             peer in inspector for dock in media for peer in self._host.tabifiedDockWidgets(dock)
@@ -196,7 +206,8 @@ class EditDockResizeHandles(QObject):
         shown = {dock: not dock.isHidden() for dock in (*media, *inspector) if not dock.isFloating()}
         active_media = next((dock for dock in media if self._visible(dock)), None)
         active_inspector = next((dock for dock in inspector if self._visible(dock)), None)
-        for dock in (*shown, self._viewer):
+        # Keep the viewer mounted so splitting the row does not hide its widget.
+        for dock in shown:
             host.removeDockWidget(dock)
 
         horizontal = Qt.Orientation.Horizontal
@@ -236,8 +247,9 @@ class EditDockResizeHandles(QObject):
     def _find_side_columns(self) -> tuple[QDockWidget | None, QDockWidget | None]:
         viewer = self._viewer
         sides = [dock for dock in self._sides if self._visible(dock)]
-        left = next((dock for dock in sides if 0 <= viewer.x() - dock.geometry().right() <= 2), None)
-        right = next((dock for dock in sides if 0 <= dock.x() - viewer.geometry().right() <= 2), None)
+        gap = self._left.separator_extent()
+        left = next((dock for dock in sides if 0 <= viewer.x() - dock.geometry().right() - 1 <= gap), None)
+        right = next((dock for dock in sides if 0 <= dock.x() - viewer.geometry().right() - 1 <= gap), None)
         return left, right
 
     def _refresh(self) -> None:

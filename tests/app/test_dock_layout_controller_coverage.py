@@ -1173,16 +1173,22 @@ def test_edit_timeline_uses_factory_ratio_only_without_a_saved_layout(
         assert timeline.width() == layout_host.contentsRect().width()
 
 
-def test_composite_factory_layout_gives_layer_timeline_its_own_row(
-        host: _DockHost, monkeypatch: pytest.MonkeyPatch, qapp) -> None:
+def test_composite_factory_layout_groups_media_and_timeline_tabs(
+        host: _DockHost, monkeypatch: pytest.MonkeyPatch, qapp, qtbot: QtBot) -> None:
+    from src.features.composite.adapters.main_window_adapter import MainWindowAdapter
+
     _set_work_mode(host, "video", monkeypatch)
-    host.resize(1440, 900)
+    monkeypatch.setattr(dlc.WorkspaceDockResizeHandles, "screen_width", staticmethod(lambda host: 1920))
+    host.resize(1680, 900)
     host.current_page = "Composite"
     host.dock_composite.show()
     host.initialize_page_layouts()
     host.show()
-    host.resize(1440, 900)
-    host._apply_default_composite_layout()
+    host.resize(1680, 900)
+    host.dock_viewport.setMinimumWidth(640)
+    host.dock_edit_media_pool.setMinimumWidth(240)
+    host.dock_node_properties.setMinimumWidth(280)
+    host._reset_factory_page_layout()
     qapp.processEvents()
 
     timeline = host.dock_composite_keyframes
@@ -1190,18 +1196,38 @@ def test_composite_factory_layout_gives_layer_timeline_its_own_row(
     props = host.dock_node_properties
     media = host.dock_edit_media_pool
     scopes = host.dock_composite_scope
-    assert host.dock_composite.isHidden()
+    adapter = MainWindowAdapter(host)
+    adapter.runtime.dock_scope = scopes
+    adapter.runtime.scope_panel = scopes.widget()
+    graph = host.dock_composite
+    assert not graph.isHidden()
     assert not timeline.isHidden()
     assert not viewer.isHidden()
     assert not media.isHidden()
     assert not props.isHidden()
     assert not scopes.isHidden()
+    assert scopes in host.tabifiedDockWidgets(media)
+    assert graph in host.tabifiedDockWidgets(timeline)
+    assert not media.visibleRegion().isEmpty()
+    assert not timeline.visibleRegion().isEmpty()
+    assert scopes.visibleRegion().isEmpty()
+    assert not adapter._is_scope_visible()
+    assert graph.visibleRegion().isEmpty()
     assert media.geometry().right() < viewer.geometry().left()
     assert viewer.geometry().right() < props.geometry().left()
     assert timeline.geometry().top() > viewer.geometry().bottom()
     assert timeline.width() >= host.width() - 2
     assert viewer.width() > max(media.width(), props.width())
-    assert scopes.geometry().top() > props.geometry().bottom()
+    total_width = media.width() + viewer.width() + props.width()
+    assert tuple(dock.width() / total_width for dock in (media, viewer, props)) == pytest.approx(
+        (0.3, 0.4, 0.3), abs=0.02,
+    )
+    for dock in (media, viewer, props):
+        assert host.dockWidgetArea(dock) == Qt.DockWidgetArea.TopDockWidgetArea
+    scopes.raise_()
+    qapp.processEvents()
+    assert adapter._is_scope_visible()
+    assert scopes.geometry().right() < viewer.geometry().left()
 
     for dock in (
         host.dock_composite_asset_dependency, host.dock_composite_import_report,
@@ -1217,20 +1243,78 @@ def test_composite_factory_layout_gives_layer_timeline_its_own_row(
     for dock in (host.dock_composite_spline, host.dock_composite_asset_dependency,
                  host.dock_composite_import_report, host.dock_composite_material):
         dock.hide()
-    host.dock_composite.show()
-    host.dock_composite.raise_()
+    graph.raise_()
     qapp.processEvents()
-    assert host.dock_composite in host.tabifiedDockWidgets(timeline)
-    assert host.dock_composite.width() >= host.width() - 2
+    assert not graph.visibleRegion().isEmpty()
+    assert graph.width() >= host.width() - 2
     assert not viewer.isHidden()
 
-    host.dock_edit_media_pool.hide()
-    host.dock_viewport.setMinimumWidth(640)
     host.resize(1050, 780)
-    host._apply_default_composite_layout()
+    qtbot.waitUntil(lambda: props in host.tabifiedDockWidgets(media))
+    # Qt initially clamps the width to the minimum of the three-column split.
+    host.resize(1050, 780)
+    qtbot.waitUntil(lambda: host.width() == 1050)
+    assert not scopes.isHidden() and not props.isHidden()
+    assert viewer.width() >= 640
+    assert not graph.visibleRegion().isEmpty() and graph.width() >= host.width() - 2
+
+    props.raise_()
     qapp.processEvents()
-    assert host.dock_edit_media_pool.isHidden()
-    assert not viewer.isHidden() and timeline.width() >= host.width() - 2
+    assert not props.visibleRegion().isEmpty()
+    assert viewer.width() >= 640
+    host.resize(1680, 900)
+    qtbot.waitUntil(lambda: props not in host.tabifiedDockWidgets(media))
+    qtbot.waitUntil(lambda: viewer.width() / host.contentsRect().width() == pytest.approx(0.4, abs=0.02))
+    assert scopes in host.tabifiedDockWidgets(media)
+    assert media.geometry().right() < viewer.geometry().left() < props.geometry().left()
+
+    props.hide()
+    qtbot.waitUntil(lambda: viewer.width() > 950)
+    props.show()
+    qtbot.waitUntil(lambda: viewer.width() / host.contentsRect().width() == pytest.approx(0.4, abs=0.02))
+
+    host.resize(1050, 780)
+    qtbot.waitUntil(lambda: props in host.tabifiedDockWidgets(media))
+    host.resize(1050, 780)
+    host._reset_factory_page_layout()
+    qapp.processEvents()
+    assert host.width() == 1050
+    assert props in host.tabifiedDockWidgets(media)
+    assert viewer.width() >= 640
+
+
+def test_composite_inspector_resize_keeps_viewer_visible_during_parameter_edit(
+        host: _DockHost, monkeypatch: pytest.MonkeyPatch, qtbot: QtBot) -> None:
+    from src.features.composite.nodes.transform_node import TransformNode
+    from src.features.composite.ui.node_properties_panel import NodePropertiesPanel
+
+    _set_work_mode(host, "video", monkeypatch)
+    monkeypatch.setattr(dlc.WorkspaceDockResizeHandles, "screen_width", staticmethod(lambda host: 1920))
+    host.current_page = "Composite"
+    host.resize(1440, 900)
+    viewer, media, props = host.dock_viewport, host.dock_edit_media_pool, host.dock_node_properties
+    viewer.setMinimumWidth(640)
+    media.setMinimumWidth(240)
+    panel = NodePropertiesPanel()
+    props.setWidget(panel)
+    node = TransformNode("transform")
+    panel.set_node(node.id, node.node_type, "Transform", dict(node.parameters),
+                   node.get_param_options(), node.get_param_defs())
+    host._reset_factory_page_layout()
+    qtbot.waitUntil(lambda: not panel.visibleRegion().isEmpty() and host._composite_dock_resize_handles._column_inputs is not None)
+
+    visibility = []
+    viewer.visibilityChanged.connect(visibility.append)
+    rotation = panel._sections[node.id]._param_widgets["rotation"]["widget"]
+    # Model a parameter editor requesting more space while the dock stays open.
+    panel.parameter_changed.connect(lambda *_: props.setMinimumWidth(544))
+    rotation.setValue(25.0)
+    qtbot.waitUntil(lambda: props in host.tabifiedDockWidgets(media))
+
+    assert host.width() == 1440
+    assert viewer.width() >= 640
+    assert not viewer.visibleRegion().isEmpty()
+    assert False not in visibility
 
 
 def test_image_composite_layout_keeps_node_graph_available(host: _DockHost) -> None:
@@ -1268,19 +1352,25 @@ def test_composite_default_upgrade_leaves_named_presets_alone(host, monkeypatch,
     host.current_page = "Composite"
     host.show()
     host.dock_composite.show()
+    version_key = f"composite_default_layout_version_{host._layout_profile_mode()}"
+    host.config_manager.set(version_key, 3)
     selection_key = host._active_page_layout_key()
     monkeypatch.setattr(host, "_page_layout_choices", lambda: [("Default Layout", "factory"), ("Custom", None)])
     host.config_manager.set(selection_key, {"name": "Custom"})
     host._migrate_composite_default_layout()
     assert not host.dock_composite.isHidden()
+    assert host.config_manager.get(version_key) == 3
 
     host.config_manager.set(selection_key, {"preset_id": "factory"})
     host._migrate_composite_default_layout()
     qapp.processEvents()
-    assert host.dock_composite.isHidden()
-    host.dock_composite.show()
+    assert host.dock_composite in host.tabifiedDockWidgets(host.dock_composite_keyframes)
+    assert host.dock_composite.visibleRegion().isEmpty()
+    assert host.config_manager.get(version_key) == dlc._COMPOSITE_DEFAULT_LAYOUT_VERSION
+    host.dock_composite.raise_()
     host._migrate_composite_default_layout()
-    assert not host.dock_composite.isHidden()
+    qapp.processEvents()
+    assert not host.dock_composite.visibleRegion().isEmpty()
 
 
 def test_initialize_falls_back_to_hardcoded_defaults(

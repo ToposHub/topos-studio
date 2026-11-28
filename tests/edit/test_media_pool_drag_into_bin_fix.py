@@ -84,10 +84,20 @@ def test_is_internal_drag_true_when_urls_and_custom_mime_both_present() -> None:
 # build / parse round-trip
 # ---------------------------------------------------------------------------
 
-def test_build_drag_mime_attaches_urls_for_assets(tmp_path) -> None:
+def test_build_drag_mime_attaches_urls_for_assets(monkeypatch, tmp_path) -> None:
     """Confirms the precondition of the bug: asset drags carry URLs."""
     media_path = tmp_path / "clip.mp4"
     media_path.write_bytes(b"placeholder")
+
+    import os
+
+    exists = os.path.exists
+
+    def reject_probe(path: str) -> bool:
+        assert str(path) != str(media_path), f"Building drag data must not probe {path}"
+        return exists(path)
+
+    monkeypatch.setattr("os.path.exists", reject_probe)
     mime = build_media_pool_drag_mime(
         asset_ids=["a1"],
         asset_paths=[str(media_path)],

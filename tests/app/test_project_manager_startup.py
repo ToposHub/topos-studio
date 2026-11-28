@@ -16,21 +16,18 @@ from src.app.controllers.menu_toolbar_controller import MenuToolbarMixin
 from src.shared.config.config_manager import ConfigManager
 
 
-def test_next_untitled_project_name_avoids_project_manager_names(monkeypatch):
+def test_next_untitled_project_name_uses_history_without_scanning_drives(monkeypatch):
     from src.shared.project import library
 
     monkeypatch.setattr(
         library,
         "scan_video_projects",
-        lambda _config: [
-            SimpleNamespace(name="Untitled Project"),
-            SimpleNamespace(name="Untitled Project 2"),
-            SimpleNamespace(name="A saved project"),
-        ],
+        lambda _config: pytest.fail("starting an empty project must not scan storage"),
     )
 
     host = MenuToolbarMixin()
-    host.config_manager = object()
+    host.config_manager = {"recent_projects": ["/Volumes/Archive/Untitled Project.topos"],
+                           "last_project": "/Volumes/Archive/Untitled Project 2.topos"}
 
     assert host._next_untitled_project_name() == "Untitled Project 3"
 
@@ -129,7 +126,7 @@ def project_browser(qtbot, monkeypatch, tmp_path):
         config.set(key, value, auto_save=False)
     monkeypatch.setattr(
         manager, "scan_project_libraries",
-        lambda _config: (
+        lambda _config, **_kwargs: (
             projects,
             [manager.ProjectLibraryLocation(str(path), True) for path in (tmp_path, secondary)],
         ),
@@ -213,8 +210,79 @@ def test_resume_hides_if_last_project_is_removed(qtbot, project_browser, monkeyp
     monkeypatch.setattr(dialog, "_show_missing_project", unavailable.append)
     with qtbot.assertNotEmitted(dialog.project_selected):
         dialog.resume_btn.click()
+        qtbot.waitUntil(lambda: bool(unavailable))
     assert unavailable == [cut.path]
     assert not dialog.resume_btn.isVisible()
+
+
+def test_slow_last_project_probe_does_not_block_a_different_project(qtbot, project_browser, monkeypatch):
+    from src.app.ui import project_manager_dialog as manager
+
+    dialog, (_cut, grade, delivery) = project_browser
+    waiting, release = Event(), Event()
+    original = manager.os.path.isfile
+
+    def isfile(path: str) -> bool:
+        if path == delivery.path:
+            waiting.set()
+            release.wait(timeout=5)
+        return original(path)
+
+    monkeypatch.setattr(manager.os.path, "isfile", isfile)
+    dialog._config.set("last_project", delivery.path, auto_save=False)
+    dialog._update_resume_button()
+    assert not waiting.is_set()
+    dialog.resume_btn.click()
+    try:
+        qtbot.waitUntil(waiting.is_set)
+        with qtbot.waitSignal(dialog.project_selected, timeout=1000) as opened:
+            dialog._open_project_file(grade.path)
+        assert opened.args == [grade.path]
+    finally:
+        release.set()
+    with qtbot.assertNotEmitted(dialog.project_selected):
+        qtbot.waitUntil(lambda: not dialog._open_checks)
+
+
+def test_local_projects_appear_while_the_external_library_is_waiting(qtbot, tmp_path, monkeypatch):
+    from src.app.ui.project_manager_dialog import ProjectManagerDialog
+    from src.shared.io import mount_paths
+
+    local, external = tmp_path / "Local", tmp_path / "External"
+    local.mkdir()
+    external.mkdir()
+    project = local / "Local Cut.topos"
+    with ZipFile(project, "w") as archive:
+        archive.writestr("manifest.json", '{"project_mode": "edit_project"}')
+        archive.writestr("project.json", '{"assets": {}}')
+    config = ConfigManager(tmp_path / "config.json")
+    config.set("project_library_directory", str(external), auto_save=False)
+    config.set("project_library_directories", [str(local)], auto_save=False)
+    monkeypatch.setattr(mount_paths, "is_external_mount_path", lambda path: path == str(external))
+    waiting, release = Event(), Event()
+    original = Path.iterdir
+
+    def iterdir(path: Path):
+        if path == external:
+            waiting.set()
+            release.wait(timeout=5)
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    dialog = ProjectManagerDialog(config)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    try:
+        qtbot.waitUntil(waiting.is_set)
+        qtbot.waitUntil(lambda: dialog.list_widget.count() == 1)
+        assert dialog._scan_inflight
+        dialog.list_widget.setCurrentRow(0)
+        with qtbot.waitSignal(dialog.project_selected, timeout=1000) as opened:
+            dialog.open_btn.click()
+        assert opened.args == [str(project)]
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not dialog._scan_inflight)
 
 
 def test_actions_menu_keeps_batch_selection_and_protects_open_project(monkeypatch, project_browser):
@@ -383,7 +451,7 @@ def test_refresh_keeps_rows_and_latest_selection_on_success_and_error(qtbot, pro
     cut, grade, _delivery = projects
     started, release = Event(), Event()
 
-    def rescan(_config):
+    def rescan(_config, **_kwargs):
         started.set()
         release.wait(timeout=3)
         return projects, dialog_locations
@@ -406,7 +474,7 @@ def test_refresh_keeps_rows_and_latest_selection_on_success_and_error(qtbot, pro
     assert dialog._selected_paths() == [grade.path]
     assert not dialog.scan_status.isVisible()
 
-    def failed_scan(_config):
+    def failed_scan(_config, **_kwargs):
         raise OSError("Unavailable")
 
     monkeypatch.setattr(manager, "scan_project_libraries", failed_scan)
@@ -446,6 +514,7 @@ def test_missing_project_offers_rescan_and_locate(qtbot, project_browser, monkey
     if action == "rescan":
         with qtbot.assertNotEmitted(dialog.project_selected):
             dialog.open_btn.click()
+            qtbot.waitUntil(lambda: bool(invoked))
         assert invoked == ["refresh"]
     else:
         with qtbot.waitSignal(dialog.project_selected, timeout=1000) as opened:

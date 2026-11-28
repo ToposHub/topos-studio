@@ -125,11 +125,61 @@ def test_product_arg_does_not_override_existing_env(monkeypatch, qt_stub, shutdo
 
 
 def test_invalid_project_path_logs_error(monkeypatch, qt_stub, shutdown_recorder, caplog, tmp_path):
-    bad = str(tmp_path / "missing.topos")
+    bad = str(tmp_path / "missing.mov")
     with caplog.at_level("ERROR", logger="src.main"):
         _run_main(monkeypatch, "--project", bad)
-    assert any("not an existing .topos file" in r.message for r in caplog.records)
+    assert any("must name a .topos file" in r.message for r in caplog.records)
     assert shutdown_recorder == [0]
+
+
+def test_startup_never_stats_the_command_line_project_before_show(monkeypatch, qt_stub, shutdown_recorder):
+    path = "/Volumes/Sleeping Disk/Project.topos"
+    original = os.path.isfile
+
+    def isfile(value):
+        assert value != path, "bootstrap must not probe the project drive"
+        return original(value)
+
+    monkeypatch.setattr(os.path, "isfile", isfile)
+    assert _run_main(monkeypatch, "--project", path) == 0
+    qt_stub["window"].show.assert_called_once()
+
+
+def test_startup_cache_alias_probe_does_not_wait_on_the_ui(qtbot, monkeypatch, tmp_path):
+    from threading import Event
+
+    from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+    from src.app import main_window
+
+    class Host(QObject):
+        _startup_cache_probed = pyqtSignal(str, str)
+
+    alias = str(tmp_path / "alias")
+    external = "/Volumes/Sleeping Disk/Cache"
+    resolve = os.path.realpath
+    waiting, release, returned = Event(), Event(), Event()
+
+    def realpath(path, *args, **kwargs):
+        if path == alias:
+            waiting.set()
+            release.wait(timeout=5)
+            returned.set()
+            return external
+        return resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", realpath)
+    monkeypatch.setattr(main_window, "is_external_mount_path", lambda path: path == external)
+    host = Host()
+    with qtbot.assertNotEmitted(host._startup_cache_probed):
+        main_window.MainWindow._probe_startup_cache(host, alias)
+        ticks = []
+        QTimer.singleShot(0, lambda: ticks.append(True))
+        try:
+            qtbot.waitUntil(waiting.is_set)
+            qtbot.waitUntil(lambda: bool(ticks))
+        finally:
+            release.set()
+        qtbot.waitUntil(returned.is_set)
 
 
 # ---------------------------------------------------------------------------

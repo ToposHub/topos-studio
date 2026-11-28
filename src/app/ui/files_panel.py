@@ -207,7 +207,9 @@ class FilesPanel(QWidget):
             self._native_transport.ai_library_index_status.connect(self._refresh_completed_ai_marks)
             self._native_panel.tree_requested.connect(self._native_transport.load_tree)
             # U03：预览 —— 每次请求都取消上一次未完成的取数，避免错过图串台
-            self._native_panel.preview_requested.connect(self._native_transport.load_preview)
+            self._native_panel.preview_requested.connect(
+                lambda path: self._native_transport.load_preview(
+                    path, cached_revisions=self._native_panel.preview_cache_revisions(path)))
             self._native_transport.preview_loaded.connect(self._native_panel.show_preview_bytes)
             self._native_transport.preview_failed.connect(self._native_panel.preview_load_failed)
             self._native_panel.preview_closed.connect(self._native_transport.cancel_preview)

@@ -471,7 +471,8 @@ class MainWindowAdapter:
         if not isinstance(dock, QDockWidget) or not isinstance(panel, QWidget):
             return False
         try:
-            return bool(dock.isVisible() and panel.isVisible())
+            # A background dock tab is still visible to QWidget.
+            return panel.isVisible() and not dock.visibleRegion().isEmpty()
         except Exception:
             return False
 

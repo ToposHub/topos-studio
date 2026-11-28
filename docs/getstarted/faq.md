@@ -59,6 +59,7 @@ Windows 下的硬件视频路径按“真实输出格式”裁决，不会把 FF
 
 ### 5. 其他常见问题
 
+*   **外接盘正在连接、唤醒或已掉盘**：Topos 在后台扫描工程库和检查素材在线状态。本地工程会先显示，外接盘上的素材等读盘完成后再更新。启动时跳过外接盘上的历史图片，外接盘上的自定义缓存位置会使用本机默认缓存代替。盘重新可用后，可刷新工程库或重新打开所需素材。
 *   **虚拟环境不可跨架构复制**：从 Intel Mac 迁移到 Apple Silicon（或反向）时必须删除旧 `.venv` 重建——详见 [installation.md](installation.md) “架构迁移须知”。
 
 ---
@@ -117,5 +118,7 @@ Preview's `preserve_planes=True` prefers NV12/P010 planar data so the renderer c
 | VLC | `import vlc` fails | Debian/Ubuntu: `sudo apt install vlc libvlc-dev`; Fedora: `sudo dnf install vlc`. |
 
 ### 5. Other Common Issues
+
+*   **External drives connecting, waking, or disconnected**: Topos scans project libraries and checks media availability in the background. Local projects appear first while external storage responds. Startup skips recent images on external drives and uses the default local cache in place of a custom cache on an external drive. Refresh the library or reopen the media once the drive is available.
 
 - **Virtual environments cannot be copied across CPU architectures:** when moving between an Intel Mac and Apple Silicon, remove and recreate `.venv` — see “Moving Between CPU Architectures” in [installation.md](installation.md).

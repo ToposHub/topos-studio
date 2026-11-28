@@ -12,7 +12,7 @@ import time
 import uuid
 import zipfile
 import datetime
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Optional
@@ -56,6 +56,7 @@ class ProjectMeta:
     modified_at: float
     file_modified_at: float  # filesystem mtime (for sorting when internal is 0)
     preview_path: str | None = None  # first source asset used for the project card
+    preview_fallback_path: str | None = None  # alternate source to resolve off-thread
 
 
 @dataclass(frozen=True)
@@ -381,6 +382,7 @@ def _archive_float(value: Any, fallback: float) -> float:
 
 def read_project_meta(
     path: str, *, require_manifest_mode: bool = False, require_manifest: bool = False,
+    probe_preview_path: bool = True,
 ) -> Optional[ProjectMeta]:
     """Read a .topos archive's metadata without a full load.
 
@@ -410,6 +412,7 @@ def read_project_meta(
     except OSError:
         file_mtime = 0.0
     preview_path = None
+    preview_fallback_path = None
     project_dir = Path(path).parent
     assets = project.get("assets")
     for asset in assets.values() if isinstance(assets, dict) else ():
@@ -418,8 +421,13 @@ def read_project_meta(
         relative = asset.get("path_relative")
         if isinstance(relative, str) and relative and "\x00" not in relative:
             candidate = project_dir / relative
-            if not Path(relative).is_absolute() and os.path.isfile(candidate):
+            if not Path(relative).is_absolute() and (not probe_preview_path or os.path.isfile(candidate)):
                 preview_path = str(candidate)
+                absolute = asset.get("path")
+                if not probe_preview_path and isinstance(absolute, str) and absolute:
+                    alternate = str(project_dir / absolute)
+                    if alternate != preview_path:
+                        preview_fallback_path = alternate
                 break
         asset_path = asset.get("path") or relative
         if not asset_path:
@@ -444,6 +452,7 @@ def read_project_meta(
         ),
         file_modified_at=file_mtime,
         preview_path=preview_path,
+        preview_fallback_path=preview_fallback_path,
     )
 
 
@@ -500,6 +509,7 @@ def scan_project_libraries(
     *,
     work_mode: Literal["image", "video"] = "video",
     directories: Iterable[Path] | None = None,
+    on_library_scanned: Callable[[ProjectLibraryLocation, list[ProjectMeta]], None] | None = None,
 ) -> tuple[list[ProjectMeta], list[ProjectLibraryLocation]]:
     """List projects of a work mode in the supplied folders or registered libraries."""
     results: list[ProjectMeta] = []
@@ -509,27 +519,49 @@ def scan_project_libraries(
         if config is None or not config.get("project_library_directory"):
             get_project_library_dir(config)
         directories = get_project_library_dirs(config)
+    if on_library_scanned is not None:
+        from src.shared.io.mount_paths import is_external_mount_path
+
+        # Publish local results before a removable library can stall the scan.
+        directories = sorted(directories, key=lambda path: is_external_mount_path(str(path)))
     for lib_dir in directories:
         try:
             entries = list(lib_dir.iterdir())
         except OSError as exc:
             logger.warning("Cannot scan project library %s: %s", lib_dir, exc)
-            locations.append(ProjectLibraryLocation(str(lib_dir), False))
+            location = ProjectLibraryLocation(str(lib_dir), False)
+            locations.append(location)
+            if on_library_scanned is not None:
+                on_library_scanned(location, [])
             continue
-        locations.append(ProjectLibraryLocation(str(lib_dir), True))
+        location = ProjectLibraryLocation(str(lib_dir), True)
+        locations.append(location)
         backup_dir = get_project_backup_dir(lib_dir / "__library__.topos", config, create=False)
+        library_projects: list[ProjectMeta] = []
         if project_library_key(lib_dir) == project_library_key(backup_dir):
+            if on_library_scanned is not None:
+                on_library_scanned(location, library_projects)
             continue
         for entry in entries:
-            if entry.suffix.lower() != ".topos" or entry.stem.lower().endswith(".topos") or not entry.is_file():
+            if entry.suffix.lower() != ".topos" or entry.stem.lower().endswith(".topos"):
+                continue
+            try:
+                if not entry.is_file():
+                    continue
+            except OSError as exc:
+                logger.debug("Project became unavailable during scan: %s: %s", entry, exc)
                 continue
             key = project_library_key(entry)
             if key in seen_paths:
                 continue
             seen_paths.add(key)
-            meta = read_project_meta(os.path.abspath(entry), require_manifest=work_mode == "image")
+            meta = read_project_meta(os.path.abspath(entry), require_manifest=work_mode == "image",
+                                     probe_preview_path=on_library_scanned is None)
             if meta is not None and is_video_project(meta) == (work_mode == "video"):
-                results.append(meta)
+                library_projects.append(meta)
+        results.extend(library_projects)
+        if on_library_scanned is not None:
+            on_library_scanned(location, library_projects)
     results.sort(key=lambda m: (m.modified_at or m.file_modified_at or 0.0), reverse=True)
     return results, locations
 

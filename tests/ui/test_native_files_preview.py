@@ -206,12 +206,24 @@ def test_panel_space_on_image_requests_preview_and_ignores_stale_bytes(qtbot):
     assert panel._preview._image.width() == 40
 
 
-def test_lightbox_paints_cached_card_then_loads_fit_and_original(qtbot, tmp_path):
+def test_lightbox_paints_cached_card_then_loads_fit_and_original(qtbot, monkeypatch, tmp_path):
+    import os
+
+    from src.features.files.services.thumbnail_cache import GradedThumbnailStamp
+
     first = tmp_path / "first.png"
     second = tmp_path / "second.png"
     payload = _png_bytes(2200, 1200)
     first.write_bytes(payload)
     second.write_bytes(payload)
+    revision = GradedThumbnailStamp.revision(str(first))
+    stat = os.stat
+
+    def no_preview_stat(path, *args, **kwargs):
+        assert str(path) != str(first), "The lightbox must not probe the preview path"
+        return stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", no_preview_stat)
     panel = NativeFilesPanel()
     qtbot.addWidget(panel)
     panel.resize(900, 620)
@@ -229,7 +241,7 @@ def test_lightbox_paints_cached_card_then_loads_fit_and_original(qtbot, tmp_path
     preview = panel._preview
     assert not preview.body.pixmap().isNull()
     assert preview._image is None and preview._decode_pending
-    panel.show_preview_bytes(str(first), payload)
+    panel.show_preview_bytes(str(first), payload, revision)
     qtbot.waitUntil(lambda: preview._image is not None)
     assert preview._image.width() < 2200
     assert not preview._has_detail
@@ -247,13 +259,15 @@ def test_lightbox_paints_cached_card_then_loads_fit_and_original(qtbot, tmp_path
 
     preview.close_preview()
     assert panel.open_path_native(str(first))
-    assert len(requested) == 3
+    assert len(requested) == 4
+    assert panel.preview_cache_revisions(str(first)) == (revision,)
+    panel.show_preview_bytes(str(first), None, revision)
     assert preview._image is not None and not preview._decode_pending
     panel.preview_load_failed(str(first), "late error")
     assert "late error" not in preview.meta.text()
     first.write_bytes(_png_bytes(1800, 1200))
     assert panel.open_path_native(str(first))
-    assert requested[-1] == str(first) and len(requested) == 4
+    assert requested[-1] == str(first) and len(requested) == 5
     assert preview._image is None
 
 

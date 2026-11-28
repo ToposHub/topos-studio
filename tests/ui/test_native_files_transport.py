@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from PyQt6.QtCore import QTimer
 from pytestqt.qtbot import QtBot
 
 from src.app.ui.native_files_transport import NativeFilesTransport
@@ -276,20 +277,16 @@ def test_tree_missing_directory_reports_empty(qtbot, env):
 
 def test_macos_mount_snapshot_lists_data_volumes_only(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.app.ui import native_files_locations as locations
-
-    def volume(path: str, name: str, *, root: bool = False, ready: bool = True) -> SimpleNamespace:
-        return SimpleNamespace(
-            rootPath=lambda: path, displayName=lambda: name, device=lambda: b"device",
-            isRoot=lambda: root, isReady=lambda: ready, isValid=lambda: True,
-        )
+    from src.shared.io import macos_mount_table
 
     monkeypatch.setattr(locations, "sys", SimpleNamespace(platform="darwin"))
-    monkeypatch.setattr(locations.QStorageInfo, "mountedVolumes", lambda: (
-        volume("/", "Startup", root=True),
-        volume("/System/Volumes/Data", "Data"),
-        volume("/Volumes/Offline", "Offline", ready=False),
-        volume("/Volumes/USB", "USB"),
-        volume("/Volumes/Archive", "Archive"),
+    monkeypatch.setattr(locations.QStorageInfo, "mountedVolumes",
+                        lambda: pytest.fail("must not probe mounted disks"))
+    monkeypatch.setattr(macos_mount_table, "cached_mounts", lambda: (
+        ("/", b"/dev/disk1s1"),
+        ("/System/Volumes/Data", b"/dev/disk1s2"),
+        ("/Volumes/USB", b"/dev/disk2s1"),
+        ("/Volumes/Archive", b"/dev/disk3s1"),
     ))
     assert [mount.name for mount in locations.mounted_data_volumes()] == ["Archive", "USB"]
 
@@ -840,7 +837,8 @@ def test_preview_local_read_bytes_and_errors(qtbot, env):
     try:
         with qtbot.waitSignal(transport.preview_loaded, timeout=8000) as ok:
             transport.load_preview(str(asset))
-        assert ok.args == [str(asset), b"\x89PNG fake"]
+        assert ok.args[:2] == [str(asset), b"\x89PNG fake"]
+        assert len(ok.args[2]) == 5
 
         transport.MAX_PREVIEW_BYTES = 8  # 实例级收紧上限：避免真实 64MB 夹具
         big = _seed(env, "big.png", b"x" * 16)
@@ -873,7 +871,7 @@ def test_preview_same_path_latest_wins(qtbot, env, monkeypatch):
     monkeypatch.setattr(facade_module, "read_file_bytes", gated)
     transport = make_transport(env)
     loaded, failed = [], []
-    transport.preview_loaded.connect(lambda p, data: loaded.append((p, data)))
+    transport.preview_loaded.connect(lambda p, data, revision: loaded.append((p, data)))
     transport.preview_failed.connect(failed.append)
     try:
         transport.load_preview(str(asset))
@@ -885,6 +883,57 @@ def test_preview_same_path_latest_wins(qtbot, env, monkeypatch):
         qtbot.wait(150)
         assert loaded == [(str(asset), b"NEW")]
         assert failed == []
+    finally:
+        release.set()
+        transport.shutdown()
+
+
+def test_preview_validates_cached_revisions_off_the_ui_thread(qtbot, env, monkeypatch) -> None:
+    from src.features.files.services import facade as facade_module
+    from src.features.files.services.thumbnail_cache import GradedThumbnailStamp
+
+    asset = _seed(env, "wait.png", b"OLD")
+    entered, release = threading.Event(), threading.Event()
+    ui_thread = threading.get_ident()
+    revision = GradedThumbnailStamp.revision
+    read_bytes = facade_module.read_file_bytes
+    reads: list[str] = []
+
+    def gated_revision(path: str) -> tuple[int, int, int, int, int]:
+        assert threading.get_ident() != ui_thread
+        entered.set()
+        assert release.wait(5)
+        return revision(path)
+
+    def tracked_read(path: str, limit: int) -> bytes:
+        reads.append(path)
+        return read_bytes(path, limit)
+
+    monkeypatch.setattr(facade_module, "read_file_bytes", tracked_read)
+    transport = make_transport(env)
+    try:
+        with qtbot.waitSignal(transport.preview_loaded) as first:
+            transport.load_preview(str(asset))
+        stamp = first.args[2]
+        monkeypatch.setattr(GradedThumbnailStamp, "revision", staticmethod(gated_revision))
+
+        with qtbot.waitSignal(transport.preview_loaded) as cached:
+            transport.load_preview(str(asset), cached_revisions=(stamp,))
+            qtbot.waitUntil(entered.is_set)
+            ticked: list[bool] = []
+            QTimer.singleShot(0, lambda: ticked.append(True))
+            qtbot.waitUntil(lambda: bool(ticked))
+            release.set()
+        assert cached.args == [str(asset), None, stamp]
+        assert reads == [str(asset)]
+
+        replacement = _seed(env, "replacement.png", b"NEW")
+        replacement.replace(asset)
+        with qtbot.waitSignal(transport.preview_loaded) as replaced:
+            transport.load_preview(str(asset), cached_revisions=(stamp,))
+        assert replaced.args[:2] == [str(asset), b"NEW"]
+        assert replaced.args[2] != stamp
+        assert reads == [str(asset), str(asset)]
     finally:
         release.set()
         transport.shutdown()
@@ -958,17 +1007,19 @@ def test_shutdown_suppresses_late_results(qtbot, env, monkeypatch):
     facade = FilesFacade(env.catalog, max_workers=1)
     captured: list = []
     monkeypatch.setattr(
-        facade, "read_file",
-        lambda path, *, request_id, listener, max_bytes: captured.append(listener))
+        facade, "run",
+        lambda *, key, request_id, work, listener: captured.append(listener))
     transport = NativeFilesTransport(lambda: "", None, facade=facade)
     loaded = []
     transport.preview_loaded.connect(lambda *args: loaded.append(args))
     try:
         transport.load_preview(str(asset))  # 提交被拦截：listener 未执行
         assert len(captured) == 1
+        result = FacadeOutcome(request_id="late", key="preview:x",
+                               generation=1, result=(b"LATE", None))
+        captured[0](result)  # 关闭前已入 GUI 队列，也必须丢弃。
         transport.shutdown()
-        captured[0](FacadeOutcome(request_id="late", key="read:x",
-                                  generation=1, result=b"LATE"))
+        captured[0](result)
         with qtbot.assertNotEmitted(transport.preview_loaded):
             qtbot.wait(100)
         assert loaded == []

@@ -733,6 +733,7 @@ class TestRebuildPrimesFromThumbnailCache(unittest.TestCase):
         # legacy (path, frame, height) tuple store
         provider._frame_pixmap_cache = _DictCache()
         provider.frame_cache = _DictCache()
+        provider._frame_source_revisions = _DictCache()
         provider._frame_pixmap_cache[(entry.asset_path, frame, 144)] = pixmap
         hit = provider.get_cached_frame_pixmap_any(
             entry.asset_path, frame, target_height=144, asset_id=None,

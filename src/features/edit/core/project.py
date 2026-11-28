@@ -799,12 +799,13 @@ class SmartBin:
 
     # ==================== 过滤方法 ====================
 
-    def get_assets(self, project: EditProject) -> list[MediaAsset]:
+    def get_assets(self, project: EditProject, *, probe_offline: bool = True) -> list[MediaAsset]:
         """
         根据过滤条件获取匹配的素材。
 
         Args:
             project: EditProject 实例
+            probe_offline: Probe files when the cached state is online.
 
         Returns:
             匹配的素材列表
@@ -822,7 +823,7 @@ class SmartBin:
             for asset in project.assets.values():
                 if asset.is_virtual:
                     continue  # Virtual assets don't have real file paths
-                if asset.is_offline or not os.path.exists(asset.path):
+                if asset.is_offline or (probe_offline and not os.path.exists(asset.path)):
                     assets.append(asset)
 
         elif self.filter_type == "recent":
@@ -4499,12 +4500,13 @@ class EditProject:
             SmartBin.create_recent_imports(),
         ]
 
-    def get_smart_bin_assets(self, smart_bin_id: str) -> list[MediaAsset]:
+    def get_smart_bin_assets(self, smart_bin_id: str, *, probe_offline: bool = True) -> list[MediaAsset]:
         """
         根据 Smart Bin ID 获取匹配的素材。
 
         Args:
             smart_bin_id: Smart Bin ID（使用预定义常量）
+            probe_offline: Probe files when the cached state is online.
 
         Returns:
             匹配的素材列表
@@ -4522,7 +4524,25 @@ class EditProject:
         if smart_bin is None:
             return []
 
-        return smart_bin.get_assets(self)
+        return smart_bin.get_assets(self, probe_offline=probe_offline)
+
+    def with_scanned_asset_availability(
+        self, source: EditProject, checked: EditProject,
+    ) -> EditProject:
+        """Merge derived flags from a scan without overwriting project edits."""
+        if self.project_id != source.project_id or self.project_id != checked.project_id:
+            return self
+        updated: dict[str, MediaAsset] = {}
+        for asset_id, scanned in checked.assets.items():
+            original = source.assets.get(asset_id)
+            current = self.assets.get(asset_id)
+            if (original is None or current is None
+                    or scanned.is_offline == original.is_offline
+                    or current.is_offline != original.is_offline
+                    or current.path != original.path or current.is_virtual):
+                continue
+            updated[asset_id] = current.with_offline_status(scanned.is_offline)
+        return replace(self, assets={**self.assets, **updated}) if updated else self
 
     def __hash__(self) -> int:
         """哈希值，基于 project_id"""

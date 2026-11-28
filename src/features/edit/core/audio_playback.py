@@ -6339,6 +6339,8 @@ class AudioPlaybackManager(QObject):
         audio_edit: Optional[dict] = None,
         pre_render_plan: Optional[Any] = None,
         pcm_source: Any = None,
+        *,
+        prepared_decoder: AudioDecoder | None = None,
     ) -> bool:
         """
         添加音频轨道。
@@ -6364,13 +6366,17 @@ class AudioPlaybackManager(QObject):
                 的 Source Patch 覆盖，mix_samples 解码后据此选道。
             fade_curve: B16 淡化曲线（None=legacy equal_power）。
             fade_curve_in/out: R09 两端独立曲线（优先于 fade_curve）。
+            prepared_decoder: 后台已打开的解码器，成功时所有权交给混音器。
 
         Returns:
             是否成功添加
         """
-        # 创建解码器
-        decoder = AudioDecoder()
-        if pcm_source is not None:
+        # Source Monitor can open its decoder before touching the Qt manager.
+        decoder = prepared_decoder if prepared_decoder is not None else AudioDecoder()
+        if prepared_decoder is not None:
+            if not decoder.is_open:
+                return False
+        elif pcm_source is not None:
             decoder.open_pcm(pcm_source, self._timeline_fps, source_start=source_start,
                              source_fps=source_fps, output_sample_rate=self._sample_rate)
         elif not decoder.open(

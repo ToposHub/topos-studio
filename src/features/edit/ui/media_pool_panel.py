@@ -246,7 +246,7 @@ def build_media_pool_drag_mime(
 
     Args:
         asset_ids: Asset ID 列表（可选）
-        asset_paths: Asset 路径列表（可选，用于 urls fallback）
+        asset_paths: 已知在线的资产路径列表（可选，用于 urls fallback）
         timeline_ids: Timeline ID 列表（可选，用于拖入 bin）
         source_clip: 单个素材标记范围的 Source 剪辑载荷（可选）
 
@@ -282,7 +282,7 @@ def build_media_pool_drag_mime(
     if asset_paths:
         # 去重 paths
         unique_paths = list(dict.fromkeys(asset_paths))
-        urls = [QUrl.fromLocalFile(p) for p in unique_paths if p and os.path.exists(p)]
+        urls = [QUrl.fromLocalFile(path) for path in unique_paths if path]
         if urls:
             mime.setUrls(urls)
 
@@ -3342,7 +3342,8 @@ class AssetTreeWidget(QTreeWidget):
                 asset = project.assets.get(item_id)
                 if asset:
                     asset_ids.append(item_id)
-                    asset_paths.append(asset.path)
+                    if not asset.is_virtual and not asset.is_offline:
+                        asset_paths.append(asset.path)
                     assets.append(asset)
             elif item_type == "timeline":
                 if item_id in project.timelines:
@@ -4130,7 +4131,8 @@ class AssetListView(QListView):
                 asset = source_model.data(source_index, Qt.ItemDataRole.UserRole)
                 if isinstance(asset, MediaAsset):
                     asset_ids.append(asset.asset_id)
-                    asset_paths.append(asset.path)
+                    if not asset.is_virtual and not asset.is_offline:
+                        asset_paths.append(asset.path)
                     assets.append(asset)
             elif item_type == "timeline":
                 timeline_ids.append(item_id)
@@ -4882,6 +4884,7 @@ class MediaPoolPanel(QWidget):
     _source_range_viewer: SourceViewerWidget | None = None
     timeline_selected = pyqtSignal(str)        # timeline_id (inspect only)
     project_changed = pyqtSignal(object)       # EditProject
+    project_availability_changed = pyqtSignal(object, object)  # previous, checked EditProject
     # F2.7：解释覆盖已提交（asset_ids, fps）——控制器可提示应用到当前
     # 时间线的既有片段（时基重锚）
     interpretation_applied = pyqtSignal(tuple, float)
@@ -4965,6 +4968,9 @@ class MediaPoolPanel(QWidget):
         # AUD-20202: availability scans run on a pool worker; at most one in
         # flight at a time so slow network volumes can't queue up scans.
         self._offline_scan_in_flight: bool = False
+        self._offline_scan_pending = False
+        self._offline_project_generation = 0
+        self._offline_scan_generation = 0
         self._refresh_bins_pending: bool = False
         # M3: 媒体池可选快速分析（§17.2）。默认 off（M3 验收第 1 项：导入零 AI 推理）。
         # controller 由 host 注入（set_media_analysis_controller）；panel 不直接调
@@ -5728,20 +5734,22 @@ class MediaPoolPanel(QWidget):
         """
         Set the current project reference.
 
-        When a project is set, automatically checks all assets for offline status.
+        Show the project immediately and schedule changed paths for a background check.
 
         Args:
             project: EditProject instance to bind
-            check_offline: Check availability now. Timeline imports have already
-                validated their sources and can use the periodic offline worker.
+            check_offline: Queue an initial check for changed sources. Timeline
+                imports have already validated their sources and can use the
+                periodic offline worker.
         """
         if self._updating:
             return
 
-        if (
-            self._project is not None
-            and (project is None or project.project_id != self._project.project_id)
-        ):
+        project_id = project.project_id if project is not None else None
+        switched = project_id != getattr(self._project, "project_id", None)
+        if switched:
+            self._offline_project_generation += 1
+        if self._project is not None and switched:
             # Do not let a late decode result from the previous project paint
             # a timeline card with the same ID in the new project.
             self._pending_timeline_frame_previews.clear()
@@ -5774,7 +5782,7 @@ class MediaPoolPanel(QWidget):
             return
 
         self._close_pool_info()
-        offline_status_changed = False
+        schedule_scan = False
         self._updating = True
         try:
             if (
@@ -5790,13 +5798,8 @@ class MediaPoolPanel(QWidget):
             # not repeat that work when only the active timeline changes.
             if project is not None:
                 signature = self._offline_signature(project)
-                if check_offline and signature != self._offline_status_signature:
-                    checked_project = update_offline_status(project)
-                    offline_status_changed = checked_project is not project
-                    project = checked_project
-                    self._offline_status_signature = self._offline_signature(project)
-                elif not check_offline:
-                    self._offline_status_signature = signature
+                schedule_scan = check_offline and (switched or signature != self._offline_status_signature)
+                self._offline_status_signature = signature
                 offline_count = sum(1 for a in project.assets.values() if a.is_offline)
                 if offline_count > 0:
                     logger.info(f"Detected {offline_count} offline asset(s) in project")
@@ -5824,12 +5827,15 @@ class MediaPoolPanel(QWidget):
         self._analysis_status_cache.clear()
         self._refresh_analysis_badges()
 
-        if offline_status_changed and project is not None:
-            self.project_changed.emit(project)
+        if schedule_scan:
+            if self._offline_scan_in_flight:
+                self._offline_scan_pending = True
+            else:
+                self._refresh_offline_status()
 
     def _refresh_offline_status(self) -> None:
         """Refresh derived file availability while the project is open."""
-        if self._updating or self._project is None:
+        if self._updating or self._project is None or not self._project.assets:
             return
 
         # AUD-20202: os.path.exists on network/removable volumes can block for
@@ -5838,6 +5844,7 @@ class MediaPoolPanel(QWidget):
         if self._offline_scan_in_flight:
             return
         self._offline_scan_in_flight = True
+        self._offline_scan_generation = self._offline_project_generation
         worker = OfflineScanWorker(self._project)
         worker.signals.finished.connect(self._on_offline_scan_finished)
         QThreadPool.globalInstance().start(worker)
@@ -5847,19 +5854,16 @@ class MediaPoolPanel(QWidget):
         self._offline_scan_in_flight = False
         if self._updating or self._project is None:
             return
-        # The scan ran on a snapshot; if the panel's project was swapped in
-        # the meantime (import, undo, timeline activation), discard the stale
-        # result — the next timer tick rescans the new project.
-        if source is not self._project or checked is None or checked is self._project:
-            return
-        if not isinstance(checked, EditProject):
-            return
-
-        # Force one normal UI refresh, then notify the host so the updated
-        # immutable project reaches the timeline/preview controllers too.
-        self._offline_status_signature = None
-        self.set_project(checked)
-        self.project_changed.emit(checked)
+        if (self._offline_scan_generation == self._offline_project_generation
+                and isinstance(source, EditProject) and isinstance(checked, EditProject)):
+            previous = self._project
+            updated = previous.with_scanned_asset_availability(source, checked)
+            if updated is not previous:
+                self.set_project(updated, check_offline=False)
+                self.project_availability_changed.emit(previous, updated)
+        if self._offline_scan_pending:
+            self._offline_scan_pending = False
+            self._refresh_offline_status()
 
     @staticmethod
     def _offline_signature(project: EditProject) -> tuple[tuple[str, str, bool, bool], ...]:
@@ -5869,7 +5873,7 @@ class MediaPoolPanel(QWidget):
                 (
                     asset_id,
                     asset.path,
-                    asset.is_comp_clip,
+                    asset.is_virtual,
                     asset.is_offline,
                 )
                 for asset_id, asset in project.assets.items()
@@ -8338,7 +8342,7 @@ class MediaPoolPanel(QWidget):
 
         # Smart Bin 选中
         if self._current_bin_is_smart and self._current_bin_id:
-            return self._project.get_smart_bin_assets(self._current_bin_id)
+            return self._project.get_smart_bin_assets(self._current_bin_id, probe_offline=False)
 
         # 普通 Bin 选中
         if self._current_bin_id and not self._current_bin_is_smart:
@@ -8808,6 +8812,7 @@ class MediaPoolPanel(QWidget):
             self._current_bin_id, self._sort_by, self._sort_order,
             self._project.project_id if self._project else "",
             self._project.revision if self._project else -1,
+            id(self._project.assets) if self._project else None,
         )
 
     def _ensure_pool_query(self) -> None:
@@ -8862,6 +8867,8 @@ class MediaPoolPanel(QWidget):
         # 工程可能又前进一步——晚到结果不得按新工程渲染）。
         if getattr(result, "revision", None) != self._project.revision:
             logger.info("Dropping pool query result (stale revision)")
+            return
+        if self._pending_query_fingerprint != self._pool_query_fingerprint():
             return
         if getattr(result, "cancelled", False):
             return

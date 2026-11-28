@@ -42,13 +42,18 @@ class MountedVolume:
 
 def mounted_data_volumes() -> tuple[MountedVolume, ...]:
     """Read the OS mount table on a worker, without scanning directory contents."""
+    if sys.platform == "darwin":
+        from src.shared.io.macos_mount_table import cached_mounts
+
+        volumes = [MountedVolume(normalize_path(path), path.rsplit("/", 1)[-1], device)
+                   for path, device in cached_mounts() if path.rpartition("/")[0] == "/Volumes"]
+        return tuple(sorted(volumes, key=lambda volume: (volume.name.casefold(), volume.path)))
+
     volumes = []
     for storage in QStorageInfo.mountedVolumes():
         if not storage.isValid() or not storage.isReady() or storage.isRoot():
             continue
         path = normalize_path(storage.rootPath())
-        if sys.platform == "darwin" and path.rpartition("/")[0] != "/Volumes":
-            continue
         if sys.platform.startswith("linux") and not (
             path == "/mnt" or path.startswith(("/mnt/", "/media/", "/run/media/"))
         ):

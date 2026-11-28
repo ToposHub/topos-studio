@@ -8,6 +8,7 @@ import hashlib
 import logging
 import math
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, List, Tuple
 
@@ -259,14 +260,27 @@ class FrameThumbnailKey:
     target_height: int
 
 
+_FrameRequestKey = tuple[str | None, str, int, int]
+_FRAME_SOURCE_RECHECK_SECONDS = 2.0
+
+
+@dataclass(frozen=True)
+class _FrameThumbnailResult:
+    epoch: object
+    request_key: _FrameRequestKey
+    cache_key: tuple | FrameThumbnailKey | None
+    total_frames: int
+    image: QImage | None
+    reuse_cached: bool
+
+
 def _make_frame_key(
     asset_id: str | None,
     path: str,
     frame_index: int,
     target_height: int,
 ) -> tuple | FrameThumbnailKey:
-    """Build a cache key, falling back to a plain tuple when ``asset_id``
-    is not available (backward-compatible path).
+    """Probe the revision and build a cache key on the worker thread.
 
     When ``asset_id`` is ``None`` the caller opted out of the new key
     scheme — we return ``(path, frame_index, target_height)`` so that
@@ -279,6 +293,14 @@ def _make_frame_key(
     except OSError:
         mtime_ns = 0
     return FrameThumbnailKey(asset_id, path, mtime_ns, frame_index, target_height)
+
+
+def _drop_pooled_captures(path: str) -> None:
+    """Close handles to a replaced source before decoding its new contents."""
+    with _cap_pool_lock:
+        captures = _cap_pool.pop(path, ())
+    for capture in captures:
+        capture.release()
 
 
 def _estimate_pixmap_bytes(pixmap: QPixmap) -> int:
@@ -341,6 +363,14 @@ class MemoryAwareLRUCache:
             del self._cache[key]
             evict_size = self._sizes.pop(key, 0)
             self._total_bytes -= evict_size
+
+    def remove_source(self, path: str) -> None:
+        """Remove any frame pixmaps cached under this path."""
+        for key in list(self._cache):
+            if isinstance(key, FrameThumbnailKey) and key.path == path:
+                self.remove(key)
+            elif isinstance(key, tuple) and key and key[0] == path:
+                self.remove(key)
 
     def clear(self) -> None:
         """Clear all cached items."""
@@ -1031,7 +1061,10 @@ class ThumbnailProvider(QObject):
         self._frame_pixmap_cache: MemoryAwareLRUCache = MemoryAwareLRUCache(
             max_items=200, max_bytes=500 * 1024 * 1024
         )  # Memory-aware per-frame pixmap cache
-        self._pending_frame_pixmap_requests: set = set()  # Track pending keys
+        # The request identity is independent of the on-disk revision. A
+        # revision only becomes available once the worker has checked it.
+        self._pending_frame_pixmap_requests: dict[_FrameRequestKey, bool] = {}
+        self._frame_source_revisions = LRUCache(2000)
         self._playback_active: bool = False
         self._media_result_epoch = object()
         self._thumbnail_generation: int = 0
@@ -1179,8 +1212,8 @@ class ThumbnailProvider(QObject):
 
         When ``asset_id`` is provided the cache key is a
         :class:`FrameThumbnailKey` that includes the file's ``mtime_ns``,
-        so a file replacement at the same path automatically invalidates
-        stale entries.  When ``asset_id`` is ``None`` (the default) a
+        so a background revision check can invalidate stale entries after
+        a replacement. When ``asset_id`` is ``None`` (the default) a
         plain tuple key ``(path, frame_index, icon_size)`` is used for
         backward compatibility.
 
@@ -1191,37 +1224,9 @@ class ThumbnailProvider(QObject):
             icon_size: Desired thumbnail size
             asset_id: Optional asset identifier for improved cache key
         """
-        frame_pixmap_key = _make_frame_key(asset_id, path, frame_index, icon_size)
-
-        # Check the per-frame pixmap cache first
-        cached = self._frame_pixmap_cache.get(frame_pixmap_key)
-        if cached:
-            self.frame_thumbnail_ready.emit(path, frame_index, cached)
-            return
-
-        # Also check legacy frame cache for backwards compatibility
-        legacy_key = (path, frame_index)
-        legacy_cached = self.frame_cache.get(legacy_key)
-        if legacy_cached:
-            self.frame_thumbnail_ready.emit(path, frame_index, legacy_cached)
-            return
-
-        # Check if request is already pending
-        if self._playback_active or frame_pixmap_key in self._pending_frame_pixmap_requests:
-            return
-        if legacy_key in self.pending_frame_requests:
-            return
-
-        self.pending_frame_requests.add(legacy_key)
-        self._pending_frame_pixmap_requests.add(frame_pixmap_key)
-        epoch = self._media_result_epoch
-        request = FrameThumbnailRequest(
-            path, frame_index, total_frames, icon_size,
-            self._on_frame_thumbnail_loaded,
-            cancelled=lambda: epoch is not self._media_result_epoch,
-            result_epoch=epoch,
+        self._request_frame(
+            asset_id, path, frame_index, total_frames, icon_size, media_request=True,
         )
-        self.pool.start(request, -10)
 
     def get_cached_thumbnail(self, path: str, icon_size: int = 128) -> QPixmap | None:
         """
@@ -1258,56 +1263,56 @@ class ThumbnailProvider(QObject):
             pass
 
     def _on_frame_thumbnail_loaded(
-        self, path: str, frame_index: int, image: QImage | _ThumbnailResult | None,
+        self, path: str, frame_index: int, image: QImage | _FrameThumbnailResult | None,
     ) -> None:
         """Main-thread callback: converts QImage to QPixmap and caches it."""
-        if isinstance(image, _ThumbnailResult):
-            if image.epoch is not self._media_result_epoch:
-                return
-            image = image.image
-        cache_key = (path, frame_index)
-        if cache_key in self.pending_frame_requests:
-            self.pending_frame_requests.discard(cache_key)
-        if self._playback_active:
+        if isinstance(image, _FrameThumbnailResult):
+            self._apply_frame_result(path, frame_index, image)
+            return
+        self.pending_frame_requests.discard((path, frame_index))
+        if not self._playback_active and image:
+            pixmap = QPixmap.fromImage(image)
+            self.frame_cache.put((path, frame_index), pixmap)
+            self.frame_thumbnail_ready.emit(path, frame_index, pixmap)
+
+    def _apply_frame_result(self, path: str, frame_index: int, result: _FrameThumbnailResult) -> None:
+        if result.epoch is not self._media_result_epoch:
+            return
+        if result.request_key not in self._pending_frame_pixmap_requests:
+            return
+        media_request = self._pending_frame_pixmap_requests.pop(result.request_key)
+        if media_request:
+            self.pending_frame_requests.discard((path, frame_index))
+        key = result.cache_key
+        if self._playback_active or key is None:
             return
 
-        if image:
-            pixmap = QPixmap.fromImage(image)
-            # Store in legacy cache
-            self.frame_cache.put(cache_key, pixmap)
-            # Store in per-frame pixmap cache for each pending key that
-            # matches (path, frame_index).  This covers both FrameThumbnailKey
-            # entries (new) and plain tuple entries (legacy).
-            matching = [
-                k for k in self._pending_frame_pixmap_requests
-                if self._key_matches_path_frame(k, path, frame_index)
-            ]
-            for k in matching:
-                self._frame_pixmap_cache.put(k, pixmap)
-                self._pending_frame_pixmap_requests.discard(k)
-
-            self.frame_thumbnail_ready.emit(path, frame_index, pixmap)
-        else:
-            # Clean up pending entries on failure
-            to_remove = [
-                k for k in self._pending_frame_pixmap_requests
-                if self._key_matches_path_frame(k, path, frame_index)
-            ]
-            for k in to_remove:
-                self._pending_frame_pixmap_requests.discard(k)
-
-    @staticmethod
-    def _key_matches_path_frame(key: object, path: str, frame_index: int) -> bool:
-        """Return True if *key* refers to the given ``path`` and ``frame_index``.
-
-        Handles both :class:`FrameThumbnailKey` instances and legacy tuples.
-        """
         if isinstance(key, FrameThumbnailKey):
-            return key.path == path and key.frame_index == frame_index
-        # Legacy tuple: (path, frame_index, ...) or (path, frame_index)
-        if isinstance(key, tuple) and len(key) >= 2:
-            return key[0] == path and key[1] == frame_index
-        return False
+            previous = self._frame_source_revisions.get(path)
+            if previous is not None and previous[0] != key.mtime_ns:
+                # Legacy callers use keys without revisions. Remove their
+                # old pixmaps as soon as a source change becomes known.
+                self.frame_cache.remove_source(path)
+                self._frame_pixmap_cache.remove_source(path)
+            self._frame_source_revisions.put(path, (key.mtime_ns, time.monotonic()))
+
+        if result.reuse_cached:
+            pixmap = self._frame_pixmap_cache.get(key)
+            if pixmap is None:
+                # The entry was evicted while its revision check was queued.
+                asset_id, _, _, target_height = result.request_key
+                self._request_frame(
+                    asset_id, path, frame_index, result.total_frames, target_height,
+                    media_request=media_request,
+                )
+                return
+        else:
+            if not result.image:
+                return
+            pixmap = QPixmap.fromImage(result.image)
+            self.frame_cache.put((path, frame_index), pixmap)
+            self._frame_pixmap_cache.put(key, pixmap)
+        self.frame_thumbnail_ready.emit(path, frame_index, pixmap)
 
     # ================================================================
     # Phase 1.1: Clip Thumbnail Methods
@@ -1541,8 +1546,8 @@ class ThumbnailProvider(QObject):
         """
         Get cached frame pixmap by asset_id, frame_number, and target_height.
 
-        When ``path`` is provided a :class:`FrameThumbnailKey` (with
-        ``mtime_ns``) is used; otherwise a plain tuple
+        When ``path`` is provided, look up the last revision observed by
+        the worker. This call only reads memory. Without a path, a plain tuple
         ``(asset_id, frame_number, target_height)`` is used for
         backward compatibility.
 
@@ -1555,13 +1560,14 @@ class ThumbnailProvider(QObject):
         Returns:
             QPixmap if cached, None otherwise
         """
-        if path is not None:
-            key: tuple | FrameThumbnailKey = _make_frame_key(
-                asset_id, path, frame_number, target_height,
-            )
-        else:
-            key = (asset_id, frame_number, target_height)
-        return self._frame_pixmap_cache.get(key)
+        if path is None:
+            return self._frame_pixmap_cache.get((asset_id, frame_number, target_height))
+        revision = self._frame_source_revisions.get(path)
+        if revision is None:
+            return None
+        return self._frame_pixmap_cache.get(
+            FrameThumbnailKey(asset_id, path, revision[0], frame_number, target_height),
+        )
 
     def get_cached_frame_pixmap_any(
         self,
@@ -1580,16 +1586,15 @@ class ThumbnailProvider(QObject):
         the Color clip strip rebuilding its cards without flashing the
         placeholder — use this instead of betting on one key form.
         """
-        candidates: list = []
         if asset_id:
-            candidates.append(
-                _make_frame_key(asset_id, path, frame_number, target_height)
+            cached = self.get_cached_frame_pixmap(
+                asset_id, frame_number, target_height, path=path,
             )
-        candidates.append((path, frame_number, target_height))
-        for key in candidates:
-            cached = self._frame_pixmap_cache.get(key)
             if cached is not None:
                 return cached
+        cached = self._frame_pixmap_cache.get((path, frame_number, target_height))
+        if cached is not None:
+            return cached
         return self.frame_cache.get((path, frame_number))
 
     def request_frame_pixmap_async(
@@ -1613,24 +1618,48 @@ class ThumbnailProvider(QObject):
             total_frames: Total frames in the video
             target_height: Target thumbnail height in pixels
         """
-        cache_key = _make_frame_key(asset_id, file_path, frame_number, target_height)
+        self._request_frame(asset_id, file_path, frame_number, total_frames, target_height)
 
-        # Check cache first
+    def _request_frame(
+        self, asset_id: str | None, path: str, frame_index: int, total_frames: int, target_height: int,
+        *, media_request: bool = False,
+    ) -> None:
+        revision = self._frame_source_revisions.get(path) if asset_id is not None else None
+        cache_key = (FrameThumbnailKey(asset_id, path, revision[0], frame_index, target_height)
+                     if asset_id is not None and revision is not None
+                     else (path, frame_index, target_height))
+        legacy_key = (path, frame_index)
         cached = self._frame_pixmap_cache.get(cache_key)
-        if cached:
-            self.frame_thumbnail_ready.emit(file_path, frame_number, cached)
+        # Revalidate after an idle interval on the worker. Repeated paint or
+        # hover work can use the verified pixmap without repeated disk I/O.
+        fresh = asset_id is None or (
+            revision is not None and time.monotonic() - revision[1] < _FRAME_SOURCE_RECHECK_SECONDS
+        )
+        if fresh or self._playback_active:
+            if cached is None and media_request:
+                cached = self.frame_cache.get(legacy_key)
+            if cached:
+                self.frame_thumbnail_ready.emit(path, frame_index, cached)
+                return
+        if self._playback_active or (media_request and legacy_key in self.pending_frame_requests):
             return
-
-        # Skip if already pending
-        if self._playback_active or cache_key in self._pending_frame_pixmap_requests:
+        request_key = (asset_id, path, frame_index, target_height)
+        if request_key in self._pending_frame_pixmap_requests:
             return
-
-        self._pending_frame_pixmap_requests.add(cache_key)
+        self._pending_frame_pixmap_requests[request_key] = media_request
+        if media_request:
+            self.pending_frame_requests.add(legacy_key)
+        epoch = self._media_result_epoch
+        generation = self._thumbnail_generation
         request = FrameThumbnailRequest(
-            file_path, frame_number, total_frames, target_height,
+            path, frame_index, total_frames, target_height,
             self._on_frame_thumbnail_loaded,
-            cancelled=lambda generation=self._thumbnail_generation: self._request_cancelled(generation),
-            result_epoch=self._media_result_epoch,
+            cancelled=lambda: epoch is not self._media_result_epoch or (
+                not media_request and self._request_cancelled(generation)
+            ),
+            result_epoch=epoch, asset_id=asset_id,
+            previous_mtime=revision[0] if revision is not None else None,
+            cached_key=cache_key if cached and isinstance(cache_key, FrameThumbnailKey) else None,
         )
         self.pool.start(request, -10)
 
@@ -1642,6 +1671,8 @@ class FrameThumbnailRequest(QRunnable):
         self, path: str, frame_index: int, total_frames: int, icon_size: int,
         callback: Callable[..., None] | None,
         cancelled: Callable[[], bool] | None = None, *, result_epoch: object | None = None,
+        asset_id: str | None = None, previous_mtime: int | None = None,
+        cached_key: FrameThumbnailKey | None = None,
     ) -> None:
         super().__init__()
         self.path = path
@@ -1651,12 +1682,20 @@ class FrameThumbnailRequest(QRunnable):
         self.callback = callback
         self._cancelled = cancelled
         self._result_epoch = result_epoch
+        self._request_key = (asset_id, path, frame_index, icon_size)
+        self._cache_key: tuple | FrameThumbnailKey | None = (
+            (path, frame_index, icon_size) if asset_id is None else None
+        )
+        self._previous_mtime = previous_mtime
+        self._cached_key = cached_key
 
     def _is_cancelled(self) -> bool:
         return self._cancelled is not None and self._cancelled()
 
-    def _emit_result(self, image: QImage | None) -> None:
-        result = image if self._result_epoch is None else _ThumbnailResult(self._result_epoch, image)
+    def _emit_result(self, image: QImage | None, *, reuse_cached: bool = False) -> None:
+        result = image if self._result_epoch is None else _FrameThumbnailResult(
+            self._result_epoch, self._request_key, self._cache_key, self.total_frames, image, reuse_cached,
+        )
         _get_bridge().frame_thumbnail_done.emit(self.path, self.frame_index, result)
 
     @pyqtSlot()
@@ -1666,6 +1705,16 @@ class FrameThumbnailRequest(QRunnable):
             if self._is_cancelled():
                 self._emit_result(None)
                 return
+            asset_id = self._request_key[0]
+            if asset_id is not None:
+                key = _make_frame_key(asset_id, self.path, self.frame_index, self.icon_size)
+                if self._is_cancelled():
+                    self._emit_result(None)
+                    return
+                self._cache_key = key
+                if self._cached_key == key:
+                    self._emit_result(None, reuse_cached=True)
+                    return
             ext = os.path.splitext(self.path)[1].lower()
 
             # Only support video files for frame extraction
@@ -1707,6 +1756,9 @@ class FrameThumbnailRequest(QRunnable):
                     _cleanup_file_lock(self.path)
                     self._emit_result(None)
                     return
+                if (isinstance(self._cache_key, FrameThumbnailKey) and self._previous_mtime is not None
+                        and self._cache_key.mtime_ns != self._previous_mtime):
+                    _drop_pooled_captures(self.path)
                 cap = _get_capture(self.path)
                 try:
                     if self._is_cancelled() or not cap.isOpened():

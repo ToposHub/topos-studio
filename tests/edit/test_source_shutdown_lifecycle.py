@@ -190,13 +190,15 @@ def test_i05_release_clears_monitor_state_store(qapp):
     assert widget._current_frame == 0     # 存储已清，不回填旧工程位置
 
 
-def test_i05_close_source_keeps_monitor_state_within_project(qapp):
+def test_i05_close_source_keeps_monitor_state_within_project(qapp, qtbot):
     """对照：工程内换源（close_source）保留监看状态——只有工程级释放才清。"""
     widget = _widget(qapp, _Provider())
     widget.open_asset(_video_asset())
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
     widget.seek(33)
 
     widget.close_source()                 # 换源路径（I02 语义）
     widget.open_asset(_video_asset())
+    qtbot.waitUntil(lambda: widget._pending_monitor_restore is None)
 
     assert widget._current_frame == 33

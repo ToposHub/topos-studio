@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QMenu, QMessageBox, QPushButton, QVBoxLayout,
 )
 from PyQt6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon, QKeySequence, QShortcut
+from PyQt6.QtGui import QIcon, QKeySequence, QShortcut
 from src.app.ui.startup_dialog import DraggableHeaderDialog, WorkModeSelector
 from src.shared.i18n.i18n import I18N
 from src.shared.project.library import ProjectMeta, project_library_key, scan_project_libraries
@@ -77,6 +77,19 @@ class _ProjectFolderWorker(QRunnable):
         self.signals.done.emit(self._request, projects, locations[0].available)
 
 
+class _RecentPathProbe(QRunnable):
+    class _Signals(QObject):
+        checked = pyqtSignal(str, bool)
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self._path = path
+        self.signals = self._Signals()
+
+    def run(self) -> None:
+        self.signals.checked.emit(self._path, os.path.isfile(self._path))
+
+
 class WelcomeDialog(DraggableHeaderDialog):
     """Welcome dialog shown at application startup.
 
@@ -113,6 +126,8 @@ class WelcomeDialog(DraggableHeaderDialog):
         # C++ 对象随打开次数永久累积
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self._config = config_manager
+        self._pending_recent: tuple[str, bool] | None = None
+        self._recent_checks: set[str] = set()
         self._recent_project_paths: list[str] | None = None
         self._project_folder: str | None = None
         self._folder_request = 0
@@ -304,14 +319,7 @@ class WelcomeDialog(DraggableHeaderDialog):
             return
 
         for filepath in recent:
-            item = self._recent_item(filepath)
-            if not os.path.exists(filepath):
-                item.setForeground(QColor("#a6a6ae"))
-                item.setToolTip(I18N.tr("error.file_not_found", "File not found: {0}").format(filepath))
-                font = item.font()
-                font.setItalic(True)
-                item.setFont(font)
-            self.recent_list.addItem(item)
+            self.recent_list.addItem(self._recent_item(filepath))
 
     def _populate_recent_projects(self) -> None:
         """Populate the Recent Projects list, filtered by the active work mode.
@@ -616,26 +624,41 @@ class WelcomeDialog(DraggableHeaderDialog):
         self.accept()
 
     def _on_recent_double_click(self, item: QListWidgetItem | None) -> None:
-        if path := self._available_recent_path(item):
-            self.recent_file_selected.emit(path)
-            self.accept()
+        self._check_recent_path(item, project=False)
 
     def _on_project_double_click(self, item: QListWidgetItem | None) -> None:
-        if path := self._available_recent_path(item):
-            self.recent_project_selected.emit(path)
+        self._check_recent_path(item, project=True)
 
-    def _available_recent_path(self, item: QListWidgetItem | None) -> str | None:
+    def _check_recent_path(self, item: QListWidgetItem | None, *, project: bool) -> None:
         path = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-        if not path:
-            return None
-        if os.path.exists(path):
-            return path
+        if not isinstance(path, str) or not path:
+            return
+        self._pending_recent = path, project
+        if path in self._recent_checks:
+            return
+        self._recent_checks.add(path)
+        worker = _RecentPathProbe(path)
+        worker.signals.checked.connect(self._on_recent_path_checked, Qt.ConnectionType.QueuedConnection)
+        QThreadPool.globalInstance().start(worker)
+
+    def _on_recent_path_checked(self, path: str, available: bool) -> None:
+        self._recent_checks.discard(path)
+        if self._pending_recent is None or self._pending_recent[0] != path or not self.isVisible():
+            return
+        _, project = self._pending_recent
+        self._pending_recent = None
+        if available:
+            if project:
+                self.recent_project_selected.emit(path)
+            else:
+                self.recent_file_selected.emit(path)
+                self.accept()
+            return
         QMessageBox.warning(
             self,
             I18N.tr("error.title", "Error"),
             I18N.tr("error.file_not_found", "File not found: {0}").format(path),
         )
-        return None
 
     def _on_mode_clicked(self, mode: str) -> None:
         """Switch the work mode and offer to restart immediately.

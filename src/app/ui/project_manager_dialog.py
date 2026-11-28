@@ -7,6 +7,7 @@ import logging
 import os
 from collections import Counter
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from PyQt6.QtCore import (
@@ -159,20 +160,35 @@ class _ProjectTask(QRunnable):
 
     class _Signals(QObject):
         done = pyqtSignal(object, object)
+        contextual_done = pyqtSignal(object, object, object)
+        library_scanned = pyqtSignal(object, object)
 
-    def __init__(self, operation: Callable[[], object]) -> None:
+    def __init__(self, operation: Callable[[], object], *, context: object = None,
+                 signals: _Signals | None = None) -> None:
         super().__init__()
         self._operation = operation
-        self.signals = self._Signals()
+        self._context = context
+        self.signals = signals if signals is not None else self._Signals()
 
     def run(self) -> None:
+        result, error = None, None
         try:
             result = self._operation()
-        except Exception as error:
+        except Exception as exc:
             logger.exception("Project manager operation failed")
-            self.signals.done.emit(None, error)
+            error = exc
+        if self._context is None:
+            self.signals.done.emit(result, error)
         else:
-            self.signals.done.emit(result, None)
+            self.signals.contextual_done.emit(self._context, result, error)
+
+
+def _read_card_preview(meta: ProjectMeta) -> tuple[bytes | None, str | None]:
+    cover = extract_cover_thumbnail(meta.path)
+    source = meta.preview_path
+    if not cover and source and meta.preview_fallback_path and not os.path.isfile(source):
+        source = meta.preview_fallback_path
+    return cover, source
 
 
 class _ProjectCardDelegate(QStyledItemDelegate):
@@ -538,6 +554,13 @@ class ProjectManagerDialog(DraggableHeaderDialog):
         # 每次变更都会整表重建并逐项重开 zip 解压封面（extract_cover_
         # thumbnail），抵消 [R0-7] 异步扫描；缓存随刷新清空、容量有上限。
         self._cover_pixmap_cache: dict[str, QPixmap] = {}
+        self._cover_generation = 0
+        self._cover_queue: dict[str, ProjectMeta] = {}
+        self._cover_inflight: set[tuple[int, str]] = set()
+        self._cover_checked: dict[str, str | None] = {}
+        self._pending_open: tuple[str, bool] | None = None
+        self._open_checks: set[str] = set()
+        self._unavailable_resume: str | None = None
         self._all_projects: list[ProjectMeta] = []
         self._locations: list[ProjectLibraryLocation] = []
         self._library_filter: str | None = None
@@ -556,6 +579,7 @@ class ProjectManagerDialog(DraggableHeaderDialog):
         self._thumbnail_provider = ThumbnailProvider.instance()
         self._thumbnail_provider.thumbnail_ready.connect(self._on_thumbnail_ready)
         self._setup_ui()
+        self.finished.connect(self._cancel_pending_open)
         self._apply_styles()
         self._restore_browser_settings()
         self._refresh_project_list()
@@ -936,7 +960,7 @@ class ProjectManagerDialog(DraggableHeaderDialog):
 
     def _last_project_path(self) -> str | None:
         path = self._config.get("last_project")
-        return path if isinstance(path, str) and os.path.isfile(path) else None
+        return path if isinstance(path, str) and path and path != self._unavailable_resume else None
 
     def _update_resume_button(self) -> None:
         path = self._last_project_path()
@@ -968,7 +992,10 @@ class ProjectManagerDialog(DraggableHeaderDialog):
         )
         self._apply_filter(self.search_box.text())
         config = self._config
-        worker = _ProjectTask(lambda: scan_project_libraries(config))
+        signals = _ProjectTask._Signals()
+        signals.library_scanned.connect(self._on_library_scanned, Qt.ConnectionType.QueuedConnection)
+        worker = _ProjectTask(partial(scan_project_libraries, config,
+                                      on_library_scanned=signals.library_scanned.emit), signals=signals)
         worker.signals.done.connect(self._on_scan_done)
         QThreadPool.globalInstance().start(worker)
 
@@ -997,16 +1024,35 @@ class ProjectManagerDialog(DraggableHeaderDialog):
             self._apply_filter(self.search_box.text())
             return
 
-        self._has_scan_snapshot = True
         self._set_scan_status("")
-        self._all_projects, self._locations = result
+        self._cover_pixmap_cache.clear()
+        self._cover_generation += 1
+        self._cover_queue.clear()
+        self._cover_checked.clear()
+        self._apply_scan_snapshot(*result)
+
+    @pyqtSlot(object, object)
+    def _on_library_scanned(self, location: ProjectLibraryLocation, projects: list[ProjectMeta]) -> None:
+        if not self._scan_inflight:
+            return
+        key = project_library_key(location.path)
+        locations = {project_library_key(current.path): current for current in self._locations}
+        locations[key] = location
+        previous = [meta for meta in self._all_projects if project_library_key(Path(meta.path).parent) != key]
+        self._set_scan_status(I18N.tr("pm.refreshing", "Refreshing…"))
+        self._apply_scan_snapshot([*previous, *projects], list(locations.values()))
+
+    def _apply_scan_snapshot(self, projects: list[ProjectMeta], locations: list[ProjectLibraryLocation]) -> None:
+        self._has_scan_snapshot = True
+        self._all_projects, self._locations = projects, locations
+        if any(meta.path == self._unavailable_resume for meta in self._all_projects):
+            self._unavailable_resume = None
         if self._library_filter and not any(item.path == self._library_filter for item in self._locations):
             self._library_filter = None
         self._update_library_button()
         self._update_resume_button()
         scroll_bar = self.list_widget.verticalScrollBar()
         scroll_position = scroll_bar.value()
-        self._cover_pixmap_cache.clear()
         self._media_path = None
         self._rebuild_projects()
         self.list_widget.doItemsLayout()
@@ -1300,28 +1346,66 @@ class ProjectManagerDialog(DraggableHeaderDialog):
         item.setToolTip("\n".join([*description, modified, *tags, meta.path]))
         item.setIcon(QIcon(self._project_preview(meta)))
         self._preview_items[meta.path] = item
-        if meta.preview_path:
-            self._preview_paths[meta.path] = meta.preview_path
-            cached = self._thumbnail_provider.get_cached_thumbnail(meta.preview_path, 640)
-            if cached is None:
-                self._thumbnail_provider.get_thumbnail(meta.preview_path, 640)
-            else:
-                item.setIcon(QIcon(self._fit_preview(cached)))
+        source = self._cover_checked.get(meta.path, meta.preview_path)
+        if source and meta.path not in self._cover_pixmap_cache:
+            self._preview_paths[meta.path] = source
+            if meta.path in self._cover_checked:
+                self._request_source_fallback(meta.path)
         self.list_widget.addItem(item)
 
+    def _request_source_fallback(self, path: str) -> None:
+        source = self._preview_paths.get(path)
+        item = self._preview_items.get(path)
+        if source is None or item is None:
+            return
+        cached = self._thumbnail_provider.get_cached_thumbnail(source, 640)
+        if cached is None:
+            self._thumbnail_provider.get_thumbnail(source, 640)
+        else:
+            item.setIcon(QIcon(self._fit_preview(cached)))
+
     def _project_preview(self, meta: ProjectMeta) -> QPixmap:
-        """Reuse decoded covers across sorting and use a shared empty preview."""
+        """Return a RAM-only preview while the archive is read in the background."""
         cached = self._cover_pixmap_cache.get(meta.path)
         if cached is not None:
             return cached
-        cover = extract_cover_thumbnail(meta.path)
-        if cover:
-            pixmap = QPixmap()
-            if pixmap.loadFromData(cover):
-                fitted = self._fit_preview(pixmap)
-                self._remember_cover(meta.path, fitted)
-                return fitted
+        if meta.path not in self._cover_checked and (self._cover_generation, meta.path) not in self._cover_inflight:
+            self._cover_queue[meta.path] = meta
+            self._start_cover_reads()
         return self._empty_preview
+
+    def _start_cover_reads(self) -> None:
+        while self._cover_queue and len(self._cover_inflight) < 2:
+            path = next(iter(self._cover_queue))
+            meta = self._cover_queue.pop(path)
+            request = (self._cover_generation, path)
+            self._cover_inflight.add(request)
+            worker = _ProjectTask(partial(_read_card_preview, meta), context=request)
+            worker.signals.contextual_done.connect(self._finish_cover_read, Qt.ConnectionType.QueuedConnection)
+            QThreadPool.globalInstance().start(worker)
+
+    @pyqtSlot(object, object, object)
+    def _finish_cover_read(
+        self, request: tuple[int, str], preview: tuple[bytes | None, str | None] | None,
+        error: Exception | None,
+    ) -> None:
+        self._cover_inflight.discard(request)
+        generation, path = request
+        if generation == self._cover_generation:
+            cover, source = preview if preview is not None else (None, self._preview_paths.get(path))
+            pixmap = QPixmap()
+            if error is None and cover and pixmap.loadFromData(cover):
+                fitted = self._fit_preview(pixmap)
+                self._remember_cover(path, fitted)
+                item = self._preview_items.get(path)
+                if item is not None:
+                    item.setIcon(QIcon(fitted))
+            else:
+                self._cover_checked[path] = source
+                if source:
+                    self._preview_paths[path] = source
+                    self._request_source_fallback(path)
+        self._start_cover_reads()
 
     # Upper bound for the decoded-cover cache (~250x140 ARGB ≈ 140 KB/张，
     # 256 张 ≈ 36 MB，覆盖典型项目库规模而不失控)。
@@ -1379,7 +1463,8 @@ class ProjectManagerDialog(DraggableHeaderDialog):
             return
         preview = self._fit_preview(pixmap)
         for project_path, item_source in self._preview_paths.items():
-            if os.path.abspath(item_source) == os.path.abspath(source_path):
+            if (project_path not in self._cover_pixmap_cache
+                    and os.path.abspath(item_source) == os.path.abspath(source_path)):
                 item = self._preview_items.get(project_path)
                 if item is not None:
                     item.setIcon(QIcon(preview))
@@ -1487,11 +1572,32 @@ class ProjectManagerDialog(DraggableHeaderDialog):
             self._open_project_file(path)
 
     def _open_project_file(self, path: str, *, register: bool = False) -> None:
-        if not os.path.isfile(path):
+        self._pending_open = path, register
+        if path in self._open_checks:
+            return
+        self._open_checks.add(path)
+        worker = _ProjectTask(partial(os.path.isfile, path), context=path)
+        worker.signals.contextual_done.connect(self._on_project_path_checked, Qt.ConnectionType.QueuedConnection)
+        QThreadPool.globalInstance().start(worker)
+
+    def _cancel_pending_open(self) -> None:
+        self._pending_open = None
+        self._cover_generation += 1
+        self._cover_queue.clear()
+
+    @pyqtSlot(object, object, object)
+    def _on_project_path_checked(self, path: str, available: bool | None, error: Exception | None) -> None:
+        self._open_checks.discard(path)
+        if self._pending_open is None or self._pending_open[0] != path:
+            return
+        _, register = self._pending_open
+        self._pending_open = None
+        if error is not None or not available:
             last_project = self._config.get("last_project")
             if isinstance(last_project, str) and last_project and (
                 project_library_key(last_project) == project_library_key(path)
             ):
+                self._unavailable_resume = last_project
                 self.resume_btn.hide()
             self._show_missing_project(path)
             return
@@ -1525,10 +1631,7 @@ class ProjectManagerDialog(DraggableHeaderDialog):
         if choice == rescan:
             self._refresh_project_list()
         elif choice == locate:
-            directory = os.path.dirname(path)
-            if not os.path.isdir(directory):
-                directory = str(get_project_library_dir(self._config, create=False))
-            self._choose_project_file(directory)
+            self._choose_project_file(str(Path.home()))
 
     def _on_open_clicked(self) -> None:
         items = self.list_widget.selectedItems()
