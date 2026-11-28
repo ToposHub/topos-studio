@@ -212,3 +212,18 @@ class TestResolveLayers:
         r = SourceResolver()
         decisions = r.resolve_layers(mode=PlaybackMode.REALTIME, queries=[])
         assert decisions == []
+
+
+def test_full_preview_selects_original_over_ready_disk_proxy_during_playback() -> None:
+    from dataclasses import replace
+
+    source = "/x.mov"
+    proxy = _MockProxyEntry(ready=True, path="/proxy/x.mov")
+    resolver = SourceResolver(proxy_manager=_MockProxyManager({source: proxy}))
+    original_request = replace(_make_query(source_path=source), prefer_original=True)
+
+    decision = resolver.resolve_single(mode=PlaybackMode.REALTIME, query=original_request)
+    assert decision.source_kind is SourceKind.MASTER
+    assert decision.source_path == source
+    assert not decision.allow_blocking_decode
+    assert not decision.allow_master_fallback

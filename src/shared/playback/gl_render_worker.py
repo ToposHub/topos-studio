@@ -184,8 +184,9 @@ class _RenderThread(QThread):
         fbo.viewport = (0, 0, fw, fh)
         fbo.clear(0.0, 0.0, 0.0, 1.0)
         # letterbox：与 gl_video_canvas._paint_yuv 同一几何（等比、黑边）
-        scale = min(fw / frame.width, fh / frame.height)
-        vw = max(1, int(frame.width * scale))
+        pixel_width = frame.display_width
+        scale = min(fw / pixel_width, fh / frame.height)
+        vw = max(1, int(pixel_width * scale))
         vh = max(1, int(frame.height * scale))
         fbo.viewport = ((fw - vw) // 2, (fh - vh) // 2, vw, vh)
 
@@ -222,6 +223,7 @@ class _RenderThread(QThread):
             chroma_uv_offset=chroma_offset,
             bit_depth=int(frame.bit_depth),
             gbr_mode=("gbr" in frame.pixel_format),
+            linear_sampling=(vw, vh) != (frame.width, frame.height),
         )
         # 发布前显式同步：share group 无跨上下文 fence 的诚实版本——
         # 完成即提交（finish 开销换正确性；帧率由 latest-wins 吸收）

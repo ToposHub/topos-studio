@@ -2193,6 +2193,7 @@ class YUVGPUUploader:
         uniform int has_alpha;            // 0=opaque (alpha=1.0), 1=sample a_plane
         uniform int alpha_premultiplied;  // 1=rgb pre-multiplied by alpha → unpremultiply
         uniform int gbr_mode;             // Topos GBR plane order is G, B, R
+        uniform int linear_sampling;
         uniform vec2 source_uv_scale;
         uniform vec2 source_uv_offset;
         uniform vec2 chroma_uv_scale;
@@ -2219,6 +2220,23 @@ class YUVGPUUploader:
             1.4020, -0.7141, 0.0
         );
 
+        float sample_code(usampler2D plane, vec2 uv) {
+            if (linear_sampling == 0) {
+                return float(texture(plane, uv).r);
+            }
+            ivec2 last = textureSize(plane, 0) - ivec2(1);
+            vec2 pixel = uv * vec2(textureSize(plane, 0)) - vec2(0.5);
+            ivec2 origin = ivec2(floor(pixel));
+            vec2 weight = fract(pixel);
+            ivec2 low = clamp(origin, ivec2(0), last);
+            ivec2 high = clamp(origin + ivec2(1), ivec2(0), last);
+            float top = mix(float(texelFetch(plane, low, 0).r),
+                            float(texelFetch(plane, ivec2(high.x, low.y), 0).r), weight.x);
+            float bottom = mix(float(texelFetch(plane, ivec2(low.x, high.y), 0).r),
+                               float(texelFetch(plane, high, 0).r), weight.x);
+            return mix(top, bottom, weight.y);
+        }
+
         void main() {
             vec2 source_uv = v_texcoord * source_uv_scale + source_uv_offset;
             if (source_uv.x < 0.0 || source_uv.x > 1.0 || source_uv.y < 0.0 || source_uv.y > 1.0) {
@@ -2226,17 +2244,12 @@ class YUVGPUUploader:
                 return;
             }
 
-            // Read raw uint code values from integer textures
-            uint y_code = texture(y_plane, source_uv).r;
+            // Filtering happens in source code values before range expansion.
             vec2 chroma_uv = source_uv * chroma_uv_scale + chroma_uv_offset;
-            uint u_code = texture(u_plane, chroma_uv).r;
-            uint v_code = texture(v_plane, chroma_uv).r;
-
-            // Normalize to 0..1 based on bit depth
             float max_val = pow(2.0, float(bit_depth)) - 1.0;
-            float y = float(y_code) / max_val;
-            float u = float(u_code) / max_val;
-            float v = float(v_code) / max_val;
+            float y = sample_code(y_plane, source_uv) / max_val;
+            float u = sample_code(u_plane, chroma_uv) / max_val;
+            float v = sample_code(v_plane, chroma_uv) / max_val;
 
             // GBR stores full-range G/B/R planes and bypasses YUV range/matrix.
             vec3 rgb;
@@ -2682,6 +2695,8 @@ class YUVGPUUploader:
         alpha_bit_depth: int = 10,
         alpha_premultiplied: bool = False,
         gbr_mode: bool = False,
+        *,
+        linear_sampling: bool = False,
     ) -> None:
         """
         渲染 YUV 平面到 RGB FBO。
@@ -2706,7 +2721,8 @@ class YUVGPUUploader:
                 y_tex, u_tex, v_tex, output_fbo,
                 chroma_uv_scale, chroma_uv_offset, bit_depth,
                 a_tex=a_tex, alpha_bit_depth=alpha_bit_depth,
-                alpha_premultiplied=alpha_premultiplied, gbr_mode=gbr_mode
+                alpha_premultiplied=alpha_premultiplied, gbr_mode=gbr_mode,
+                linear_sampling=linear_sampling,
             )
 
         # Float sampler path
@@ -2755,6 +2771,8 @@ class YUVGPUUploader:
         alpha_bit_depth: int = 10,
         alpha_premultiplied: bool = False,
         gbr_mode: bool = False,
+        *,
+        linear_sampling: bool = False,
     ) -> None:
         """
         使用 R16UI/usampler2D shader 渲染 YUV 平面到 RGB FBO。
@@ -2786,6 +2804,7 @@ class YUVGPUUploader:
         self._r16ui_program['has_alpha'].value = 1 if a_tex is not None else 0
         self._r16ui_program['alpha_premultiplied'].value = 1 if alpha_premultiplied else 0
         self._r16ui_program['gbr_mode'].value = 1 if gbr_mode else 0
+        self._r16ui_program['linear_sampling'].value = int(linear_sampling)
         self._r16ui_program['source_uv_scale'].value = source_uv_scale
         self._r16ui_program['source_uv_offset'].value = source_uv_offset
         self._r16ui_program['chroma_uv_scale'].value = chroma_uv_scale

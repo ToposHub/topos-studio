@@ -4484,6 +4484,30 @@
     "float": "Float",
     "dock": "Dock"
   },
+  "playback_resolution": {
+    "settings": "Playback Settings",
+    "menu": "Playback Resolution",
+    "full": "Full Resolution",
+    "info": "Video Info",
+    "pending": "Source {source} · Waiting for frame",
+    "original": "Playback {frame} · Original resolution",
+    "reduced": "Playback {frame} · Source {source} · Reduced resolution",
+    "resampled": "Playback {frame} · Decoded {decoded} · Source {source}",
+    "qt_scaled": "Preview {preview} · Decoded {decoded}",
+    "qt_decoded": "Playback {decoded} · Decoded size",
+    "qt_menu": "Preview Resolution (Scaled After Decode)",
+    "qt_source": "Source {source}",
+    "qt_pending": "Waiting for frame"
+  },
+  "program_preview_resolution": {
+    "title": "Preview Resolution",
+    "full": "Full Resolution",
+    "smooth": "Smooth (Auto)",
+    "actual": "Presented frame {size}",
+    "timeline": "Timeline canvas {size}",
+    "source": "Original media {sizes}",
+    "decoded": "Decoded media {sizes}"
+  },
   "fps_indicator": {
     "tooltip": "Realtime preview FPS"
   },

@@ -3,9 +3,21 @@ from __future__ import annotations
 
 import math
 from fractions import Fraction
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from PyQt6.QtGui import QImage
+
+
+QIMAGE_SAMPLE_ASPECT_KEY = 'topos.playback.sample_aspect_ratio'
+
+
+def qimage_display_width(image: QImage) -> float:
+    """Display width at native height, including the session's pixel aspect ratio."""
+    sample_aspect = float(image.text(QIMAGE_SAMPLE_ASPECT_KEY) or 1)
+    return image.width() * sample_aspect
 
 
 class FrameDimensions(Protocol):

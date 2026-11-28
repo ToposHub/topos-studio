@@ -1,0 +1,114 @@
+{
+  "prores_apple": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9953535368304688,
+      "normalized_squared_error": 0.010033306467758707
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.9578261924976949,
+      "normalized_squared_error": 0.16350921493396744
+    },
+    "high_7_14": {
+      "correlated_amplitude": -6.259198820773039e-05,
+      "normalized_squared_error": 1.003592363829311
+    }
+  },
+  "topos_default": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9459373248876088,
+      "normalized_squared_error": 0.017112937696935077
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.7963171652739477,
+      "normalized_squared_error": 0.1574342759258998
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.3688085684440722,
+      "normalized_squared_error": 0.8874416754147265
+    }
+  },
+  "topos_matched_full": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9539211216614979,
+      "normalized_squared_error": 0.013130198950449118
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.8321791561123167,
+      "normalized_squared_error": 0.12210353973135914
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.4443617217006862,
+      "normalized_squared_error": 0.772528339120454
+    }
+  },
+  "prores_ks": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9247313096023843,
+      "normalized_squared_error": 0.017133877495431223
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.638584823628535,
+      "normalized_squared_error": 0.2555932798308198
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.0027803912162391586,
+      "normalized_squared_error": 1.000624317394496
+    }
+  },
+  "topos_matched": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9540365131115291,
+      "normalized_squared_error": 0.013075489365952169
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.8328558316529019,
+      "normalized_squared_error": 0.12122309202712313
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.44795660692185124,
+      "normalized_squared_error": 0.7675317472594947
+    }
+  },
+  "topos_dz0": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9960924932338612,
+      "normalized_squared_error": 0.0136234107551792
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.975092890490803,
+      "normalized_squared_error": 0.1363611332802898
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.6881644460343931,
+      "normalized_squared_error": 0.9236287039063742
+    }
+  },
+  "topos_chroma_minus2": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9501573744616758,
+      "normalized_squared_error": 0.015092069326013228
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.8147770301524896,
+      "normalized_squared_error": 0.13922295855171726
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.4100081390890122,
+      "normalized_squared_error": 0.8261989037470311
+    }
+  },
+  "topos_netproxy": {
+    "low_1_2": {
+      "correlated_amplitude": 0.8617916302876156,
+      "normalized_squared_error": 0.07931301302632834
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.5828476201317367,
+      "normalized_squared_error": 0.3926994536560094
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.09661207316447733,
+      "normalized_squared_error": 1.248074313306605
+    }
+  }
+}

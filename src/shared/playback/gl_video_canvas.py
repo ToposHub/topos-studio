@@ -43,6 +43,7 @@ from PyQt6.QtCore import QRectF, Qt, pyqtSlot
 from PyQt6.QtGui import QImage, QPainter, QSurfaceFormat
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
+from .frame_geometry import qimage_display_width
 from .yuv_frame import YuvFrame
 
 logger = logging.getLogger(__name__)
@@ -406,12 +407,12 @@ class GLVideoCanvas(QOpenGLWidget):
         painter.fillRect(self.rect(), Qt.GlobalColor.black)
         if not image.isNull():
             src = QRectF(0, 0, image.width(), image.height())
-            dst = self._fit_rect(image.width(), image.height())
+            dst = self._fit_rect(qimage_display_width(image), image.height())
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             painter.drawImage(dst, image, src)
         painter.end()
 
-    def _fit_rect(self, width: int, height: int) -> QRectF:
+    def _fit_rect(self, width: float, height: int) -> QRectF:
         if width <= 0 or height <= 0:
             return QRectF(self.rect())
         ww, wh = self.width(), self.height()
@@ -433,8 +434,9 @@ class GLVideoCanvas(QOpenGLWidget):
         fbo.viewport = (0, 0, fw, fh)
         fbo.clear(0.0, 0.0, 0.0, 1.0)
 
-        scale = min(fw / frame.width, fh / frame.height)
-        vw = max(1, int(frame.width * scale))
+        pixel_width = frame.display_width
+        scale = min(fw / pixel_width, fh / frame.height)
+        vw = max(1, int(pixel_width * scale))
         vh = max(1, int(frame.height * scale))
         vx = (fw - vw) // 2
         vy = (fh - vh) // 2
@@ -468,6 +470,7 @@ class GLVideoCanvas(QOpenGLWidget):
             chroma_uv_offset=self._chroma_offset,
             bit_depth=int(frame.bit_depth),
             gbr_mode=('gbr' in frame.pixel_format),
+            linear_sampling=(vw, vh) != (frame.width, frame.height),
         )
 
     def _upload_planes(self, frame: YuvFrame) -> None:

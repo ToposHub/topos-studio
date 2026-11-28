@@ -13,7 +13,7 @@ LibavPlayer（PyAV 多线程解码）；其余视频 → UltimatePlayer（Qt Mul
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import QEvent, QObject, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPoint, pyqtSignal
 
 
 TOPOS_EXT = '.topos'
@@ -180,6 +180,18 @@ class NativePlayerHost(QObject):
         self._lightbox_tools = visible
         if self._lightbox and self._current is not None:
             self._current.set_lightbox_tools(visible)
+
+    def observe_transport_pointer(self, global_position: QPoint) -> None:
+        if self._current is not None:
+            self._current.observe_transport_pointer(global_position)
+
+    def leave_transport(self) -> None:
+        if self._current is not None:
+            self._current.leave_transport()
+
+    def open_playback_settings(self, global_position: QPoint) -> None:
+        if self._current is not None:
+            self._current.open_playback_settings(global_position)
 
     def stop(self) -> None:
         current, self._current = self._current, None

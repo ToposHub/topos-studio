@@ -65,7 +65,7 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QMouseEvent, QWheelEvent, QKeyEvent, QPainter, QColor, QPen, QBrush,
-    QFont, QFontMetrics, QImage, QTransform, QPolygon, QIcon, QPaintEvent,
+    QFont, QFontMetrics, QImage, QTransform, QPolygon, QIcon, QPaintEvent, QContextMenuEvent,
 )
 
 from src.shared.i18n.i18n import I18N
@@ -328,17 +328,17 @@ class ProgramViewerBar(ViewportToolBarBase):
         # Preview proxy resolution uses the same compact menu treatment as
         # the navigation controls, rather than a native-looking combo box.
         self._quality_labels: Dict[float, str] = {
-            0.0: I18N.tr("preview_quality.smooth", "流畅"),
-            1.0: I18N.tr("preview_quality.full", "完整"),
+            1.0: I18N.tr("program_preview_resolution.full", "Full Resolution"),
+            0.0: I18N.tr("program_preview_resolution.smooth", "Smooth (Auto)"),
             0.5: "1/2",
             round(1.0 / 3.0, 4): "1/3",
             0.25: "1/4",
         }
-        self._preview_quality: float = 0.0
+        self._preview_quality: float = 1.0
         self.quality_menu_btn = self._make_menu_button("")
         self.quality_menu_btn.setObjectName("previewQualityMenu")
         self.quality_menu_btn.setToolTip(
-            I18N.tr("tooltip.preview_quality", "预览代理分辨率"))
+            I18N.tr("program_preview_resolution.title", "Preview Resolution"))
         self.quality_menu = self._create_quality_menu()
         self.quality_menu_btn.clicked.connect(
             lambda: self._show_menu_at_button(self.quality_menu, self.quality_menu_btn))
@@ -696,8 +696,18 @@ class TransportControlBar(QFrame):
         self.speed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.speed_label)
 
-        # Center stretch
         layout.addStretch()
+
+        self.resolution_label = QLabel()
+        self.resolution_label.setObjectName("programPlaybackResolution")
+        self.resolution_label.setStyleSheet(
+            f"color: {EDIT_COLORS['text_muted']}; font-size: 11px; background: transparent;"
+        )
+        self.resolution_label.setMinimumWidth(0)
+        self.resolution_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.resolution_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.resolution_label.hide()
+        layout.addWidget(self.resolution_label)
 
         # Timecode display
         self.timecode_label = QLabel("00:00:00:00")
@@ -3477,6 +3487,11 @@ class ProgramViewerWidget(QWidget):
         self._native_showing: bool = False
         self._native_refresh_scheduled: bool = False
         self._native_trace_by_frame: Dict[int, int] = {}
+        self._native_resolution_by_frame: Dict[int, Tuple[int, int]] = {}
+        self._preview_frame_contexts: Dict[
+            int, tuple[Tuple[int, int], tuple[Tuple[int, int], ...], tuple[Tuple[int, int], ...]]
+        ] = {}
+        self._last_preview_resolution: tuple = ()
 
         # Build UI
         self._setup_ui()
@@ -3533,6 +3548,7 @@ class ProgramViewerWidget(QWidget):
         self._viewer.monitor_frame_ready.connect(self.monitor_frame_ready.emit)
         self._viewer.monitor_gpu_frame_ready.connect(self.monitor_gpu_frame_ready.emit)
         self._viewer.frame_presented.connect(self._toolbar.record_presented_frame)
+        self._viewer.frame_presented.connect(self._on_gl_frame_presented)
         # P10.3: 字幕手柄交互信号转发
         self._viewer.subtitle_interaction_started.connect(self.subtitle_interaction_started.emit)
         self._viewer.subtitle_interaction_updated.connect(self.subtitle_interaction_updated.emit)
@@ -3558,6 +3574,12 @@ class ProgramViewerWidget(QWidget):
         self.setMinimumSize(200, 150)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if isinstance(event, QContextMenuEvent) and (
+            watched is self._viewer or watched is self.__dict__.get("_metal_host")
+        ):
+            self._toolbar.quality_menu.popup(event.globalPos())
+            event.accept()
+            return True
         if watched is self._viewer and event.type() in {QEvent.Type.Resize, QEvent.Type.Show}:
             if self.__dict__.get("_metal_host") is not None:
                 self._schedule_native_refresh()
@@ -3584,6 +3606,61 @@ class ProgramViewerWidget(QWidget):
         self.fullscreen_changed.emit(is_fullscreen)
 
     # ==================== Public API ====================
+
+    def set_preview_resolution_context(
+        self, frame: int, timeline_size: Tuple[int, int],
+        source_sizes: tuple[Tuple[int, int], ...], decoded_sizes: tuple[Tuple[int, int], ...] = (),
+    ) -> None:
+        """Attach canvas and source geometry to a pending picture."""
+        contexts = self._preview_frame_contexts
+        contexts[int(frame)] = (timeline_size, source_sizes, decoded_sizes)
+        while len(contexts) > 64:
+            contexts.pop(next(iter(contexts)))
+
+    def _on_gl_frame_presented(self, frame: int) -> None:
+        if self._native_showing:
+            return
+        if self._viewer._error_state != "none":
+            self._set_preview_resolution(frame, None)
+            return
+        size = (self._viewer._tex_width, self._viewer._tex_height)
+        self._set_preview_resolution(frame, size)
+
+    def _set_preview_resolution(self, frame: int, size: Optional[Tuple[int, int]]) -> None:
+        """Show pixels from a presented frame, independently of widget zoom."""
+        canvas, sources, decoded = self._preview_frame_contexts.get(int(frame), (None, (), ()))
+        status = (size, canvas, sources, decoded)
+        if status == self._last_preview_resolution:
+            return
+        self._last_preview_resolution = status
+        label = self._transport_bar.resolution_label
+        if not size or min(size) <= 0 or canvas is None:
+            label.hide()
+            return
+        actual = f"{size[0]}×{size[1]}"
+        timeline = f"{canvas[0]}×{canvas[1]}"
+        label.setText(actual if size == canvas else f"{actual} / {timeline}")
+        rows = [
+            I18N.tr("program_preview_resolution.actual", "Presented frame {size}", size=actual),
+            I18N.tr("program_preview_resolution.timeline", "Timeline canvas {size}", size=timeline),
+        ]
+        if sources:
+            rows.append(I18N.tr(
+                "program_preview_resolution.source", "Original media {sizes}",
+                sizes=", ".join(f"{w}×{h}" for w, h in sources),
+            ))
+        if decoded:
+            rows.append(I18N.tr(
+                "program_preview_resolution.decoded", "Decoded media {sizes}",
+                sizes=", ".join(f"{w}×{h}" for w, h in decoded),
+            ))
+        label.setToolTip("\n".join(rows))
+        label.setAccessibleName(" · ".join(rows))
+        label.show()
+
+    def preview_quality_preference(self) -> float:
+        """Return the active setting so a newly attached renderer matches the menu."""
+        return self._toolbar._preview_quality
 
     def get_viewer(self) -> ProgramViewer:
         """Get the ProgramViewer instance."""
@@ -3670,6 +3747,9 @@ class ProgramViewerWidget(QWidget):
         if callable(leave_native):
             leave_native(False)
         self._viewer.clear_texture()
+        set_resolution = getattr(self, "_set_preview_resolution", None)
+        if callable(set_resolution):
+            set_resolution(-1, None)
         # P8: Reset error state to none (show empty frame, not error)
         self._viewer._error_state = "none"
         self._viewer._error_message = ""
@@ -3785,6 +3865,9 @@ class ProgramViewerWidget(QWidget):
                 # P8: 显示"无片段"状态
                 playback_trace("program_viewer.set_frame_none", frame=frame, scrub_active=scrub_active_for_trace)
                 self._viewer.set_error_state("no_clip")
+                set_resolution = getattr(self, "_set_preview_resolution", None)
+                if callable(set_resolution):
+                    set_resolution(frame, None)
                 return
 
             # Handle GPU present descriptor (fence + slot ack path).
@@ -3963,6 +4046,7 @@ class ProgramViewerWidget(QWidget):
             host.deleteLater()
             return False
         self._metal_host = host
+        host.installEventFilter(self)
         self._native_renderer = renderer
         self._viewer._overlay_dirty_hook = self._schedule_native_refresh
         self._viewer._native_covered_hook = self._native_layer_is_showing
@@ -4114,7 +4198,9 @@ class ProgramViewerWidget(QWidget):
             return "layer_not_on_screen"
         viewer = self._viewer
         # The view transform and the overlays work from the texture size.
-        viewer._tex_width, viewer._tex_height = int(present.width), int(present.height)
+        previous_size = (viewer._tex_width, viewer._tex_height)
+        size = (int(present.width), int(present.height))
+        viewer._tex_width, viewer._tex_height = size
         if host.geometry() != viewer.geometry():
             # The viewer is laid out after the viewport is enabled: the first
             # native frame finds the layer at its start-up size.
@@ -4128,7 +4214,12 @@ class ProgramViewerWidget(QWidget):
                 released, ack_cb, trace_id),
         )
         if not taken:
+            viewer._tex_width, viewer._tex_height = previous_size
             return "viewport_queue_refused"
+        sizes = self.__dict__.setdefault("_native_resolution_by_frame", {})
+        sizes[int(frame)] = size
+        while len(sizes) > 64:
+            sizes.pop(next(iter(sizes)))
         # Same state effects as the GL viewer's set_present_frame: a new
         # frame clears stale error / offline feedback and re-fits in fit mode.
         viewer._error_state = "none"
@@ -4222,6 +4313,10 @@ class ProgramViewerWidget(QWidget):
                 get_trace_collector().annotate(int(trace_id), present_status="displayed")
             except Exception:  # noqa: BLE001 - telemetry only
                 pass
+        size = self.__dict__.get("_native_resolution_by_frame", {}).pop(int(frame), None)
+        set_resolution = getattr(self, "_set_preview_resolution", None)
+        if size is not None and self.__dict__.get("_native_showing") and callable(set_resolution):
+            set_resolution(frame, size)
         self._viewer.frame_presented.emit(int(frame))
 
     def _on_native_viewport_failed(self, reason: str) -> None:

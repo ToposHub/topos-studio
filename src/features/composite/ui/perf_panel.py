@@ -238,8 +238,10 @@ class PerfPanel(QWidget):
             }
         """)
 
+        from PyQt6.QtWidgets import QDockWidget
+
         dock = self._find_parent_dock()
-        if dock:
+        if dock and (dock.isFloating() or dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable):
             if dock.isFloating():
                 action = menu.addAction(I18N.tr("perf.dock_panel", "Dock Panel"))
             else:

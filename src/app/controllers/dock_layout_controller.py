@@ -160,9 +160,11 @@ def restore_workspace_dock_state(window: QMainWindow, state: QByteArray, page: s
             return False
         if version == _PREVIOUS_VIDEO_COLOR_LAYOUT_VERSION:
             window._upgrade_video_color_scopes_tabs()
+        _return_workspace_docks_to_layout(window)
         return True
     if not window.restoreState(state):
         return False
+    _return_workspace_docks_to_layout(window)
     if page != "Color":
         return True
     snapshot = bytes(state)
@@ -173,13 +175,23 @@ def restore_workspace_dock_state(window: QMainWindow, state: QByteArray, page: s
     return True
 
 
+def _return_workspace_docks_to_layout(window: QMainWindow) -> None:
+    """Redock workspace panels saved before their float feature was disabled."""
+    if not isinstance(window, QMainWindow):
+        return
+    floatable = QDockWidget.DockWidgetFeature.DockWidgetFloatable
+    for dock in window.findChildren(QDockWidget, options=Qt.FindChildOption.FindDirectChildrenOnly):
+        if dock.isFloating() and not dock.features() & floatable:
+            dock.setFloating(False)
+
+
 def _place_missing_grade_dock(
     window: QMainWindow, snapshot: bytes, object_name: str, dock_attr: str,
     anchor_attrs: tuple[str, ...],
 ) -> None:
     dock = getattr(window, dock_attr, None)
     # Qt saves object names as big-endian QStrings. Only insert the dock if
-    # the snapshot predates it, leaving a saved close or float state intact.
+    # the snapshot predates it, preserving any saved visibility.
     if dock is None or object_name.encode("utf-16-be") in snapshot:
         return
     dock.hide()
@@ -356,14 +368,11 @@ class DockLayoutMixin:
             dock = dock_type(title, self)
             dock.setObjectName(obj_name)
             dock.setWidget(widget)
-            # Ensure dock has all features enabled for proper floating/docking
             dock.setFeatures(
                 QDockWidget.DockWidgetFeature.DockWidgetClosable |
-                QDockWidget.DockWidgetFeature.DockWidgetMovable |
-                QDockWidget.DockWidgetFeature.DockWidgetFloatable
+                QDockWidget.DockWidgetFeature.DockWidgetMovable
             )
-            # Hide the title bar by default for tabified docks (show only tabs)
-            # Use a minimal height widget to allow dragging (important for floating)
+            # A small title bar keeps rearrangement within the workspace.
             hidden_titlebar = QWidget()
             hidden_titlebar.setFixedHeight(1)  # 1px is enough for dragging
             dock.setTitleBarWidget(hidden_titlebar)
@@ -603,12 +612,6 @@ class DockLayoutMixin:
             self._on_grade_paste_requested)
         self.color_timeline_clip_strip.grade_paste_all_requested.connect(
             self._on_grade_paste_all_requested)
-        # Connect float/close signals from right-click menu
-        self.color_timeline_clip_strip.float_requested.connect(
-            lambda: self.dock_color_timeline_clips.setFloating(
-                not self.dock_color_timeline_clips.isFloating()
-            )
-        )
         self.color_timeline_clip_strip.close_requested.connect(
             lambda: self.dock_color_timeline_clips.hide()
         )
@@ -1050,8 +1053,7 @@ class DockLayoutMixin:
                     self.dock_ai_edit_assistant = self.ai_edit_assistant_panel
                     self.dock_ai_edit_assistant.setFeatures(
                         QDockWidget.DockWidgetFeature.DockWidgetClosable |
-                        QDockWidget.DockWidgetFeature.DockWidgetMovable |
-                        QDockWidget.DockWidgetFeature.DockWidgetFloatable
+                        QDockWidget.DockWidgetFeature.DockWidgetMovable
                     )
                     hidden_titlebar = QWidget()
                     hidden_titlebar.setFixedHeight(1)
@@ -1059,8 +1061,7 @@ class DockLayoutMixin:
                     self.dock_ai_edit_assistant.setContextMenuPolicy(
                         Qt.ContextMenuPolicy.CustomContextMenu
                     )
-                    # AiEditAssistantPanel 自己提供合并后的右键菜单（AI 操作 +
-                    # 浮动/停靠/关闭），这里不要再连接通用 Dock 菜单，避免双菜单。
+                    # The assistant owns its AI and close actions in one menu.
                     self.dock_ai_edit_assistant.dockLocationChanged.connect(
                         self.update_all_dock_titlebars
                     )
@@ -3651,10 +3652,7 @@ class DockLayoutMixin:
     # _show_dock_context_menu
     # ------------------------------------------------------------------
     def _show_dock_context_menu(self, pos, dock) -> None:
-        """Show right-click context menu for a dock widget.
-
-        Provides Float/Dock toggle and Close actions.
-        """
+        """Show workspace actions when the dock has no content menu."""
         if self._is_image_library_page():
             return
         name = dock.objectName()
@@ -3671,11 +3669,11 @@ class DockLayoutMixin:
             return
 
         # Skip context menu for docks that have their own internal menus
-        if name in ("dockCurves", "dockMasks", "dockEditTimeline"):
+        if name in ("dockCurves", "dockMasks", "dockEditTimeline", "dockFiles"):
             return
 
         features = QDockWidget.DockWidgetFeature
-        if not dock.features() & (features.DockWidgetFloatable | features.DockWidgetClosable):
+        if not dock.isFloating() and not dock.features() & features.DockWidgetClosable:
             return
         menu = QMenu(self)
         menu.setStyleSheet(DARK_THEME)

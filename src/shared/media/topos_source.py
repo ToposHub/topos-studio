@@ -20,8 +20,7 @@ Topos Video Codec Media Source Module
   的串行化假设）；ToposMovieFile 原生句柄不自带锁；
 - 普通 MediaSource 接口不触碰 OpenGL/Qt，只产出 numpy 平面；显式的
   ``read_frame_metal`` 导出接口例外地创建 IOSurface→Metal 资源，供渲染线程消费；
-- target_size 在新 native request/context 可用时直接申请目标平面；旧 dylib
-  才回退纯 numpy 分离 box 滤波，放大请求回退原始分辨率。
+- target_size 支持原生目标解码及完整解码后的面积缩小，放大请求回退原始分辨率。
 """
 
 from __future__ import annotations
@@ -518,6 +517,7 @@ class ToposMediaSource:
         decode_role: str = "playback",
         drop_alpha: bool = False,
         no_deblock: bool = False,
+        filtered_preview: bool = False,
     ) -> None:
         """
         Args:
@@ -532,6 +532,7 @@ class ToposMediaSource:
             decode_role: 预算诊断角色（通常为 playback 或 export）。
             drop_alpha: 导出目标明确不带 Alpha 时，请 native 解码跳过 Alpha
                 slice；旧库/不支持的码流自动保留四平面路径。
+            filtered_preview: 完整解码平面后做面积缩小。带独立基础层的流沿用基础层解码。
         """
         self._path = path
         self._target_size: Optional[tuple[int, int]] = None
@@ -542,6 +543,8 @@ class ToposMediaSource:
             else:
                 logger.warning(f"ToposMediaSource: 非法 target_size {target_size}，忽略")
         self._preserve_planes = preserve_planes
+        self._filtered_preview_requested = filtered_preview
+        self._filtered_preview = False
         self._read_ahead_param = read_ahead
         self._decode_workers_param = decode_workers
         self._decode_role = str(decode_role or "playback")
@@ -713,6 +716,18 @@ class ToposMediaSource:
                     f"{self._summary.width}x{self._summary.height}，回退原始分辨率"
                 )
                 self._target_size = None
+        if (self._filtered_preview_requested and self._target_size is not None
+                and int(self._summary.pixel_format) != 3
+                and self._target_size != (self._summary.width, self._summary.height)):
+            has_base_layer = False
+            if self._bitstream_major == 7 and getattr(
+                    self._codec, "_has_movie_packet_base", False):
+                try:
+                    _, _, has_base_layer = self._movie.packet_base_into(0)
+                except ToposCodecError:
+                    # An unavailable first sample should not prevent a later seek.
+                    logger.debug("Topos 预览基础层探测失败", exc_info=True)
+            self._filtered_preview = not has_base_layer
         if (self._drop_alpha_requested and self._summary.alpha_mode != 0
                 and getattr(self._codec, "_has_capabilities", False)
                 and getattr(self._codec, "_has_decoder_request", False)):
@@ -736,7 +751,8 @@ class ToposMediaSource:
                     "ToposMediaSource: 本机 dylib 不广播 NO_DEBLOCK 能力，"
                     "忽略预览关滤波开关（保持滤波）"
                 )
-        if ((self._target_size is not None or self._native_drop_alpha
+        if (((self._target_size is not None and not self._filtered_preview)
+                or self._native_drop_alpha
                 or self._native_no_deblock)
                 and int(getattr(self._summary, 'pixel_format', 0) or 0) != 3
                 and getattr(self._codec, "_has_decoder_request", False)):
@@ -744,7 +760,9 @@ class ToposMediaSource:
             # 的缩放语义在 native request 域未定义（fail-closed）；代理
             # 显示路径由 legacy box 平面缩放承担（仅显示，不涉交付）。
             self._decode_request = self._build_target_decode_request()
-            self._native_target_decode = self._decode_request is not None
+            self._native_target_decode = (
+                self._decode_request.mode != TC_DECODE_MODE_FULL
+            )
             self._legacy_reduced_fallback = (
                 self._stream_compatibility == 'legacy_v1_v6'
                 and int(self._decode_request.mode) == TC_DECODE_MODE_REDUCED
@@ -803,7 +821,7 @@ class ToposMediaSource:
                     depth = 0
                     self._decode_path = 'context'
                     self._decode_path_reason = 'batch_symbols_unavailable'
-                elif depth > 0 and self._native_target_decode and not getattr(
+                elif depth > 0 and self._decode_request is not None and not getattr(
                         self._codec, "_has_decoder_batch_request", False):
                     depth = 0
                     self._decode_path = 'context'
@@ -858,6 +876,7 @@ class ToposMediaSource:
             self._gop_ctx = None
         self._decode_request = None
         self._native_target_decode = False
+        self._filtered_preview = False
         self._native_drop_alpha = False
         self._native_no_deblock = False
         self._legacy_reduced_fallback = False
@@ -1478,6 +1497,7 @@ class ToposMediaSource:
             'decode_path': self._decode_path,
             'decode_path_reason': self._decode_path_reason,
             'native_target_decode': self._native_target_decode,
+            'filtered_preview': self._filtered_preview,
             'drop_alpha_requested': self._drop_alpha_requested,
             'native_drop_alpha': self._native_drop_alpha,
             'native_no_deblock': self._native_no_deblock,
@@ -1748,7 +1768,7 @@ class ToposMediaSource:
         if self._native_no_deblock:
             # 预览提速：跳过输出去块（只对带特性位的 V7-R2 产品流可见）
             flags |= TC_DECODE_FLAG_NO_DEBLOCK
-        if self._target_size is None:
+        if self._target_size is None or self._filtered_preview:
             return ToposDecoder.make_request(
                 TC_DECODE_MODE_FULL, flags=flags)
         target_w, target_h = self._target_size
@@ -1797,7 +1817,7 @@ class ToposMediaSource:
         try:
             batch_request = self._decode_request
             packets = None
-            if (self._bitstream_major == 7 and self._decode_request is not None and
+            if (self._bitstream_major == 7 and self._native_target_decode and
                     getattr(codec, "_has_movie_packet_base_batch", False)):
                 arena, offs, sizes, base_flags = movie.packets_base_into_batch(
                     index, count)
@@ -2076,18 +2096,18 @@ class ToposMediaSource:
             if info.plane_count == 4:
                 bit_depths.append(s.alpha_bit_depth)
 
-        # legacy fallback：旧 dylib/请求符号不可用时，保留原有完整帧后
-        # box 缩放语义。native request 路径的 planes 已经是目标几何，禁止
-        # 再次缩放或创建完整分辨率中间帧。
+        # Native target decode has already produced the requested geometry.
         out_geoms = plane_geoms
         if self._target_size is not None and not self._native_target_decode:
             tw, th = self._target_size
             out_geoms = _plane_geoms(int(info.pixel_format),
                                      int(info.plane_count), tw, th)
-            planes = [
-                _downscale_plane(p, oh, ow)
-                for p, (ow, oh) in zip(planes, out_geoms)
-            ]
+            if self._filtered_preview:
+                from src.shared.video.planar_resample import downsample_plane
+
+                planes = [downsample_plane(p, ow, oh) for p, (ow, oh) in zip(planes, out_geoms)]
+            else:
+                planes = [_downscale_plane(p, oh, ow) for p, (ow, oh) in zip(planes, out_geoms)]
 
         # 复验 P1-09：GBR 流平面序 = (G,B,R[,A])——组件标签必须如实标注，
         # 下游按 'Y/U/V' 标签或 planar_yuv 语义分派会把色差当 luma
@@ -2122,6 +2142,8 @@ class ToposMediaSource:
             ),
             'topos_chroma_siting': int(s.chroma_siting),
         }
+        if self._filtered_preview:
+            extra['native_decode_size'] = (vw, vh)
         if self._alpha_budget is not None:
             # R3：文件级 alpha 预算记录（tpcB；共享 dict 引用，零拷贝）
             extra['topos_alpha_budget'] = self._alpha_budget

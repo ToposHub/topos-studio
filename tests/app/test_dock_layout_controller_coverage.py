@@ -2059,6 +2059,14 @@ def test_context_menu_skipped_for_docks_with_internal_menus(
     assert factory.instances == [], "no generic menu may be built for dockCurves"
 
 
+def test_files_dock_does_not_open_a_workspace_context_menu(
+        host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
+    factory = _MockFactory("files-menu")
+    monkeypatch.setattr(dlc, "QMenu", factory)
+    host._show_dock_context_menu(QPoint(3, 4), host.dock_files)
+    assert factory.instances == []
+
+
 def test_context_menu_delegates_for_edit_effects(
         host: _DockHost, monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import MagicMock

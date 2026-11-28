@@ -32,7 +32,7 @@ from typing import Any, Optional
 
 from .policy import RealtimePlaybackPolicy, get_default_policy
 from .render_cache_adapter import RenderCacheAdapter
-from .types import PlaybackMode, SourceDecision
+from .types import PlaybackMode, SourceDecision, SourceKind
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ class LayerSourceQuery:
     source_frame: int
     timeline_frame: int
     requires_effect_cache: bool = False
+    prefer_original: bool = False
 
 
 # =============================================================================
@@ -305,6 +306,18 @@ class SourceResolver:
         """
         decisions: list[SourceDecision] = []
         for q in queries:
+            if q.prefer_original and q.source_path and not q.requires_effect_cache:
+                decisions.append(SourceDecision(
+                    source_kind=SourceKind.MASTER,
+                    source_path=q.source_path,
+                    proxy_info=None,
+                    render_cache_info=None,
+                    allow_blocking_decode=mode.allows_blocking,
+                    allow_master_fallback=False,
+                    max_wait_ms=2000 if mode.allows_blocking else 0,
+                    reason=f"{mode.value}: full resolution requested",
+                ))
+                continue
             proxy_state = self._query_proxy_state(q.source_path)
             cache_state = self._per_clip_cache_state(q.clip_id)
             decision = self._policy.decide_layer_source(

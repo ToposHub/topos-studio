@@ -5536,31 +5536,6 @@ class ClipItem(QGraphicsObject):
             I18N.tr("edit.clip.split", "Split at Playhead")
         )
 
-        # Add Float/Dock option for timeline panel
-        menu.addSeparator()
-        from PyQt6.QtWidgets import QDockWidget
-        timeline_dock = None
-        # Find the dock widget containing this timeline
-        parent_widget = self.scene().views()[0] if self.scene().views() else None
-        if parent_widget:
-            for p in [parent_widget.parent(), parent_widget.parent().parent() if parent_widget.parent() else None]:
-                if isinstance(p, QDockWidget):
-                    timeline_dock = p
-                    break
-            # Also check through parent chain
-            if not timeline_dock:
-                p = parent_widget.parent()
-                while p:
-                    if isinstance(p, QDockWidget):
-                        timeline_dock = p
-                        break
-                    p = p.parent()
-
-        if timeline_dock:
-            is_floating = timeline_dock.isFloating()
-            float_text = I18N.tr("dock.dock", "Dock") if is_floating else I18N.tr("dock.float", "Float")
-            float_action = menu.addAction(float_text)
-
         # Execute menu
         action = menu.exec(screen_pos)
 
@@ -5583,11 +5558,6 @@ class ClipItem(QGraphicsObject):
         if selected(envelope_reset):
             self.envelope_edit_finished.emit(self._clip_id, self._track_id, [])
             return
-
-        # Handle Float/Dock action
-        if timeline_dock and selected(float_action):
-            timeline_dock.setFloating(not timeline_dock.isFloating())
-            return  # Don't process other actions
 
         # Handle actions
         if selected(editor_action):
@@ -9098,39 +9068,8 @@ class TrackHeaderItem(QGraphicsObject):
         menu.addSeparator()
         visibility_action = menu.addAction("Hide Track" if self._is_visible else "Show Track")
 
-        # Add Float/Dock option for timeline panel
-        menu.addSeparator()
-        from PyQt6.QtWidgets import QDockWidget
-        from src.shared.i18n.i18n import I18N
-        timeline_dock = None
-        # Find the dock widget containing this timeline
-        parent_widget = self.scene().views()[0] if self.scene().views() else None
-        if parent_widget:
-            for p in [parent_widget.parent(), parent_widget.parent().parent() if parent_widget.parent() else None]:
-                if isinstance(p, QDockWidget):
-                    timeline_dock = p
-                    break
-            # Also check through parent chain
-            if not timeline_dock:
-                p = parent_widget.parent()
-                while p:
-                    if isinstance(p, QDockWidget):
-                        timeline_dock = p
-                        break
-                    p = p.parent()
-
-        if timeline_dock:
-            is_floating = timeline_dock.isFloating()
-            float_text = I18N.tr("dock.dock", "Dock") if is_floating else I18N.tr("dock.float", "Float")
-            float_action = menu.addAction(float_text)
-
         # Execute menu
         action = menu.exec(screen_pos)
-
-        # Handle Float/Dock action first
-        if timeline_dock and action == float_action:
-            timeline_dock.setFloating(not timeline_dock.isFloating())
-            return
 
         if action == rename_action:
             self.rename_requested.emit(self._track_id)

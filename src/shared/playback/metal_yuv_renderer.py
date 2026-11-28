@@ -7,8 +7,8 @@ two steps and keeps to the GL semantics so both paths show the same picture:
 - **Planes.**  8-bit planes become ``R8Unorm`` textures and are read through a
   normalised, linearly filtered sampler with clamped edges — what the GL ``R8``
   pool gives its ``sampler2D``.  10/12/16-bit planes become ``R16Uint``
-  textures read by index, i.e. nearest — what the GL ``R16UI`` pool gives its
-  ``usampler2D``.  The kernels differ only in that read.
+  textures. The conversion reads pixel centres directly at 1:1 and
+  interpolates code values during display scaling, as in GL playback.
 - **Coordinates.**  A pixel centre of the picture rectangle maps to the same
   normalised texture coordinate the GL viewport gives its fragment; the
   chroma coordinate is ``uv * scale + offset`` with the values of
@@ -137,6 +137,25 @@ static inline uint2 playback_nearest(float2 texel,
     return uint2(clamp(pos, limit.xy, limit.zw));
 }
 
+static inline float playback_integer_sample(texture2d<uint> plane,
+                                          float2 texel, bool linear) {
+    const uint2 size = uint2(plane.get_width(), plane.get_height());
+    if (!linear) {
+        return float(plane.read(playback_nearest(texel, size)).r);
+    }
+    const float2 pixel = texel - 0.5f;
+    const float2 weight = fract(pixel);
+    const int2 origin = int2(floor(pixel));
+    const int2 last = int2(size) - 1;
+    const uint2 low = uint2(clamp(origin, int2(0), last));
+    const uint2 high = uint2(clamp(origin + 1, int2(0), last));
+    const float top = mix(float(plane.read(low).r),
+                          float(plane.read(uint2(high.x, low.y)).r), weight.x);
+    const float bottom = mix(float(plane.read(uint2(low.x, high.y)).r),
+                             float(plane.read(high).r), weight.x);
+    return mix(top, bottom, weight.y);
+}
+
 // 8-bit planes: R8Unorm, bilinear like the GL R8 pool.
 kernel void playback_yuv_u8(
     texture2d<float> y_plane [[texture(0)]],
@@ -162,7 +181,7 @@ kernel void playback_yuv_u8(
     picture.write(float4(rgb.r, rgb.g, rgb.b, 1.0f), gid);
 }
 
-// 10/12/16-bit planes: R16Uint, nearest like the GL R16UI pool.
+// 10/12/16-bit integer planes, interpolated only when display size changes.
 kernel void playback_yuv_u16(
     texture2d<uint> y_plane [[texture(0)]],
     texture2d<uint> u_plane [[texture(1)]],
@@ -186,11 +205,10 @@ kernel void playback_yuv_u16(
     const float2 pixel = float2(gid) + 0.5f - params.rect.xy;
     const float2 y_texel = pixel * params.luma_texel_scale;
     const float2 c_texel = pixel * params.chroma_texel_scale + params.chroma_offset_texels;
-    const uint2 y_pos = playback_nearest(y_texel, uint2(y_plane.get_width(), y_plane.get_height()));
-    const uint2 c_size = uint2(u_plane.get_width(), u_plane.get_height());
-    const float y = float(y_plane.read(y_pos).r) / params.max_val;
-    const float u = float(u_plane.read(playback_nearest(c_texel, c_size)).r) / params.max_val;
-    const float v = float(v_plane.read(playback_nearest(c_texel, c_size)).r) / params.max_val;
+    const bool linear = any(params.luma_texel_scale != 1.0f);
+    const float y = playback_integer_sample(y_plane, y_texel, linear) / params.max_val;
+    const float u = playback_integer_sample(u_plane, c_texel, linear) / params.max_val;
+    const float v = playback_integer_sample(v_plane, c_texel, linear) / params.max_val;
     const float3 rgb = playback_yuv_to_rgb(y, u, v, params);
     picture.write(float4(rgb.r, rgb.g, rgb.b, 1.0f), gid);
 }
@@ -408,7 +426,7 @@ class PlaybackYuvRenderer:
         """
         width, height = out_size
         if picture_rect is None:
-            picture_rect = letterbox_rect(frame.width, frame.height, width, height)
+            picture_rect = letterbox_rect(frame.display_width, frame.height, width, height)
         left, top, picture_width, picture_height = picture_rect
         if (left < 0 or top < 0 or picture_width <= 0 or picture_height <= 0
                 or left + picture_width > width or top + picture_height > height):

@@ -297,7 +297,8 @@ class MediaSourceFactory:
         target_size: Optional[tuple[int, int]] = None,
         preserve_planes: bool = False,
         auto_open: bool = False,
-        no_deblock: bool = False
+        no_deblock: bool = False,
+        filtered_preview: bool = False,
     ) -> MediaSource:
         """
         创建媒体源（不自动打开）。
@@ -309,6 +310,7 @@ class MediaSourceFactory:
             preserve_planes: 是否保留 planar 格式（避免 CPU RGB 转换）。
                              当 True 且源像素格式是 YUV 时，输出 planar DecodedFrame。
             auto_open: 是否自动打开（默认 False，调用方应显式调用 open_source()）
+            filtered_preview: Topos 预览完整解码后再做面积缩小。
 
         Returns:
             MediaSource 实例（未打开状态）
@@ -351,7 +353,7 @@ class MediaSourceFactory:
             source: Optional[MediaSource] = None
             try:
                 source = cls._create_with_backend(backend_name, path, target_size,
-                                                  preserve_planes, no_deblock)
+                                                  preserve_planes, no_deblock, filtered_preview)
                 logger.info(f"MediaSourceFactory: 使用后端 {backend_name} 创建 {path}, preserve_planes={preserve_planes}")
                 # P3.A: 不自动 open，由调用方决定何时打开
                 if auto_open:
@@ -456,7 +458,8 @@ class MediaSourceFactory:
         path: str,
         target_size: Optional[tuple[int, int]],
         preserve_planes: bool = False,
-        no_deblock: bool = False
+        no_deblock: bool = False,
+        filtered_preview: bool = False,
     ) -> MediaSource:
         """
         使用指定后端创建媒体源（不打开）。
@@ -489,6 +492,8 @@ class MediaSourceFactory:
         extra: dict = {}
         if no_deblock and backend_name in cls._NO_DEBLOCK_BACKENDS:
             extra['no_deblock'] = True
+        if filtered_preview and backend_name == 'topos':
+            extra['filtered_preview'] = True
         source = factory_func(path, target_size, preserve_planes, **extra)
 
         # P3.A: 不再自动 open，直接返回创建的 source
@@ -571,7 +576,8 @@ class MediaSourceFactory:
                     path: str,
                     target_size: Optional[tuple[int, int]],
                     preserve_planes: bool = False,
-                    no_deblock: bool = False
+                    no_deblock: bool = False,
+                    filtered_preview: bool = False,
                 ) -> MediaSource:
                     from .topos_source import ToposMediaSource
                     return ToposMediaSource(
@@ -579,6 +585,7 @@ class MediaSourceFactory:
                         target_size=target_size,
                         preserve_planes=preserve_planes,
                         no_deblock=no_deblock,
+                        filtered_preview=filtered_preview,
                     )
 
                 def check_topos_available() -> bool:

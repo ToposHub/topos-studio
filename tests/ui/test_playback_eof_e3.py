@@ -292,6 +292,54 @@ def test_ultimate_slider_seek_clears_replay_flag(qtbot):
     assert not player._at_eof      # 片尾回跳后继续播，不再触发从头重播
 
 
+def test_ultimate_lightbox_transport_wakes_and_stays_visible_when_paused(qtbot: QtBot) -> None:
+    from PyQt6.QtCore import QPoint
+
+    player = UltimatePlayer()
+    qtbot.addWidget(player)
+    player.resize(800, 450)
+    player.show()
+    player.set_lightbox_tools(False)
+    player._on_playback_state(QMediaPlayer.PlaybackState.PlayingState)
+    assert player.controls_container.isVisible() and player.header_container.isHidden()
+    assert player.hide_cursor_timer.interval() == 6000
+
+    player.hide_ui()
+    assert player.controls_container.isHidden()
+    player.observe_transport_pointer(player.mapToGlobal(QPoint(40, player.height() - 8)))
+    assert player.controls_container.isVisible() and not player.hide_cursor_timer.isActive()
+    player.hide_ui()
+    assert player.controls_container.isVisible()
+    player.observe_transport_pointer(player.mapToGlobal(QPoint(40, 128)))
+    assert player.hide_cursor_timer.remainingTime() >= 5500
+
+    player._on_playback_state(QMediaPlayer.PlaybackState.PausedState)
+    player.set_lightbox_tools(False)
+    player.hide_ui()
+    assert player.controls_container.isVisible() and not player.hide_cursor_timer.isActive()
+
+
+def test_ultimate_reports_decoded_and_preview_dimensions(qtbot: QtBot) -> None:
+    player = UltimatePlayer()
+    qtbot.addWidget(player)
+    player.current_path = "/media/mock.mp4"
+    player._source_size = (384, 216)
+    image = QImage(384, 216, QImage.Format.Format_RGB888)
+    image.fill(0)
+    player._on_video_frame(SimpleNamespace(toImage=lambda: image))
+
+    menu = player._build_resolution_menu()
+    actions = [action for action in menu.actions() if action.isCheckable()]
+    actions[1].trigger()
+    assert player.video_frame._img.size() == QSize(192, 108)
+    assert player._decoded_image.size() == QSize(384, 216)
+    assert all(size in player.lbl_playback_resolution.text() for size in ("192×108", "384×216"))
+    actions[2].trigger()
+    assert player.video_frame._img.size() == QSize(96, 54)
+    actions[0].trigger()
+    assert player.video_frame._img.size() == QSize(384, 216)
+
+
 def test_topos_silent_clock_catches_up_and_paused_seek_presents_one_frame(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

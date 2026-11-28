@@ -2438,6 +2438,9 @@ class NativeFilesPanel(QWidget):
         if self._video_host is None:
             host = NativePlayerHost(self._preview.video_slot, self, lightbox=True)
             self._preview.tools_visibility_changed.connect(host.set_lightbox_tools)
+            self._preview.video_pointer_moved.connect(host.observe_transport_pointer)
+            self._preview.video_pointer_left.connect(host.leave_transport)
+            self._preview.video_settings_requested.connect(host.open_playback_settings)
             host.closed.connect(self._on_video_player_closed)
             host.prev_requested.connect(lambda: self._step_video_preview(-1))
             host.next_requested.connect(lambda: self._step_video_preview(1))

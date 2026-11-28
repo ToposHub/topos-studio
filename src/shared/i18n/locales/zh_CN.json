@@ -4554,6 +4554,30 @@
     "dock": "停靠",
     "close": "关闭面板"
   },
+  "playback_resolution": {
+    "settings": "播放设置",
+    "menu": "播放分辨率",
+    "full": "全分辨率",
+    "info": "视频信息",
+    "pending": "源 {source} · 等待播放帧",
+    "original": "播放 {frame} · 原分辨率",
+    "reduced": "播放 {frame} · 源 {source} · 降分辨率",
+    "resampled": "播放 {frame} · 解码 {decoded} · 源 {source}",
+    "qt_scaled": "预览 {preview} · 解码 {decoded}",
+    "qt_decoded": "播放 {decoded} · 解码尺寸",
+    "qt_menu": "预览分辨率（解码后缩放）",
+    "qt_source": "源 {source}",
+    "qt_pending": "等待播放帧"
+  },
+  "program_preview_resolution": {
+    "title": "预览分辨率",
+    "full": "全分辨率",
+    "smooth": "流畅（自动）",
+    "actual": "实际呈现帧 {size}",
+    "timeline": "时间线画幅 {size}",
+    "source": "素材原始尺寸 {sizes}",
+    "decoded": "实际解码尺寸 {sizes}"
+  },
   "fps_indicator": {
     "tooltip": "实时预览帧率"
   },

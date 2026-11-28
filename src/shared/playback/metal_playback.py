@@ -55,7 +55,7 @@ DEFAULT_MAX_TEXTURE = 16384
 
 #: Kernel for 8-bit planes (``R8Unorm``, linear filtered like the GL ``R8`` pool).
 KERNEL_U8 = "playback_yuv_u8"
-#: Kernel for 10/12/16-bit planes (``R16Uint``, nearest like the GL ``R16UI`` pool).
+#: Kernel for 10/12/16-bit integer planes, with display-scale interpolation.
 KERNEL_U16 = "playback_yuv_u16"
 
 # Same coefficient tuples as the GLSL ``mat3`` constants of
@@ -193,15 +193,15 @@ def display_size_refusal(width: int, height: int, *, max_texture: int = DEFAULT_
     return ""
 
 
-def letterbox_rect(frame_w: int, frame_h: int, out_w: int, out_h: int) -> tuple[int, int, int, int]:
+def letterbox_rect(frame_w: float, frame_h: int, out_w: int, out_h: int) -> tuple[int, int, int, int]:
     """``(left, top, width, height)`` of the picture inside a top-left-origin output.
 
     Same rectangle as the GL path: the picture keeps its aspect ratio, is
     centred, and an odd left-over row stays at the top (the GL viewport is
     measured from the bottom, where ``(out_h - vh) // 2`` rounds down).
     """
-    scale = min(int(out_w) / int(frame_w), int(out_h) / int(frame_h))
-    view_w = max(1, int(int(frame_w) * scale))
+    scale = min(int(out_w) / frame_w, int(out_h) / int(frame_h))
+    view_w = max(1, int(frame_w * scale))
     view_h = max(1, int(int(frame_h) * scale))
     left = (int(out_w) - view_w) // 2
     bottom = (int(out_h) - view_h) // 2

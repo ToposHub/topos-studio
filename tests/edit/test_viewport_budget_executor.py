@@ -333,16 +333,17 @@ class TestBudgetScaleDomain:
         r.set_budget_size_cap((960, 540))
         assert r.preview_quality_preference() == 1.0          # 偏好不动
         target = r.preview_decode_target_size()
-        assert target == (960, 540)                           # 预算仍生效
-        r.set_budget_size_cap(None)                           # 解除
+        assert target == (3840, 2160)
+        assert r.budget_size_cap_status()["satisfied"] is False
+        r.set_budget_size_cap(None)
         assert r.preview_quality_preference() == 1.0
         assert r._effective_preview_quality_scale(3840, 2160) == 1.0
 
-    def test_8k_user_full_capped_by_preview_edge_and_budget(self):
+    def test_8k_user_full_keeps_native_canvas_despite_preview_caps(self):
         r = _renderer_shell((7680, 4320), user_quality=1.0)
-        assert r._effective_preview_quality_scale(7680, 4320) == 0.5  # 4K 顶
+        assert r._effective_preview_quality_scale(7680, 4320) == 1.0
         r.set_budget_size_cap((1920, 1080))
-        assert r._effective_preview_quality_scale(7680, 4320) == 0.25
+        assert r._effective_preview_quality_scale(7680, 4320) == 1.0
 
     def test_full_stage_and_scrub_targets_also_constrained(self):
         r = _renderer_shell((3840, 2160))

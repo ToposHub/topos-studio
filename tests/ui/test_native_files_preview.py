@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 
 from PyQt6.QtCore import QBuffer, QEvent, QIODevice, QItemSelectionModel, QObject, QPoint, QPointF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QWheelEvent
-from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
+from PyQt6.QtGui import QColor, QContextMenuEvent, QImage, QKeyEvent, QMouseEvent, QWheelEvent
+from PyQt6.QtWidgets import QApplication, QMenu, QPushButton, QWidget
 
 from src.app.ui import native_files_panel
 from src.app.ui.native_files_panel import NativeFilesPanel
@@ -291,6 +291,15 @@ def test_panel_routes_video_to_native_preview(qtbot, monkeypatch):
         def set_lightbox_tools(self, visible):
             pass
 
+        def observe_transport_pointer(self, _position):
+            pass
+
+        def leave_transport(self):
+            pass
+
+        def open_playback_settings(self, _position):
+            pass
+
         def play(self, path):
             played.append(path)
             self.player_button.show()
@@ -320,6 +329,104 @@ def test_panel_routes_video_to_native_preview(qtbot, monkeypatch):
         qtbot.keyClick(panel._video_host.player_button, Qt.Key.Key_Space)
     assert not panel._preview.is_open
     assert played == ["/media/C.mov"]
+
+
+def test_files_lightbox_playback_resolution_and_controls(qtbot, monkeypatch, tmp_path) -> None:
+    import numpy as np
+    from src.shared.playback import player_host
+    from src.shared.playback.base_player import _VideoCanvas
+    from src.shared.playback.topos_player import ToposPlayer
+
+    class Session:
+        width, height = 384, 216
+        frame_count = 20
+        fps = 2.0
+        duration_sec = frame_count / fps
+        independent_frames = True
+
+        def frame_rgb(self, index: int, size: tuple[int, int] | None = None) -> np.ndarray:
+            width, height = size or (self.width, self.height)
+            return np.full((height, width, 3), index, dtype=np.uint8)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(player_host, "decide_route", lambda _path: "topos")
+    monkeypatch.setattr(ToposPlayer, "_open_session", lambda _player, _path: Session())
+    monkeypatch.setattr(ToposPlayer, "_create_canvas", lambda player: _VideoCanvas(player))
+    monkeypatch.setattr(ToposPlayer, "_configure_session", lambda _player, _sess: None)
+    path = str(tmp_path / "native.mov")
+    panel = NativeFilesPanel()
+    qtbot.addWidget(panel)
+    panel.resize(800, 480)
+    panel.show()
+    panel.set_entries(str(tmp_path), [{"name": "native.mov", "path": path, "type": "video"}])
+
+    assert panel.open_path_native(path)
+    player = panel._video_host._players["topos"]
+    try:
+        assert player._controls.isVisible()
+        assert player._header.isHidden()
+        assert player._idle_timer.interval() == 6000
+        player._auto_hide_ui()
+        assert player._controls.isHidden()
+
+        def move_on_overlay(point: QPoint) -> None:
+            overlay = panel._preview
+            global_pos = overlay.mapToGlobal(point)
+            QApplication.sendEvent(overlay, QMouseEvent(
+                QEvent.Type.MouseMove, QPointF(point), QPointF(global_pos),
+                Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
+
+        move_on_overlay(QPoint(120, 30))
+        assert player._controls.isHidden()
+        move_on_overlay(QPoint(120, panel._preview.height() - 30))
+        assert player._controls.isVisible() and player._transport_hot
+        assert not player._idle_timer.isActive()
+        player._auto_hide_ui()
+        assert player._controls.isVisible()
+        move_on_overlay(QPoint(120, 150))
+        assert not player._transport_hot and player._idle_timer.remainingTime() >= 5500
+
+        qtbot.mouseClick(player.btn_play, Qt.MouseButton.LeftButton)
+        assert not player._playing
+        player.set_lightbox_tools(False)
+        player._auto_hide_ui()
+        assert player._controls.isVisible()
+        qtbot.waitUntil(lambda: player._presented_frame_size == (384, 216))
+        assert "384×216" in player.lbl_playback_resolution.text()
+
+        player.slider.setValue(7)
+        player.slider.sliderReleased.emit()
+        qtbot.waitUntil(lambda: player._shown_index == 7)
+
+        displayed = []
+
+        def capture_menu(menu: QMenu, _position: QPoint) -> None:
+            displayed.append(menu)
+
+        monkeypatch.setattr(QMenu, "exec", capture_menu)
+        point = QPoint(40, 90)
+        event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, point, player.canvas.mapToGlobal(point))
+        QApplication.sendEvent(player.canvas, event)
+        assert event.isAccepted() and len(displayed) == 1
+        assert len([action for action in displayed[0].actions() if action.isCheckable()]) == 3
+        menu = player._build_resolution_menu()
+        actions = [action for action in menu.actions() if action.isCheckable()]
+        assert [action.isChecked() for action in actions] == [True, False, False]
+        actions[1].trigger()
+        assert "192×108" not in player.lbl_playback_resolution.text()
+        qtbot.waitUntil(lambda: player._presented_frame_size == (192, 108))
+        assert player._shown_index == 7 and not player._playing
+        assert all(size in player.lbl_playback_resolution.text() for size in ("192×108", "384×216"))
+        actions[2].trigger()
+        qtbot.waitUntil(lambda: player._presented_frame_size == (96, 54))
+        actions[0].trigger()
+        qtbot.waitUntil(lambda: player._presented_frame_size == (384, 216))
+        qtbot.keyClick(player, Qt.Key.Key_Space)
+        assert panel._preview.is_open and player._playing
+    finally:
+        panel._video_host.shutdown()
 
 
 def test_preview_steps_only_between_images(qtbot):

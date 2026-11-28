@@ -760,14 +760,6 @@ class AiEditAssistantPanel(PanelDockWidget):
         # Dock 管理动作与 AI 操作放在同一个菜单，避免 QDockWidget 默认菜单
         # 再弹出第二个窗口。
         menu.addSeparator()
-        float_action = QAction(
-            tr("dock.dock", "停靠") if self.isFloating() else tr("dock.float", "浮动"),
-            menu,
-        )
-        float_action.triggered.connect(
-            lambda: self.setFloating(not self.isFloating())
-        )
-        menu.addAction(float_action)
         close_action = QAction(tr("dock.close", "关闭面板"), menu)
         close_action.triggered.connect(lambda: self.setVisible(False))
         menu.addAction(close_action)

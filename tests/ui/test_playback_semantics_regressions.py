@@ -264,8 +264,8 @@ def test_topos_prefetch_overlaps_output_and_discards_stale_seek(monkeypatch: pyt
         assert prefetched.wait(timeout=5)
         return av_module.VideoFrame(*args, **kwargs)
 
-    def decode(index: int, preview: bool, buffer: _DecodeBuffer) -> _DecodeBuffer:
-        decoded.append((index, preview))
+    def decode(index: int, size: tuple[int, int] | None, buffer: _DecodeBuffer) -> _DecodeBuffer:
+        decoded.append((index, size))
         if index == 1:
             assert convert_started.wait(timeout=5)
             prefetched.set()
@@ -286,8 +286,8 @@ def test_topos_prefetch_overlaps_output_and_discards_stale_seek(monkeypatch: pyt
         assert sought.y[0, 0] == 564
         assert frame_1.y[0, 0] == 164
         assert snapshot[0, 0, 0] > frame_0[0, 0, 0]
-        assert decoded[:2] == [(0, True), (1, True)]
-        assert decoded[-2:] == [(5, True), (5, False)]
+        assert decoded[:2] == [(0, (16, 8)), (1, (16, 8))]
+        assert decoded[-2:] == [(5, (16, 8)), (5, None)]
     finally:
         session.close()
 
@@ -300,7 +300,7 @@ def test_topos_close_releases_context_after_inflight_prefetch(monkeypatch: pytes
     resume = threading.Event()
     closed = threading.Event()
 
-    def decode(index: int, preview: bool, buffer: _DecodeBuffer) -> _DecodeBuffer:
+    def decode(index: int, size: tuple[int, int] | None, buffer: _DecodeBuffer) -> _DecodeBuffer:
         if index == 1:
             started.set()
             assert resume.wait(timeout=5)
@@ -330,24 +330,96 @@ def test_topos_v7b_preview_decodes_embedded_base_and_snapshot_reads_full() -> No
     movie.packet_into = Mock(return_value=(b'full', 4))
     session = _session_with_movie(movie)
     session._try_base_layer = True
-    session._auto_request = object()
     decoder = session._decoder
     decoder.prepare_request = Mock(side_effect=AssertionError('base was already reduced'))
     decoder.prepare = Mock(side_effect=[
         SimpleNamespace(pixel_format=0, bit_depth=10, plane_count=3, width=16, height=8),
+        SimpleNamespace(pixel_format=0, bit_depth=10, plane_count=3, width=16, height=8),
         SimpleNamespace(pixel_format=0, bit_depth=10, plane_count=3, width=32, height=16),
     ])
-    decoder.decode_views = Mock()
+
+    def fill_planes(_packet: bytes, planes: tuple, _count: int, _size: int) -> None:
+        for plane in planes:
+            plane.fill(512)
+
+    decoder.decode_views = Mock(side_effect=fill_planes)
     session._codec.plane_geometry = (
         lambda info, plane: (info.width // (2 if plane else 1), info.height))
     try:
         preview = session.frame_yuv(0, size=(16, 8))
+        quarter = session.frame_yuv(1, size=(8, 4))
         snapshot = session.frame_yuv(0)
         assert (preview.width, preview.height) == (16, 8)
+        assert (quarter.width, quarter.height) == (8, 4)
+        assert quarter.decoded_size == (16, 8)
         assert (snapshot.width, snapshot.height) == (32, 16)
-        assert [call.args[0] for call in decoder.decode_views.call_args_list] == [b'base', b'full']
-        movie.packet_base_into.assert_called_once_with(0)
+        assert [call.args[0] for call in decoder.decode_views.call_args_list] == [b'base', b'base', b'full']
+        assert [call.args[0] for call in movie.packet_base_into.call_args_list] == [0, 1]
         movie.packet_into.assert_called_once_with(0)
+    finally:
+        session.close()
+
+
+@pytest.mark.parametrize('factor', [2, 4])
+def test_topos_preview_resamples_all_planes_after_full_decode(factor: int) -> None:
+    import numpy as np
+    from unittest.mock import Mock
+
+    movie = _FakeMovie(sample_count=2, ticks_per_frame=1, timescale=24, width=32, height=16)
+    movie.packet_into = Mock(side_effect=lambda index: (bytes([index]), 1))
+    session = _session_with_movie(movie)
+    decoder = session._decoder
+    decoder.prepare = Mock(return_value=SimpleNamespace(pixel_format=0, bit_depth=10, plane_count=3))
+    decoder.prepare_request = Mock(side_effect=AssertionError('requires full reconstruction'))
+    session._codec.plane_geometry = lambda _info, plane: (16 if plane else 32, 16)
+
+    def decode(packet: bytes, planes: tuple, _count: int, _size: int) -> None:
+        for offset, plane in enumerate(planes):
+            y, x = np.indices(plane.shape)
+            plane[:] = 64 + 120 * offset + 64 * packet[0] + 4 * x + 8 * y
+
+    decoder.decode_views = Mock(side_effect=decode)
+    try:
+        full = session.frame_yuv(0)
+        size = (32 // factor, 16 // factor)
+        preview = session.frame_yuv(0, size=size)
+        rgb, decoded_size = session.frame_rgb_with_decode_size(0, size=size)
+        session.frame_yuv(1, size=size)  # Reusing the decoder buffers must leave preview intact.
+        assert preview.decoded_size == decoded_size == (32, 16)
+        assert (preview.width, preview.height) == size
+        assert rgb.shape == (size[1], size[0], 3)
+        assert preview.is_valid()
+        for native, resampled in zip((full.y, full.u, full.v), (preview.y, preview.u, preview.v), strict=True):
+            h, w = resampled.shape
+            exact = native.reshape(h, factor, w, factor).mean(axis=(1, 3))
+            np.testing.assert_array_equal(resampled, exact)
+            assert resampled.dtype == native.dtype
+    finally:
+        session.close()
+
+
+def test_topos_prefetch_rejects_same_frame_from_previous_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv('TOPOS_DISABLE_PREFETCH', raising=False)
+    movie = _FakeMovie(sample_count=3, ticks_per_frame=1, timescale=24, width=32, height=16)
+    session = _session_with_movie(movie, prefetch=True)
+    old_request_started = threading.Event()
+
+    def decode(index: int, size: tuple[int, int] | None, buffer: _DecodeBuffer) -> _DecodeBuffer:
+        w, h = size or (32, 16)
+        buffer.ensure(session._decoder, ((w, h), (w // 2, h), (w // 2, h)))
+        if index == 1 and size == (16, 8):
+            old_request_started.set()
+        return buffer
+
+    monkeypatch.setattr(session, '_decode_into', decode)
+    try:
+        first = session.frame_yuv(0, size=(16, 8))
+        assert (first.width, first.height) == (16, 8)
+        assert old_request_started.wait(timeout=5)
+        full = session.frame_yuv(1)
+        assert (full.width, full.height) == (32, 16)
+        quarter = session.frame_yuv(2, size=(8, 4))
+        assert (quarter.width, quarter.height) == (8, 4)
     finally:
         session.close()
 
@@ -426,6 +498,16 @@ def test_fr20_source_sar_widens_display():
     assert result.width / result.height == pytest.approx(4.0)
 
 
+def test_full_resolution_retains_encoded_dimensions_and_sample_aspect() -> None:
+    frame = av.VideoFrame(160, 80, 'yuv420p')
+    frame.pts, frame.time_base = 0, Fraction(1, 24)
+    session = _yuv_session_with_frame(frame)
+    session.sar = Fraction(2, 1)
+    result = session.frame_yuv(0)
+    assert (result.width, result.height) == (160, 80)
+    assert result.display_width == 320.0
+
+
 def test_fr20_odd_sizes_round_to_even():
     frame = av.VideoFrame(161, 81, 'yuv420p')
     frame.pts, frame.time_base = 0, Fraction(1, 24)
@@ -463,7 +545,8 @@ def test_topos_rgb_fallback_keeps_source_aspect(box, expected):
               np.full((78, 78), 512, dtype="<u2"))
     buffer = _DecodeBuffer(geometry=((156, 78), (78, 78), (78, 78)), planes=planes)
     session._read_planes_locked = lambda index, preview: buffer
-    rgb = session._frame_rgb_locked(0, box)
+    rgb, decoded_size = session._frame_rgb_locked(0, box)
+    assert decoded_size == (156, 78)
     assert (rgb.shape[1], rgb.shape[0]) == expected
     assert not rgb.any()
 

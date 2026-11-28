@@ -961,12 +961,10 @@ class TimelineClipStrip(QWidget):
     Signals:
         clip_activated(str, str, int, int): Emits
             (timeline_id, clip_id, timeline_start, source_start).
-        float_requested(): Request to float the panel.
         close_requested(): Request to close the panel.
     """
 
     clip_activated = pyqtSignal(str, str, int, int)
-    float_requested = pyqtSignal()
     close_requested = pyqtSignal()
     # P1-COLOR-16 分类调色复制/粘贴（timeline_id, clip_id）
     grade_copy_requested = pyqtSignal(str, str)
@@ -1402,8 +1400,6 @@ class TimelineClipStrip(QWidget):
 
         # Panel options
         menu.addSeparator()
-        menu.addAction(I18N.tr("clipstrip.float_panel", "Float Panel"),
-                       self.float_requested.emit)
         menu.addAction(I18N.tr("clipstrip.close_panel", "Close Panel"),
                        self.close_requested.emit)
 

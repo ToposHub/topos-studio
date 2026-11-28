@@ -35,17 +35,20 @@ def test_h273_matrix_maps_bt709_601_2020():
     assert _h273_matrix_to_uploader(2) == 0
 
 
-def test_topos_decode_prefers_gpu_yuv_frame():
+@pytest.mark.parametrize(("divisor", "size"), [(1, None), (2, (1920, 1080)), (4, (960, 540))])
+def test_topos_decode_prefers_gpu_yuv_frame(divisor, size):
     from src.shared.playback.topos_player import ToposPlayer
 
     player = ToposPlayer.__new__(ToposPlayer)
-    player.canvas = SimpleNamespace(
-        gpu_active=True, display_size=lambda: (640, 360))
+    player.canvas = SimpleNamespace(gpu_active=True)
+    player._playback_resolution_divisor = divisor
     marker = object()
 
     class _Session:
-        def frame_yuv(self, target, size=None):
-            assert target == 12 and size == (640, 360)
+        width, height = 3840, 2160
+
+        def frame_yuv(self, target, **kwargs):
+            assert target == 12 and kwargs["size"] == size
             return marker
 
         def frame_rgb(self, target, size=None):
@@ -58,8 +61,8 @@ def test_topos_decode_rgb_fallback(qtbot):
     from src.shared.playback.topos_player import ToposPlayer
 
     player = ToposPlayer.__new__(ToposPlayer)
-    player.canvas = SimpleNamespace(
-        gpu_active=False, display_size=lambda: (640, 360))
+    player.canvas = SimpleNamespace(gpu_active=False)
+    player._playback_resolution_divisor = 1
     rgb = np.zeros((360, 640, 3), np.uint8)
     rgb[:, :, 1] = 128
 
@@ -68,7 +71,7 @@ def test_topos_decode_rgb_fallback(qtbot):
             raise AssertionError('RGB fallback should not call frame_yuv')
 
         def frame_rgb(self, target, size=None):
-            assert size == (640, 360)
+            assert size is None
             return rgb
 
     image = player._decode_frame(_Session(), 0)

@@ -5,9 +5,9 @@ import logging
 import os
 
 from PyQt6 import sip
-from PyQt6.QtCore import QPoint, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QResizeEvent
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget, QFileDialog, QMenu, QDockWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QStackedWidget, QFileDialog, QMessageBox
 from src.app.ui.ai_library_window import RegisteredAILibraryWindow
 from src.features.files.contracts import normalize_path
 from src.shared.i18n.i18n import I18N
@@ -53,8 +53,6 @@ class FilesPanel(QWidget):
         self.content_stack = QStackedWidget(self._workspace_splitter)
         self._workspace_splitter.addWidget(self.content_stack)
         self.layout.addWidget(self._workspace_splitter)
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._show_context_menu)
         self._initialize_native()
 
     def get_main_window(self) -> QWidget | None:
@@ -63,17 +61,6 @@ class FilesPanel(QWidget):
     def set_color_workspace_active(self, active: bool) -> None:
         if self._native_panel is not None:
             self._native_panel.set_color_workspace_active(active)
-
-    def _show_context_menu(self, pos: QPoint) -> None:
-        menu = QMenu(self)
-        dock = self.parent()
-        while dock and not isinstance(dock, QDockWidget):
-            dock = dock.parent()
-        if dock:
-            text = I18N.tr("dock.dock", "Dock") if dock.isFloating() else I18N.tr("dock.float", "Float")
-            menu.addAction(text).triggered.connect(lambda: dock.setFloating(not dock.isFloating()))
-        if not menu.isEmpty():
-            menu.exec(self.mapToGlobal(pos))
 
     def refresh_layout(self) -> None:
         self.layout.activate()

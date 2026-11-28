@@ -3780,9 +3780,6 @@ class CompositeViewer(QOpenGLWidget):
             self._inspector_bar.setVisible(checked)
         inspector_action.toggled.connect(_toggle_inspector)
 
-        menu.addSeparator()
-        menu.addAction(I18N.tr("viewport.dock_float", "Dock/Float"), self._toggle_dock_float)
-
         menu.exec(event.globalPos())
 
     def _toggle_fullscreen(self) -> None:
@@ -3797,13 +3794,6 @@ class CompositeViewer(QOpenGLWidget):
         window = self.window()
         if hasattr(window, 'toggle_focus_mode'):
             window.toggle_focus_mode()
-
-    def _toggle_dock_float(self) -> None:
-        """Toggle the viewport dock between docked and floating."""
-        window = self.window()
-        if hasattr(window, 'dock_viewport') and window.dock_viewport:
-            dock = window.dock_viewport
-            dock.setFloating(not dock.isFloating())
 
     def cleanup(self) -> None:
         """Release OpenGL resources. Safe to call even after partial init."""

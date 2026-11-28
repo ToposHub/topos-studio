@@ -9,11 +9,8 @@ thread of a standalone GL context and compares the pictures:
 * 8-bit planes and every layout go through the GL path as it is; the two
   pictures may differ by rounding only.
 * 10/12/16-bit planes at 1:1 likewise.
-* 10/12-bit planes scaled: the GL path samples half a texel off vertically
-  there (its integer sampler's ``texture()`` at a scaled viewport), so the
-  Metal picture is compared with a nearest-neighbour reference at the output
-  pixel centres instead, and is expected to be exact.  The GL offset is
-  recorded in the migration status, not reproduced.
+* Scaled 10/12-bit planes interpolate at the output pixel centres, compared
+  with a separate CPU reference for both renderers.
 """
 
 from __future__ import annotations
@@ -46,23 +43,36 @@ def _planes(rng: np.random.Generator, w: int, h: int, sub: str, depth: int) -> t
     return y, u, v
 
 
-def _nearest_reference(frame: Any, out: tuple) -> np.ndarray:
-    """Nearest-neighbour YUV -> RGB at the centres of an ``out``-sized picture."""
-    from src.shared.playback.metal_playback import range_constants, uploader_matrix
+def _linear_reference(frame: Any, out: tuple[int, int]) -> np.ndarray:
+    """Bilinear YUV -> RGB at the centres of an output-sized picture."""
+    from src.shared.playback.metal_playback import chroma_sampling, range_constants, uploader_matrix
 
-    h, w = frame.height, frame.width
     ow, oh = out
-    cw, ch = frame.u.shape[1], frame.u.shape[0]
+    ux = (np.arange(ow) + 0.5) / ow
+    uy = (np.arange(oh) + 0.5) / oh
+    scale, offset = chroma_sampling(frame)
+
+    def sample(plane: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        h, w = plane.shape
+        x, y = x * w - 0.5, y * h - 0.5
+        ix, iy = np.floor(x).astype(int), np.floor(y).astype(int)
+        fx, fy = (x - ix)[None, :], (y - iy)[:, None]
+        x0, x1 = ix.clip(0, w - 1), (ix + 1).clip(0, w - 1)
+        y0, y1 = iy.clip(0, h - 1), (iy + 1).clip(0, h - 1)
+        a = plane[np.ix_(y0, x0)] * (1 - fx) + plane[np.ix_(y0, x1)] * fx
+        b = plane[np.ix_(y1, x0)] * (1 - fx) + plane[np.ix_(y1, x1)] * fx
+        return a * (1 - fy) + b * fy
+
     max_val, y_black, y_range_inv, c_neutral, c_range_inv = range_constants(frame.bit_depth)
-    if frame.color_range:                        # full range: nothing to undo
-        y_black, y_range_inv, c_neutral, c_range_inv = 0.0, 1.0, 0.0, 1.0
-    ys = np.minimum((np.arange(oh) + 0.5) * h / oh, h - 0.5).astype(int)
-    xs = np.minimum((np.arange(ow) + 0.5) * w / ow, w - 0.5).astype(int)
-    cys = np.minimum((np.arange(oh) + 0.5) * ch / oh, ch - 0.5).astype(int)
-    cxs = np.minimum((np.arange(ow) + 0.5) * cw / ow, cw - 0.5).astype(int)
-    y = (frame.y[np.ix_(ys, xs)].astype(np.float64) - y_black * max_val) * y_range_inv / max_val
-    u = (frame.u[np.ix_(cys, cxs)].astype(np.float64) - c_neutral * max_val) * c_range_inv / max_val
-    v = (frame.v[np.ix_(cys, cxs)].astype(np.float64) - c_neutral * max_val) * c_range_inv / max_val
+    cx, cy = ux * scale[0] + offset[0], uy * scale[1] + offset[1]
+    y = sample(frame.y, ux, uy) / max_val
+    u = sample(frame.u, cx, cy) / max_val
+    v = sample(frame.v, cx, cy) / max_val
+    if frame.color_range:
+        u, v = u - 0.5, v - 0.5
+    else:
+        y = (y - y_black) * y_range_inv
+        u, v = (u - c_neutral) * c_range_inv, (v - c_neutral) * c_range_inv
     cr_r, cb_g, cr_g, cb_b = {0: (1.5748, -0.1873, -0.4681, 1.8556), 1: (1.4746, -0.1646, -0.5714, 1.8814),
                               2: (1.4020, -0.3441, -0.7141, 1.7720)}[uploader_matrix(frame.matrix)]
     rgb = np.stack([y + cr_r * v, y + cb_g * u + cr_g * v, y + cb_b * u], axis=-1)
@@ -122,7 +132,8 @@ class _Both:
             YUVGPUUploader.RANGE_FULL if frame.color_range else YUVGPUUploader.RANGE_LIMITED)
         self.uploader.render_yuv_to_rgb(
             *planes[:3], fbo, chroma_uv_scale=chroma_scale, chroma_uv_offset=chroma_offset,
-            bit_depth=frame.bit_depth, gbr_mode="gbr" in str(frame.pixel_format))
+            bit_depth=frame.bit_depth, gbr_mode="gbr" in str(frame.pixel_format),
+            linear_sampling=(view_w, view_h) != (frame.width, frame.height))
         top_down = np.frombuffer(fbo.read(components=3), np.uint8).reshape(height, width, 3)[::-1]
         picture = top_down.copy()
         texture.release()
@@ -159,11 +170,11 @@ def _compare(cases: list) -> list:
         for label, make, out, against in cases:
             frame = make(rng)
             got = both.metal_picture(frame, out)
-            if against == "gl":
-                expected = both.gl_picture(frame, out).astype(np.int16)
-            else:
-                expected = _nearest_reference(frame, out).astype(np.int16)
+            gl = both.gl_picture(frame, out).astype(np.int16)
+            expected = gl if against == "gl" else _linear_reference(frame, out).astype(np.int16)
             difference = np.abs(got.astype(np.int16) - expected)
+            if against != "gl":
+                difference = np.maximum(difference, np.abs(gl - expected))
             report.append((label, int(difference.max()), float(difference.mean())))
     finally:
         both.close()
@@ -233,9 +244,8 @@ def test_scaled_high_bit_depth_planes_sample_at_the_pixel_centres() -> None:
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="PlaybackParity") as worker:
         report = worker.submit(_compare, VS_REFERENCE).result()
     for label, worst_level, mean in report:
-        # A 2x downscale puts every sample on a tie between two texels; which
-        # of the two a nearest lookup takes may differ by one level.
-        assert worst_level <= 1 and mean < 0.01, (label, worst_level, mean)
+        # Integer presentation only rounds when writing the 8-bit drawable.
+        assert worst_level <= 1 and mean < 0.10, (label, worst_level, mean)
 
 
 # ---------------------------------------------------------------------------

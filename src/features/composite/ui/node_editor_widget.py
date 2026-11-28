@@ -2184,7 +2184,7 @@ class NodeEditorWidget(QGraphicsView):
         # Float/Dock toggle
         dock = self._find_parent_dock()
         action_float = None
-        if dock:
+        if dock and (dock.isFloating() or dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable):
             action_float = menu.addAction("Dock" if dock.isFloating() else "Float")
 
         menu.addSeparator()

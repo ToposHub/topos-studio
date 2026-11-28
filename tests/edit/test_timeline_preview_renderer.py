@@ -1181,7 +1181,8 @@ class TestPreviewRenderWorker:
             max_preview_edge=1280,
         )
 
-        assert worker._preview_quality == 0.0
+        assert worker._preview_quality == 1.0
+        worker.set_preview_quality(0.0)
         assert worker._decode_target_size == (1280, 720)
 
         worker.stop()
@@ -1245,12 +1246,21 @@ class TestPreviewRenderWorker:
 
         worker.stop()
 
+    @pytest.mark.parametrize(("quality", "source_target", "output_size"), [
+        (1.0, None, (3840, 2160)),
+        (0.5, (1920, 1080), (1920, 1080)),
+        (0.25, (960, 540), (960, 540)),
+    ])
     def test_gpu_path_requests_decode_at_preview_quality_size(
         self,
         mock_frame_provider,
         simple_sequence,
+        quality,
+        source_target,
+        output_size,
     ):
         """GPU decode size follows preview quality rather than widget size."""
+        simple_sequence = replace(simple_sequence, width=3840, height=2160)
         layer = TimelineRenderPlan(simple_sequence).get_frame_plan(0).layers[0]
 
         resolver = Mock()
@@ -1258,7 +1268,7 @@ class TestPreviewRenderWorker:
         resolver.get_asset_path.return_value = "/path/to/video.mp4"
 
         decode_manager = Mock()
-        decoded_frame = Mock()
+        decoded_frame = Mock(width=3840, height=2160)
         decode_manager.get_frame.return_value = (decoded_frame, "planar")
 
         gpu_renderer = Mock()
@@ -1274,6 +1284,9 @@ class TestPreviewRenderWorker:
             gpu_renderer=gpu_renderer,
         )
 
+        assert worker._preview_quality == 1.0
+        if quality != 1.0:
+            worker.set_preview_quality(quality)
         ok, _ = worker._try_gpu_render(
             frame=0,
             layers=(layer,),
@@ -1285,11 +1298,12 @@ class TestPreviewRenderWorker:
         decode_manager.get_frame.assert_called_once_with(
             "/path/to/video.mp4",
             0,
-            target_size=(1920, 1080),
+            target_size=source_target,
             stream_key="clip-001",
         )
         submitted_task = gpu_renderer.submit.call_args.args[0]
-        assert submitted_task.output_fbo_size == (960, 540)
+        assert submitted_task.output_fbo_size == output_size
+        assert submitted_task.decoded_sizes == ((3840, 2160),)
 
         worker.stop()
 
@@ -1349,6 +1363,7 @@ class TestPreviewRenderWorker:
             gpu_decode_manager=decode_manager,
             gpu_renderer=gpu_renderer,
         )
+        worker.set_preview_quality(0.0)
         worker._timeline_decode_scheduler = scheduler
         worker._gpu_compositor = compositor
         worker._current_render_realtime = True
@@ -1420,13 +1435,13 @@ class TestPreviewRenderWorker:
         decode_manager.estimate_interactive_decode_deadline_ms.assert_called_once_with(
             "/path/to/video.mp4",
             0,
-            target_size=(1920, 1080),
+            target_size=None,
             stream_key="clip-001",
         )
         decode_manager.get_frame_interactive.assert_called_once()
         decode_manager.get_frame.assert_not_called()
         call_kwargs = decode_manager.get_frame_interactive.call_args.kwargs
-        assert call_kwargs["target_size"] == (1920, 1080)
+        assert call_kwargs["target_size"] is None
         assert call_kwargs["stream_key"] == "clip-001"
         assert callable(call_kwargs["is_stale"])
         assert isinstance(call_kwargs["deadline_at"], float)
@@ -2213,7 +2228,7 @@ class TestPreviewRenderWorker:
         assert frame.shape == (1080, 1920, 3)
         source_cls.assert_called_once_with(
             path=asset.path,
-            target_size=(1920, 1080),
+            target_size=None,
             preserve_planes=False,
             output_mode="packed_rgb",
             output_format="rgb24",
@@ -2311,7 +2326,7 @@ class TestPreviewRenderWorker:
         fake_source.read_frame.assert_called_once_with(99)
         source_cls.assert_called_once_with(
             path=asset.path,
-            target_size=(1920, 1080),
+            target_size=None,
             preserve_planes=False,
             output_mode="packed_rgb",
             output_format="rgb24",
@@ -2381,7 +2396,7 @@ class TestPreviewRenderWorker:
         assert emitted[0][1].height() == 1080
         source_cls.assert_called_once_with(
             path=asset.path,
-            target_size=(1920, 1080),
+            target_size=None,
             preserve_planes=False,
             output_mode="packed_rgb",
             output_format="rgb24",
@@ -2409,6 +2424,7 @@ class TestPreviewRenderWorker:
             viewport_size=(1920, 1080),
             max_preview_edge=1280,
         )
+        worker.set_preview_quality(0.0)
         worker._get_layer_frame = Mock(side_effect=[
             np.full((720, 1280, 3), 32, dtype=np.uint8),
             np.full((720, 1280, 3), 224, dtype=np.uint8),
@@ -2499,7 +2515,7 @@ class TestPreviewRenderWorker:
 
         asset = list(mock_project.assets.values())[0]
         assert worker._get_video_frame(asset.path, 10, asset.asset_id, "clip-a") is not None
-        provider.request_frame.assert_called_once_with("session-a", 10, quality="proxy")
+        provider.request_frame.assert_called_once_with("session-a", 10, quality="master")
 
         worker.stop()
 
@@ -2538,7 +2554,6 @@ class TestPreviewRenderWorker:
         asset = list(mock_project.assets.values())[0]
         assert worker._get_video_frame(asset.path, 10, asset.asset_id, "clip-a") is None
         assert provider.request_frame.call_args_list == [
-            call("session-a", 10, quality="proxy"),
             call("session-a", 10, quality="master"),
         ]
 
@@ -2707,6 +2722,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
 
         provider = Mock()
         provider.frame_thumbnail_ready.connect = Mock()
@@ -2754,6 +2770,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
 
         image = QImage(16, 9, QImage.Format.Format_RGB888)
         image.fill(0)
@@ -3120,6 +3137,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
         controller = EditPlaybackController()
         controller.set_timeline_duration(100)
         controller.play()
@@ -3283,7 +3301,7 @@ class TestTimelinePreviewRenderer:
         gpu_decode_manager.preposition_interactive_frame.assert_called_once_with(
             "/path/to/video.mp4",
             42,
-            target_size=(1920, 1080),
+            target_size=None,
             stream_key="clip-001",
             deadline_ms=48.0,
         )
@@ -3326,7 +3344,7 @@ class TestTimelinePreviewRenderer:
         gpu_decode_manager.preposition_interactive_frame.assert_called_with(
             "/path/to/video.mp4",
             17,
-            target_size=(1920, 1080),
+            target_size=None,
             stream_key="clip-001",
             deadline_ms=48.0,
         )
@@ -4196,6 +4214,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
 
         image = QImage(16, 9, QImage.Format.Format_RGB888)
         image.fill(0)
@@ -4670,6 +4689,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
         renderer._worker.enqueue = Mock(return_value=True)
 
         image = QImage(16, 9, QImage.Format.Format_RGB888)
@@ -4725,6 +4745,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
         renderer._worker.enqueue = Mock(return_value=True)
 
         image = QImage(16, 9, QImage.Format.Format_RGB888)
@@ -4780,6 +4801,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
         renderer._worker.enqueue = Mock(return_value=True)
 
         controller = EditPlaybackController()
@@ -4887,6 +4909,7 @@ class TestTimelinePreviewRenderer:
             frame_provider=mock_frame_provider,
             viewport_size=(1920, 1080),
         )
+        renderer._preview_quality = 0.0
         renderer._worker.enqueue = Mock(return_value=True)
 
         image = QImage(16, 9, QImage.Format.Format_RGB888)
@@ -5077,7 +5100,7 @@ class TestTimelinePreviewRenderer:
         # 是播放热路径实际使用的 clip 流 key（此前错误地用 asset_path，
         # 导致播放启动现场重建会话）。
         assert warmups == [
-            ("/media/source-a.mov", renderer._decode_target_size, "clip-a1")
+            ("/media/source-a.mov", None, "clip-a1")
         ]
 
     def test_set_sequence_with_only_empty_track_added_is_lightweight(

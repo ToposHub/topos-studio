@@ -476,6 +476,7 @@ def test_topos_preview_passes_target_to_native_reduced_decode(
         "target_size": (1920, 1080),
         # 预览关滤波开关（默认关）随 source 创建一起下传
         "no_deblock": False,
+        "filtered_preview": True,
     }]
 
 
@@ -521,6 +522,7 @@ def test_topos_preview_routes_by_container_before_codec_probe(
         "backend": "topos",
         "target_size": (1920, 1080),
         "no_deblock": False,
+        "filtered_preview": True,
     }]
 
 
@@ -1541,3 +1543,19 @@ def test_warmup_source_pool_gating(monkeypatch: pytest.MonkeyPatch) -> None:
 
     manager.warmup_source("/warm.mov", target_size=(1280, 720))
     assert pool_calls, "scrub warmup keeps the interactive pool"
+
+
+def test_unbounded_topos_preview_decodes_original_even_with_a_ready_proxy() -> None:
+    manager = EditGpuDecodeManager()
+    manager._is_topos_movie_path = lambda path: True
+    manager._ready_disk_proxy_path = lambda path: "/proxy/source.mov"
+
+    full = manager._resolve_preview_decode_source("/original/source.mov", None, for_playback=True)
+    reduced = manager._resolve_preview_decode_source(
+        "/original/source.mov", (1920, 1080), for_playback=True,
+    )
+    assert full.decode_path == "/original/source.mov"
+    assert full.target_size is None
+    assert full.source_kind == "original_topos"
+    assert reduced.decode_path == "/proxy/source.mov"
+    assert reduced.source_kind == "disk_proxy"

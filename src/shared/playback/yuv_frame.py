@@ -40,6 +40,8 @@ class YuvFrame:
     pixel_format: str = ''   # '422' / '444' / '420' / 'gbr'
     source_width: int = 0
     source_height: int = 0
+    sample_aspect_ratio: float = 1.0
+    decoded_size: tuple[int, int] | None = None  # decoder output before preview resampling
 
     @property
     def width(self) -> int:
@@ -48,6 +50,11 @@ class YuvFrame:
     @property
     def height(self) -> int:
         return int(self.y.shape[0])
+
+    @property
+    def display_width(self) -> float:
+        """Preserve pixel aspect ratio without changing decoded plane dimensions."""
+        return self.width * self.sample_aspect_ratio
 
     def is_valid(self) -> bool:
         """平面尺寸是否符合 subsampling 约定。"""

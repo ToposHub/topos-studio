@@ -2192,7 +2192,7 @@ class EditGpuDecodeManager:
             )
 
         # Topos MOV is a private TPIC stream inside a QuickTime container. It
-        # must keep the requested box for the native reduced decoder and must
+        # must pass the requested preview size to the native Topos source and
         # never enter the FFmpeg/VideoToolbox codec-probing path.
         if self._is_topos_movie_path(asset_path):
             return _DecodeSourceSpec(
@@ -3532,10 +3532,8 @@ class EditGpuDecodeManager:
         # 3.6 Topos 私有编码（TPIC）：FFmpeg/PyAV 没有该解码器，硬编码的
         # CPU packed 路径对它必然失败（曾造成播放期间逐帧 "CPU source
         # failed"）。Topos 与其它 planar intra codec 不同：V7-B 可在
-        # container 层只读取独立 <=2K base packet。预览目标必须传入 native
-        # source，不能沿用“完整解码再 GPU 缩放”的 ProRes 路由，否则 6K/8K/
-        # 12K 会重新落回全分辨率 entropy/residual 工作量。旧流仍由 source
-        # 的 reduced fallback 兼容处理。
+        # container 层只读取独立 <=2K base packet。预览目标由 Topos source
+        # 解释，普通帧内流在平面域面积缩小，带独立基础层的流仍可只读基础层。
         if codec == 'topos':
             return self._create_topos_source(asset_path, target_size,
                                              self._no_deblock)
@@ -3641,7 +3639,7 @@ class EditGpuDecodeManager:
 
             source = MediaSourceFactory.create(
                 asset_path, backend='topos', target_size=target_size,
-                no_deblock=no_deblock,
+                no_deblock=no_deblock, filtered_preview=target_size is not None,
             )
             source.open()
             playback_trace(

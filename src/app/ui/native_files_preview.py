@@ -16,7 +16,10 @@ from collections.abc import Callable
 from typing import Optional
 
 from PyQt6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QImage, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QPixmap, QResizeEvent, QWheelEvent
+from PyQt6.QtGui import (
+    QColor, QContextMenuEvent, QEnterEvent, QImage, QKeyEvent, QMouseEvent, QPainter,
+    QPaintEvent, QPixmap, QResizeEvent, QWheelEvent,
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -135,6 +138,9 @@ class NativeFilesPreview(QWidget):
     detail_requested = pyqtSignal()
     grade_requested = pyqtSignal(str)
     tools_visibility_changed = pyqtSignal(bool)
+    video_pointer_moved = pyqtSignal(QPoint)
+    video_pointer_left = pyqtSignal()
+    video_settings_requested = pyqtSignal(QPoint)
 
     def __init__(self, parent: QWidget, *, bg: str = "#141414", fg: str = "#d8d8d8",
                  muted: str = "#8b8b8b") -> None:
@@ -323,6 +329,21 @@ class NativeFilesPreview(QWidget):
             return super().eventFilter(obj, event)
         if obj is not self and not self.isAncestorOf(obj):
             return super().eventFilter(obj, event)
+        if self.is_video and obj.window().windowType() == Qt.WindowType.Popup:
+            return super().eventFilter(obj, event)
+        if (self.is_video and kind in (
+                QEvent.Type.ContextMenu, QEvent.Type.MouseMove, QEvent.Type.Enter, QEvent.Type.Leave)):
+            if isinstance(event, QContextMenuEvent):
+                point = event.globalPos()
+                if self.video_slot.rect().contains(self.video_slot.mapFromGlobal(point)):
+                    self.video_settings_requested.emit(point)
+                    event.accept()
+                    return True
+            elif isinstance(event, QEnterEvent) or (
+                    kind == QEvent.Type.MouseMove and isinstance(event, QMouseEvent)):
+                self.video_pointer_moved.emit(event.globalPosition().toPoint())
+            elif obj is self and kind == QEvent.Type.Leave:
+                self.video_pointer_left.emit()
         if self._handle_viewport_event(obj, event):
             return True
         if kind in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
@@ -416,6 +437,8 @@ class NativeFilesPreview(QWidget):
 
     def _handle_dismiss_key(self, event: QKeyEvent) -> bool:
         if event.modifiers() != Qt.KeyboardModifier.NoModifier or event.key() not in (Qt.Key.Key_Space, Qt.Key.Key_Escape):
+            return False
+        if self.is_video and event.key() == Qt.Key.Key_Space and not self._close_on_space:
             return False
         event.accept()
         if (event.type() == QEvent.Type.KeyPress and not event.isAutoRepeat()

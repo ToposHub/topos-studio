@@ -469,7 +469,43 @@ def test_target_size_downscale_exact(codec: ToposCodec, tmp_path) -> None:
         proxy.close()
 
 
-def test_v7b_preview_uses_movie_base_range(codec: ToposCodec, tmp_path) -> None:
+@pytest.mark.parametrize("divisor", [2, 4])
+def test_filtered_preview_averages_full_decode(
+    movie_path: str, divisor: int,
+) -> None:
+    from src.shared.media.topos_source import ToposMediaSource
+
+    full = ToposMediaSource(movie_path)
+    target_size = (W // divisor, H // divisor)
+    preview = ToposMediaSource(
+        movie_path, target_size=target_size, filtered_preview=True,
+        no_deblock=True, read_ahead=3,
+    )
+    full.open()
+    preview.open()
+    try:
+        held_preview = preview.read_frame(0)
+        for index, filtered in ((0, held_preview), (1, preview.read_frame(1)),
+                                (4, preview.read_frame(4))):
+            assert (filtered.width, filtered.height) == target_size
+            assert filtered.extra["native_decode_size"] == (W, H)
+            for full_plane, area_plane in zip(
+                    full.read_frame(index).planes, filtered.planes, strict=True):
+                h, w = area_plane.shape
+                expected = full_plane.reshape(h, divisor, w, divisor).mean(axis=(1, 3))
+                assert area_plane.dtype == full_plane.dtype
+                np.testing.assert_allclose(area_plane, expected, atol=0.5, rtol=0)
+        assert preview.diagnostics["native_target_decode"] is False
+        assert preview.diagnostics["read_ahead_stats"]["batch_decodes"] == 1
+    finally:
+        full.close()
+        preview.close()
+
+
+@pytest.mark.parametrize("filtered_preview", [False, True])
+def test_v7b_preview_uses_movie_base_range(
+    codec: ToposCodec, tmp_path, filtered_preview: bool,
+) -> None:
     """RD4-04：V7-B MOV 预览直接取 base range，不读完整 residual sample。"""
     from src.shared.media.topos_source import ToposMediaSource
 
@@ -488,7 +524,8 @@ def test_v7b_preview_uses_movie_base_range(codec: ToposCodec, tmp_path) -> None:
             mux.add_packet(packet, pts=i * FRAME_DUR, dur=FRAME_DUR)
         mux.finish()
 
-    src = ToposMediaSource(path, target_size=(w // 3, h // 3), read_ahead=3)
+    src = ToposMediaSource(path, target_size=(w // 3, h // 3), read_ahead=3,
+                           filtered_preview=filtered_preview)
     src.open()
     try:
         frame = src.read_frame(0)

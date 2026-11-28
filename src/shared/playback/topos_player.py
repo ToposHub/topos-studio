@@ -7,7 +7,7 @@ Topos Video Codec 原生播放器（应用级共享播放核心）。
 - 全 intra：任意帧独立解码，进度条拖动零寻址延迟；
 - 解码线程后台预取（环形缓冲 6 帧 + 背压）；有音轨时以 QAudioSink
   播放位置为主时钟，无音轨时用单调时钟；
-- 播放用 auto2k 档（显示尺寸优先），快照/封面走全尺寸；
+- 播放默认原生尺寸，右键可选固定比例预览。快照/封面固定全尺寸；
 - 快照原生全尺寸直出（不依赖 ffmpeg CLI）；
 - 片段导出走自编译 FFmpeg（libtopos 解码 → ProRes 422 HQ 交付格式）；
 - 信息面板（编解码/分辨率/帧率/位深/色彩/码率）、设为封面、点击暂停。
@@ -98,6 +98,7 @@ class _DecodeBuffer:
 @dataclass(frozen=True)
 class _PreviewRequest:
     index: int
+    size: tuple[int, int] | None
     slot: int
     result: Future[_DecodeBuffer]
 
@@ -112,6 +113,7 @@ class ToposMovieSession(DecoderBackend):
     _PREVIEW_PLANES_BUDGET = 96 * 1024 * 1024
 
     independent_frames = True
+    supports_plane_scaling = True
 
     def __init__(self, path: str, slice_workers: int = 0, *, prefetch: bool = False) -> None:
         ToposCodec, ToposMovieFile, ToposDecoder = _load_binding()
@@ -140,6 +142,9 @@ class ToposMovieSession(DecoderBackend):
         self.info = info
         self.width = info.width
         self.height = info.height
+        sar_num = getattr(info, 'sar_num', 0)
+        sar_den = getattr(info, 'sar_den', 0)
+        self.sar = Fraction(sar_num, sar_den) if sar_num > 0 and sar_den > 0 else None
         self.frame_count = info.sample_count
         # [E4] Topos 容器无旋转元数据概念：显示旋转恒 0（与 libav 会话
         # 的 rotation_quarters 契约对齐，播放器侧守卫统一生效）
@@ -179,10 +184,6 @@ class ToposMovieSession(DecoderBackend):
                     f'player:{id(self)}', role='playback', requested=requested,
                     apply=self._decoder.set_max_slice_workers)
 
-            from src.shared.codec.topos_binding import TC_DECODE_MODE_AUTO_2K
-
-            self._auto_request = (self._decoder.make_request(TC_DECODE_MODE_AUTO_2K)
-                                  if getattr(self._codec, '_has_decoder_request', False) else None)
             self._try_base_layer = (
                 getattr(info, 'bitstream_major', 0) == 7
                 and getattr(self._codec, '_has_movie_packet_base', False)
@@ -215,28 +216,35 @@ class ToposMovieSession(DecoderBackend):
     def frame_rgb(self, index: int, size: tuple[int, int] | None = None) -> np.ndarray:
         """解码第 index 帧 → (H, W, 3) uint8 RGB。
 
-        size=(w, h) 时 swscale 一步完成转色+缩放到显示分辨率
-        （4K 预览的实时性关键路径）；None = 原生全尺寸（快照用）。
+        size=(w, h) 指定缩放边界。None 走原生全尺寸。
         """
+        rgb, _decoded_size = self.frame_rgb_with_decode_size(index, size)
+        return rgb
+
+    def frame_rgb_with_decode_size(
+        self, index: int, size: tuple[int, int] | None = None,
+    ) -> tuple[np.ndarray, tuple[int, int]]:
+        """Return the RGB preview and the decoder's actual output size."""
         with self._lock:
             return self._frame_rgb_locked(index, size)
 
     def frame_yuv(self, index: int, size: tuple[int, int] | None = None) -> YuvFrame:
         """解码第 index 帧 → :class:`YuvFrame`（GPU 预览路径）。
 
-        与 ``frame_rgb`` 共用同一条 decode/auto2k 路径，但不经过
-        swscale，也不把 10/12-bit 压成 8-bit；三平面复制成本帧独立数组，
-        避免解码器缓冲被下一帧覆盖。``size`` 非空时启用 AUTO_2K。
+        与 ``frame_rgb`` 共用解码路径，直接保留 10/12-bit 平面。
+        每帧持有独立数组，避免被后续解码覆盖。
         """
         from .yuv_frame import YuvFrame
 
         with self._lock:
-            y, u, v = self._read_planes_locked(index, preview=size is not None).planes[:3]
+            target_size = self._fit_preview_size(size)
+            buffer = self._read_planes_locked(index, target_size)
+            y, u, v = self._output_planes(buffer, target_size)
             pixel_format = '444' if int(self.info.pixel_format) == 1 else '422'
             return YuvFrame(
-                y=y.copy(),
-                u=u.copy(),
-                v=v.copy(),
+                y=y.copy() if y is buffer.planes[0] else y,
+                u=u.copy() if u is buffer.planes[1] else u,
+                v=v.copy() if v is buffer.planes[2] else v,
                 bit_depth=int(self.info.bit_depth),
                 subsampling=pixel_format,
                 matrix=int(self.info.color_matrix),
@@ -245,41 +253,78 @@ class ToposMovieSession(DecoderBackend):
                 pixel_format=pixel_format,
                 source_width=self.width,
                 source_height=self.height,
+                sample_aspect_ratio=float(self.sar or 1),
+                decoded_size=buffer.geometry[0],
             )
 
-    def _decode_into(self, index: int, preview: bool, buffer: _DecodeBuffer) -> _DecodeBuffer:
-        """读包和解码串行。V7-B 预览只读 base 层，并直接按 base 尺寸解码。"""
-        request = self._auto_request if preview else None
-        if preview and self._try_base_layer:
+    def _fit_preview_size(self, size: tuple[int, int] | None) -> tuple[int, int] | None:
+        if size is None:
+            return None
+        if any(size == ((self.width + factor - 1) // factor,
+                        (self.height + factor - 1) // factor)
+               for factor in (2, 4)):
+            return size
+        return fit_aspect_size(self, *size)
+
+    def _output_planes(
+        self, buffer: _DecodeBuffer, target: tuple[int, int] | None,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Area-filter the reconstructed planes before color conversion or GPU upload."""
+        y, u, v = buffer.planes[:3]
+        width, height = buffer.geometry[0]
+        if (target is None or target == (width, height)
+                or target[0] > width or target[1] > height):
+            return y, u, v
+        from src.shared.video.planar_resample import downsample_plane
+
+        width, height = target
+        chroma_width = (width + 1) // 2 if self.info.pixel_format == 0 else width
+        return (
+            downsample_plane(y, width, height),
+            downsample_plane(u, chroma_width, height),
+            downsample_plane(v, chroma_width, height),
+        )
+
+    def _decode_into(self, index: int, target: tuple[int, int] | None,
+                     buffer: _DecodeBuffer) -> _DecodeBuffer:
+        """Reconstruct all samples, using an independent V7-B base when it fits."""
+        decoder = self._decoder
+        geometry = None
+        if (target is not None and self._try_base_layer
+                and target != (self.width, self.height)
+                and target[0] <= self.width and target[1] <= self.height):
             packet, size, is_base = self._movie.packet_base_into(index)
-            # 对首个预览包探测基础层。V7-A 的接口返回完整包，之后走常规读取。
+            # 普通 V7 返回完整包；后续直接读取完整包。
             self._try_base_layer = is_base
             if is_base:
-                request = None
+                base_geometry = decoder.prepare(packet, size)
+                base_size = self._codec.plane_geometry(base_geometry, 0)
+                if target[0] <= base_size[0] and target[1] <= base_size[1]:
+                    geometry = base_geometry
+                else:
+                    packet, size = self._movie.packet_into(index)
         else:
             packet, size = self._movie.packet_into(index)
 
-        decoder = self._decoder
-        geometry = (decoder.prepare_request(packet, request, size) if request is not None
-                    else decoder.prepare(packet, size))
+        if geometry is None:
+            geometry = decoder.prepare(packet, size)
         if (int(geometry.pixel_format), int(geometry.bit_depth)) != (
                 int(self.info.pixel_format), int(self.info.bit_depth)):
             raise ValueError('Topos 帧像素格式或位深与容器声明不一致')
         buffer.ensure(decoder, tuple(self._codec.plane_geometry(geometry, plane)
                                      for plane in range(int(geometry.plane_count))))
-        if request is None:
-            decoder.decode_views(packet, buffer.views, len(buffer.planes), size)
-        else:
-            decoder.decode_views_request(packet, buffer.views, request, size)
+        decoder.decode_views(packet, buffer.views, len(buffer.planes), size)
         return buffer
 
-    def _read_planes_locked(self, index: int, *, preview: bool) -> _DecodeBuffer:
+    def _read_planes_locked(self, index: int, size: tuple[int, int] | None) -> _DecodeBuffer:
         if self._closed:
             raise RuntimeError('Topos 解码会话已关闭')
+        if not self._prefetch:
+            return self._decode_into(index, size, self._full_buffer)
 
         pending, self._pending = self._pending, None
         slot = 0
-        if pending is not None and preview and pending.index == index:
+        if pending is not None and pending.index == index and pending.size == size:
             slot = pending.slot
             buffer = pending.result.result()
         else:
@@ -289,27 +334,30 @@ class ToposMovieSession(DecoderBackend):
                 except (RuntimeError, ValueError):
                     # 定位作废的帧不会交给调用方。同一原生 context 要等它退出。
                     logger.debug('Discarding failed Topos prefetch', exc_info=True)
-            buffer = self._decode_into(index, preview,
-                                       self._preview_buffers[slot] if preview else self._full_buffer)
+            buffer = self._decode_into(index, size, self._preview_buffers[slot])
 
-        if (preview and self._prefetch and index + 1 < self.frame_count
+        if (index + 1 < self.frame_count
                 and buffer.nbytes * 2 <= self._PREVIEW_PLANES_BUDGET):
             next_slot = 1 - slot
             if self._preview_worker is None:
                 self._preview_worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='topos-prefetch')
             future = self._preview_worker.submit(
-                self._decode_into, index + 1, True, self._preview_buffers[next_slot])
-            self._pending = _PreviewRequest(index + 1, next_slot, future)
+                self._decode_into, index + 1, size, self._preview_buffers[next_slot])
+            self._pending = _PreviewRequest(index + 1, size, next_slot, future)
         return buffer
 
-    def _frame_rgb_locked(self, index: int, size: tuple[int, int] | None = None) -> np.ndarray:
-        buffer = self._read_planes_locked(index, preview=size is not None)
-        width, height = buffer.geometry[0]
+    def _frame_rgb_locked(
+        self, index: int, size: tuple[int, int] | None = None,
+    ) -> tuple[np.ndarray, tuple[int, int]]:
+        target_size = self._fit_preview_size(size)
+        buffer = self._read_planes_locked(index, target_size)
+        planes = self._output_planes(buffer, target_size)
+        height, width = planes[0].shape
         frame = self._rgb_input
         if frame is None or (frame.width, frame.height) != (width, height):
             frame = self._av.VideoFrame(width, height, format=self.vfmt)
             self._rgb_input = frame
-        for destination, source in zip(frame.planes, buffer.planes):
+        for destination, source in zip(frame.planes, planes):
             if destination.buffer_size == source.nbytes:
                 destination.update(source.data)
             else:
@@ -322,12 +370,11 @@ class ToposMovieSession(DecoderBackend):
         # H.273 码值与 AVColorSpace 同源直传；topos range: 0=limited(tv), 1=full
         frame.colorspace = int(self.info.color_matrix)
         frame.color_range = 2 if self.info.color_range == 1 else 1
-        if size:
-            width, height = fit_aspect_size(self, int(size[0]), int(size[1]))
-            out = frame.reformat(width=width, height=height, format='rgb24')
+        if target_size is not None:
+            out = frame.reformat(width=target_size[0], height=target_size[1], format='rgb24')
         else:
             out = frame.reformat(format='rgb24')
-        return out.to_ndarray()
+        return out.to_ndarray(), buffer.geometry[0]
 
     # -- 音频读取（独立句柄；供顶层播放器的音频线程调用） ---------------
 
@@ -419,24 +466,27 @@ class ToposPlayer(BasePlayer):
         return make_canvas(self)
 
     def _decode_frame(self, session: DecoderBackend, target: int):
-        """解码线程：GPU 就绪时产出 YUV 平面，否则回退 RGB QImage。
-
-        BasePlayer 默认 ``frame_rgb(target)`` 不传 size，会让 Topos 的
-        AUTO_2K 请求完全失效（M2 遗留问题）。这里统一传画布显示尺寸，
-        4K 素材预览解码到 1920×1080，快照仍走 ``_native_frame`` 全尺寸。
-        """
+        """Decode the selected size independently of the canvas or its scale."""
         canvas = self.canvas
+        size = self._playback_target_size(session)
         # [E4] 与 libav 同款守卫：有显示旋转走 RGB 路径（Topos 格式本身
         # 无旋转概念，rotation_quarters 恒 0——守卫保持两引擎语义一致）
         if getattr(canvas, 'gpu_active', False) and \
                 hasattr(session, 'frame_yuv') and \
+                (size is None or getattr(session, 'supports_plane_scaling', True)) and \
                 getattr(session, 'rotation_quarters', 0) == 0:
             try:
-                return session.frame_yuv(target, size=canvas.display_size())
+                return session.frame_yuv(target, size=size)
             except Exception:
                 logger.warning('Topos GPU YUV 帧失败，回退 RGB', exc_info=True)
-        rgb = session.frame_rgb(target, size=canvas.display_size())
-        return _frame_to_qimage(rgb)
+        if isinstance(session, ToposMovieSession):
+            rgb, decoded_size = session.frame_rgb_with_decode_size(target, size=size)
+        else:
+            rgb, decoded_size = session.frame_rgb(target, size=size), None
+        return _frame_to_qimage(
+            rgb, sample_aspect_ratio=float(getattr(session, 'sar', None) or 1),
+            decoded_size=decoded_size,
+        )
 
     def _populate_header_buttons(self, hl) -> None:
         btn_clip = _icons.make_tool_button(

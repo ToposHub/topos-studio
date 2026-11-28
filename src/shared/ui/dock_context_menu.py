@@ -26,16 +26,12 @@ def find_parent_dock(widget: Optional[QWidget]) -> Optional[QDockWidget]:
 def add_dock_management_actions(
     menu: QMenu, dock: QDockWidget, *, toggle_floating: Callable[[], None] | None = None,
 ) -> None:
-    """Append the standard Float/Dock and Close actions to ``menu``."""
-    if dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable:
-        float_action = menu.addAction(
-            I18N.tr("dock.float", "Float")
-            if not dock.isFloating()
-            else I18N.tr("dock.dock", "Dock")
-        )
-        float_action.triggered.connect(
-            toggle_floating if toggle_floating is not None else lambda: dock.setFloating(not dock.isFloating())
-        )
+    """Append workspace actions; only explicitly floatable hosts can opt in to Float."""
+    if dock.isFloating():
+        dock_action = menu.addAction(I18N.tr("dock.dock", "Dock"))
+        dock_action.triggered.connect(toggle_floating or (lambda: dock.setFloating(False)))
+    elif toggle_floating is not None and dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable:
+        menu.addAction(I18N.tr("dock.float", "Float"), toggle_floating)
 
     if dock.features() & QDockWidget.DockWidgetFeature.DockWidgetClosable:
         close_action = menu.addAction(I18N.tr("dock.close", "Close"))

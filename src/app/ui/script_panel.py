@@ -974,21 +974,10 @@ class ScriptPanel(QWidget):
         self.customContextMenuRequested.connect(self._show_context_menu)
 
     def _show_context_menu(self, pos):
-        """Show context menu with docking/undocking options."""
+        """Show editor commands for the script panel."""
         from src.shared.i18n.i18n import I18N
 
         menu = QMenu(self)
-
-        # Docking options
-        float_action = QAction(I18N.tr("dock.float", "Float"), self)
-        float_action.triggered.connect(self._toggle_float)
-        menu.addAction(float_action)
-
-        dock_action = QAction(I18N.tr("dock.dock", "Dock"), self)
-        dock_action.triggered.connect(self._dock_panel)
-        menu.addAction(dock_action)
-
-        menu.addSeparator()
 
         # Standard edit actions
         copy_action = QAction(I18N.tr("script.copy", "Copy"), self)
@@ -1036,28 +1025,6 @@ class ScriptPanel(QWidget):
         menu.addAction(clear_action)
 
         menu.exec(self.console.mapToGlobal(pos))
-
-    def _toggle_float(self):
-        """Toggle the panel to floating mode."""
-        parent = self.parent()
-        while parent is not None:
-            from PyQt6.QtWidgets import QDockWidget
-            if isinstance(parent, QDockWidget):
-                if not parent.isFloating():
-                    parent.setFloating(True)
-                return
-            parent = parent.parent()
-
-    def _dock_panel(self):
-        """Dock the panel back to main window."""
-        parent = self.parent()
-        while parent is not None:
-            from PyQt6.QtWidgets import QDockWidget
-            if isinstance(parent, QDockWidget):
-                if parent.isFloating():
-                    parent.setFloating(False)
-                return
-            parent = parent.parent()
 
     def _setup_ui(self):
         from src.shared.i18n.i18n import I18N

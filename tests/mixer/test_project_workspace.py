@@ -548,7 +548,7 @@ def test_double_click_and_tab_activation_follow_timeline_selection(project_host,
     monkeypatch.setattr(QMenu, "exec", lambda menu, *_args: shown_actions.extend(menu.actions()))
     host._show_dock_context_menu(QPoint(2, 2), dock)
     assert [action.text() for action in shown_actions] == [
-        I18N.tr("dock.float", "Float"), I18N.tr("dock.close", "Close"),
+        I18N.tr("dock.close", "Close"),
     ]
 
 

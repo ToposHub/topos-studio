@@ -1,0 +1,13 @@
+Detected locale "C" with character encoding "US-ASCII", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+2026-11-28 19:28:58.858 Python[28637:169869] ApplePersistenceIgnoreState: Existing state will not be touched. New state will be written to ${TMPDIR}/org.python.python.savedState
+qt.qpa.fonts: Populating font family aliases took 275 ms. Replace uses of missing font family "DejaVu Sans Mono" with one that exists to avoid this cost.
+Program Viewer context ready
+painted 301 widget 960 556 preview 3840×2160 info Presented frame 3840×2160 | Timeline canvas 3840×2160 | Original media 3840×2160 | Decoded media 3840×2160
+Edit Metal composite unavailable, using OpenGL: GL error before Metal preview surface allocation (GL_INVALID_OPERATION)
+painted 1474 widget 960 556 preview 1920×1080 / 3840×2160 info Presented frame 1920×1080 | Timeline canvas 3840×2160 | Original media 3840×2160 | Decoded media 1920×1080
+painted 1604 widget 960 556 preview 960×540 / 3840×2160 info Presented frame 960×540 | Timeline canvas 3840×2160 | Original media 3840×2160 | Decoded media 960×540
+painted 1605 widget 960 556 preview 3840×2160 info Presented frame 3840×2160 | Timeline canvas 3840×2160 | Original media 3840×2160 | Decoded media 3840×2160
+1080p timeline with the same master Presented frame 1920×1080 | Timeline canvas 1920×1080 | Original media 3840×2160 | Decoded media 3840×2160

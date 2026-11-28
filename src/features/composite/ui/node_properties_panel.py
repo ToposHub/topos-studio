@@ -5029,7 +5029,7 @@ class NodePropertiesPanel(QWidget):
         """)
 
         dock = self._find_parent_dock()
-        if dock:
+        if dock and (dock.isFloating() or dock.features() & QDockWidget.DockWidgetFeature.DockWidgetFloatable):
             if dock.isFloating():
                 action = menu.addAction(I18N.tr("node_props.dock", "Dock"))
             else:

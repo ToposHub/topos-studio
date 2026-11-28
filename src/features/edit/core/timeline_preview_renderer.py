@@ -637,7 +637,7 @@ class PreviewRenderWorker(QThread):
         # 由 renderer 注入，用于回填引擎遥测的真实管线耗时。
         self._render_trace_hook = None
         self._max_preview_edge = max(64, int(max_preview_edge))
-        self._preview_quality: float = 0.0
+        self._preview_quality: float = 1.0
         # R03（2026-11-09 复查）：监看域临时预算上限（两轴像素上限）。
         # 与用户预览质量偏好（_preview_quality，持久菜单选择）分离：
         # 预算只做"不高于"约束，解除后用户偏好原样生效，绝不写回。
@@ -1567,7 +1567,6 @@ class PreviewRenderWorker(QThread):
     def set_viewport_size(self, size: Tuple[int, int]) -> None:
         """设置视口尺寸"""
         self._viewport_size = size
-        self._clear_direct_preview_sources()
 
     def set_preview_quality(self, scale: float) -> None:
         """设置预览代理分辨率缩放比例"""
@@ -1614,14 +1613,17 @@ class PreviewRenderWorker(QThread):
             dh += 1
         return (dw, dh)
 
+    def _source_decode_size(self, preview_size: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+        """An unbounded decode request selects the original file and native pixels."""
+        return None if self._preview_quality >= 1.0 else preview_size
+
     def _effective_preview_quality_scale(self, base_w: int, base_h: int) -> float:
         explicit = float(getattr(self, "_preview_quality", 0.0))
         longest = max(1, int(base_w), int(base_h))
         max_edge = max(64, int(getattr(self, "_max_preview_edge", 3840)))
+        if explicit >= 1.0:
+            return 1.0
         if explicit > 0.0:
-            # Explicit choices are relative to the sequence resolution.
-            # Full quality is capped at the 4K preview ceiling only for 6K/8K
-            # timelines; it must always be at least as large as Smooth.
             scale = max(0.125, min(1.0, explicit, max_edge / longest))
         else:
             # Smooth mode targets 1920x1080 for high-resolution material while
@@ -2215,6 +2217,8 @@ class PreviewRenderWorker(QThread):
             and can_render_video_signal_gl(LINEAR_SCENE, timeline_space)
         )
         task_meta = task_meta or {}
+        preview_size = self._decode_target_size
+        source_target = self._source_decode_size(preview_size)
         background = bool(task_meta.get('background'))
         background_deadline = time.perf_counter() + 0.032 if background else 0.0
         background_read = getattr(self._gpu_decode_manager, 'get_frame_background', None)
@@ -2241,7 +2245,7 @@ class PreviewRenderWorker(QThread):
         transition_jobs: tuple = ()
         if transitions:
             transition_jobs = self._build_gpu_transition_jobs(
-                transitions, self._viewport_size,
+                transitions, preview_size,
             )
             if transition_jobs is None:
                 return False, {
@@ -2281,14 +2285,14 @@ class PreviewRenderWorker(QThread):
             and not realtime_now
             and not background
             and monitor_aces is None
-            and has_cached(int(frame), int(generation_id), self._viewport_size) is True
+            and has_cached(int(frame), int(generation_id), preview_size) is True
         ):
             cache_task = EditRenderTask(
                 frame=frame,
                 generation_id=generation_id,
                 layers=[],
-                viewport_size=self._viewport_size,
-                output_fbo_size=self._viewport_size,
+                viewport_size=preview_size,
+                output_fbo_size=preview_size,
                 coordinate_size=self._get_sequence_resolution(),
                 request_kind=str(task_meta.get("request_kind", "") or ""),
                 scrub_request_token=(
@@ -2581,7 +2585,8 @@ class PreviewRenderWorker(QThread):
             # __new__ to exercise pure GPU task assembly.  Treat that as the
             # scheduler being absent, just like a headless renderer.
             scheduler = None
-        if (scheduler is not None and realtime_now and task_meta.get("request_kind") != "scrub"
+        if (source_target is not None and scheduler is not None and realtime_now
+                and task_meta.get("request_kind") != "scrub"
                 and not task_meta.get("software_seek")):
             try:
                 scheduler_clip_ids = set(scheduler.layer_clip_ids)
@@ -2714,7 +2719,7 @@ class PreviewRenderWorker(QThread):
                 decoded_frame, frame_type = background_read(
                     asset_path,
                     source_frame,
-                    target_size=self._decode_target_size,
+                    target_size=source_target,
                     stream_key=decode_stream_key,
                     is_stale=lambda: (
                         generation_id != self._generation_id
@@ -2748,7 +2753,7 @@ class PreviewRenderWorker(QThread):
                 deadline_at = self._interactive_scrub_deadline_at(
                     asset_path=asset_path,
                     source_frame=source_frame,
-                    target_size=self._decode_target_size,
+                    target_size=source_target,
                     stream_key=decode_stream_key,
                     task_meta=task_meta,
                     timeline_frame=frame,
@@ -2757,7 +2762,7 @@ class PreviewRenderWorker(QThread):
                 decoded_frame, frame_type = self._gpu_decode_manager.get_frame_interactive(
                     asset_path,
                     source_frame,
-                    target_size=self._decode_target_size,
+                    target_size=source_target,
                     stream_key=decode_stream_key,
                     is_stale=lambda: (
                         generation_id != self._generation_id
@@ -2777,7 +2782,7 @@ class PreviewRenderWorker(QThread):
                 decoded_frame, frame_type = self._gpu_decode_manager.get_frame_with_policy(
                     asset_path,
                     source_frame,
-                    target_size=self._decode_target_size,
+                    target_size=source_target,
                     stream_key=decode_stream_key,
                     source_decision=decision,
                     **reuse_options,
@@ -2791,7 +2796,7 @@ class PreviewRenderWorker(QThread):
                 decoded_frame, frame_type = self._gpu_decode_manager.get_frame(
                     asset_path,
                     source_frame,
-                    target_size=self._decode_target_size,
+                    target_size=source_target,
                     stream_key=decode_stream_key,
                     **settle_options,
                     **reuse_options,
@@ -2884,6 +2889,14 @@ class PreviewRenderWorker(QThread):
                 # grade. Without this key the crop silently no-ops in preview.
                 'crop': getattr(layer, 'crop', None),
             }
+            decoded_w = getattr(decoded_frame, "width", None)
+            decoded_h = getattr(decoded_frame, "height", None)
+            if isinstance(decoded_w, int) and isinstance(decoded_h, int) and min(decoded_w, decoded_h) > 0:
+                extra = getattr(decoded_frame, "extra", None)
+                track_info["decoded_size"] = (
+                    extra.get("native_decode_size", (decoded_w, decoded_h))
+                    if isinstance(extra, dict) else (decoded_w, decoded_h)
+                )
             actual_source = getattr(decoded_frame, 'frame_index', None)
             if is_interactive_scrub and clip_id and isinstance(actual_source, int):
                 clip = getattr(layer, 'clip', None)
@@ -3094,9 +3107,13 @@ class PreviewRenderWorker(QThread):
             frame=frame,
             generation_id=generation_id,
             layers=gpu_layers,
-            viewport_size=self._viewport_size,
-            output_fbo_size=self._viewport_size,
+            viewport_size=preview_size,
+            output_fbo_size=preview_size,
             coordinate_size=self._get_sequence_resolution(),
+            decoded_sizes=tuple(dict.fromkeys(
+                size for result in gpu_layers
+                if (size := result.get("track_info", {}).get("decoded_size")) is not None
+            )),
             request_kind=str(task_meta.get("request_kind", "") or ""),
             scrub_settled=bool(task_meta.get("scrub_settled")),
             scrub_source_frames=tuple(
@@ -3131,7 +3148,7 @@ class PreviewRenderWorker(QThread):
             frame=frame,
             generation=generation_id,
             layers=len(gpu_layers),
-            viewport=self._viewport_size,
+            viewport=preview_size,
             request_kind=task.request_kind,
             scrub_token=task.scrub_request_token,
         )
@@ -5159,7 +5176,7 @@ class PreviewRenderWorker(QThread):
 
             source = FFmpegMediaSource(
                 path=asset_path,
-                target_size=key[2],
+                target_size=self._source_decode_size(key[2]),
                 preserve_planes=False,
                 output_mode="packed_rgb",
                 # Edit playback is an 8-bit display path.  Without this
@@ -6037,7 +6054,8 @@ class PreviewRenderWorker(QThread):
 
         if project_aces_settings(self._preview_color_settings()) is not None:
             frame_data = self._get_aces_preview_source(asset_path, "video", frame_data, asset_id=layer.asset_id)
-        return self._numpy_to_qimage(frame_data)
+        width, height = self._decode_target_size
+        return self._numpy_to_qimage(self._resize_frame_to_viewport(frame_data, width, height))
 
     def _get_video_frame(
         self,
@@ -6086,7 +6104,14 @@ class PreviewRenderWorker(QThread):
         try:
             decoded_frame = None
 
-            if is_realtime:
+            if self._preview_quality >= 1.0:
+                decoded_frame = self._frame_provider.request_frame(
+                    clip_id, source_frame, quality="master",
+                )
+                decoded_frame = self._validate_source_frame(
+                    decoded_frame, source_frame, asset_id, clip_key, "master"
+                )
+            elif is_realtime:
                 # 实时播放热路径：只请求 proxy，禁止 master fallback。
                 # proxy miss 时返回 None，上层 hold/placeholder/rebuffer。
                 decoded_frame = self._frame_provider.request_frame(
@@ -6942,11 +6967,9 @@ class TimelinePreviewRenderer(QObject):
             )
         self._raw_viewport_size = viewport_size
         self._viewport_size = self._fit_viewport_to_sequence_aspect(viewport_size)
-        # Edit-page preview defaults to an 8-bit, 4K-capped playback path.
-        # 4K timelines stay native; only 6K/8K timelines are reduced to a
-        # still-detailed 4K preview. The viewer itself may render smaller than
-        # this texture, but it should not force a low-resolution decode.
-        self._preview_quality: float = 0.0
+        # Full preview decodes the source at native size and renders on the
+        # timeline canvas. The viewer fits that result only for presentation.
+        self._preview_quality: float = 1.0
         # R03（2026-11-09 复查）：监看域临时预算上限（两轴像素）——与用户
         # 预览质量偏好（_preview_quality，菜单持久选择）分离。预算只做
         # "不高于"约束：解除后用户偏好原样生效，绝不写回用户档位。
@@ -7470,16 +7493,14 @@ class TimelinePreviewRenderer(QObject):
 
         Smooth mode is a 1920-long-edge target (1920×1080 for 16:9), while
         explicit settings are relative to the timeline's native resolution.
-        Full/explicit output remains bounded by ``_max_preview_edge`` so a
-        deliberate choice cannot accidentally decode an 8K master in the
-        live Program viewer.
-
-        R03：合成后再受监看域临时预算（``_budget_size_cap``，两轴"不高
-        于"）约束；预算只降不升，且绝不改动用户显式档位本身。
+        Full renders the native timeline canvas. Reduced choices remain
+        subject to the preview and temporary monitoring budgets.
         """
         explicit = float(getattr(self, "_preview_quality", 0.0))
         longest = max(1, int(base_w), int(base_h))
         max_edge = max(64, int(getattr(self, "_max_preview_edge", 3840)))
+        if explicit >= 1.0:
+            return 1.0
         if explicit > 0.0:
             scale = max(0.125, min(1.0, explicit, max_edge / longest))
         else:
@@ -7487,6 +7508,15 @@ class TimelinePreviewRenderer(QObject):
             scale = max(0.125, min(1.0, smooth_edge / longest))
         return _budget_constrained_scale(
             self.__dict__.get("_budget_size_cap"), scale, base_w, base_h)
+
+    def _update_effect_preview_policy(self, is_playing: Optional[bool] = None) -> None:
+        """Preserve precise effect settings during full-resolution playback."""
+        gpu_renderer = getattr(self, "_gpu_renderer", None)
+        setter = getattr(gpu_renderer, "set_preview_degraded", None)
+        if callable(setter):
+            if is_playing is None:
+                is_playing = self._is_controller_playing()
+            setter(bool(is_playing) and self.preview_quality_preference() < 1.0)
 
     def _invalidate_render_generation_for_quality(self, reason: str) -> None:
         """Invalidate queued/in-flight work when decode quality changes."""
@@ -7547,6 +7577,8 @@ class TimelinePreviewRenderer(QObject):
         if abs(scale - float(self.__dict__.get("_adaptive_playback_scale", 1.0))) < 1e-6:
             return
         self._adaptive_playback_scale = scale
+        if self.preview_quality_preference() > 0.0:
+            return
         self._invalidate_preview_frame_caches()
         self._invalidate_render_generation_for_quality(reason)
         playback_trace(
@@ -7634,8 +7666,8 @@ class TimelinePreviewRenderer(QObject):
 
         Args:
             scale: 0.0 = smooth (1920×1080 target for high-resolution
-                material), 1.0 = full timeline resolution up to the 4K
-                preview ceiling, 0.5 = half, 0.333 = third, 0.25 = quarter
+                material), 1.0 = native source and timeline resolution,
+                0.5 = half, 0.333 = third, 0.25 = quarter
         """
         scale = float(scale)
         if scale <= 0.0:
@@ -7646,7 +7678,9 @@ class TimelinePreviewRenderer(QObject):
             return
         self._preview_quality = scale
         self._cancel_full_quality_refresh()
-        self._set_decode_quality_stage("auto2k", "manual_quality_change")
+        self._decode_quality_stage = "auto2k"
+        self._invalidate_render_generation_for_quality("manual_quality_change")
+        self._update_effect_preview_policy()
         if scale <= 0.0:
             logger.info(
                 "TimelinePreviewRenderer: preview quality set to auto "
@@ -7663,13 +7697,7 @@ class TimelinePreviewRenderer(QObject):
         if self._worker:
             self._worker.set_preview_quality(scale)
 
-        # Invalidate decode sources — they cache the target_size
-        if self._worker and hasattr(self._worker, '_gpu_decode_manager') and self._worker._gpu_decode_manager:
-            self._worker._gpu_decode_manager.invalidate_all_sources()
-
-        # Reset monotonic guard so the first frame at new quality is accepted
-        self._reset_emitted_frame_guard()
-        self._render_in_flight = False
+        # Decoder cache keys contain the input path and requested size.
 
         # Request current frame re-render
         self._schedule_current_frame_warmup()
@@ -7688,18 +7716,43 @@ class TimelinePreviewRenderer(QObject):
         if normalized == self._budget_size_cap:
             return
         self._budget_size_cap = normalized
+        if self._worker:
+            self._worker.set_budget_size_cap(normalized)
+        if self._preview_quality >= 1.0:
+            return
         logger.info(
             "TimelinePreviewRenderer: monitor budget size cap = %s"
             "（临时约束；用户预览质量偏好 %s 不变）",
             normalized, self._preview_quality,
         )
         self._invalidate_preview_frame_caches()
-        if self._worker:
-            self._worker.set_budget_size_cap(normalized)
         # Decoder caches already include the target size in their keys.
         # A viewport budget change must not join the decoder threads here.
         self._invalidate_render_generation_for_quality("monitor_budget")
         self._schedule_current_frame_warmup()
+
+    def _source_decode_size(self, preview_size: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+        """Select the source size for prefetch and interactive decoder lookup."""
+        return None if self.preview_quality_preference() >= 1.0 else preview_size
+
+    def preview_resolution_context(
+        self, frame: int,
+    ) -> tuple[Tuple[int, int], tuple[Tuple[int, int], ...]]:
+        """Return the timeline canvas and available original sizes for the frame."""
+        sizes: dict[Tuple[int, int], None] = {}
+        plan = self._compute_frame_plan(frame)
+        for layer in plan.layers:
+            metadata = self._asset_resolver.get_asset_metadata(layer.asset_id)
+            if not isinstance(metadata, Mapping):
+                continue
+            try:
+                width = int(metadata.get("width") or 0)
+                height = int(metadata.get("height") or 0)
+            except (TypeError, ValueError):
+                continue
+            if min(width, height) > 0:
+                sizes[(width, height)] = None
+        return self._get_sequence_resolution(), tuple(sizes)
 
     def preview_quality_preference(self) -> float:
         """用户预览质量偏好（0=auto/smooth；预算不改动此值）。"""
@@ -7758,6 +7811,7 @@ class TimelinePreviewRenderer(QObject):
             viewport_size=self._viewport_size,
             max_preview_edge=self._max_preview_edge,
         )
+        self._worker.set_preview_quality(self._preview_quality)
         # P1-02：worker 重建时转发已注入的子序列解析器
         if getattr(self, "_sequence_resolver", None) is not None:
             self._worker._sequence_resolver = self._sequence_resolver
@@ -9021,6 +9075,7 @@ class TimelinePreviewRenderer(QObject):
                     source_frame=int(getattr(layer, "source_frame", 0) or 0),
                     timeline_frame=int(timeline_frame),
                     requires_effect_cache=False,
+                    prefer_original=self.preview_quality_preference() >= 1.0,
                 )
             )
         return queries
@@ -9396,7 +9451,9 @@ class TimelinePreviewRenderer(QObject):
                 pause_frame = controller.current_frame if controller is not None else self.get_playhead()
                 self._software_resume = (self._generation_id, int(pause_frame), software_stream)
             self._software_playback_stream = None
-        if is_playing:
+        if self.preview_quality_preference() > 0.0:
+            self._cancel_full_quality_refresh()
+        elif is_playing:
             # Any paused FULL request becomes stale as soon as playback starts.
             self._cancel_full_quality_refresh()
             self._set_decode_quality_stage("auto2k", "playback_started")
@@ -9434,10 +9491,7 @@ class TimelinePreviewRenderer(QObject):
         # FX-M04: the GPU effect policy must follow the real playback state.
         # Previously set_preview_degraded() had no production caller, so the
         # policy was permanently disabled despite its passing unit tests.
-        gpu_renderer = getattr(self, "_gpu_renderer", None)
-        set_preview_degraded = getattr(gpu_renderer, "set_preview_degraded", None)
-        if callable(set_preview_degraded):
-            set_preview_degraded(bool(is_playing))
+        self._update_effect_preview_policy(is_playing)
         from src.features.edit.core.realtime_playback import PlaybackMode
         if _sync_engine:
             if is_playing:
@@ -10494,6 +10548,8 @@ class TimelinePreviewRenderer(QObject):
         need to open FFmpeg/VT sources. A cached media-pool or timeline thumbnail
         keeps ProgramViewer from showing the empty GL surface during that warmup.
         """
+        if self.preview_quality_preference() >= 1.0:
+            return
         if self._should_use_gpu_only_realtime_preview():
             playback_trace("renderer.placeholder_skip_gpu_only_realtime", frame=frame)
             return
@@ -11057,7 +11113,9 @@ class TimelinePreviewRenderer(QObject):
         asset_path = resolver.get_asset_path(layer.asset_id)
         stream_key = layer.decoder_stream_key or layer.clip_id
         manager = getattr(self._worker, '_gpu_decode_manager', None)
-        if asset_path and manager is not None and manager.can_use_software_scrub_source(asset_path, target_size, stream_key):
+        if asset_path and manager is not None and manager.can_use_software_scrub_source(
+            asset_path, self._source_decode_size(target_size), stream_key,
+        ):
             return (asset_path, stream_key)
         return None
 
@@ -11090,7 +11148,7 @@ class TimelinePreviewRenderer(QObject):
         if resolver is None:
             return
 
-        decode_target_size = target_size or self._decode_target_size
+        decode_target_size = self._source_decode_size(target_size or self._decode_target_size)
         for layer in getattr(plan, 'layers', ()) or ():
             asset_id = getattr(layer, 'asset_id', None)
             if not asset_id:
@@ -11128,7 +11186,7 @@ class TimelinePreviewRenderer(QObject):
         if not callable(prefetch) or resolver is None:
             return
 
-        decode_target_size = target_size or self._decode_target_size
+        decode_target_size = self._source_decode_size(target_size or self._decode_target_size)
         for layer in getattr(plan, 'layers', ()) or ():
             asset_id = getattr(layer, 'asset_id', None)
             if not asset_id or getattr(layer, 'composite_id', None):
@@ -11198,7 +11256,7 @@ class TimelinePreviewRenderer(QObject):
         if not callable(preposition) or resolver is None:
             return
 
-        decode_target_size = target_size or self._scrub_render_decode_target_size()
+        decode_target_size = self._source_decode_size(target_size or self._scrub_render_decode_target_size())
         preposition_frame = self._scrub_preposition_timeline_frame(
             timeline_frame,
             direction,
@@ -11596,7 +11654,7 @@ class TimelinePreviewRenderer(QObject):
             # prepositioning them would fight the live cursor for nothing.
             active_streams = self._active_playback_stream_keys(frame, plan)
 
-            target_size = self._auto2k_decode_target_size()
+            target_size = self._source_decode_size(self._auto2k_decode_target_size())
             prepositioned = 0
             for (asset_path, asset_id, decode_stream_key), source_frames in jobs.items():
                 if _stale():
@@ -11748,7 +11806,7 @@ class TimelinePreviewRenderer(QObject):
                 seen_keys.add(warm_key)
                 gpu_dm.warmup_source(
                     asset_path,
-                    target_size=self._auto2k_decode_target_size(),
+                    target_size=self._source_decode_size(self._auto2k_decode_target_size()),
                     stream_key=stream_key,
                     warm_interactive_pool=False,
                 )
@@ -12743,6 +12801,8 @@ class TimelinePreviewRenderer(QObject):
 
     def _arm_snapshot_for_next_gpu_frame(self) -> None:
         """布防下一个 GPU 合成帧的快照捕获（无 GPU 管线时 no-op）。"""
+        if self.preview_quality_preference() >= 1.0:
+            return
         renderer = getattr(self, "_gpu_renderer", None)
         if renderer is None or not hasattr(renderer, "arm_frame_snapshot"):
             return
@@ -12840,6 +12900,9 @@ class TimelinePreviewRenderer(QObject):
         if image is None or image.isNull():
             return
         frame = int(frame)
+        if self.preview_quality_preference() >= 1.0:
+            self._idle_prebuffer_pending.discard(frame)
+            return
         if self._cache.get(frame) is not None and frame not in self._snapshot_frame_keys:
             return  # 已有全分辨率条目
         self._cache.put(frame, image)

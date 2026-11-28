@@ -7,11 +7,15 @@ import threading
 import logging
 logger = logging.getLogger(__name__)
 from PIL import Image
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QUrl, QRectF
+from PyQt6.QtCore import QEvent, QPoint, pyqtSignal, Qt, QTimer, QUrl, QRectF
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QVideoSink
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QPushButton, QHBoxLayout, QSlider, QLabel, QWidget, QLineEdit, QSizePolicy
-from PyQt6.QtGui import QCursor, QFont, QPainter, QImage, QDesktopServices
-from .base_player import _fmt_time, utils_get_tool_path
+from PyQt6.QtWidgets import QFrame, QVBoxLayout, QPushButton, QHBoxLayout, QSlider, QLabel, QWidget, QLineEdit, QMenu, QSizePolicy
+from PyQt6.QtGui import QCursor, QEnterEvent, QFont, QMouseEvent, QPainter, QImage, QDesktopServices
+from src.shared.i18n import I18N
+from .base_player import (
+    PLAYBACK_RESOLUTION_DIVISORS, TRANSPORT_IDLE_MS, _fmt_time,
+    playback_resolution_menu, transport_hot_zone, utils_get_tool_path,
+)
 from .thumb_cache import thumbnail_path
 
 # 播放器基于 Qt Multimedia（PyQt6 自带 FFmpeg 后端），打包后无需用户安装 VLC。
@@ -103,6 +107,11 @@ class UltimatePlayer(QFrame):
         self.duration = 0
         self.is_playing = False
         self.is_clipping_mode = False
+        self._lightbox_mode = False
+        self._transport_hot = False
+        self._preview_divisor = 1
+        self._decoded_image: QImage | None = None
+        self._source_size: tuple[int, int] | None = None
         # [E3/FUP-07] 自然播完（EndOfMedia）与用户停止分离：
         # 只有前者置位 _at_eof——片尾按播放=从头重播，用户停止后再按=原地续播
         self._at_eof = False
@@ -119,7 +128,8 @@ class UltimatePlayer(QFrame):
         for w in (self.video_frame, self.header_container, self.controls_container):
             w.installEventFilter(self)
         self.hide_cursor_timer = QTimer(self)
-        self.hide_cursor_timer.setInterval(3000)
+        self.hide_cursor_timer.setInterval(TRANSPORT_IDLE_MS)
+        self.hide_cursor_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self.hide_cursor_timer.setSingleShot(True)
         self.hide_cursor_timer.timeout.connect(self.hide_ui)
         self._startup_timer = QTimer(self)
@@ -139,6 +149,9 @@ class UltimatePlayer(QFrame):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.video_frame = _VideoCanvas(self); self.video_frame.mousePressEvent = self.on_video_click; self.video_frame.lower()
+        self.video_frame.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.video_frame.customContextMenuRequested.connect(
+            lambda point: self.open_playback_settings(self.video_frame.mapToGlobal(point)))
         self.video_sink = QVideoSink(self)
         self.video_sink.videoFrameChanged.connect(self._on_video_frame)
         self.mediaplayer.setVideoSink(self.video_sink)
@@ -186,6 +199,18 @@ class UltimatePlayer(QFrame):
         for widget in (self.btn_play, self.lbl_curr, self.slider, self.lbl_total,
                        self.lbl_vol, self.slider_vol):
             self.ctrl_layout.addWidget(widget, 1 if widget is self.slider else 0)
+        self.btn_playback_settings = _icons.make_tool_button(
+            self, "fa5s.cog", I18N.tr("playback_resolution.settings", "播放设置"), "⚙", size=14)
+        self.btn_playback_settings.clicked.connect(
+            lambda: self.open_playback_settings(
+                self.btn_playback_settings.mapToGlobal(self.btn_playback_settings.rect().topRight())))
+        self.ctrl_layout.addWidget(self.btn_playback_settings)
+        self.lbl_playback_resolution = QLabel(self)
+        self.lbl_playback_resolution.setStyleSheet(
+            "background: rgba(0, 0, 0, 0.72); color: #eee;"
+            "padding: 2px 6px; border-radius: 4px; font-size: 11px;")
+        self.lbl_playback_resolution.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_playback_resolution.hide()
         # 视频剪切面板
         self.clip_panel = QFrame(self); self.clip_panel.setObjectName("FloatingPanel"); self.clip_panel.hide()
         self.clip_layout = QHBoxLayout(self.clip_panel); self.clip_layout.setContentsMargins(15, 5, 15, 5)
@@ -206,6 +231,7 @@ class UltimatePlayer(QFrame):
         clip_w = 400
         self.clip_panel.setGeometry((w - clip_w)//2, h - 140, clip_w, 50)
         self.clip_panel.raise_()
+        self._layout_playback_resolution()
         super().resizeEvent(event)
 
     def create_btn(self, text, tooltip, func):
@@ -221,6 +247,10 @@ class UltimatePlayer(QFrame):
         self._startup_timer.stop()
         self.mediaplayer.stop()
         self.video_frame.clear()
+        self._decoded_image = None
+        self._source_size = None
+        self._preview_divisor = 1
+        self.lbl_playback_resolution.hide()
         self.current_path = unicodedata.normalize("NFC", path)
         self.duration = 0
         self._error_handled = False
@@ -295,7 +325,80 @@ class UltimatePlayer(QFrame):
     def _on_video_frame(self, frame):
         img = frame.toImage()
         if self.current_path and not img.isNull():
-            self.video_frame.setFrame(img)
+            self._decoded_image = img
+            self._show_preview_frame()
+
+    def _layout_playback_resolution(self) -> None:
+        label = self.lbl_playback_resolution
+        label.adjustSize()
+        label.move(8, max(0, self.height() - label.height() - 3))
+        label.raise_()
+
+    def _show_preview_frame(self) -> None:
+        image = self._decoded_image
+        if image is None:
+            return
+        decoded_size = (image.width(), image.height())
+        native_size = f"{decoded_size[0]}×{decoded_size[1]}"
+        divisor = self._preview_divisor
+        if divisor > 1:
+            image = image.scaled(
+                (image.width() + divisor - 1) // divisor,
+                (image.height() + divisor - 1) // divisor,
+                Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            text = I18N.tr("playback_resolution.qt_scaled",
+                           "预览 {preview} · 解码 {decoded}",
+                           preview=f"{image.width()}×{image.height()}", decoded=native_size)
+        elif self._source_size is None:
+            text = I18N.tr("playback_resolution.qt_decoded", "播放 {decoded} · 解码尺寸",
+                           decoded=native_size)
+        elif decoded_size in (self._source_size, self._source_size[::-1]):
+            text = I18N.tr("playback_resolution.original", "播放 {frame} · 原分辨率",
+                           frame=native_size)
+        else:
+            text = I18N.tr("playback_resolution.reduced", "播放 {frame} · 源 {source} · 降分辨率",
+                           frame=native_size, source=f"{self._source_size[0]}×{self._source_size[1]}")
+        self.video_frame.setFrame(image)
+        label = self.lbl_playback_resolution
+        if text != label.text() or label.isHidden():
+            label.setText(text)
+            label.show()
+            self._layout_playback_resolution()
+
+    def _set_preview_resolution(self, divisor: int) -> None:
+        if divisor not in PLAYBACK_RESOLUTION_DIVISORS:
+            raise ValueError(f"Unsupported preview divisor: {divisor}")
+        if divisor != self._preview_divisor:
+            self._preview_divisor = divisor
+            self._show_preview_frame()
+
+    def _build_resolution_menu(self) -> QMenu:
+        menu = playback_resolution_menu(
+            self, I18N.tr("playback_resolution.qt_menu", "预览分辨率（解码后缩放）"),
+            self._preview_divisor, self._set_preview_resolution)
+        info = menu.addMenu(I18N.tr("playback_resolution.info", "视频信息"))
+        if self._decoded_image is not None:
+            if self._source_size is not None:
+                source = f"{self._source_size[0]}×{self._source_size[1]}"
+                info.addAction(I18N.tr("playback_resolution.qt_source", "源 {source}",
+                                       source=source)).setEnabled(False)
+            info.addAction(self.lbl_playback_resolution.text()).setEnabled(False)
+        else:
+            info.addAction(I18N.tr("playback_resolution.qt_pending", "等待播放帧")).setEnabled(False)
+        return menu
+
+    def open_playback_settings(self, global_position: QPoint) -> None:
+        if not self.current_path:
+            return
+        self._wake_ui()
+        self.hide_cursor_timer.stop()
+        menu = self._build_resolution_menu()
+        try:
+            menu.exec(global_position)
+        finally:
+            menu.deleteLater()
+            self.observe_transport_pointer(QCursor.pos())
+            self._wake_ui()
 
     def _on_playback_state(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
@@ -304,14 +407,14 @@ class UltimatePlayer(QFrame):
             self._wake_ui()
         elif state == QMediaPlayer.PlaybackState.PausedState:
             from . import icons as _icons; _icons.set_play_icon(self.btn_play, playing=False)
-            self._wake_ui()
             self.is_playing = False
+            self._wake_ui()
         elif state == QMediaPlayer.PlaybackState.StoppedState:
             # [BUG-P1-13] 自然播完走 StoppedState：此前不处理导致 is_playing
             # 恒 True——播放键停留"暂停"图标、控件照常自动隐藏、空格误走暂停分支
             from . import icons as _icons; _icons.set_play_icon(self.btn_play, playing=False)
-            self._wake_ui()
             self.is_playing = False
+            self._wake_ui()
 
     def clear_badges(self):
         for i in reversed(range(self.meta_layout.count())):
@@ -324,7 +427,9 @@ class UltimatePlayer(QFrame):
             meta = self.mediaplayer.metaData()
             resolution = meta.value(QMediaMetaData.Key.Resolution)
             if resolution is not None and resolution.width() > 0:
+                self._source_size = (resolution.width(), resolution.height())
                 info.append(f"{resolution.width()}x{resolution.height()}")
+                self._show_preview_frame()
             fps = meta.value(QMediaMetaData.Key.VideoFrameRate)
             if fps:
                 try: fps = float(fps)
@@ -361,6 +466,9 @@ class UltimatePlayer(QFrame):
         self.mediaplayer.setSource(QUrl())
         self.timer.stop()
         self.video_frame.clear()
+        self._decoded_image = None
+        self.lbl_playback_resolution.hide()
+        self._transport_hot = False
         # [BUG-P2-31] 此前未停 hide_cursor_timer：关闭后每 3s 触发 hide_ui
         # 空转（与基类 stop 行为不一致）
         self.hide_cursor_timer.stop()
@@ -595,39 +703,56 @@ class UltimatePlayer(QFrame):
         elif key == Qt.Key.Key_Down: self.request_next.emit()
 
     def eventFilter(self, obj, ev):
-        from PyQt6.QtCore import QEvent
-        if ev.type() in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress,
-                         QEvent.Type.MouseButtonRelease, QEvent.Type.Wheel):
+        if isinstance(ev, (QMouseEvent, QEnterEvent)):
+            self.observe_transport_pointer(ev.globalPosition().toPoint())
+        kind = ev.type()
+        if (kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, QEvent.Type.Wheel)
+                or (not self._lightbox_mode and kind in (QEvent.Type.Enter, QEvent.Type.MouseMove))):
             self._wake_ui()
         return super().eventFilter(obj, ev)
 
-    def set_lightbox_tools(self, visible: bool) -> None:
-        """Use the host's top chrome and reveal transport controls on demand."""
-        self._lightbox_tools = visible
-        self.hide_cursor_timer.stop()
-        self.header_container.hide()
-        self.controls_container.setVisible(visible)
-        self.setCursor(Qt.CursorShape.ArrowCursor)
+    def observe_transport_pointer(self, global_position: QPoint) -> None:
+        hot = transport_hot_zone(self, global_position)
+        if hot != self._transport_hot:
+            self._transport_hot = hot
+            self._wake_ui()
 
-    def _wake_ui(self):
-        if getattr(self, "_lightbox_tools", None) is not None:
-            return
+    def leave_transport(self) -> None:
+        if self._transport_hot:
+            self._transport_hot = False
+            self._wake_ui()
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self.leave_transport()
+        super().leaveEvent(event)
+
+    def set_lightbox_tools(self, _visible: bool) -> None:
+        """Leave the lightbox header with the host and manage transport locally."""
+        self._lightbox_mode = True
+        self.header_container.hide()
+
+    def _wake_ui(self) -> None:
         self.ui_visible = True
-        self.header_container.show()
+        if not self._lightbox_mode:
+            self.header_container.show()
+            self.header_container.raise_()
         self.controls_container.show()
-        self.header_container.raise_()
         self.controls_container.raise_()
         self.clip_panel.raise_()
         self.setCursor(Qt.CursorShape.ArrowCursor)
-        self.hide_cursor_timer.start()
+        if self.is_playing and not self._transport_hot:
+            self.hide_cursor_timer.start()
+        else:
+            self.hide_cursor_timer.stop()
 
     def mouseMoveEvent(self, event):
-        self._wake_ui()
+        if not self._lightbox_mode:
+            self._wake_ui()
         super().mouseMoveEvent(event)
 
     def hide_ui(self):
         # 仅播放中隐藏；暂停常显；截取面板打开时不藏
-        if not self.is_playing or self.clip_panel.isVisible():
+        if not self.is_playing or self.clip_panel.isVisible() or self._transport_hot:
             return
         self.ui_visible = False
         self.header_container.hide()

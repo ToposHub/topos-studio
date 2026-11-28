@@ -319,6 +319,7 @@ class NativePreviewProducer:
                 "gpu_query_deferred": False,
                 "render_backend": "metal",
                 "native_viewport": True,
+                "decoded_sizes": getattr(task, "decoded_sizes", ()),
                 "deadline_ns": int(getattr(task, "deadline_ns", 0) or 0),
                 "scrub_token": getattr(task, "scrub_request_token", None),
             },

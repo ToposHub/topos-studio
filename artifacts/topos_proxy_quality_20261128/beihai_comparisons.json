@@ -1,0 +1,30 @@
+[
+  {
+    "index": 1081,
+    "x": 1716,
+    "y": 0,
+    "width": 156,
+    "height": 100,
+    "patch_y_psnr": [
+      37.12724775821445,
+      34.174440630896335,
+      34.174440630896335
+    ],
+    "default_minus_prores_frame_y_db": -2.8316696438469413,
+    "selection": "Largest frame-level luma PSNR deficit"
+  },
+  {
+    "index": 642,
+    "x": 3432,
+    "y": 800,
+    "width": 156,
+    "height": 100,
+    "patch_y_psnr": [
+      40.48536693460707,
+      39.989402184536885,
+      39.989402184536885
+    ],
+    "default_minus_prores_frame_y_db": 0.17005255717015086,
+    "selection": "Median frame-level luma PSNR difference"
+  }
+]

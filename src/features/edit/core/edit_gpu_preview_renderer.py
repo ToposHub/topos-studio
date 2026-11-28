@@ -356,6 +356,7 @@ class EditRenderTask:
     luminance: VideoSignalLuminance | None = None
     scrub_settled: bool = False
     scrub_source_frames: tuple[ScrubSourceFrame, ...] = ()
+    decoded_sizes: tuple[Tuple[int, int], ...] = ()
     idle_prebuffer_cancelled: threading.Event | None = None
 
     def __post_init__(self) -> None:
@@ -2985,6 +2986,7 @@ class EditGpuPreviewRenderer(QThread):
                 scrub_request_token=task.scrub_request_token,
                 scrub_settled=task.scrub_settled,
                 scrub_source_frames=task.scrub_source_frames,
+                decoded_sizes=task.decoded_sizes,
                 **timing,
             )
 
@@ -4383,12 +4385,15 @@ class EditGpuPreviewRenderer(QThread):
             retired_entries = [(tex, fbo) for tex, fbo in self._output_pool]
             self._output_pool = []
 
-            # Rebuild present pool for the new size
-            self._present_pool = OutputSlotPool(size=self._output_pool_size)
+            # Size the RGBA8 pool by bytes so full UHD and larger canvases
+            # do not multiply the viewer-sized slot allowance into gigabytes.
+            frame_bytes = w * h * 4
+            pool_bytes = 256 * 1024 * 1024
+            slot_count = min(self._output_pool_size, max(3, pool_bytes // frame_bytes))
+            self._present_pool = OutputSlotPool(size=slot_count)
             self._present_pool_registered = False
 
-            # Create new pool entries
-            for slot_id in range(self._output_pool_size):
+            for slot_id in range(slot_count):
                 tex = self.ctx.texture((w, h), components=4, dtype='f1')
                 fbo = self.ctx.framebuffer(color_attachments=[tex])
                 self._output_pool.append((tex, fbo))
@@ -4430,7 +4435,7 @@ class EditGpuPreviewRenderer(QThread):
         else:
             # Fallback：旧 +2 推进（present pool 未注册时）
             self._output_pool_index = (
-                (self._output_pool_index + 2) % self._output_pool_size
+                (self._output_pool_index + 2) % len(self._output_pool)
             )
 
         self._composite_tex, self._composite_fbo = self._output_pool[self._output_pool_index]
@@ -5774,6 +5779,7 @@ void main() {
         scrub_request_token: int | None = None,
         scrub_settled: bool = False,
         scrub_source_frames: tuple[ScrubSourceFrame, ...] = (),
+        decoded_sizes: tuple[Tuple[int, int], ...] = (),
     ) -> Optional[GpuPresentFrame]:
         """
         Composite 完成后：插入 GL fence，标记 slot READY，构造 GpuPresentFrame。
@@ -5800,6 +5806,8 @@ void main() {
             "gpu_query_deferred": not metal and not gpu_time_unavailable,
             "render_backend": "metal" if metal else "opengl",
         }
+        if decoded_sizes:
+            gpu_extra["decoded_sizes"] = decoded_sizes
         if scrub_request_token is not None:
             gpu_extra.update(
                 scrub_request_token=scrub_request_token,

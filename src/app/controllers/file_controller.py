@@ -3090,6 +3090,11 @@ class FileOpsMixin:
             self.program_viewer_widget.preview_quality_changed.connect(
                 self.timeline_preview_renderer.set_preview_quality
             )
+            preference = getattr(self.program_viewer_widget, "preview_quality_preference", None)
+            if callable(preference):
+                scale = preference()
+                if isinstance(scale, (int, float)):
+                    self.timeline_preview_renderer.set_preview_quality(float(scale))
 
         # P1-10: 自适应播放质量用户偏好（默认开启；关闭时 engine 钉在
         # NORMAL 档，负载不再降 decode scale）。
@@ -3583,6 +3588,19 @@ class FileOpsMixin:
         if self.program_viewer_widget:
             setattr(self.program_viewer_widget, "_timeline_scrub_active_for_trace", scrub_active)
             try:
+                renderer = getattr(self, "timeline_preview_renderer", None)
+                resolution_context = getattr(renderer, "preview_resolution_context", None)
+                set_resolution_context = getattr(
+                    self.program_viewer_widget, "set_preview_resolution_context", None,
+                )
+                if result is not None and callable(resolution_context) and callable(set_resolution_context):
+                    context = resolution_context(frame)
+                    if isinstance(context, tuple) and len(context) == 2:
+                        canvas, sources = context
+                        present = result.get("present_frame") if isinstance(result, dict) else result
+                        extra = getattr(present, "extra", None)
+                        decoded = extra.get("decoded_sizes", ()) if isinstance(extra, dict) else ()
+                        set_resolution_context(frame, canvas, sources, decoded)
                 self.program_viewer_widget.set_frame(frame, result)
                 if getattr(self, "_color_program_monitor_active", False):
                     self._show_color_program_output_kind(result)

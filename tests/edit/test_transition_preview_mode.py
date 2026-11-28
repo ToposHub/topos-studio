@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 from PyQt6.QtCore import QCoreApplication, QPoint, QSize, Qt
 from PyQt6.QtGui import QColor, QMovie
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication, QDockWidget
+from PyQt6.QtWidgets import QApplication, QDockWidget, QMainWindow
 
 from src.shared.i18n.i18n import I18N
 from src.features.edit.ui.edit_effects_panel import (
@@ -195,7 +195,9 @@ def test_transition_preview_size_presets_update_cards(qapp) -> None:  # type: ig
 
 def test_effects_context_menu_unifies_preview_size_and_dock_actions(qapp) -> None:  # type: ignore[no-untyped-def]
     panel = EditEffectsPanel()
-    dock = QDockWidget("Effects")
+    window = QMainWindow()
+    dock = QDockWidget("Effects", window)
+    window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, dock)
     dock.setWidget(panel)
 
     effect_menu = panel._build_library_context_menu_for_type("gaussian_blur")
@@ -204,13 +206,8 @@ def test_effects_context_menu_unifies_preview_size_and_dock_actions(qapp) -> Non
         if not action.isSeparator()
     ]
     assert I18N.tr("dock.close", "Close") in effect_labels
-    dock_action_label = (
-        I18N.tr("dock.dock", "Dock")
-        if dock.isFloating()
-        else I18N.tr("dock.float", "Float")
-    )
-    assert dock_action_label in effect_labels
-    assert set(effect_labels) == {I18N.tr("dock.close", "Close"), dock_action_label}
+    dock_action_label = I18N.tr("dock.close", "Close")
+    assert effect_labels == [dock_action_label]
 
     transition_menu = panel._build_library_context_menu_for_type(
         "cross_dissolve",

@@ -1,0 +1,294 @@
+{
+  "beihai": {
+    "source_frame": 1081,
+    "apple_packet_bytes": 740704,
+    "topos_default": {
+      "sse": [
+        1080248777.0,
+        103679307.00000001,
+        99022729.99999999
+      ],
+      "frame": 1081,
+      "packet_bytes": 454284,
+      "qp": 84
+    },
+    "topos_matched": {
+      "sse": [
+        1080248777.0,
+        103679307.00000001,
+        99022729.99999999
+      ],
+      "frame": 1081,
+      "packet_bytes": 454284,
+      "qp": 84
+    },
+    "topos_matched_y_psnr": 39.05012459644265,
+    "single_frame_reanchor": {
+      "qp": 81,
+      "bytes": 684491,
+      "y_psnr": 41.89749037842451,
+      "slice_count": 102
+    },
+    "qscale_inspection": {
+      "topos_default": {
+        "packet_sample_count": 87,
+        "slice_counts": {
+          "102": 87
+        },
+        "unique_qscale_count_min_median_max": [
+          1,
+          1.0,
+          1
+        ],
+        "all_encoded_values_or_deltas": [
+          0
+        ]
+      },
+      "prores_apple": {
+        "packet_sample_count": 87,
+        "slice_counts": {
+          "4050": 87
+        },
+        "unique_qscale_count_min_median_max": [
+          1,
+          2.0,
+          3
+        ],
+        "all_encoded_values_or_deltas": [
+          8,
+          10,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          32,
+          36,
+          38,
+          40,
+          42
+        ]
+      },
+      "prores_ks": {
+        "packet_sample_count": 10,
+        "slice_counts": {
+          "4050": 10
+        },
+        "unique_qscale_count_min_median_max": [
+          35,
+          46.5,
+          61
+        ],
+        "all_encoded_values_or_deltas": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          62,
+          63,
+          64,
+          65,
+          72
+        ]
+      }
+    }
+  },
+  "yuanmingyuan": {
+    "source_frame": 447,
+    "apple_packet_bytes": 710672,
+    "topos_default": {
+      "sse": [
+        560946530.0000001,
+        51140480.00000001,
+        65472907.00000001
+      ],
+      "frame": 447,
+      "packet_bytes": 410364,
+      "qp": 82
+    },
+    "topos_matched": {
+      "sse": [
+        373833773.00000006,
+        38624413.0,
+        48830471.99999999
+      ],
+      "frame": 447,
+      "packet_bytes": 554278,
+      "qp": 80
+    },
+    "topos_matched_y_psnr": 43.658577089685274,
+    "single_frame_reanchor": {
+      "qp": 79,
+      "bytes": 645785,
+      "y_psnr": 44.650973398937914,
+      "slice_count": 102
+    },
+    "qscale_inspection": {
+      "topos_default": {
+        "packet_sample_count": 36,
+        "slice_counts": {
+          "102": 36
+        },
+        "unique_qscale_count_min_median_max": [
+          1,
+          1.0,
+          1
+        ],
+        "all_encoded_values_or_deltas": [
+          0
+        ]
+      },
+      "prores_apple": {
+        "packet_sample_count": 36,
+        "slice_counts": {
+          "4050": 36
+        },
+        "unique_qscale_count_min_median_max": [
+          1,
+          1.0,
+          2
+        ],
+        "all_encoded_values_or_deltas": [
+          8,
+          15,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24
+        ]
+      },
+      "prores_ks": {
+        "packet_sample_count": 10,
+        "slice_counts": {
+          "4050": 10
+        },
+        "unique_qscale_count_min_median_max": [
+          33,
+          43.5,
+          47
+        ],
+        "all_encoded_values_or_deltas": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53
+        ]
+      }
+    }
+  }
+}

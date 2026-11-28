@@ -1,0 +1,58 @@
+{
+  "prores_apple": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9969240928043848,
+      "normalized_squared_error": 0.006313039448868186
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.949128867928406,
+      "normalized_squared_error": 0.12683376791415196
+    },
+    "high_7_14": {
+      "correlated_amplitude": 6.196461243935124e-06,
+      "normalized_squared_error": 1.0023667930477895
+    }
+  },
+  "topos_default": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9616688955193938,
+      "normalized_squared_error": 0.009508943042502658
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.8298489626138298,
+      "normalized_squared_error": 0.12325290116129352
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.3852177185055695,
+      "normalized_squared_error": 0.7703180940638632
+    }
+  },
+  "topos_matched_full": {
+    "low_1_2": {
+      "correlated_amplitude": 0.9661585330802129,
+      "normalized_squared_error": 0.007773046353801015
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.8495321951945957,
+      "normalized_squared_error": 0.10473789330328148
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.4253506236424603,
+      "normalized_squared_error": 0.7110389804379802
+    }
+  },
+  "prores_ks": {
+    "low_1_2": {
+      "correlated_amplitude": 0.92703661144972,
+      "normalized_squared_error": 0.017422520178611716
+    },
+    "mid_3_6": {
+      "correlated_amplitude": 0.609454280377282,
+      "normalized_squared_error": 0.29220431861631724
+    },
+    "high_7_14": {
+      "correlated_amplitude": 0.005301138207142271,
+      "normalized_squared_error": 0.9966972847442456
+    }
+  }
+}

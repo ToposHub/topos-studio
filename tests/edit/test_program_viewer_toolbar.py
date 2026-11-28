@@ -237,3 +237,47 @@ def test_vertical_matte_covers_the_fractional_top_edge(qapp) -> None:
     assert canvas.pixelColor(41, 10) == QColor("#000000")
     assert canvas.pixelColor(42, 10) == QColor("#ffffff")
     assert canvas.pixelColor(10, 85) == QColor("#000000")
+
+
+def test_context_menu_offers_preview_resolution_and_defaults_to_full(qapp, monkeypatch) -> None:
+    from PyQt6.QtCore import QPoint
+    from PyQt6.QtGui import QContextMenuEvent
+    from src.features.edit.ui.program_viewer import ProgramViewerWidget
+
+    widget = ProgramViewerWidget()
+    toolbar = widget.get_toolbar()
+    popup_positions = []
+    monkeypatch.setattr(toolbar.quality_menu, "popup", popup_positions.append)
+
+    point = QPoint(120, 130)
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(20, 30), point)
+    assert widget.eventFilter(widget.get_viewer(), event)
+    assert popup_positions == [point]
+    checked = [action.data() for action in toolbar.quality_menu.actions() if action.isChecked()]
+    assert checked == [1.0]
+    assert [action.data() for action in toolbar.quality_menu.actions() if action.data() > 0] == [
+        1.0, 0.5, round(1.0 / 3.0, 4), 0.25,
+    ]
+
+
+def test_resolution_readout_uses_presented_pixels_and_shows_lower_timeline_canvas(qapp) -> None:
+    from src.features.edit.ui.program_viewer import ProgramViewerWidget
+
+    widget = ProgramViewerWidget()
+    widget.set_preview_resolution_context(
+        11, (1920, 1080), ((3840, 2160),), ((3840, 2160),),
+    )
+    viewer = widget.get_viewer()
+    label = widget.get_transport_bar().resolution_label
+    assert label.isHidden()
+
+    viewer._tex_width, viewer._tex_height = (960, 540)
+    viewer.frame_presented.emit(11)
+    assert label.text() == "960×540 / 1920×1080"
+    assert "3840×2160" in label.toolTip()
+
+    viewer._tex_width, viewer._tex_height = (1920, 1080)
+    viewer.frame_presented.emit(11)
+    assert label.text() == "1920×1080"
+    widget.clear_texture()
+    assert label.isHidden()

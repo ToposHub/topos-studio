@@ -1,0 +1,20 @@
+--- a/src/transform/quant.c
++++ b/src/transform/quant.c
+@@ -248,7 +248,7 @@
+ {
+     for (int i = 0; i < 64; ++i) {
+         const uint32_t Q = tc_quant_step(qm[i], qp);
+-        const uint32_t dz = (i == 0) ? 0u : (Q >> 2);
++        const uint32_t dz = (i == 0) ? 0u : (Q >> 3);
+         /* 先钳位再取绝对值：规避 INT32_MIN 取负 UB（防御路径，合法 |F| ≤ 2^24.4） */
+         int32_t v = F[i];
+         if (v > TC_TRANSFORM_MAX_ABS_F) { v = TC_TRANSFORM_MAX_ABS_F; }
+@@ -298,7 +298,7 @@
+      * 历史：TC_DZ_DEV 实验旋钮已于 P3 扫频后移除（2026-09-03 战役销账：
+      * dz 0~6/16 × 4 素材，工作码率区间 1.4~3.6 bpp 内 1/4 已最优，
+      * 见 docs/Topos_码率效率优化计划_2026-09-03.md §7）。DC 恒 0。 */
+-    const uint32_t dz_num = 1u, dz_den = 4u;
++    const uint32_t dz_num = 1u, dz_den = 8u;
+     for (int i = 0; i < 64; ++i) {
+         const uint32_t q = ctx->Q[i];
+         ctx->half[i] = q >> 1;

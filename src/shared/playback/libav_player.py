@@ -592,7 +592,8 @@ class _LibavSession(DecoderBackend):
                 bit_depth=depth, subsampling=subsampling,
                 matrix=matrix, color_range=full_range, chroma_siting=siting,
                 pixel_format='gbr' if 'gbr' in fmt else subsampling,
-                source_width=int(frame.width), source_height=int(frame.height))
+                source_width=int(frame.width), source_height=int(frame.height),
+                sample_aspect_ratio=float(self.sar or 1) if size is None else 1.0)
 
     def _decode_frame_locked(self, index: int, size: tuple[int, int] | None = None,
                              *, pixel_format: str | None = None) -> av.VideoFrame:
@@ -775,20 +776,21 @@ class LibavPlayer(BasePlayer):
 
     def _decode_frame(self, session, target: int):
         canvas = self.canvas
-        size = canvas.display_size()
-        if getattr(session, 'has_alpha', False):
-            return _frame_to_qimage(session.frame_rgba(target, size=size))
+        size = self._playback_target_size(session)
+        has_alpha = getattr(session, 'has_alpha', False)
+        rotation = getattr(session, 'rotation_quarters', 0)
         # [E4] YUV/GPU 上传路径不支持旋转：有显示旋转时直接走 RGB 路径
         # （frame_rgb 内完成旋转）
-        if getattr(canvas, 'gpu_active', False) and \
-                hasattr(session, 'frame_yuv') and \
-                getattr(session, 'rotation_quarters', 0) == 0:
+        if (not has_alpha and getattr(canvas, 'gpu_active', False)
+                and hasattr(session, 'frame_yuv') and rotation == 0):
             try:
                 return session.frame_yuv(target, size=size)
             except Exception:
                 logger.warning('Libav GPU YUV 帧失败，回退 RGB', exc_info=True)
-        rgb = session.frame_rgb(target, size=size)
-        return _frame_to_qimage(rgb)
+        decode = session.frame_rgba if has_alpha else session.frame_rgb
+        pixels = decode(target, size=size)
+        sar = float(getattr(session, 'sar', None) or 1) if size is None else 1.0
+        return _frame_to_qimage(pixels, sample_aspect_ratio=1.0 / sar if rotation % 2 else sar)
 
     def _on_decode_stop(self) -> None:
         import traceback

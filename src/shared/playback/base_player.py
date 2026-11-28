@@ -25,15 +25,25 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Callable
 
-from PyQt6.QtCore import Qt, QTimer, QRectF, pyqtSignal
-from PyQt6.QtGui import QImage, QPainter
-from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
+from PyQt6.QtCore import QEvent, QPoint, Qt, QTimer, QRectF, pyqtSignal
+from PyQt6.QtGui import QActionGroup, QCursor, QEnterEvent, QImage, QMouseEvent, QPainter
+from PyQt6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
                              QSizePolicy, QSlider, QVBoxLayout, QWidget)
 
+from src.shared.i18n import I18N
+
 from . import icons as _icons
+from .frame_geometry import QIMAGE_SAMPLE_ASPECT_KEY, qimage_display_width
+from .yuv_frame import YuvFrame
 
 logger = logging.getLogger(__name__)
+
+PLAYBACK_RESOLUTION_DIVISORS = (1, 2, 4)
+QIMAGE_DECODED_SIZE_KEY = 'topos.decoded_size'
+TRANSPORT_IDLE_MS = 6000
+TRANSPORT_BOTTOM_ZONE = 90
 
 STYLESHEET = """
     QFrame#ToposHeader {
@@ -68,12 +78,42 @@ def _fmt_time(sec: float) -> str:
     return f'{sec // 60:02d}:{sec % 60:02d}'
 
 
-def _frame_to_qimage(pixels) -> QImage:
+def _frame_to_qimage(pixels, *, sample_aspect_ratio: float = 1.0,
+                     decoded_size: tuple[int, int] | None = None) -> QImage:
     h, w, channels = pixels.shape
     image_format = (QImage.Format.Format_RGBA8888 if channels == 4
                     else QImage.Format.Format_RGB888)
     img = QImage(pixels.data, w, h, channels * w, image_format)
-    return img.copy()  # 脱离 numpy 缓冲生命周期
+    img = img.copy()  # 脱离 numpy 缓冲生命周期
+    if sample_aspect_ratio != 1.0:
+        img.setText(QIMAGE_SAMPLE_ASPECT_KEY, str(sample_aspect_ratio))
+    if decoded_size is not None and decoded_size != (w, h):
+        img.setText(QIMAGE_DECODED_SIZE_KEY, f'{decoded_size[0]}x{decoded_size[1]}')
+    return img
+
+
+def playback_resolution_menu(
+    parent: QWidget, title: str, divisor: int, select: Callable[[int], None],
+) -> QMenu:
+    menu = QMenu(parent)
+    group = QActionGroup(menu)
+    heading = menu.addAction(title)
+    heading.setEnabled(False)
+    for factor in PLAYBACK_RESOLUTION_DIVISORS:
+        label = (I18N.tr('playback_resolution.full', '全分辨率')
+                 if factor == 1 else f'1/{factor}')
+        action = group.addAction(label)
+        action.setCheckable(True)
+        action.setChecked(factor == divisor)
+        action.triggered.connect(lambda _checked=False, value=factor: select(value))
+        menu.addAction(action)
+    return menu
+
+
+def transport_hot_zone(player: QWidget, global_position: QPoint) -> bool:
+    """The strip containing the original bottom transport and the canvas beneath it."""
+    point = player.mapFromGlobal(global_position)
+    return player.rect().contains(point) and point.y() >= player.height() - TRANSPORT_BOTTOM_ZONE
 
 
 def utils_get_tool_path(tool: str):
@@ -103,6 +143,7 @@ class _VideoCanvas(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._image: QImage | None = None
+        self._on_click = None
         self.setStyleSheet('background: #000;')
 
     def set_image(self, image: QImage | None) -> None:
@@ -120,7 +161,7 @@ class _VideoCanvas(QWidget):
             return
         # 等比适配 + 单次 drawImage（避免 scaled()/fromImage 中间拷贝）
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        iw, ih = self._image.width(), self._image.height()
+        iw, ih = qimage_display_width(self._image), self._image.height()
         scale = min(self.width() / iw, self.height() / ih)
         tw, th = int(iw * scale), int(ih * scale)
         p.drawImage(QRectF((self.width() - tw) / 2, (self.height() - th) / 2,
@@ -132,7 +173,7 @@ class _VideoCanvas(QWidget):
 
     def mousePressEvent(self, event):
         # 点击画面 = 播放/暂停（VLC 习惯）
-        if callable(self._on_click):
+        if event.button() == Qt.MouseButton.LeftButton and callable(self._on_click):
             self._on_click()
         super().mousePressEvent(event)
 
@@ -178,8 +219,7 @@ class DecoderBackend(ABC):
     def frame_rgb(self, index: int, size=None):
         """解码第 index 帧 → (H, W, 3) uint8 RGB。
 
-        size=(w, h) 时转换+缩放到显示分辨率一步完成（4K 实时预览关键
-        路径）；None = 原生全尺寸（快照/封面用）。
+        size=(w, h) 请求确定的缩放边界。None 走原生全尺寸。
         """
 
     @abstractmethod
@@ -226,6 +266,11 @@ class BasePlayer(QFrame):
         self._decode_exhausted = False
         self._eof_published = False
         self._current_path = ''
+        self._lightbox_mode = False
+        self._transport_hot = False
+        self._playback_resolution_divisor = 1
+        self._presented_frame_size: tuple[int, int] | None = None
+        self._presented_decode_size: tuple[int, int] | None = None
 
         self._build_ui()
         self.toast_requested.connect(self._toast)
@@ -248,6 +293,8 @@ class BasePlayer(QFrame):
         self.canvas = self._create_canvas()
         self.canvas._on_click = self.toggle_play
         self.canvas.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.canvas.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.canvas.customContextMenuRequested.connect(self._open_resolution_menu)
 
         header = QFrame(self)
         header.setObjectName('ToposHeader')
@@ -314,6 +361,12 @@ class BasePlayer(QFrame):
             self.lbl_vol.setText('🔊')
         for w in (self.lbl_vol, self.slider_vol):
             cl.addWidget(w)
+        self.btn_playback_settings = _icons.make_tool_button(
+            self, 'fa5s.cog', I18N.tr('playback_resolution.settings', '播放设置'), '⚙', size=14)
+        self.btn_playback_settings.clicked.connect(
+            lambda: self.open_playback_settings(
+                self.btn_playback_settings.mapToGlobal(self.btn_playback_settings.rect().topRight())))
+        cl.addWidget(self.btn_playback_settings)
         if not self.HAS_AUDIO:
             self.lbl_vol.hide()
             self.slider_vol.hide()
@@ -332,13 +385,24 @@ class BasePlayer(QFrame):
         controls.raise_()
         controls.adjustSize()
 
-        # 播放中 3 秒无操作自动隐藏顶栏/播放条/光标，动鼠标即恢复
+        self.lbl_playback_resolution = QLabel(self)
+        self.lbl_playback_resolution.setObjectName('PlaybackResolution')
+        self.lbl_playback_resolution.setStyleSheet(
+            'background: rgba(0, 0, 0, 0.72); color: #eee;'
+            'padding: 2px 6px; border-radius: 4px; font-size: 11px;')
+        self.lbl_playback_resolution.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.lbl_playback_resolution.hide()
+
+        # 热区之外闲置时隐藏顶栏/播放条，操作画布或进入底部可唤出。
         self.setMouseTracking(True)
         self.canvas.setMouseTracking(True)
         for w in (self.canvas, self._header, self._controls):
             w.installEventFilter(self)
         self._idle_timer = QTimer(self)
-        self._idle_timer.setInterval(3000)
+        self._idle_timer.setInterval(TRANSPORT_IDLE_MS)
+        self._idle_timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._idle_timer.setSingleShot(True)
         self._idle_timer.timeout.connect(self._auto_hide_ui)
 
         # —— 信息浮层（ℹ️ 切换） ——
@@ -352,6 +416,9 @@ class BasePlayer(QFrame):
         self.lbl_info.setWordWrap(True)
         self.lbl_info.setStyleSheet('font-size:12px; font-family:monospace;')
         il.addWidget(self.lbl_info)
+        self.lbl_info_resolution = QLabel(self.info_panel)
+        self.lbl_info_resolution.setWordWrap(True)
+        il.addWidget(self.lbl_info_resolution)
         self.info_panel.hide()
 
         self._build_extra_ui()
@@ -394,6 +461,8 @@ class BasePlayer(QFrame):
             return
         self._session = session
         self._current_path = path
+        self._playback_resolution_divisor = 1
+        self._set_presented_frame_size(None)
         self._ring.clear()
         self._shown_index = -1
         self._frame_to_present = 0
@@ -456,6 +525,11 @@ class BasePlayer(QFrame):
             self._playing = False
             self._cond.notify()
         self.canvas.set_image(None)
+        self._presented_frame_size = None
+        self._presented_decode_size = None
+        self._transport_hot = False
+        self.lbl_playback_resolution.hide()
+        self.info_panel.hide()
         self._teardown_output()
         with self._ring_lock:
             self._ring.clear()
@@ -565,7 +639,89 @@ class BasePlayer(QFrame):
 
     def _decode_frame(self, session: DecoderBackend, target: int) -> QImage:
         """解码 target 帧 → QImage（在工作线程内调用）。"""
-        return _frame_to_qimage(session.frame_rgb(target))
+        return _frame_to_qimage(session.frame_rgb(
+            target, size=self._playback_target_size(session)))
+
+    def _playback_target_size(self, session: DecoderBackend) -> tuple[int, int] | None:
+        """Decode a source-relative size independent of the viewport geometry."""
+        divisor = self._playback_resolution_divisor
+        if divisor == 1:
+            return None
+        width, height = session.width, session.height
+        if getattr(session, 'rotation_quarters', 0) % 2:
+            width, height = height, width
+        return (width + divisor - 1) // divisor, (height + divisor - 1) // divisor
+
+    def _build_resolution_menu(self) -> QMenu:
+        menu = playback_resolution_menu(
+            self, I18N.tr('playback_resolution.menu', '播放分辨率'),
+            self._playback_resolution_divisor, self._set_playback_resolution)
+        menu.addSeparator()
+        menu.addAction(I18N.tr('playback_resolution.info', '视频信息'), self._toggle_info)
+        return menu
+
+    def _open_resolution_menu(self, pos: QPoint) -> None:
+        self.open_playback_settings(self.canvas.mapToGlobal(pos))
+
+    def open_playback_settings(self, global_position: QPoint) -> None:
+        if self._session is None:
+            return
+        self._wake_ui()
+        self._idle_timer.stop()
+        menu = self._build_resolution_menu()
+        try:
+            menu.exec(global_position)
+        finally:
+            menu.deleteLater()
+            self.observe_transport_pointer(QCursor.pos())
+            self._wake_ui()
+
+    def _set_playback_resolution(self, divisor: int) -> None:
+        if divisor not in PLAYBACK_RESOLUTION_DIVISORS:
+            raise ValueError(f'Unsupported playback resolution divisor: {divisor}')
+        if self._session is None or divisor == self._playback_resolution_divisor:
+            return
+        self._playback_resolution_divisor = divisor
+        target = self._frame_to_present
+        if target is None:
+            target = max(0, self._shown_index)
+        # A paused frame must be redrawn, and old-size queued frames must be dropped.
+        self._request_seek(target)
+
+    def _playback_resolution_text(self) -> str:
+        session = self._session
+        if session is None:
+            return ''
+        expected = (session.width, session.height)
+        source = f'{expected[0]}×{expected[1]}'
+        actual = self._presented_frame_size
+        if actual is None:
+            return I18N.tr('playback_resolution.pending', '源 {source} · 等待播放帧',
+                           source=source)
+        if getattr(session, 'rotation_quarters', 0) % 2:
+            expected = expected[::-1]
+        frame = f'{actual[0]}×{actual[1]}'
+        decoded = self._presented_decode_size
+        if decoded is not None and decoded != actual:
+            return I18N.tr('playback_resolution.resampled',
+                           '播放 {frame} · 解码 {decoded} · 源 {source}',
+                           frame=frame, decoded=f'{decoded[0]}×{decoded[1]}', source=source)
+        if actual == expected:
+            return I18N.tr('playback_resolution.original', '播放 {frame} · 原分辨率',
+                           frame=frame)
+        return I18N.tr('playback_resolution.reduced',
+                       '播放 {frame} · 源 {source} · 降分辨率',
+                       frame=frame, source=source)
+
+    def _set_presented_frame_size(self, size: tuple[int, int] | None,
+                                  decoded_size: tuple[int, int] | None = None) -> None:
+        self._presented_frame_size = size
+        self._presented_decode_size = decoded_size
+        text = self._playback_resolution_text()
+        self.lbl_playback_resolution.setText(text)
+        self.lbl_playback_resolution.setVisible(bool(text))
+        self.lbl_info_resolution.setText(text)
+        self._layout_playback_resolution()
 
     def _on_decode_stop(self) -> None:
         """_decode_frame 抛 StopIteration（迭代式后端的正常收尾）。"""
@@ -741,6 +897,19 @@ class BasePlayer(QFrame):
         index, image = frame
         self._shown_index = index
         self.canvas.set_image(image)
+        decoded_size = None
+        if isinstance(image, QImage) and not image.isNull():
+            size = (image.width(), image.height())
+            width, _, height = image.text(QIMAGE_DECODED_SIZE_KEY).partition('x')
+            if width.isdecimal() and height.isdecimal():
+                decoded_size = (int(width), int(height))
+        elif isinstance(image, YuvFrame):
+            size = (image.width, image.height)
+            decoded_size = image.decoded_size
+        else:
+            size = None
+        if (size, decoded_size) != (self._presented_frame_size, self._presented_decode_size):
+            self._set_presented_frame_size(size, decoded_size)
         if not self.slider.isSliderDown():
             self.slider.setValue(index)
         if self._session is not None:
@@ -800,39 +969,54 @@ class BasePlayer(QFrame):
     # ------------------------------------------------------------------
 
     def eventFilter(self, obj, ev):
-        from PyQt6.QtCore import QEvent
-        if ev.type() in (QEvent.Type.MouseMove, QEvent.Type.MouseButtonPress,
-                         QEvent.Type.MouseButtonRelease, QEvent.Type.Wheel):
+        if isinstance(ev, (QMouseEvent, QEnterEvent)):
+            self.observe_transport_pointer(ev.globalPosition().toPoint())
+        kind = ev.type()
+        if (kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease, QEvent.Type.Wheel)
+                or (not self._lightbox_mode and kind in (QEvent.Type.Enter, QEvent.Type.MouseMove))):
             self._wake_ui()
         return super().eventFilter(obj, ev)
 
-    def set_lightbox_tools(self, visible: bool) -> None:
-        """Use the host's top chrome and reveal transport controls on demand."""
-        self._lightbox_tools = visible
-        self._idle_timer.stop()
+    def observe_transport_pointer(self, global_position: QPoint) -> None:
+        hot = transport_hot_zone(self, global_position)
+        if hot != self._transport_hot:
+            self._transport_hot = hot
+            self._wake_ui()
+
+    def leave_transport(self) -> None:
+        if self._transport_hot:
+            self._transport_hot = False
+            self._wake_ui()
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self.leave_transport()
+        super().leaveEvent(event)
+
+    def set_lightbox_tools(self, _visible: bool) -> None:
+        """The lightbox owns its top chrome; the player owns its transport."""
+        self._lightbox_mode = True
         self._header.hide()
-        self._controls.setVisible(visible)
-        self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _wake_ui(self) -> None:
         """显示顶栏/播放条并重置空闲计时；暂停状态下保持常显。"""
-        if getattr(self, "_lightbox_tools", None) is not None:
-            return
-        self._header.show()
+        if not self._lightbox_mode:
+            self._header.show()
+            self._header.raise_()
         self._controls.show()
-        self._header.raise_()
         self._controls.raise_()
         if self.info_panel.isVisible():
             self.info_panel.raise_()
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self._relayout()
-        if self._playing:
+        if self._playing and not self._transport_hot:
             self._idle_timer.start()
+        else:
+            self._idle_timer.stop()
 
     def _auto_hide_ui(self) -> None:
         # 仅播放中隐藏；暂停常显；信息/扩展面板打开时不藏（避免误伤操作）
         if (not self._playing or self.info_panel.isVisible()
-                or self._overlay_panels_open()):
+                or self._overlay_panels_open() or self._transport_hot):
             return
         self._header.hide()
         self._controls.hide()
@@ -854,12 +1038,19 @@ class BasePlayer(QFrame):
                             self.height() - self._controls.height() - 24)
         if self.info_panel.isVisible():
             self.info_panel.move(16, 56)
+        self._layout_playback_resolution()
         self._relayout_extra()
         # [U10] 尺寸缓存随布局刷新（GUI 线程侧），解码线程只读缓存
         try:
             self.canvas.refresh_size_cache()
         except Exception:
             pass
+
+    def _layout_playback_resolution(self) -> None:
+        label = self.lbl_playback_resolution
+        label.adjustSize()
+        label.move(8, max(0, self.height() - label.height() - 3))
+        label.raise_()
 
     def resizeEvent(self, event):
         self._relayout()
